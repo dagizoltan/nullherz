@@ -1,4 +1,4 @@
-use audio_core::{AudioEngine, AudioProcessor, ProcessorChain, ThreadedBackend, AudioBackend};
+use audio_core::{AudioEngine, AudioProcessor, ProcessorGraph, ThreadedBackend, AudioBackend, Telemetry};
 use audio_dsp::{SineOscillator};
 use control_plane::{Command, TimestampedCommand};
 use ipc_layer::RingBuffer;
@@ -16,12 +16,9 @@ impl AudioProcessor for SineProcessor {
             }
         }
     }
-
     fn apply_command(&mut self, command: &Command) {
         if let Command::SetParam { target_id, param_id, value } = command {
-            if *target_id == 1 && *param_id == 1 {
-                self.osc.set_frequency(*value);
-            }
+            if *target_id == 1 && *param_id == 1 { self.osc.set_frequency(*value); }
         }
     }
 }
@@ -29,36 +26,26 @@ impl AudioProcessor for SineProcessor {
 fn main() {
     let rb = RingBuffer::new(1024);
     let (mut prod, cons) = rb.split();
-
     let garbage_rb = RingBuffer::new(32);
     let (garbage_prod, _) = garbage_rb.split();
-    let initial_graph = Box::new(ProcessorChain::new());
+    let tel_rb = RingBuffer::new(1024);
+    let (tel_prod, _) = tel_rb.split();
 
-    let engine = AudioEngine::new(cons, garbage_prod, initial_graph);
+    let engine = AudioEngine::new(cons, garbage_prod, tel_prod, Box::new(Box::new(ProcessorGraph::new())));
 
     let osc = SineOscillator::new(44100.0, 440.0);
-    engine.request_swap({
-        let mut g = Box::new(ProcessorChain::new());
-        g.add(Box::new(SineProcessor { osc }));
-        g
-    });
+    engine.request_swap(Box::new(Box::new(SineProcessor { osc })));
 
     let mut backend = ThreadedBackend::new();
     backend.start(engine).unwrap();
 
     println!("Starting simulation...");
-
     prod.push(TimestampedCommand {
-        timestamp_samples: 44100, // Change frequency after 1 second
-        command: Command::SetParam {
-            target_id: 1,
-            param_id: 1,
-            value: 880.0,
-        },
+        timestamp_samples: 44100,
+        command: Command::SetParam { target_id: 1, param_id: 1, value: 880.0 },
     }).unwrap();
 
-    std::thread::sleep(std::time::Duration::from_secs(2));
-
+    std::thread::sleep(std::time::Duration::from_millis(100));
     println!("Simulation finished.");
     backend.stop();
 }

@@ -1,29 +1,26 @@
-use audio_core::{AudioEngine, ProcessorChain};
+use audio_core::{AudioEngine, ProcessorGraph, ThreadedBackend, AudioBackend, Telemetry};
 use ipc_layer::{RingBuffer};
 
 fn main() {
     let rb = RingBuffer::new(1024);
     let (_, cons) = rb.split();
-
     let garbage_rb = RingBuffer::new(32);
     let (garbage_prod, _) = garbage_rb.split();
+    let tel_rb = RingBuffer::new(1024);
+    let (tel_prod, _) = tel_rb.split();
 
-    let initial_graph = Box::new(ProcessorChain::new());
-    let mut engine = AudioEngine::new(cons, garbage_prod, initial_graph);
+    let initial_graph = Box::new(Box::new(ProcessorGraph::new()) as Box<dyn audio_core::AudioProcessor>);
+    let engine = AudioEngine::new(cons, garbage_prod, tel_prod, initial_graph);
 
-    println!("Engine initialized with empty graph.");
+    println!("Engine initialized.");
 
-    let new_graph = Box::new(ProcessorChain::new());
+    let mut new_graph = ProcessorGraph::new();
+    engine.request_swap(Box::new(Box::new(new_graph)));
 
-    println!("Requesting graph swap...");
-    engine.request_swap(new_graph);
+    let mut backend = ThreadedBackend::new();
+    backend.start(engine).unwrap();
 
-    // In a real system, the swap happens when process_block is called.
-    let mut out_buffer = [0.0f32; 128];
-    let mut out_ptrs = [&mut out_buffer[..]];
-    engine.process_block(&[], &mut out_ptrs, 128);
-
-    println!("Graph swap should be completed by engine.");
-
+    std::thread::sleep(std::time::Duration::from_millis(100));
     println!("Simulation finished.");
+    backend.stop();
 }

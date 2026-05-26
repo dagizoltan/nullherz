@@ -1,4 +1,4 @@
-use ipc_layer::{ShmRingBuffer, AudioBlock};
+use ipc_layer::{ShmRingBuffer, AudioBlock, ShmSignal};
 use audio_core::AudioProcessor;
 
 /// A sidecar DSP process context.
@@ -7,6 +7,7 @@ pub struct SidecarContext<P: AudioProcessor> {
     command_buffer: &'static ShmRingBuffer<control_plane::Command>,
     input_buffers: Vec<&'static ShmRingBuffer<AudioBlock>>,
     output_buffers: Vec<&'static ShmRingBuffer<AudioBlock>>,
+    signal: &'static ShmSignal,
 }
 
 impl<P: AudioProcessor> SidecarContext<P> {
@@ -15,12 +16,14 @@ impl<P: AudioProcessor> SidecarContext<P> {
         command_ptr: *const ShmRingBuffer<control_plane::Command>,
         inputs: Vec<*const ShmRingBuffer<AudioBlock>>,
         outputs: Vec<*const ShmRingBuffer<AudioBlock>>,
+        signal_ptr: *const ShmSignal,
     ) -> Self {
         Self {
             processor,
             command_buffer: &*command_ptr,
             input_buffers: inputs.into_iter().map(|p| &*p).collect(),
             output_buffers: outputs.into_iter().map(|p| &*p).collect(),
+            signal: &*signal_ptr,
         }
     }
 
@@ -67,9 +70,13 @@ impl<P: AudioProcessor> SidecarContext<P> {
         }
     }
 
+    /// Run the sidecar loop.
+    /// Non-blocking polling of ShmSignal.
     pub fn run_loop(&mut self) {
         loop {
-            self.process_once();
+            if self.signal.check_and_clear() {
+                self.process_once();
+            }
             std::thread::yield_now();
         }
     }
