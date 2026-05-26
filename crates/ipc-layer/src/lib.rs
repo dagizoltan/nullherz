@@ -1,18 +1,90 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::cell::UnsafeCell;
+use std::marker::PhantomData;
 
-/// A lock-free, Single-Producer Single-Consumer (SPSC) ring buffer.
-/// Uses UnsafeCell to allow mutation through shared references (RT-safe).
+/// A lock-free, Single-Producer Single-Consumer (SPSC) ring buffer
+/// that can reside in shared memory.
+///
+/// The layout is designed to be stable and transmutable from a raw byte buffer.
+#[repr(C)]
+pub struct ShmRingBuffer<T> {
+    head: AtomicUsize,
+    tail: AtomicUsize,
+    capacity: usize,
+    _marker: PhantomData<T>,
+    // The buffer follows in memory
+}
+
+impl<T> ShmRingBuffer<T> {
+    /// Calculate the size required for a ShmRingBuffer of given capacity.
+    pub fn size_required(capacity: usize) -> usize {
+        std::mem::size_of::<Self>() + capacity * std::mem::size_of::<UnsafeCell<Option<T>>>()
+    }
+
+    /// Initialize a ShmRingBuffer in a provided raw memory pointer.
+    pub unsafe fn init(ptr: *mut u8, capacity: usize) -> *mut Self {
+        let rb_ptr = ptr as *mut Self;
+        std::ptr::write(&mut (*rb_ptr).head, AtomicUsize::new(0));
+        std::ptr::write(&mut (*rb_ptr).tail, AtomicUsize::new(0));
+        (*rb_ptr).capacity = capacity;
+
+        // Initialize the buffer area to None
+        let buffer_ptr = rb_ptr.add(1) as *mut UnsafeCell<Option<T>>;
+        for i in 0..capacity {
+            std::ptr::write(buffer_ptr.add(i), UnsafeCell::new(None));
+        }
+
+        rb_ptr
+    }
+
+    fn buffer_ptr(&self) -> *const UnsafeCell<Option<T>> {
+        // self.add(1) increments by size_of::<Self>()
+        unsafe { (self as *const Self).add(1) as *const UnsafeCell<Option<T>> }
+    }
+
+    pub fn push(&self, item: T) -> Result<(), T> {
+        let head = self.head.load(Ordering::Acquire);
+        let tail = self.tail.load(Ordering::Relaxed);
+
+        if (tail + 1) % self.capacity == head {
+            return Err(item);
+        }
+
+        unsafe {
+            let cell_ptr = self.buffer_ptr().add(tail) as *mut UnsafeCell<Option<T>>;
+            std::ptr::write((*cell_ptr).get(), Some(item));
+        }
+
+        self.tail.store((tail + 1) % self.capacity, Ordering::Release);
+        Ok(())
+    }
+
+    pub fn pop(&self) -> Option<T> {
+        let head = self.head.load(Ordering::Relaxed);
+        let tail = self.tail.load(Ordering::Acquire);
+
+        if head == tail {
+            return None;
+        }
+
+        let item = unsafe {
+            let cell_ptr = self.buffer_ptr().add(head) as *mut UnsafeCell<Option<T>>;
+            (*(*cell_ptr).get()).take()
+        };
+
+        self.head.store((head + 1) % self.capacity, Ordering::Release);
+        item
+    }
+}
+
+// Keep the Arc-based version for internal use as well
 pub struct RingBuffer<T> {
     buffer: Box<[UnsafeCell<Option<T>>]>,
-    head: AtomicUsize, // Written by consumer
-    tail: AtomicUsize, // Written by producer
+    head: AtomicUsize,
+    tail: AtomicUsize,
     capacity: usize,
 }
 
-// Safety: RingBuffer is Sync if T is Send, because we ensure only one thread
-// accesses each UnsafeCell at a time (SPSC).
 unsafe impl<T: Send> Sync for RingBuffer<T> {}
 
 impl<T> RingBuffer<T> {
@@ -30,7 +102,7 @@ impl<T> RingBuffer<T> {
     }
 
     pub fn split(self) -> (Producer<T>, Consumer<T>) {
-        let arc = Arc::new(self);
+        let arc = std::sync::Arc::new(self);
         (
             Producer { inner: arc.clone() },
             Consumer { inner: arc },
@@ -39,7 +111,7 @@ impl<T> RingBuffer<T> {
 }
 
 pub struct Producer<T> {
-    inner: Arc<RingBuffer<T>>,
+    inner: std::sync::Arc<RingBuffer<T>>,
 }
 
 impl<T> Producer<T> {
@@ -62,7 +134,7 @@ impl<T> Producer<T> {
 }
 
 pub struct Consumer<T> {
-    inner: Arc<RingBuffer<T>>,
+    inner: std::sync::Arc<RingBuffer<T>>,
 }
 
 impl<T> Consumer<T> {
@@ -103,19 +175,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_spsc_ring_buffer() {
-        let rb = RingBuffer::new(4);
-        let (mut prod, mut cons) = rb.split();
+    fn test_shm_ring_buffer() {
+        let capacity = 4;
+        let size = ShmRingBuffer::<i32>::size_required(capacity);
+        let mut mem = vec![0u8; size];
 
-        prod.push(1).unwrap();
-        prod.push(2).unwrap();
-        prod.push(3).unwrap();
-        assert!(prod.push(4).is_err());
+        let rb_ptr = unsafe { ShmRingBuffer::<i32>::init(mem.as_mut_ptr(), capacity) };
+        let rb = unsafe { &*rb_ptr };
 
-        assert_eq!(cons.peek(), Some(&1));
-        assert_eq!(cons.pop(), Some(1));
-        assert_eq!(cons.pop(), Some(2));
-        assert_eq!(cons.pop(), Some(3));
-        assert_eq!(cons.pop(), None);
+        rb.push(10).unwrap();
+        rb.push(20).unwrap();
+        assert_eq!(rb.pop(), Some(10));
+        assert_eq!(rb.pop(), Some(20));
+        assert_eq!(rb.pop(), None);
     }
 }

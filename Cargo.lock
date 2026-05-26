@@ -9,6 +9,7 @@ dependencies = [
  "audio-dsp",
  "control-plane",
  "ipc-layer",
+ "sidecar-sdk",
 ]
 
 [[package]]
@@ -35,6 +36,7 @@ version = "0.1.0"
 name = "sidecar-sdk"
 version = "0.1.0"
 dependencies = [
- "audio-dsp",
+ "audio-core",
+ "control-plane",
  "ipc-layer",
 ]

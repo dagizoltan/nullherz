@@ -37,6 +37,32 @@ impl AudioProcessor for ProcessorChain {
 
 pub const MAX_CHANNELS: usize = 16;
 
+/// A processor that represents an external sidecar process.
+pub struct SidecarProcessor {
+    command_producer_ptr: *const ipc_layer::ShmRingBuffer<control_plane::Command>,
+}
+
+// Safety: We ensure the shared memory pointer is valid for the duration of the engine.
+unsafe impl Send for SidecarProcessor {}
+
+impl SidecarProcessor {
+    pub unsafe fn new(command_ptr: *const ipc_layer::ShmRingBuffer<control_plane::Command>) -> Self {
+        Self { command_producer_ptr: command_ptr }
+    }
+}
+
+impl AudioProcessor for SidecarProcessor {
+    fn process(&mut self, _inputs: &[&[f32]], _outputs: &mut [&mut [f32]]) {
+        // Implementation for audio data exchange goes here
+    }
+
+    fn apply_command(&mut self, command: &control_plane::Command) {
+        unsafe {
+            let _ = (*self.command_producer_ptr).push(*command);
+        }
+    }
+}
+
 pub struct AudioEngine {
     command_consumer: Consumer<TimestampedCommand>,
     main_chain: ProcessorChain,
@@ -111,7 +137,6 @@ impl AudioEngine {
             sub_inputs_ptr[i] = &inputs[i][offset..offset+len];
         }
 
-        // Use a pointer array to bypass the lack of Copy for &mut [f32].
         let mut sub_outputs_ptrs: [*mut f32; MAX_CHANNELS] = [std::ptr::null_mut(); MAX_CHANNELS];
         let mut sub_outputs_lens: [usize; MAX_CHANNELS] = [0; MAX_CHANNELS];
         let num_outputs = outputs.len().min(MAX_CHANNELS);
@@ -122,8 +147,6 @@ impl AudioEngine {
             sub_outputs_lens[i] = slice.len();
         }
 
-        // Reconstruct &mut [&mut [f32]] using a temporary stack array of &mut [f32].
-        // This is safe because the lifetime of the reconstructed slices is tied to this block.
         let mut sub_outputs_reconstructed: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|i| {
             if i < num_outputs {
                 unsafe { std::slice::from_raw_parts_mut(sub_outputs_ptrs[i], sub_outputs_lens[i]) }

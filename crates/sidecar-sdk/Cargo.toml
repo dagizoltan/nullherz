@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 ipc-layer = { path = "../ipc-layer" }
-audio-dsp = { path = "../audio-dsp" }
+audio-core = { path = "../audio-core" }
+control-plane = { path = "../control-plane" }

@@ -7,3 +7,6 @@ edition = "2021"
 audio-dsp = { path = "../audio-dsp" }
 control-plane = { path = "../control-plane" }
 ipc-layer = { path = "../ipc-layer" }
+
+[dev-dependencies]
+sidecar-sdk = { path = "../sidecar-sdk" }
