@@ -1,4 +1,4 @@
-use ipc_layer::{ShmRingBuffer, AudioBlock, ShmSignal};
+use ipc_layer::{ShmRingBuffer, AudioBlock, ShmSignal, EventFd};
 use audio_core::AudioProcessor;
 
 /// A sidecar DSP process context.
@@ -8,6 +8,7 @@ pub struct SidecarContext<P: AudioProcessor> {
     input_buffers: Vec<&'static ShmRingBuffer<AudioBlock>>,
     output_buffers: Vec<&'static ShmRingBuffer<AudioBlock>>,
     signal: &'static ShmSignal,
+    event_fd: Option<EventFd>,
 }
 
 impl<P: AudioProcessor> SidecarContext<P> {
@@ -17,6 +18,7 @@ impl<P: AudioProcessor> SidecarContext<P> {
         inputs: Vec<*const ShmRingBuffer<AudioBlock>>,
         outputs: Vec<*const ShmRingBuffer<AudioBlock>>,
         signal_ptr: *const ShmSignal,
+        event_fd: Option<EventFd>,
     ) -> Self {
         Self {
             processor,
@@ -24,6 +26,7 @@ impl<P: AudioProcessor> SidecarContext<P> {
             input_buffers: inputs.into_iter().map(|p| &*p).collect(),
             output_buffers: outputs.into_iter().map(|p| &*p).collect(),
             signal: &*signal_ptr,
+            event_fd,
         }
     }
 
@@ -71,13 +74,21 @@ impl<P: AudioProcessor> SidecarContext<P> {
     }
 
     /// Run the sidecar loop.
-    /// Non-blocking polling of ShmSignal.
+    /// If an event_fd is present, it will perform a blocking wait to save CPU.
+    /// Otherwise it will poll the ShmSignal and yield.
     pub fn run_loop(&mut self) {
         loop {
-            if self.signal.check_and_clear() {
-                self.process_once();
+            if let Some(efd) = &self.event_fd {
+                // Blocking wait (efficient)
+                efd.wait();
+            } else {
+                // Polling wait (low latency but high CPU)
+                if !self.signal.check_and_clear() {
+                    std::thread::yield_now();
+                    continue;
+                }
             }
-            std::thread::yield_now();
+            self.process_once();
         }
     }
 }

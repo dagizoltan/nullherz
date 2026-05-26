@@ -139,6 +139,7 @@ impl AudioProcessor for SidecarProcessor {
 
 pub struct AudioEngine {
     command_consumer: Consumer<TimestampedCommand>,
+    // Simplification: Store a pointer to the trait object box directly.
     active_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     pending_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     garbage_producer: Producer<Box<Box<dyn AudioProcessor>>>,
@@ -152,11 +153,11 @@ impl AudioEngine {
         command_consumer: Consumer<TimestampedCommand>,
         garbage_producer: Producer<Box<Box<dyn AudioProcessor>>>,
         telemetry_producer: Producer<Telemetry>,
-        initial_graph: Box<Box<dyn AudioProcessor>>,
+        initial_graph: Box<dyn AudioProcessor>,
     ) -> Self {
         Self {
             command_consumer,
-            active_graph: AtomicPtr::new(Box::into_raw(initial_graph)),
+            active_graph: AtomicPtr::new(Box::into_raw(Box::new(initial_graph))),
             pending_graph: AtomicPtr::new(std::ptr::null_mut()),
             garbage_producer,
             telemetry_producer,
@@ -164,8 +165,8 @@ impl AudioEngine {
             pending_command: None,
         }
     }
-    pub fn request_swap(&self, new_graph: Box<Box<dyn AudioProcessor>>) {
-        let new_ptr = Box::into_raw(new_graph);
+    pub fn request_swap(&self, new_graph: Box<dyn AudioProcessor>) {
+        let new_ptr = Box::into_raw(Box::new(new_graph));
         let old_pending = self.pending_graph.swap(new_ptr, Ordering::AcqRel);
         if !old_pending.is_null() { unsafe { drop(Box::from_raw(old_pending)); } }
     }
@@ -255,15 +256,13 @@ impl AudioBackend for ThreadedBackend {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let handle = thread::spawn(move || {
-            let inputs_raw = [[0.0f32; 128]; 2];
             let mut outputs_raw = [[0.0f32; 128]; 2];
             let interval = Duration::from_secs_f64(128.0 / 44100.0);
             while running.load(Ordering::SeqCst) {
                 let start = Instant::now();
-                let in_refs = [&inputs_raw[0][..], &inputs_raw[1][..]];
                 let (ch1, ch2) = outputs_raw.split_at_mut(1);
                 let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
-                engine.process_block(&in_refs, &mut out_refs, 128);
+                engine.process_block(&[], &mut out_refs, 128);
                 let elapsed = start.elapsed();
                 if elapsed < interval { thread::sleep(interval - elapsed); }
             }
@@ -271,10 +270,7 @@ impl AudioBackend for ThreadedBackend {
         self.handle = Some(handle);
         Ok(())
     }
-    fn stop(&mut self) {
-        self.running.store(false, Ordering::SeqCst);
-        if let Some(handle) = self.handle.take() { let _ = handle.join(); }
-    }
+    fn stop(&mut self) { self.running.store(false, Ordering::SeqCst); if let Some(handle) = self.handle.take() { let _ = handle.join(); } }
 }
 
 struct AlsaLib {
@@ -322,7 +318,8 @@ impl AudioBackend for AlsaBackend {
                 let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
                 let name = std::ffi::CString::new("default").unwrap();
                 if (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) != 0 { return; }
-                if (alsa.snd_pcm_set_params)(pcm, 2, 3, 2, 44100, 1, 50000) != 0 { (alsa.snd_pcm_close)(pcm); return; }
+                // Target 5ms latency (5000us)
+                if (alsa.snd_pcm_set_params)(pcm, 2, 3, 2, 44100, 1, 5000) != 0 { (alsa.snd_pcm_close)(pcm); return; }
                 let mut outputs_raw = [[0.0f32; 128]; 2];
                 let mut interleaved = [0i16; 256];
                 while running.load(Ordering::SeqCst) {

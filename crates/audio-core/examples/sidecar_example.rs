@@ -1,4 +1,4 @@
-use audio_core::{AudioEngine, AudioProcessor, SidecarProcessor, ProcessorGraph, ThreadedBackend, AudioBackend, Telemetry};
+use audio_core::{AudioEngine, AudioProcessor, SidecarProcessor, ProcessorGraph, ThreadedBackend, AudioBackend};
 use control_plane::{Command};
 use ipc_layer::{RingBuffer, ShmRingBuffer, AudioBlock, SharedMemory, ShmSignal};
 use std::thread;
@@ -64,7 +64,6 @@ fn main() {
     let (_, cons) = rb.split();
     let garbage_rb = RingBuffer::new(32);
     let (garbage_prod, _) = garbage_rb.split();
-
     let tel_rb = RingBuffer::new(1024);
     let (tel_prod, mut tel_cons) = tel_rb.split();
 
@@ -72,16 +71,14 @@ fn main() {
     let sidecar_proxy = unsafe { SidecarProcessor::new(cmd_rb_ptr, &[in_rb_ptr], &[out_rb_ptr], sig_ptr, None) };
     graph.add_node(Box::new(sidecar_proxy), vec![], vec![0]);
 
-    let engine = AudioEngine::new(cons, garbage_prod, tel_prod, Box::new(Box::new(graph)));
+    let engine = AudioEngine::new(cons, garbage_prod, tel_prod, Box::new(graph));
 
     let mut backend = ThreadedBackend::new();
     backend.start(engine).unwrap();
-
     thread::sleep(std::time::Duration::from_millis(100));
 
-    // Check telemetry
     while let Some(t) = tel_cons.pop() {
-        println!("Telemetry: process_time_ns={}", t.process_time_ns);
+        if t.sample_counter < 1000 { println!("Telemetry: process_time_ns={}", t.process_time_ns); }
     }
 
     println!("Engine: Simulation finished.");

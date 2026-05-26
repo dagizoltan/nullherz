@@ -1,4 +1,4 @@
-use audio_core::{AudioEngine, AudioProcessor, ProcessorGraph, ThreadedBackend, AudioBackend, Telemetry};
+use audio_core::{AudioEngine, AudioProcessor, ProcessorGraph, ThreadedBackend, AudioBackend};
 use audio_dsp::{SineOscillator};
 use control_plane::{Command, TimestampedCommand};
 use ipc_layer::RingBuffer;
@@ -31,10 +31,10 @@ fn main() {
     let tel_rb = RingBuffer::new(1024);
     let (tel_prod, _) = tel_rb.split();
 
-    let engine = AudioEngine::new(cons, garbage_prod, tel_prod, Box::new(Box::new(ProcessorGraph::new())));
+    let engine = AudioEngine::new(cons, garbage_prod, tel_prod, Box::new(ProcessorGraph::new()));
 
     let osc = SineOscillator::new(44100.0, 440.0);
-    engine.request_swap(Box::new(Box::new(SineProcessor { osc })));
+    engine.request_swap(Box::new(SineProcessor { osc }));
 
     let mut backend = ThreadedBackend::new();
     backend.start(engine).unwrap();
