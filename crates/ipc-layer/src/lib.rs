@@ -1,38 +1,56 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::cell::UnsafeCell;
 use std::marker::PhantomData;
+use std::alloc::Layout;
 
 /// Alignment for SIMD (AVX-512 requires 64 bytes).
 pub const SIMD_ALIGNMENT: usize = 64;
 
 /// A SIMD-aligned audio block.
 #[repr(C, align(64))]
+#[derive(Clone, Copy)]
 pub struct AudioBlock {
     pub data: [f32; 128], // Fixed size for predictability
 }
 
 /// A lock-free, Single-Producer Single-Consumer (SPSC) ring buffer
 /// that can reside in shared memory.
-#[repr(C)]
+#[repr(C, align(64))]
 pub struct ShmRingBuffer<T> {
     head: AtomicUsize,
     tail: AtomicUsize,
     capacity: usize,
+    buffer_offset: usize, // Offset in bytes from start of ShmRingBuffer to first element
     _marker: PhantomData<T>,
 }
 
 impl<T> ShmRingBuffer<T> {
-    pub fn size_required(capacity: usize) -> usize {
-        std::mem::size_of::<Self>() + capacity * std::mem::size_of::<UnsafeCell<Option<T>>>()
+    /// Calculate the size and layout required for a ShmRingBuffer of given capacity.
+    pub fn layout(capacity: usize) -> (Layout, usize) {
+        let header_layout = Layout::new::<Self>();
+        let buffer_element_layout = Layout::new::<UnsafeCell<Option<T>>>();
+
+        let (buffer_layout, offset) = header_layout.extend(
+            Layout::from_size_align(
+                buffer_element_layout.size() * capacity,
+                buffer_element_layout.align()
+            ).unwrap()
+        ).unwrap();
+
+        (buffer_layout.pad_to_align(), offset)
     }
 
+    /// Initialize a ShmRingBuffer in a provided raw memory pointer.
     pub unsafe fn init(ptr: *mut u8, capacity: usize) -> *mut Self {
+        let (_, offset) = Self::layout(capacity);
         let rb_ptr = ptr as *mut Self;
+
         std::ptr::write(&mut (*rb_ptr).head, AtomicUsize::new(0));
         std::ptr::write(&mut (*rb_ptr).tail, AtomicUsize::new(0));
         (*rb_ptr).capacity = capacity;
+        (*rb_ptr).buffer_offset = offset;
 
-        let buffer_ptr = rb_ptr.add(1) as *mut UnsafeCell<Option<T>>;
+        let buffer_ptr = ptr.add(offset) as *mut UnsafeCell<Option<T>>;
         for i in 0..capacity {
             std::ptr::write(buffer_ptr.add(i), UnsafeCell::new(None));
         }
@@ -40,8 +58,11 @@ impl<T> ShmRingBuffer<T> {
         rb_ptr
     }
 
-    fn buffer_ptr(&self) -> *const UnsafeCell<Option<T>> {
-        unsafe { (self as *const Self).add(1) as *const UnsafeCell<Option<T>> }
+    fn buffer_ptr(&self) -> *mut UnsafeCell<Option<T>> {
+        unsafe {
+            let base_ptr = self as *const Self as *mut u8;
+            base_ptr.add(self.buffer_offset) as *mut UnsafeCell<Option<T>>
+        }
     }
 
     pub fn push(&self, item: T) -> Result<(), T> {
@@ -53,7 +74,7 @@ impl<T> ShmRingBuffer<T> {
         }
 
         unsafe {
-            let cell_ptr = self.buffer_ptr().add(tail) as *mut UnsafeCell<Option<T>>;
+            let cell_ptr = self.buffer_ptr().add(tail);
             std::ptr::write((*cell_ptr).get(), Some(item));
         }
 
@@ -70,7 +91,7 @@ impl<T> ShmRingBuffer<T> {
         }
 
         let item = unsafe {
-            let cell_ptr = self.buffer_ptr().add(head) as *mut UnsafeCell<Option<T>>;
+            let cell_ptr = self.buffer_ptr().add(head);
             (*(*cell_ptr).get()).take()
         };
 
@@ -169,5 +190,36 @@ impl<T> Consumer<T> {
             let cell_ptr = self.inner.buffer[head].get();
             (*cell_ptr).as_ref()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shm_ring_buffer() {
+        let capacity = 4;
+        let (layout, _) = ShmRingBuffer::<i32>::layout(capacity);
+        let mut mem = vec![0u8; layout.size() + 64]; // Extra space for manual alignment
+        let ptr = mem.as_mut_ptr();
+        let aligned_ptr = unsafe { ptr.add(ptr.align_offset(64)) };
+
+        let rb_ptr = unsafe { ShmRingBuffer::<i32>::init(aligned_ptr, capacity) };
+        let rb = unsafe { &*rb_ptr };
+
+        rb.push(10).unwrap();
+        rb.push(20).unwrap();
+        assert_eq!(rb.pop(), Some(10));
+        assert_eq!(rb.pop(), Some(20));
+        assert_eq!(rb.pop(), None);
+    }
+
+    #[test]
+    fn test_alignment() {
+        let capacity = 4;
+        let (layout, offset) = ShmRingBuffer::<AudioBlock>::layout(capacity);
+        assert!(offset % 64 == 0);
+        assert!(layout.align() >= 64);
     }
 }

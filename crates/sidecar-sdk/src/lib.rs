@@ -26,9 +26,17 @@ impl<P: AudioProcessor> SidecarContext<P> {
     }
 
     /// Run the sidecar loop.
+    ///
+    /// Note: This current implementation uses a yield loop.
+    /// For production, use a wait mechanism like `eventfd` or `futex`
+    /// to avoid high CPU usage while maintaining low latency.
     pub fn run_loop(&mut self) {
         loop {
             self.process_once();
+
+            // TODO: Wait for signal from host engine
+            // eventfd_read(fd, &mut val);
+
             std::thread::yield_now();
         }
     }

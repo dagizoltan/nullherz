@@ -37,8 +37,8 @@ fn main() {
     let mut engine = AudioEngine::new(cons, garbage_prod, initial_graph);
 
     let osc = SineOscillator::new(44100.0, 440.0);
-    // Use the active graph
-    engine.swap_graph({
+    // Request the swap
+    engine.request_swap({
         let mut g = Box::new(ProcessorChain::new());
         g.add(Box::new(SineProcessor { osc }));
         g

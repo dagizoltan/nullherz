@@ -12,19 +12,22 @@ pub struct SineOscillator {
     phase: f32,
     phase_inc: f32,
     sample_rate: f32,
+    two_pi: f32,
 }
 
 impl SineOscillator {
     pub fn new(sample_rate: f32, frequency: f32) -> Self {
+        let two_pi = 2.0 * std::f32::consts::PI;
         Self {
             phase: 0.0,
-            phase_inc: 2.0 * std::f32::consts::PI * frequency / sample_rate,
+            phase_inc: two_pi * frequency / sample_rate,
             sample_rate,
+            two_pi,
         }
     }
 
     pub fn set_frequency(&mut self, frequency: f32) {
-        self.phase_inc = 2.0 * std::f32::consts::PI * frequency / self.sample_rate;
+        self.phase_inc = self.two_pi * frequency / self.sample_rate;
     }
 }
 
@@ -32,8 +35,8 @@ impl Oscillator for SineOscillator {
     fn next_sample(&mut self) -> f32 {
         let sample = self.phase.sin();
         self.phase += self.phase_inc;
-        if self.phase >= 2.0 * std::f32::consts::PI {
-            self.phase -= 2.0 * std::f32::consts::PI;
+        if self.phase >= self.two_pi {
+            self.phase -= self.two_pi;
         }
         sample
     }
@@ -62,10 +65,14 @@ impl Gain {
     /// Process a block of samples with SIMD-friendly loop.
     pub fn process_block(&mut self, input: &[f32], output: &mut [f32]) {
         let len = input.len();
+        let target = self.target_gain;
+        let factor = self.smoothing_factor;
+        let mut current = self.current_gain;
+
         for i in 0..len {
-            // Simple linear smoothing for each sample
-            self.current_gain += (self.target_gain - self.current_gain) * self.smoothing_factor;
-            output[i] = input[i] * self.current_gain;
+            current += (target - current) * factor;
+            output[i] = input[i] * current;
         }
+        self.current_gain = current;
     }
 }
