@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "crates/audio-core",
+    "crates/audio-dsp",
+    "crates/fx-runtime",
+    "crates/control-plane",
+    "crates/ipc-layer",
+    "crates/sidecar-sdk",
+]
+resolver = "2"
