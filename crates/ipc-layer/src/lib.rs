@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 use std::alloc::Layout;
+use std::ffi::CString;
 
 /// Alignment for SIMD (AVX-512 requires 64 bytes).
 pub const SIMD_ALIGNMENT: usize = 64;
@@ -20,41 +21,34 @@ pub struct ShmRingBuffer<T> {
     head: AtomicUsize,
     tail: AtomicUsize,
     capacity: usize,
-    buffer_offset: usize, // Offset in bytes from start of ShmRingBuffer to first element
+    buffer_offset: usize,
     _marker: PhantomData<T>,
 }
 
 impl<T> ShmRingBuffer<T> {
-    /// Calculate the size and layout required for a ShmRingBuffer of given capacity.
     pub fn layout(capacity: usize) -> (Layout, usize) {
         let header_layout = Layout::new::<Self>();
         let buffer_element_layout = Layout::new::<UnsafeCell<Option<T>>>();
-
         let (buffer_layout, offset) = header_layout.extend(
             Layout::from_size_align(
                 buffer_element_layout.size() * capacity,
                 buffer_element_layout.align()
             ).unwrap()
         ).unwrap();
-
         (buffer_layout.pad_to_align(), offset)
     }
 
-    /// Initialize a ShmRingBuffer in a provided raw memory pointer.
     pub unsafe fn init(ptr: *mut u8, capacity: usize) -> *mut Self {
         let (_, offset) = Self::layout(capacity);
         let rb_ptr = ptr as *mut Self;
-
         std::ptr::write(&mut (*rb_ptr).head, AtomicUsize::new(0));
         std::ptr::write(&mut (*rb_ptr).tail, AtomicUsize::new(0));
         (*rb_ptr).capacity = capacity;
         (*rb_ptr).buffer_offset = offset;
-
         let buffer_ptr = ptr.add(offset) as *mut UnsafeCell<Option<T>>;
         for i in 0..capacity {
             std::ptr::write(buffer_ptr.add(i), UnsafeCell::new(None));
         }
-
         rb_ptr
     }
 
@@ -68,16 +62,13 @@ impl<T> ShmRingBuffer<T> {
     pub fn push(&self, item: T) -> Result<(), T> {
         let head = self.head.load(Ordering::Acquire);
         let tail = self.tail.load(Ordering::Relaxed);
-
         if (tail + 1) % self.capacity == head {
             return Err(item);
         }
-
         unsafe {
             let cell_ptr = self.buffer_ptr().add(tail);
             std::ptr::write((*cell_ptr).get(), Some(item));
         }
-
         self.tail.store((tail + 1) % self.capacity, Ordering::Release);
         Ok(())
     }
@@ -85,22 +76,82 @@ impl<T> ShmRingBuffer<T> {
     pub fn pop(&self) -> Option<T> {
         let head = self.head.load(Ordering::Relaxed);
         let tail = self.tail.load(Ordering::Acquire);
-
         if head == tail {
             return None;
         }
-
         let item = unsafe {
             let cell_ptr = self.buffer_ptr().add(head);
             (*(*cell_ptr).get()).take()
         };
-
         self.head.store((head + 1) % self.capacity, Ordering::Release);
         item
     }
+
+    pub fn peek(&self) -> Option<&T> {
+        let head = self.head.load(Ordering::Relaxed);
+        let tail = self.tail.load(Ordering::Acquire);
+        if head == tail {
+            return None;
+        }
+        unsafe {
+            let cell_ptr = self.buffer_ptr().add(head);
+            (*(*cell_ptr).get()).as_ref()
+        }
+    }
 }
 
-// Keep the Arc-based version for internal use
+pub struct SharedMemory {
+    ptr: *mut u8,
+    size: usize,
+    name: String,
+    owner: bool,
+}
+
+impl SharedMemory {
+    pub fn create(name: &str, size: usize) -> Result<Self, String> {
+        let cname = CString::new(name).map_err(|e| e.to_string())?;
+        unsafe {
+            let fd = libc::shm_open(cname.as_ptr(), libc::O_CREAT | libc::O_RDWR | libc::O_TRUNC, 0o666);
+            if fd < 0 { return Err("shm_open failed".to_string()); }
+            if libc::ftruncate(fd, size as libc::off_t) < 0 {
+                libc::close(fd);
+                return Err("ftruncate failed".to_string());
+            }
+            let ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd, 0);
+            libc::close(fd);
+            if ptr == libc::MAP_FAILED { return Err("mmap failed".to_string()); }
+            Ok(Self { ptr: ptr as *mut u8, size, name: name.to_string(), owner: true })
+        }
+    }
+
+    pub fn open(name: &str, size: usize) -> Result<Self, String> {
+        let cname = CString::new(name).map_err(|e| e.to_string())?;
+        unsafe {
+            let fd = libc::shm_open(cname.as_ptr(), libc::O_RDWR, 0o666);
+            if fd < 0 { return Err("shm_open failed".to_string()); }
+            let ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd, 0);
+            libc::close(fd);
+            if ptr == libc::MAP_FAILED { return Err("mmap failed".to_string()); }
+            Ok(Self { ptr: ptr as *mut u8, size, name: name.to_string(), owner: false })
+        }
+    }
+
+    pub fn ptr(&self) -> *mut u8 { self.ptr }
+    pub fn size(&self) -> usize { self.size }
+}
+
+impl Drop for SharedMemory {
+    fn drop(&mut self) {
+        unsafe {
+            libc::munmap(self.ptr as *mut libc::c_void, self.size);
+            if self.owner {
+                let cname = CString::new(self.name.as_str()).unwrap();
+                libc::shm_unlink(cname.as_ptr());
+            }
+        }
+    }
+}
+
 pub struct RingBuffer<T> {
     buffer: Box<[UnsafeCell<Option<T>>]>,
     head: AtomicUsize,
@@ -141,16 +192,13 @@ impl<T> Producer<T> {
     pub fn push(&mut self, item: T) -> Result<(), T> {
         let head = self.inner.head.load(Ordering::Acquire);
         let tail = self.inner.tail.load(Ordering::Relaxed);
-
         if (tail + 1) % self.inner.capacity == head {
             return Err(item);
         }
-
         unsafe {
             let cell_ptr = self.inner.buffer[tail].get();
             std::ptr::write(cell_ptr, Some(item));
         }
-
         self.inner.tail.store((tail + 1) % self.inner.capacity, Ordering::Release);
         Ok(())
     }
@@ -164,16 +212,13 @@ impl<T> Consumer<T> {
     pub fn pop(&mut self) -> Option<T> {
         let head = self.inner.head.load(Ordering::Relaxed);
         let tail = self.inner.tail.load(Ordering::Acquire);
-
         if head == tail {
             return None;
         }
-
         let item = unsafe {
             let cell_ptr = self.inner.buffer[head].get();
             (*cell_ptr).take()
         };
-
         self.inner.head.store((head + 1) % self.inner.capacity, Ordering::Release);
         item
     }
@@ -181,11 +226,9 @@ impl<T> Consumer<T> {
     pub fn peek(&self) -> Option<&T> {
         let head = self.inner.head.load(Ordering::Relaxed);
         let tail = self.inner.tail.load(Ordering::Acquire);
-
         if head == tail {
             return None;
         }
-
         unsafe {
             let cell_ptr = self.inner.buffer[head].get();
             (*cell_ptr).as_ref()
@@ -201,13 +244,11 @@ mod tests {
     fn test_shm_ring_buffer() {
         let capacity = 4;
         let (layout, _) = ShmRingBuffer::<i32>::layout(capacity);
-        let mut mem = vec![0u8; layout.size() + 64]; // Extra space for manual alignment
+        let mut mem = vec![0u8; layout.size() + 64];
         let ptr = mem.as_mut_ptr();
         let aligned_ptr = unsafe { ptr.add(ptr.align_offset(64)) };
-
         let rb_ptr = unsafe { ShmRingBuffer::<i32>::init(aligned_ptr, capacity) };
         let rb = unsafe { &*rb_ptr };
-
         rb.push(10).unwrap();
         rb.push(20).unwrap();
         assert_eq!(rb.pop(), Some(10));

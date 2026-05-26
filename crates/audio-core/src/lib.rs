@@ -1,6 +1,8 @@
 use control_plane::TimestampedCommand;
 use ipc_layer::{Consumer, Producer, AudioBlock, ShmRingBuffer};
 use std::sync::atomic::{AtomicPtr, Ordering};
+use std::thread;
+use std::time::{Duration, Instant};
 
 pub trait AudioProcessor: Send {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]);
@@ -15,7 +17,6 @@ impl ProcessorChain {
     pub fn new() -> Self {
         Self { processors: Vec::new() }
     }
-
     pub fn add(&mut self, processor: Box<dyn AudioProcessor>) {
         self.processors.push(processor);
     }
@@ -27,7 +28,6 @@ impl AudioProcessor for ProcessorChain {
             processor.process(inputs, outputs);
         }
     }
-
     fn apply_command(&mut self, command: &control_plane::Command) {
         for processor in &mut self.processors {
             processor.apply_command(command);
@@ -37,12 +37,9 @@ impl AudioProcessor for ProcessorChain {
 
 pub const MAX_CHANNELS: usize = 16;
 
-/// A processor that represents an external sidecar process.
 pub struct SidecarProcessor {
     command_producer_ptr: *const ShmRingBuffer<control_plane::Command>,
-    /// Array of input buffers for each channel.
     input_shm: [*mut ShmRingBuffer<AudioBlock>; MAX_CHANNELS],
-    /// Array of output buffers for each channel.
     output_shm: [*const ShmRingBuffer<AudioBlock>; MAX_CHANNELS],
     num_channels: usize,
 }
@@ -58,33 +55,23 @@ impl SidecarProcessor {
         let mut input_shm = [std::ptr::null_mut(); MAX_CHANNELS];
         let mut output_shm = [std::ptr::null(); MAX_CHANNELS];
         let num_channels = inputs.len().min(MAX_CHANNELS).min(outputs.len());
-
         for i in 0..num_channels {
             input_shm[i] = inputs[i];
             output_shm[i] = outputs[i];
         }
-
-        Self {
-            command_producer_ptr: command_ptr,
-            input_shm,
-            output_shm,
-            num_channels,
-        }
+        Self { command_producer_ptr: command_ptr, input_shm, output_shm, num_channels }
     }
 }
 
 impl AudioProcessor for SidecarProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         for i in 0..self.num_channels {
-            // 1. Push input audio to shared memory
             if i < inputs.len() {
                 let mut block = AudioBlock { data: [0.0; 128] };
                 let len = inputs[i].len().min(128);
                 block.data[..len].copy_from_slice(&inputs[i][..len]);
                 unsafe { let _ = (*self.input_shm[i]).push(block); }
             }
-
-            // 2. Try to pop processed audio from shared memory
             if i < outputs.len() {
                 unsafe {
                     if let Some(block) = (*self.output_shm[i]).pop() {
@@ -95,20 +82,15 @@ impl AudioProcessor for SidecarProcessor {
             }
         }
     }
-
     fn apply_command(&mut self, command: &control_plane::Command) {
-        unsafe {
-            let _ = (*self.command_producer_ptr).push(*command);
-        }
+        unsafe { let _ = (*self.command_producer_ptr).push(*command); }
     }
 }
 
 pub struct AudioEngine {
     command_consumer: Consumer<TimestampedCommand>,
     active_graph: AtomicPtr<ProcessorChain>,
-    /// Pending graph update from Control Plane.
     pending_graph: AtomicPtr<ProcessorChain>,
-
     garbage_producer: Producer<Box<ProcessorChain>>,
     sample_counter: u64,
     pending_command: Option<TimestampedCommand>,
@@ -130,11 +112,8 @@ impl AudioEngine {
         }
     }
 
-    /// Requests a graph swap. This is safe to call from Control Plane.
     pub fn request_swap(&self, new_graph: Box<ProcessorChain>) {
         let new_ptr = Box::into_raw(new_graph);
-        // We only allow one pending swap at a time for simplicity.
-        // If a swap is already pending, we'll have to handle it (e.g. drop the new one or replace it).
         let old_pending = self.pending_graph.swap(new_ptr, Ordering::AcqRel);
         if !old_pending.is_null() {
             unsafe { drop(Box::from_raw(old_pending)); }
@@ -142,7 +121,6 @@ impl AudioEngine {
     }
 
     pub fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize) {
-        // 0. Check for pending graph swap
         let pending = self.pending_graph.swap(std::ptr::null_mut(), Ordering::Acquire);
         if !pending.is_null() {
             let old = self.active_graph.swap(pending, Ordering::AcqRel);
@@ -151,21 +129,17 @@ impl AudioEngine {
                 let _ = self.garbage_producer.push(old_graph);
             }
         }
-
         let block_start_sample = self.sample_counter;
         let block_end_sample = block_start_sample + num_samples as u64;
         let mut current_sample_in_block = 0;
-
         let graph_ptr = self.active_graph.load(Ordering::Acquire);
         let graph = unsafe { &mut *graph_ptr };
-
         while current_sample_in_block < num_samples {
             let cmd = if let Some(pending) = self.pending_command.take() {
                 Some(pending)
             } else {
                 self.command_consumer.pop()
             };
-
             if let Some(cmd) = cmd {
                 if cmd.timestamp_samples < block_end_sample {
                     let cmd_offset = if cmd.timestamp_samples > block_start_sample {
@@ -173,13 +147,11 @@ impl AudioEngine {
                     } else {
                         0
                     };
-
                     if cmd_offset > current_sample_in_block {
                         let samples_to_process = cmd_offset - current_sample_in_block;
                         self.process_sub_block(graph, inputs, outputs, current_sample_in_block, samples_to_process);
                         current_sample_in_block += samples_to_process;
                     }
-
                     graph.apply_command(&cmd.command);
                 } else {
                     self.pending_command = Some(cmd);
@@ -222,17 +194,64 @@ impl AudioEngine {
 impl Drop for AudioEngine {
     fn drop(&mut self) {
         let ptr = self.active_graph.load(Ordering::Acquire);
-        if !ptr.is_null() {
-            unsafe { drop(Box::from_raw(ptr)); }
-        }
+        if !ptr.is_null() { unsafe { drop(Box::from_raw(ptr)); } }
         let pending = self.pending_graph.load(Ordering::Acquire);
-        if !pending.is_null() {
-            unsafe { drop(Box::from_raw(pending)); }
-        }
+        if !pending.is_null() { unsafe { drop(Box::from_raw(pending)); } }
     }
 }
 
 pub trait AudioBackend {
     fn start(&mut self, engine: AudioEngine) -> Result<(), String>;
     fn stop(&mut self);
+}
+
+pub struct ThreadedBackend {
+    handle: Option<thread::JoinHandle<()>>,
+    running: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl ThreadedBackend {
+    pub fn new() -> Self {
+        Self { handle: None, running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)) }
+    }
+}
+
+impl AudioBackend for ThreadedBackend {
+    fn start(&mut self, mut engine: AudioEngine) -> Result<(), String> {
+        self.running.store(true, Ordering::SeqCst);
+        let running = self.running.clone();
+
+        let handle = thread::spawn(move || {
+            let inputs_raw = [[0.0f32; 128]; 2];
+            let mut outputs_raw = [[0.0f32; 128]; 2];
+            let interval = Duration::from_secs_f64(128.0 / 44100.0);
+
+            while running.load(Ordering::SeqCst) {
+                let start = Instant::now();
+
+                let in_refs = [&inputs_raw[0][..], &inputs_raw[1][..]];
+
+                // Safe way to get multiple mut references from the same array of arrays
+                let (ch1, ch2) = outputs_raw.split_at_mut(1);
+                let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
+
+                engine.process_block(&in_refs, &mut out_refs, 128);
+
+                let elapsed = start.elapsed();
+                if elapsed < interval {
+                    thread::sleep(interval - elapsed);
+                }
+            }
+        });
+
+        self.handle = Some(handle);
+        Ok(())
+    }
+
+    fn stop(&mut self) {
+        self.running.store(false, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
 }

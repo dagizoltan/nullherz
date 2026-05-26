@@ -1,4 +1,4 @@
-use audio_core::{AudioEngine, AudioProcessor, ProcessorChain};
+use audio_core::{AudioEngine, AudioProcessor, ProcessorChain, ThreadedBackend, AudioBackend};
 use audio_dsp::{SineOscillator};
 use control_plane::{Command, TimestampedCommand};
 use ipc_layer::RingBuffer;
@@ -34,28 +34,22 @@ fn main() {
     let (garbage_prod, _) = garbage_rb.split();
     let initial_graph = Box::new(ProcessorChain::new());
 
-    let mut engine = AudioEngine::new(cons, garbage_prod, initial_graph);
+    let engine = AudioEngine::new(cons, garbage_prod, initial_graph);
 
     let osc = SineOscillator::new(44100.0, 440.0);
-    // Request the swap
     engine.request_swap({
         let mut g = Box::new(ProcessorChain::new());
         g.add(Box::new(SineProcessor { osc }));
         g
     });
 
-    let mut out_buffer = [0.0f32; 128];
+    let mut backend = ThreadedBackend::new();
+    backend.start(engine).unwrap();
 
     println!("Starting simulation...");
 
-    {
-        let mut out_ptrs = [&mut out_buffer[..]];
-        engine.process_block(&[], &mut out_ptrs, 128);
-    }
-    println!("Block 1 sample 0: {}", out_buffer[0]);
-
     prod.push(TimestampedCommand {
-        timestamp_samples: 192,
+        timestamp_samples: 44100, // Change frequency after 1 second
         command: Command::SetParam {
             target_id: 1,
             param_id: 1,
@@ -63,12 +57,8 @@ fn main() {
         },
     }).unwrap();
 
-    {
-        let mut out_ptrs = [&mut out_buffer[..]];
-        engine.process_block(&[], &mut out_ptrs, 128);
-    }
-    println!("Block 2 sample 0: {} (should be 440Hz part)", out_buffer[0]);
-    println!("Block 2 sample 64: {} (should be after 880Hz switch)", out_buffer[64]);
+    std::thread::sleep(std::time::Duration::from_secs(2));
 
     println!("Simulation finished.");
+    backend.stop();
 }
