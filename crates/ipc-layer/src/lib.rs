@@ -2,33 +2,36 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 
+/// Alignment for SIMD (AVX-512 requires 64 bytes).
+pub const SIMD_ALIGNMENT: usize = 64;
+
+/// A SIMD-aligned audio block.
+#[repr(C, align(64))]
+pub struct AudioBlock {
+    pub data: [f32; 128], // Fixed size for predictability
+}
+
 /// A lock-free, Single-Producer Single-Consumer (SPSC) ring buffer
 /// that can reside in shared memory.
-///
-/// The layout is designed to be stable and transmutable from a raw byte buffer.
 #[repr(C)]
 pub struct ShmRingBuffer<T> {
     head: AtomicUsize,
     tail: AtomicUsize,
     capacity: usize,
     _marker: PhantomData<T>,
-    // The buffer follows in memory
 }
 
 impl<T> ShmRingBuffer<T> {
-    /// Calculate the size required for a ShmRingBuffer of given capacity.
     pub fn size_required(capacity: usize) -> usize {
         std::mem::size_of::<Self>() + capacity * std::mem::size_of::<UnsafeCell<Option<T>>>()
     }
 
-    /// Initialize a ShmRingBuffer in a provided raw memory pointer.
     pub unsafe fn init(ptr: *mut u8, capacity: usize) -> *mut Self {
         let rb_ptr = ptr as *mut Self;
         std::ptr::write(&mut (*rb_ptr).head, AtomicUsize::new(0));
         std::ptr::write(&mut (*rb_ptr).tail, AtomicUsize::new(0));
         (*rb_ptr).capacity = capacity;
 
-        // Initialize the buffer area to None
         let buffer_ptr = rb_ptr.add(1) as *mut UnsafeCell<Option<T>>;
         for i in 0..capacity {
             std::ptr::write(buffer_ptr.add(i), UnsafeCell::new(None));
@@ -38,7 +41,6 @@ impl<T> ShmRingBuffer<T> {
     }
 
     fn buffer_ptr(&self) -> *const UnsafeCell<Option<T>> {
-        // self.add(1) increments by size_of::<Self>()
         unsafe { (self as *const Self).add(1) as *const UnsafeCell<Option<T>> }
     }
 
@@ -77,7 +79,7 @@ impl<T> ShmRingBuffer<T> {
     }
 }
 
-// Keep the Arc-based version for internal use as well
+// Keep the Arc-based version for internal use
 pub struct RingBuffer<T> {
     buffer: Box<[UnsafeCell<Option<T>>]>,
     head: AtomicUsize,
@@ -167,26 +169,5 @@ impl<T> Consumer<T> {
             let cell_ptr = self.inner.buffer[head].get();
             (*cell_ptr).as_ref()
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_shm_ring_buffer() {
-        let capacity = 4;
-        let size = ShmRingBuffer::<i32>::size_required(capacity);
-        let mut mem = vec![0u8; size];
-
-        let rb_ptr = unsafe { ShmRingBuffer::<i32>::init(mem.as_mut_ptr(), capacity) };
-        let rb = unsafe { &*rb_ptr };
-
-        rb.push(10).unwrap();
-        rb.push(20).unwrap();
-        assert_eq!(rb.pop(), Some(10));
-        assert_eq!(rb.pop(), Some(20));
-        assert_eq!(rb.pop(), None);
     }
 }

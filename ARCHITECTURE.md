@@ -38,22 +38,23 @@ The system is a deterministic audio execution engine, not a plugin-based DAW.
 
 ---
 
-## 3. High-Level System Architecture
-`UI Layer` → `Control Plane` → `Real-Time Audio Kernel` → `DSP Sidecars` → `Linux Audio Backend`
+## 3. Advanced Architectural Patterns
+
+### 3.1 Atomic Graph Swapping
+To allow dynamic reconfiguration of the audio engine without violating real-time constraints, we use `AtomicPtr` for swapping the entire processing graph. The Control Plane prepares a new `ProcessorChain` and performs an atomic swap. The old graph is then sent back to the Control Plane for safe deallocation outside the RT thread.
+
+### 3.2 SIMD Alignment and Vectorization
+Audio buffers and DSP structures are aligned to 64-byte boundaries (supporting AVX-512) to enable efficient auto-vectorization and manual SIMD optimizations. Fixed-size blocks are used to ensure predictable performance.
+
+### 3.3 Sample-Accurate Automation
+Commands are applied by splitting audio blocks into sub-blocks at the exact sample where the command is timestamped. This ensures that parameter changes happen at the precise intended moment, regardless of the system's buffer size.
 
 ---
 
 ## 4. Rust Crate Architecture
-- `audio-core`: Core engine logic and RT loop.
-- `audio-dsp`: Basic DSP primitives and traits.
-- `fx-runtime`: Logic for running effects.
-- `control-plane`: Command stream management and AI integration.
-- `ipc-layer`: Zero-copy IPC mechanisms (Shared Memory).
-- `sidecar-sdk`: SDK for building external DSP processes.
-
----
-
-## 5. Performance Targets
-- 2–6 ms latency.
-- 32–128 sample buffers.
-- Zero-drop RT execution.
+- `audio-core`: Core engine logic, RT loop, and backend abstractions.
+- `audio-dsp`: Optimized DSP primitives, filters, and oscillators.
+- `fx-runtime`: Logic for running complex effects.
+- `control-plane`: Command stream management, AI integration, and graph management.
+- `ipc-layer`: Zero-copy Shared Memory IPC and aligned data structures.
+- `sidecar-sdk`: SDK for building external, isolated DSP processes.

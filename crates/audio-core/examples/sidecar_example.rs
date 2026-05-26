@@ -1,4 +1,4 @@
-use audio_core::{AudioEngine, AudioProcessor, SidecarProcessor};
+use audio_core::{AudioEngine, AudioProcessor, SidecarProcessor, ProcessorChain};
 use control_plane::{Command, TimestampedCommand};
 use ipc_layer::{RingBuffer, ShmRingBuffer};
 use sidecar_sdk::SidecarContext;
@@ -44,11 +44,19 @@ fn main() {
     // 3. Setup Engine
     let rb = RingBuffer::new(1024);
     let (mut prod, cons) = rb.split();
-    let mut engine = AudioEngine::new(cons);
+
+    let garbage_rb = RingBuffer::new(32);
+    let (garbage_prod, _) = garbage_rb.split();
+    let initial_graph = Box::new(ProcessorChain::new());
+    let mut engine = AudioEngine::new(cons, garbage_prod, initial_graph);
 
     // Add SidecarProcessor proxy
     let sidecar_proxy = unsafe { SidecarProcessor::new(shm_rb_ptr) };
-    engine.add_processor(Box::new(sidecar_proxy));
+    engine.swap_graph({
+        let mut g = Box::new(ProcessorChain::new());
+        g.add(Box::new(sidecar_proxy));
+        g
+    });
 
     println!("Engine: Sending Play command...");
     prod.push(TimestampedCommand {

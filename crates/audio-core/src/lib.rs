@@ -1,5 +1,6 @@
 use control_plane::TimestampedCommand;
-use ipc_layer::Consumer;
+use ipc_layer::{Consumer, Producer};
+use std::sync::atomic::{AtomicPtr, Ordering};
 
 /// Base trait for any audio processing unit.
 pub trait AudioProcessor: Send {
@@ -42,7 +43,6 @@ pub struct SidecarProcessor {
     command_producer_ptr: *const ipc_layer::ShmRingBuffer<control_plane::Command>,
 }
 
-// Safety: We ensure the shared memory pointer is valid for the duration of the engine.
 unsafe impl Send for SidecarProcessor {}
 
 impl SidecarProcessor {
@@ -53,7 +53,6 @@ impl SidecarProcessor {
 
 impl AudioProcessor for SidecarProcessor {
     fn process(&mut self, _inputs: &[&[f32]], _outputs: &mut [&mut [f32]]) {
-        // Implementation for audio data exchange goes here
     }
 
     fn apply_command(&mut self, command: &control_plane::Command) {
@@ -65,23 +64,34 @@ impl AudioProcessor for SidecarProcessor {
 
 pub struct AudioEngine {
     command_consumer: Consumer<TimestampedCommand>,
-    main_chain: ProcessorChain,
+    /// The current active processing graph.
+    active_graph: AtomicPtr<ProcessorChain>,
+    /// Queue to send old graphs back to the control plane for safe deallocation.
+    garbage_producer: Producer<Box<ProcessorChain>>,
+
     sample_counter: u64,
     pending_command: Option<TimestampedCommand>,
 }
 
 impl AudioEngine {
-    pub fn new(command_consumer: Consumer<TimestampedCommand>) -> Self {
+    pub fn new(
+        command_consumer: Consumer<TimestampedCommand>,
+        garbage_producer: Producer<Box<ProcessorChain>>,
+        initial_graph: Box<ProcessorChain>,
+    ) -> Self {
         Self {
             command_consumer,
-            main_chain: ProcessorChain::new(),
+            active_graph: AtomicPtr::new(Box::into_raw(initial_graph)),
+            garbage_producer,
             sample_counter: 0,
             pending_command: None,
         }
     }
 
-    pub fn add_processor(&mut self, processor: Box<dyn AudioProcessor>) {
-        self.main_chain.add(processor);
+    pub fn swap_graph(&self, new_graph: Box<ProcessorChain>) -> Box<ProcessorChain> {
+        let new_ptr = Box::into_raw(new_graph);
+        let old_ptr = self.active_graph.swap(new_ptr, Ordering::AcqRel);
+        unsafe { Box::from_raw(old_ptr) }
     }
 
     pub fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize) {
@@ -89,6 +99,9 @@ impl AudioEngine {
         let block_end_sample = block_start_sample + num_samples as u64;
 
         let mut current_sample_in_block = 0;
+
+        let graph_ptr = self.active_graph.load(Ordering::Acquire);
+        let graph = unsafe { &mut *graph_ptr };
 
         while current_sample_in_block < num_samples {
             let cmd = if let Some(pending) = self.pending_command.take() {
@@ -107,20 +120,20 @@ impl AudioEngine {
 
                     if cmd_offset > current_sample_in_block {
                         let samples_to_process = cmd_offset - current_sample_in_block;
-                        self.process_sub_block(inputs, outputs, current_sample_in_block, samples_to_process);
+                        self.process_sub_block(graph, inputs, outputs, current_sample_in_block, samples_to_process);
                         current_sample_in_block += samples_to_process;
                     }
 
-                    self.main_chain.apply_command(&cmd.command);
+                    graph.apply_command(&cmd.command);
                 } else {
                     self.pending_command = Some(cmd);
                     let remaining = num_samples - current_sample_in_block;
-                    self.process_sub_block(inputs, outputs, current_sample_in_block, remaining);
+                    self.process_sub_block(graph, inputs, outputs, current_sample_in_block, remaining);
                     current_sample_in_block = num_samples;
                 }
             } else {
                 let remaining = num_samples - current_sample_in_block;
-                self.process_sub_block(inputs, outputs, current_sample_in_block, remaining);
+                self.process_sub_block(graph, inputs, outputs, current_sample_in_block, remaining);
                 current_sample_in_block = num_samples;
             }
         }
@@ -128,7 +141,7 @@ impl AudioEngine {
         self.sample_counter = block_end_sample;
     }
 
-    fn process_sub_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], offset: usize, len: usize) {
+    fn process_sub_block(&mut self, graph: &mut ProcessorChain, inputs: &[&[f32]], outputs: &mut [&mut [f32]], offset: usize, len: usize) {
         if len == 0 { return; }
 
         let mut sub_inputs_ptr = [ &[][..]; MAX_CHANNELS ];
@@ -155,6 +168,21 @@ impl AudioEngine {
             }
         });
 
-        self.main_chain.process(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs]);
+        graph.process(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs]);
     }
+}
+
+impl Drop for AudioEngine {
+    fn drop(&mut self) {
+        let ptr = self.active_graph.load(Ordering::Acquire);
+        if !ptr.is_null() {
+            unsafe { drop(Box::from_raw(ptr)); }
+        }
+    }
+}
+
+/// Abstraction for different audio backends (PipeWire, JACK, ALSA).
+pub trait AudioBackend {
+    fn start(&mut self, engine: AudioEngine) -> Result<(), String>;
+    fn stop(&mut self);
 }
