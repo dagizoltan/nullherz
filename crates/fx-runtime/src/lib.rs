@@ -5,9 +5,11 @@ use audio_core::{SidecarProcessor, MAX_CHANNELS};
 pub struct SidecarHandle {
     pub process: Child,
     pub shm_cmd: SharedMemory,
+    pub shm_feedback: SharedMemory,
     pub shm_inputs: Vec<SharedMemory>,
     pub shm_outputs: Vec<SharedMemory>,
     pub shm_signal: SharedMemory,
+    pub last_heartbeat: std::time::Instant,
 }
 
 pub struct SidecarManager {
@@ -27,6 +29,12 @@ impl SidecarManager {
         let (cmd_layout, _) = ShmRingBuffer::<control_plane::Command>::layout(64);
         let shm_cmd = SharedMemory::create(&cmd_shm_name, cmd_layout.size())?;
         let cmd_rb_ptr = unsafe { ShmRingBuffer::init(shm_cmd.ptr(), 64) };
+
+        // 1b. Create SHM for feedback
+        let fb_shm_name = format!("/nullherz_fb_{}", name);
+        let (fb_layout, _) = ShmRingBuffer::<control_plane::SidecarMetadata>::layout(8);
+        let shm_feedback = SharedMemory::create(&fb_shm_name, fb_layout.size())?;
+        let fb_rb_ptr = unsafe { ShmRingBuffer::init(shm_feedback.ptr(), 8) };
 
         // 2. Create SHM for audio blocks
         let mut shm_inputs = Vec::new();
@@ -61,6 +69,7 @@ impl SidecarManager {
         // 5. Spawn process
         let mut cmd = Command::new(binary_path);
         cmd.arg("--command-shm").arg(&cmd_shm_name)
+           .arg("--feedback-shm").arg(&fb_shm_name)
            .arg("--channels").arg(num_channels.to_string())
            .arg("--signal-shm").arg(&sig_name)
            .arg("--event-fd").arg(efd_raw.to_string());
@@ -76,6 +85,7 @@ impl SidecarManager {
         let processor = unsafe {
             SidecarProcessor::new(
                 cmd_rb_ptr,
+                Some(fb_rb_ptr),
                 &input_ptrs,
                 &output_ptrs,
                 signal_ptr,
@@ -86,9 +96,11 @@ impl SidecarManager {
         self.active_sidecars.push(SidecarHandle {
             process: child,
             shm_cmd,
+            shm_feedback,
             shm_inputs,
             shm_outputs,
             shm_signal,
+            last_heartbeat: std::time::Instant::now(),
         });
 
         Ok(processor)
@@ -96,11 +108,32 @@ impl SidecarManager {
 
     pub fn reap_zombies(&mut self) {
         self.active_sidecars.retain_mut(|handle| {
-            match handle.process.try_wait() {
+            let still_running = match handle.process.try_wait() {
                 Ok(Some(_status)) => false, // Process exited, remove handle
                 Ok(None) => true,           // Still running
                 Err(_) => false,            // Error, assume gone
+            };
+
+            if !still_running { return false; }
+
+            // Check heartbeat from SHM
+            let sig_ptr = handle.shm_signal.ptr() as *const ShmSignal;
+            if unsafe { (*sig_ptr).check_and_clear_heartbeat() } {
+                handle.last_heartbeat = std::time::Instant::now();
             }
+
+            // Health check: if no heartbeat for 5 seconds, consider it dead
+            if handle.last_heartbeat.elapsed() > std::time::Duration::from_secs(5) {
+                let _ = handle.process.kill();
+                return false;
+            }
+            true
         });
+    }
+
+    pub fn update_heartbeat(&mut self, sidecar_idx: usize) {
+        if let Some(handle) = self.active_sidecars.get_mut(sidecar_idx) {
+            handle.last_heartbeat = std::time::Instant::now();
+        }
     }
 }

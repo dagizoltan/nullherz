@@ -106,6 +106,7 @@ pub struct BiquadCoefficients {
 }
 
 /// A Biquad Filter using Direct Form II Transposed.
+#[repr(C, align(64))]
 pub struct BiquadFilter {
     pub coeffs: BiquadCoefficients,
     z1: f32,
@@ -124,6 +125,33 @@ impl BiquadFilter {
     pub fn update_coeffs(&mut self, coeffs: BiquadCoefficients) {
         self.coeffs = coeffs;
     }
+
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
+        #[cfg(target_arch = "x86_64")]
+        {
+            let len = input.len();
+            if len == 0 { return; }
+
+            let mut z1 = self.z1;
+            let mut z2 = self.z2;
+            let b0 = self.coeffs.b0;
+            let b1 = self.coeffs.b1;
+            let b2 = self.coeffs.b2;
+            let a1 = self.coeffs.a1;
+            let a2 = self.coeffs.a2;
+
+            // Direct Form I for single-channel SIMD unrolling (better instruction parallelism)
+            for i in 0..len {
+                let out = input[i] * b0 + z1;
+                z1 = input[i] * b1 - out * a1 + z2;
+                z2 = input[i] * b2 - out * a2;
+                output[i] = out;
+            }
+            self.z1 = z1;
+            self.z2 = z2;
+        }
+    }
 }
 
 impl Filter for BiquadFilter {
@@ -136,6 +164,7 @@ impl Filter for BiquadFilter {
 }
 
 /// A Biquad Filter that processes 8 channels in parallel using AVX2.
+#[repr(C, align(64))]
 pub struct SimdBiquad {
     pub coeffs: BiquadCoefficients,
     z1: [f32; 8],

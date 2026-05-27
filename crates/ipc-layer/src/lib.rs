@@ -187,12 +187,15 @@ impl Drop for EventFd {
 #[repr(C, align(64))]
 pub struct ShmSignal {
     pub(crate) flag: AtomicBool,
+    pub(crate) heartbeat: AtomicBool,
 }
 
 impl ShmSignal {
-    pub fn new() -> Self { Self { flag: AtomicBool::new(false) } }
+    pub fn new() -> Self { Self { flag: AtomicBool::new(false), heartbeat: AtomicBool::new(false) } }
     pub fn notify(&self) { self.flag.store(true, Ordering::Release); }
     pub fn check_and_clear(&self) -> bool { self.flag.swap(false, Ordering::Acquire) }
+    pub fn pulse_heartbeat(&self) { self.heartbeat.store(true, Ordering::Release); }
+    pub fn check_and_clear_heartbeat(&self) -> bool { self.heartbeat.swap(false, Ordering::Acquire) }
 }
 
 pub struct RingBuffer<T> {

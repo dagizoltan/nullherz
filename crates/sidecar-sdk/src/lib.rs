@@ -5,6 +5,7 @@ use audio_core::AudioProcessor;
 pub struct SidecarContext<P: AudioProcessor> {
     processor: P,
     command_buffer: &'static ShmRingBuffer<control_plane::Command>,
+    feedback_buffer: Option<&'static ShmRingBuffer<control_plane::SidecarMetadata>>,
     input_buffers: Vec<&'static ShmRingBuffer<AudioBlock>>,
     output_buffers: Vec<&'static ShmRingBuffer<AudioBlock>>,
     signal: &'static ShmSignal,
@@ -15,6 +16,7 @@ impl<P: AudioProcessor> SidecarContext<P> {
     pub unsafe fn new(
         processor: P,
         command_ptr: *const ShmRingBuffer<control_plane::Command>,
+        feedback_ptr: Option<*const ShmRingBuffer<control_plane::SidecarMetadata>>,
         inputs: Vec<*const ShmRingBuffer<AudioBlock>>,
         outputs: Vec<*const ShmRingBuffer<AudioBlock>>,
         signal_ptr: *const ShmSignal,
@@ -23,6 +25,7 @@ impl<P: AudioProcessor> SidecarContext<P> {
         Self {
             processor,
             command_buffer: &*command_ptr,
+            feedback_buffer: feedback_ptr.map(|p| &*p),
             input_buffers: inputs.into_iter().map(|p| &*p).collect(),
             output_buffers: outputs.into_iter().map(|p| &*p).collect(),
             signal: &*signal_ptr,
@@ -30,8 +33,15 @@ impl<P: AudioProcessor> SidecarContext<P> {
         }
     }
 
+    pub fn report_metadata(&self, metadata: control_plane::SidecarMetadata) {
+        if let Some(fb) = self.feedback_buffer {
+            let _ = fb.push(metadata);
+        }
+    }
+
     /// Process one iteration of the sidecar loop.
     pub fn process_once(&mut self) {
+        self.signal.pulse_heartbeat();
         while let Some(cmd) = self.command_buffer.pop() {
             self.processor.apply_command(&cmd);
         }

@@ -10,6 +10,15 @@ pub trait AudioProcessor: Send {
     fn apply_command(&mut self, _command: &control_plane::Command) {}
 }
 
+pub struct CrossfadeState {
+    pub node_idx: usize,
+    pub input_idx: usize,
+    pub old_buffer_idx: usize,
+    pub new_buffer_idx: usize,
+    pub remaining_samples: u32,
+    pub total_samples: u32,
+}
+
 pub struct ProcessorNode {
     pub processor: Box<dyn AudioProcessor>,
     pub input_indices: Vec<usize>,
@@ -19,13 +28,20 @@ pub struct ProcessorNode {
 pub struct ProcessorGraph {
     nodes: Vec<ProcessorNode>,
     buffers: Vec<AudioBlock>,
+    crossfades: Vec<CrossfadeState>,
+    crossfade_buffers: [AudioBlock; 8],
 }
 
 impl ProcessorGraph {
     pub fn new() -> Self {
         let mut buffers = Vec::with_capacity(64);
         for _ in 0..64 { buffers.push(AudioBlock { data: [0.0f32; 128] }); }
-        Self { nodes: Vec::new(), buffers }
+        Self {
+            nodes: Vec::new(),
+            buffers,
+            crossfades: Vec::with_capacity(8),
+            crossfade_buffers: [AudioBlock { data: [0.0f32; 128] }; 8],
+        }
     }
     pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
         let max_idx = outputs.iter().chain(inputs.iter()).cloned().max().unwrap_or(0);
@@ -40,15 +56,53 @@ impl AudioProcessor for ProcessorGraph {
         if num_samples == 0 { return; }
 
         let buffers_ptr = self.buffers.as_mut_ptr();
-        for node in &mut self.nodes {
+
+        // Handle crossfades
+        for i in 0..self.crossfades.len() {
+            let xf = &mut self.crossfades[i];
+            let samples_to_fade = (xf.remaining_samples as usize).min(num_samples);
+
+            unsafe {
+                let old_buf = &(*buffers_ptr.add(xf.old_buffer_idx)).data;
+                let new_buf = &(*buffers_ptr.add(xf.new_buffer_idx)).data;
+                let target_buf = &mut self.crossfade_buffers[i].data;
+
+                for j in 0..samples_to_fade {
+                    let fade_in = (xf.total_samples - xf.remaining_samples + j as u32) as f32 / xf.total_samples as f32;
+                    let fade_out = 1.0 - fade_in;
+                    target_buf[j] = old_buf[j] * fade_out + new_buf[j] * fade_in;
+                }
+
+                // Fill remainder of block with new buffer if fade finished
+                if samples_to_fade < num_samples {
+                    target_buf[samples_to_fade..num_samples].copy_from_slice(&new_buf[samples_to_fade..num_samples]);
+                }
+            }
+
+            xf.remaining_samples -= samples_to_fade as u32;
+        }
+
+        for (n_idx, node) in self.nodes.iter_mut().enumerate() {
             let mut node_inputs_storage = [ &[][..]; 16 ];
             let num_inputs = node.input_indices.len().min(16);
             for i in 0..num_inputs {
                 let idx = node.input_indices[i];
-                unsafe {
-                    let buf_ptr: *const AudioBlock = buffers_ptr.add(idx);
-                    let buf_ref: &AudioBlock = &*buf_ptr;
-                    node_inputs_storage[i] = &buf_ref.data[..num_samples];
+
+                let mut crossfaded = false;
+                for (xf_idx, xf) in self.crossfades.iter().enumerate() {
+                    if xf.node_idx == n_idx && xf.input_idx == i {
+                        node_inputs_storage[i] = &self.crossfade_buffers[xf_idx].data[..num_samples];
+                        crossfaded = true;
+                        break;
+                    }
+                }
+
+                if !crossfaded {
+                    unsafe {
+                        let buf_ptr: *const AudioBlock = buffers_ptr.add(idx);
+                        let buf_ref: &AudioBlock = &*buf_ptr;
+                        node_inputs_storage[i] = &buf_ref.data[..num_samples];
+                    }
                 }
             }
             let mut node_outputs_ptrs: [*mut f32; 16] = [std::ptr::null_mut(); 16];
@@ -69,6 +123,13 @@ impl AudioProcessor for ProcessorGraph {
         if external_outputs.len() >= 2 && self.buffers.len() >= 2 {
             external_outputs[0].copy_from_slice(&self.buffers[0].data[..num_samples]);
             external_outputs[1].copy_from_slice(&self.buffers[1].data[..num_samples]);
+        }
+
+        // Cleanup finished crossfades
+        for i in (0..self.crossfades.len()).rev() {
+            if self.crossfades[i].remaining_samples == 0 {
+                self.crossfades.swap_remove(i);
+            }
         }
     }
     fn apply_command(&mut self, command: &control_plane::Command) {
@@ -92,6 +153,27 @@ impl AudioProcessor for ProcessorGraph {
                     }
                 }
             }
+            control_plane::Command::UpdateEdgeCrossfaded { node_idx, input_idx, new_buffer_idx, duration_samples } => {
+                if let Some(node) = self.nodes.get_mut(*node_idx as usize) {
+                    if let Some(input) = node.input_indices.get_mut(*input_idx as usize) {
+                        if (*new_buffer_idx as usize) < self.buffers.len() {
+                            let old_buffer_idx = *input;
+                            // Update immediately to the new one, but the crossfade logic will handle the transition
+                            *input = *new_buffer_idx as usize;
+                            if self.crossfades.len() < self.crossfades.capacity() {
+                                self.crossfades.push(CrossfadeState {
+                                    node_idx: *node_idx as usize,
+                                    input_idx: *input_idx as usize,
+                                    old_buffer_idx,
+                                    new_buffer_idx: *new_buffer_idx as usize,
+                                    remaining_samples: *duration_samples,
+                                    total_samples: *duration_samples,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
             _ => {
                 for node in &mut self.nodes { node.processor.apply_command(command); }
             }
@@ -111,6 +193,7 @@ pub struct Telemetry {
 
 pub struct SidecarProcessor {
     command_producer_ptr: *const ShmRingBuffer<control_plane::Command>,
+    feedback_consumer_ptr: Option<*const ShmRingBuffer<control_plane::SidecarMetadata>>,
     input_shm: [*mut ShmRingBuffer<AudioBlock>; MAX_CHANNELS],
     output_shm: [*const ShmRingBuffer<AudioBlock>; MAX_CHANNELS],
     num_channels: usize,
@@ -123,6 +206,7 @@ unsafe impl Send for SidecarProcessor {}
 impl SidecarProcessor {
     pub unsafe fn new(
         command_ptr: *const ShmRingBuffer<control_plane::Command>,
+        feedback_ptr: Option<*const ShmRingBuffer<control_plane::SidecarMetadata>>,
         inputs: &[*mut ShmRingBuffer<AudioBlock>],
         outputs: &[*const ShmRingBuffer<AudioBlock>],
         signal: *const ShmSignal,
@@ -132,12 +216,25 @@ impl SidecarProcessor {
         let mut output_shm = [std::ptr::null(); MAX_CHANNELS];
         let num_channels = inputs.len().min(MAX_CHANNELS).min(outputs.len());
         for i in 0..num_channels { input_shm[i] = inputs[i]; output_shm[i] = outputs[i]; }
-        Self { command_producer_ptr: command_ptr, input_shm, output_shm, num_channels, signal, event_fd }
+        Self {
+            command_producer_ptr: command_ptr,
+            feedback_consumer_ptr: feedback_ptr,
+            input_shm,
+            output_shm,
+            num_channels,
+            signal,
+            event_fd
+        }
+    }
+
+    pub fn poll_feedback(&self) -> Option<control_plane::SidecarMetadata> {
+        self.feedback_consumer_ptr.and_then(|ptr| unsafe { (*ptr).pop() })
     }
 }
 
 impl AudioProcessor for SidecarProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        unsafe { (*self.signal).pulse_heartbeat(); }
         for i in 0..self.num_channels {
             if i < inputs.len() {
                 let mut block = AudioBlock { data: [0.0; 128] };

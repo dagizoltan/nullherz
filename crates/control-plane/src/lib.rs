@@ -21,6 +21,12 @@ pub enum Command {
         output_idx: u32,
         new_buffer_idx: u32,
     },
+    UpdateEdgeCrossfaded {
+        node_idx: u32,
+        input_idx: u32,
+        new_buffer_idx: u32,
+        duration_samples: u32,
+    },
 }
 
 /// A command with an associated timestamp for deterministic execution.
@@ -29,4 +35,22 @@ pub enum Command {
 pub struct TimestampedCommand {
     pub timestamp_samples: u64,
     pub command: Command,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ParameterMetadata {
+    pub id: u32,
+    pub name: [u8; 32],
+    pub min: f32,
+    pub max: f32,
+    pub default: f32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SidecarMetadata {
+    pub sidecar_id: u64,
+    pub num_parameters: u32,
+    pub parameters: [ParameterMetadata; 16],
 }
