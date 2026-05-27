@@ -1,0 +1,13 @@
+[package]
+name = "audio-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+audio-dsp = { path = "../audio-dsp" }
+control-plane = { path = "../control-plane" }
+ipc-layer = { path = "../ipc-layer" }
+libc = "0.2"
+
+[dev-dependencies]
+sidecar-sdk = { path = "../sidecar-sdk" }

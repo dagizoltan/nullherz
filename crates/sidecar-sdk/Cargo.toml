@@ -1,0 +1,9 @@
+[package]
+name = "sidecar-sdk"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ipc-layer = { path = "../ipc-layer" }
+audio-core = { path = "../audio-core" }
+control-plane = { path = "../control-plane" }
