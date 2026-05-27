@@ -43,8 +43,9 @@ impl AudioProcessor for ProcessorGraph {
             for i in 0..num_inputs {
                 let idx = node.input_indices[i];
                 unsafe {
-                    let buf_ptr: *const f32 = (*buffers_ptr.add(idx)).as_ptr();
-                    node_inputs_storage[i] = std::slice::from_raw_parts(buf_ptr, num_samples);
+                    let buf_ptr: *const [f32; 128] = buffers_ptr.add(idx);
+                    let buf_ref: &[f32; 128] = &*buf_ptr;
+                    node_inputs_storage[i] = &buf_ref[..num_samples];
                 }
             }
             let mut node_outputs_ptrs: [*mut f32; 16] = [std::ptr::null_mut(); 16];
@@ -52,7 +53,9 @@ impl AudioProcessor for ProcessorGraph {
             for i in 0..num_outputs {
                 let idx = node.output_indices[i];
                 unsafe {
-                    node_outputs_ptrs[i] = (*buffers_ptr.add(idx)).as_mut_ptr();
+                    let buf_ptr: *mut [f32; 128] = buffers_ptr.add(idx);
+                    let buf_ref: &mut [f32; 128] = &mut *buf_ptr;
+                    node_outputs_ptrs[i] = buf_ref.as_mut_ptr();
                 }
             }
             let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|i| {
@@ -139,7 +142,6 @@ impl AudioProcessor for SidecarProcessor {
 
 pub struct AudioEngine {
     command_consumer: Consumer<TimestampedCommand>,
-    // Simplification: Store a pointer to the trait object box directly.
     active_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     pending_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     garbage_producer: Producer<Box<Box<dyn AudioProcessor>>>,
@@ -177,7 +179,9 @@ impl AudioEngine {
             let old = self.active_graph.swap(pending, Ordering::AcqRel);
             if !old.is_null() {
                 let old_graph = unsafe { Box::from_raw(old) };
-                let _ = self.garbage_producer.push(old_graph);
+                if let Err(leaked) = self.garbage_producer.push(old_graph) {
+                    let _ = Box::into_raw(leaked);
+                }
             }
         }
         let block_start_sample = self.sample_counter;
@@ -280,6 +284,8 @@ struct AlsaLib {
     snd_pcm_writei: unsafe extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void, std::os::raw::c_ulong) -> isize,
     snd_pcm_close: unsafe extern "C" fn(*mut std::ffi::c_void) -> std::os::raw::c_int,
 }
+unsafe impl Send for AlsaLib {}
+
 impl AlsaLib {
     fn load() -> Result<Self, String> {
         unsafe {
@@ -318,7 +324,6 @@ impl AudioBackend for AlsaBackend {
                 let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
                 let name = std::ffi::CString::new("default").unwrap();
                 if (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) != 0 { return; }
-                // Target 5ms latency (5000us)
                 if (alsa.snd_pcm_set_params)(pcm, 2, 3, 2, 44100, 1, 5000) != 0 { (alsa.snd_pcm_close)(pcm); return; }
                 let mut outputs_raw = [[0.0f32; 128]; 2];
                 let mut interleaved = [0i16; 256];
@@ -327,8 +332,10 @@ impl AudioBackend for AlsaBackend {
                     let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
                     engine.process_block(&[], &mut out_refs, 128);
                     for i in 0..128 {
-                        interleaved[i*2] = (outputs_raw[0][i] * 32767.0) as i16;
-                        interleaved[i*2+1] = (outputs_raw[1][i] * 32767.0) as i16;
+                        let sample_l = (outputs_raw[0][i] * 32767.0).clamp(-32768.0, 32767.0);
+                        let sample_r = (outputs_raw[1][i] * 32767.0).clamp(-32768.0, 32767.0);
+                        interleaved[i*2] = sample_l as i16;
+                        interleaved[i*2+1] = sample_r as i16;
                     }
                     (alsa.snd_pcm_writei)(pcm, interleaved.as_ptr() as *const _, 128);
                 }
