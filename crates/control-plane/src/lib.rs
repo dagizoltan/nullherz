@@ -11,6 +11,16 @@ pub enum Command {
     },
     Play,
     Stop,
+    UpdateEdge {
+        node_idx: u32,
+        input_idx: u32,
+        new_buffer_idx: u32,
+    },
+    UpdateOutputEdge {
+        node_idx: u32,
+        output_idx: u32,
+        new_buffer_idx: u32,
+    },
 }
 
 /// A command with an associated timestamp for deterministic execution.

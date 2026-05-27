@@ -27,6 +27,8 @@ version = "0.1.0"
 dependencies = [
  "audio-core",
  "audio-dsp",
+ "control-plane",
+ "ipc-layer",
 ]
 
 [[package]]

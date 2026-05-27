@@ -1,3 +1,4 @@
+use audio_dsp::Filter;
 use control_plane::TimestampedCommand;
 use ipc_layer::{Consumer, Producer, AudioBlock, ShmRingBuffer, ShmSignal, EventFd};
 use std::sync::atomic::{AtomicPtr, Ordering};
@@ -17,17 +18,19 @@ pub struct ProcessorNode {
 
 pub struct ProcessorGraph {
     nodes: Vec<ProcessorNode>,
-    buffers: Vec<[f32; 128]>,
+    buffers: Vec<AudioBlock>,
 }
 
 impl ProcessorGraph {
     pub fn new() -> Self {
-        Self { nodes: Vec::new(), buffers: Vec::new() }
+        let mut buffers = Vec::with_capacity(64);
+        for _ in 0..64 { buffers.push(AudioBlock { data: [0.0f32; 128] }); }
+        Self { nodes: Vec::new(), buffers }
     }
     pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
         let max_idx = outputs.iter().chain(inputs.iter()).cloned().max().unwrap_or(0);
         self.nodes.push(ProcessorNode { processor, input_indices: inputs, output_indices: outputs });
-        while self.buffers.len() <= max_idx { self.buffers.push([0.0f32; 128]); }
+        while self.buffers.len() <= max_idx { self.buffers.push(AudioBlock { data: [0.0f32; 128] }); }
     }
 }
 
@@ -43,9 +46,9 @@ impl AudioProcessor for ProcessorGraph {
             for i in 0..num_inputs {
                 let idx = node.input_indices[i];
                 unsafe {
-                    let buf_ptr: *const [f32; 128] = buffers_ptr.add(idx);
-                    let buf_ref: &[f32; 128] = &*buf_ptr;
-                    node_inputs_storage[i] = &buf_ref[..num_samples];
+                    let buf_ptr: *const AudioBlock = buffers_ptr.add(idx);
+                    let buf_ref: &AudioBlock = &*buf_ptr;
+                    node_inputs_storage[i] = &buf_ref.data[..num_samples];
                 }
             }
             let mut node_outputs_ptrs: [*mut f32; 16] = [std::ptr::null_mut(); 16];
@@ -53,9 +56,9 @@ impl AudioProcessor for ProcessorGraph {
             for i in 0..num_outputs {
                 let idx = node.output_indices[i];
                 unsafe {
-                    let buf_ptr: *mut [f32; 128] = buffers_ptr.add(idx);
-                    let buf_ref: &mut [f32; 128] = &mut *buf_ptr;
-                    node_outputs_ptrs[i] = buf_ref.as_mut_ptr();
+                    let buf_ptr: *mut AudioBlock = buffers_ptr.add(idx);
+                    let buf_ref: &mut AudioBlock = &mut *buf_ptr;
+                    node_outputs_ptrs[i] = buf_ref.data.as_mut_ptr();
                 }
             }
             let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|i| {
@@ -64,12 +67,35 @@ impl AudioProcessor for ProcessorGraph {
             node.processor.process(&node_inputs_storage[..num_inputs], &mut node_outputs_reconstructed[..num_outputs]);
         }
         if external_outputs.len() >= 2 && self.buffers.len() >= 2 {
-            external_outputs[0].copy_from_slice(&self.buffers[0][..num_samples]);
-            external_outputs[1].copy_from_slice(&self.buffers[1][..num_samples]);
+            external_outputs[0].copy_from_slice(&self.buffers[0].data[..num_samples]);
+            external_outputs[1].copy_from_slice(&self.buffers[1].data[..num_samples]);
         }
     }
     fn apply_command(&mut self, command: &control_plane::Command) {
-        for node in &mut self.nodes { node.processor.apply_command(command); }
+        match command {
+            control_plane::Command::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
+                if let Some(node) = self.nodes.get_mut(*node_idx as usize) {
+                    if let Some(input) = node.input_indices.get_mut(*input_idx as usize) {
+                        // Check against the pre-allocated buffer pool
+                        if (*new_buffer_idx as usize) < self.buffers.len() {
+                            *input = *new_buffer_idx as usize;
+                        }
+                    }
+                }
+            }
+            control_plane::Command::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
+                if let Some(node) = self.nodes.get_mut(*node_idx as usize) {
+                    if let Some(output) = node.output_indices.get_mut(*output_idx as usize) {
+                        if (*new_buffer_idx as usize) < self.buffers.len() {
+                            *output = *new_buffer_idx as usize;
+                        }
+                    }
+                }
+            }
+            _ => {
+                for node in &mut self.nodes { node.processor.apply_command(command); }
+            }
+        }
     }
 }
 
@@ -277,6 +303,58 @@ impl AudioBackend for ThreadedBackend {
     fn stop(&mut self) { self.running.store(false, Ordering::SeqCst); if let Some(handle) = self.handle.take() { let _ = handle.join(); } }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use control_plane::{Command, TimestampedCommand};
+    use ipc_layer::RingBuffer;
+
+    struct ConstantProcessor { val: f32 }
+    impl AudioProcessor for ConstantProcessor {
+        fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+            for out in outputs { for s in out.iter_mut() { *s = self.val; } }
+        }
+    }
+
+    #[test]
+    fn test_sample_accurate_rewiring() {
+        let (cmd_p, cmd_c) = RingBuffer::<TimestampedCommand>::new(16).split();
+        let (gar_p, _gar_c) = RingBuffer::<Box<Box<dyn AudioProcessor>>>::new(16).split();
+        let (tel_p, _tel_c) = RingBuffer::<Telemetry>::new(16).split();
+
+        let mut graph = ProcessorGraph::new();
+        graph.add_node(Box::new(ConstantProcessor { val: 1.0 }), vec![], vec![2]); // Node 0 -> Buf 2
+        graph.add_node(Box::new(ConstantProcessor { val: 2.0 }), vec![], vec![3]); // Node 1 -> Buf 3
+
+        // Passthrough node
+        struct Pass { }
+        impl AudioProcessor for Pass {
+            fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+                if !inputs.is_empty() && !outputs.is_empty() { outputs[0].copy_from_slice(inputs[0]); }
+            }
+        }
+        graph.add_node(Box::new(Pass {}), vec![2], vec![0]); // Node 2: Input Buf 2, Output Buf 0
+
+        let mut engine = AudioEngine::new(cmd_c, gar_p, tel_p, Box::new(graph));
+
+        let mut out_l = [0.0f32; 10];
+        let mut out_r = [0.0f32; 10];
+        let mut out_refs = [&mut out_l[..], &mut out_r[..]];
+
+        // Command to switch Node 2's input from Buf 2 (1.0) to Buf 3 (2.0) at sample 5
+        let mut producer = cmd_p;
+        producer.push(TimestampedCommand {
+            timestamp_samples: 5,
+            command: Command::UpdateEdge { node_idx: 2, input_idx: 0, new_buffer_idx: 3 }
+        }).unwrap();
+
+        engine.process_block(&[], &mut out_refs, 10);
+
+        for i in 0..5 { assert_eq!(out_l[i], 1.0, "Sample {} should be 1.0", i); }
+        for i in 5..10 { assert_eq!(out_l[i], 2.0, "Sample {} should be 2.0", i); }
+    }
+}
+
 struct AlsaLib {
     handle: *mut std::ffi::c_void,
     snd_pcm_open: unsafe extern "C" fn(*mut *mut std::ffi::c_void, *const std::os::raw::c_char, std::os::raw::c_int, std::os::raw::c_int) -> std::os::raw::c_int,
@@ -310,6 +388,64 @@ impl Drop for AlsaLib { fn drop(&mut self) { unsafe { libc::dlclose(self.handle)
 pub struct AlsaBackend {
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
+}
+
+pub struct BiquadProcessor {
+    filter: audio_dsp::BiquadFilter,
+}
+
+impl BiquadProcessor {
+    pub fn new(coeffs: audio_dsp::BiquadCoefficients) -> Self {
+        Self { filter: audio_dsp::BiquadFilter::new(coeffs) }
+    }
+}
+
+impl AudioProcessor for BiquadProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        if inputs.is_empty() || outputs.is_empty() { return; }
+        for i in 0..inputs[0].len() {
+            outputs[0][i] = self.filter.process_sample(inputs[0][i]);
+        }
+    }
+}
+
+pub struct SimdBiquadProcessor {
+    filter: audio_dsp::SimdBiquad,
+}
+
+impl SimdBiquadProcessor {
+    pub fn new(coeffs: audio_dsp::BiquadCoefficients) -> Self {
+        Self { filter: audio_dsp::SimdBiquad::new(coeffs) }
+    }
+}
+
+impl AudioProcessor for SimdBiquadProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        let num_channels = inputs.len().min(outputs.len()).min(8);
+        if num_channels == 0 { return; }
+        let len = inputs[0].len();
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            if num_channels == 8 && is_x86_feature_detected!("avx2") {
+                let mut in_ptrs = [std::ptr::null(); 8];
+                let mut out_ptrs = [std::ptr::null_mut(); 8];
+                for i in 0..8 {
+                    in_ptrs[i] = inputs[i].as_ptr();
+                    out_ptrs[i] = outputs[i].as_mut_ptr();
+                }
+                unsafe {
+                    self.filter.process_8_channels(in_ptrs, out_ptrs, len);
+                }
+                return;
+            }
+        }
+
+        // Fallback for non-x86, no AVX2, or fewer than 8 channels
+        for i in 0..num_channels {
+            self.filter.process_scalar(i, inputs[i], outputs[i]);
+        }
+    }
 }
 impl AlsaBackend {
     pub fn new() -> Self { Self { running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), handle: None } }
