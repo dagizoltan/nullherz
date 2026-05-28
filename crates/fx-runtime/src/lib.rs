@@ -3,6 +3,9 @@ use ipc_layer::{SharedMemory, ShmRingBuffer, ShmSignal, EventFd, AudioBlock};
 use audio_core::{SidecarProcessor, MAX_CHANNELS};
 
 pub struct SidecarHandle {
+    pub name: String,
+    pub binary_path: String,
+    pub num_channels: usize,
     pub process: Child,
     pub shm_cmd: SharedMemory,
     pub shm_feedback: SharedMemory,
@@ -94,6 +97,9 @@ impl SidecarManager {
         };
 
         self.active_sidecars.push(SidecarHandle {
+            name: name.to_string(),
+            binary_path: binary_path.to_string(),
+            num_channels,
             process: child,
             shm_cmd,
             shm_feedback,
@@ -106,15 +112,22 @@ impl SidecarManager {
         Ok(processor)
     }
 
-    pub fn reap_zombies(&mut self) {
+    pub fn reap_zombies(&mut self) -> Vec<SidecarProcessor> {
+        let mut to_restart = Vec::new();
         self.active_sidecars.retain_mut(|handle| {
-            let still_running = match handle.process.try_wait() {
-                Ok(Some(_status)) => false, // Process exited, remove handle
-                Ok(None) => true,           // Still running
-                Err(_) => false,            // Error, assume gone
+            let exited = match handle.process.try_wait() {
+                Ok(Some(_status)) => true, // Process exited
+                Ok(None) => false,          // Still running
+                Err(_) => true,             // Error, assume gone
             };
 
-            if !still_running { return false; }
+            let timed_out = handle.last_heartbeat.elapsed() > std::time::Duration::from_secs(5);
+
+            if exited || timed_out {
+                if timed_out { let _ = handle.process.kill(); }
+                to_restart.push((handle.name.clone(), handle.binary_path.clone(), handle.num_channels));
+                return false;
+            }
 
             // Check heartbeat from SHM
             let sig_ptr = handle.shm_signal.ptr() as *const ShmSignal;
@@ -122,13 +135,16 @@ impl SidecarManager {
                 handle.last_heartbeat = std::time::Instant::now();
             }
 
-            // Health check: if no heartbeat for 5 seconds, consider it dead
-            if handle.last_heartbeat.elapsed() > std::time::Duration::from_secs(5) {
-                let _ = handle.process.kill();
-                return false;
-            }
             true
         });
+
+        let mut new_processors = Vec::new();
+        for (name, path, channels) in to_restart {
+            if let Ok(p) = self.spawn_sidecar(&name, &path, channels) {
+                new_processors.push(p);
+            }
+        }
+        new_processors
     }
 
     pub fn update_heartbeat(&mut self, sidecar_idx: usize) {
