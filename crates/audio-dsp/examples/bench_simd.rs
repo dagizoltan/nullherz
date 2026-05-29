@@ -20,9 +20,23 @@ fn main() {
     println!("Scalar: {:?}", start.elapsed());
 
     // 2. SIMD Multi-channel Benchmark (8 channels)
+    // To properly compare, scalar should also process 8 channels.
+    let mut scalar_filters: Vec<BiquadFilter> = (0..8).map(|_| BiquadFilter::new(coeffs)).collect();
+    let mut outputs: Vec<Vec<f32>> = (0..8).map(|_| vec![0.0f32; block_size]).collect();
+
+    let start = Instant::now();
+    for _ in 0..iterations {
+        for ch in 0..8 {
+            for i in 0..block_size {
+                outputs[ch][i] = scalar_filters[ch].process_sample(input[i]);
+            }
+        }
+    }
+    println!("Scalar (8 channels): {:?}", start.elapsed());
+
     let mut simd_filter = SimdBiquad::new(coeffs);
     let in_ptrs: [*const f32; 8] = [input.as_ptr(); 8];
-    let mut out_ptrs: [*mut f32; 8] = [output.as_mut_ptr(); 8];
+    let out_ptrs: [*mut f32; 8] = [outputs[0].as_mut_ptr(), outputs[1].as_mut_ptr(), outputs[2].as_mut_ptr(), outputs[3].as_mut_ptr(), outputs[4].as_mut_ptr(), outputs[5].as_mut_ptr(), outputs[6].as_mut_ptr(), outputs[7].as_mut_ptr()];
 
     let start = Instant::now();
     for _ in 0..iterations {

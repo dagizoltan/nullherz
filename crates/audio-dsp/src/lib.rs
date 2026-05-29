@@ -58,7 +58,7 @@ impl Oscillator for SineOscillator {
 pub struct Gain {
     current_gain: f32,
     target_gain: f32,
-    smoothing_factor: f32,
+    _smoothing_factor: f32,
     ramp_remaining: u32,
     ramp_step: f32,
 }
@@ -68,7 +68,7 @@ impl Gain {
         Self {
             current_gain: initial_gain,
             target_gain: initial_gain,
-            smoothing_factor,
+            _smoothing_factor: smoothing_factor,
             ramp_remaining: 0,
             ramp_step: 0.0,
         }
@@ -123,6 +123,9 @@ pub struct BiquadCoefficients {
 #[repr(C, align(64))]
 pub struct BiquadFilter {
     pub coeffs: BiquadCoefficients,
+    pub target_coeffs: BiquadCoefficients,
+    pub ramp_duration: u32,
+    pub ramp_counter: u32,
     z1: f32,
     z2: f32,
 }
@@ -131,13 +134,28 @@ impl BiquadFilter {
     pub fn new(coeffs: BiquadCoefficients) -> Self {
         Self {
             coeffs,
+            target_coeffs: coeffs,
+            ramp_duration: 0,
+            ramp_counter: 0,
             z1: 0.0,
             z2: 0.0,
         }
     }
 
     pub fn update_coeffs(&mut self, coeffs: BiquadCoefficients) {
-        self.coeffs = coeffs;
+        self.target_coeffs = coeffs;
+        self.coeffs = coeffs; // Immediate for now to avoid stability issues in simple interpolation
+        self.ramp_duration = 0;
+    }
+
+    pub fn set_coeffs_ramped(&mut self, coeffs: BiquadCoefficients, duration: u32) {
+        if duration == 0 {
+            self.update_coeffs(coeffs);
+        } else {
+            self.target_coeffs = coeffs;
+            self.ramp_duration = duration;
+            self.ramp_counter = duration;
+        }
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -209,6 +227,17 @@ impl BiquadFilter {
 
 impl Filter for BiquadFilter {
     fn process_sample(&mut self, input: f32) -> f32 {
+        if self.ramp_duration > 0 && self.ramp_counter > 0 {
+            let t = (self.ramp_duration - self.ramp_counter + 1) as f32 / self.ramp_duration as f32;
+            self.coeffs.b0 = self.coeffs.b0 * (1.0 - t) + self.target_coeffs.b0 * t;
+            self.coeffs.b1 = self.coeffs.b1 * (1.0 - t) + self.target_coeffs.b1 * t;
+            self.coeffs.b2 = self.coeffs.b2 * (1.0 - t) + self.target_coeffs.b2 * t;
+            self.coeffs.a1 = self.coeffs.a1 * (1.0 - t) + self.target_coeffs.a1 * t;
+            self.coeffs.a2 = self.coeffs.a2 * (1.0 - t) + self.target_coeffs.a2 * t;
+            self.ramp_counter -= 1;
+            if self.ramp_counter == 0 { self.ramp_duration = 0; }
+        }
+
         let output = input * self.coeffs.b0 + self.z1;
         self.z1 = input * self.coeffs.b1 - output * self.coeffs.a1 + self.z2;
         self.z2 = input * self.coeffs.b2 - output * self.coeffs.a2;
@@ -256,7 +285,7 @@ impl SimdBiquad {
 
             for i in 0..len {
                 let idx = _mm256_cvttps_epi32(b_phase);
-                let mut out_v = [0.0f32; 8];
+                let _out_v = [0.0f32; 8];
                 let mut idx_arr = [0i32; 8];
                 _mm256_storeu_si256(idx_arr.as_mut_ptr() as *mut __m256i, idx);
 

@@ -14,7 +14,7 @@ fn main() {
 
     println!("Engine initialized.");
 
-    let mut new_graph = ProcessorGraph::new();
+    let new_graph = ProcessorGraph::new();
     engine.request_swap(Box::new(new_graph));
 
     let mut backend = ThreadedBackend::new();

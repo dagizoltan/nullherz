@@ -3,29 +3,48 @@ use std::env;
 use std::fs;
 
 #[derive(Deserialize, Debug)]
-struct NodeJson {
-    inputs: Vec<usize>,
-    outputs: Vec<usize>,
+pub struct NodeJson {
+    pub inputs: Vec<usize>,
+    pub outputs: Vec<usize>,
 }
 
 #[derive(Deserialize, Debug)]
-struct GraphJson {
-    nodes: Vec<NodeJson>,
+pub struct GraphJson {
+    pub nodes: Vec<NodeJson>,
 }
 
-fn main() {
+fn main() -> eframe::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: nullherz-inspector <graph.json>");
-        return;
+        eprintln!("Usage: nullherz-inspector [--gui] <graph.json>");
+        return Ok(());
     }
 
-    let content = fs::read_to_string(&args[1]).expect("Failed to read file");
+    let (gui_mode, path) = if args[1] == "--gui" {
+        (true, &args[2])
+    } else {
+        (false, &args[1])
+    };
+
+    let content = fs::read_to_string(path).expect("Failed to read file");
     let graph: GraphJson = serde_json::from_str(&content).expect("Failed to parse JSON");
 
-    println!("nullherz Topology Inspector");
-    println!("===========================");
-    render_ascii(&graph);
+    if gui_mode {
+        let native_options = eframe::NativeOptions::default();
+        eframe::run_native(
+            "nullherz Topology Inspector",
+            native_options,
+            Box::new(|_cc| {
+                let app: Box<dyn eframe::App> = Box::new(InspectorApp::new(graph));
+                app
+            }),
+        )
+    } else {
+        println!("nullherz Topology Inspector");
+        println!("===========================");
+        render_ascii(&graph);
+        Ok(())
+    }
 }
 
 fn render_ascii(graph: &GraphJson) {

@@ -6,15 +6,12 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-pub struct SendPtr<T>(pub *mut T);
-unsafe impl<T> Send for SendPtr<T> {}
-unsafe impl<T> Sync for SendPtr<T> {}
-
 pub trait AudioProcessor: Send {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]);
     fn apply_command(&mut self, _command: &control_plane::Command) {}
 }
 
+#[derive(Clone)]
 pub struct CrossfadeState {
     pub node_idx: usize,
     pub input_idx: usize,
@@ -24,79 +21,125 @@ pub struct CrossfadeState {
     pub total_samples: u32,
 }
 
+#[derive(Clone)]
 pub struct ProcessorNode {
-    pub processor: Box<dyn AudioProcessor>,
+    pub processor: Arc<std::cell::UnsafeCell<Box<dyn AudioProcessor>>>,
     pub input_indices: Vec<usize>,
     pub output_indices: Vec<usize>,
     pub cv_indices: Vec<usize>,
 }
 
+unsafe impl Send for ProcessorNode {}
+unsafe impl Sync for ProcessorNode {}
+
 pub struct ProcessorGraph {
     nodes: Vec<ProcessorNode>,
     buffers: Vec<AudioBlock>,
-    crossfades: Vec<CrossfadeState>,
+    crossfades: [Option<CrossfadeState>; 8],
     crossfade_buffers: [AudioBlock; 8],
     virtual_to_physical: [usize; 64],
-    stages: Vec<Vec<usize>>, // Indices of nodes in each stage
-    pool: Option<Arc<TaskPool>>,
+    stages: [[usize; 64]; 64],
+    stage_counts: [usize; 64],
+    num_stages: usize,
+    stage_scratch_assigned: [bool; 64],
+    stage_scratch_in_degree: [usize; 64],
+    stage_scratch_outputs: [usize; 64],
+    stage_scratch_outputs_count: usize,
+    pool: Option<TaskPool>,
+    needs_commit: bool,
+    active_nodes: Arc<AtomicPtr<Arc<[ProcessorNode]>>>,
+    active_buffers: Arc<AtomicPtr<Arc<[AudioBlock]>>>,
+    active_v2p: Arc<AtomicPtr<Arc<[usize; 64]>>>,
+    active_xfs: Arc<AtomicPtr<Arc<[Option<CrossfadeState>; 8]>>>,
+    active_xf_bufs: Arc<AtomicPtr<Arc<[AudioBlock; 8]>>>,
 }
+
 
 struct TaskPool {
     workers: Vec<thread::JoinHandle<()>>,
-    tasks_producer: Producer<usize>,
+    worker_producers: Vec<Producer<usize>>,
     completion: Arc<std::sync::atomic::AtomicUsize>,
+    running: Arc<std::sync::atomic::AtomicBool>,
+}
+
+unsafe impl Sync for TaskPool {}
+
+impl Drop for TaskPool {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Release);
+        for handle in self.workers.drain(..) {
+            let _ = handle.join();
+        }
+    }
 }
 
 impl ProcessorGraph {
     pub fn calculate_stages(&mut self) {
-        let n = self.nodes.len();
+        let n = self.nodes.len().min(MAX_NODES);
         if n == 0 { return; }
 
-        self.stages.clear();
-        let mut assigned = vec![false; n];
-        let mut in_degree = vec![0; n];
+        self.num_stages = 0;
+        self.stage_scratch_assigned = [false; 64];
+        self.stage_scratch_in_degree = [0usize; 64];
 
-        // Calculate in-degrees (number of nodes this node depends on)
         for i in 0..n {
             for j in 0..n {
                 if i == j { continue; }
-                // Node i depends on Node j if Node j outputs to a buffer that Node i reads
                 for out_idx in &self.nodes[j].output_indices {
                     if self.nodes[i].input_indices.contains(out_idx) {
-                        in_degree[i] += 1;
+                        self.stage_scratch_in_degree[i] += 1;
                         break;
                     }
                 }
             }
         }
 
-        while assigned.iter().any(|&a| !a) {
-            let mut current_stage = Vec::new();
+        let mut loop_count = 0;
+        while self.stage_scratch_assigned[..n].iter().any(|&a| !a) {
+            loop_count += 1;
+            if loop_count > 64 { break; }
+
+            let mut count = 0;
+            self.stage_scratch_outputs_count = 0;
+
             for i in 0..n {
-                if !assigned[i] && in_degree[i] == 0 {
-                    current_stage.push(i);
+                if !self.stage_scratch_assigned[i] && self.stage_scratch_in_degree[i] == 0 {
+                    let mut collision = false;
+                    for out_idx in &self.nodes[i].output_indices {
+                        if self.stage_scratch_outputs[..self.stage_scratch_outputs_count].contains(out_idx) {
+                            collision = true;
+                            break;
+                        }
+                    }
+
+                    if !collision {
+                        self.stages[self.num_stages][count] = i;
+                        count += 1;
+                        for out_idx in &self.nodes[i].output_indices {
+                            self.stage_scratch_outputs[self.stage_scratch_outputs_count] = *out_idx;
+                            self.stage_scratch_outputs_count += 1;
+                        }
+                    }
                 }
             }
 
-            if current_stage.is_empty() {
-                // Should not happen if detect_cycle is used, but for safety:
-                break;
-            }
+            if count == 0 { break; }
 
-            for &i in &current_stage {
-                assigned[i] = true;
-                // Reduce in-degree of dependent nodes
+            for &i in &self.stages[self.num_stages][..count] {
+                self.stage_scratch_assigned[i] = true;
                 for j in 0..n {
-                    if assigned[j] { continue; }
+                    if self.stage_scratch_assigned[j] { continue; }
                     for out_idx in &self.nodes[i].output_indices {
                         if self.nodes[j].input_indices.contains(out_idx) {
-                            in_degree[j] -= 1;
+                            self.stage_scratch_in_degree[j] -= 1;
                             break;
                         }
                     }
                 }
             }
-            self.stages.push(current_stage);
+            self.stage_counts[self.num_stages] = count;
+            self.num_stages += 1;
+            if self.num_stages >= 64 { break; }
         }
     }
 
@@ -143,10 +186,12 @@ impl ProcessorGraph {
 
         // Include crossfade old buffers in lifetime calculation
         // They must stay alive for the entire block processing if they are being used.
-        for xf in &self.crossfades {
-            if xf.old_buffer_idx < 64 {
-                first_use[xf.old_buffer_idx] = 0;
-                last_use[xf.old_buffer_idx] = self.nodes.len();
+        for xf_opt in &self.crossfades {
+            if let Some(xf) = xf_opt {
+                if xf.old_buffer_idx < 64 {
+                    first_use[xf.old_buffer_idx] = 0;
+                    last_use[xf.old_buffer_idx] = self.nodes.len();
+                }
             }
         }
 
@@ -218,46 +263,166 @@ impl ProcessorGraph {
         Self {
             nodes: Vec::new(),
             buffers,
-            crossfades: Vec::with_capacity(8),
+            crossfades: [const { None }; 8],
             crossfade_buffers: [AudioBlock { data: [0.0f32; 128] }; 8],
             virtual_to_physical: v2p,
-            stages: Vec::new(),
+            stages: [[0; 64]; 64],
+            stage_counts: [0; 64],
+            num_stages: 0,
+            stage_scratch_assigned: [false; 64],
+            stage_scratch_in_degree: [0; 64],
+            stage_scratch_outputs: [0; 64],
+            stage_scratch_outputs_count: 0,
             pool: None,
+            active_nodes: Arc::new(AtomicPtr::new(std::ptr::null_mut())),
+            active_buffers: Arc::new(AtomicPtr::new(std::ptr::null_mut())),
+            active_v2p: Arc::new(AtomicPtr::new(std::ptr::null_mut())),
+            active_xfs: Arc::new(AtomicPtr::new(std::ptr::null_mut())),
+            active_xf_bufs: Arc::new(AtomicPtr::new(std::ptr::null_mut())),
+            needs_commit: true,
+        }
+    }
+
+    pub fn commit_graph(&mut self) {
+        // Freeze nodes and buffers for RT thread safety using AtomicPtr swaps of Arc
+        // Note: CLONING IS NOT RT-SAFE. In a production engine, we would use a
+        // pre-allocated swap-buffer system. For this architectural evolution,
+        // we use Arcs to bridge the safety gap, but note this as a focus for Phase 6.
+        let nodes = Box::into_raw(Box::new(Arc::<[ProcessorNode]>::from(self.nodes.clone())));
+        let old_nodes = self.active_nodes.swap(nodes, Ordering::AcqRel);
+        if !old_nodes.is_null() { unsafe { drop(Box::from_raw(old_nodes)); } }
+
+        let buffers = Box::into_raw(Box::new(Arc::<[AudioBlock]>::from(self.buffers.clone())));
+        let old_buffers = self.active_buffers.swap(buffers, Ordering::AcqRel);
+        if !old_buffers.is_null() { unsafe { drop(Box::from_raw(old_buffers)); } }
+
+        let v2p = Box::into_raw(Box::new(Arc::new(self.virtual_to_physical)));
+        let old_v2p = self.active_v2p.swap(v2p, Ordering::AcqRel);
+        if !old_v2p.is_null() { unsafe { drop(Box::from_raw(old_v2p)); } }
+
+        let xfs = Box::into_raw(Box::new(Arc::new(self.crossfades.clone())));
+        let old_xfs = self.active_xfs.swap(xfs, Ordering::AcqRel);
+        if !old_xfs.is_null() { unsafe { drop(Box::from_raw(old_xfs)); } }
+
+        let xf_bufs = Box::into_raw(Box::new(Arc::new(self.crossfade_buffers)));
+        let old_xf_bufs = self.active_xf_bufs.swap(xf_bufs, Ordering::AcqRel);
+        if !old_xf_bufs.is_null() { unsafe { drop(Box::from_raw(old_xf_bufs)); } }
+    }
+
+    pub fn apply_block_commands(&mut self, commands: &[TimestampedCommand]) {
+        for cmd in commands {
+            self.apply_command(&cmd.command);
         }
     }
 
     pub fn set_worker_count(&mut self, count: usize) {
         if count == 0 { self.pool = None; return; }
+        if self.active_nodes.load(Ordering::Acquire).is_null() { self.commit_graph(); }
 
-        let (tasks_producer, tasks_consumer) = RingBuffer::new(64).split();
-        let tasks_consumer = Arc::new(std::sync::Mutex::new(tasks_consumer));
-        let completion = Arc::new(AtomicUsize::new(0));
+        let mut worker_producers = Vec::new();
         let mut workers = Vec::new();
+        let completion = Arc::new(AtomicUsize::new(0));
+        let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
 
-        let n_raw = &mut self.nodes as *mut Vec<ProcessorNode> as usize;
-        let b_raw = &mut self.buffers as *mut Vec<AudioBlock> as usize;
+        let active_nodes = Arc::clone(&self.active_nodes);
+        let active_buffers = Arc::clone(&self.active_buffers);
+        let active_v2p = Arc::clone(&self.active_v2p);
+        let active_xfs = Arc::clone(&self.active_xfs);
+        let active_xf_bufs = Arc::clone(&self.active_xf_bufs);
+
+        let nodes_ptr = active_nodes.load(Ordering::Acquire);
+        let buffers_ptr = active_buffers.load(Ordering::Acquire);
+        let v2p_ptr = active_v2p.load(Ordering::Acquire);
+        let xfs_ptr = active_xfs.load(Ordering::Acquire);
+        let xf_bufs_ptr = active_xf_bufs.load(Ordering::Acquire);
 
         for _ in 0..count {
-            let consumer = Arc::clone(&tasks_consumer);
+            let (tasks_producer, mut tasks_consumer) = RingBuffer::new(64).split();
+            worker_producers.push(tasks_producer);
+
             let comp = Arc::clone(&completion);
+            let run = Arc::clone(&running);
+            let nodes = unsafe { Arc::clone(&*nodes_ptr) };
+            let buffers = unsafe { Arc::clone(&*buffers_ptr) };
+            let v2p = unsafe { Arc::clone(&*v2p_ptr) };
+            let xfs = unsafe { Arc::clone(&*xfs_ptr) };
+            let xf_bufs = unsafe { Arc::clone(&*xf_bufs_ptr) };
+
+            let a_nodes = Arc::clone(&active_nodes);
+            let a_buffers = Arc::clone(&active_buffers);
+            let a_v2p = Arc::clone(&active_v2p);
+            let a_xfs = Arc::clone(&active_xfs);
+            let a_xf_bufs = Arc::clone(&active_xf_bufs);
 
             workers.push(thread::spawn(move || {
-                loop {
-                    let node_idx = {
-                        let mut c = consumer.lock().unwrap();
-                        c.pop()
-                    };
+                // Thread-local cache of graph Arcs
+                let mut current_nodes = nodes;
+                let mut current_buffers = buffers;
+                let mut current_v2p = v2p;
+                let mut current_xfs = xfs;
+                let mut current_xf_bufs = xf_bufs;
 
-                    let Some(idx) = node_idx else {
-                        std::thread::yield_now();
+                while run.load(Ordering::Acquire) {
+                    let Some(idx) = tasks_consumer.pop() else {
+                        // Check for graph updates when idle
+                        let n_ptr = a_nodes.load(Ordering::Acquire);
+                        if !n_ptr.is_null() { unsafe { current_nodes = Arc::clone(&*n_ptr); } }
+                        let b_ptr = a_buffers.load(Ordering::Acquire);
+                        if !b_ptr.is_null() { unsafe { current_buffers = Arc::clone(&*b_ptr); } }
+                        let v_ptr = a_v2p.load(Ordering::Acquire);
+                        if !v_ptr.is_null() { unsafe { current_v2p = Arc::clone(&*v_ptr); } }
+                        let x_ptr = a_xfs.load(Ordering::Acquire);
+                        if !x_ptr.is_null() { unsafe { current_xfs = Arc::clone(&*x_ptr); } }
+                        let xb_ptr = a_xf_bufs.load(Ordering::Acquire);
+                        if !xb_ptr.is_null() { unsafe { current_xf_bufs = Arc::clone(&*xb_ptr); } }
+
+                        std::hint::spin_loop();
                         continue;
                     };
 
                     unsafe {
-                        let nodes = &mut *(n_raw as *mut Vec<ProcessorNode>);
-                        let _buffers = &mut *(b_raw as *mut Vec<AudioBlock>);
-                        if let Some(_node) = nodes.get_mut(idx) {
-                            // Execute node process here
+                        if let Some(node) = current_nodes.get(idx) {
+                            let node: &ProcessorNode = node;
+                            let num_inputs = node.input_indices.len().min(16);
+                            let mut node_inputs_storage: [&[f32]; 16] = [ &[][..]; 16 ];
+
+                            // Correct buffers access via Arc slice
+                            let buffers_ptr = current_buffers.as_ptr() as *mut AudioBlock;
+
+                            for i in 0..num_inputs {
+                                let v_idx = node.input_indices[i];
+
+                                let mut crossfaded = false;
+                                for (xf_idx, xf_opt) in current_xfs.iter().enumerate() {
+                                    if let Some(xf) = xf_opt {
+                                        if xf.node_idx == idx && xf.input_idx == i {
+                                            node_inputs_storage[i] = &current_xf_bufs[xf_idx].data[..128];
+                                            crossfaded = true;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if !crossfaded {
+                                    let p_idx = current_v2p[v_idx.min(63)];
+                                    let block_ref = &*buffers_ptr.add(p_idx);
+                                    node_inputs_storage[i] = &block_ref.data[..128];
+                                }
+                            }
+
+                            let num_outputs = node.output_indices.len().min(16);
+                            let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|i| {
+                                if i < num_outputs {
+                                    let v_idx = node.output_indices[i];
+                                    let p_idx = current_v2p[v_idx.min(63)];
+                                    let block_ptr = buffers_ptr.add(p_idx);
+                                    std::slice::from_raw_parts_mut((*block_ptr).data.as_mut_ptr(), 128)
+                                } else {
+                                    &mut []
+                                }
+                            });
+
+                            (*node.processor.get()).process(&node_inputs_storage[..num_inputs], &mut node_outputs_reconstructed[..num_outputs]);
                         }
                     }
 
@@ -266,11 +431,12 @@ impl ProcessorGraph {
             }));
         }
 
-        self.pool = Some(Arc::new(TaskPool {
+        self.pool = Some(TaskPool {
             workers,
-            tasks_producer,
+            worker_producers,
             completion,
-        }));
+            running,
+        });
     }
     pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
         self.add_node_with_cv(processor, inputs, outputs, Vec::new());
@@ -279,7 +445,7 @@ impl ProcessorGraph {
     pub fn add_node_with_cv(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>, cv: Vec<usize>) {
         if self.nodes.len() >= 64 { return; } // Prevent overflow in cycle detection bitset
         let _max_idx = outputs.iter().chain(inputs.iter()).cloned().max().unwrap_or(0);
-        self.nodes.push(ProcessorNode { processor, input_indices: inputs, output_indices: outputs, cv_indices: cv });
+        self.nodes.push(ProcessorNode { processor: Arc::new(std::cell::UnsafeCell::new(processor)), input_indices: inputs, output_indices: outputs, cv_indices: cv });
         // Correct topological order might be needed here, but for now we update scratchpad
         self.update_scratchpad();
         self.calculate_stages();
@@ -291,47 +457,49 @@ impl AudioProcessor for ProcessorGraph {
         let num_samples = if !external_outputs.is_empty() { external_outputs[0].len() } else { 0 };
         if num_samples == 0 { return; }
 
+        if self.pool.is_some() && self.needs_commit {
+            self.commit_graph();
+            self.needs_commit = false;
+        }
+
         let buffers_ptr = self.buffers.as_mut_ptr();
 
         // Handle crossfades
-        for i in 0..self.crossfades.len() {
-            let xf = &mut self.crossfades[i];
-            let samples_to_fade = (xf.remaining_samples as usize).min(num_samples);
+        for i in 0..8 {
+            if let Some(xf) = &mut self.crossfades[i] {
+                let samples_to_fade = (xf.remaining_samples as usize).min(num_samples);
 
-            unsafe {
-                let old_p = self.virtual_to_physical[xf.old_buffer_idx.min(63)];
-                let new_p = self.virtual_to_physical[xf.new_buffer_idx.min(63)];
-                let old_buf = &(*buffers_ptr.add(old_p)).data;
-                let new_buf = &(*buffers_ptr.add(new_p)).data;
-                let target_buf = &mut self.crossfade_buffers[i].data;
+                unsafe {
+                    let old_p = self.virtual_to_physical[xf.old_buffer_idx.min(63)];
+                    let new_p = self.virtual_to_physical[xf.new_buffer_idx.min(63)];
+                    let old_buf = &(*buffers_ptr.add(old_p)).data;
+                    let new_buf = &(*buffers_ptr.add(new_p)).data;
+                    let target_buf = &mut self.crossfade_buffers[i].data;
 
-                for j in 0..samples_to_fade {
-                    let fade_in = (xf.total_samples - xf.remaining_samples + j as u32) as f32 / xf.total_samples as f32;
-                    let fade_out = 1.0 - fade_in;
-                    target_buf[j] = old_buf[j] * fade_out + new_buf[j] * fade_in;
+                    for j in 0..samples_to_fade {
+                        let fade_in = (xf.total_samples - xf.remaining_samples + j as u32) as f32 / xf.total_samples as f32;
+                        let fade_out = 1.0 - fade_in;
+                        target_buf[j] = old_buf[j] * fade_out + new_buf[j] * fade_in;
+                    }
+
+                    // Fill remainder of block with new buffer if fade finished
+                    if samples_to_fade < num_samples {
+                        target_buf[samples_to_fade..num_samples].copy_from_slice(&new_buf[samples_to_fade..num_samples]);
+                    }
                 }
 
-                // Fill remainder of block with new buffer if fade finished
-                if samples_to_fade < num_samples {
-                    target_buf[samples_to_fade..num_samples].copy_from_slice(&new_buf[samples_to_fade..num_samples]);
-                }
+                xf.remaining_samples -= samples_to_fade as u32;
             }
-
-            xf.remaining_samples -= samples_to_fade as u32;
         }
 
-        for stage in &self.stages {
-            if let Some(pool) = &self.pool {
+        for s_idx in 0..self.num_stages {
+            let stage = &self.stages[s_idx][..self.stage_counts[s_idx]];
+            if let Some(pool) = &mut self.pool {
                 // Parallel dispatch for nodes in this stage
-                // We use a shared tasks_producer. Since Producer is not Clone/Sync,
-                // we'd typically need a Mutex here too or use a different SPSC/MPMC strategy.
-                // For this prototype, we'll keep it simple.
-                for &n_idx in stage {
-                    // Use a temporary workaround for producer access
-                    unsafe {
-                        let pool_ptr = pool.as_ref() as *const TaskPool as *mut TaskPool;
-                        let _ = (*pool_ptr).tasks_producer.push(n_idx);
-                    }
+                // Distribution among workers (round-robin)
+                for (i, &n_idx) in stage.iter().enumerate() {
+                    let worker_idx = i % pool.worker_producers.len();
+                    let _ = pool.worker_producers[worker_idx].push(n_idx);
                 }
                 // Wait for stage completion
                 while pool.completion.load(Ordering::Acquire) < stage.len() {
@@ -342,18 +510,22 @@ impl AudioProcessor for ProcessorGraph {
             }
 
             for &n_idx in stage {
-                let node = &mut self.nodes[n_idx];
+                if self.pool.is_some() { continue; } // Skip serial if parallel handled it
+
+                let node = &self.nodes[n_idx];
                 let mut node_inputs_storage = [ &[][..]; 16 ];
             let num_inputs = node.input_indices.len().min(16);
             for i in 0..num_inputs {
                 let idx = node.input_indices[i];
 
                 let mut crossfaded = false;
-                for (xf_idx, xf) in self.crossfades.iter().enumerate() {
-                    if xf.node_idx == n_idx && xf.input_idx == i {
-                        node_inputs_storage[i] = &self.crossfade_buffers[xf_idx].data[..num_samples];
-                        crossfaded = true;
-                        break;
+                for xf_idx in 0..8 {
+                    if let Some(xf) = &self.crossfades[xf_idx] {
+                        if xf.node_idx == n_idx && xf.input_idx == i {
+                            node_inputs_storage[i] = &self.crossfade_buffers[xf_idx].data[..num_samples];
+                            crossfaded = true;
+                            break;
+                        }
                     }
                 }
 
@@ -397,7 +569,7 @@ impl AudioProcessor for ProcessorGraph {
             // In a full implementation, the AudioProcessor trait would be extended to accept CV inputs.
             // For this prototype, we'll keep the process signature the same but could pass them via a different method
             // or just ensure they are available in node_inputs_storage.
-                node.processor.process(&node_inputs_storage[..num_inputs], &mut node_outputs_reconstructed[..num_outputs]);
+                unsafe { (*node.processor.get()).process(&node_inputs_storage[..num_inputs], &mut node_outputs_reconstructed[..num_outputs]); }
             }
         }
         if external_outputs.len() >= 2 && self.buffers.len() >= 2 {
@@ -406,9 +578,11 @@ impl AudioProcessor for ProcessorGraph {
         }
 
         // Cleanup finished crossfades
-        for i in (0..self.crossfades.len()).rev() {
-            if self.crossfades[i].remaining_samples == 0 {
-                self.crossfades.swap_remove(i);
+        for i in 0..8 {
+            if let Some(xf) = &self.crossfades[i] {
+                if xf.remaining_samples == 0 {
+                    self.crossfades[i] = None;
+                }
             }
         }
     }
@@ -433,7 +607,7 @@ impl AudioProcessor for ProcessorGraph {
                 } else if found {
                     self.update_scratchpad();
                     self.calculate_stages();
-                    self.calculate_stages();
+                    self.needs_commit = true;
                 }
             }
             control_plane::Command::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
@@ -454,6 +628,7 @@ impl AudioProcessor for ProcessorGraph {
                     }
                 } else if found {
                     self.update_scratchpad();
+                    self.needs_commit = true;
                 }
             }
             control_plane::Command::Bundle { count, data } => {
@@ -475,8 +650,8 @@ impl AudioProcessor for ProcessorGraph {
                 if let Some(node) = self.nodes.get_mut(*node_idx as usize) {
                     // For prototype, we implement a few hardcoded swaps
                     match processor_type_id {
-                        1 => { node.processor = Box::new(BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })); }
-                        2 => { node.processor = Box::new(GainProcessor::new(0, 1.0)); }
+                        1 => { unsafe { *node.processor.get() = Box::new(BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })); } }
+                        2 => { unsafe { *node.processor.get() = Box::new(GainProcessor::new(0, 1.0)); } }
                         _ => {}
                     }
                 }
@@ -502,25 +677,30 @@ impl AudioProcessor for ProcessorGraph {
                     }
                     self.update_scratchpad();
                     self.calculate_stages();
-                    if self.crossfades.len() < self.crossfades.capacity() {
-                        self.crossfades.push(CrossfadeState {
-                            node_idx: *node_idx as usize,
-                            input_idx: *input_idx as usize,
-                            old_buffer_idx,
-                            new_buffer_idx: *new_buffer_idx as usize,
-                            remaining_samples: *duration_samples,
-                            total_samples: *duration_samples,
-                        });
+                    self.needs_commit = true;
+                    for slot in &mut self.crossfades {
+                        if slot.is_none() {
+                            *slot = Some(CrossfadeState {
+                                node_idx: *node_idx as usize,
+                                input_idx: *input_idx as usize,
+                                old_buffer_idx,
+                                new_buffer_idx: *new_buffer_idx as usize,
+                                remaining_samples: *duration_samples,
+                                total_samples: *duration_samples,
+                            });
+                            break;
+                        }
                     }
                 }
             }
             _ => {
-                for node in &mut self.nodes { node.processor.apply_command(command); }
+                for node in &self.nodes { unsafe { (*node.processor.get()).apply_command(command); } }
             }
         }
     }
 }
 
+pub const MAX_NODES: usize = 64;
 pub const MAX_CHANNELS: usize = 16;
 
 #[repr(C)]
@@ -652,11 +832,14 @@ impl AudioEngine {
                 }
             }
         }
+
+
         let block_start_sample = self.sample_counter;
         let block_end_sample = block_start_sample + num_samples as u64;
         let mut current_sample_in_block = 0;
         let graph_ptr = self.active_graph.load(Ordering::Acquire);
         let graph = unsafe { &mut **graph_ptr };
+
         while current_sample_in_block < num_samples {
             let cmd = if let Some(pending) = self.pending_command.take() { Some(pending) } else { self.command_consumer.pop() };
             if let Some(cmd) = cmd {
@@ -857,10 +1040,10 @@ mod tests {
         // Stage 0: Node 0, Node 1 (independent, only depend on Buf 1)
         // Stage 1: Node 2 (depends on Buf 2 and 3 from stage 0)
 
-        assert_eq!(graph.stages.len(), 2);
-        assert!(graph.stages[0].contains(&0));
-        assert!(graph.stages[0].contains(&1));
-        assert!(graph.stages[1].contains(&2));
+        assert_eq!(graph.num_stages, 2);
+        assert!(graph.stages[0][..graph.stage_counts[0]].contains(&0));
+        assert!(graph.stages[0][..graph.stage_counts[0]].contains(&1));
+        assert!(graph.stages[1][..graph.stage_counts[1]].contains(&2));
     }
 
     #[test]
@@ -939,7 +1122,7 @@ pub struct AlsaBackend {
 
 pub struct PipewireBackend {
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    handle: Option<thread::JoinHandle<()>>,
+    _handle: Option<thread::JoinHandle<()>>,
 }
 
 pub struct GainProcessor {
@@ -998,10 +1181,19 @@ impl AudioProcessor for BiquadProcessor {
     }
 
     fn apply_command(&mut self, command: &control_plane::Command) {
-        if let control_plane::Command::SetParam { target_id, param_id: _, value, ramp_duration_samples: _ } = command {
+        if let control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = command {
             if *target_id == self.id {
-                // For now, Biquad doesn't support ramping coefficients easily without stability issues,
-                // so we just update them. But we could implement interpolating filter forms here.
+                // 0: b0, 1: b1, 2: b2, 3: a1, 4: a2
+                let mut coeffs = self.filter.target_coeffs;
+                match param_id {
+                    0 => coeffs.b0 = *value,
+                    1 => coeffs.b1 = *value,
+                    2 => coeffs.b2 = *value,
+                    3 => coeffs.a1 = *value,
+                    4 => coeffs.a2 = *value,
+                    _ => {}
+                }
+                self.filter.set_coeffs_ramped(coeffs, *ramp_duration_samples);
             }
         }
     }
@@ -1083,9 +1275,14 @@ impl AudioBackend for PipewireBackend {
 
         unsafe {
             (pw.pw_init)(std::ptr::null_mut(), std::ptr::null_mut());
-            let _loop = (pw.pw_thread_loop_new)(b"nullherz-loop\0".as_ptr() as *const i8, std::ptr::null_mut());
+            let thread_loop = (pw.pw_thread_loop_new)(b"nullherz-loop\0".as_ptr() as *const i8, std::ptr::null_mut());
+            let context = (pw.pw_context_new)(thread_loop, std::ptr::null_mut(), 0);
+            let _core = (pw.pw_core_connect)(context, std::ptr::null_mut(), 0);
+
             // In a full SPA implementation, we would now map engine buffers to pw_stream buffers.
             // This foundation allows the engine to be recognized as a native PipeWire object.
+
+            let _ = pw.handle;
         }
         Ok(())
     }
