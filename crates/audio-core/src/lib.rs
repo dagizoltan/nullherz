@@ -1,7 +1,8 @@
 use audio_dsp::Filter;
 use control_plane::TimestampedCommand;
-use ipc_layer::{Consumer, Producer, AudioBlock, ShmRingBuffer, ShmSignal, EventFd};
-use std::sync::atomic::{AtomicPtr, Ordering};
+use ipc_layer::{Consumer, Producer, AudioBlock, ShmRingBuffer, ShmSignal, EventFd, RingBuffer};
+use std::sync::atomic::{AtomicPtr, Ordering, AtomicUsize};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -23,6 +24,7 @@ pub struct ProcessorNode {
     pub processor: Box<dyn AudioProcessor>,
     pub input_indices: Vec<usize>,
     pub output_indices: Vec<usize>,
+    pub cv_indices: Vec<usize>,
 }
 
 pub struct ProcessorGraph {
@@ -31,17 +33,88 @@ pub struct ProcessorGraph {
     crossfades: Vec<CrossfadeState>,
     crossfade_buffers: [AudioBlock; 8],
     virtual_to_physical: [usize; 64],
+    stages: Vec<Vec<usize>>, // Indices of nodes in each stage
+    pool: Option<Arc<TaskPool>>,
+}
+
+struct TaskPool {
+    workers: Vec<thread::JoinHandle<()>>,
+    tasks: Arc<RingBuffer<usize>>, // node indices
+    completion: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl ProcessorGraph {
+    pub fn calculate_stages(&mut self) {
+        let n = self.nodes.len();
+        if n == 0 { return; }
+
+        self.stages.clear();
+        let mut assigned = vec![false; n];
+        let mut in_degree = vec![0; n];
+
+        // Calculate in-degrees (number of nodes this node depends on)
+        for i in 0..n {
+            for j in 0..n {
+                if i == j { continue; }
+                // Node i depends on Node j if Node j outputs to a buffer that Node i reads
+                for out_idx in &self.nodes[j].output_indices {
+                    if self.nodes[i].input_indices.contains(out_idx) {
+                        in_degree[i] += 1;
+                        break;
+                    }
+                }
+            }
+        }
+
+        while assigned.iter().any(|&a| !a) {
+            let mut current_stage = Vec::new();
+            for i in 0..n {
+                if !assigned[i] && in_degree[i] == 0 {
+                    current_stage.push(i);
+                }
+            }
+
+            if current_stage.is_empty() {
+                // Should not happen if detect_cycle is used, but for safety:
+                break;
+            }
+
+            for &i in &current_stage {
+                assigned[i] = true;
+                // Reduce in-degree of dependent nodes
+                for j in 0..n {
+                    if assigned[j] { continue; }
+                    for out_idx in &self.nodes[i].output_indices {
+                        if self.nodes[j].input_indices.contains(out_idx) {
+                            in_degree[j] -= 1;
+                            break;
+                        }
+                    }
+                }
+            }
+            self.stages.push(current_stage);
+        }
+    }
+
     pub fn serialize_to_json(&self) -> String {
         let mut json = String::from("{\"nodes\": [");
         for (i, node) in self.nodes.iter().enumerate() {
             if i > 0 { json.push_str(", "); }
-            json.push_str(&format!("{{\"inputs\": {:?}, \"outputs\": {:?}}}", node.input_indices, node.output_indices));
+            json.push_str(&format!("{{\"inputs\": {:?}, \"outputs\": {:?}, \"cv\": {:?}}}",
+                node.input_indices, node.output_indices, node.cv_indices));
         }
         json.push_str("]}");
         json
+    }
+
+    pub fn get_delta_json(&self, previous_json: &str) -> String {
+        let current = self.serialize_to_json();
+        if current == previous_json {
+            return String::from("{}");
+        }
+        // Simplified delta: just return full if different for now.
+        // In a full version, we'd use a JSON diff library.
+        current
     }
 
     pub fn update_scratchpad(&mut self) {
@@ -144,14 +217,27 @@ impl ProcessorGraph {
             crossfades: Vec::with_capacity(8),
             crossfade_buffers: [AudioBlock { data: [0.0f32; 128] }; 8],
             virtual_to_physical: v2p,
+            stages: Vec::new(),
+            pool: None,
         }
     }
+
+    pub fn set_worker_count(&mut self, count: usize) {
+        if count == 0 { self.pool = None; return; }
+        // Worker implementation would go here.
+        // For zero-allocation RT thread, workers must be pre-spawned and wait on EventFd or Atomics.
+    }
     pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
+        self.add_node_with_cv(processor, inputs, outputs, Vec::new());
+    }
+
+    pub fn add_node_with_cv(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>, cv: Vec<usize>) {
         if self.nodes.len() >= 64 { return; } // Prevent overflow in cycle detection bitset
         let _max_idx = outputs.iter().chain(inputs.iter()).cloned().max().unwrap_or(0);
-        self.nodes.push(ProcessorNode { processor, input_indices: inputs, output_indices: outputs });
+        self.nodes.push(ProcessorNode { processor, input_indices: inputs, output_indices: outputs, cv_indices: cv });
         // Correct topological order might be needed here, but for now we update scratchpad
         self.update_scratchpad();
+        self.calculate_stages();
     }
 }
 
@@ -227,6 +313,23 @@ impl AudioProcessor for ProcessorGraph {
             let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|i| {
                 if i < num_outputs { unsafe { std::slice::from_raw_parts_mut(node_outputs_ptrs[i], num_samples) } } else { &mut [] }
             });
+
+            // Map CV inputs
+            let mut node_cv_storage = [ &[][..]; 16 ];
+            let num_cv = node.cv_indices.len().min(16);
+            for i in 0..num_cv {
+                let idx = node.cv_indices[i];
+                unsafe {
+                    let p_idx = self.virtual_to_physical[idx.min(63)];
+                    let buf_ptr: *const AudioBlock = buffers_ptr.add(p_idx);
+                    let buf_ref: &AudioBlock = &*buf_ptr;
+                    node_cv_storage[i] = &buf_ref.data[..num_samples];
+                }
+            }
+
+            // In a full implementation, the AudioProcessor trait would be extended to accept CV inputs.
+            // For this prototype, we'll keep the process signature the same but could pass them via a different method
+            // or just ensure they are available in node_inputs_storage.
             node.processor.process(&node_inputs_storage[..num_inputs], &mut node_outputs_reconstructed[..num_outputs]);
         }
         if external_outputs.len() >= 2 && self.buffers.len() >= 2 {
@@ -261,6 +364,8 @@ impl AudioProcessor for ProcessorGraph {
                     }
                 } else if found {
                     self.update_scratchpad();
+                    self.calculate_stages();
+                    self.calculate_stages();
                 }
             }
             control_plane::Command::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
@@ -318,6 +423,7 @@ impl AudioProcessor for ProcessorGraph {
                         return;
                     }
                     self.update_scratchpad();
+                    self.calculate_stages();
                     if self.crossfades.len() < self.crossfades.capacity() {
                         self.crossfades.push(CrossfadeState {
                             node_idx: *node_idx as usize,
@@ -660,6 +766,26 @@ mod tests {
     }
 
     #[test]
+    fn test_stage_grouping() {
+        let mut graph = ProcessorGraph::new();
+        struct Pass { }
+        impl AudioProcessor for Pass { fn process(&mut self, _: &[&[f32]], _: &mut [&mut [f32]]) {} }
+
+        graph.add_node(Box::new(Pass {}), vec![1], vec![2]); // Node 0: In 1, Out 2
+        graph.add_node(Box::new(Pass {}), vec![1], vec![3]); // Node 1: In 1, Out 3
+        graph.add_node(Box::new(Pass {}), vec![2, 3], vec![4]); // Node 2: In 2, 3, Out 4
+
+        // Expected stages:
+        // Stage 0: Node 0, Node 1 (independent, only depend on Buf 1)
+        // Stage 1: Node 2 (depends on Buf 2 and 3 from stage 0)
+
+        assert_eq!(graph.stages.len(), 2);
+        assert!(graph.stages[0].contains(&0));
+        assert!(graph.stages[0].contains(&1));
+        assert!(graph.stages[1].contains(&2));
+    }
+
+    #[test]
     fn test_sample_accurate_rewiring() {
         let (cmd_p, cmd_c) = RingBuffer::<TimestampedCommand>::new(16).split();
         let (gar_p, _gar_c) = RingBuffer::<Box<Box<dyn AudioProcessor>>>::new(16).split();
@@ -847,7 +973,9 @@ impl AlsaBackend {
 struct PwLib {
     handle: *mut std::ffi::c_void,
     pw_init: unsafe extern "C" fn(*mut i32, *mut *mut *mut i8),
-    pw_main_loop_new: unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void,
+    pw_thread_loop_new: unsafe extern "C" fn(*const i8, *const std::ffi::c_void) -> *mut std::ffi::c_void,
+    pw_context_new: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, usize) -> *mut std::ffi::c_void,
+    pw_core_connect: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, usize) -> *mut std::ffi::c_void,
 }
 
 impl PwLib {
@@ -862,7 +990,9 @@ impl PwLib {
             Ok(Self {
                 handle: lib,
                 pw_init: std::mem::transmute(load_sym(b"pw_init\0").ok_or("pw_init failed")?),
-                pw_main_loop_new: std::mem::transmute(load_sym(b"pw_main_loop_new\0").ok_or("pw_main_loop_new failed")?),
+                pw_thread_loop_new: std::mem::transmute(load_sym(b"pw_thread_loop_new\0").ok_or("pw_thread_loop_new failed")?),
+                pw_context_new: std::mem::transmute(load_sym(b"pw_context_new\0").ok_or("pw_context_new failed")?),
+                pw_core_connect: std::mem::transmute(load_sym(b"pw_core_connect\0").ok_or("pw_core_connect failed")?),
             })
         }
     }
