@@ -35,12 +35,9 @@ pub enum Command {
         processor_type_id: u32,
     },
     Bundle {
-        // Use a numeric offset/id to avoid raw pointers in the enum for Send trait.
-        // In this implementation we will use a fixed size array of IDs or similar.
-        // For simplicity and to stay Send, let's use a small fixed-size array of 4 commands.
-        // To avoid recursion, we'll define a FlatCommand.
+        // Flat array of parameter updates: [node_id, param_id, value_bits, ...]
         count: u32,
-        data: [u64; 16], // 8 commands (id + value)
+        data: [u64; 12], // Supports up to 4 bundled SetParam commands
     },
 }
 
@@ -73,6 +70,17 @@ pub struct SidecarMetadata {
 pub struct History {
     pub snapshots: Vec<String>,
     pub current_idx: usize,
+}
+
+pub struct ModMatrix {
+    pub connections: Vec<(u64, u32, u64)>, // source_node, param_id, dest_node
+}
+
+impl ModMatrix {
+    pub fn new() -> Self { Self { connections: Vec::new() } }
+    pub fn add_connection(&mut self, src: u64, param: u32, dest: u64) {
+        self.connections.push((src, param, dest));
+    }
 }
 
 impl History {

@@ -2,6 +2,11 @@
 
 pub trait Oscillator {
     fn next_sample(&mut self) -> f32;
+    fn process_block(&mut self, output: &mut [f32]) {
+        for sample in output.iter_mut() {
+            *sample = self.next_sample();
+        }
+    }
 }
 
 pub trait Filter {
@@ -239,6 +244,32 @@ impl SimdBiquad {
         }
         self.z1[channel] = z1;
         self.z2[channel] = z2;
+    }
+
+    pub fn process_wavetable_8_channels(&mut self, phase: &mut [f32; 8], phase_inc: &[f32; 8], table: &[f32; 1024], outputs: [*mut f32; 8], len: usize) {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            use std::arch::x86_64::*;
+            let b_inc = _mm256_loadu_ps(phase_inc.as_ptr());
+            let mut b_phase = _mm256_loadu_ps(phase.as_ptr());
+            let lut_size = _mm256_set1_ps(1024.0);
+
+            for i in 0..len {
+                let idx = _mm256_cvttps_epi32(b_phase);
+                let mut out_v = [0.0f32; 8];
+                let mut idx_arr = [0i32; 8];
+                _mm256_storeu_si256(idx_arr.as_mut_ptr() as *mut __m256i, idx);
+
+                for ch in 0..8 {
+                    *outputs[ch].add(i) = table[idx_arr[ch] as usize % 1024];
+                }
+
+                b_phase = _mm256_add_ps(b_phase, b_inc);
+                let mask = _mm256_cmp_ps(b_phase, lut_size, _CMP_GE_OQ);
+                b_phase = _mm256_sub_ps(b_phase, _mm256_and_ps(mask, lut_size));
+            }
+            _mm256_storeu_ps(phase.as_mut_ptr(), b_phase);
+        }
     }
 
     #[cfg(target_arch = "aarch64")]

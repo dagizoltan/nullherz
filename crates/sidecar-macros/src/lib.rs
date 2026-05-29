@@ -26,10 +26,10 @@ pub fn sidecar(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 for i in 0..args.len() {
                     match args[i].as_str() {
-                        "--command-shm" => cmd_shm = &args[i+1],
-                        "--signal-shm" => sig_shm = &args[i+1],
-                        "--event-fd" => efd_val = args[i+1].parse().unwrap_or(0),
-                        "--channels" => channels = args[i+1].parse().unwrap_or(0),
+                        "--command-shm" if i + 1 < args.len() => cmd_shm = &args[i+1],
+                        "--signal-shm" if i + 1 < args.len() => sig_shm = &args[i+1],
+                        "--event-fd" if i + 1 < args.len() => efd_val = args[i+1].parse().unwrap_or(0),
+                        "--channels" if i + 1 < args.len() => channels = args[i+1].parse().unwrap_or(0),
                         _ => {}
                     }
                 }

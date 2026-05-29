@@ -39,3 +39,23 @@ fn render_ascii(graph: &GraphJson) {
         }
     }
 }
+
+// Graphical UI stub using egui
+pub struct InspectorApp {
+    graph: GraphJson,
+}
+
+impl InspectorApp {
+    pub fn new(graph: GraphJson) -> Self { Self { graph } }
+}
+
+impl eframe::App for InspectorApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("nullherz Topology Inspector");
+            for (i, node) in self.graph.nodes.iter().enumerate() {
+                ui.label(format!("Node {}: In {:?} Out {:?}", i, node.inputs, node.outputs));
+            }
+        });
+    }
+}
