@@ -211,20 +211,20 @@ impl Filter for BiquadFilter {
     }
 }
 
-/// A Biquad Filter that processes 8 channels in parallel using AVX2.
+/// A Biquad Filter that processes 8 or 16 channels in parallel using AVX2/AVX-512.
 #[repr(C, align(64))]
 pub struct SimdBiquad {
     pub coeffs: BiquadCoefficients,
-    z1: [f32; 8],
-    z2: [f32; 8],
+    z1: [f32; 16],
+    z2: [f32; 16],
 }
 
 impl SimdBiquad {
     pub fn new(coeffs: BiquadCoefficients) -> Self {
         Self {
             coeffs,
-            z1: [0.0; 8],
-            z2: [0.0; 8],
+            z1: [0.0; 16],
+            z2: [0.0; 16],
         }
     }
 
@@ -243,10 +243,27 @@ impl SimdBiquad {
 
     #[cfg(target_arch = "aarch64")]
     pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
-        // Neon implementation stub
-        for i in 0..input.len() {
-            output[i] = self.process_sample(input[i]);
+        use std::arch::aarch64::*;
+        let len = input.len();
+        if len == 0 { return; }
+
+        let mut z1 = self.z1;
+        let mut z2 = self.z2;
+        let b0 = self.coeffs.b0;
+        let b1 = self.coeffs.b1;
+        let b2 = self.coeffs.b2;
+        let a1 = self.coeffs.a1;
+        let a2 = self.coeffs.a2;
+
+        for i in 0..len {
+            let x = *input.get_unchecked(i);
+            let y = x * b0 + z1;
+            z1 = x * b1 - y * a1 + z2;
+            z2 = x * b2 - y * a2;
+            *output.get_unchecked_mut(i) = y;
         }
+        self.z1 = z1;
+        self.z2 = z2;
     }
 }
 
@@ -254,16 +271,87 @@ impl SimdBiquad {
     #[cfg(target_arch = "aarch64")]
     pub unsafe fn process_8_channels(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
         use std::arch::aarch64::*;
-        // Process 4 channels at a time with Neon (128-bit registers)
+
+        let b0 = vdupq_n_f32(self.coeffs.b0);
+        let b1 = vdupq_n_f32(self.coeffs.b1);
+        let b2 = vdupq_n_f32(self.coeffs.b2);
+        let a1 = vdupq_n_f32(self.coeffs.a1);
+        let a2 = vdupq_n_f32(self.coeffs.a2);
+
+        let mut z1_0 = vld1q_f32(self.z1.as_ptr());
+        let mut z1_1 = vld1q_f32(self.z1.as_ptr().add(4));
+        let mut z2_0 = vld1q_f32(self.z2.as_ptr());
+        let mut z2_1 = vld1q_f32(self.z2.as_ptr().add(4));
+
         for i in 0..len {
-            for ch in 0..8 {
-                let x = *inputs[ch].add(i);
-                let out = x * self.coeffs.b0 + self.z1[ch];
-                self.z1[ch] = x * self.coeffs.b1 - out * self.coeffs.a1 + self.z2[ch];
-                self.z2[ch] = x * self.coeffs.b2 - out * self.coeffs.a2;
-                *outputs[ch].add(i) = out;
-            }
+            let x0 = vsetq_lane_f32(*inputs[0].add(i), vdupq_n_f32(0.0), 0);
+            let x0 = vsetq_lane_f32(*inputs[1].add(i), x0, 1);
+            let x0 = vsetq_lane_f32(*inputs[2].add(i), x0, 2);
+            let x0 = vsetq_lane_f32(*inputs[3].add(i), x0, 3);
+
+            let x1 = vsetq_lane_f32(*inputs[4].add(i), vdupq_n_f32(0.0), 0);
+            let x1 = vsetq_lane_f32(*inputs[5].add(i), x1, 1);
+            let x1 = vsetq_lane_f32(*inputs[6].add(i), x1, 2);
+            let x1 = vsetq_lane_f32(*inputs[7].add(i), x1, 3);
+
+            // Group 0 (Ch 0-3)
+            let y0 = vaddq_f32(vmulq_f32(x0, b0), z1_0);
+            z1_0 = vaddq_f32(vsubq_f32(vmulq_f32(x0, b1), vmulq_f32(y0, a1)), z2_0);
+            z2_0 = vsubq_f32(vmulq_f32(x0, b2), vmulq_f32(y0, a2));
+
+            // Group 1 (Ch 4-7)
+            let y1 = vaddq_f32(vmulq_f32(x1, b0), z1_1);
+            z1_1 = vaddq_f32(vsubq_f32(vmulq_f32(x1, b1), vmulq_f32(y1, a1)), z2_1);
+            z2_1 = vsubq_f32(vmulq_f32(x1, b2), vmulq_f32(y1, a2));
+
+            let mut out0 = [0.0f32; 4];
+            let mut out1 = [0.0f32; 4];
+            vst1q_f32(out0.as_mut_ptr(), y0);
+            vst1q_f32(out1.as_mut_ptr(), y1);
+
+            for ch in 0..4 { *outputs[ch].add(i) = out0[ch]; }
+            for ch in 0..4 { *outputs[ch+4].add(i) = out1[ch]; }
         }
+
+        vst1q_f32(self.z1.as_mut_ptr(), z1_0);
+        vst1q_f32(self.z1.as_mut_ptr().add(4), z1_1);
+        vst1q_f32(self.z2.as_mut_ptr(), z2_0);
+        vst1q_f32(self.z2.as_mut_ptr().add(4), z2_1);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx512f")]
+    pub unsafe fn process_16_channels(&mut self, inputs: [*const f32; 16], outputs: [*mut f32; 16], len: usize) {
+        use std::arch::x86_64::*;
+
+        let b0 = _mm512_set1_ps(self.coeffs.b0);
+        let b1 = _mm512_set1_ps(self.coeffs.b1);
+        let b2 = _mm512_set1_ps(self.coeffs.b2);
+        let a1 = _mm512_set1_ps(self.coeffs.a1);
+        let a2 = _mm512_set1_ps(self.coeffs.a2);
+
+        let mut z1 = _mm512_loadu_ps(self.z1.as_ptr());
+        let mut z2 = _mm512_loadu_ps(self.z2.as_ptr());
+
+        for i in 0..len {
+            let x = _mm512_set_ps(
+                *inputs[15].add(i), *inputs[14].add(i), *inputs[13].add(i), *inputs[12].add(i),
+                *inputs[11].add(i), *inputs[10].add(i), *inputs[9].add(i), *inputs[8].add(i),
+                *inputs[7].add(i), *inputs[6].add(i), *inputs[5].add(i), *inputs[4].add(i),
+                *inputs[3].add(i), *inputs[2].add(i), *inputs[1].add(i), *inputs[0].add(i)
+            );
+
+            let y = _mm512_add_ps(_mm512_mul_ps(x, b0), z1);
+            z1 = _mm512_add_ps(_mm512_sub_ps(_mm512_mul_ps(x, b1), _mm512_mul_ps(y, a1)), z2);
+            z2 = _mm512_sub_ps(_mm512_mul_ps(x, b2), _mm512_mul_ps(y, a2));
+
+            let mut out_v = [0.0f32; 16];
+            _mm512_storeu_ps(out_v.as_mut_ptr(), y);
+            for ch in 0..16 { *outputs[ch].add(i) = out_v[ch]; }
+        }
+
+        _mm512_storeu_ps(self.z1.as_mut_ptr(), z1);
+        _mm512_storeu_ps(self.z2.as_mut_ptr(), z2);
     }
 
     #[cfg(target_arch = "x86_64")]

@@ -283,6 +283,21 @@ impl AudioProcessor for ProcessorGraph {
                     self.update_scratchpad();
                 }
             }
+            control_plane::Command::Bundle { count, data: _ } => {
+                for _i in 0..*count {
+                    // For prototype, we'd decode data into commands.
+                }
+            }
+            control_plane::Command::SwapProcessor { node_idx, processor_type_id } => {
+                if let Some(node) = self.nodes.get_mut(*node_idx as usize) {
+                    // For prototype, we implement a few hardcoded swaps
+                    match processor_type_id {
+                        1 => { node.processor = Box::new(BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })); }
+                        2 => { node.processor = Box::new(GainProcessor::new(0, 1.0)); }
+                        _ => {}
+                    }
+                }
+            }
             control_plane::Command::UpdateEdgeCrossfaded { node_idx, input_idx, new_buffer_idx, duration_samples } => {
                 let mut old_buffer_idx = 0;
                 let mut found = false;
@@ -718,6 +733,11 @@ pub struct AlsaBackend {
     handle: Option<thread::JoinHandle<()>>,
 }
 
+pub struct PipewireBackend {
+    running: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
 pub struct GainProcessor {
     gain: audio_dsp::Gain,
     id: u64,
@@ -824,6 +844,43 @@ impl AudioProcessor for SimdBiquadProcessor {
 impl AlsaBackend {
     pub fn new() -> Self { Self { running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), handle: None } }
 }
+struct PwLib {
+    handle: *mut std::ffi::c_void,
+    pw_init: unsafe extern "C" fn(*mut i32, *mut *mut *mut i8),
+    pw_main_loop_new: unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void,
+}
+
+impl PwLib {
+    fn load() -> Result<Self, String> {
+        unsafe {
+            let lib = libc::dlopen(b"libpipewire-0.3.so.0\0".as_ptr() as *const _, libc::RTLD_NOW);
+            if lib.is_null() { return Err("Could not load libpipewire-0.3.so.0".to_string()); }
+            let load_sym = |name: &[u8]| {
+                let sym = libc::dlsym(lib, name.as_ptr() as *const _);
+                if sym.is_null() { None } else { Some(sym) }
+            };
+            Ok(Self {
+                handle: lib,
+                pw_init: std::mem::transmute(load_sym(b"pw_init\0").ok_or("pw_init failed")?),
+                pw_main_loop_new: std::mem::transmute(load_sym(b"pw_main_loop_new\0").ok_or("pw_main_loop_new failed")?),
+            })
+        }
+    }
+}
+
+impl AudioBackend for PipewireBackend {
+    fn start(&mut self, _engine: AudioEngine) -> Result<(), String> {
+        let _pw = PwLib::load()?;
+        self.running.store(true, Ordering::SeqCst);
+        // PipeWire SPA integration foundation:
+        // We would setup a pw_thread_loop and an SPA node here.
+        Ok(())
+    }
+    fn stop(&mut self) {
+        self.running.store(false, Ordering::SeqCst);
+    }
+}
+
 impl AudioBackend for AlsaBackend {
     fn start(&mut self, mut engine: AudioEngine) -> Result<(), String> {
         let alsa = AlsaLib::load()?;

@@ -28,6 +28,20 @@ pub enum Command {
         new_buffer_idx: u32,
         duration_samples: u32,
     },
+    SwapProcessor {
+        node_idx: u32,
+        // In a real system, we'd pass a factory or ID for the new processor.
+        // For this prototype, we'll use a numeric ID.
+        processor_type_id: u32,
+    },
+    Bundle {
+        // Use a numeric offset/id to avoid raw pointers in the enum for Send trait.
+        // In this implementation we will use a fixed size array of IDs or similar.
+        // For simplicity and to stay Send, let's use a small fixed-size array of 4 commands.
+        // To avoid recursion, we'll define a FlatCommand.
+        count: u32,
+        data: [u64; 16], // 8 commands (id + value)
+    },
 }
 
 /// A command with an associated timestamp for deterministic execution.
