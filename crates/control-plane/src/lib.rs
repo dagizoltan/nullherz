@@ -8,6 +8,7 @@ pub enum Command {
         target_id: u64,
         param_id: u32,
         value: f32,
+        ramp_duration_samples: u32,
     },
     Play,
     Stop,

@@ -54,6 +54,8 @@ pub struct Gain {
     current_gain: f32,
     target_gain: f32,
     smoothing_factor: f32,
+    ramp_remaining: u32,
+    ramp_step: f32,
 }
 
 impl Gain {
@@ -62,32 +64,39 @@ impl Gain {
             current_gain: initial_gain,
             target_gain: initial_gain,
             smoothing_factor,
+            ramp_remaining: 0,
+            ramp_step: 0.0,
         }
     }
 
-    pub fn set_gain(&mut self, gain: f32) {
+    pub fn set_gain(&mut self, gain: f32, ramp_samples: u32) {
         self.target_gain = gain;
+        if ramp_samples > 0 {
+            self.ramp_remaining = ramp_samples;
+            self.ramp_step = (gain - self.current_gain) / ramp_samples as f32;
+        } else {
+            self.current_gain = gain;
+            self.ramp_remaining = 0;
+            self.ramp_step = 0.0;
+        }
     }
 
-    /// Process a block of samples.
-    /// This implementation uses manual unrolling and hint-friendly patterns for SIMD.
     pub fn process_block(&mut self, input: &[f32], output: &mut [f32]) {
         let len = input.len();
-        let target = self.target_gain;
-        let factor = self.smoothing_factor;
         let mut current = self.current_gain;
 
-        // We calculate a gain ramp for the block if the target changed.
-        // For simplicity and vectorization, we'll use linear interpolation over the block.
-        if (target - current).abs() > 0.0001 {
-            let step = (target - current) * factor / len as f32;
+        if self.ramp_remaining > 0 {
             for i in 0..len {
-                current += step;
+                if self.ramp_remaining > 0 {
+                    current += self.ramp_step;
+                    self.ramp_remaining -= 1;
+                } else {
+                    current = self.target_gain;
+                }
                 output[i] = input[i] * current;
             }
         } else {
-            // Static gain loop - extremely easy to vectorize
-            current = target;
+            current = self.target_gain;
             for i in 0..len {
                 output[i] = input[i] * current;
             }
@@ -126,9 +135,9 @@ impl BiquadFilter {
         self.coeffs = coeffs;
     }
 
+    #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
-        #[cfg(target_arch = "x86_64")]
         {
             let len = input.len();
             if len == 0 { return; }
@@ -232,9 +241,34 @@ impl SimdBiquad {
         self.z2[channel] = z2;
     }
 
+    #[cfg(target_arch = "aarch64")]
+    pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
+        // Neon implementation stub
+        for i in 0..input.len() {
+            output[i] = self.process_sample(input[i]);
+        }
+    }
+}
+
+impl SimdBiquad {
+    #[cfg(target_arch = "aarch64")]
+    pub unsafe fn process_8_channels(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
+        use std::arch::aarch64::*;
+        // Process 4 channels at a time with Neon (128-bit registers)
+        for i in 0..len {
+            for ch in 0..8 {
+                let x = *inputs[ch].add(i);
+                let out = x * self.coeffs.b0 + self.z1[ch];
+                self.z1[ch] = x * self.coeffs.b1 - out * self.coeffs.a1 + self.z2[ch];
+                self.z2[ch] = x * self.coeffs.b2 - out * self.coeffs.a2;
+                *outputs[ch].add(i) = out;
+            }
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_8_channels(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
-        #[cfg(target_arch = "x86_64")]
         {
             use std::arch::x86_64::*;
 

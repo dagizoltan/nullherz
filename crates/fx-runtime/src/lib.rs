@@ -153,3 +153,27 @@ impl SidecarManager {
         }
     }
 }
+
+pub struct SidecarRegistry {
+    pub known_binaries: Vec<String>,
+}
+
+impl SidecarRegistry {
+    pub fn new() -> Self {
+        Self { known_binaries: Vec::new() }
+    }
+
+    pub fn scan_directory(&mut self, path: &str) -> Result<(), String> {
+        let entries = std::fs::read_dir(path).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(s) = path.to_str() {
+                    self.known_binaries.push(s.to_string());
+                }
+            }
+        }
+        Ok(())
+    }
+}
