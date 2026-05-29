@@ -68,7 +68,7 @@ fn main() {
     let (tel_prod, mut tel_cons) = tel_rb.split();
 
     let mut graph = ProcessorGraph::new();
-    let sidecar_proxy = unsafe { SidecarProcessor::new(cmd_rb_ptr, &[in_rb_ptr], &[out_rb_ptr], sig_ptr, None) };
+    let sidecar_proxy = unsafe { SidecarProcessor::new(cmd_rb_ptr, None, &[in_rb_ptr], &[out_rb_ptr], sig_ptr, None) };
     graph.add_node(Box::new(sidecar_proxy), vec![], vec![0]);
 
     let engine = AudioEngine::new(cons, garbage_prod, tel_prod, Box::new(graph));

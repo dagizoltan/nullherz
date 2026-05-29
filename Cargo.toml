@@ -6,5 +6,7 @@ members = [
     "crates/control-plane",
     "crates/ipc-layer",
     "crates/sidecar-sdk",
+    "crates/sidecar-macros",
+    "crates/nullherz-inspector",
 ]
 resolver = "2"

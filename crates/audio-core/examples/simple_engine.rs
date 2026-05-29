@@ -17,7 +17,7 @@ impl AudioProcessor for SineProcessor {
         }
     }
     fn apply_command(&mut self, command: &Command) {
-        if let Command::SetParam { target_id, param_id, value } = command {
+        if let Command::SetParam { target_id, param_id, value, .. } = command {
             if *target_id == 1 && *param_id == 1 { self.osc.set_frequency(*value); }
         }
     }
@@ -42,7 +42,7 @@ fn main() {
     println!("Starting simulation...");
     prod.push(TimestampedCommand {
         timestamp_samples: 44100,
-        command: Command::SetParam { target_id: 1, param_id: 1, value: 880.0 },
+        command: Command::SetParam { target_id: 1, param_id: 1, value: 880.0, ramp_duration_samples: 0 },
     }).unwrap();
 
     std::thread::sleep(std::time::Duration::from_millis(100));

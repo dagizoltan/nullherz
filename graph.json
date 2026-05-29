@@ -1,0 +1,6 @@
+{
+  "nodes": [
+    {"inputs": [1], "outputs": [2]},
+    {"inputs": [2], "outputs": [3]}
+  ]
+}

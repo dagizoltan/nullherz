@@ -8,9 +8,40 @@ pub enum Command {
         target_id: u64,
         param_id: u32,
         value: f32,
+        ramp_duration_samples: u32,
     },
     Play,
     Stop,
+    UpdateEdge {
+        node_idx: u32,
+        input_idx: u32,
+        new_buffer_idx: u32,
+    },
+    UpdateOutputEdge {
+        node_idx: u32,
+        output_idx: u32,
+        new_buffer_idx: u32,
+    },
+    UpdateEdgeCrossfaded {
+        node_idx: u32,
+        input_idx: u32,
+        new_buffer_idx: u32,
+        duration_samples: u32,
+    },
+    SwapProcessor {
+        node_idx: u32,
+        // In a real system, we'd pass a factory or ID for the new processor.
+        // For this prototype, we'll use a numeric ID.
+        processor_type_id: u32,
+    },
+    Bundle {
+        // Use a numeric offset/id to avoid raw pointers in the enum for Send trait.
+        // In this implementation we will use a fixed size array of IDs or similar.
+        // For simplicity and to stay Send, let's use a small fixed-size array of 4 commands.
+        // To avoid recursion, we'll define a FlatCommand.
+        count: u32,
+        data: [u64; 16], // 8 commands (id + value)
+    },
 }
 
 /// A command with an associated timestamp for deterministic execution.
@@ -19,4 +50,22 @@ pub enum Command {
 pub struct TimestampedCommand {
     pub timestamp_samples: u64,
     pub command: Command,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ParameterMetadata {
+    pub id: u32,
+    pub name: [u8; 32],
+    pub min: f32,
+    pub max: f32,
+    pub default: f32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SidecarMetadata {
+    pub sidecar_id: u64,
+    pub num_parameters: u32,
+    pub parameters: [ParameterMetadata; 16],
 }
