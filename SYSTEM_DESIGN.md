@@ -34,7 +34,9 @@ To simplify routing for global features (Radio, DJ CUE), the first 8 virtual buf
 | **2-3** | `CUE_OUT` | Monitor bus for headphones (DJ pre-listening / Studio metronome). |
 | **4-5** | `BROADCAST_OUT` | Dedicated siphon bus for the Radio/Encoder sidecar. |
 | **6-7** | `PREVIEW_BUS` | Internal bus for auditioning samples without affecting Master. |
-| **8-63** | `DYNAMIC_POOL` | Managed by the scratchpad allocator for internal routing. |
+| **8-9** | `DJ_BUS_A` | Pre-summed output for Deck A (for crossfading). |
+| **10-11** | `DJ_BUS_B` | Pre-summed output for Deck B (for crossfading). |
+| **12-63** | `DYNAMIC_POOL` | Managed by the scratchpad allocator for internal routing. |
 
 ---
 
@@ -45,15 +47,18 @@ The "Lego" model (Option A) is implemented via a **Macro-Node** system. A "Chann
 ### Studio Channel Strip Template
 1.  **Source Node**: Sampler or external input.
 2.  **Gain Node**: Pre-fader trim and polarity.
-3.  **Filter Node**: Explicit SIMD Biquad (high/low pass).
-4.  **Dynamics Node**: Sidecar-based Compressor/Limiter.
-5.  **Fader Node**: Smooth volume control and Stereo Panning.
-6.  **Siphon Node**: Optional "tap" to send audio to FX groups or the Broadcast bus.
+3.  **Insert FX Chain**: A dynamic list of independent FX nodes (Biquad, Distortion, etc.) that process the signal sequentially.
+4.  **Fader Node**: Smooth volume control and Stereo Panning.
+5.  **Siphon Node**: Optional "tap" to send audio to FX groups or the Broadcast bus.
 
 ### DJ Deck Template
-*   **Resampling Node**: High-quality interpolation for pitch-shifting and time-stretching.
-*   **Isolator EQ**: Specialized 3-band "Kill" EQ using SIMD crossovers.
-*   **Crossfader Node**: Resides on the Master Bus, blending between Deck A and Deck B buffer inputs.
+1.  **Resampling Node**: High-quality interpolation for pitch-shifting and time-stretching.
+2.  **Insert FX Chain**: Independent deck effects (Echo, Reverb, etc.).
+3.  **Isolator EQ**: Specialized 3-band "Kill" EQ using SIMD crossovers.
+4.  **Output Assignment**: Routed either to `DJ_BUS_A`, `DJ_BUS_B`, or directly to `MASTER_OUT`.
+
+### The Crossfader
+*   **The Crossfader Node**: Resides on the Master Bus. It performs a SIMD-optimized blend between `DJ_BUS_A` and `DJ_BUS_B` based on a project-wide `CrossfaderPosition` parameter.
 
 ---
 
@@ -67,7 +72,17 @@ Essential for the Studio/DJ hybrid, the Conductor supports multiple simultaneous
 
 ---
 
-## 5. Feature Implementation Strategy
+## 5. MIDI Mapping & External Control
+
+To ensure low-latency physical control (MPC pads, DJ faders), MIDI is handled as a primary input stream.
+
+*   **MIDI Sidecar**: A dedicated sidecar responsible for OS-level MIDI device discovery (ALSA/JACK MIDI).
+*   **The Mapper (Conductor)**: Lives in the Conductor. It maintains a registry of `(MIDI_CC, Channel) -> (Node_ID, Param_ID)`.
+*   **Late-Binding**: Parameters can be "learned" at runtime. The UI sends a `LearnParameter` request, and the next received MIDI CC is bound to that engine parameter.
+
+---
+
+## 6. Feature Implementation Strategy
 
 ### DAW & MPC Features
 *   **Event Timeline**: A look-ahead queue in the Conductor that buffers events (MIDI-style) and dispatches them to the Engine exactly 128 samples before they are due.

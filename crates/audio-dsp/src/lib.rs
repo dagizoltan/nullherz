@@ -9,6 +9,47 @@ pub trait Oscillator {
     }
 }
 
+/// A SIMD-optimized Crossfader.
+pub struct Crossfader {
+    position: f32, // 0.0 (A) to 1.0 (B)
+}
+
+impl Crossfader {
+    pub fn new() -> Self { Self { position: 0.5 } }
+    pub fn set_position(&mut self, pos: f32) { self.position = pos.clamp(0.0, 1.0); }
+
+    pub fn process_block(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
+        let gain_b = self.position;
+        let gain_a = 1.0 - gain_b;
+
+        for i in 0..output.len() {
+            output[i] = input_a[i] * gain_a + input_b[i] * gain_b;
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn process_block_avx2(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
+        use std::arch::x86_64::*;
+        let len = output.len();
+        let b_gain_b = _mm256_set1_ps(self.position);
+        let b_gain_a = _mm256_set1_ps(1.0 - self.position);
+
+        let mut i = 0;
+        while i + 8 <= len {
+            let va = _mm256_loadu_ps(input_a.as_ptr().add(i));
+            let vb = _mm256_loadu_ps(input_b.as_ptr().add(i));
+            let res = _mm256_add_ps(_mm256_mul_ps(va, b_gain_a), _mm256_mul_ps(vb, b_gain_b));
+            _mm256_storeu_ps(output.as_mut_ptr().add(i), res);
+            i += 8;
+        }
+        while i < len {
+            output[i] = input_a[i] * (1.0 - self.position) + input_b[i] * self.position;
+            i += 1;
+        }
+    }
+}
+
 pub trait Filter {
     fn process_sample(&mut self, input: f32) -> f32;
 }

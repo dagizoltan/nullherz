@@ -22,9 +22,15 @@ impl Transport {
     }
 }
 
+pub struct MidiBinding {
+    pub node_id: u64,
+    pub param_id: u32,
+}
+
 pub struct Conductor {
     transport: Transport,
     command_queue: Vec<TimestampedCommand>,
+    midi_map: std::collections::HashMap<(u8, u8), MidiBinding>, // (Channel, CC) -> Binding
 }
 
 impl Conductor {
@@ -32,6 +38,25 @@ impl Conductor {
         Self {
             transport: Transport::new(bpm, sample_rate),
             command_queue: Vec::new(),
+            midi_map: std::collections::HashMap::new(),
+        }
+    }
+
+    pub fn bind_midi_cc(&mut self, channel: u8, cc: u8, node_id: u64, param_id: u32) {
+        self.midi_map.insert((channel, cc), MidiBinding { node_id, param_id });
+    }
+
+    pub fn handle_midi_cc(&mut self, channel: u8, cc: u8, value: u8) -> Option<control_plane::Command> {
+        if let Some(binding) = self.midi_map.get(&(channel, cc)) {
+            let normalized_val = value as f32 / 127.0;
+            Some(control_plane::Command::SetParam {
+                target_id: binding.node_id,
+                param_id: binding.param_id,
+                value: normalized_val,
+                ramp_duration_samples: 0,
+            })
+        } else {
+            None
         }
     }
 
