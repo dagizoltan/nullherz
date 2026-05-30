@@ -2075,6 +2075,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
+name = "nullherz-broadcast"
+version = "0.1.0"
+dependencies = [
+ "audio-core",
+ "control-plane",
+ "sidecar-macros",
+ "sidecar-sdk",
+]
+
+[[package]]
+name = "nullherz-conductor"
+version = "0.1.0"
+dependencies = [
+ "control-plane",
+]
+
+[[package]]
 name = "nullherz-inspector"
 version = "0.1.0"
 dependencies = [
@@ -2082,6 +2099,24 @@ dependencies = [
  "egui",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "nullherz-mixer"
+version = "0.1.0"
+dependencies = [
+ "audio-core",
+ "control-plane",
+]
+
+[[package]]
+name = "nullherz-sampler"
+version = "0.1.0"
+dependencies = [
+ "audio-core",
+ "control-plane",
+ "sidecar-macros",
+ "sidecar-sdk",
 ]
 
 [[package]]
