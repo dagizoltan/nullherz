@@ -2,6 +2,17 @@ use ipc_layer::{ShmRingBuffer, AudioBlock, ShmSignal, EventFd};
 use audio_core::AudioProcessor;
 
 /// A sidecar DSP process context.
+pub struct SidecarHost;
+
+impl SidecarHost {
+    pub unsafe fn new(_cmd: &str, _sig: &str, _ins: &[String], _outs: &[String], _efd: i32) -> Self {
+        Self
+    }
+    pub fn run(&mut self, _processor: impl AudioProcessor) {
+        // Placeholder for SidecarHost logic
+    }
+}
+
 pub struct SidecarContext<P: AudioProcessor> {
     processor: P,
     command_buffer: &'static ShmRingBuffer<control_plane::Command>,

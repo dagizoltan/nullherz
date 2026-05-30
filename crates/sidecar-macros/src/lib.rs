@@ -26,18 +26,28 @@ pub fn sidecar(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 for i in 0..args.len() {
                     match args[i].as_str() {
-                        "--command-shm" => cmd_shm = &args[i+1],
-                        "--signal-shm" => sig_shm = &args[i+1],
-                        "--event-fd" => efd_val = args[i+1].parse().unwrap_or(0),
-                        "--channels" => channels = args[i+1].parse().unwrap_or(0),
+                        "--command-shm" if i + 1 < args.len() => cmd_shm = &args[i+1],
+                        "--signal-shm" if i + 1 < args.len() => sig_shm = &args[i+1],
+                        "--event-fd" if i + 1 < args.len() => efd_val = args[i+1].parse().unwrap_or(0),
+                        "--channels" if i + 1 < args.len() => channels = args[i+1].parse().unwrap_or(0),
                         _ => {}
                     }
                 }
 
                 println!("Sidecar {} started with {} channels", stringify!(#name), channels);
 
-                // In a full implementation, we'd use the sidecar-sdk to map SHM and run the loop.
-                // For now, this macro provides the entry point structure.
+                // Map SHM segments and run the sidecar loop using sidecar-sdk
+                let mut inputs = Vec::new();
+                let mut outputs = Vec::new();
+                for i in 0..args.len() {
+                    if args[i] == "--input-shm" && i + 1 < args.len() { inputs.push(args[i+1].clone()); }
+                    if args[i] == "--output-shm" && i + 1 < args.len() { outputs.push(args[i+1].clone()); }
+                }
+
+                unsafe {
+                    let mut sidecar = sidecar_sdk::SidecarHost::new(cmd_shm, sig_shm, &inputs, &outputs, efd_val);
+                    sidecar.run(processor);
+                }
             }
         }
     };

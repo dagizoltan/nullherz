@@ -2,6 +2,52 @@
 
 pub trait Oscillator {
     fn next_sample(&mut self) -> f32;
+    fn process_block(&mut self, output: &mut [f32]) {
+        for sample in output.iter_mut() {
+            *sample = self.next_sample();
+        }
+    }
+}
+
+/// A SIMD-optimized Crossfader.
+pub struct Crossfader {
+    position: f32, // 0.0 (A) to 1.0 (B)
+}
+
+impl Crossfader {
+    pub fn new() -> Self { Self { position: 0.5 } }
+    pub fn set_position(&mut self, pos: f32) { self.position = pos.clamp(0.0, 1.0); }
+
+    pub fn process_block(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
+        let gain_b = self.position;
+        let gain_a = 1.0 - gain_b;
+
+        for i in 0..output.len() {
+            output[i] = input_a[i] * gain_a + input_b[i] * gain_b;
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn process_block_avx2(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
+        use std::arch::x86_64::*;
+        let len = output.len();
+        let b_gain_b = _mm256_set1_ps(self.position);
+        let b_gain_a = _mm256_set1_ps(1.0 - self.position);
+
+        let mut i = 0;
+        while i + 8 <= len {
+            let va = _mm256_loadu_ps(input_a.as_ptr().add(i));
+            let vb = _mm256_loadu_ps(input_b.as_ptr().add(i));
+            let res = _mm256_add_ps(_mm256_mul_ps(va, b_gain_a), _mm256_mul_ps(vb, b_gain_b));
+            _mm256_storeu_ps(output.as_mut_ptr().add(i), res);
+            i += 8;
+        }
+        while i < len {
+            output[i] = input_a[i] * (1.0 - self.position) + input_b[i] * self.position;
+            i += 1;
+        }
+    }
 }
 
 pub trait Filter {
@@ -53,7 +99,7 @@ impl Oscillator for SineOscillator {
 pub struct Gain {
     current_gain: f32,
     target_gain: f32,
-    smoothing_factor: f32,
+    _smoothing_factor: f32,
     ramp_remaining: u32,
     ramp_step: f32,
 }
@@ -63,7 +109,7 @@ impl Gain {
         Self {
             current_gain: initial_gain,
             target_gain: initial_gain,
-            smoothing_factor,
+            _smoothing_factor: smoothing_factor,
             ramp_remaining: 0,
             ramp_step: 0.0,
         }
@@ -118,6 +164,9 @@ pub struct BiquadCoefficients {
 #[repr(C, align(64))]
 pub struct BiquadFilter {
     pub coeffs: BiquadCoefficients,
+    pub target_coeffs: BiquadCoefficients,
+    pub ramp_duration: u32,
+    pub ramp_counter: u32,
     z1: f32,
     z2: f32,
 }
@@ -126,13 +175,28 @@ impl BiquadFilter {
     pub fn new(coeffs: BiquadCoefficients) -> Self {
         Self {
             coeffs,
+            target_coeffs: coeffs,
+            ramp_duration: 0,
+            ramp_counter: 0,
             z1: 0.0,
             z2: 0.0,
         }
     }
 
     pub fn update_coeffs(&mut self, coeffs: BiquadCoefficients) {
-        self.coeffs = coeffs;
+        self.target_coeffs = coeffs;
+        self.coeffs = coeffs; // Immediate for now to avoid stability issues in simple interpolation
+        self.ramp_duration = 0;
+    }
+
+    pub fn set_coeffs_ramped(&mut self, coeffs: BiquadCoefficients, duration: u32) {
+        if duration == 0 {
+            self.update_coeffs(coeffs);
+        } else {
+            self.target_coeffs = coeffs;
+            self.ramp_duration = duration;
+            self.ramp_counter = duration;
+        }
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -204,6 +268,17 @@ impl BiquadFilter {
 
 impl Filter for BiquadFilter {
     fn process_sample(&mut self, input: f32) -> f32 {
+        if self.ramp_duration > 0 && self.ramp_counter > 0 {
+            let t = (self.ramp_duration - self.ramp_counter + 1) as f32 / self.ramp_duration as f32;
+            self.coeffs.b0 = self.coeffs.b0 * (1.0 - t) + self.target_coeffs.b0 * t;
+            self.coeffs.b1 = self.coeffs.b1 * (1.0 - t) + self.target_coeffs.b1 * t;
+            self.coeffs.b2 = self.coeffs.b2 * (1.0 - t) + self.target_coeffs.b2 * t;
+            self.coeffs.a1 = self.coeffs.a1 * (1.0 - t) + self.target_coeffs.a1 * t;
+            self.coeffs.a2 = self.coeffs.a2 * (1.0 - t) + self.target_coeffs.a2 * t;
+            self.ramp_counter -= 1;
+            if self.ramp_counter == 0 { self.ramp_duration = 0; }
+        }
+
         let output = input * self.coeffs.b0 + self.z1;
         self.z1 = input * self.coeffs.b1 - output * self.coeffs.a1 + self.z2;
         self.z2 = input * self.coeffs.b2 - output * self.coeffs.a2;
@@ -239,6 +314,32 @@ impl SimdBiquad {
         }
         self.z1[channel] = z1;
         self.z2[channel] = z2;
+    }
+
+    pub fn process_wavetable_8_channels(&mut self, phase: &mut [f32; 8], phase_inc: &[f32; 8], table: &[f32; 1024], outputs: [*mut f32; 8], len: usize) {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            use std::arch::x86_64::*;
+            let b_inc = _mm256_loadu_ps(phase_inc.as_ptr());
+            let mut b_phase = _mm256_loadu_ps(phase.as_ptr());
+            let lut_size = _mm256_set1_ps(1024.0);
+
+            for i in 0..len {
+                let idx = _mm256_cvttps_epi32(b_phase);
+                let _out_v = [0.0f32; 8];
+                let mut idx_arr = [0i32; 8];
+                _mm256_storeu_si256(idx_arr.as_mut_ptr() as *mut __m256i, idx);
+
+                for ch in 0..8 {
+                    *outputs[ch].add(i) = table[idx_arr[ch] as usize % 1024];
+                }
+
+                b_phase = _mm256_add_ps(b_phase, b_inc);
+                let mask = _mm256_cmp_ps(b_phase, lut_size, _CMP_GE_OQ);
+                b_phase = _mm256_sub_ps(b_phase, _mm256_and_ps(mask, lut_size));
+            }
+            _mm256_storeu_ps(phase.as_mut_ptr(), b_phase);
+        }
     }
 
     #[cfg(target_arch = "aarch64")]
