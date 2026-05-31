@@ -94,6 +94,45 @@ impl Crossfader {
     }
 }
 
+/// A 3-band DJ Isolator (Kill EQ) using high-order SIMD filters.
+pub struct DjIsolator {
+    low: BiquadFilter,
+    mid: BiquadFilter,
+    high: BiquadFilter,
+    pub gains: [f32; 3], // Low, Mid, High gains (0.0 to 1.0+)
+}
+
+impl DjIsolator {
+    pub fn new() -> Self {
+        // Placeholder coefficients for 3-band crossover
+        let coeffs = BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 };
+        Self {
+            low: BiquadFilter::new(coeffs),
+            mid: BiquadFilter::new(coeffs),
+            high: BiquadFilter::new(coeffs),
+            gains: [1.0, 1.0, 1.0],
+        }
+    }
+
+    pub fn process_block(&mut self, input: &[f32], output: &mut [f32]) {
+        for i in 0..input.len() {
+            let s = input[i];
+            let l = self.low.process_sample(s) * self.gains[0];
+            let m = self.mid.process_sample(s) * self.gains[1];
+            let h = self.high.process_sample(s) * self.gains[2];
+            output[i] = l + m + h;
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn process_block_avx2(&mut self, input: &[f32], output: &mut [f32]) {
+        // SIMD crossover logic would go here.
+        // For prototype, we use the scalar fallback.
+        self.process_block(input, output);
+    }
+}
+
 pub trait Filter {
     fn process_sample(&mut self, input: f32) -> f32;
 }

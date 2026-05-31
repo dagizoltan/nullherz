@@ -39,6 +39,10 @@ pub enum Command {
         count: u32,
         data: [u64; 12], // Supports up to 4 bundled SetParam commands
     },
+    AddNode {
+        processor_type_id: u32,
+        node_idx: u32,
+    },
 }
 
 /// A command with an associated timestamp for deterministic execution.
