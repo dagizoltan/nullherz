@@ -9,6 +9,50 @@ pub trait Oscillator {
     }
 }
 
+/// A SIMD Summing Node that mixes up to 16 input buffers into one output.
+pub struct SummingNode {
+    pub gain: f32,
+}
+
+impl SummingNode {
+    pub fn new() -> Self { Self { gain: 1.0 } }
+
+    pub fn process_16_to_1(&self, inputs: &[&[f32]], output: &mut [f32]) {
+        let len = output.len();
+        output.fill(0.0);
+
+        for input in inputs {
+            for i in 0..len {
+                output[i] += input[i] * self.gain;
+            }
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn process_16_to_1_avx2(&self, inputs: &[&[f32]], output: &mut [f32]) {
+        use std::arch::x86_64::*;
+        let len = output.len();
+        output.fill(0.0);
+        let b_gain = _mm256_set1_ps(self.gain);
+
+        for input in inputs {
+            let mut i = 0;
+            while i + 8 <= len {
+                let v_in = _mm256_loadu_ps(input.as_ptr().add(i));
+                let v_out = _mm256_loadu_ps(output.as_ptr().add(i));
+                let res = _mm256_add_ps(v_out, _mm256_mul_ps(v_in, b_gain));
+                _mm256_storeu_ps(output.as_mut_ptr().add(i), res);
+                i += 8;
+            }
+            while i < len {
+                output[i] += input[i] * self.gain;
+                i += 1;
+            }
+        }
+    }
+}
+
 /// A SIMD-optimized Crossfader.
 pub struct Crossfader {
     position: f32, // 0.0 (A) to 1.0 (B)
