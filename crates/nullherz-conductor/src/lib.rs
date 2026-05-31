@@ -27,11 +27,30 @@ pub struct MidiBinding {
     pub param_id: u32,
 }
 
+pub enum GridDivision {
+    Quarter,
+    Eighth,
+    Sixteenth,
+    ThirtySecond,
+}
+
+impl GridDivision {
+    pub fn to_beats(&self) -> f32 {
+        match self {
+            Self::Quarter => 1.0,
+            Self::Eighth => 0.5,
+            Self::Sixteenth => 0.25,
+            Self::ThirtySecond => 0.125,
+        }
+    }
+}
+
 pub struct Conductor {
     transport: Transport,
     command_queue: Vec<TimestampedCommand>,
     midi_map: std::collections::HashMap<(u8, u8), MidiBinding>, // (Channel, CC) -> Binding
     pub midi_learning: Option<(u64, u32)>, // Some(Node_ID, Param_ID) if in learn mode
+    pub grid: GridDivision,
 }
 
 impl Conductor {
@@ -41,7 +60,14 @@ impl Conductor {
             command_queue: Vec::new(),
             midi_map: std::collections::HashMap::new(),
             midi_learning: None,
+            grid: GridDivision::Sixteenth,
         }
+    }
+
+    pub fn schedule_quantized(&mut self, current_beat: f32, command: control_plane::Command) {
+        let division = self.grid.to_beats();
+        let next_beat = ((current_beat / division).floor() + 1.0) * division;
+        self.schedule_event(next_beat, command);
     }
 
     pub fn bind_midi_cc(&mut self, channel: u8, cc: u8, node_id: u64, param_id: u32) {

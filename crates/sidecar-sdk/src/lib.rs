@@ -1,15 +1,69 @@
 use ipc_layer::{ShmRingBuffer, AudioBlock, ShmSignal, EventFd};
 use audio_core::AudioProcessor;
 
+use ipc_layer::SharedMemory;
+
 /// A sidecar DSP process context.
-pub struct SidecarHost;
+pub struct SidecarHost {
+    shm_cmd: SharedMemory,
+    shm_signal: SharedMemory,
+    shm_inputs: Vec<SharedMemory>,
+    shm_outputs: Vec<SharedMemory>,
+    event_fd: Option<EventFd>,
+}
 
 impl SidecarHost {
-    pub unsafe fn new(_cmd: &str, _sig: &str, _ins: &[String], _outs: &[String], _efd: i32) -> Self {
-        Self
+    pub unsafe fn new(cmd_name: &str, sig_name: &str, in_names: &[String], out_names: &[String], efd: i32) -> Self {
+        let (cmd_layout, _) = ShmRingBuffer::<control_plane::Command>::layout(64);
+        let shm_cmd = SharedMemory::open(cmd_name, cmd_layout.size()).unwrap();
+
+        let shm_signal = SharedMemory::open(sig_name, std::mem::size_of::<ShmSignal>()).unwrap();
+
+        let (audio_layout, _) = ShmRingBuffer::<AudioBlock>::layout(16);
+        let mut shm_inputs = Vec::new();
+        for name in in_names {
+            shm_inputs.push(SharedMemory::open(name, audio_layout.size()).unwrap());
+        }
+
+        let mut shm_outputs = Vec::new();
+        for name in out_names {
+            shm_outputs.push(SharedMemory::open(name, audio_layout.size()).unwrap());
+        }
+
+        let event_fd = if efd >= 0 { Some(EventFd::from_raw(efd)) } else { None };
+
+        Self {
+            shm_cmd,
+            shm_signal,
+            shm_inputs,
+            shm_outputs,
+            event_fd,
+        }
     }
-    pub fn run(&mut self, _processor: impl AudioProcessor) {
-        // Placeholder for SidecarHost logic
+
+    pub fn run(&mut self, processor: impl AudioProcessor) {
+        let cmd_rb_ptr = self.shm_cmd.ptr() as *const ShmRingBuffer<control_plane::Command>;
+        let signal_ptr = self.shm_signal.ptr() as *const ShmSignal;
+
+        let mut input_ptrs = Vec::new();
+        for shm in &self.shm_inputs { input_ptrs.push(shm.ptr() as *const ShmRingBuffer<AudioBlock>); }
+
+        let mut output_ptrs = Vec::new();
+        for shm in &self.shm_outputs { output_ptrs.push(shm.ptr() as *const ShmRingBuffer<AudioBlock>); }
+
+        let mut context = unsafe {
+            SidecarContext::new(
+                processor,
+                cmd_rb_ptr,
+                None, // Feedback SHM management could be added here
+                input_ptrs,
+                output_ptrs,
+                signal_ptr,
+                self.event_fd.take()
+            )
+        };
+
+        context.run_loop();
     }
 }
 
