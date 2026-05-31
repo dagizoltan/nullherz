@@ -265,6 +265,7 @@ impl AudioProcessor for ProcessorGraph {
                     match processor_type_id {
                         1 => { unsafe { *node.processor.get() = Box::new(BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })); } }
                         2 => { unsafe { *node.processor.get() = Box::new(GainProcessor::new(0, 1.0)); } }
+                        20 => { unsafe { *node.processor.get() = Box::new(CrossfaderProcessor::new()); } }
                         _ => {}
                     }
                 }
@@ -698,6 +699,36 @@ impl AudioProcessor for BiquadProcessor {
                 self.filter.set_coeffs_ramped(coeffs, *ramp_duration_samples);
             }
         }
+    }
+}
+
+pub struct CrossfaderProcessor {
+    inner: audio_dsp::Crossfader,
+}
+
+impl CrossfaderProcessor {
+    pub fn new() -> Self { Self { inner: audio_dsp::Crossfader::new() } }
+}
+
+impl AudioProcessor for CrossfaderProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        if inputs.len() < 2 || outputs.is_empty() { return; }
+        self.inner.process_block(inputs[0], inputs[1], outputs[0]);
+    }
+}
+
+pub struct SummingProcessor {
+    inner: audio_dsp::SummingNode,
+}
+
+impl SummingProcessor {
+    pub fn new() -> Self { Self { inner: audio_dsp::SummingNode::new() } }
+}
+
+impl AudioProcessor for SummingProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        if outputs.is_empty() { return; }
+        self.inner.process_16_to_1(inputs, outputs[0]);
     }
 }
 

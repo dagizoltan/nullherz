@@ -12,8 +12,8 @@ pub const BUF_DJ_B_L: usize = 10;
 pub const BUF_DJ_B_R: usize = 11;
 
 pub struct MixerManager {
-    next_node_id: usize,
-    next_buffer_id: usize,
+    next_node_id: u32,
+    next_buffer_id: u32,
 }
 
 impl MixerManager {
@@ -33,17 +33,27 @@ impl MixerManager {
 
         let gain_id = self.next_node_id;
         self.next_node_id += 1;
-        commands.push(Command::SwapProcessor { node_idx: gain_id as u32, processor_type_id: 2 });
+        commands.push(Command::SwapProcessor { node_idx: gain_id, processor_type_id: 2 });
+        commands.push(Command::UpdateEdge { node_idx: gain_id, input_idx: 0, new_buffer_idx: input_buf as u32 });
 
+        let mut prev_node = gain_id;
         for &fx_type in fx_ids {
             let fx_id = self.next_node_id;
             self.next_node_id += 1;
-            commands.push(Command::SwapProcessor { node_idx: fx_id as u32, processor_type_id: fx_type });
+            let fx_buf = self.next_buffer_id;
+            self.next_buffer_id += 1;
+
+            commands.push(Command::SwapProcessor { node_idx: fx_id, processor_type_id: fx_type });
+            commands.push(Command::UpdateOutputEdge { node_idx: prev_node, output_idx: 0, new_buffer_idx: fx_buf });
+            commands.push(Command::UpdateEdge { node_idx: fx_id, input_idx: 0, new_buffer_idx: fx_buf });
+            prev_node = fx_id;
         }
 
         let fader_id = self.next_node_id;
         self.next_node_id += 1;
-        commands.push(Command::SwapProcessor { node_idx: fader_id as u32, processor_type_id: 2 });
+        commands.push(Command::SwapProcessor { node_idx: fader_id, processor_type_id: 2 });
+        commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 0, new_buffer_idx: self.next_buffer_id });
+        commands.push(Command::UpdateOutputEdge { node_idx: fader_id, output_idx: 0, new_buffer_idx: BUF_MASTER_L as u32 });
 
         commands
     }

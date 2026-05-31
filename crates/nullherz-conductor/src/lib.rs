@@ -31,6 +31,7 @@ pub struct Conductor {
     transport: Transport,
     command_queue: Vec<TimestampedCommand>,
     midi_map: std::collections::HashMap<(u8, u8), MidiBinding>, // (Channel, CC) -> Binding
+    pub midi_learning: Option<(u64, u32)>, // Some(Node_ID, Param_ID) if in learn mode
 }
 
 impl Conductor {
@@ -39,6 +40,7 @@ impl Conductor {
             transport: Transport::new(bpm, sample_rate),
             command_queue: Vec::new(),
             midi_map: std::collections::HashMap::new(),
+            midi_learning: None,
         }
     }
 
@@ -47,6 +49,11 @@ impl Conductor {
     }
 
     pub fn handle_midi_cc(&mut self, channel: u8, cc: u8, value: u8) -> Option<control_plane::Command> {
+        if let Some((node_id, param_id)) = self.midi_learning.take() {
+            println!("MIDI LEARN: Bound (Ch {}, CC {}) to Node {}, Param {}", channel, cc, node_id, param_id);
+            self.bind_midi_cc(channel, cc, node_id, param_id);
+        }
+
         if let Some(binding) = self.midi_map.get(&(channel, cc)) {
             let normalized_val = value as f32 / 127.0;
             Some(control_plane::Command::SetParam {
