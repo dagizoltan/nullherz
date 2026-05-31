@@ -2075,12 +2075,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
-name = "nullherz-broadcast"
+name = "nullherz-bench"
 version = "0.1.0"
 dependencies = [
  "audio-core",
+ "audio-dsp",
  "control-plane",
- "sidecar-macros",
+ "fx-runtime",
+ "ipc-layer",
+]
+
+[[package]]
+name = "nullherz-broadcast"
+version = "0.1.0"
+dependencies = [
  "sidecar-sdk",
 ]
 
@@ -2105,8 +2113,7 @@ dependencies = [
 name = "nullherz-midi"
 version = "0.1.0"
 dependencies = [
- "control-plane",
- "ipc-layer",
+ "sidecar-sdk",
 ]
 
 [[package]]
@@ -2121,10 +2128,6 @@ dependencies = [
 name = "nullherz-sampler"
 version = "0.1.0"
 dependencies = [
- "audio-core",
- "control-plane",
- "memmap2",
- "sidecar-macros",
  "sidecar-sdk",
 ]
 

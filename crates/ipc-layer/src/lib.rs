@@ -184,6 +184,22 @@ impl Drop for EventFd {
     fn drop(&mut self) { if self.owner { unsafe { libc::close(self.fd); } } }
 }
 
+pub fn set_rt_priority(pid: i32, priority: i32) -> Result<(), String> {
+    unsafe {
+        let param = libc::sched_param { sched_priority: priority };
+        let res = libc::sched_setscheduler(pid, libc::SCHED_FIFO, &param);
+        if res != 0 {
+            return Err(format!("sched_setscheduler failed: {}", std::io::Error::last_os_error()));
+        }
+    }
+    Ok(())
+}
+
+pub fn move_to_cgroup(pid: i32, cgroup_path: &str) -> Result<(), String> {
+    let path = std::path::Path::new(cgroup_path).join("cgroup.procs");
+    std::fs::write(path, pid.to_string()).map_err(|e| e.to_string())
+}
+
 #[repr(C, align(64))]
 pub struct ShmSignal {
     pub(crate) flag: AtomicBool,

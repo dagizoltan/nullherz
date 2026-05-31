@@ -85,6 +85,11 @@ impl SidecarManager {
         let child = cmd.spawn()
             .map_err(|e| e.to_string())?;
 
+        let pid = child.id() as i32;
+        // Try to set RT priority and move to cgroup, but don't fail if we can't (might lack permissions in CI/Docker)
+        let _ = ipc_layer::set_rt_priority(pid, 10);
+        let _ = ipc_layer::move_to_cgroup(pid, "/sys/fs/cgroup/nullherz");
+
         let processor = unsafe {
             SidecarProcessor::new(
                 cmd_rb_ptr,
