@@ -7,6 +7,6 @@ members = [
     "crates/ipc-layer",
     "crates/sidecar-sdk",
     "crates/sidecar-macros",
-    "crates/nullherz-inspector", "crates/nullherz-mixer", "crates/nullherz-conductor", "crates/nullherz-bench", "sidecars/nullherz-sampler", "sidecars/nullherz-broadcast", "sidecars/nullherz-midi",
+    "crates/nullherz-bench", "crates/nullherz-bridge", "crates/nullherz-inspector", "crates/nullherz-mixer", "crates/nullherz-conductor", "sidecars/nullherz-sampler", "sidecars/nullherz-broadcast", "sidecars/nullherz-midi",
 ]
 resolver = "2"

@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 pub trait AudioProcessor: Send {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]);
     fn apply_command(&mut self, _command: &control_plane::Command) {}
+    fn get_telemetry(&self, _node_load: &mut [u64; 64], _node_avg_load: &mut [u64; 64], _suggestions: &mut [u8; 64], _buffer_levels: &mut [f32; 64]) {}
 }
 
 #[derive(Clone, Copy)]
@@ -47,9 +48,51 @@ pub struct GraphTopology {
     pub node_count: usize,
 }
 
+pub struct TopologyStats {
+    pub average_load_ns: [u64; 64],
+    pub optimization_suggestions: [u8; 64], // 0: None, 1: Parallelize, 2: Merge
+    history: [[u64; 100]; 64],
+    history_idx: usize,
+}
+
+impl TopologyStats {
+    pub fn new() -> Self {
+        Self {
+            average_load_ns: [0; 64],
+            optimization_suggestions: [0; 64],
+            history: [[0; 100]; 64],
+            history_idx: 0,
+        }
+    }
+    pub fn record(&mut self, loads: &[u64; 64], topo: &GraphTopology) {
+        for i in 0..64 {
+            self.history[i][self.history_idx] = loads[i];
+            let mut sum = 0u64;
+            for j in 0..100 { sum += self.history[i][j]; }
+            self.average_load_ns[i] = sum / 100;
+        }
+        self.history_idx = (self.history_idx + 1) % 100;
+
+        // Generate suggestions
+        for i in 0..topo.node_count {
+            if self.average_load_ns[i] > 50000 {
+                // If it's slow, suggest parallelizing if it's the only slow node in its stage
+                self.optimization_suggestions[i] = 1;
+            } else if self.average_load_ns[i] < 500 && self.average_load_ns[i] > 0 {
+                // If it's very fast, suggest merging (conceptual suggestion for now)
+                self.optimization_suggestions[i] = 2;
+            } else {
+                self.optimization_suggestions[i] = 0;
+            }
+        }
+    }
+}
+
 pub struct ProcessorGraph {
     nodes: Arc<Vec<ProcessorNode>>,
     buffers: Box<[AudioBlock; 64]>,
+    pub last_node_load_ns: [u64; 64],
+    pub stats: TopologyStats,
     crossfade_buffers: [AudioBlock; 8],
     topologies: Box<[GraphTopology; 2]>,
     active_topo_idx: Arc<AtomicUsize>,
@@ -134,6 +177,8 @@ impl ProcessorGraph {
         Self {
             nodes: Arc::new(Vec::with_capacity(64)),
             buffers,
+            last_node_load_ns: [0u64; 64],
+            stats: TopologyStats::new(),
             crossfade_buffers: [AudioBlock { data: [0.0f32; 128] }; 8],
             topologies: Box::new([topo; 2]),
             active_topo_idx: Arc::new(AtomicUsize::new(0)),
@@ -244,7 +289,30 @@ impl ProcessorGraph {
     }
 }
 
+impl ProcessorGraph {
+    pub fn get_buffer_levels(&self) -> [f32; 64] {
+        let mut levels = [0.0f32; 64];
+        for i in 0..64 {
+            let mut peak = 0.0f32;
+            for &s in self.buffers[i].data.iter() {
+                peak = peak.max(s.abs());
+            }
+            levels[i] = peak;
+        }
+        levels
+    }
+    pub fn get_node_load_ns(&self) -> [u64; 64] {
+        self.last_node_load_ns
+    }
+}
+
 impl AudioProcessor for ProcessorGraph {
+    fn get_telemetry(&self, node_load: &mut [u64; 64], node_avg_load: &mut [u64; 64], suggestions: &mut [u8; 64], buffer_levels: &mut [f32; 64]) {
+        *node_load = self.get_node_load_ns();
+        *node_avg_load = self.stats.average_load_ns;
+        *suggestions = self.stats.optimization_suggestions;
+        *buffer_levels = self.get_buffer_levels();
+    }
     fn process(&mut self, _external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]]) {
         let num_samples = if !external_outputs.is_empty() { external_outputs[0].len() } else { 0 };
         if num_samples == 0 { return; }
@@ -257,10 +325,13 @@ impl AudioProcessor for ProcessorGraph {
         let topo = *self.current_topology();
         let buffers_ptr = self.buffers.as_mut_ptr();
 
+        let mut node_loads = [0u64; 64];
+
         for s_idx in 0..topo.num_stages {
             let stage = &topo.stages[s_idx][..topo.stage_counts[s_idx]];
 
             if let Some(pool) = &mut self.pool {
+                let stage_start = Instant::now();
                 pool.completion.store(0, Ordering::Release);
                 let num_nodes = stage.len();
                 for (i, &n_idx) in stage.iter().enumerate() {
@@ -272,8 +343,15 @@ impl AudioProcessor for ProcessorGraph {
                 while pool.completion.load(Ordering::Acquire) < num_nodes {
                     std::thread::yield_now();
                 }
+                let stage_duration = stage_start.elapsed().as_nanos() as u64;
+                for &n_idx in stage {
+                    let load = stage_duration / num_nodes as u64; // Approximation for pooled nodes
+                    self.last_node_load_ns[n_idx] = load;
+                    node_loads[n_idx] = load;
+                }
             } else {
                 for &n_idx in stage {
+                    let node_start = Instant::now();
                     let node = &self.nodes[n_idx];
                     let routing = &topo.routing[n_idx];
                     let mut node_inputs_storage = [ &[][..]; 16 ];
@@ -288,6 +366,9 @@ impl AudioProcessor for ProcessorGraph {
                         } else { &mut [] }
                     });
                     unsafe { (*node.processor.get()).process(&node_inputs_storage[..routing.input_count], &mut node_outputs_reconstructed[..routing.output_count]); }
+                    let load = node_start.elapsed().as_nanos() as u64;
+                    self.last_node_load_ns[n_idx] = load;
+                    node_loads[n_idx] = load;
                 }
             }
         }
@@ -300,6 +381,8 @@ impl AudioProcessor for ProcessorGraph {
             let p1 = topo.virtual_to_physical[1];
             external_outputs[1].copy_from_slice(&self.buffers[p1].data[..num_samples]);
         }
+
+        self.stats.record(&node_loads, &topo);
     }
     fn apply_command(&mut self, command: &control_plane::Command) {
         match command {
@@ -357,12 +440,22 @@ impl AudioProcessor for ProcessorGraph {
 
 pub const MAX_CHANNELS: usize = 16;
 
+use serde_big_array::BigArray;
+
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Telemetry {
     pub process_time_ns: u64,
     pub sample_counter: u64,
     pub xrun_count: u32,
+    #[serde(with = "BigArray")]
+    pub node_load_ns: [u64; 64],
+    #[serde(with = "BigArray")]
+    pub node_avg_load_ns: [u64; 64],
+    #[serde(with = "BigArray")]
+    pub optimization_suggestions: [u8; 64],
+    #[serde(with = "BigArray")]
+    pub buffer_levels: [f32; 64],
 }
 
 pub struct SidecarProcessor {
@@ -486,6 +579,7 @@ impl AudioEngine {
         let block_end_sample = block_start_sample + num_samples as u64;
         let mut current_sample_in_block = 0;
         let graph_ptr = self.active_graph.load(Ordering::Acquire);
+        if graph_ptr.is_null() { return; }
         let graph = unsafe { &mut **graph_ptr };
         while current_sample_in_block < num_samples {
             let cmd = if let Some(pending) = self.pending_command.take() { Some(pending) } else { self.command_consumer.pop() };
@@ -511,12 +605,27 @@ impl AudioEngine {
             }
         }
         self.sample_counter = block_end_sample;
+        let mut node_load_ns = [0u64; 64];
+        let mut node_avg_load_ns = [0u64; 64];
+        let mut suggestions = [0u8; 64];
+        let mut buffer_levels = [0.0f32; 64];
+        graph.get_telemetry(&mut node_load_ns, &mut node_avg_load_ns, &mut suggestions, &mut buffer_levels);
+
         let _ = self.telemetry_producer.push(Telemetry {
             process_time_ns: start_time.elapsed().as_nanos() as u64,
             sample_counter: self.sample_counter,
             xrun_count: 0,
+            node_load_ns,
+            node_avg_load_ns,
+            optimization_suggestions: suggestions,
+            buffer_levels,
         });
     }
+    pub fn last_telemetry(&self) -> Option<Telemetry> {
+        // This is a placeholder. In a real system, we'd have a way to peek at the last telemetry.
+        None
+    }
+
     fn process_sub_block(&mut self, graph: &mut dyn AudioProcessor, inputs: &[&[f32]], outputs: &mut [&mut [f32]], offset: usize, len: usize) {
         if len == 0 { return; }
         let mut sub_inputs_ptr = [ &[][..]; MAX_CHANNELS ];
@@ -1127,6 +1236,29 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         let engine_final = backend2.stop().expect("Should return engine");
         assert!(engine_final.sample_counter > prev_samples);
+    }
+
+    #[test]
+    fn test_node_telemetry() {
+        let rb = RingBuffer::new(1024);
+        let (_, cons) = rb.split();
+        let garbage_rb = RingBuffer::new(32);
+        let (garbage_prod, _) = garbage_rb.split();
+        let tel_rb = RingBuffer::new(1024);
+        let (tel_prod, mut tel_cons) = tel_rb.split();
+
+        let mut graph = ProcessorGraph::new();
+        graph.pool = None; // Sync execution for timing
+        graph.add_node(Box::new(ConstantProcessor { val: 0.5 }), vec![], vec![0]);
+        let mut engine = AudioEngine::new(cons, garbage_prod, tel_prod, Box::new(graph));
+
+        let mut outputs = [[0.0f32; 128]; 1];
+        let mut out_refs = [&mut outputs[0][..]];
+        engine.process_block(&[], &mut out_refs, 128);
+
+        let tel = tel_cons.pop().expect("Should have telemetry");
+        assert!(tel.node_load_ns[0] > 0);
+        assert_eq!(tel.buffer_levels[0], 0.5);
     }
 
     #[test]

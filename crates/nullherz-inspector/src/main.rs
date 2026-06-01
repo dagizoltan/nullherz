@@ -1,6 +1,9 @@
 use serde::{Deserialize};
 use std::env;
 use std::fs;
+use std::net::TcpStream;
+use tungstenite::{connect, stream::MaybeTlsStream, WebSocket};
+use audio_core::Telemetry;
 
 #[derive(Deserialize, Debug)]
 pub struct NodeJson {
@@ -59,22 +62,91 @@ fn render_ascii(graph: &GraphJson) {
     }
 }
 
-// Graphical UI stub using egui
+// Graphical UI using egui
 pub struct InspectorApp {
     graph: GraphJson,
+    socket: Option<WebSocket<MaybeTlsStream<TcpStream>>>,
+    last_telemetry: Option<Telemetry>,
 }
 
 impl InspectorApp {
-    pub fn new(graph: GraphJson) -> Self { Self { graph } }
+    pub fn new(graph: GraphJson) -> Self {
+        let socket = match connect("ws://127.0.0.1:8080") {
+            Ok((s, _)) => {
+                match s.get_ref() {
+                    MaybeTlsStream::Plain(stream) => { stream.set_nonblocking(true).unwrap(); }
+                    _ => {}
+                }
+                Some(s)
+            }
+            Err(_) => None,
+        };
+        Self { graph, socket, last_telemetry: None }
+    }
 }
 
 impl eframe::App for InspectorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Poll for new telemetry
+        if let Some(ref mut socket) = self.socket {
+            match socket.read() {
+                Ok(msg) => {
+                    if let tungstenite::Message::Text(text) = msg {
+                        if let Ok(tel) = serde_json::from_str::<Telemetry>(&text) {
+                            self.last_telemetry = Some(tel);
+                        }
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("nullherz Topology Inspector");
-            for (i, node) in self.graph.nodes.iter().enumerate() {
-                ui.label(format!("Node {}: In {:?} Out {:?}", i, node.inputs, node.outputs));
+
+            if self.socket.is_none() {
+                ui.colored_label(egui::Color32::RED, "Not connected to bridge");
             }
+
+            for (i, node) in self.graph.nodes.iter().enumerate() {
+                let load = self.last_telemetry.as_ref().map(|t| t.node_load_ns[i]).unwrap_or(0);
+                let avg_load = self.last_telemetry.as_ref().map(|t| t.node_avg_load_ns[i]).unwrap_or(0);
+                let intensity = (avg_load as f32 / 100000.0).min(1.0); // 100us as max intensity
+                let color = egui::Color32::from_rgb(
+                    (intensity * 255.0) as u8,
+                    ((1.0 - intensity) * 255.0) as u8,
+                    0
+                );
+
+                ui.horizontal(|ui| {
+                    ui.label(format!("Node {}: In {:?} Out {:?}", i, node.inputs, node.outputs));
+                    ui.colored_label(color, format!(" (cur: {} ns, avg: {} ns)", load, avg_load));
+                    if avg_load > 50000 { // 50us bottleneck
+                        ui.colored_label(egui::Color32::RED, " [BOTTLENECK]");
+                    }
+
+                    let suggestion = self.last_telemetry.as_ref().map(|t| t.optimization_suggestions[i]).unwrap_or(0);
+                    match suggestion {
+                        1 => { ui.colored_label(egui::Color32::YELLOW, " [SUGGEST: PARALLELIZE]"); }
+                        2 => { ui.colored_label(egui::Color32::LIGHT_BLUE, " [SUGGEST: MERGE]"); }
+                        _ => {}
+                    }
+                });
+            }
+
+            ui.separator();
+            ui.heading("Buffer Levels");
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for i in 0..64 {
+                    let level = self.last_telemetry.as_ref().map(|t| t.buffer_levels[i]).unwrap_or(0.0);
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Buf {}: ", i));
+                        ui.add(egui::ProgressBar::new(level).text(format!("{:.2}", level)));
+                    });
+                }
+            });
         });
+
+        ctx.request_repaint();
     }
 }
