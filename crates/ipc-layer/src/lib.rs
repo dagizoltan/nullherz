@@ -184,6 +184,35 @@ impl Drop for EventFd {
     fn drop(&mut self) { if self.owner { unsafe { libc::close(self.fd); } } }
 }
 
+pub fn set_rt_priority(priority: i32) -> Result<(), String> {
+    set_rt_priority_for(0, priority)
+}
+
+pub fn set_rt_priority_for(pid: i32, priority: i32) -> Result<(), String> {
+    unsafe {
+        let mut param = libc::sched_param { sched_priority: priority };
+        let result = libc::sched_setscheduler(pid, libc::SCHED_FIFO, &mut param);
+        if result == -1 {
+            return Err(format!("Failed to set RT priority for PID {}: {}", pid, std::io::Error::last_os_error()));
+        }
+    }
+    Ok(())
+}
+
+pub fn move_to_cgroup(cgroup_name: &str, pid: i32) -> Result<(), String> {
+    let base_path = format!("/sys/fs/cgroup/{}", cgroup_name);
+    let procs_path = format!("{}/cgroup.procs", base_path);
+
+    if !std::path::Path::new(&base_path).exists() {
+        if let Err(e) = std::fs::create_dir_all(&base_path) {
+            return Err(format!("Failed to create cgroup directory {}: {}. Note: This usually requires root privileges or cgroup delegation.", base_path, e));
+        }
+    }
+
+    std::fs::write(&procs_path, pid.to_string())
+        .map_err(|e| format!("Failed to write PID to {}: {}. Check permissions or cgroup v2 availability.", procs_path, e))
+}
+
 #[repr(C, align(64))]
 pub struct ShmSignal {
     pub(crate) flag: AtomicBool,

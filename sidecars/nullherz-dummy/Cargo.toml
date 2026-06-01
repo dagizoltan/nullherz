@@ -1,0 +1,8 @@
+[package]
+name = "nullherz-dummy"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "nullherz-sidecar-dummy"
+path = "src/main.rs"

@@ -1,7 +1,7 @@
 /// Represents an action to be performed by the audio engine.
 /// Fixed-size strings are used to avoid heap allocations in the RT thread.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Command {
     SetParam {
         /// Target ID (e.g. hash of a name or a fixed-size buffer)
@@ -47,7 +47,7 @@ pub enum Command {
 
 /// A command with an associated timestamp for deterministic execution.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TimestampedCommand {
     pub timestamp_samples: u64,
     pub command: Command,

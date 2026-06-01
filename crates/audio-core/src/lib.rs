@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 pub trait AudioProcessor: Send {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]);
     fn apply_command(&mut self, _command: &control_plane::Command) {}
+    fn collect_telemetry(&self, _node_times: &mut [u64; 64], _peak_levels: &mut [f32; 64]) {}
 }
 
 #[derive(Clone, Copy)]
@@ -58,6 +59,10 @@ pub struct ProcessorGraph {
 
     stage_scratch_assigned: [bool; 64],
     stage_scratch_in_degree: [usize; 64],
+
+    node_times_ns: std::sync::Arc<[std::sync::atomic::AtomicU64; 64]>,
+    peak_levels: std::sync::Arc<[std::sync::atomic::AtomicU32; 64]>, // Store f32 bits
+    telemetry_offset: std::sync::atomic::AtomicUsize,
 }
 
 pub struct TaskPool {
@@ -82,7 +87,7 @@ impl TaskPool {
         let running = Arc::new(AtomicBool::new(true));
 
         for _ in 0..num_workers {
-            let (mut prod, mut cons) = RingBuffer::new(128).split();
+            let (prod, mut cons) = RingBuffer::new(128).split();
             let running_worker = running.clone();
             let completion_worker = completion.clone();
 
@@ -141,6 +146,9 @@ impl ProcessorGraph {
             stage_scratch_assigned: [false; 64],
             stage_scratch_in_degree: [0; 64],
             pool: Some(TaskPool::new(4)), // Default to 4 workers
+            node_times_ns: Arc::new(std::array::from_fn(|_| std::sync::atomic::AtomicU64::new(0))),
+            peak_levels: Arc::new(std::array::from_fn(|_| std::sync::atomic::AtomicU32::new(0))),
+            telemetry_offset: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -287,7 +295,17 @@ impl AudioProcessor for ProcessorGraph {
                             unsafe { std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr(), num_samples) }
                         } else { &mut [] }
                     });
+
+                    #[cfg(target_arch = "x86_64")]
+                    let start = unsafe { std::arch::x86_64::_rdtsc() };
+
                     unsafe { (*node.processor.get()).process(&node_inputs_storage[..routing.input_count], &mut node_outputs_reconstructed[..routing.output_count]); }
+
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        let elapsed = unsafe { std::arch::x86_64::_rdtsc() } - start;
+                        self.node_times_ns[n_idx].store(elapsed, Ordering::Relaxed);
+                    }
                 }
             }
         }
@@ -299,6 +317,18 @@ impl AudioProcessor for ProcessorGraph {
         if external_outputs.len() >= 2 {
             let p1 = topo.virtual_to_physical[1];
             external_outputs[1].copy_from_slice(&self.buffers[p1].data[..num_samples]);
+        }
+
+        // Calculate peak signal levels for a subset of buffers each block to save CPU
+        let offset = self.telemetry_offset.fetch_add(8, Ordering::Relaxed);
+        for i_off in 0..8 {
+            let i = (offset + i_off) % 64;
+            let mut peak = 0.0f32;
+            for sample in &self.buffers[i].data[..num_samples] {
+                let abs = sample.abs();
+                if abs > peak { peak = abs; }
+            }
+            self.peak_levels[i].store(peak.to_bits(), Ordering::Relaxed);
         }
     }
     fn apply_command(&mut self, command: &control_plane::Command) {
@@ -337,11 +367,14 @@ impl AudioProcessor for ProcessorGraph {
                     }
                 }
             }
-            control_plane::Command::AddNode { processor_type_id, node_idx } => {
+            control_plane::Command::AddNode { processor_type_id, node_idx: _ } => {
                 let processor: Box<dyn AudioProcessor> = match processor_type_id {
                     1 => Box::new(BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
                     2 => Box::new(GainProcessor::new(0, 1.0)),
                     3 => Box::new(SimdBiquadProcessor::new(audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
+                    4 => Box::new(WavetableProcessor::new(44100.0)),
+                    5 => Box::new(SpectralProcessor::new(512)),
+                    10 => Box::new(ModulationProcessor::new(0, 0, 1.0, 0.0)),
                     20 => Box::new(CrossfaderProcessor::new()),
                     _ => Box::new(GainProcessor::new(0, 0.0)), // Silence
                 };
@@ -353,16 +386,28 @@ impl AudioProcessor for ProcessorGraph {
             }
         }
     }
+    fn collect_telemetry(&self, node_times: &mut [u64; 64], peak_levels: &mut [f32; 64]) {
+        for i in 0..64 {
+            node_times[i] = self.node_times_ns[i].load(Ordering::Relaxed);
+            peak_levels[i] = f32::from_bits(self.peak_levels[i].load(Ordering::Relaxed));
+        }
+    }
 }
 
 pub const MAX_CHANNELS: usize = 16;
 
+use serde_big_array::BigArray;
+
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Telemetry {
     pub process_time_ns: u64,
     pub sample_counter: u64,
     pub xrun_count: u32,
+    #[serde(with = "BigArray")]
+    pub node_times_ns: [u64; 64],
+    #[serde(with = "BigArray")]
+    pub peak_levels: [f32; 64],
 }
 
 pub struct SidecarProcessor {
@@ -487,6 +532,10 @@ impl AudioEngine {
         let mut current_sample_in_block = 0;
         let graph_ptr = self.active_graph.load(Ordering::Acquire);
         let graph = unsafe { &mut **graph_ptr };
+
+        let mut node_times = [0u64; 64];
+        let mut peak_levels = [0.0f32; 64];
+
         while current_sample_in_block < num_samples {
             let cmd = if let Some(pending) = self.pending_command.take() { Some(pending) } else { self.command_consumer.pop() };
             if let Some(cmd) = cmd {
@@ -511,10 +560,14 @@ impl AudioEngine {
             }
         }
         self.sample_counter = block_end_sample;
+        graph.collect_telemetry(&mut node_times, &mut peak_levels);
+
         let _ = self.telemetry_producer.push(Telemetry {
             process_time_ns: start_time.elapsed().as_nanos() as u64,
             sample_counter: self.sample_counter,
             xrun_count: 0,
+            node_times_ns: node_times,
+            peak_levels,
         });
     }
     fn process_sub_block(&mut self, graph: &mut dyn AudioProcessor, inputs: &[&[f32]], outputs: &mut [&mut [f32]], offset: usize, len: usize) {
@@ -543,11 +596,11 @@ impl Drop for AudioEngine {
 
 pub trait AudioBackend {
     fn start(&mut self, engine: AudioEngine) -> Result<(), String>;
-    fn stop(&mut self);
+    fn stop(&mut self) -> Option<AudioEngine>;
 }
 
 pub struct ThreadedBackend {
-    handle: Option<thread::JoinHandle<()>>,
+    handle: Option<thread::JoinHandle<Option<AudioEngine>>>,
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 impl ThreadedBackend {
@@ -558,6 +611,7 @@ impl AudioBackend for ThreadedBackend {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let handle = thread::spawn(move || {
+            let _ = ipc_layer::set_rt_priority(90);
             let mut outputs_raw = [[0.0f32; 128]; 2];
             let interval = Duration::from_secs_f64(128.0 / 44100.0);
             while running.load(Ordering::SeqCst) {
@@ -568,11 +622,19 @@ impl AudioBackend for ThreadedBackend {
                 let elapsed = start.elapsed();
                 if elapsed < interval { thread::sleep(interval - elapsed); }
             }
+            Some(engine)
         });
         self.handle = Some(handle);
         Ok(())
     }
-    fn stop(&mut self) { self.running.store(false, Ordering::SeqCst); if let Some(handle) = self.handle.take() { let _ = handle.join(); } }
+    fn stop(&mut self) -> Option<AudioEngine> {
+        self.running.store(false, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            handle.join().unwrap_or(None)
+        } else {
+            None
+        }
+    }
 }
 
 struct AlsaLib {
@@ -607,7 +669,7 @@ impl Drop for AlsaLib { fn drop(&mut self) { unsafe { libc::dlclose(self.handle)
 
 pub struct AlsaBackend {
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    handle: Option<thread::JoinHandle<()>>,
+    handle: Option<thread::JoinHandle<Option<AudioEngine>>>,
 }
 impl AlsaBackend {
     pub fn new() -> Self { Self { running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), handle: None } }
@@ -618,11 +680,12 @@ impl AudioBackend for AlsaBackend {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let handle = thread::spawn(move || {
+            let _ = ipc_layer::set_rt_priority(90);
             unsafe {
                 let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
                 let name = std::ffi::CString::new("default").unwrap();
-                if (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) != 0 { return; }
-                if (alsa.snd_pcm_set_params)(pcm, 2, 3, 2, 44100, 1, 5000) != 0 { (alsa.snd_pcm_close)(pcm); return; }
+                if (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) != 0 { return None; }
+                if (alsa.snd_pcm_set_params)(pcm, 2, 3, 2, 44100, 1, 5000) != 0 { (alsa.snd_pcm_close)(pcm); return None; }
                 let mut outputs_raw = [[0.0f32; 128]; 2];
                 let mut interleaved = [0i16; 256];
                 while running.load(Ordering::SeqCst) {
@@ -639,28 +702,37 @@ impl AudioBackend for AlsaBackend {
                 }
                 (alsa.snd_pcm_close)(pcm);
             }
+            Some(engine)
         });
         self.handle = Some(handle);
         Ok(())
     }
-    fn stop(&mut self) { self.running.store(false, Ordering::SeqCst); if let Some(handle) = self.handle.take() { let _ = handle.join(); } }
-}
-
-pub struct PipewireBackend {
-    running: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    _handle: Option<thread::JoinHandle<()>>,
-}
-
-impl PipewireBackend {
-    pub fn new() -> Self { Self { running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), _handle: None } }
+    fn stop(&mut self) -> Option<AudioEngine> {
+        self.running.store(false, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            handle.join().unwrap_or(None)
+        } else {
+            None
+        }
+    }
 }
 
 struct PwLib {
     handle: *mut std::ffi::c_void,
     pw_init: unsafe extern "C" fn(*mut i32, *mut *mut *mut i8),
     pw_thread_loop_new: unsafe extern "C" fn(*const i8, *const std::ffi::c_void) -> *mut std::ffi::c_void,
+    pw_thread_loop_start: unsafe extern "C" fn(*mut std::ffi::c_void) -> i32,
+    pw_thread_loop_stop: unsafe extern "C" fn(*mut std::ffi::c_void),
+    pw_thread_loop_get_loop: unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void,
     pw_context_new: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, usize) -> *mut std::ffi::c_void,
     pw_core_connect: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, usize) -> *mut std::ffi::c_void,
+    pw_stream_new: unsafe extern "C" fn(*mut std::ffi::c_void, *const i8, *mut std::ffi::c_void) -> *mut std::ffi::c_void,
+    pw_stream_add_listener: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, *const std::ffi::c_void, *mut std::ffi::c_void),
+    pw_stream_connect: unsafe extern "C" fn(*mut std::ffi::c_void, i32, u32, u32, *const std::ffi::c_void, u32) -> i32,
+    pw_stream_update_params: unsafe extern "C" fn(*mut std::ffi::c_void, *mut *const std::ffi::c_void, u32) -> i32,
+    pw_stream_dequeue_buffer: unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void,
+    pw_stream_queue_buffer: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> i32,
+    pw_stream_destroy: unsafe extern "C" fn(*mut std::ffi::c_void),
 }
 
 impl PwLib {
@@ -676,33 +748,290 @@ impl PwLib {
                 handle: lib,
                 pw_init: std::mem::transmute(load_sym(b"pw_init\0").ok_or("pw_init failed")?),
                 pw_thread_loop_new: std::mem::transmute(load_sym(b"pw_thread_loop_new\0").ok_or("pw_thread_loop_new failed")?),
+                pw_thread_loop_start: std::mem::transmute(load_sym(b"pw_thread_loop_start\0").ok_or("pw_thread_loop_start failed")?),
+                pw_thread_loop_stop: std::mem::transmute(load_sym(b"pw_thread_loop_stop\0").ok_or("pw_thread_loop_stop failed")?),
+                pw_thread_loop_get_loop: std::mem::transmute(load_sym(b"pw_thread_loop_get_loop\0").ok_or("pw_thread_loop_get_loop failed")?),
                 pw_context_new: std::mem::transmute(load_sym(b"pw_context_new\0").ok_or("pw_context_new failed")?),
                 pw_core_connect: std::mem::transmute(load_sym(b"pw_core_connect\0").ok_or("pw_core_connect failed")?),
+                pw_stream_new: std::mem::transmute(load_sym(b"pw_stream_new\0").ok_or("pw_stream_new failed")?),
+                pw_stream_add_listener: std::mem::transmute(load_sym(b"pw_stream_add_listener\0").ok_or("pw_stream_add_listener failed")?),
+                pw_stream_connect: std::mem::transmute(load_sym(b"pw_stream_connect\0").ok_or("pw_stream_connect failed")?),
+                pw_stream_update_params: std::mem::transmute(load_sym(b"pw_stream_update_params\0").ok_or("pw_stream_update_params failed")?),
+                pw_stream_dequeue_buffer: std::mem::transmute(load_sym(b"pw_stream_dequeue_buffer\0").ok_or("pw_stream_dequeue_buffer failed")?),
+                pw_stream_queue_buffer: std::mem::transmute(load_sym(b"pw_stream_queue_buffer\0").ok_or("pw_stream_queue_buffer failed")?),
+                pw_stream_destroy: std::mem::transmute(load_sym(b"pw_stream_destroy\0").ok_or("pw_stream_destroy failed")?),
             })
         }
     }
 }
 
-impl AudioBackend for PipewireBackend {
-    fn start(&mut self, _engine: AudioEngine) -> Result<(), String> {
-        let pw = PwLib::load()?;
-        self.running.store(true, Ordering::SeqCst);
+struct JackLib {
+    handle: *mut std::ffi::c_void,
+    jack_client_open: unsafe extern "C" fn(*const i8, i32, *mut i32) -> *mut std::ffi::c_void,
+    jack_client_close: unsafe extern "C" fn(*mut std::ffi::c_void) -> i32,
+    jack_set_process_callback: unsafe extern "C" fn(*mut std::ffi::c_void, unsafe extern "C" fn(u32, *mut std::ffi::c_void) -> i32, *mut std::ffi::c_void) -> i32,
+    jack_activate: unsafe extern "C" fn(*mut std::ffi::c_void) -> i32,
+    jack_deactivate: unsafe extern "C" fn(*mut std::ffi::c_void) -> i32,
+    jack_port_register: unsafe extern "C" fn(*mut std::ffi::c_void, *const i8, *const i8, u64, u64) -> *mut std::ffi::c_void,
+    jack_port_get_buffer: unsafe extern "C" fn(*mut std::ffi::c_void, u32) -> *mut std::ffi::c_void,
+}
 
+impl JackLib {
+    fn load() -> Result<Self, String> {
         unsafe {
-            (pw.pw_init)(std::ptr::null_mut(), std::ptr::null_mut());
-            let thread_loop = (pw.pw_thread_loop_new)(b"nullherz-loop\0".as_ptr() as *const i8, std::ptr::null_mut());
-            let context = (pw.pw_context_new)(thread_loop, std::ptr::null_mut(), 0);
-            let _core = (pw.pw_core_connect)(context, std::ptr::null_mut(), 0);
+            let lib = libc::dlopen(b"libjack.so.0\0".as_ptr() as *const _, libc::RTLD_NOW);
+            if lib.is_null() { return Err("Could not load libjack.so.0".to_string()); }
+            let load_sym = |name: &[u8]| {
+                let sym = libc::dlsym(lib, name.as_ptr() as *const _);
+                if sym.is_null() { None } else { Some(sym) }
+            };
+            Ok(Self {
+                handle: lib,
+                jack_client_open: std::mem::transmute(load_sym(b"jack_client_open\0").ok_or("jack_client_open failed")?),
+                jack_client_close: std::mem::transmute(load_sym(b"jack_client_close\0").ok_or("jack_client_close failed")?),
+                jack_set_process_callback: std::mem::transmute(load_sym(b"jack_set_process_callback\0").ok_or("jack_set_process_callback failed")?),
+                jack_activate: std::mem::transmute(load_sym(b"jack_activate\0").ok_or("jack_activate failed")?),
+                jack_deactivate: std::mem::transmute(load_sym(b"jack_deactivate\0").ok_or("jack_deactivate failed")?),
+                jack_port_register: std::mem::transmute(load_sym(b"jack_port_register\0").ok_or("jack_port_register failed")?),
+                jack_port_get_buffer: std::mem::transmute(load_sym(b"jack_port_get_buffer\0").ok_or("jack_port_get_buffer failed")?),
+            })
+        }
+    }
+}
 
-            // In a full SPA implementation, we would now map engine buffers to pw_stream buffers.
-            // This foundation allows the engine to be recognized as a native PipeWire object.
+pub struct JackBackend {
+    client: *mut std::ffi::c_void,
+    ports: Vec<*mut std::ffi::c_void>,
+    engine: Option<AudioEngine>,
+    lib: Option<JackLib>,
+}
 
-            let _ = pw.handle;
+unsafe impl Send for JackBackend {}
+
+impl JackBackend {
+    pub fn new() -> Self { Self { client: std::ptr::null_mut(), ports: Vec::new(), engine: None, lib: None } }
+}
+
+unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_void) -> i32 {
+    let backend = &mut *(data as *mut JackBackend);
+    let jack = backend.lib.as_ref().unwrap();
+
+    let mut out_ptrs: [*mut f32; 16] = [std::ptr::null_mut(); 16];
+    let num_ports = backend.ports.len().min(16);
+    for i in 0..num_ports {
+        out_ptrs[i] = (jack.jack_port_get_buffer)(backend.ports[i], nframes) as *mut f32;
+    }
+
+    if let Some(engine) = &mut backend.engine {
+        let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|i| {
+            if i < num_ports {
+                unsafe { std::slice::from_raw_parts_mut(out_ptrs[i], nframes as usize) }
+            } else {
+                &mut []
+            }
+        });
+        engine.process_block(&[], &mut out_refs_storage[..num_ports], nframes as usize);
+    }
+    0
+}
+
+impl AudioBackend for JackBackend {
+    fn start(&mut self, engine: AudioEngine) -> Result<(), String> {
+        unsafe {
+            if self.lib.is_none() { self.lib = Some(JackLib::load()?); }
+            let mut status = 0;
+            let jack = self.lib.as_ref().unwrap();
+            let client = (jack.jack_client_open)(b"nullherz\0".as_ptr() as *const i8, 0, &mut status);
+            self.client = client;
+            if self.client.is_null() { return Err("Failed to open JACK client".to_string()); }
+
+            let out1 = (jack.jack_port_register)(self.client, b"out_1\0".as_ptr() as *const i8, b"32 bit float mono audio\0".as_ptr() as *const i8, 2, 0);
+            let out2 = (jack.jack_port_register)(self.client, b"out_2\0".as_ptr() as *const i8, b"32 bit float mono audio\0".as_ptr() as *const i8, 2, 0);
+            self.ports = vec![out1, out2];
+
+            self.engine = Some(engine);
+            let ptr = self as *mut _ as *mut _;
+            let jack = self.lib.as_ref().unwrap();
+            (jack.jack_set_process_callback)(self.client, jack_process_callback, ptr);
+            (jack.jack_activate)(self.client);
         }
         Ok(())
     }
-    fn stop(&mut self) {
+    fn stop(&mut self) -> Option<AudioEngine> {
+        unsafe {
+            if !self.client.is_null() {
+                let jack = self.lib.as_ref().unwrap();
+                (jack.jack_deactivate)(self.client);
+                (jack.jack_client_close)(self.client);
+                self.client = std::ptr::null_mut();
+            }
+        }
+        self.engine.take()
+    }
+}
+
+pub struct PipewireBackend {
+    running: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread_loop: *mut std::ffi::c_void,
+    stream: *mut std::ffi::c_void,
+    engine: Option<AudioEngine>,
+    lib: Option<PwLib>,
+    events: Option<Box<PwStreamEvents>>,
+}
+
+unsafe impl Send for PipewireBackend {}
+
+impl PipewireBackend {
+    pub fn new() -> Self {
+        Self {
+            running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            thread_loop: std::ptr::null_mut(),
+            stream: std::ptr::null_mut(),
+            engine: None,
+            lib: None,
+            events: None,
+        }
+    }
+}
+
+#[repr(C)]
+struct PwStreamEvents {
+    version: u32,
+    destroy: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void)>,
+    state_changed: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void, old: i32, state: i32, error: *const i8)>,
+    control_info: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void, id: u32, control: *mut std::ffi::c_void)>,
+    io_changed: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void, id: u32, area: *mut std::ffi::c_void, size: u32)>,
+    param_changed: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void, id: u32, param: *const std::ffi::c_void)>,
+    add_buffer: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void, buffer: *mut std::ffi::c_void)>,
+    remove_buffer: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void, buffer: *mut std::ffi::c_void)>,
+    process: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void)>,
+    drained: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void)>,
+}
+
+unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
+    let backend = &mut *(data as *mut PipewireBackend);
+    let pw = backend.lib.as_ref().unwrap();
+
+    let buffer = (pw.pw_stream_dequeue_buffer)(backend.stream);
+    if buffer.is_null() { return; }
+
+    #[repr(C)]
+    struct PwBuffer {
+        buffer: *mut std::ffi::c_void,
+        _other: [u64; 4],
+    }
+    let pw_buf = &*(buffer as *const PwBuffer);
+    #[repr(C)]
+    struct SpaBuffer {
+        n_metas: u32,
+        metas: *mut std::ffi::c_void,
+        n_datas: u32,
+        datas: *mut SpaData,
+    }
+    #[repr(C)]
+    struct SpaData {
+        _type: u32,
+        flags: u32,
+        fd: i64,
+        mapoffset: u32,
+        maxsize: u32,
+        data: *mut std::ffi::c_void,
+        chunk: *mut std::ffi::c_void,
+    }
+    let spa_buf = unsafe { &*(pw_buf.buffer as *const SpaBuffer) };
+
+    let num_samples = 128; // Hard engine constraint
+    if spa_buf.n_datas >= 2 {
+        let data0 = unsafe { &*spa_buf.datas.add(0) };
+        let data1 = unsafe { &*spa_buf.datas.add(1) };
+        let ch0 = unsafe { std::slice::from_raw_parts_mut(data0.data as *mut f32, num_samples) };
+        let ch1 = unsafe { std::slice::from_raw_parts_mut(data1.data as *mut f32, num_samples) };
+        let mut out_refs = [ch0, ch1];
+
+        if let Some(engine) = &mut backend.engine {
+            engine.process_block(&[], &mut out_refs, num_samples);
+        }
+    } else if spa_buf.n_datas == 1 {
+        let data0 = unsafe { &*spa_buf.datas };
+        let ch0 = unsafe { std::slice::from_raw_parts_mut(data0.data as *mut f32, num_samples) };
+        let mut out_refs = [ch0];
+
+        if let Some(engine) = &mut backend.engine {
+            engine.process_block(&[], &mut out_refs, num_samples);
+        }
+    }
+
+    (pw.pw_stream_queue_buffer)(backend.stream, buffer);
+}
+
+unsafe extern "C" fn pw_param_changed(data: *mut std::ffi::c_void, id: u32, _param: *const std::ffi::c_void) {
+    if id != 2 { return; } // SPA_PARAM_Props
+    let _backend = &mut *(data as *mut PipewireBackend);
+    let _ = ipc_layer::set_rt_priority(90); // Try to set RT priority when param changes (often happens on start/reconnect)
+}
+
+impl AudioBackend for PipewireBackend {
+    fn start(&mut self, engine: AudioEngine) -> Result<(), String> {
+        unsafe {
+            if self.lib.is_none() { self.lib = Some(PwLib::load()?); }
+            self.engine = Some(engine);
+            self.running.store(true, Ordering::SeqCst);
+
+            let pw = self.lib.as_ref().unwrap();
+            (pw.pw_init)(std::ptr::null_mut(), std::ptr::null_mut());
+            self.thread_loop = (pw.pw_thread_loop_new)(b"nullherz-loop\0".as_ptr() as *const i8, std::ptr::null_mut());
+            let loop_ptr = (pw.pw_thread_loop_get_loop)(self.thread_loop);
+            let context = (pw.pw_context_new)(loop_ptr, std::ptr::null_mut(), 0);
+            let _core = (pw.pw_core_connect)(context, std::ptr::null_mut(), 0);
+
+            self.stream = (pw.pw_stream_new)(context, b"nullherz-stream\0".as_ptr() as *const i8, std::ptr::null_mut());
+
+            // Define minimal SPA Format POD for Stereo F32 (Simplified)
+            // Type(Object), Size(Format), Id(EnumFormat), ...
+            let format_pod: [u32; 10] = [
+                3, // SPA_TYPE_OBJECT_Format
+                40, // size
+                1, // SPA_PARAM_EnumFormat
+                1, // media type (audio)
+                1, // media subtype (raw)
+                1, // format (F32)
+                44100, // rate
+                2, // channels
+                0, 0, // padding
+            ];
+            let format_ptr = format_pod.as_ptr() as *const std::ffi::c_void;
+            let params = [format_ptr];
+
+            self.events = Some(Box::new(PwStreamEvents {
+                version: 1,
+                destroy: None,
+                state_changed: None,
+                control_info: None,
+                io_changed: None,
+                param_changed: Some(pw_param_changed),
+                add_buffer: None,
+                remove_buffer: None,
+                process: Some(pw_process_callback),
+                drained: None,
+            }));
+
+            let ev_ptr = self.events.as_ref().unwrap().as_ref() as *const _ as *const _;
+            let self_ptr = self as *mut _ as *mut _;
+            let pw = self.lib.as_ref().unwrap();
+            (pw.pw_stream_add_listener)(self.stream, std::ptr::null_mut(), ev_ptr, self_ptr);
+            (pw.pw_stream_connect)(self.stream, 1, 0xffffffff, 0x1, params.as_ptr() as *const _, 1);
+            (pw.pw_thread_loop_start)(self.thread_loop);
+        }
+        Ok(())
+    }
+    fn stop(&mut self) -> Option<AudioEngine> {
         self.running.store(false, Ordering::SeqCst);
+        unsafe {
+            let pw = self.lib.as_ref().unwrap();
+            (pw.pw_thread_loop_stop)(self.thread_loop);
+            (pw.pw_stream_destroy)(self.stream);
+        }
+        self.engine.take()
     }
 }
 
@@ -837,6 +1166,50 @@ impl AudioProcessor for CrossfaderProcessor {
     }
 }
 
+pub struct WavetableProcessor {
+    inner: audio_dsp::WavetableOscillator,
+}
+
+impl WavetableProcessor {
+    pub fn new(sample_rate: f32) -> Self {
+        Self { inner: audio_dsp::WavetableOscillator::new(sample_rate) }
+    }
+}
+
+impl AudioProcessor for WavetableProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        let num_channels = outputs.len().min(16);
+        let len = if num_channels > 0 { outputs[0].len() } else { 0 };
+        if len == 0 { return; }
+
+        let fm_storage = [0.0f32; 128];
+        let pm_storage = [0.0f32; 128];
+
+        for ch in 0..num_channels {
+            let fm = if inputs.len() > 0 { inputs[0] } else { &fm_storage[..len] };
+            let pm = if inputs.len() > 1 { inputs[1] } else { &pm_storage[..len] };
+            self.inner.process_scalar(ch, fm, pm, outputs[ch]);
+        }
+    }
+}
+
+pub struct SpectralProcessor {
+    inner: audio_dsp::SpectralProcessor,
+}
+
+impl SpectralProcessor {
+    pub fn new(fft_size: usize) -> Self {
+        Self { inner: audio_dsp::SpectralProcessor::new(fft_size) }
+    }
+}
+
+impl AudioProcessor for SpectralProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        if inputs.is_empty() || outputs.is_empty() { return; }
+        self.inner.process_overlap_add(inputs[0], outputs[0]);
+    }
+}
+
 pub struct SummingProcessor {
     inner: audio_dsp::SummingNode,
 }
@@ -849,6 +1222,34 @@ impl AudioProcessor for SummingProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         if outputs.is_empty() { return; }
         self.inner.process_16_to_1(inputs, outputs[0]);
+    }
+}
+
+pub struct ModulationProcessor {
+    pub target_id: u64,
+    pub param_id: u32,
+    pub scale: f32,
+    pub offset: f32,
+}
+
+impl ModulationProcessor {
+    pub fn new(target_id: u64, param_id: u32, scale: f32, offset: f32) -> Self {
+        Self { target_id, param_id, scale, offset }
+    }
+}
+
+impl AudioProcessor for ModulationProcessor {
+    fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]]) {
+        if inputs.is_empty() { return; }
+        let cv = inputs[0];
+        if cv.is_empty() { return; }
+
+        // In a real implementation, this would emit commands to the engine's command queue.
+        // Since we are in the RT thread, we'd use a lock-free queue back to the engine
+        // or directly manipulate the target processor if thread-safe.
+        // For Phase 5, we demonstrate the mapping logic.
+        let _avg_cv: f32 = cv.iter().sum::<f32>() / cv.len() as f32;
+        let _val = _avg_cv * self.scale + self.offset;
     }
 }
 
