@@ -2097,6 +2097,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "nullherz-dummy"
+version = "0.1.0"
+
+[[package]]
 name = "nullherz-inspector"
 version = "0.1.0"
 dependencies = [

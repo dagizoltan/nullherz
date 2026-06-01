@@ -82,7 +82,7 @@ impl TaskPool {
         let running = Arc::new(AtomicBool::new(true));
 
         for _ in 0..num_workers {
-            let (mut prod, mut cons) = RingBuffer::new(128).split();
+            let (prod, mut cons) = RingBuffer::new(128).split();
             let running_worker = running.clone();
             let completion_worker = completion.clone();
 
@@ -337,7 +337,7 @@ impl AudioProcessor for ProcessorGraph {
                     }
                 }
             }
-            control_plane::Command::AddNode { processor_type_id, node_idx } => {
+            control_plane::Command::AddNode { processor_type_id, node_idx: _ } => {
                 let processor: Box<dyn AudioProcessor> = match processor_type_id {
                     1 => Box::new(BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
                     2 => Box::new(GainProcessor::new(0, 1.0)),
@@ -746,8 +746,6 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
     let buffer = (pw.pw_stream_dequeue_buffer)(backend.stream);
     if buffer.is_null() { return; }
 
-    // Deconstruct PipeWire buffer to get raw pointers (Simplified for zero-copy example)
-    // In a real implementation, we'd iterate over planes and use dmabuf if available.
     #[repr(C)]
     struct PwBuffer {
         buffer: *mut std::ffi::c_void,
@@ -771,12 +769,23 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
         data: *mut std::ffi::c_void,
         chunk: *mut std::ffi::c_void,
     }
-    let spa_buf = &*(pw_buf.buffer as *const SpaBuffer);
-    if spa_buf.n_datas > 0 {
-        let data = &*spa_buf.datas;
-        let num_samples = 128; // Assume fixed block for nullherz
-        let mut out_raw = [std::slice::from_raw_parts_mut(data.data as *mut f32, num_samples)];
-        let mut out_refs = [&mut out_raw[0][..]];
+    let spa_buf = unsafe { &*(pw_buf.buffer as *const SpaBuffer) };
+
+    let num_samples = 128; // Hard engine constraint
+    if spa_buf.n_datas >= 2 {
+        let data0 = unsafe { &*spa_buf.datas.add(0) };
+        let data1 = unsafe { &*spa_buf.datas.add(1) };
+        let ch0 = unsafe { std::slice::from_raw_parts_mut(data0.data as *mut f32, num_samples) };
+        let ch1 = unsafe { std::slice::from_raw_parts_mut(data1.data as *mut f32, num_samples) };
+        let mut out_refs = [ch0, ch1];
+
+        if let Some(engine) = &mut backend.engine {
+            engine.process_block(&[], &mut out_refs, num_samples);
+        }
+    } else if spa_buf.n_datas == 1 {
+        let data0 = unsafe { &*spa_buf.datas };
+        let ch0 = unsafe { std::slice::from_raw_parts_mut(data0.data as *mut f32, num_samples) };
+        let mut out_refs = [ch0];
 
         if let Some(engine) = &mut backend.engine {
             engine.process_block(&[], &mut out_refs, num_samples);
@@ -784,6 +793,12 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
     }
 
     (pw.pw_stream_queue_buffer)(backend.stream, buffer);
+}
+
+unsafe extern "C" fn pw_param_changed(data: *mut std::ffi::c_void, id: u32, _param: *const std::ffi::c_void) {
+    if id != 2 { return; } // SPA_PARAM_Props
+    let _backend = &mut *(data as *mut PipewireBackend);
+    let _ = ipc_layer::set_rt_priority(90); // Try to set RT priority when param changes (often happens on start/reconnect)
 }
 
 impl AudioBackend for PipewireBackend {
@@ -802,20 +817,20 @@ impl AudioBackend for PipewireBackend {
 
             self.stream = (pw.pw_stream_new)(context, b"nullherz-stream\0".as_ptr() as *const i8, std::ptr::null_mut());
 
-            let mut events = PwStreamEvents {
+            static mut EVENTS: PwStreamEvents = PwStreamEvents {
                 version: 1,
                 destroy: None,
                 state_changed: None,
                 control_info: None,
                 io_changed: None,
-                param_changed: None,
+                param_changed: Some(pw_param_changed),
                 add_buffer: None,
                 remove_buffer: None,
                 process: Some(pw_process_callback),
                 drained: None,
             };
 
-            (pw.pw_stream_add_listener)(self.stream, std::ptr::null_mut(), &events as *const _ as *const _, self as *mut _ as *mut _);
+            (pw.pw_stream_add_listener)(self.stream, std::ptr::null_mut(), &EVENTS as *const _ as *const _, self as *mut _ as *mut _);
             (pw.pw_stream_connect)(self.stream, 1, 0xffffffff, 0, std::ptr::null_mut(), 0);
             (pw.pw_thread_loop_start)(self.thread_loop);
         }

@@ -14,10 +14,12 @@ fn main() {
     let mut manager = SidecarManager::new();
 
     println!("Spawning 16 SIMD-heavy sidecar nodes...");
+    let dummy_path = "./target/debug/nullherz-sidecar-dummy";
     for i in 0..16 {
-        // In a real bench, we'd have a dummy SIMD binary.
-        // For now, we assume manager can attempt to spawn (it will fail to find binary but we test the logic).
-        let _ = manager.spawn_sidecar(&format!("bench_node_{}", i), "./nullherz-sidecar-dummy", 2);
+        match manager.spawn_sidecar(&format!("bench_node_{}", i), dummy_path, 2) {
+            Ok(_) => println!("Spawned node {}", i),
+            Err(e) => println!("Failed to spawn node {}: {}", i, e),
+        }
     }
 
     let mut engine = AudioEngine::new(cmd_cons, garbage_prod, tel_prod, Box::new(graph));
@@ -47,9 +49,9 @@ fn main() {
 
             engine = backend.stop().expect("Backend should return engine");
         } else {
-            println!("Failed to start backend {}", current_backend_idx);
-            // If it failed, we still need an engine for the next one, but how?
-            // This is just a bench, so we assume success for the architecture test.
+            println!("Failed to start backend {}. It might not be available on this system.", current_backend_idx);
+            // Re-create engine from previous if possible, but we already moved it.
+            // For bench, we just stop.
             break;
         }
 
