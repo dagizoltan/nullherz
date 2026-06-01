@@ -200,10 +200,17 @@ pub fn set_rt_priority_for(pid: i32, priority: i32) -> Result<(), String> {
 }
 
 pub fn move_to_cgroup(cgroup_name: &str, pid: i32) -> Result<(), String> {
-    let path = format!("/sys/fs/cgroup/{}/cgroup.procs", cgroup_name);
-    // Ensure directory exists - though we might expect it to exist
-    std::fs::create_dir_all(format!("/sys/fs/cgroup/{}", cgroup_name)).map_err(|e| e.to_string())?;
-    std::fs::write(path, pid.to_string()).map_err(|e| e.to_string())
+    let base_path = format!("/sys/fs/cgroup/{}", cgroup_name);
+    let procs_path = format!("{}/cgroup.procs", base_path);
+
+    if !std::path::Path::new(&base_path).exists() {
+        if let Err(e) = std::fs::create_dir_all(&base_path) {
+            return Err(format!("Failed to create cgroup directory {}: {}. Note: This usually requires root privileges or cgroup delegation.", base_path, e));
+        }
+    }
+
+    std::fs::write(&procs_path, pid.to_string())
+        .map_err(|e| format!("Failed to write PID to {}: {}. Check permissions or cgroup v2 availability.", procs_path, e))
 }
 
 #[repr(C, align(64))]

@@ -1,4 +1,4 @@
-use audio_core::{AudioEngine, ProcessorGraph, ThreadedBackend, AlsaBackend, PipewireBackend, AudioBackend};
+use audio_core::{AudioEngine, ProcessorGraph, ThreadedBackend, AlsaBackend, PipewireBackend, JackBackend, AudioBackend};
 use ipc_layer::RingBuffer;
 use fx_runtime::SidecarManager;
 use std::time::{Duration, Instant};
@@ -28,6 +28,7 @@ fn main() {
         Box::new(ThreadedBackend::new()),
         Box::new(AlsaBackend::new()),
         Box::new(PipewireBackend::new()),
+        Box::new(JackBackend::new()),
     ];
 
     let mut current_backend_idx = 0;
