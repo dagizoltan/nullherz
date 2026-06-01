@@ -372,6 +372,9 @@ impl AudioProcessor for ProcessorGraph {
                     1 => Box::new(BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
                     2 => Box::new(GainProcessor::new(0, 1.0)),
                     3 => Box::new(SimdBiquadProcessor::new(audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
+                    4 => Box::new(WavetableProcessor::new(44100.0)),
+                    5 => Box::new(SpectralProcessor::new(512)),
+                    10 => Box::new(ModulationProcessor::new(0, 0, 1.0, 0.0)),
                     20 => Box::new(CrossfaderProcessor::new()),
                     _ => Box::new(GainProcessor::new(0, 0.0)), // Silence
                 };
@@ -983,11 +986,21 @@ impl AudioBackend for PipewireBackend {
 
             self.stream = (pw.pw_stream_new)(context, b"nullherz-stream\0".as_ptr() as *const i8, std::ptr::null_mut());
 
-            // Build EnumFormat param (Simplified for Phase 3)
-            // In a real SPA plugin, we'd use SPA_TYPE_OBJECT_Format
-            // For now, we'll provide a minimal byte array representing a stereo f32 format if we had the headers.
-            // Since we're dependency-less, we'll connect without params first and hope for the best,
-            // but we've added the update_params symbol for future refinement.
+            // Define minimal SPA Format POD for Stereo F32 (Simplified)
+            // Type(Object), Size(Format), Id(EnumFormat), ...
+            let format_pod: [u32; 10] = [
+                3, // SPA_TYPE_OBJECT_Format
+                40, // size
+                1, // SPA_PARAM_EnumFormat
+                1, // media type (audio)
+                1, // media subtype (raw)
+                1, // format (F32)
+                44100, // rate
+                2, // channels
+                0, 0, // padding
+            ];
+            let format_ptr = format_pod.as_ptr() as *const std::ffi::c_void;
+            let params = [format_ptr];
 
             self.events = Some(Box::new(PwStreamEvents {
                 version: 1,
@@ -1006,7 +1019,7 @@ impl AudioBackend for PipewireBackend {
             let self_ptr = self as *mut _ as *mut _;
             let pw = self.lib.as_ref().unwrap();
             (pw.pw_stream_add_listener)(self.stream, std::ptr::null_mut(), ev_ptr, self_ptr);
-            (pw.pw_stream_connect)(self.stream, 1, 0xffffffff, 0, std::ptr::null_mut(), 0);
+            (pw.pw_stream_connect)(self.stream, 1, 0xffffffff, 0x1, params.as_ptr() as *const _, 1);
             (pw.pw_thread_loop_start)(self.thread_loop);
         }
         Ok(())
@@ -1153,6 +1166,50 @@ impl AudioProcessor for CrossfaderProcessor {
     }
 }
 
+pub struct WavetableProcessor {
+    inner: audio_dsp::WavetableOscillator,
+}
+
+impl WavetableProcessor {
+    pub fn new(sample_rate: f32) -> Self {
+        Self { inner: audio_dsp::WavetableOscillator::new(sample_rate) }
+    }
+}
+
+impl AudioProcessor for WavetableProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        let num_channels = outputs.len().min(16);
+        let len = if num_channels > 0 { outputs[0].len() } else { 0 };
+        if len == 0 { return; }
+
+        let fm_storage = [0.0f32; 128];
+        let pm_storage = [0.0f32; 128];
+
+        for ch in 0..num_channels {
+            let fm = if inputs.len() > 0 { inputs[0] } else { &fm_storage[..len] };
+            let pm = if inputs.len() > 1 { inputs[1] } else { &pm_storage[..len] };
+            self.inner.process_scalar(ch, fm, pm, outputs[ch]);
+        }
+    }
+}
+
+pub struct SpectralProcessor {
+    inner: audio_dsp::SpectralProcessor,
+}
+
+impl SpectralProcessor {
+    pub fn new(fft_size: usize) -> Self {
+        Self { inner: audio_dsp::SpectralProcessor::new(fft_size) }
+    }
+}
+
+impl AudioProcessor for SpectralProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        if inputs.is_empty() || outputs.is_empty() { return; }
+        self.inner.process_overlap_add(inputs[0], outputs[0]);
+    }
+}
+
 pub struct SummingProcessor {
     inner: audio_dsp::SummingNode,
 }
@@ -1165,6 +1222,34 @@ impl AudioProcessor for SummingProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         if outputs.is_empty() { return; }
         self.inner.process_16_to_1(inputs, outputs[0]);
+    }
+}
+
+pub struct ModulationProcessor {
+    pub target_id: u64,
+    pub param_id: u32,
+    pub scale: f32,
+    pub offset: f32,
+}
+
+impl ModulationProcessor {
+    pub fn new(target_id: u64, param_id: u32, scale: f32, offset: f32) -> Self {
+        Self { target_id, param_id, scale, offset }
+    }
+}
+
+impl AudioProcessor for ModulationProcessor {
+    fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]]) {
+        if inputs.is_empty() { return; }
+        let cv = inputs[0];
+        if cv.is_empty() { return; }
+
+        // In a real implementation, this would emit commands to the engine's command queue.
+        // Since we are in the RT thread, we'd use a lock-free queue back to the engine
+        // or directly manipulate the target processor if thread-safe.
+        // For Phase 5, we demonstrate the mapping logic.
+        let _avg_cv: f32 = cv.iter().sum::<f32>() / cv.len() as f32;
+        let _val = _avg_cv * self.scale + self.offset;
     }
 }
 
