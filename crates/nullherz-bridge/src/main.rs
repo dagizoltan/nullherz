@@ -4,7 +4,7 @@ use audio_core::Telemetry;
 use control_plane::TimestampedCommand;
 
 fn main() {
-    let (tel_prod, tel_cons) = RingBuffer::<Telemetry>::new(1024).split();
+    let (_tel_prod, tel_cons) = RingBuffer::<Telemetry>::new(1024).split();
     let (cmd_prod, _cmd_cons) = RingBuffer::<TimestampedCommand>::new(1024).split();
 
     let mut bridge = Bridge::new(tel_cons, cmd_prod);

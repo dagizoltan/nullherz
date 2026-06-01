@@ -1,4 +1,4 @@
-use audio_core::{AudioEngine, ProcessorGraph, ThreadedBackend, AudioBackend, AlsaBackend, PipewireBackend, SimdBiquadProcessor};
+use audio_core::{AudioEngine, ProcessorGraph, ThreadedBackend, AudioBackend, SimdBiquadProcessor};
 use ipc_layer::RingBuffer;
 use std::time::Duration;
 

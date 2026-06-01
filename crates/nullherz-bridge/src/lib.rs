@@ -1,5 +1,5 @@
-use audio_core::{Telemetry};
-use control_plane::{Command, TimestampedCommand};
+use audio_core::Telemetry;
+use control_plane::TimestampedCommand;
 use ipc_layer::{Consumer, Producer};
 use std::net::TcpListener;
 use std::thread;
