@@ -35,12 +35,15 @@ impl Bridge {
                 println!("New WebSocket connection");
 
                 loop {
-                    // 1. Broadcast Telemetry
+                    // 1. Broadcast Telemetry (limit per loop to avoid blocking other tasks)
+                    let mut count = 0;
                     while let Some(tel) = telemetry_consumer.pop() {
                         let json = serde_json::to_string(&tel).unwrap();
                         if let Err(_) = websocket.send(tungstenite::Message::Text(json)) {
                             return;
                         }
+                        count += 1;
+                        if count > 10 { break; }
                     }
 
                     // 2. Forward Commands

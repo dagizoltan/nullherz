@@ -313,8 +313,8 @@ impl AudioProcessor for ProcessorGraph {
         *suggestions = self.stats.optimization_suggestions;
         *buffer_levels = self.get_buffer_levels();
     }
-    fn process(&mut self, _external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]]) {
-        let num_samples = if !external_outputs.is_empty() { external_outputs[0].len() } else { 0 };
+    fn process(&mut self, external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]]) {
+        let num_samples = if !external_outputs.is_empty() { external_outputs[0].len() } else if !external_inputs.is_empty() { external_inputs[0].len() } else { 0 };
         if num_samples == 0 { return; }
 
         if self.needs_commit {
@@ -323,6 +323,13 @@ impl AudioProcessor for ProcessorGraph {
         }
 
         let topo = *self.current_topology();
+
+        // Map external inputs to internal buffers
+        for (i, &input) in external_inputs.iter().enumerate().take(16) {
+            let p_idx = topo.virtual_to_physical[i]; // Simple mapping: input N -> buffer N
+            self.buffers[p_idx].data[..num_samples].copy_from_slice(input);
+        }
+
         let buffers_ptr = self.buffers.as_mut_ptr();
 
         let mut node_loads = [0u64; 64];
@@ -583,15 +590,31 @@ impl AudioEngine {
         let graph = unsafe { &mut **graph_ptr };
         while current_sample_in_block < num_samples {
             let cmd = if let Some(pending) = self.pending_command.take() { Some(pending) } else { self.command_consumer.pop() };
-            if let Some(cmd) = cmd {
+            if let Some(mut cmd) = cmd {
                 if cmd.timestamp_samples < block_end_sample {
                     let cmd_offset = if cmd.timestamp_samples > block_start_sample { (cmd.timestamp_samples - block_start_sample) as usize } else { 0 };
-                    if cmd_offset > current_sample_in_block {
-                        let samples_to_process = cmd_offset - current_sample_in_block;
-                        self.process_sub_block(graph, inputs, outputs, current_sample_in_block, samples_to_process);
-                        current_sample_in_block += samples_to_process;
+                    let samples_before_cmd = cmd_offset.saturating_sub(current_sample_in_block);
+
+                    if samples_before_cmd > 0 {
+                        self.process_sub_block(graph, inputs, outputs, current_sample_in_block, samples_before_cmd);
+                        current_sample_in_block += samples_before_cmd;
                     }
+
                     graph.apply_command(&cmd.command);
+
+                    loop {
+                        if let Some(next_cmd) = self.command_consumer.pop() {
+                            if next_cmd.timestamp_samples <= cmd.timestamp_samples {
+                                graph.apply_command(&next_cmd.command);
+                                cmd = next_cmd;
+                                continue;
+                            } else {
+                                self.pending_command = Some(next_cmd);
+                                break;
+                            }
+                        }
+                        break;
+                    }
                 } else {
                     self.pending_command = Some(cmd);
                     let remaining = num_samples - current_sample_in_block;
@@ -1236,6 +1259,50 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         let engine_final = backend2.stop().expect("Should return engine");
         assert!(engine_final.sample_counter > prev_samples);
+    }
+
+    #[test]
+    fn test_burst_commands() {
+        let rb = RingBuffer::new(1024);
+        let (mut prod, cons) = rb.split();
+        let garbage_rb = RingBuffer::new(32);
+        let (garbage_prod, _) = garbage_rb.split();
+        let tel_rb = RingBuffer::new(1024);
+        let (tel_prod, _) = tel_rb.split();
+
+        let mut graph = ProcessorGraph::new();
+        graph.pool = None;
+        graph.add_node(Box::new(GainProcessor::new(1, 0.0)), vec![0], vec![1]);
+        let mut engine = AudioEngine::new(cons, garbage_prod, tel_prod, Box::new(graph));
+
+        // Send two commands at the same timestamp
+        let _ = prod.push(TimestampedCommand {
+            timestamp_samples: 5,
+            command: Command::SetParam { target_id: 1, param_id: 0, value: 0.5, ramp_duration_samples: 0 },
+        });
+        let _ = prod.push(TimestampedCommand {
+            timestamp_samples: 5,
+            command: Command::SetParam { target_id: 1, param_id: 0, value: 1.0, ramp_duration_samples: 0 },
+        });
+
+        let mut outputs = [[0.0f32; 128]; 2];
+        let mut inputs = [[1.0f32; 128]; 1];
+        let (ch0, ch1) = outputs.split_at_mut(1);
+        let mut out_refs = [&mut ch0[0][..], &mut ch1[0][..]];
+        let in_refs = [&inputs[0][..]];
+
+        engine.process_block(&in_refs, &mut out_refs, 10);
+
+        // Samples 0-4 should be 0.0 (initial gain)
+        println!("OUT at 0: {}", outputs[1][0]);
+        println!("OUT at 4: {}", outputs[1][4]);
+        assert_eq!(outputs[1][0], 0.0);
+        assert_eq!(outputs[1][4], 0.0);
+        // Samples 5-9 should be 1.0 (last command wins)
+        println!("OUT at 5: {}", outputs[1][5]);
+        println!("OUT at 9: {}", outputs[1][9]);
+        assert_eq!(outputs[1][5], 1.0);
+        assert_eq!(outputs[1][9], 1.0);
     }
 
     #[test]
