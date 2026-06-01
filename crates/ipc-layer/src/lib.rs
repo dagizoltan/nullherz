@@ -184,6 +184,28 @@ impl Drop for EventFd {
     fn drop(&mut self) { if self.owner { unsafe { libc::close(self.fd); } } }
 }
 
+pub fn set_rt_priority(priority: i32) -> Result<(), String> {
+    set_rt_priority_for(0, priority)
+}
+
+pub fn set_rt_priority_for(pid: i32, priority: i32) -> Result<(), String> {
+    unsafe {
+        let mut param = libc::sched_param { sched_priority: priority };
+        let result = libc::sched_setscheduler(pid, libc::SCHED_FIFO, &mut param);
+        if result == -1 {
+            return Err(format!("Failed to set RT priority for PID {}: {}", pid, std::io::Error::last_os_error()));
+        }
+    }
+    Ok(())
+}
+
+pub fn move_to_cgroup(cgroup_name: &str, pid: i32) -> Result<(), String> {
+    let path = format!("/sys/fs/cgroup/{}/cgroup.procs", cgroup_name);
+    // Ensure directory exists - though we might expect it to exist
+    std::fs::create_dir_all(format!("/sys/fs/cgroup/{}", cgroup_name)).map_err(|e| e.to_string())?;
+    std::fs::write(path, pid.to_string()).map_err(|e| e.to_string())
+}
+
 #[repr(C, align(64))]
 pub struct ShmSignal {
     pub(crate) flag: AtomicBool,

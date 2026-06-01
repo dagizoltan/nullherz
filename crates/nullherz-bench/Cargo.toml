@@ -1,0 +1,11 @@
+[package]
+name = "nullherz-bench"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+audio-core = { path = "../audio-core" }
+audio-dsp = { path = "../audio-dsp" }
+control-plane = { path = "../control-plane" }
+fx-runtime = { path = "../fx-runtime" }
+ipc-layer = { path = "../ipc-layer" }

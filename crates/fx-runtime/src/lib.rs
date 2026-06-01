@@ -1,5 +1,5 @@
 use std::process::{Command, Child};
-use ipc_layer::{SharedMemory, ShmRingBuffer, ShmSignal, EventFd, AudioBlock};
+use ipc_layer::{SharedMemory, ShmRingBuffer, ShmSignal, EventFd, AudioBlock, move_to_cgroup};
 use audio_core::{SidecarProcessor, MAX_CHANNELS};
 
 pub struct SidecarHandle {
@@ -84,6 +84,10 @@ impl SidecarManager {
 
         let child = cmd.spawn()
             .map_err(|e| e.to_string())?;
+
+        // Move to high-priority Cgroup and set RT priority
+        let _ = move_to_cgroup("nullherz", child.id() as i32);
+        let _ = ipc_layer::set_rt_priority_for(child.id() as i32, 80);
 
         let processor = unsafe {
             SidecarProcessor::new(

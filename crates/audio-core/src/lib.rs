@@ -543,11 +543,11 @@ impl Drop for AudioEngine {
 
 pub trait AudioBackend {
     fn start(&mut self, engine: AudioEngine) -> Result<(), String>;
-    fn stop(&mut self);
+    fn stop(&mut self) -> Option<AudioEngine>;
 }
 
 pub struct ThreadedBackend {
-    handle: Option<thread::JoinHandle<()>>,
+    handle: Option<thread::JoinHandle<Option<AudioEngine>>>,
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 impl ThreadedBackend {
@@ -558,6 +558,7 @@ impl AudioBackend for ThreadedBackend {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let handle = thread::spawn(move || {
+            let _ = ipc_layer::set_rt_priority(90);
             let mut outputs_raw = [[0.0f32; 128]; 2];
             let interval = Duration::from_secs_f64(128.0 / 44100.0);
             while running.load(Ordering::SeqCst) {
@@ -568,11 +569,19 @@ impl AudioBackend for ThreadedBackend {
                 let elapsed = start.elapsed();
                 if elapsed < interval { thread::sleep(interval - elapsed); }
             }
+            Some(engine)
         });
         self.handle = Some(handle);
         Ok(())
     }
-    fn stop(&mut self) { self.running.store(false, Ordering::SeqCst); if let Some(handle) = self.handle.take() { let _ = handle.join(); } }
+    fn stop(&mut self) -> Option<AudioEngine> {
+        self.running.store(false, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            handle.join().unwrap_or(None)
+        } else {
+            None
+        }
+    }
 }
 
 struct AlsaLib {
@@ -607,7 +616,7 @@ impl Drop for AlsaLib { fn drop(&mut self) { unsafe { libc::dlclose(self.handle)
 
 pub struct AlsaBackend {
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    handle: Option<thread::JoinHandle<()>>,
+    handle: Option<thread::JoinHandle<Option<AudioEngine>>>,
 }
 impl AlsaBackend {
     pub fn new() -> Self { Self { running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), handle: None } }
@@ -618,11 +627,12 @@ impl AudioBackend for AlsaBackend {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let handle = thread::spawn(move || {
+            let _ = ipc_layer::set_rt_priority(90);
             unsafe {
                 let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
                 let name = std::ffi::CString::new("default").unwrap();
-                if (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) != 0 { return; }
-                if (alsa.snd_pcm_set_params)(pcm, 2, 3, 2, 44100, 1, 5000) != 0 { (alsa.snd_pcm_close)(pcm); return; }
+                if (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) != 0 { return None; }
+                if (alsa.snd_pcm_set_params)(pcm, 2, 3, 2, 44100, 1, 5000) != 0 { (alsa.snd_pcm_close)(pcm); return None; }
                 let mut outputs_raw = [[0.0f32; 128]; 2];
                 let mut interleaved = [0i16; 256];
                 while running.load(Ordering::SeqCst) {
@@ -639,28 +649,36 @@ impl AudioBackend for AlsaBackend {
                 }
                 (alsa.snd_pcm_close)(pcm);
             }
+            Some(engine)
         });
         self.handle = Some(handle);
         Ok(())
     }
-    fn stop(&mut self) { self.running.store(false, Ordering::SeqCst); if let Some(handle) = self.handle.take() { let _ = handle.join(); } }
-}
-
-pub struct PipewireBackend {
-    running: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    _handle: Option<thread::JoinHandle<()>>,
-}
-
-impl PipewireBackend {
-    pub fn new() -> Self { Self { running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), _handle: None } }
+    fn stop(&mut self) -> Option<AudioEngine> {
+        self.running.store(false, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            handle.join().unwrap_or(None)
+        } else {
+            None
+        }
+    }
 }
 
 struct PwLib {
     handle: *mut std::ffi::c_void,
     pw_init: unsafe extern "C" fn(*mut i32, *mut *mut *mut i8),
     pw_thread_loop_new: unsafe extern "C" fn(*const i8, *const std::ffi::c_void) -> *mut std::ffi::c_void,
+    pw_thread_loop_start: unsafe extern "C" fn(*mut std::ffi::c_void) -> i32,
+    pw_thread_loop_stop: unsafe extern "C" fn(*mut std::ffi::c_void),
+    pw_thread_loop_get_loop: unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void,
     pw_context_new: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, usize) -> *mut std::ffi::c_void,
     pw_core_connect: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, usize) -> *mut std::ffi::c_void,
+    pw_stream_new: unsafe extern "C" fn(*mut std::ffi::c_void, *const i8, *mut std::ffi::c_void) -> *mut std::ffi::c_void,
+    pw_stream_add_listener: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, *const std::ffi::c_void, *mut std::ffi::c_void),
+    pw_stream_connect: unsafe extern "C" fn(*mut std::ffi::c_void, i32, u32, u32, *const std::ffi::c_void, u32) -> i32,
+    pw_stream_dequeue_buffer: unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void,
+    pw_stream_queue_buffer: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> i32,
+    pw_stream_destroy: unsafe extern "C" fn(*mut std::ffi::c_void),
 }
 
 impl PwLib {
@@ -676,33 +694,141 @@ impl PwLib {
                 handle: lib,
                 pw_init: std::mem::transmute(load_sym(b"pw_init\0").ok_or("pw_init failed")?),
                 pw_thread_loop_new: std::mem::transmute(load_sym(b"pw_thread_loop_new\0").ok_or("pw_thread_loop_new failed")?),
+                pw_thread_loop_start: std::mem::transmute(load_sym(b"pw_thread_loop_start\0").ok_or("pw_thread_loop_start failed")?),
+                pw_thread_loop_stop: std::mem::transmute(load_sym(b"pw_thread_loop_stop\0").ok_or("pw_thread_loop_stop failed")?),
+                pw_thread_loop_get_loop: std::mem::transmute(load_sym(b"pw_thread_loop_get_loop\0").ok_or("pw_thread_loop_get_loop failed")?),
                 pw_context_new: std::mem::transmute(load_sym(b"pw_context_new\0").ok_or("pw_context_new failed")?),
                 pw_core_connect: std::mem::transmute(load_sym(b"pw_core_connect\0").ok_or("pw_core_connect failed")?),
+                pw_stream_new: std::mem::transmute(load_sym(b"pw_stream_new\0").ok_or("pw_stream_new failed")?),
+                pw_stream_add_listener: std::mem::transmute(load_sym(b"pw_stream_add_listener\0").ok_or("pw_stream_add_listener failed")?),
+                pw_stream_connect: std::mem::transmute(load_sym(b"pw_stream_connect\0").ok_or("pw_stream_connect failed")?),
+                pw_stream_dequeue_buffer: std::mem::transmute(load_sym(b"pw_stream_dequeue_buffer\0").ok_or("pw_stream_dequeue_buffer failed")?),
+                pw_stream_queue_buffer: std::mem::transmute(load_sym(b"pw_stream_queue_buffer\0").ok_or("pw_stream_queue_buffer failed")?),
+                pw_stream_destroy: std::mem::transmute(load_sym(b"pw_stream_destroy\0").ok_or("pw_stream_destroy failed")?),
             })
         }
     }
 }
 
-impl AudioBackend for PipewireBackend {
-    fn start(&mut self, _engine: AudioEngine) -> Result<(), String> {
-        let pw = PwLib::load()?;
-        self.running.store(true, Ordering::SeqCst);
+pub struct PipewireBackend {
+    running: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread_loop: *mut std::ffi::c_void,
+    stream: *mut std::ffi::c_void,
+    engine: Option<AudioEngine>,
+}
 
+unsafe impl Send for PipewireBackend {}
+
+impl PipewireBackend {
+    pub fn new() -> Self { Self { running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), thread_loop: std::ptr::null_mut(), stream: std::ptr::null_mut(), engine: None } }
+}
+
+#[repr(C)]
+struct PwStreamEvents {
+    version: u32,
+    destroy: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void)>,
+    state_changed: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void, old: i32, state: i32, error: *const i8)>,
+    control_info: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void, id: u32, control: *mut std::ffi::c_void)>,
+    io_changed: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void, id: u32, area: *mut std::ffi::c_void, size: u32)>,
+    param_changed: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void, id: u32, param: *const std::ffi::c_void)>,
+    add_buffer: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void, buffer: *mut std::ffi::c_void)>,
+    remove_buffer: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void, buffer: *mut std::ffi::c_void)>,
+    process: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void)>,
+    drained: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void)>,
+}
+
+static mut PW_LIB: Option<PwLib> = None;
+
+unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
+    let backend = &mut *(data as *mut PipewireBackend);
+    let pw = PW_LIB.as_ref().unwrap();
+
+    let buffer = (pw.pw_stream_dequeue_buffer)(backend.stream);
+    if buffer.is_null() { return; }
+
+    // Deconstruct PipeWire buffer to get raw pointers (Simplified for zero-copy example)
+    // In a real implementation, we'd iterate over planes and use dmabuf if available.
+    #[repr(C)]
+    struct PwBuffer {
+        buffer: *mut std::ffi::c_void,
+        _other: [u64; 4],
+    }
+    let pw_buf = &*(buffer as *const PwBuffer);
+    #[repr(C)]
+    struct SpaBuffer {
+        n_metas: u32,
+        metas: *mut std::ffi::c_void,
+        n_datas: u32,
+        datas: *mut SpaData,
+    }
+    #[repr(C)]
+    struct SpaData {
+        _type: u32,
+        flags: u32,
+        fd: i64,
+        mapoffset: u32,
+        maxsize: u32,
+        data: *mut std::ffi::c_void,
+        chunk: *mut std::ffi::c_void,
+    }
+    let spa_buf = &*(pw_buf.buffer as *const SpaBuffer);
+    if spa_buf.n_datas > 0 {
+        let data = &*spa_buf.datas;
+        let num_samples = 128; // Assume fixed block for nullherz
+        let mut out_raw = [std::slice::from_raw_parts_mut(data.data as *mut f32, num_samples)];
+        let mut out_refs = [&mut out_raw[0][..]];
+
+        if let Some(engine) = &mut backend.engine {
+            engine.process_block(&[], &mut out_refs, num_samples);
+        }
+    }
+
+    (pw.pw_stream_queue_buffer)(backend.stream, buffer);
+}
+
+impl AudioBackend for PipewireBackend {
+    fn start(&mut self, engine: AudioEngine) -> Result<(), String> {
         unsafe {
+            if PW_LIB.is_none() { PW_LIB = Some(PwLib::load()?); }
+            let pw = PW_LIB.as_ref().unwrap();
+            self.engine = Some(engine);
+            self.running.store(true, Ordering::SeqCst);
+
             (pw.pw_init)(std::ptr::null_mut(), std::ptr::null_mut());
-            let thread_loop = (pw.pw_thread_loop_new)(b"nullherz-loop\0".as_ptr() as *const i8, std::ptr::null_mut());
-            let context = (pw.pw_context_new)(thread_loop, std::ptr::null_mut(), 0);
+            self.thread_loop = (pw.pw_thread_loop_new)(b"nullherz-loop\0".as_ptr() as *const i8, std::ptr::null_mut());
+            let loop_ptr = (pw.pw_thread_loop_get_loop)(self.thread_loop);
+            let context = (pw.pw_context_new)(loop_ptr, std::ptr::null_mut(), 0);
             let _core = (pw.pw_core_connect)(context, std::ptr::null_mut(), 0);
 
-            // In a full SPA implementation, we would now map engine buffers to pw_stream buffers.
-            // This foundation allows the engine to be recognized as a native PipeWire object.
+            self.stream = (pw.pw_stream_new)(context, b"nullherz-stream\0".as_ptr() as *const i8, std::ptr::null_mut());
 
-            let _ = pw.handle;
+            let mut events = PwStreamEvents {
+                version: 1,
+                destroy: None,
+                state_changed: None,
+                control_info: None,
+                io_changed: None,
+                param_changed: None,
+                add_buffer: None,
+                remove_buffer: None,
+                process: Some(pw_process_callback),
+                drained: None,
+            };
+
+            (pw.pw_stream_add_listener)(self.stream, std::ptr::null_mut(), &events as *const _ as *const _, self as *mut _ as *mut _);
+            (pw.pw_stream_connect)(self.stream, 1, 0xffffffff, 0, std::ptr::null_mut(), 0);
+            (pw.pw_thread_loop_start)(self.thread_loop);
         }
         Ok(())
     }
-    fn stop(&mut self) {
+    fn stop(&mut self) -> Option<AudioEngine> {
         self.running.store(false, Ordering::SeqCst);
+        unsafe {
+            let pw = PW_LIB.as_ref().unwrap();
+            (pw.pw_thread_loop_stop)(self.thread_loop);
+            (pw.pw_stream_destroy)(self.stream);
+        }
+        self.engine.take()
     }
 }
 
