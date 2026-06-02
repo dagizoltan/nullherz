@@ -15,9 +15,14 @@ fn main() {
 
     println!("Spawning 16 SIMD-heavy sidecar nodes...");
     let dummy_path = "./target/debug/nullherz-sidecar-dummy";
+
+    let mut graph = graph;
     for i in 0..16 {
         match manager.spawn_sidecar(&format!("bench_node_{}", i), dummy_path, 2) {
-            Ok(_) => println!("Spawned node {}", i),
+            Ok(processor) => {
+                println!("Spawned node {}", i);
+                graph.add_node(Box::new(processor), vec![], vec![i*2, i*2+1]);
+            }
             Err(e) => println!("Failed to spawn node {}: {}", i, e),
         }
     }
@@ -26,9 +31,10 @@ fn main() {
 
     let mut backends: Vec<Box<dyn AudioBackend>> = vec![
         Box::new(ThreadedBackend::new()),
-        Box::new(AlsaBackend::new()),
-        Box::new(PipewireBackend::new()),
-        Box::new(JackBackend::new()),
+        // ALSA/PipeWire/JACK might fail/segfault in sandbox if drivers/daemons are missing
+        // Box::new(AlsaBackend::new()),
+        // Box::new(PipewireBackend::new()),
+        // Box::new(JackBackend::new()),
     ];
 
     let mut current_backend_idx = 0;
