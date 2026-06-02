@@ -20,10 +20,12 @@ impl SummingNode {
     pub fn process_16_to_1(&self, inputs: &[&[f32]], output: &mut [f32]) {
         let len = output.len();
         output.fill(0.0);
+        let g = self.gain;
 
         for input in inputs {
+            let input = &input[..len];
             for i in 0..len {
-                output[i] += input[i] * self.gain;
+                output[i] += input[i] * g;
             }
         }
     }
@@ -213,15 +215,21 @@ impl WavetableOscillator {
 
         for i in 0..output.len() {
             let modulated_inc = base_inc * (1.0 + fm[i]);
-            let modulated_phase = (phase + pm[i] * 2048.0).rem_euclid(2048.0);
+            let mut modulated_phase = phase + pm[i] * 2048.0;
+
+            // Fast wrapping for modulated phase
+            while modulated_phase >= 2048.0 { modulated_phase -= 2048.0; }
+            while modulated_phase < 0.0 { modulated_phase += 2048.0; }
 
             let idx = modulated_phase as usize;
-            let next_idx = (idx + 1) % 2048;
+            let next_idx = (idx + 1) & 2047;
             let frac = modulated_phase - idx as f32;
 
             output[i] = self.table[idx] * (1.0 - frac) + self.table[next_idx] * frac;
 
-            phase = (phase + modulated_inc).rem_euclid(2048.0);
+            phase += modulated_inc;
+            if phase >= 2048.0 { phase -= 2048.0; }
+            else if phase < 0.0 { phase += 2048.0; }
         }
         self.phases[channel] = phase;
     }
@@ -433,6 +441,11 @@ pub struct BiquadFilter {
     pub target_coeffs: BiquadCoefficients,
     pub ramp_duration: u32,
     pub ramp_counter: u32,
+    b0_step: f32,
+    b1_step: f32,
+    b2_step: f32,
+    a1_step: f32,
+    a2_step: f32,
     z1: f32,
     z2: f32,
 }
@@ -444,6 +457,11 @@ impl BiquadFilter {
             target_coeffs: coeffs,
             ramp_duration: 0,
             ramp_counter: 0,
+            b0_step: 0.0,
+            b1_step: 0.0,
+            b2_step: 0.0,
+            a1_step: 0.0,
+            a2_step: 0.0,
             z1: 0.0,
             z2: 0.0,
         }
@@ -451,8 +469,14 @@ impl BiquadFilter {
 
     pub fn update_coeffs(&mut self, coeffs: BiquadCoefficients) {
         self.target_coeffs = coeffs;
-        self.coeffs = coeffs; // Immediate for now to avoid stability issues in simple interpolation
+        self.coeffs = coeffs;
         self.ramp_duration = 0;
+        self.ramp_counter = 0;
+        self.b0_step = 0.0;
+        self.b1_step = 0.0;
+        self.b2_step = 0.0;
+        self.a1_step = 0.0;
+        self.a2_step = 0.0;
     }
 
     pub fn set_coeffs_ramped(&mut self, coeffs: BiquadCoefficients, duration: u32) {
@@ -462,87 +486,95 @@ impl BiquadFilter {
             self.target_coeffs = coeffs;
             self.ramp_duration = duration;
             self.ramp_counter = duration;
+            let inv_duration = 1.0 / duration as f32;
+            self.b0_step = (coeffs.b0 - self.coeffs.b0) * inv_duration;
+            self.b1_step = (coeffs.b1 - self.coeffs.b1) * inv_duration;
+            self.b2_step = (coeffs.b2 - self.coeffs.b2) * inv_duration;
+            self.a1_step = (coeffs.a1 - self.coeffs.a1) * inv_duration;
+            self.a2_step = (coeffs.a2 - self.coeffs.a2) * inv_duration;
         }
     }
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
-        {
-            let len = input.len();
-            if len == 0 { return; }
+        let len = input.len();
+        if len == 0 { return; }
 
-            // Single-channel SIMD optimization using Parallel Direct Form II (Transposed).
-            // We unroll the recursive equations to calculate 4 samples at once.
-            // Simplified here: we'll use a better unrolling that hints the compiler to use
-            // FMA (Fused Multiply-Add) where available.
-
-            let mut z1 = self.z1;
-            let mut z2 = self.z2;
-            let b0 = self.coeffs.b0;
-            let b1 = self.coeffs.b1;
-            let b2 = self.coeffs.b2;
-            let a1 = self.coeffs.a1;
-            let a2 = self.coeffs.a2;
-
-            let mut i = 0;
-            while i + 4 <= len {
-                // Manually unrolled 4 samples. For single-channel, true parallelization
-                // requires a complex "look-ahead" filter form.
-                // Here we focus on high-density scalar execution with SIMD register hints.
-                let x0 = *input.get_unchecked(i);
-                let y0 = x0 * b0 + z1;
-                z1 = x0 * b1 - y0 * a1 + z2;
-                z2 = x0 * b2 - y0 * a2;
-                *output.get_unchecked_mut(i) = y0;
-
-                let x1 = *input.get_unchecked(i+1);
-                let y1 = x1 * b0 + z1;
-                z1 = x1 * b1 - y1 * a1 + z2;
-                z2 = x1 * b2 - y1 * a2;
-                *output.get_unchecked_mut(i+1) = y1;
-
-                let x2 = *input.get_unchecked(i+2);
-                let y2 = x2 * b0 + z1;
-                z1 = x2 * b1 - y2 * a1 + z2;
-                z2 = x2 * b2 - y2 * a2;
-                *output.get_unchecked_mut(i+2) = y2;
-
-                let x3 = *input.get_unchecked(i+3);
-                let y3 = x3 * b0 + z1;
-                z1 = x3 * b1 - y3 * a1 + z2;
-                z2 = x3 * b2 - y3 * a2;
-                *output.get_unchecked_mut(i+3) = y3;
-
-                i += 4;
+        // If we are currently ramping, fall back to the ramped scalar implementation
+        // to ensure parameter continuity.
+        if self.ramp_duration > 0 {
+            for i in 0..len {
+                output[i] = self.process_sample(input[i]);
             }
-
-            while i < len {
-                let x = *input.get_unchecked(i);
-                let y = x * b0 + z1;
-                z1 = x * b1 - y * a1 + z2;
-                z2 = x * b2 - y * a2;
-                *output.get_unchecked_mut(i) = y;
-                i += 1;
-            }
-
-            self.z1 = z1;
-            self.z2 = z2;
+            return;
         }
+
+        let mut z1 = self.z1;
+        let mut z2 = self.z2;
+        let b0 = self.coeffs.b0;
+        let b1 = self.coeffs.b1;
+        let b2 = self.coeffs.b2;
+        let a1 = self.coeffs.a1;
+        let a2 = self.coeffs.a2;
+
+        let mut i = 0;
+        while i + 4 <= len {
+            let x0 = *input.get_unchecked(i);
+            let y0 = x0 * b0 + z1;
+            z1 = x0 * b1 - y0 * a1 + z2;
+            z2 = x0 * b2 - y0 * a2;
+            *output.get_unchecked_mut(i) = y0;
+
+            let x1 = *input.get_unchecked(i+1);
+            let y1 = x1 * b0 + z1;
+            z1 = x1 * b1 - y1 * a1 + z2;
+            z2 = x1 * b2 - y1 * a2;
+            *output.get_unchecked_mut(i+1) = y1;
+
+            let x2 = *input.get_unchecked(i+2);
+            let y2 = x2 * b0 + z1;
+            z1 = x2 * b1 - y2 * a1 + z2;
+            z2 = x2 * b2 - y2 * a2;
+            *output.get_unchecked_mut(i+2) = y2;
+
+            let x3 = *input.get_unchecked(i+3);
+            let y3 = x3 * b0 + z1;
+            z1 = x3 * b1 - y3 * a1 + z2;
+            z2 = x3 * b2 - y3 * a2;
+            *output.get_unchecked_mut(i+3) = y3;
+
+            i += 4;
+        }
+
+        while i < len {
+            let x = *input.get_unchecked(i);
+            let y = x * b0 + z1;
+            z1 = x * b1 - y * a1 + z2;
+            z2 = x * b2 - y * a2;
+            *output.get_unchecked_mut(i) = y;
+            i += 1;
+        }
+
+        self.z1 = z1;
+        self.z2 = z2;
     }
 }
 
 impl Filter for BiquadFilter {
     fn process_sample(&mut self, input: f32) -> f32 {
-        if self.ramp_duration > 0 && self.ramp_counter > 0 {
-            let t = (self.ramp_duration - self.ramp_counter + 1) as f32 / self.ramp_duration as f32;
-            self.coeffs.b0 = self.coeffs.b0 * (1.0 - t) + self.target_coeffs.b0 * t;
-            self.coeffs.b1 = self.coeffs.b1 * (1.0 - t) + self.target_coeffs.b1 * t;
-            self.coeffs.b2 = self.coeffs.b2 * (1.0 - t) + self.target_coeffs.b2 * t;
-            self.coeffs.a1 = self.coeffs.a1 * (1.0 - t) + self.target_coeffs.a1 * t;
-            self.coeffs.a2 = self.coeffs.a2 * (1.0 - t) + self.target_coeffs.a2 * t;
+        if self.ramp_duration > 0 {
+            self.coeffs.b0 += self.b0_step;
+            self.coeffs.b1 += self.b1_step;
+            self.coeffs.b2 += self.b2_step;
+            self.coeffs.a1 += self.a1_step;
+            self.coeffs.a2 += self.a2_step;
+
             self.ramp_counter -= 1;
-            if self.ramp_counter == 0 { self.ramp_duration = 0; }
+            if self.ramp_counter == 0 {
+                self.coeffs = self.target_coeffs;
+                self.ramp_duration = 0;
+            }
         }
 
         let output = input * self.coeffs.b0 + self.z1;

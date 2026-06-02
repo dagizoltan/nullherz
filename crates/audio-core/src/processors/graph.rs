@@ -93,17 +93,22 @@ impl TaskPool {
                         let routing = &topo.routing[job.node_idx];
 
                         let mut node_inputs_storage = [ &[][..]; 16 ];
-                        for i in 0..routing.input_count {
-                            let p_idx = topo.virtual_to_physical[routing.input_indices[i].min(63)];
-                            unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[..num_samples]; }
+                        let input_count = routing.input_count.min(16);
+                        for i in 0..input_count {
+                            let v_idx = routing.input_indices[i].min(63);
+                            let p_idx = topo.virtual_to_physical[v_idx].min(63);
+                            unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[..num_samples.min(128)]; }
                         }
 
-                        let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|i| {
-                            if i < routing.output_count && i < 16 {
-                                let p_idx = topo.virtual_to_physical[routing.output_indices[i].min(63)];
-                                unsafe { std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr(), num_samples) }
-                            } else { &mut [] }
-                        });
+                        let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
+                        let output_count = routing.output_count.min(16);
+                        for i in 0..output_count {
+                            let v_idx = routing.output_indices[i].min(63);
+                            let p_idx = topo.virtual_to_physical[v_idx].min(63);
+                            unsafe {
+                                node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr(), num_samples.min(128));
+                            }
+                        }
 
                         #[cfg(target_arch = "x86_64")]
                         let start = unsafe { std::arch::x86_64::_rdtsc() };
@@ -326,24 +331,38 @@ impl AudioProcessor for ProcessorGraph {
                     pool.worker_efds[worker_idx].notify();
                 }
 
+                let mut spins = 0;
                 while pool.completion.load(Ordering::Acquire) < num_nodes {
-                    pool.completion_efd.wait();
+                    if spins < 1000 {
+                        std::hint::spin_loop();
+                        spins += 1;
+                    } else {
+                        // After some spinning, we can yield or just keep spinning.
+                        // In a hard RT system, we'd prefer to just spin or use a more efficient RT-safe wait.
+                        // Yielding might be better than a syscall like EventFd::wait() which is much heavier.
+                        std::thread::yield_now();
+                    }
                 }
             } else {
                 for &n_idx in stage {
                     let node = &self.nodes[n_idx];
                     let routing = &topo.routing[n_idx];
                     let mut node_inputs_storage = [ &[][..]; 16 ];
-                    for i in 0..routing.input_count {
-                        let p_idx = topo.virtual_to_physical[routing.input_indices[i].min(63)];
-                        unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[..num_samples]; }
+                    let input_count = routing.input_count.min(16);
+                    for i in 0..input_count {
+                        let v_idx = routing.input_indices[i].min(63);
+                        let p_idx = topo.virtual_to_physical[v_idx].min(63);
+                        unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[..num_samples.min(128)]; }
                     }
-                    let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|i| {
-                        if i < routing.output_count && i < 16 {
-                            let p_idx = topo.virtual_to_physical[routing.output_indices[i].min(63)];
-                            unsafe { std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr(), num_samples) }
-                        } else { &mut [] }
-                    });
+                    let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
+                    let output_count = routing.output_count.min(16);
+                    for i in 0..output_count {
+                        let v_idx = routing.output_indices[i].min(63);
+                        let p_idx = topo.virtual_to_physical[v_idx].min(63);
+                        unsafe {
+                            node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr(), num_samples.min(128));
+                        }
+                    }
 
                     #[cfg(target_arch = "x86_64")]
                     let start = unsafe { std::arch::x86_64::_rdtsc() };
@@ -368,11 +387,14 @@ impl AudioProcessor for ProcessorGraph {
             external_outputs[1].copy_from_slice(&self.buffers[p1].data[..num_samples]);
         }
 
-        let offset = self.telemetry_offset.fetch_add(8, Ordering::Relaxed);
-        for i_off in 0..8 {
-            let i = (offset + i_off) % 64;
+        let num_nodes_to_process = self.node_count.min(64);
+        for i in 0..num_nodes_to_process {
             let mut peak = 0.0f32;
-            for sample in &self.buffers[i].data[..num_samples] {
+            // The buffers are indexed by physical index in topo.
+            // But node telemetry is indexed by node index.
+            // Let's use the active topology to find the physical buffer for each node.
+            let p_idx = topo.virtual_to_physical[i];
+            for sample in &self.buffers[p_idx].data[..num_samples] {
                 let abs = sample.abs();
                 if abs > peak { peak = abs; }
             }
