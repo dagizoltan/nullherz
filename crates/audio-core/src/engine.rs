@@ -96,13 +96,24 @@ impl AudioEngine {
         if len == 0 { return; }
         let mut sub_inputs_ptr = [ &[][..]; crate::MAX_CHANNELS ];
         let num_inputs = inputs.len().min(crate::MAX_CHANNELS);
-        for i in 0..num_inputs { sub_inputs_ptr[i] = &inputs[i][offset..offset+len]; }
-        let mut sub_outputs_ptrs: [*mut f32; crate::MAX_CHANNELS] = [std::ptr::null_mut(); crate::MAX_CHANNELS];
+        for i in 0..num_inputs {
+            let input_len = inputs[i].len();
+            let end = (offset + len).min(input_len);
+            let actual_offset = offset.min(input_len);
+            sub_inputs_ptr[i] = &inputs[i][actual_offset..end];
+        }
+
+        let mut sub_outputs_reconstructed: [&mut [f32]; crate::MAX_CHANNELS] = std::array::from_fn(|_| &mut [][..]);
         let num_outputs = outputs.len().min(crate::MAX_CHANNELS);
-        for i in 0..num_outputs { sub_outputs_ptrs[i] = outputs[i][offset..offset+len].as_mut_ptr(); }
-        let mut sub_outputs_reconstructed: [&mut [f32]; crate::MAX_CHANNELS] = std::array::from_fn(|i| {
-            if i < num_outputs { unsafe { std::slice::from_raw_parts_mut(sub_outputs_ptrs[i], len) } } else { &mut [] }
-        });
+        for (i, out) in outputs.iter_mut().take(num_outputs).enumerate() {
+            let output_len = out.len();
+            let end = (offset + len).min(output_len);
+            let actual_offset = offset.min(output_len);
+            if end > actual_offset {
+                sub_outputs_reconstructed[i] = &mut out[actual_offset..end];
+            }
+        }
+
         graph.process(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs]);
     }
 }

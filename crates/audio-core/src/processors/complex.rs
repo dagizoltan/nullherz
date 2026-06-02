@@ -40,7 +40,9 @@ impl SpectralProcessor {
 impl AudioProcessor for SpectralProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         if inputs.is_empty() || outputs.is_empty() { return; }
-        self.inner.process_overlap_add(inputs[0], outputs[0]);
+        // For prototype, we ensure lengths match.
+        let len = inputs[0].len().min(outputs[0].len());
+        self.inner.process_overlap_add(&inputs[0][..len], &mut outputs[0][..len]);
     }
 }
 
@@ -49,11 +51,16 @@ pub struct ModulationProcessor {
     pub param_id: u32,
     pub scale: f32,
     pub offset: f32,
+    command_producer: Option<ipc_layer::Producer<control_plane::TimestampedCommand>>,
 }
 
 impl ModulationProcessor {
     pub fn new(target_id: u64, param_id: u32, scale: f32, offset: f32) -> Self {
-        Self { target_id, param_id, scale, offset }
+        Self { target_id, param_id, scale, offset, command_producer: None }
+    }
+
+    pub fn set_producer(&mut self, producer: ipc_layer::Producer<control_plane::TimestampedCommand>) {
+        self.command_producer = Some(producer);
     }
 }
 
@@ -63,7 +70,11 @@ impl AudioProcessor for ModulationProcessor {
         let cv = inputs[0];
         if cv.is_empty() { return; }
 
-        let _avg_cv: f32 = cv.iter().sum::<f32>() / cv.len() as f32;
-        let _val = _avg_cv * self.scale + self.offset;
+        let avg_cv: f32 = cv.iter().sum::<f32>() / cv.len() as f32;
+        let val = avg_cv * self.scale + self.offset;
+
+        // In a real system, we'd send a command back to the control plane
+        // or directly to the target processor if it's in the same graph.
+        // For now, this serves as a placeholder for CV-to-Parameter mapping.
     }
 }
