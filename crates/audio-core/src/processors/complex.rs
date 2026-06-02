@@ -78,3 +78,49 @@ impl AudioProcessor for ModulationProcessor {
         // For now, this serves as a placeholder for CV-to-Parameter mapping.
     }
 }
+
+pub struct SequencerProcessor {
+    bpm: f32,
+    sample_rate: f32,
+    current_sample: u64,
+    grid: [[bool; 16]; 8], // 8 tracks, 16 steps
+    command_producer: Option<ipc_layer::Producer<control_plane::TimestampedCommand>>,
+}
+
+impl SequencerProcessor {
+    pub fn new(sample_rate: f32, bpm: f32) -> Self {
+        Self {
+            bpm,
+            sample_rate,
+            current_sample: 0,
+            grid: [[false; 16]; 8],
+            command_producer: None,
+        }
+    }
+}
+
+impl AudioProcessor for SequencerProcessor {
+    fn process(&mut self, _inputs: &[&[f32]], _outputs: &mut [&mut [f32]]) {
+        let samples_per_step = (self.sample_rate * 60.0 / self.bpm / 4.0) as u64;
+        let block_len = 128u64; // assuming fixed
+
+        let step_before = self.current_sample / samples_per_step;
+        let step_after = (self.current_sample + block_len) / samples_per_step;
+
+        if step_after > step_before {
+            let active_step = (step_after % 16) as usize;
+            for track in 0..8 {
+                if self.grid[track][active_step] {
+                    if let Some(ref mut prod) = self.command_producer {
+                        let _ = prod.push(control_plane::TimestampedCommand {
+                            timestamp_samples: self.current_sample + (samples_per_step - (self.current_sample % samples_per_step)),
+                            command: control_plane::Command::Play,
+                        });
+                    }
+                }
+            }
+        }
+
+        self.current_sample += block_len;
+    }
+}

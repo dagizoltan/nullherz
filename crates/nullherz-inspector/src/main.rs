@@ -2,9 +2,11 @@ use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::sync::{Arc, Mutex};
+use std::sync::mpsc;
 use audio_core::Telemetry;
-use futures_util::StreamExt;
+use futures_util::{StreamExt, SinkExt};
 use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::protocol::Message;
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct NodeJson {
@@ -75,6 +77,7 @@ enum View {
 pub struct InspectorApp {
     graph: GraphJson,
     last_telemetry: Arc<Mutex<Option<Telemetry>>>,
+    command_sender: mpsc::Sender<control_plane::Command>,
     active_view: View,
 
     // UI State
@@ -88,14 +91,28 @@ impl InspectorApp {
     pub fn new(graph: GraphJson) -> Self {
         let last_telemetry = Arc::new(Mutex::new(None));
         let tel_clone = last_telemetry.clone();
+        let (cmd_tx, cmd_rx) = mpsc::channel::<control_plane::Command>();
 
-        // Spawn telemetry listener thread
+        // Spawn telemetry listener and command sender thread
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
                 let url = "ws://127.0.0.1:9001";
                 if let Ok((ws_stream, _)) = connect_async(url).await {
-                    let (_, mut read) = ws_stream.split();
+                    let (mut write, mut read) = ws_stream.split();
+
+                    let sender_task = tokio::spawn(async move {
+                        while let Ok(cmd) = cmd_rx.recv() {
+                            let ts_cmd = control_plane::TimestampedCommand {
+                                timestamp_samples: 0,
+                                command: cmd,
+                            };
+                            if let Ok(json) = serde_json::to_string(&ts_cmd) {
+                                let _ = write.send(Message::Text(json.into())).await;
+                            }
+                        }
+                    });
+
                     while let Some(msg) = read.next().await {
                         if let Ok(msg) = msg {
                             if let Ok(text) = msg.to_text() {
@@ -106,6 +123,7 @@ impl InspectorApp {
                             }
                         }
                     }
+                    sender_task.abort();
                 }
             });
         });
@@ -113,6 +131,7 @@ impl InspectorApp {
         Self {
             graph,
             last_telemetry,
+            command_sender: cmd_tx,
             active_view: View::Mixer,
             channel_gains: [0.8; 4],
             master_gain: 1.0,
@@ -169,8 +188,23 @@ impl InspectorApp {
                     );
                     ui.painter().rect_filled(peak_rect, 0.0, egui::Color32::GREEN);
 
-                    ui.add(egui::Slider::new(&mut self.channel_gains[i], 0.0..=1.2).vertical().text(""));
-                    if ui.button("Mute").clicked() { self.channel_gains[i] = 0.0; }
+                    if ui.add(egui::Slider::new(&mut self.channel_gains[i], 0.0..=1.2).vertical().text("")).changed() {
+                        let _ = self.command_sender.send(control_plane::Command::SetParam {
+                            target_id: (i as u64 * 3 + 2), // Mapping to EQ/Gain node in 4-channel topology
+                            param_id: 0,
+                            value: self.channel_gains[i],
+                            ramp_duration_samples: 128,
+                        });
+                    }
+                    if ui.button("Mute").clicked() {
+                        self.channel_gains[i] = 0.0;
+                        let _ = self.command_sender.send(control_plane::Command::SetParam {
+                            target_id: (i as u64 * 3 + 2),
+                            param_id: 0,
+                            value: 0.0,
+                            ramp_duration_samples: 128,
+                        });
+                    }
 
                     ui.add_space(10.0);
                     ui.label("FX SLOTS");
