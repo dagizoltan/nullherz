@@ -36,12 +36,17 @@ fn main() -> eframe::Result<()> {
     let graph: GraphJson = serde_json::from_str(&content).expect("Failed to parse JSON");
 
     if gui_mode {
-        let native_options = eframe::NativeOptions::default();
+        let native_options = eframe::NativeOptions {
+            viewport: egui::ViewportBuilder::default()
+                .with_inner_size([1100.0, 700.0])
+                .with_title("nullherz Studio"),
+            ..Default::default()
+        };
         eframe::run_native(
             "nullherz Studio",
             native_options,
-            Box::new(|_cc| {
-                let app: Box<dyn eframe::App> = Box::new(InspectorApp::new(graph));
+            Box::new(|cc| {
+                let app: Box<dyn eframe::App> = Box::new(InspectorApp::new(graph, cc));
                 app
             }),
         )
@@ -88,7 +93,14 @@ pub struct InspectorApp {
 }
 
 impl InspectorApp {
-    pub fn new(graph: GraphJson) -> Self {
+    pub fn new(graph: GraphJson, cc: &eframe::CreationContext<'_>) -> Self {
+        let mut visuals = egui::Visuals::dark();
+        visuals.window_rounding = 8.0.into();
+        visuals.widgets.active.rounding = 4.0.into();
+        visuals.widgets.hovered.rounding = 4.0.into();
+        visuals.widgets.inactive.rounding = 4.0.into();
+        cc.egui_ctx.set_visuals(visuals);
+
         let last_telemetry = Arc::new(Mutex::new(None));
         let tel_clone = last_telemetry.clone();
         let (cmd_tx, cmd_rx) = mpsc::channel::<control_plane::Command>();
@@ -169,115 +181,143 @@ impl InspectorApp {
     }
 
     fn render_mixer(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
-        ui.heading("4-Channel Studio Mixer");
-        ui.add_space(20.0);
+        ui.heading("Studio Mixer");
+        ui.add_space(10.0);
 
-        ui.horizontal(|ui| {
-            for i in 0..4 {
-                ui.vertical(|ui| {
-                    ui.label(format!("CH {}", i + 1));
+        ui.group(|ui| {
+            ui.horizontal_top(|ui| {
+                for i in 0..4 {
+                    ui.vertical_centered(|ui| {
+                        ui.strong(format!("CH {:02}", i + 1));
+                        ui.add_space(8.0);
 
-                    // Channel peak meter
-                    let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*3 + 2].min(1.2)); // Mapping to EQ node peaks
-                    let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 150.0), egui::Sense::hover());
-                    ui.painter().rect_filled(rect, 0.0, egui::Color32::from_gray(30));
-                    let peak_h = peak * 150.0;
+                        // Refined Peak Meter
+                        let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*3 + 2].min(1.2));
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 200.0), egui::Sense::hover());
+                        ui.painter().rect_filled(rect, 2.0, egui::Color32::from_gray(20));
+                        let peak_h = (peak * 200.0).min(200.0);
+                        let peak_rect = egui::Rect::from_min_size(
+                            rect.max - egui::vec2(12.0, peak_h),
+                            egui::vec2(12.0, peak_h)
+                        );
+                        let meter_color = if peak > 1.0 { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_rgb(50, 200, 100) };
+                        ui.painter().rect_filled(peak_rect, 2.0, meter_color);
+
+                        ui.add_space(10.0);
+                        if ui.add(egui::Slider::new(&mut self.channel_gains[i], 0.0..=1.2).vertical().show_value(false)).changed() {
+                            let _ = self.command_sender.send(control_plane::Command::SetParam {
+                                target_id: (i as u64 * 3 + 2),
+                                param_id: 0,
+                                value: self.channel_gains[i],
+                                ramp_duration_samples: 128,
+                            });
+                        }
+                        ui.label(format!("{:.1}", self.channel_gains[i]));
+
+                        ui.add_space(8.0);
+                        if ui.add(egui::Button::new("M").min_size(egui::vec2(24.0, 24.0))).clicked() {
+                            self.channel_gains[i] = 0.0;
+                            let _ = self.command_sender.send(control_plane::Command::SetParam {
+                                target_id: (i as u64 * 3 + 2),
+                                param_id: 0,
+                                value: 0.0,
+                                ramp_duration_samples: 128,
+                            });
+                        }
+
+                        ui.add_space(12.0);
+                        ui.group(|ui| {
+                            ui.set_max_width(40.0);
+                            ui.label("INS");
+                            ui.checkbox(&mut true, "");
+                            ui.checkbox(&mut false, "");
+                        });
+                    });
+                    ui.add_space(24.0);
+                }
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(20.0);
+
+                ui.vertical_centered(|ui| {
+                    ui.strong("MASTER");
+                    ui.add_space(8.0);
+
+                    let master_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[12].min(1.2));
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(24.0, 200.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 3.0, egui::Color32::from_gray(15));
+                    let peak_h = (master_peak * 200.0).min(200.0);
                     let peak_rect = egui::Rect::from_min_size(
-                        rect.max - egui::vec2(10.0, peak_h),
-                        egui::vec2(10.0, peak_h)
+                        rect.max - egui::vec2(24.0, peak_h),
+                        egui::vec2(24.0, peak_h)
                     );
-                    ui.painter().rect_filled(peak_rect, 0.0, egui::Color32::GREEN);
-
-                    if ui.add(egui::Slider::new(&mut self.channel_gains[i], 0.0..=1.2).vertical().text("")).changed() {
-                        let _ = self.command_sender.send(control_plane::Command::SetParam {
-                            target_id: (i as u64 * 3 + 2), // Mapping to EQ/Gain node in 4-channel topology
-                            param_id: 0,
-                            value: self.channel_gains[i],
-                            ramp_duration_samples: 128,
-                        });
-                    }
-                    if ui.button("Mute").clicked() {
-                        self.channel_gains[i] = 0.0;
-                        let _ = self.command_sender.send(control_plane::Command::SetParam {
-                            target_id: (i as u64 * 3 + 2),
-                            param_id: 0,
-                            value: 0.0,
-                            ramp_duration_samples: 128,
-                        });
-                    }
+                    ui.painter().rect_filled(peak_rect, 3.0, if master_peak > 0.99 { egui::Color32::from_rgb(255, 100, 0) } else { egui::Color32::from_rgb(0, 150, 255) });
 
                     ui.add_space(10.0);
-                    ui.label("FX SLOTS");
-                    ui.checkbox(&mut true, "EQ");
-                    ui.checkbox(&mut false, "COMP");
+                    ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).vertical().show_value(false));
+                    ui.label(format!("{:.1}", self.master_gain));
+
+                    ui.add_space(10.0);
+                    ui.colored_label(egui::Color32::from_rgb(200, 150, 0), "LMT");
                 });
-                ui.add_space(30.0);
-            }
-
-            ui.separator();
-            ui.add_space(20.0);
-
-            ui.vertical(|ui| {
-                ui.label("MASTER");
-
-                let master_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[12].min(1.2));
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(20.0, 150.0), egui::Sense::hover());
-                ui.painter().rect_filled(rect, 0.0, egui::Color32::from_gray(30));
-                let peak_h = master_peak * 150.0;
-                let peak_rect = egui::Rect::from_min_size(
-                    rect.max - egui::vec2(20.0, peak_h),
-                    egui::vec2(20.0, peak_h)
-                );
-                ui.painter().rect_filled(peak_rect, 0.0, if master_peak > 0.99 { egui::Color32::RED } else { egui::Color32::LIGHT_BLUE });
-
-                ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).vertical().text(""));
-                ui.colored_label(egui::Color32::GOLD, "LIMITER");
             });
         });
     }
 
     fn render_sampler(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Sample Deck & Music Builder");
+        ui.heading("Sample Deck & Sequencer");
         ui.add_space(10.0);
 
         ui.columns(2, |cols| {
             cols[0].vertical(|ui| {
-                ui.heading("Sample Pool");
-                ui.add_space(5.0);
-                for s in &self.sample_pool {
-                    ui.horizontal(|ui| {
-                        if ui.button("▶").clicked() {
-                            println!("Triggering sample: {}", s);
-                        }
-                        ui.label(s);
-                        if ui.button("🗑").clicked() { /* remove */ }
-                    });
-                }
-                ui.add_space(10.0);
-                if ui.button("➕ Load New Sample").clicked() {}
+                ui.strong("SAMPLE POOL");
+                ui.add_space(8.0);
+                ui.group(|ui| {
+                    ui.set_min_height(300.0);
+                    for s in &self.sample_pool {
+                        ui.horizontal(|ui| {
+                            if ui.button("▶").clicked() {
+                                let _ = self.command_sender.send(control_plane::Command::Play);
+                            }
+                            ui.label(s);
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.small_button("×").clicked() {}
+                            });
+                        });
+                    }
+                    ui.add_space(10.0);
+                    if ui.button("+ IMPORT WAV").clicked() {}
+                });
             });
 
             cols[1].vertical(|ui| {
-                ui.heading("Trak Builder (Sequencer)");
-                ui.add_space(5.0);
+                ui.strong("SEQUENCER (TRAK BUILDER)");
+                ui.add_space(8.0);
 
-                for i in 0..8 {
-                    ui.horizontal(|ui| {
-                        ui.label(format!("Step {:02}", i + 1));
-                        for _ in 0..16 {
-                            let mut active = false;
-                            if ui.add(egui::SelectableLabel::new(active, "")).clicked() {
-                                active = !active;
+                ui.group(|ui| {
+                    ui.set_min_height(300.0);
+                    egui::Grid::new("sequencer_grid").spacing([4.0, 4.0]).show(ui, |ui| {
+                        for i in 0..8 {
+                            ui.label(format!("TRK {:02}", i + 1));
+                            for j in 0..16 {
+                                let mut active = false;
+                                let color = if j % 4 == 0 { egui::Color32::from_gray(60) } else { egui::Color32::from_gray(40) };
+                                let response = ui.add(egui::Button::new("").min_size(egui::vec2(18.0, 18.0)).fill(color));
+                                if response.clicked() { active = !active; }
                             }
+                            ui.end_row();
                         }
                     });
-                }
+                });
 
-                ui.add_space(10.0);
+                ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    let _ = ui.button("PLAY TRAK");
-                    let _ = ui.button("STOP");
-                    ui.label("BPM: 128");
+                    if ui.add_sized([100.0, 30.0], egui::Button::new("▶ PLAY").fill(egui::Color32::DARK_GREEN)).clicked() {}
+                    let _ = ui.button("⏹ STOP");
+                    ui.add_space(20.0);
+                    ui.label("BPM:");
+                    ui.add(egui::DragValue::new(&mut 128.0).speed(1.0));
                 });
             });
         });
@@ -287,62 +327,77 @@ impl InspectorApp {
         ui.heading("Global Mastering Chain");
         ui.add_space(10.0);
 
-        ui.columns(3, |cols| {
-            cols[0].vertical(|ui| {
-                ui.heading("Input Stage");
-                ui.label("Pre-Master VU");
-                let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[12]);
-                ui.add(egui::ProgressBar::new(peak).text(format!("{:.1} dB", 20.0 * peak.log10())));
-            });
-            cols[1].vertical(|ui| {
-                ui.heading("Processing");
-                ui.group(|ui| {
-                    ui.checkbox(&mut true, "Linear EQ");
-                    ui.checkbox(&mut true, "Multiband Comp");
-                    ui.checkbox(&mut false, "Saturation");
+        ui.group(|ui| {
+            ui.columns(3, |cols| {
+                cols[0].vertical_centered(|ui| {
+                    ui.strong("INPUT STAGE");
+                    ui.add_space(8.0);
+                    let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[12]);
+                    ui.add(egui::ProgressBar::new(peak.min(1.0)).text("PRE-MASTER"));
                 });
-            });
-            cols[2].vertical(|ui| {
-                ui.heading("Final Output");
-                ui.label("Post-Master VU");
-                let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[12] * 0.9);
-                ui.add(egui::ProgressBar::new(peak).text("FINAL"));
-                ui.add_space(10.0);
-                if ui.button("GENERATE MIXDOWN").clicked() {}
+                cols[1].vertical_centered(|ui| {
+                    ui.strong("DSP RACK");
+                    ui.add_space(8.0);
+                    ui.group(|ui| {
+                        ui.checkbox(&mut true, "LINEAR EQ");
+                        ui.checkbox(&mut true, "MULTIBAND");
+                        ui.checkbox(&mut false, "SATURATION");
+                    });
+                });
+                cols[2].vertical_centered(|ui| {
+                    ui.strong("FINAL STAGE");
+                    ui.add_space(8.0);
+                    let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[12] * 0.9);
+                    ui.add(egui::ProgressBar::new(peak.min(1.0)).fill(egui::Color32::GOLD).text("LUFS TARGET"));
+                    ui.add_space(12.0);
+                    if ui.add(egui::Button::new("📦 MIXDOWN").min_size(egui::vec2(120.0, 32.0))).clicked() {}
+                });
             });
         });
     }
 
     fn render_broadcast(&mut self, ui: &mut egui::Ui) {
-        ui.heading("📡 Live Web Radio Stream (Broadcast)");
+        ui.heading("📡 Studio Broadcast");
         ui.add_space(10.0);
 
-        ui.horizontal(|ui| {
-            if ui.add_sized([120.0, 40.0], egui::Button::new(if self.is_streaming { "🛑 STOP" } else { "🚀 START" })
-                .fill(if self.is_streaming { egui::Color32::RED } else { egui::Color32::DARK_GREEN })).clicked() {
-                self.is_streaming = !self.is_streaming;
-            }
-            ui.add_space(20.0);
-            ui.vertical(|ui| {
-                ui.label(format!("STATUS: {}", if self.is_streaming { "LIVE" } else { "OFFLINE" }));
-                ui.label("Uptime: 00:00:00");
-            });
-        });
-
-        ui.add_space(20.0);
         ui.group(|ui| {
-            ui.heading("Stream Configuration");
-            ui.label("Format: MP3 320kbps");
-            ui.label("Server: Icecast / nullherz-edge");
             ui.horizontal(|ui| {
-                ui.label("Mount Point:");
-                ui.text_edit_singleline(&mut "/live".to_string());
+                let btn = egui::Button::new(if self.is_streaming { "🛑 OFFLINE" } else { "🚀 GO LIVE" })
+                    .min_size(egui::vec2(140.0, 50.0))
+                    .fill(if self.is_streaming { egui::Color32::from_rgb(180, 50, 50) } else { egui::Color32::from_rgb(50, 150, 80) });
+
+                if ui.add(btn).clicked() {
+                    self.is_streaming = !self.is_streaming;
+                }
+                ui.add_space(20.0);
+                ui.vertical(|ui| {
+                    ui.strong(format!("ENGINE STATUS: {}", if self.is_streaming { "STREAMING" } else { "READY" }));
+                    ui.label("00:00:00.000");
+                });
+            });
+
+            ui.add_space(20.0);
+            ui.columns(2, |cols| {
+                cols[0].vertical(|ui| {
+                    ui.strong("CONFIGURATION");
+                    ui.group(|ui| {
+                        ui.label("Target: Icecast 2.4");
+                        ui.label("Codec: OPUS @ 256kbps");
+                        ui.horizontal(|ui| {
+                            ui.label("Mount:");
+                            ui.text_edit_singleline(&mut "/stream".to_string());
+                        });
+                    });
+                });
+                cols[1].vertical(|ui| {
+                    ui.strong("AUDIENCE");
+                    ui.group(|ui| {
+                        ui.label("Peak Listeners: 0");
+                        ui.label("Average Time: 0s");
+                    });
+                });
             });
         });
-
-        ui.add_space(20.0);
-        ui.heading("Recent Listeners");
-        ui.label("Total: 0");
     }
 }
 

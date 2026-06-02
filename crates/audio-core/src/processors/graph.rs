@@ -449,6 +449,7 @@ impl AudioProcessor for ProcessorGraph {
                     10 => Box::new(crate::processors::complex::ModulationProcessor::new(0, 0, 1.0, 0.0)),
                     20 => Box::new(crate::processors::standard::CrossfaderProcessor::new()),
                     30 => Box::new(crate::processors::standard::SummingProcessor::new()),
+                    40 => Box::new(crate::processors::complex::SequencerProcessor::new(44100.0, 120.0)),
                     _ => Box::new(crate::processors::standard::GainProcessor::new(0, 0.0)),
                 };
                 self.add_node(processor, vec![], vec![]);
