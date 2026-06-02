@@ -2147,6 +2147,8 @@ dependencies = [
  "control-plane",
  "fx-runtime",
  "ipc-layer",
+ "nullherz-mixer",
+ "serde_json",
  "tokio",
 ]
 

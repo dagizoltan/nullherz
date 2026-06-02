@@ -90,4 +90,30 @@ impl MixerManager {
         commands.push(Command::AddNode { node_idx: cf_id as u32, processor_type_id: 20 }); // Crossfader type
         commands
     }
+
+    pub fn create_4channel_mixer(&mut self) -> Vec<Command> {
+        let mut commands = Vec::new();
+        println!("Building 4-Channel Mixer Architecture...");
+
+        // Create 4 DJ Decks (A, B, C, D)
+        let decks = ['A', 'B', 'C', 'D'];
+        for &deck in &decks {
+            let bus = if deck == 'A' || deck == 'C' { 'A' } else { 'B' };
+            commands.extend(self.create_dj_deck(deck, &[1], bus));
+        }
+
+        // Create a Summing Node to mix everything to Master
+        let sum_id = self.next_node_id;
+        self.next_node_id += 1;
+        commands.push(Command::AddNode { node_idx: sum_id, processor_type_id: 30 }); // Summing processor
+
+        // Route buses to Summing Node
+        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 0, new_buffer_idx: BUF_DJ_A_L as u32 });
+        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 1, new_buffer_idx: BUF_DJ_B_L as u32 });
+
+        // Output Sum to Master
+        commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 0, new_buffer_idx: BUF_MASTER_L as u32 });
+
+        commands
+    }
 }
