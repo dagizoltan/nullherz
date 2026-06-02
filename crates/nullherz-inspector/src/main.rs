@@ -1,15 +1,18 @@
-use serde::{Deserialize};
+use serde::Deserialize;
 use std::env;
 use std::fs;
+use std::sync::{Arc, Mutex};
 use audio_core::Telemetry;
+use futures_util::StreamExt;
+use tokio_tungstenite::connect_async;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct NodeJson {
     pub inputs: Vec<usize>,
     pub outputs: Vec<usize>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct GraphJson {
     pub nodes: Vec<NodeJson>,
 }
@@ -60,28 +63,56 @@ fn render_ascii(graph: &GraphJson) {
     }
 }
 
-// Graphical UI stub using egui
 pub struct InspectorApp {
     graph: GraphJson,
-    last_telemetry: Option<Telemetry>,
+    last_telemetry: Arc<Mutex<Option<Telemetry>>>,
 }
 
 impl InspectorApp {
     pub fn new(graph: GraphJson) -> Self {
+        let last_telemetry = Arc::new(Mutex::new(None));
+        let tel_clone = last_telemetry.clone();
+
+        // Spawn telemetry listener thread
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let url = "ws://127.0.0.1:9001";
+                if let Ok((ws_stream, _)) = connect_async(url).await {
+                    let (_, mut read) = ws_stream.split();
+                    while let Some(msg) = read.next().await {
+                        if let Ok(msg) = msg {
+                            if let Ok(text) = msg.to_text() {
+                                if let Ok(tel) = serde_json::from_str::<Telemetry>(text) {
+                                    let mut lock = tel_clone.lock().unwrap();
+                                    *lock = Some(tel);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        });
+
         Self {
             graph,
-            last_telemetry: None,
+            last_telemetry,
         }
     }
 }
 
 impl eframe::App for InspectorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let telemetry = {
+            let lock = self.last_telemetry.lock().unwrap();
+            lock.clone()
+        };
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("nullherz Topology Inspector");
 
             ui.add_space(20.0);
-            ui.heading("Node CPU Heatmap (Micro-load)");
+            ui.heading("Node CPU Heatmap (Cycle Count)");
             {
                 let (rect, _response) = ui.allocate_exact_size(egui::vec2(640.0, 40.0), egui::Sense::hover());
                 let painter = ui.painter();
@@ -90,22 +121,23 @@ impl eframe::App for InspectorApp {
                         rect.min + egui::vec2(i as f32 * 10.0, 0.0),
                         egui::vec2(10.0, 40.0)
                     );
-                    let load = if let Some(tel) = &self.last_telemetry {
-                    (tel.node_times_cycles[i] as f32 / 100000.0).min(1.0)
+                    let load = if let Some(tel) = &telemetry {
+                        // Normalize cycle count. 100k cycles is arbitrary "high load" for visualization.
+                        (tel.node_times_cycles[i] as f32 / 100000.0).min(1.0)
                     } else {
                         0.0
                     };
                     let color = egui::Color32::from_rgb(
                         (load * 255.0) as u8,
                         (255.0 * (1.0 - load)) as u8,
-                        0
+                        (50.0 * (1.0 - load)) as u8
                     );
                     painter.rect_filled(cell_rect, 0.0, color);
                 }
             }
 
             ui.add_space(20.0);
-            ui.heading("Buffer Peak Levels");
+            ui.heading("Buffer Peak Levels (0dBFS Heatmap)");
             {
                 let (rect, _response) = ui.allocate_exact_size(egui::vec2(640.0, 40.0), egui::Sense::hover());
                 let painter = ui.painter();
@@ -114,21 +146,28 @@ impl eframe::App for InspectorApp {
                         rect.min + egui::vec2(i as f32 * 10.0, 0.0),
                         egui::vec2(10.0, 40.0)
                     );
-                    let level = if let Some(tel) = &self.last_telemetry {
+                    let level = if let Some(tel) = &telemetry {
                         tel.peak_levels[i].min(1.0)
                     } else {
                         0.0
                     };
-                    let color = egui::Color32::from_gray((level * 255.0) as u8);
+                    let color = if level > 0.99 {
+                        egui::Color32::RED
+                    } else {
+                        egui::Color32::from_gray((level * 255.0) as u8)
+                    };
                     painter.rect_filled(cell_rect, 0.0, color);
                 }
             }
 
             ui.add_space(20.0);
             ui.separator();
-            for (i, node) in self.graph.nodes.iter().enumerate() {
-                ui.label(format!("Node {}: In {:?} Out {:?}", i, node.inputs, node.outputs));
-            }
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for (i, node) in self.graph.nodes.iter().enumerate() {
+                    let cycles = telemetry.as_ref().map(|t| t.node_times_cycles[i]).unwrap_or(0);
+                    ui.label(format!("Node {}: In {:?} Out {:?} ({} cycles)", i, node.inputs, node.outputs, cycles));
+                }
+            });
         });
 
         // Request constant repaints for real-time updates
