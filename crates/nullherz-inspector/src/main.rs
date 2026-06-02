@@ -91,7 +91,7 @@ impl eframe::App for InspectorApp {
                         egui::vec2(10.0, 40.0)
                     );
                     let load = if let Some(tel) = &self.last_telemetry {
-                        (tel.node_times_ns[i] as f32 / 100000.0).min(1.0)
+                    (tel.node_times_cycles[i] as f32 / 100000.0).min(1.0)
                     } else {
                         0.0
                     };

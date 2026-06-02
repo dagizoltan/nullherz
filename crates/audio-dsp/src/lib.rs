@@ -213,7 +213,7 @@ impl WavetableOscillator {
 
         for i in 0..output.len() {
             let modulated_inc = base_inc * (1.0 + fm[i]);
-            let modulated_phase = (phase + pm[i] * 2048.0) % 2048.0;
+            let modulated_phase = (phase + pm[i] * 2048.0).rem_euclid(2048.0);
 
             let idx = modulated_phase as usize;
             let next_idx = (idx + 1) % 2048;
@@ -221,7 +221,7 @@ impl WavetableOscillator {
 
             output[i] = self.table[idx] * (1.0 - frac) + self.table[next_idx] * frac;
 
-            phase = (phase + modulated_inc) % 2048.0;
+            phase = (phase + modulated_inc).rem_euclid(2048.0);
         }
         self.phases[channel] = phase;
     }
