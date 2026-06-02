@@ -5,3 +5,7 @@ edition = "2024"
 
 [dependencies]
 control-plane = { path = "../control-plane" }
+audio-core = { path = "../audio-core" }
+fx-runtime = { path = "../fx-runtime" }
+ipc-layer = { path = "../ipc-layer" }
+tokio = { version = "1.0", features = ["full"] }
