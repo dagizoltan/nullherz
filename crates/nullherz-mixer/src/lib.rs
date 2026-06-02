@@ -64,20 +64,32 @@ impl MixerManager {
 
         let resample_id = self.next_node_id;
         self.next_node_id += 1;
-        commands.push(Command::AddNode { node_idx: resample_id as u32, processor_type_id: 10 });
+        commands.push(Command::AddNode { node_idx: resample_id, processor_type_id: 10 });
 
+        let mut prev_id = resample_id;
         for &fx_type in fx_ids {
             let fx_id = self.next_node_id;
             self.next_node_id += 1;
-            commands.push(Command::AddNode { node_idx: fx_id as u32, processor_type_id: fx_type });
+            let fx_buf = self.next_buffer_id;
+            self.next_buffer_id += 1;
+
+            commands.push(Command::AddNode { node_idx: fx_id, processor_type_id: fx_type });
+            commands.push(Command::UpdateOutputEdge { node_idx: prev_id, output_idx: 0, new_buffer_idx: fx_buf });
+            commands.push(Command::UpdateEdge { node_idx: fx_id, input_idx: 0, new_buffer_idx: fx_buf });
+            prev_id = fx_id;
         }
 
         let eq_id = self.next_node_id;
         self.next_node_id += 1;
-        commands.push(Command::AddNode { node_idx: eq_id as u32, processor_type_id: 11 });
+        let eq_buf = self.next_buffer_id;
+        self.next_buffer_id += 1;
+        commands.push(Command::AddNode { node_idx: eq_id, processor_type_id: 11 });
+        commands.push(Command::UpdateOutputEdge { node_idx: prev_id, output_idx: 0, new_buffer_idx: eq_buf });
+        commands.push(Command::UpdateEdge { node_idx: eq_id, input_idx: 0, new_buffer_idx: eq_buf });
 
         let target_l = if bus_assignment == 'A' { BUF_DJ_A_L } else { BUF_DJ_B_L };
         println!("Routing Deck {} to Buffer {}", deck_id, target_l);
+        commands.push(Command::UpdateOutputEdge { node_idx: eq_id, output_idx: 0, new_buffer_idx: target_l as u32 });
 
         commands
     }
