@@ -100,9 +100,11 @@ impl SequencerProcessor {
 }
 
 impl AudioProcessor for SequencerProcessor {
-    fn process(&mut self, _inputs: &[&[f32]], _outputs: &mut [&mut [f32]]) {
+    fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        let block_len = if !outputs.is_empty() { outputs[0].len() as u64 } else { 0 };
+        if block_len == 0 { return; }
+
         let samples_per_step = (self.sample_rate * 60.0 / self.bpm / 4.0) as u64;
-        let block_len = 128u64; // assuming fixed
 
         let step_before = self.current_sample / samples_per_step;
         let step_after = (self.current_sample + block_len) / samples_per_step;
