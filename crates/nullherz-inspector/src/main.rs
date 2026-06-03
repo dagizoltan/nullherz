@@ -163,51 +163,57 @@ impl InspectorApp {
     }
 
     fn render_dj_studio(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
-        ui.spacing_mut().item_spacing = egui::vec2(10.0, 10.0);
+        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
 
-        ui.horizontal_top(|ui| {
+        let total_w = ui.available_width();
+        let main_w = total_w * 0.75;
+        let lib_w = total_w * 0.25;
+
+        ui.horizontal(|ui| {
             // Main Mixing Area (3/4 width)
-            let main_width = ui.available_width() * 0.75;
-            ui.allocate_ui(egui::vec2(main_width, ui.available_height()), |ui| {
+            ui.allocate_ui(egui::vec2(main_w, ui.available_height()), |ui| {
                 ui.vertical(|ui| {
-                    // 4 Deck Rows
-                    for i in 0..4 {
-                        ui.group(|ui| {
-                            ui.set_min_height(140.0);
+                    ui.group(|ui| {
+                        ui.set_width(main_w);
+                        for i in 0..4 {
                             ui.horizontal(|ui| {
-                                // Deck ID & Master controls
+                                ui.set_height(120.0);
+                                // Deck ID & Controls
                                 ui.vertical(|ui| {
-                                    ui.strong(format!("DECK {:02}", i + 1));
-                                    ui.add_space(5.0);
-                                    ui.button("CUE");
-                                    ui.button("SYNC");
+                                    ui.set_width(60.0);
+                                    ui.strong(format!("D{:02}", i + 1));
+                                    if ui.button("CUE").clicked() {}
+                                    if ui.button("SYNC").clicked() {}
                                 });
 
-                                ui.separator();
-
-                                // Oscillator / Waveform Visualization
-                                let (rect, _) = ui.allocate_exact_size(egui::vec2(300.0, 100.0), egui::Sense::hover());
-                                ui.painter().rect_filled(rect, 4.0, egui::Color32::from_gray(10));
-                                // Draw dummy "live" waveform
-                                let points: Vec<egui::Pos2> = (0..300).map(|x| {
-                                    let y = rect.center().y + (x as f32 * 0.1).sin() * 30.0 * (x as f32 * 0.01).cos();
+                                // Waveform Display
+                                let (rect, _) = ui.allocate_exact_size(egui::vec2(main_w - 280.0, 100.0), egui::Sense::hover());
+                                ui.painter().rect_filled(rect, 1.0, egui::Color32::from_gray(15));
+                                let w = rect.width();
+                                let points: Vec<egui::Pos2> = (0..w as i32).map(|x| {
+                                    let phase = x as f32 * 0.1;
+                                    let y = rect.center().y + (phase.sin() * 20.0) + ((phase * 0.5).cos() * 10.0);
                                     egui::pos2(rect.min.x + x as f32, y)
                                 }).collect();
-                                let shape = egui::Shape::line(points, egui::Stroke::new(1.5, egui::Color32::from_rgb(0, 255, 255)));
+                                let shape = egui::Shape::line(points, egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 200, 0)));
                                 ui.painter().add(shape);
 
-                                ui.separator();
+                                ui.add_space(12.0);
 
-                                // Mixer Strip for this deck
-                                ui.vertical(|ui| {
-                                    ui.label("EQ");
-                                    ui.add(egui::Slider::new(&mut 0.0, -24.0..=6.0).show_value(false).text("H"));
-                                    ui.add(egui::Slider::new(&mut 0.0, -24.0..=6.0).show_value(false).text("M"));
-                                    ui.add(egui::Slider::new(&mut 0.0, -24.0..=6.0).show_value(false).text("L"));
+                                // EQ Knobs (represented as small sliders)
+                                ui.vertical_centered(|ui| {
+                                    ui.set_width(40.0);
+                                    ui.label(egui::RichText::new("H").small());
+                                    ui.add(egui::Slider::new(&mut 0.0, -24.0..=6.0).show_value(false));
+                                    ui.label(egui::RichText::new("M").small());
+                                    ui.add(egui::Slider::new(&mut 0.0, -24.0..=6.0).show_value(false));
+                                    ui.label(egui::RichText::new("L").small());
+                                    ui.add(egui::Slider::new(&mut 0.0, -24.0..=6.0).show_value(false));
                                 });
 
-                                // Vertical Fader & Meter
+                                // Fader & Precision Meter
                                 ui.horizontal(|ui| {
+                                    ui.set_width(40.0);
                                     if ui.add(egui::Slider::new(&mut self.channel_gains[i], 0.0..=1.2).vertical().show_value(false)).changed() {
                                         let _ = self.command_sender.send(control_plane::Command::SetParam {
                                             target_id: (i as u64 * 3 + 2),
@@ -218,72 +224,69 @@ impl InspectorApp {
                                     }
 
                                     let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*3 + 2].min(1.2));
-                                    let (m_rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 100.0), egui::Sense::hover());
-                                    ui.painter().rect_filled(m_rect, 1.0, egui::Color32::from_gray(20));
-                                    let m_h = peak * 100.0;
-                                    let m_p_rect = egui::Rect::from_min_size(m_rect.max - egui::vec2(8.0, m_h), egui::vec2(8.0, m_h));
-                                    ui.painter().rect_filled(m_p_rect, 1.0, egui::Color32::from_rgb(100, 255, 100));
+                                    let (m_rect, _) = ui.allocate_exact_size(egui::vec2(6.0, 100.0), egui::Sense::hover());
+                                    ui.painter().rect_filled(m_rect, 0.0, egui::Color32::from_gray(25));
+                                    let m_h = (peak * 100.0).min(100.0);
+                                    let m_p_rect = egui::Rect::from_min_size(m_rect.max - egui::vec2(6.0, m_h), egui::vec2(6.0, m_h));
+                                    ui.painter().rect_filled(m_p_rect, 0.0, egui::Color32::from_rgb(0, 255, 150));
                                 });
 
-                                // FX Slots
+                                // FX & State
                                 ui.vertical(|ui| {
-                                    ui.label("FX");
-                                    ui.group(|ui| {
-                                        ui.checkbox(&mut true, "REVERB");
-                                        ui.checkbox(&mut false, "DELAY");
-                                    });
+                                    ui.checkbox(&mut true, "REV");
+                                    ui.checkbox(&mut false, "DLY");
                                 });
                             });
-                        });
-                    }
+                            ui.separator();
+                        }
+                    });
 
-                    ui.add_space(10.0);
-                    // Master Section at bottom of main col
+                    ui.add_space(4.0);
+                    // Compact Master
                     ui.group(|ui| {
+                        ui.set_width(main_w);
                         ui.horizontal(|ui| {
-                            ui.strong("MASTER BUS");
+                            ui.strong("MASTER");
                             ui.add_space(20.0);
-                            ui.label("FX: LIMITER + COMP");
-                            ui.add_space(20.0);
-                            ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).text("LVL"));
+                            ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).show_value(true));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label("CPU: 12%");
+                                ui.separator();
+                                ui.label("BPM: 128.0");
+                            });
                         });
                     });
                 });
             });
 
-            ui.separator();
+            // Track Library (1/4 width) - Single line entries
+            ui.allocate_ui(egui::vec2(lib_w, ui.available_height()), |ui| {
+                ui.vertical(|ui| {
+                    ui.strong("LIBRARY");
+                    ui.text_edit_singleline(&mut "".to_string());
+                    ui.add_space(4.0);
 
-            // Track Library (1/4 width)
-            ui.vertical(|ui| {
-                ui.set_min_width(ui.available_width());
-                ui.heading("📚 Library");
-                ui.text_edit_singleline(&mut "".to_string()); // Search
-                ui.add_space(10.0);
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        let tracks = [
+                            ("Deep Techno", "nullherz", 126.0),
+                            ("Ambient Flow", "dsp_king", 90.0),
+                            ("Glitch Hop", "rust_ace", 140.0),
+                            ("Acid Bass", "tb_303", 128.0),
+                            ("Minimal House", "logic_error", 124.0),
+                            ("Rust Vibes", "ferris", 132.0),
+                        ];
 
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    let tracks = [
-                        ("Deep Techno", "nullherz", 126.0),
-                        ("Ambient Flow", "dsp_king", 90.0),
-                        ("Glitch Hop", "rust_ace", 140.0),
-                        ("Acid Bass", "tb_303", 128.0),
-                        ("Minimal House", "logic_error", 124.0),
-                    ];
-
-                    for (title, artist, bpm) in tracks {
-                        ui.group(|ui| {
-                            ui.vertical(|ui| {
-                                ui.label(egui::RichText::new(title).strong());
-                                ui.label(format!("{} • {} BPM", artist, bpm));
-                                ui.horizontal(|ui| {
-                                    if ui.small_button("L1").clicked() {}
-                                    if ui.small_button("L2").clicked() {}
-                                    if ui.small_button("L3").clicked() {}
-                                    if ui.small_button("L4").clicked() {}
+                        for (title, artist, bpm) in tracks {
+                            ui.horizontal(|ui| {
+                                ui.set_height(24.0);
+                                if ui.small_button("L").clicked() {}
+                                ui.label(egui::RichText::new(format!("{} - {}", title, artist)));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui.small(format!("{:.0}", bpm));
                                 });
                             });
-                        });
-                        ui.add_space(4.0);
-                    }
+                        }
+                    });
                 });
             });
         });
