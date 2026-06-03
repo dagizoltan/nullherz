@@ -72,11 +72,18 @@ fn render_ascii(graph: &GraphJson) {
 
 #[derive(PartialEq)]
 enum View {
+    DjStudio,
     Mixer,
     Sampler,
     Mastering,
     Broadcast,
     Topology,
+}
+
+pub struct Track {
+    pub title: String,
+    pub artist: String,
+    pub bpm: f32,
 }
 
 pub struct InspectorApp {
@@ -95,10 +102,13 @@ pub struct InspectorApp {
 impl InspectorApp {
     pub fn new(graph: GraphJson, cc: &eframe::CreationContext<'_>) -> Self {
         let mut visuals = egui::Visuals::dark();
-        visuals.window_rounding = 8.0.into();
-        visuals.widgets.active.rounding = 4.0.into();
-        visuals.widgets.hovered.rounding = 4.0.into();
-        visuals.widgets.inactive.rounding = 4.0.into();
+        visuals.window_rounding = 0.0.into(); // Sharp modern edges
+        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_gray(10);
+        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_gray(25));
+        visuals.widgets.active.rounding = 1.0.into();
+        visuals.widgets.hovered.rounding = 1.0.into();
+        visuals.widgets.inactive.rounding = 1.0.into();
+        visuals.selection.bg_fill = egui::Color32::from_rgb(0, 150, 255);
         cc.egui_ctx.set_visuals(visuals);
 
         let last_telemetry = Arc::new(Mutex::new(None));
@@ -144,12 +154,139 @@ impl InspectorApp {
             graph,
             last_telemetry,
             command_sender: cmd_tx,
-            active_view: View::Mixer,
+            active_view: View::DjStudio,
             channel_gains: [0.8; 4],
             master_gain: 1.0,
             sample_pool: vec!["kick.wav".into(), "snare.wav".into(), "hihat.wav".into()],
             is_streaming: false,
         }
+    }
+
+    fn render_dj_studio(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
+        ui.spacing_mut().item_spacing = egui::vec2(10.0, 10.0);
+
+        ui.horizontal_top(|ui| {
+            // Main Mixing Area (3/4 width)
+            let main_width = ui.available_width() * 0.75;
+            ui.allocate_ui(egui::vec2(main_width, ui.available_height()), |ui| {
+                ui.vertical(|ui| {
+                    // 4 Deck Rows
+                    for i in 0..4 {
+                        ui.group(|ui| {
+                            ui.set_min_height(140.0);
+                            ui.horizontal(|ui| {
+                                // Deck ID & Master controls
+                                ui.vertical(|ui| {
+                                    ui.strong(format!("DECK {:02}", i + 1));
+                                    ui.add_space(5.0);
+                                    ui.button("CUE");
+                                    ui.button("SYNC");
+                                });
+
+                                ui.separator();
+
+                                // Oscillator / Waveform Visualization
+                                let (rect, _) = ui.allocate_exact_size(egui::vec2(300.0, 100.0), egui::Sense::hover());
+                                ui.painter().rect_filled(rect, 4.0, egui::Color32::from_gray(10));
+                                // Draw dummy "live" waveform
+                                let points: Vec<egui::Pos2> = (0..300).map(|x| {
+                                    let y = rect.center().y + (x as f32 * 0.1).sin() * 30.0 * (x as f32 * 0.01).cos();
+                                    egui::pos2(rect.min.x + x as f32, y)
+                                }).collect();
+                                let shape = egui::Shape::line(points, egui::Stroke::new(1.5, egui::Color32::from_rgb(0, 255, 255)));
+                                ui.painter().add(shape);
+
+                                ui.separator();
+
+                                // Mixer Strip for this deck
+                                ui.vertical(|ui| {
+                                    ui.label("EQ");
+                                    ui.add(egui::Slider::new(&mut 0.0, -24.0..=6.0).show_value(false).text("H"));
+                                    ui.add(egui::Slider::new(&mut 0.0, -24.0..=6.0).show_value(false).text("M"));
+                                    ui.add(egui::Slider::new(&mut 0.0, -24.0..=6.0).show_value(false).text("L"));
+                                });
+
+                                // Vertical Fader & Meter
+                                ui.horizontal(|ui| {
+                                    if ui.add(egui::Slider::new(&mut self.channel_gains[i], 0.0..=1.2).vertical().show_value(false)).changed() {
+                                        let _ = self.command_sender.send(control_plane::Command::SetParam {
+                                            target_id: (i as u64 * 3 + 2),
+                                            param_id: 0,
+                                            value: self.channel_gains[i],
+                                            ramp_duration_samples: 128,
+                                        });
+                                    }
+
+                                    let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*3 + 2].min(1.2));
+                                    let (m_rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 100.0), egui::Sense::hover());
+                                    ui.painter().rect_filled(m_rect, 1.0, egui::Color32::from_gray(20));
+                                    let m_h = peak * 100.0;
+                                    let m_p_rect = egui::Rect::from_min_size(m_rect.max - egui::vec2(8.0, m_h), egui::vec2(8.0, m_h));
+                                    ui.painter().rect_filled(m_p_rect, 1.0, egui::Color32::from_rgb(100, 255, 100));
+                                });
+
+                                // FX Slots
+                                ui.vertical(|ui| {
+                                    ui.label("FX");
+                                    ui.group(|ui| {
+                                        ui.checkbox(&mut true, "REVERB");
+                                        ui.checkbox(&mut false, "DELAY");
+                                    });
+                                });
+                            });
+                        });
+                    }
+
+                    ui.add_space(10.0);
+                    // Master Section at bottom of main col
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.strong("MASTER BUS");
+                            ui.add_space(20.0);
+                            ui.label("FX: LIMITER + COMP");
+                            ui.add_space(20.0);
+                            ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).text("LVL"));
+                        });
+                    });
+                });
+            });
+
+            ui.separator();
+
+            // Track Library (1/4 width)
+            ui.vertical(|ui| {
+                ui.set_min_width(ui.available_width());
+                ui.heading("📚 Library");
+                ui.text_edit_singleline(&mut "".to_string()); // Search
+                ui.add_space(10.0);
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let tracks = [
+                        ("Deep Techno", "nullherz", 126.0),
+                        ("Ambient Flow", "dsp_king", 90.0),
+                        ("Glitch Hop", "rust_ace", 140.0),
+                        ("Acid Bass", "tb_303", 128.0),
+                        ("Minimal House", "logic_error", 124.0),
+                    ];
+
+                    for (title, artist, bpm) in tracks {
+                        ui.group(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(title).strong());
+                                ui.label(format!("{} • {} BPM", artist, bpm));
+                                ui.horizontal(|ui| {
+                                    if ui.small_button("L1").clicked() {}
+                                    if ui.small_button("L2").clicked() {}
+                                    if ui.small_button("L3").clicked() {}
+                                    if ui.small_button("L4").clicked() {}
+                                });
+                            });
+                        });
+                        ui.add_space(4.0);
+                    }
+                });
+            });
+        });
     }
 
     fn render_topology(&self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
@@ -301,10 +438,10 @@ impl InspectorApp {
                         for i in 0..8 {
                             ui.label(format!("TRK {:02}", i + 1));
                             for j in 0..16 {
-                                let mut active = false;
+                                let mut _active = false;
                                 let color = if j % 4 == 0 { egui::Color32::from_gray(60) } else { egui::Color32::from_gray(40) };
                                 let response = ui.add(egui::Button::new("").min_size(egui::vec2(18.0, 18.0)).fill(color));
-                                if response.clicked() { active = !active; }
+                                if response.clicked() { _active = !_active; }
                             }
                             ui.end_row();
                         }
@@ -407,6 +544,7 @@ impl eframe::App for InspectorApp {
 
         egui::TopBottomPanel::top("nav").show(ctx, |ui| {
             ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.active_view, View::DjStudio, "🎧 DJ Studio");
                 ui.selectable_value(&mut self.active_view, View::Mixer, "🎚 Mixer");
                 ui.selectable_value(&mut self.active_view, View::Sampler, "🎹 Sampler");
                 ui.selectable_value(&mut self.active_view, View::Mastering, "🏆 Mastering");
@@ -417,6 +555,7 @@ impl eframe::App for InspectorApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             match self.active_view {
+                View::DjStudio => self.render_dj_studio(ui, &telemetry),
                 View::Mixer => self.render_mixer(ui, &telemetry),
                 View::Sampler => self.render_sampler(ui),
                 View::Topology => self.render_topology(ui, &telemetry),

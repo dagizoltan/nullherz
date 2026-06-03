@@ -1,0 +1,101 @@
+{
+  "nodes": [
+    {
+      "inputs": [],
+      "outputs": [
+        12
+      ]
+    },
+    {
+      "inputs": [
+        12
+      ],
+      "outputs": [
+        13
+      ]
+    },
+    {
+      "inputs": [
+        13
+      ],
+      "outputs": [
+        8
+      ]
+    },
+    {
+      "inputs": [],
+      "outputs": [
+        14
+      ]
+    },
+    {
+      "inputs": [
+        14
+      ],
+      "outputs": [
+        15
+      ]
+    },
+    {
+      "inputs": [
+        15
+      ],
+      "outputs": [
+        10
+      ]
+    },
+    {
+      "inputs": [],
+      "outputs": [
+        16
+      ]
+    },
+    {
+      "inputs": [
+        16
+      ],
+      "outputs": [
+        17
+      ]
+    },
+    {
+      "inputs": [
+        17
+      ],
+      "outputs": [
+        8
+      ]
+    },
+    {
+      "inputs": [],
+      "outputs": [
+        18
+      ]
+    },
+    {
+      "inputs": [
+        18
+      ],
+      "outputs": [
+        19
+      ]
+    },
+    {
+      "inputs": [
+        19
+      ],
+      "outputs": [
+        10
+      ]
+    },
+    {
+      "inputs": [
+        8,
+        10
+      ],
+      "outputs": [
+        0
+      ]
+    }
+  ]
+}
