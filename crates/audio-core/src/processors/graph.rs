@@ -113,7 +113,7 @@ impl TaskPool {
                         #[cfg(target_arch = "x86_64")]
                         let start = unsafe { std::arch::x86_64::_rdtsc() };
 
-                        unsafe { (*node.processor.get()).process(&node_inputs_storage[..routing.input_count], &mut node_outputs_reconstructed[..routing.output_count]); }
+                        unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count]); }
 
                         #[cfg(target_arch = "x86_64")]
                         {
@@ -367,7 +367,7 @@ impl AudioProcessor for ProcessorGraph {
                     #[cfg(target_arch = "x86_64")]
                     let start = unsafe { std::arch::x86_64::_rdtsc() };
 
-                    unsafe { (*node.processor.get()).process(&node_inputs_storage[..routing.input_count], &mut node_outputs_reconstructed[..routing.output_count]); }
+                    unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count]); }
 
                     #[cfg(target_arch = "x86_64")]
                     {
@@ -439,15 +439,18 @@ impl AudioProcessor for ProcessorGraph {
                     }
                 }
             }
-            control_plane::Command::AddNode { processor_type_id, node_idx: _ } => {
+            control_plane::Command::AddNode { processor_type_id, node_idx } => {
+                let id = *node_idx as u64;
                 let processor: Box<dyn AudioProcessor> = match processor_type_id {
-                    1 => Box::new(crate::processors::standard::BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
-                    2 => Box::new(crate::processors::standard::GainProcessor::new(0, 1.0)),
+                    1 => Box::new(crate::processors::standard::BiquadProcessor::new(id, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
+                    2 => Box::new(crate::processors::standard::GainProcessor::new(id, 1.0)),
                     3 => Box::new(crate::processors::standard::SimdBiquadProcessor::new(audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
                     4 => Box::new(crate::processors::complex::WavetableProcessor::new(44100.0)),
                     5 => Box::new(crate::processors::complex::SpectralProcessor::new(512)),
                     10 => Box::new(crate::processors::complex::ModulationProcessor::new(0, 0, 1.0, 0.0)),
                     20 => Box::new(crate::processors::standard::CrossfaderProcessor::new()),
+                    30 => Box::new(crate::processors::standard::SummingProcessor::new()),
+                    40 => Box::new(crate::processors::complex::SequencerProcessor::new(44100.0, 120.0)),
                     _ => Box::new(crate::processors::standard::GainProcessor::new(0, 0.0)),
                 };
                 self.add_node(processor, vec![], vec![]);

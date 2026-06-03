@@ -2138,6 +2138,11 @@ dependencies = [
 [[package]]
 name = "nullherz-broadcast"
 version = "0.1.0"
+dependencies = [
+ "audio-core",
+ "control-plane",
+ "sidecar-sdk",
+]
 
 [[package]]
 name = "nullherz-conductor"
@@ -2147,6 +2152,8 @@ dependencies = [
  "control-plane",
  "fx-runtime",
  "ipc-layer",
+ "nullherz-mixer",
+ "serde_json",
  "tokio",
 ]
 
@@ -2173,6 +2180,7 @@ name = "nullherz-inspector"
 version = "0.1.0"
 dependencies = [
  "audio-core",
+ "control-plane",
  "eframe",
  "egui",
  "futures-util",
@@ -2197,6 +2205,11 @@ dependencies = [
 [[package]]
 name = "nullherz-sampler"
 version = "0.1.0"
+dependencies = [
+ "audio-core",
+ "control-plane",
+ "sidecar-sdk",
+]
 
 [[package]]
 name = "num-traits"
