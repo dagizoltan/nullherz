@@ -102,13 +102,23 @@ pub struct InspectorApp {
 impl InspectorApp {
     pub fn new(graph: GraphJson, cc: &eframe::CreationContext<'_>) -> Self {
         let mut visuals = egui::Visuals::dark();
-        visuals.window_rounding = 0.0.into(); // Sharp modern edges
-        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_gray(10);
-        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_gray(25));
-        visuals.widgets.active.rounding = 1.0.into();
-        visuals.widgets.hovered.rounding = 1.0.into();
-        visuals.widgets.inactive.rounding = 1.0.into();
-        visuals.selection.bg_fill = egui::Color32::from_rgb(0, 150, 255);
+        visuals.window_rounding = 0.0.into();
+
+        // Custom high-end "Precision Studio" colors
+        let bg_deep = egui::Color32::from_rgb(12, 12, 14);
+        let accent_cyan = egui::Color32::from_rgb(0, 200, 255);
+        let stroke_dim = egui::Color32::from_gray(25);
+
+        visuals.widgets.noninteractive.bg_fill = bg_deep;
+        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, stroke_dim);
+        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(18, 18, 20);
+        visuals.widgets.inactive.rounding = 0.0.into();
+        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(30, 30, 35);
+        visuals.widgets.hovered.rounding = 0.0.into();
+        visuals.widgets.active.bg_fill = accent_cyan;
+        visuals.widgets.active.rounding = 0.0.into();
+
+        visuals.selection.bg_fill = accent_cyan.linear_multiply(0.4);
         cc.egui_ctx.set_visuals(visuals);
 
         let last_telemetry = Arc::new(Mutex::new(None));
@@ -163,57 +173,61 @@ impl InspectorApp {
     }
 
     fn render_dj_studio(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
-        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-
         let total_w = ui.available_width();
         let main_w = total_w * 0.75;
-        let lib_w = total_w * 0.25;
+        let lib_w = total_w * 0.25 - 4.0;
 
         ui.horizontal(|ui| {
-            // Main Mixing Area (3/4 width)
-            ui.allocate_ui(egui::vec2(main_w, ui.available_height()), |ui| {
-                ui.vertical(|ui| {
-                    ui.group(|ui| {
-                        ui.set_width(main_w);
-                        for i in 0..4 {
+            ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
+
+            // --- MAIN MIXING AREA ---
+            ui.vertical(|ui| {
+                ui.set_width(main_w);
+                for i in 0..4 {
+                    egui::Frame::canvas(ui.style())
+                        .fill(egui::Color32::from_rgb(12, 12, 14))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(25)))
+                        .inner_margin(8.0)
+                        .show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                ui.set_height(120.0);
-                                // Deck ID & Controls
+                                ui.set_height(100.0);
+
+                                // ID & Actions
                                 ui.vertical(|ui| {
-                                    ui.set_width(60.0);
-                                    ui.strong(format!("D{:02}", i + 1));
-                                    if ui.button("CUE").clicked() {}
-                                    if ui.button("SYNC").clicked() {}
+                                    ui.set_width(40.0);
+                                    ui.label(egui::RichText::new(format!("{:02}", i+1)).color(egui::Color32::from_gray(100)).strong());
+                                    ui.add_space(4.0);
+                                    if ui.add(egui::Button::new("C").min_size(egui::vec2(24.0, 24.0))).clicked() {}
                                 });
 
-                                // Waveform Display
-                                let (rect, _) = ui.allocate_exact_size(egui::vec2(main_w - 280.0, 100.0), egui::Sense::hover());
-                                ui.painter().rect_filled(rect, 1.0, egui::Color32::from_gray(15));
-                                let w = rect.width();
-                                let points: Vec<egui::Pos2> = (0..w as i32).map(|x| {
-                                    let phase = x as f32 * 0.1;
-                                    let y = rect.center().y + (phase.sin() * 20.0) + ((phase * 0.5).cos() * 10.0);
-                                    egui::pos2(rect.min.x + x as f32, y)
+                                // Waveform
+                                let w_width = ui.available_width() - 160.0;
+                                let (w_rect, _) = ui.allocate_exact_size(egui::vec2(w_width, 80.0), egui::Sense::hover());
+                                ui.painter().rect_filled(w_rect, 0.0, egui::Color32::from_rgb(5, 5, 5));
+
+                                // Glowing wave
+                                let points: Vec<egui::Pos2> = (0..w_width as i32).step_by(2).map(|x| {
+                                    let phase = x as f32 * 0.08 + (ui.input(|i| i.time) * 4.0) as f32;
+                                    let amp = 25.0 * ((phase * 0.005).sin().abs() + 0.3);
+                                    let y = w_rect.center().y + (phase.sin() * amp);
+                                    egui::pos2(w_rect.min.x + x as f32, y)
                                 }).collect();
-                                let shape = egui::Shape::line(points, egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 200, 0)));
-                                ui.painter().add(shape);
+                                ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.5, egui::Color32::from_rgb(0, 220, 255))));
+                                ui.painter().line(vec![egui::pos2(w_rect.min.x, w_rect.center().y), egui::pos2(w_rect.max.x, w_rect.center().y)], egui::Stroke::new(0.5, egui::Color32::from_rgba_unmultiplied(0, 200, 255, 40)));
 
-                                ui.add_space(12.0);
+                                ui.add_space(10.0);
 
-                                // EQ Knobs (represented as small sliders)
-                                ui.vertical_centered(|ui| {
-                                    ui.set_width(40.0);
-                                    ui.label(egui::RichText::new("H").small());
-                                    ui.add(egui::Slider::new(&mut 0.0, -24.0..=6.0).show_value(false));
-                                    ui.label(egui::RichText::new("M").small());
-                                    ui.add(egui::Slider::new(&mut 0.0, -24.0..=6.0).show_value(false));
-                                    ui.label(egui::RichText::new("L").small());
-                                    ui.add(egui::Slider::new(&mut 0.0, -24.0..=6.0).show_value(false));
+                                // EQ (Compact Sliders)
+                                ui.vertical(|ui| {
+                                    ui.set_width(20.0);
+                                    for _ in 0..3 {
+                                        ui.add(egui::Slider::new(&mut 0.0, -24.0..=6.0).show_value(false).vertical());
+                                    }
                                 });
 
-                                // Fader & Precision Meter
+                                // Fader & Integrated Meter
                                 ui.horizontal(|ui| {
-                                    ui.set_width(40.0);
+                                    ui.add_space(8.0);
                                     if ui.add(egui::Slider::new(&mut self.channel_gains[i], 0.0..=1.2).vertical().show_value(false)).changed() {
                                         let _ = self.command_sender.send(control_plane::Command::SetParam {
                                             target_id: (i as u64 * 3 + 2),
@@ -224,68 +238,69 @@ impl InspectorApp {
                                     }
 
                                     let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*3 + 2].min(1.2));
-                                    let (m_rect, _) = ui.allocate_exact_size(egui::vec2(6.0, 100.0), egui::Sense::hover());
-                                    ui.painter().rect_filled(m_rect, 0.0, egui::Color32::from_gray(25));
+                                    let (m_rect, _) = ui.allocate_exact_size(egui::vec2(5.0, 100.0), egui::Sense::hover());
+                                    ui.painter().rect_filled(m_rect, 0.0, egui::Color32::from_gray(20));
                                     let m_h = (peak * 100.0).min(100.0);
-                                    let m_p_rect = egui::Rect::from_min_size(m_rect.max - egui::vec2(6.0, m_h), egui::vec2(6.0, m_h));
-                                    ui.painter().rect_filled(m_p_rect, 0.0, egui::Color32::from_rgb(0, 255, 150));
-                                });
-
-                                // FX & State
-                                ui.vertical(|ui| {
-                                    ui.checkbox(&mut true, "REV");
-                                    ui.checkbox(&mut false, "DLY");
+                                    let m_p_rect = egui::Rect::from_min_size(m_rect.max - egui::vec2(5.0, m_h), egui::vec2(5.0, m_h));
+                                    ui.painter().rect_filled(m_p_rect, 0.0, egui::Color32::from_rgb(0, 255, 180));
                                 });
                             });
-                            ui.separator();
-                        }
-                    });
+                        });
+                    ui.add_space(2.0);
+                }
 
-                    ui.add_space(4.0);
-                    // Compact Master
-                    ui.group(|ui| {
+                // Minimal Master Dashboard
+                egui::Frame::none().fill(egui::Color32::from_gray(5)).inner_margin(8.0).show(ui, |ui| {
+                    ui.horizontal(|ui| {
                         ui.set_width(main_w);
-                        ui.horizontal(|ui| {
-                            ui.strong("MASTER");
-                            ui.add_space(20.0);
-                            ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).show_value(true));
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label("CPU: 12%");
-                                ui.separator();
-                                ui.label("BPM: 128.0");
-                            });
+                        ui.label(egui::RichText::new("MST").small().strong());
+                        ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).show_value(false));
+
+                        let m_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[12].min(1.2));
+                        let (m_rect, _) = ui.allocate_exact_size(egui::vec2(150.0, 8.0), egui::Sense::hover());
+                        ui.painter().rect_filled(m_rect, 0.0, egui::Color32::from_gray(20));
+                        let m_w_val = (m_peak * 150.0).min(150.0);
+                        ui.painter().rect_filled(egui::Rect::from_min_size(m_rect.min, egui::vec2(m_w_val, 8.0)), 0.0, egui::Color32::from_rgb(0, 150, 255));
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new("128.0 BPM").small().color(egui::Color32::from_gray(100)));
                         });
                     });
                 });
             });
 
-            // Track Library (1/4 width) - Single line entries
-            ui.allocate_ui(egui::vec2(lib_w, ui.available_height()), |ui| {
-                ui.vertical(|ui| {
-                    ui.strong("LIBRARY");
-                    ui.text_edit_singleline(&mut "".to_string());
-                    ui.add_space(4.0);
+            // --- TRACK LIBRARY ---
+            ui.vertical(|ui| {
+                ui.set_width(lib_w);
+                egui::Frame::none().fill(egui::Color32::from_gray(8)).inner_margin(8.0).show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new("LIBRARY").color(egui::Color32::from_gray(150)).small().strong());
+                        ui.add_space(4.0);
+                        ui.text_edit_singleline(&mut "".to_string());
+                        ui.add_space(8.0);
 
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        let tracks = [
-                            ("Deep Techno", "nullherz", 126.0),
-                            ("Ambient Flow", "dsp_king", 90.0),
-                            ("Glitch Hop", "rust_ace", 140.0),
-                            ("Acid Bass", "tb_303", 128.0),
-                            ("Minimal House", "logic_error", 124.0),
-                            ("Rust Vibes", "ferris", 132.0),
-                        ];
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            let tracks = [
+                                ("Deep Techno", "nullherz", 126.0),
+                                ("Ambient Flow", "dsp_king", 90.0),
+                                ("Glitch Hop", "rust_ace", 140.0),
+                                ("Acid Bass", "tb_303", 128.0),
+                                ("Minimal House", "logic_error", 124.0),
+                            ];
+                            for (title, artist, bpm) in tracks {
+                                let (rect, res) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
+                                if res.hovered() { ui.painter().rect_filled(rect, 0.0, egui::Color32::from_gray(20)); }
 
-                        for (title, artist, bpm) in tracks {
-                            ui.horizontal(|ui| {
-                                ui.set_height(24.0);
-                                if ui.small_button("L").clicked() {}
-                                ui.label(egui::RichText::new(format!("{} - {}", title, artist)));
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.small(format!("{:.0}", bpm));
+                                ui.child_ui(rect, egui::Layout::left_to_right(egui::Align::Center)).horizontal(|ui| {
+                                    ui.add_space(4.0);
+                                    ui.label(egui::RichText::new(format!("{} - {}", title, artist)).small());
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        ui.add_space(4.0);
+                                        ui.label(egui::RichText::new(format!("{:.0}", bpm)).color(egui::Color32::from_gray(80)).small());
+                                    });
                                 });
-                            });
-                        }
+                            }
+                        });
                     });
                 });
             });
@@ -545,14 +560,25 @@ impl eframe::App for InspectorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let telemetry = self.last_telemetry.lock().unwrap().clone();
 
-        egui::TopBottomPanel::top("nav").show(ctx, |ui| {
+        egui::TopBottomPanel::top("nav").frame(egui::Frame::none().fill(egui::Color32::from_gray(5)).inner_margin(8.0)).show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.active_view, View::DjStudio, "🎧 DJ Studio");
-                ui.selectable_value(&mut self.active_view, View::Mixer, "🎚 Mixer");
-                ui.selectable_value(&mut self.active_view, View::Sampler, "🎹 Sampler");
-                ui.selectable_value(&mut self.active_view, View::Mastering, "🏆 Mastering");
-                ui.selectable_value(&mut self.active_view, View::Broadcast, "📡 Broadcast");
-                ui.selectable_value(&mut self.active_view, View::Topology, "🔍 Topology");
+                ui.spacing_mut().item_spacing = egui::vec2(20.0, 0.0);
+                for (view, label) in [
+                    (View::DjStudio, "STUDIO"),
+                    (View::Mixer, "MIXER"),
+                    (View::Sampler, "SAMPLER"),
+                    (View::Mastering, "MASTERING"),
+                    (View::Broadcast, "BROADCAST"),
+                    (View::Topology, "TOPOLOGY"),
+                ] {
+                    let text = egui::RichText::new(label).small().strong();
+                    ui.selectable_value(&mut self.active_view, view, text);
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new("nullherz").color(egui::Color32::from_rgb(0, 200, 255)).strong());
+                    ui.separator();
+                });
             });
         });
 

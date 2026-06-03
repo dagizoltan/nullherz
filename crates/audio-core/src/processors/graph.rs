@@ -439,10 +439,11 @@ impl AudioProcessor for ProcessorGraph {
                     }
                 }
             }
-            control_plane::Command::AddNode { processor_type_id, node_idx: _ } => {
+            control_plane::Command::AddNode { processor_type_id, node_idx } => {
+                let id = *node_idx as u64;
                 let processor: Box<dyn AudioProcessor> = match processor_type_id {
-                    1 => Box::new(crate::processors::standard::BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
-                    2 => Box::new(crate::processors::standard::GainProcessor::new(0, 1.0)),
+                    1 => Box::new(crate::processors::standard::BiquadProcessor::new(id, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
+                    2 => Box::new(crate::processors::standard::GainProcessor::new(id, 1.0)),
                     3 => Box::new(crate::processors::standard::SimdBiquadProcessor::new(audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
                     4 => Box::new(crate::processors::complex::WavetableProcessor::new(44100.0)),
                     5 => Box::new(crate::processors::complex::SpectralProcessor::new(512)),
