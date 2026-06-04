@@ -249,6 +249,9 @@ impl<T> RingBuffer<T> {
 }
 
 pub struct Producer<T> { inner: std::sync::Arc<RingBuffer<T>> }
+impl<T> Clone for Producer<T> {
+    fn clone(&self) -> Self { Self { inner: self.inner.clone() } }
+}
 impl<T> Producer<T> {
     pub fn push(&mut self, item: T) -> Result<(), T> {
         let head = self.inner.head.load(Ordering::Acquire);

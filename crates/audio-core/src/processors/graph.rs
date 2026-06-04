@@ -41,7 +41,6 @@ pub struct GraphTopology {
     pub stages: [[usize; 64]; 64],
     pub stage_counts: [usize; 64],
     pub num_stages: usize,
-    pub crossfades: [Option<CrossfadeState>; 8],
     pub node_count: usize,
 }
 
@@ -49,8 +48,10 @@ pub struct GraphTopology {
 pub struct Job {
     pub node_ptr: *const ProcessorNode,
     pub num_samples: usize,
-    pub buffers_ptr: *mut AudioBlock,
-    pub topo_ptr: *const GraphTopology,
+    pub input_ptrs: [*const f32; 16],
+    pub input_count: usize,
+    pub output_ptrs: [*mut f32; 16],
+    pub output_count: usize,
     pub node_idx: usize, // for telemetry
     pub telemetry_ptr: *const [AtomicU64; 64],
 }
@@ -84,36 +85,26 @@ impl TaskPool {
             let comp_efd_worker = EventFd::from_raw(completion_efd.fd());
 
             let handle = thread::spawn(move || {
+                let _ = ipc_layer::set_rt_priority(85);
                 while running_worker.load(Ordering::Relaxed) {
                     if let Some(job) = cons.pop() {
                         let node = unsafe { &*job.node_ptr };
                         let num_samples = job.num_samples;
-                        let buffers_ptr = job.buffers_ptr;
-                        let topo = unsafe { &*job.topo_ptr };
-                        let routing = &topo.routing[job.node_idx];
 
                         let mut node_inputs_storage = [ &[][..]; 16 ];
-                        let input_count = routing.input_count.min(16);
-                        for i in 0..input_count {
-                            let v_idx = routing.input_indices[i].min(63);
-                            let p_idx = topo.virtual_to_physical[v_idx].min(63);
-                            unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[..num_samples.min(128)]; }
+                        for i in 0..job.input_count {
+                            unsafe { node_inputs_storage[i] = std::slice::from_raw_parts(job.input_ptrs[i], num_samples); }
                         }
 
                         let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
-                        let output_count = routing.output_count.min(16);
-                        for i in 0..output_count {
-                            let v_idx = routing.output_indices[i].min(63);
-                            let p_idx = topo.virtual_to_physical[v_idx].min(63);
-                            unsafe {
-                                node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr(), num_samples.min(128));
-                            }
+                        for i in 0..job.output_count {
+                            unsafe { node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut(job.output_ptrs[i], num_samples); }
                         }
 
                         #[cfg(target_arch = "x86_64")]
                         let start = unsafe { std::arch::x86_64::_rdtsc() };
 
-                        unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count]); }
+                        unsafe { (*node.processor.get()).process(&node_inputs_storage[..job.input_count], &mut node_outputs_reconstructed[..job.output_count]); }
 
                         #[cfg(target_arch = "x86_64")]
                         {
@@ -151,24 +142,24 @@ impl Drop for TaskPool {
 pub struct ProcessorGraph {
     pub(crate) nodes: Box<[ProcessorNode; 64]>,
     pub(crate) node_count: usize,
-    pub(crate) buffers: Box<[AudioBlock; 64]>,
-    pub(crate) _crossfade_buffers: [AudioBlock; 8],
+    pub(crate) buffers: Box<[AudioBlock; 72]>, // 64 regular + 8 crossfade
     pub(crate) topologies: Box<[GraphTopology; 2]>,
     pub(crate) active_topo_idx: Arc<AtomicUsize>,
     pub pool: Option<TaskPool>,
     pub(crate) needs_commit: bool,
+    pub(crate) crossfades: [Option<CrossfadeState>; 8],
+    pub(crate) garbage_producer: Option<Producer<Box<dyn AudioProcessor>>>,
 
     pub(crate) _stage_scratch_assigned: [bool; 64],
     pub(crate) _stage_scratch_in_degree: [usize; 64],
 
     pub(crate) node_times_cycles: Arc<[AtomicU64; 64]>,
     pub(crate) peak_levels: Arc<[AtomicU32; 64]>,
-    pub(crate) telemetry_offset: AtomicUsize,
 }
 
 impl ProcessorGraph {
     pub fn new() -> Self {
-        let buffers = Box::new([AudioBlock { data: [0.0f32; 128] }; 64]);
+        let buffers = Box::new([AudioBlock { data: [0.0f32; 128] }; 72]);
         let mut v2p = [0usize; 64];
         for i in 0..64 { v2p[i] = i; }
         let topo = GraphTopology {
@@ -177,7 +168,6 @@ impl ProcessorGraph {
             stages: [[0; 64]; 64],
             stage_counts: [0; 64],
             num_stages: 0,
-            crossfades: [None; 8],
             node_count: 0,
         };
 
@@ -189,17 +179,21 @@ impl ProcessorGraph {
             nodes,
             node_count: 0,
             buffers,
-            _crossfade_buffers: [AudioBlock { data: [0.0f32; 128] }; 8],
             topologies: Box::new([topo; 2]),
             active_topo_idx: Arc::new(AtomicUsize::new(0)),
             needs_commit: false,
+            crossfades: [None; 8],
+            garbage_producer: None,
             _stage_scratch_assigned: [false; 64],
             _stage_scratch_in_degree: [0; 64],
             pool: Some(TaskPool::new(4)),
             node_times_cycles: Arc::new(std::array::from_fn(|_| AtomicU64::new(0))),
             peak_levels: Arc::new(std::array::from_fn(|_| AtomicU32::new(0))),
-            telemetry_offset: AtomicUsize::new(0),
         }
+    }
+
+    pub fn set_garbage_producer(&mut self, producer: Producer<Box<dyn AudioProcessor>>) {
+        self.garbage_producer = Some(producer);
     }
 
     fn inactive_topology_mut(&mut self) -> &mut GraphTopology {
@@ -298,19 +292,54 @@ impl ProcessorGraph {
 }
 
 impl AudioProcessor for ProcessorGraph {
+    fn set_garbage_producer(&mut self, producer: Producer<Box<dyn AudioProcessor>>) {
+        self.garbage_producer = Some(producer);
+    }
     fn process(&mut self, _external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]]) {
         let num_samples = if !external_outputs.is_empty() { external_outputs[0].len() } else { 0 };
         if num_samples == 0 { return; }
 
         if self.needs_commit {
             self.commit_graph();
-            self.needs_commit = false;
         }
 
         let active_idx = self.active_topo_idx.load(Ordering::Acquire);
         let topo = &self.topologies[active_idx];
         let topo_ptr = topo as *const GraphTopology;
         let buffers_ptr = self.buffers.as_mut_ptr();
+
+        // Handle active crossfades
+        for slot in 0..8 {
+            if let Some(mut state) = self.crossfades[slot] {
+                let num_samples_to_fade = (num_samples as u32).min(state.remaining_samples);
+                let fade_offset = state.total_samples - state.remaining_samples;
+
+                let old_p = topo.virtual_to_physical[state.old_buffer_idx];
+                let new_p = topo.virtual_to_physical[state.new_buffer_idx];
+                let target_p = 64 + slot;
+
+                let old_buf = &self.buffers[old_p].data[..num_samples];
+                let new_buf = &self.buffers[new_p].data[..num_samples];
+                let target_buf = unsafe { &mut (*buffers_ptr.add(target_p)).data };
+
+                for i in 0..num_samples {
+                    if (i as u32) < num_samples_to_fade {
+                        let gain_new = (fade_offset + i as u32) as f32 / state.total_samples as f32;
+                        let gain_old = 1.0 - gain_new;
+                        target_buf[i] = old_buf[i] * gain_old + new_buf[i] * gain_new;
+                    } else {
+                        target_buf[i] = new_buf[i];
+                    }
+                }
+
+                state.remaining_samples -= num_samples_to_fade;
+                if state.remaining_samples == 0 {
+                    self.crossfades[slot] = None;
+                } else {
+                    self.crossfades[slot] = Some(state);
+                }
+            }
+        }
 
         for s_idx in 0..topo.num_stages {
             let stage = &topo.stages[s_idx][..topo.stage_counts[s_idx]];
@@ -319,12 +348,37 @@ impl AudioProcessor for ProcessorGraph {
                 pool.completion.store(0, Ordering::Release);
                 let num_nodes = stage.len();
                 for (i, &n_idx) in stage.iter().enumerate() {
+                    let routing = &topo.routing[n_idx];
+                    let mut input_ptrs = [std::ptr::null(); 16];
+                    let mut output_ptrs = [std::ptr::null_mut(); 16];
+
+                    for i in 0..routing.input_count {
+                        let v_idx = routing.input_indices[i].min(63);
+                        let mut p_idx = topo.virtual_to_physical[v_idx].min(63);
+                        for slot in 0..8 {
+                            if let Some(cf) = self.crossfades[slot] {
+                                if cf.node_idx == n_idx && cf.input_idx == i {
+                                    p_idx = 64 + slot;
+                                    break;
+                                }
+                            }
+                        }
+                        input_ptrs[i] = self.buffers[p_idx].data.as_ptr();
+                    }
+                    for i in 0..routing.output_count {
+                        let v_idx = routing.output_indices[i].min(63);
+                        let p_idx = topo.virtual_to_physical[v_idx].min(63);
+                        output_ptrs[i] = self.buffers[p_idx].data.as_mut_ptr();
+                    }
+
                     let worker_idx = i % pool.worker_producers.len();
                     let _ = pool.worker_producers[worker_idx].push(Job {
                         node_ptr: &self.nodes[n_idx] as *const _,
                         num_samples,
-                        buffers_ptr,
-                        topo_ptr,
+                        input_ptrs,
+                        input_count: routing.input_count,
+                        output_ptrs,
+                        output_count: routing.output_count,
                         node_idx: n_idx,
                         telemetry_ptr: Arc::as_ptr(&self.node_times_cycles) as *const _,
                     });
@@ -351,7 +405,16 @@ impl AudioProcessor for ProcessorGraph {
                     let input_count = routing.input_count.min(16);
                     for i in 0..input_count {
                         let v_idx = routing.input_indices[i].min(63);
-                        let p_idx = topo.virtual_to_physical[v_idx].min(63);
+                        let mut p_idx = topo.virtual_to_physical[v_idx].min(63);
+
+                        for slot in 0..8 {
+                            if let Some(cf) = self.crossfades[slot] {
+                                if cf.node_idx == n_idx && cf.input_idx == i {
+                                    p_idx = 64 + slot;
+                                    break;
+                                }
+                            }
+                        }
                         unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[..num_samples.min(128)]; }
                     }
                     let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
@@ -387,16 +450,18 @@ impl AudioProcessor for ProcessorGraph {
             external_outputs[1].copy_from_slice(&self.buffers[p1].data[..num_samples]);
         }
 
-        let num_nodes_to_process = self.node_count.min(64);
-        for i in 0..num_nodes_to_process {
+        // Only calculate peak levels for active nodes in the graph
+        for i in 0..topo.node_count {
             let mut peak = 0.0f32;
-            // The buffers are indexed by physical index in topo.
-            // But node telemetry is indexed by node index.
-            // Let's use the active topology to find the physical buffer for each node.
-            let p_idx = topo.virtual_to_physical[i];
-            for sample in &self.buffers[p_idx].data[..num_samples] {
-                let abs = sample.abs();
-                if abs > peak { peak = abs; }
+            // We want the peak of the node's output.
+            // Nodes can have multiple outputs, for telemetry we take the first one.
+            if topo.routing[i].output_count > 0 {
+                let v_idx = topo.routing[i].output_indices[0];
+                let p_idx = topo.virtual_to_physical[v_idx];
+                for sample in &self.buffers[p_idx].data[..num_samples] {
+                    let abs = sample.abs();
+                    if abs > peak { peak = abs; }
+                }
             }
             self.peak_levels[i].store(peak.to_bits(), Ordering::Relaxed);
         }
@@ -427,21 +492,64 @@ impl AudioProcessor for ProcessorGraph {
                     }
                 }
             }
+            control_plane::Command::UpdateEdgeCrossfaded { node_idx, input_idx, new_buffer_idx, duration_samples } => {
+                let n_idx = *node_idx as usize;
+                let i_idx = *input_idx as usize;
+                if n_idx < self.node_count && i_idx < 16 {
+                    let old_buffer_idx = self.topologies[self.active_topo_idx.load(Ordering::Acquire)].routing[n_idx].input_indices[i_idx];
+                    let new_buf = (*new_buffer_idx as usize).min(63);
+
+                    // Find an empty crossfade slot
+                    for slot in 0..8 {
+                        if self.crossfades[slot].is_none() {
+                            self.crossfades[slot] = Some(CrossfadeState {
+                                node_idx: n_idx,
+                                input_idx: i_idx,
+                                old_buffer_idx,
+                                new_buffer_idx: new_buf,
+                                remaining_samples: *duration_samples,
+                                total_samples: *duration_samples,
+                            });
+                            break;
+                        }
+                    }
+
+                    let topo = self.inactive_topology_mut();
+                    if i_idx < topo.routing[n_idx].input_count {
+                        // Update to the new buffer immediately, the process loop will handle the blend
+                        topo.routing[n_idx].input_indices[i_idx] = new_buf;
+                        self.calculate_stages();
+                        self.needs_commit = true;
+                    }
+                }
+            }
             control_plane::Command::SwapProcessor { node_idx, processor_type_id } => {
                 let n_idx = *node_idx as usize;
                 if n_idx < self.node_count {
+                    let id = n_idx as u64;
+                    let new_processor: Box<dyn AudioProcessor> = match processor_type_id {
+                        1 => Box::new(crate::processors::standard::BiquadProcessor::new(id, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
+                        2 => Box::new(crate::processors::standard::GainProcessor::new(id, 1.0)),
+                        20 => Box::new(crate::processors::standard::CrossfaderProcessor::new()),
+                        _ => return,
+                    };
+
                     let node = &self.nodes[n_idx];
-                    match processor_type_id {
-                        1 => { unsafe { *node.processor.get() = Box::new(crate::processors::standard::BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })); } }
-                        2 => { unsafe { *node.processor.get() = Box::new(crate::processors::standard::GainProcessor::new(0, 1.0)); } }
-                        20 => { unsafe { *node.processor.get() = Box::new(crate::processors::standard::CrossfaderProcessor::new()); } }
-                        _ => {}
+                    unsafe {
+                        let old_processor = std::ptr::replace(node.processor.get(), new_processor);
+                        if let Some(ref mut garbage) = self.garbage_producer {
+                            if let Err(leaked) = garbage.push(old_processor) {
+                                std::mem::forget(leaked);
+                            }
+                        } else {
+                            std::mem::forget(old_processor);
+                        }
                     }
                 }
             }
             control_plane::Command::AddNode { processor_type_id, node_idx } => {
                 let id = *node_idx as u64;
-                let processor: Box<dyn AudioProcessor> = match processor_type_id {
+                let mut processor: Box<dyn AudioProcessor> = match processor_type_id {
                     1 => Box::new(crate::processors::standard::BiquadProcessor::new(id, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
                     2 => Box::new(crate::processors::standard::GainProcessor::new(id, 1.0)),
                     3 => Box::new(crate::processors::standard::SimdBiquadProcessor::new(audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
@@ -453,6 +561,9 @@ impl AudioProcessor for ProcessorGraph {
                     40 => Box::new(crate::processors::complex::SequencerProcessor::new(44100.0, 120.0)),
                     _ => Box::new(crate::processors::standard::GainProcessor::new(0, 0.0)),
                 };
+                if let Some(ref garbage) = self.garbage_producer {
+                    processor.set_garbage_producer(garbage.clone());
+                }
                 self.add_node(processor, vec![], vec![]);
             }
             _ => {

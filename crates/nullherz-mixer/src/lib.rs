@@ -33,6 +33,7 @@ impl MixerManager {
 
         let gain_id = self.next_node_id;
         self.next_node_id += 1;
+        // Processor ID 2 = GainProcessor
         commands.push(Command::AddNode { node_idx: gain_id, processor_type_id: 2 });
         commands.push(Command::UpdateEdge { node_idx: gain_id, input_idx: 0, new_buffer_idx: input_buf as u32 });
 
@@ -49,10 +50,14 @@ impl MixerManager {
             prev_node = fx_id;
         }
 
+        let last_fx_out_buf = self.next_buffer_id;
+        self.next_buffer_id += 1;
+        commands.push(Command::UpdateOutputEdge { node_idx: prev_node, output_idx: 0, new_buffer_idx: last_fx_out_buf });
+
         let fader_id = self.next_node_id;
         self.next_node_id += 1;
         commands.push(Command::AddNode { node_idx: fader_id, processor_type_id: 2 });
-        commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 0, new_buffer_idx: self.next_buffer_id });
+        commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 0, new_buffer_idx: last_fx_out_buf });
         commands.push(Command::UpdateOutputEdge { node_idx: fader_id, output_idx: 0, new_buffer_idx: BUF_MASTER_L as u32 });
 
         commands
@@ -64,7 +69,9 @@ impl MixerManager {
 
         let resample_id = self.next_node_id;
         self.next_node_id += 1;
-        commands.push(Command::AddNode { node_idx: resample_id, processor_type_id: 10 });
+        // Processor ID 10 = ModulationProcessor (acting as placeholder for resampling for now)
+        // Or 4 = WavetableProcessor
+        commands.push(Command::AddNode { node_idx: resample_id, processor_type_id: 4 });
 
         let mut prev_id = resample_id;
         for &fx_type in fx_ids {
@@ -83,7 +90,8 @@ impl MixerManager {
         self.next_node_id += 1;
         let eq_buf = self.next_buffer_id;
         self.next_buffer_id += 1;
-        commands.push(Command::AddNode { node_idx: eq_id, processor_type_id: 11 });
+        // Processor ID 1 = BiquadProcessor (used as EQ)
+        commands.push(Command::AddNode { node_idx: eq_id, processor_type_id: 1 });
         commands.push(Command::UpdateOutputEdge { node_idx: prev_id, output_idx: 0, new_buffer_idx: eq_buf });
         commands.push(Command::UpdateEdge { node_idx: eq_id, input_idx: 0, new_buffer_idx: eq_buf });
 
@@ -114,14 +122,23 @@ impl MixerManager {
             commands.extend(self.create_dj_deck(deck, &[1], bus));
         }
 
-        // Create a Summing Node to mix everything to Master
+        // Create the master crossfader
+        let cf_id = self.next_node_id;
+        self.next_node_id += 1;
+        let cf_out_buf = self.next_buffer_id;
+        self.next_buffer_id += 1;
+        commands.push(Command::AddNode { node_idx: cf_id, processor_type_id: 20 });
+        commands.push(Command::UpdateEdge { node_idx: cf_id, input_idx: 0, new_buffer_idx: BUF_DJ_A_L as u32 });
+        commands.push(Command::UpdateEdge { node_idx: cf_id, input_idx: 1, new_buffer_idx: BUF_DJ_B_L as u32 });
+        commands.push(Command::UpdateOutputEdge { node_idx: cf_id, output_idx: 0, new_buffer_idx: cf_out_buf });
+
+        // Create a Summing Node to mix crossfader to Master
         let sum_id = self.next_node_id;
         self.next_node_id += 1;
         commands.push(Command::AddNode { node_idx: sum_id, processor_type_id: 30 }); // Summing processor
 
-        // Route buses to Summing Node
-        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 0, new_buffer_idx: BUF_DJ_A_L as u32 });
-        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 1, new_buffer_idx: BUF_DJ_B_L as u32 });
+        // Route crossfader to Summing Node
+        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 0, new_buffer_idx: cf_out_buf as u32 });
 
         // Output Sum to Master
         commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 0, new_buffer_idx: BUF_MASTER_L as u32 });

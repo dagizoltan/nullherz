@@ -39,15 +39,16 @@ impl SummingNode {
         let b_gain = _mm256_set1_ps(self.gain);
 
         for input in inputs {
+            let input_len = input.len().min(len);
             let mut i = 0;
-            while i + 8 <= len {
+            while i + 8 <= input_len {
                 let v_in = _mm256_loadu_ps(input.as_ptr().add(i));
                 let v_out = _mm256_loadu_ps(output.as_ptr().add(i));
                 let res = _mm256_add_ps(v_out, _mm256_mul_ps(v_in, b_gain));
                 _mm256_storeu_ps(output.as_mut_ptr().add(i), res);
                 i += 8;
             }
-            while i < len {
+            while i < input_len {
                 output[i] += input[i] * self.gain;
                 i += 1;
             }
@@ -77,7 +78,7 @@ impl Crossfader {
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_block_avx2(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
         use std::arch::x86_64::*;
-        let len = output.len();
+        let len = output.len().min(input_a.len()).min(input_b.len());
         let b_gain_b = _mm256_set1_ps(self.position);
         let b_gain_a = _mm256_set1_ps(1.0 - self.position);
 
@@ -498,7 +499,7 @@ impl BiquadFilter {
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
-        let len = input.len();
+        let len = input.len().min(output.len());
         if len == 0 { return; }
 
         // If we are currently ramping, fall back to the ramped scalar implementation
@@ -519,6 +520,8 @@ impl BiquadFilter {
         let a2 = self.coeffs.a2;
 
         let mut i = 0;
+        // Unrolled scalar path (compiler often vectorizes this well if possible,
+        // but Biquad has dependencies so it's hard to truly vectorise a single channel)
         while i + 4 <= len {
             let x0 = *input.get_unchecked(i);
             let y0 = x0 * b0 + z1;

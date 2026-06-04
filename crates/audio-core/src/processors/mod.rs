@@ -12,4 +12,5 @@ pub trait AudioProcessor: Send {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]);
     fn apply_command(&mut self, _command: &control_plane::Command) {}
     fn collect_telemetry(&self, _node_times: &mut [u64; 64], _peak_levels: &mut [f32; 64]) {}
+    fn set_garbage_producer(&mut self, _producer: ipc_layer::Producer<Box<dyn AudioProcessor>>) {}
 }
