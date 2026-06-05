@@ -163,7 +163,7 @@ pub struct ProcessorGraph {
 
     pub(crate) node_times_cycles: Arc<[AtomicU64; 64]>,
     pub(crate) peak_levels: Arc<[AtomicU32; 64]>,
-    pub(crate) telemetry_offset: AtomicUsize,
+    pub(crate) _telemetry_offset: AtomicUsize,
 }
 
 impl ProcessorGraph {
@@ -198,7 +198,7 @@ impl ProcessorGraph {
             pool: Some(TaskPool::new(4)),
             node_times_cycles: Arc::new(std::array::from_fn(|_| AtomicU64::new(0))),
             peak_levels: Arc::new(std::array::from_fn(|_| AtomicU32::new(0))),
-            telemetry_offset: AtomicUsize::new(0),
+            _telemetry_offset: AtomicUsize::new(0),
         }
     }
 
@@ -337,10 +337,7 @@ impl AudioProcessor for ProcessorGraph {
                         std::hint::spin_loop();
                         spins += 1;
                     } else {
-                        // After some spinning, we can yield or just keep spinning.
-                        // In a hard RT system, we'd prefer to just spin or use a more efficient RT-safe wait.
-                        // Yielding might be better than a syscall like EventFd::wait() which is much heavier.
-                        std::thread::yield_now();
+                        let _ = pool.completion_efd.wait();
                     }
                 }
             } else {

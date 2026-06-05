@@ -106,12 +106,14 @@ pub struct DjIsolator {
 
 impl DjIsolator {
     pub fn new() -> Self {
-        // Placeholder coefficients for 3-band crossover
-        let coeffs = BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 };
+        // Approximate Linkwitz-Riley crossover coefficients
+        let low_coeffs = BiquadCoefficients { b0: 0.000944, b1: 0.001888, b2: 0.000944, a1: -1.911197, a2: 0.914975 };
+        let mid_coeffs = BiquadCoefficients { b0: 0.013359, b1: 0.0, b2: -0.013359, a1: -1.89066, a2: 0.97328 };
+        let high_coeffs = BiquadCoefficients { b0: 0.80302, b1: -1.60604, b2: 0.80302, a1: -1.56101, a2: 0.65106 };
         Self {
-            low: BiquadFilter::new(coeffs),
-            mid: BiquadFilter::new(coeffs),
-            high: BiquadFilter::new(coeffs),
+            low: BiquadFilter::new(low_coeffs),
+            mid: BiquadFilter::new(mid_coeffs),
+            high: BiquadFilter::new(high_coeffs),
             gains: [1.0, 1.0, 1.0],
         }
     }
@@ -215,11 +217,8 @@ impl WavetableOscillator {
 
         for i in 0..output.len() {
             let modulated_inc = base_inc * (1.0 + fm[i]);
-            let mut modulated_phase = phase + pm[i] * 2048.0;
-
             // Fast wrapping for modulated phase
-            while modulated_phase >= 2048.0 { modulated_phase -= 2048.0; }
-            while modulated_phase < 0.0 { modulated_phase += 2048.0; }
+            let modulated_phase = (phase + pm[i] * 2048.0).rem_euclid(2048.0);
 
             let idx = modulated_phase as usize;
             let next_idx = (idx + 1) & 2047;
@@ -227,9 +226,7 @@ impl WavetableOscillator {
 
             output[i] = self.table[idx] * (1.0 - frac) + self.table[next_idx] * frac;
 
-            phase += modulated_inc;
-            if phase >= 2048.0 { phase -= 2048.0; }
-            else if phase < 0.0 { phase += 2048.0; }
+            phase = (phase + modulated_inc).rem_euclid(2048.0);
         }
         self.phases[channel] = phase;
     }
@@ -348,16 +345,16 @@ impl SimdFft {
 /// A Spectral Processor for partitioned convolution.
 pub struct SpectralProcessor {
     pub fft: SimdFft,
-    buffer: Vec<f32>,
-    hop_size: usize,
+    _buffer: Vec<f32>,
+    _hop_size: usize,
 }
 
 impl SpectralProcessor {
     pub fn new(fft_size: usize) -> Self {
         Self {
             fft: SimdFft::new(fft_size),
-            buffer: vec![0.0; fft_size],
-            hop_size: fft_size / 2,
+            _buffer: vec![0.0; fft_size],
+            _hop_size: fft_size / 2,
         }
     }
 
@@ -563,7 +560,7 @@ impl BiquadFilter {
 
 impl Filter for BiquadFilter {
     fn process_sample(&mut self, input: f32) -> f32 {
-        if self.ramp_duration > 0 {
+        if self.ramp_counter > 0 {
             self.coeffs.b0 += self.b0_step;
             self.coeffs.b1 += self.b1_step;
             self.coeffs.b2 += self.b2_step;

@@ -52,8 +52,14 @@ impl MixerManager {
         let fader_id = self.next_node_id;
         self.next_node_id += 1;
         commands.push(Command::AddNode { node_idx: fader_id, processor_type_id: 2 });
-        commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 0, new_buffer_idx: self.next_buffer_id });
+        let fader_in_l = self.next_buffer_id;
+        let fader_in_r = self.next_buffer_id + 1;
+        self.next_buffer_id += 2;
+        
+        commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 0, new_buffer_idx: fader_in_l });
+        commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 1, new_buffer_idx: fader_in_r });
         commands.push(Command::UpdateOutputEdge { node_idx: fader_id, output_idx: 0, new_buffer_idx: BUF_MASTER_L as u32 });
+        commands.push(Command::UpdateOutputEdge { node_idx: fader_id, output_idx: 1, new_buffer_idx: BUF_MASTER_R as u32 });
 
         commands
     }
@@ -88,8 +94,10 @@ impl MixerManager {
         commands.push(Command::UpdateEdge { node_idx: eq_id, input_idx: 0, new_buffer_idx: eq_buf });
 
         let target_l = if bus_assignment == 'A' { BUF_DJ_A_L } else { BUF_DJ_B_L };
-        println!("Routing Deck {} to Buffer {}", deck_id, target_l);
+        let target_r = if bus_assignment == 'A' { BUF_DJ_A_R } else { BUF_DJ_B_R };
+        println!("Routing Deck {} to Buffers {}-{}", deck_id, target_l, target_r);
         commands.push(Command::UpdateOutputEdge { node_idx: eq_id, output_idx: 0, new_buffer_idx: target_l as u32 });
+        commands.push(Command::UpdateOutputEdge { node_idx: eq_id, output_idx: 1, new_buffer_idx: target_r as u32 });
 
         commands
     }
@@ -122,9 +130,12 @@ impl MixerManager {
         // Route buses to Summing Node
         commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 0, new_buffer_idx: BUF_DJ_A_L as u32 });
         commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 1, new_buffer_idx: BUF_DJ_B_L as u32 });
+        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 2, new_buffer_idx: BUF_DJ_A_R as u32 });
+        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 3, new_buffer_idx: BUF_DJ_B_R as u32 });
 
         // Output Sum to Master
         commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 0, new_buffer_idx: BUF_MASTER_L as u32 });
+        commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 1, new_buffer_idx: BUF_MASTER_R as u32 });
 
         commands
     }

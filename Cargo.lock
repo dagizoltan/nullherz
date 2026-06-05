@@ -2152,6 +2152,7 @@ dependencies = [
  "control-plane",
  "fx-runtime",
  "ipc-layer",
+ "nullherz-gateway",
  "nullherz-mixer",
  "serde_json",
  "tokio",
@@ -2160,6 +2161,11 @@ dependencies = [
 [[package]]
 name = "nullherz-dummy"
 version = "0.1.0"
+dependencies = [
+ "audio-core",
+ "control-plane",
+ "sidecar-sdk",
+]
 
 [[package]]
 name = "nullherz-gateway"

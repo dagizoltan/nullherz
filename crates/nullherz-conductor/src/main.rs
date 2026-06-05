@@ -12,11 +12,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     conductor.start_backend("threaded")?;
     println!("Audio engine started.");
 
-    // Bridge to gateway in a background task
-    let gateway_task = tokio::spawn(async move {
-        // We'll just use a simple loop to simulate gateway bridging if not using the actual gateway crate
-        // In a real scenario, we'd call nullherz_gateway::run_gateway
-        println!("Gateway bridge active (internal).");
+    let _gateway_task = tokio::spawn(async move {
+        let _ = nullherz_gateway::run_gateway("127.0.0.1:9001", cmd_prod, tel_cons).await;
+        println!("Gateway bridge closed.");
     });
 
     // Main orchestration loop

@@ -14,7 +14,7 @@ impl JackBackend {
 }
 
 struct JackLib {
-    handle: *mut std::ffi::c_void,
+    _handle: *mut std::ffi::c_void,
     jack_client_open: unsafe extern "C" fn(*const i8, i32, *mut i32) -> *mut std::ffi::c_void,
     jack_client_close: unsafe extern "C" fn(*mut std::ffi::c_void) -> i32,
     jack_set_process_callback: unsafe extern "C" fn(*mut std::ffi::c_void, unsafe extern "C" fn(u32, *mut std::ffi::c_void) -> i32, *mut std::ffi::c_void) -> i32,
@@ -34,7 +34,7 @@ impl JackLib {
                 if sym.is_null() { None } else { Some(sym) }
             };
             Ok(Self {
-                handle: lib,
+                _handle: lib,
                 jack_client_open: std::mem::transmute(load_sym(b"jack_client_open\0").ok_or("jack_client_open failed")?),
                 jack_client_close: std::mem::transmute(load_sym(b"jack_client_close\0").ok_or("jack_client_close failed")?),
                 jack_set_process_callback: std::mem::transmute(load_sym(b"jack_set_process_callback\0").ok_or("jack_set_process_callback failed")?),

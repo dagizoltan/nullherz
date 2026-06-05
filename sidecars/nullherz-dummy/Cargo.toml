@@ -6,3 +6,8 @@ edition = "2021"
 [[bin]]
 name = "nullherz-sidecar-dummy"
 path = "src/main.rs"
+
+[dependencies]
+sidecar-sdk = { path = "../../crates/sidecar-sdk" }
+audio-core = { path = "../../crates/audio-core" }
+control-plane = { path = "../../crates/control-plane" }

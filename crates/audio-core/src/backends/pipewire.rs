@@ -3,7 +3,7 @@ use crate::engine::AudioEngine;
 use crate::backends::AudioBackend;
 
 struct PwLib {
-    handle: *mut std::ffi::c_void,
+    _handle: *mut std::ffi::c_void,
     pw_init: unsafe extern "C" fn(*mut i32, *mut *mut *mut i8),
     pw_thread_loop_new: unsafe extern "C" fn(*const i8, *const std::ffi::c_void) -> *mut std::ffi::c_void,
     pw_thread_loop_start: unsafe extern "C" fn(*mut std::ffi::c_void) -> i32,
@@ -14,7 +14,7 @@ struct PwLib {
     pw_stream_new: unsafe extern "C" fn(*mut std::ffi::c_void, *const i8, *mut std::ffi::c_void) -> *mut std::ffi::c_void,
     pw_stream_add_listener: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, *const std::ffi::c_void, *mut std::ffi::c_void),
     pw_stream_connect: unsafe extern "C" fn(*mut std::ffi::c_void, i32, u32, u32, *const std::ffi::c_void, u32) -> i32,
-    pw_stream_update_params: unsafe extern "C" fn(*mut std::ffi::c_void, *mut *const std::ffi::c_void, u32) -> i32,
+    _pw_stream_update_params: unsafe extern "C" fn(*mut std::ffi::c_void, *mut *const std::ffi::c_void, u32) -> i32,
     pw_stream_dequeue_buffer: unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void,
     pw_stream_queue_buffer: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> i32,
     pw_stream_destroy: unsafe extern "C" fn(*mut std::ffi::c_void),
@@ -32,7 +32,7 @@ impl PwLib {
                 if sym.is_null() { None } else { Some(sym) }
             };
             Ok(Self {
-                handle: lib,
+                _handle: lib,
                 pw_init: std::mem::transmute(load_sym(b"pw_init\0").ok_or("pw_init failed")?),
                 pw_thread_loop_new: std::mem::transmute(load_sym(b"pw_thread_loop_new\0").ok_or("pw_thread_loop_new failed")?),
                 pw_thread_loop_start: std::mem::transmute(load_sym(b"pw_thread_loop_start\0").ok_or("pw_thread_loop_start failed")?),
@@ -43,7 +43,7 @@ impl PwLib {
                 pw_stream_new: std::mem::transmute(load_sym(b"pw_stream_new\0").ok_or("pw_stream_new failed")?),
                 pw_stream_add_listener: std::mem::transmute(load_sym(b"pw_stream_add_listener\0").ok_or("pw_stream_add_listener failed")?),
                 pw_stream_connect: std::mem::transmute(load_sym(b"pw_stream_connect\0").ok_or("pw_stream_connect failed")?),
-                pw_stream_update_params: std::mem::transmute(load_sym(b"pw_stream_update_params\0").ok_or("pw_stream_update_params failed")?),
+                _pw_stream_update_params: std::mem::transmute(load_sym(b"pw_stream_update_params\0").ok_or("pw_stream_update_params failed")?),
                 pw_stream_dequeue_buffer: std::mem::transmute(load_sym(b"pw_stream_dequeue_buffer\0").ok_or("pw_stream_dequeue_buffer failed")?),
                 pw_stream_queue_buffer: std::mem::transmute(load_sym(b"pw_stream_queue_buffer\0").ok_or("pw_stream_queue_buffer failed")?),
                 pw_stream_destroy: std::mem::transmute(load_sym(b"pw_stream_destroy\0").ok_or("pw_stream_destroy failed")?),
@@ -62,6 +62,7 @@ pub struct PipewireBackend {
     engine: Option<AudioEngine>,
     lib: Option<PwLib>,
     events: Option<Box<PwStreamEvents>>,
+    listener: [u64; 8],
 }
 
 unsafe impl Send for PipewireBackend {}
@@ -76,6 +77,7 @@ impl PipewireBackend {
             engine: None,
             lib: None,
             events: None,
+            listener: [0; 8],
         }
     }
 }
@@ -106,8 +108,7 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
 
     #[repr(C)]
     struct PwBuffer {
-        buffer: *mut std::ffi::c_void,
-        _other: [u64; 4],
+        buffer: *mut SpaBuffer,
     }
     let pw_buf = &*(buffer as *const PwBuffer);
     #[repr(C)]
@@ -153,7 +154,7 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
     (pw.pw_stream_queue_buffer)(backend.stream, buffer);
 }
 
-unsafe extern "C" fn pw_param_changed(data: *mut std::ffi::c_void, id: u32, _param: *const std::ffi::c_void) {
+unsafe extern "C" fn pw_param_changed(_data: *mut std::ffi::c_void, id: u32, _param: *const std::ffi::c_void) {
     if id != 2 { return; } // SPA_PARAM_Props
     let _ = ipc_layer::set_rt_priority(90);
 }
@@ -186,7 +187,7 @@ impl AudioBackend for PipewireBackend {
                 0, 0, // padding
             ];
             let format_ptr = format_pod.as_ptr() as *const std::ffi::c_void;
-            let params = [format_ptr];
+            let _params = [format_ptr];
 
             self.events = Some(Box::new(PwStreamEvents {
                 version: 1,
@@ -204,8 +205,9 @@ impl AudioBackend for PipewireBackend {
             let ev_ptr = self.events.as_ref().unwrap().as_ref() as *const _ as *const _;
             let self_ptr = self as *mut _ as *mut _;
             let pw = self.lib.as_ref().unwrap();
-            (pw.pw_stream_add_listener)(self.stream, std::ptr::null_mut(), ev_ptr, self_ptr);
-            (pw.pw_stream_connect)(self.stream, 1, 0xffffffff, 0x1, params.as_ptr() as *const _, 1);
+            (pw.pw_stream_add_listener)(self.stream, self.listener.as_mut_ptr() as *mut _, ev_ptr, self_ptr);
+            // Pass null for params to avoid SPA pod format errors for now
+            (pw.pw_stream_connect)(self.stream, 1, 0xffffffff, 0x1, std::ptr::null(), 0);
             (pw.pw_thread_loop_start)(self.thread_loop);
         }
         Ok(())

@@ -32,7 +32,7 @@ impl AudioEngine {
             pending_command: None,
         }
     }
-    pub fn request_swap(&self, new_graph: Box<dyn AudioProcessor>) {
+    pub fn request_swap(&mut self, new_graph: Box<dyn AudioProcessor>) {
         let new_ptr = Box::into_raw(Box::new(new_graph));
         let old_pending = self.pending_graph.swap(new_ptr, Ordering::AcqRel);
         if !old_pending.is_null() { unsafe { drop(Box::from_raw(old_pending)); } }

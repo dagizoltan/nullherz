@@ -91,13 +91,22 @@ pub struct InspectorApp {
     last_telemetry: Arc<Mutex<Option<Telemetry>>>,
     command_sender: mpsc::Sender<control_plane::Command>,
     active_view: View,
-    screenshot_taken: bool,
 
-    // UI State
+    // UI State — all controls bound to persistent state
     channel_gains: [f32; 4],
+    channel_eq_high: [f32; 4],
+    channel_eq_mid: [f32; 4],
+    channel_eq_low: [f32; 4],
+    channel_cue: [bool; 4],
     master_gain: f32,
     sample_pool: Vec<String>,
+    search_query: String,
     is_streaming: bool,
+
+    // Mastering chain state
+    mastering_eq_enabled: bool,
+    mastering_comp_enabled: bool,
+    mastering_limiter_enabled: bool,
 }
 
 impl InspectorApp {
@@ -162,11 +171,18 @@ impl InspectorApp {
             last_telemetry,
             command_sender: cmd_tx,
             active_view: View::Studio,
-            screenshot_taken: false,
             channel_gains: [0.8; 4],
+            channel_eq_high: [0.0; 4],
+            channel_eq_mid: [0.0; 4],
+            channel_eq_low: [0.0; 4],
+            channel_cue: [false; 4],
             master_gain: 1.0,
             sample_pool: vec!["kick.wav".into(), "snare.wav".into(), "hihat.wav".into()],
+            search_query: String::new(),
             is_streaming: false,
+            mastering_eq_enabled: true,
+            mastering_comp_enabled: true,
+            mastering_limiter_enabled: false,
         }
     }
 
@@ -192,7 +208,14 @@ impl InspectorApp {
                             ui.set_width(60.0);
                             ui.label(egui::RichText::new(format!("{:02}", i+1)).color(egui::Color32::from_gray(100)).strong().size(20.0));
                             ui.add_space(10.0);
-                            ui.button("CUE");
+                            let cue_color = if self.channel_cue[i] {
+                                egui::Color32::from_rgb(255, 180, 0)
+                            } else {
+                                egui::Color32::from_gray(80)
+                            };
+                            if ui.add(egui::Button::new(egui::RichText::new("CUE").color(cue_color).size(11.0))).clicked() {
+                                self.channel_cue[i] = !self.channel_cue[i];
+                            }
                         });
 
                         // Precision Waveform
@@ -211,13 +234,15 @@ impl InspectorApp {
 
                         ui.add_space(20.0);
 
-                        // EQ & Gain
+                        // EQ & Gain — now bound to persistent state
                         ui.vertical_centered(|ui| {
                             ui.set_width(40.0);
-                            for l in ["H", "M", "L"] {
-                                ui.label(egui::RichText::new(l).size(9.0).color(egui::Color32::from_gray(80)));
-                                ui.add(egui::Slider::new(&mut 0.0, -24.0..=6.0).show_value(false).vertical());
-                            }
+                            ui.label(egui::RichText::new("H").size(9.0).color(egui::Color32::from_gray(80)));
+                            ui.add(egui::Slider::new(&mut self.channel_eq_high[i], -24.0..=6.0).show_value(false).vertical());
+                            ui.label(egui::RichText::new("M").size(9.0).color(egui::Color32::from_gray(80)));
+                            ui.add(egui::Slider::new(&mut self.channel_eq_mid[i], -24.0..=6.0).show_value(false).vertical());
+                            ui.label(egui::RichText::new("L").size(9.0).color(egui::Color32::from_gray(80)));
+                            ui.add(egui::Slider::new(&mut self.channel_eq_low[i], -24.0..=6.0).show_value(false).vertical());
                         });
 
                         // Fader & Meter
@@ -248,7 +273,14 @@ impl InspectorApp {
                 ui.child_ui(m_rect, egui::Layout::left_to_right(egui::Align::Center)).horizontal(|ui| {
                     ui.add_space(30.0);
                     ui.strong("MASTER");
-                    ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).show_value(false));
+                    if ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).show_value(false)).changed() {
+                        let _ = self.command_sender.send(control_plane::Command::SetParam {
+                            target_id: 0,
+                            param_id: 0,
+                            value: self.master_gain,
+                            ramp_duration_samples: 128,
+                        });
+                    }
 
                     let m_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[12].min(1.2));
                     let (mtr_rect, _) = ui.allocate_exact_size(egui::vec2(250.0, 10.0), egui::Sense::hover());
@@ -260,7 +292,13 @@ impl InspectorApp {
                         ui.add_space(30.0);
                         ui.label(egui::RichText::new("128.0 BPM").strong().color(egui::Color32::from_gray(120)));
                         ui.separator();
-                        ui.label(egui::RichText::new("CPU 7%").small().color(egui::Color32::from_gray(80)));
+                        let cpu_pct = telemetry.as_ref().map_or(0.0, |t| {
+                            // process_time_ns for 128 samples at 44100 Hz
+                            // Budget = 128/44100 * 1e9 = 2,902,494 ns
+                            let budget_ns = 2_902_494.0_f64;
+                            (t.process_time_ns as f64 / budget_ns * 100.0).min(100.0)
+                        });
+                        ui.label(egui::RichText::new(format!("CPU {:.0}%", cpu_pct)).small().color(egui::Color32::from_gray(80)));
                     });
                 });
             });
@@ -271,7 +309,7 @@ impl InspectorApp {
                 egui::Frame::none().fill(egui::Color32::from_rgb(12, 12, 14)).inner_margin(12.0).show(ui, |ui| {
                     ui.label(egui::RichText::new("LIBRARY").color(egui::Color32::from_gray(150)).small().strong());
                     ui.add_space(10.0);
-                    ui.text_edit_singleline(&mut "".to_string());
+                    ui.text_edit_singleline(&mut self.search_query);
                     ui.add_space(15.0);
 
                     egui::ScrollArea::vertical().show(ui, |ui| {
@@ -284,6 +322,14 @@ impl InspectorApp {
                             ("Rust Vibes", "ferris", 132.0),
                         ];
                         for (title, artist, bpm) in tracks {
+                            // Filter by search query
+                            if !self.search_query.is_empty() {
+                                let q = self.search_query.to_lowercase();
+                                if !title.to_lowercase().contains(&q) && !artist.to_lowercase().contains(&q) {
+                                    continue;
+                                }
+                            }
+
                             let (rect, res) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), egui::Sense::click());
                             let how_h = ui.ctx().animate_bool(res.id, res.hovered());
                             if how_h > 0.0 { ui.painter().rect_filled(rect, 0.0, egui::Color32::from_gray((how_h * 20.0) as u8)); }
@@ -329,7 +375,14 @@ impl InspectorApp {
                 ui.vertical_centered(|ui| {
                     ui.strong(format!("CH {}", i + 1));
                     let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*3 + 2].min(1.2));
-                    ui.add(egui::Slider::new(&mut self.channel_gains[i], 0.0..=1.2).vertical().show_value(false));
+                    if ui.add(egui::Slider::new(&mut self.channel_gains[i], 0.0..=1.2).vertical().show_value(false)).changed() {
+                        let _ = self.command_sender.send(control_plane::Command::SetParam {
+                            target_id: (i as u64 * 3 + 2),
+                            param_id: 0,
+                            value: self.channel_gains[i],
+                            ramp_duration_samples: 128,
+                        });
+                    }
                     ui.label(format!("{:.0}%", peak * 100.0));
                 });
                 ui.add_space(50.0);
@@ -356,9 +409,9 @@ impl InspectorApp {
         ui.heading("Mastering Chain");
         ui.add_space(20.0);
         ui.group(|ui| {
-            ui.checkbox(&mut true, "LINEAR EQ");
-            ui.checkbox(&mut true, "DYNAMIC COMP");
-            ui.checkbox(&mut false, "LIMITER");
+            ui.checkbox(&mut self.mastering_eq_enabled, "LINEAR EQ");
+            ui.checkbox(&mut self.mastering_comp_enabled, "DYNAMIC COMP");
+            ui.checkbox(&mut self.mastering_limiter_enabled, "LIMITER");
         });
     }
 
@@ -372,31 +425,6 @@ impl InspectorApp {
 
 impl eframe::App for InspectorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if !self.screenshot_taken {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
-            self.screenshot_taken = true;
-        }
-
-        let mut captured_image = None;
-        ctx.input(|i| {
-            for event in &i.raw.events {
-                if let egui::Event::Screenshot { image, .. } = event {
-                    captured_image = Some(image.clone());
-                }
-            }
-        });
-
-        if let Some(image) = captured_image {
-            let pixels = image.as_raw();
-            let mut file_content = Vec::new();
-            file_content.extend_from_slice(format!("P6\n{} {}\n255\n", image.width(), image.height()).as_bytes());
-            for chunk in pixels.chunks(4) {
-                file_content.push(chunk[0]); file_content.push(chunk[1]); file_content.push(chunk[2]);
-            }
-            std::fs::write("highend_ui.ppm", file_content).expect("Failed to write screenshot");
-            std::process::exit(0);
-        }
-
         let telemetry = self.last_telemetry.lock().unwrap().clone();
 
         egui::TopBottomPanel::top("nav").frame(egui::Frame::none().fill(egui::Color32::from_gray(5)).inner_margin(12.0)).show(ctx, |ui| {

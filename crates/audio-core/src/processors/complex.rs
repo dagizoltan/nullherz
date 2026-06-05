@@ -71,7 +71,7 @@ impl AudioProcessor for ModulationProcessor {
         if cv.is_empty() { return; }
 
         let avg_cv: f32 = cv.iter().sum::<f32>() / cv.len() as f32;
-        let val = avg_cv * self.scale + self.offset;
+        let _val = avg_cv * self.scale + self.offset;
 
         // In a real system, we'd send a command back to the control plane
         // or directly to the target processor if it's in the same graph.
