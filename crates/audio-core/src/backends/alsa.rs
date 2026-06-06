@@ -6,10 +6,20 @@ use crate::backends::AudioBackend;
 struct AlsaLib {
     handle: *mut std::ffi::c_void,
     snd_pcm_open: unsafe extern "C" fn(*mut *mut std::ffi::c_void, *const std::os::raw::c_char, std::os::raw::c_int, std::os::raw::c_int) -> std::os::raw::c_int,
-    snd_pcm_set_params: unsafe extern "C" fn(*mut std::ffi::c_void, std::os::raw::c_int, std::os::raw::c_int, std::os::raw::c_uint, std::os::raw::c_uint, std::os::raw::c_int, std::os::raw::c_uint) -> std::os::raw::c_int,
+    snd_pcm_hw_params_malloc: unsafe extern "C" fn(*mut *mut std::ffi::c_void) -> std::os::raw::c_int,
+    snd_pcm_hw_params_any: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> std::os::raw::c_int,
+    snd_pcm_hw_params_set_access: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_int) -> std::os::raw::c_int,
+    snd_pcm_hw_params_set_format: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_int) -> std::os::raw::c_int,
+    snd_pcm_hw_params_set_channels: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_uint) -> std::os::raw::c_int,
+    snd_pcm_hw_params_set_rate_near: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, *mut std::os::raw::c_uint, *mut std::os::raw::c_int) -> std::os::raw::c_int,
+    snd_pcm_hw_params_set_period_size_near: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, *mut std::os::raw::c_ulong, *mut std::os::raw::c_int) -> std::os::raw::c_int,
+    snd_pcm_hw_params_set_buffer_size_near: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, *mut std::os::raw::c_ulong) -> std::os::raw::c_int,
+    snd_pcm_hw_params: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> std::os::raw::c_int,
+    snd_pcm_hw_params_free: unsafe extern "C" fn(*mut std::ffi::c_void),
     snd_pcm_writei: unsafe extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void, std::os::raw::c_ulong) -> isize,
     snd_pcm_recover: unsafe extern "C" fn(*mut std::ffi::c_void, std::os::raw::c_int, std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_close: unsafe extern "C" fn(*mut std::ffi::c_void) -> std::os::raw::c_int,
+    snd_pcm_prepare: unsafe extern "C" fn(*mut std::ffi::c_void) -> std::os::raw::c_int,
 }
 unsafe impl Send for AlsaLib {}
 
@@ -25,10 +35,20 @@ impl AlsaLib {
             Ok(Self {
                 handle: lib,
                 snd_pcm_open: std::mem::transmute(load_sym(b"snd_pcm_open\0").ok_or("sym failed")?),
-                snd_pcm_set_params: std::mem::transmute(load_sym(b"snd_pcm_set_params\0").ok_or("sym failed")?),
+                snd_pcm_hw_params_malloc: std::mem::transmute(load_sym(b"snd_pcm_hw_params_malloc\0").ok_or("sym failed")?),
+                snd_pcm_hw_params_any: std::mem::transmute(load_sym(b"snd_pcm_hw_params_any\0").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_access: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_access\0").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_format: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_format\0").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_channels: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_channels\0").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_rate_near: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_rate_near\0").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_period_size_near: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_period_size_near\0").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_buffer_size_near: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_buffer_size_near\0").ok_or("sym failed")?),
+                snd_pcm_hw_params: std::mem::transmute(load_sym(b"snd_pcm_hw_params\0").ok_or("sym failed")?),
+                snd_pcm_hw_params_free: std::mem::transmute(load_sym(b"snd_pcm_hw_params_free\0").ok_or("sym failed")?),
                 snd_pcm_writei: std::mem::transmute(load_sym(b"snd_pcm_writei\0").ok_or("sym failed")?),
                 snd_pcm_recover: std::mem::transmute(load_sym(b"snd_pcm_recover\0").ok_or("sym failed")?),
                 snd_pcm_close: std::mem::transmute(load_sym(b"snd_pcm_close\0").ok_or("sym failed")?),
+                snd_pcm_prepare: std::mem::transmute(load_sym(b"snd_pcm_prepare\0").ok_or("sym failed")?),
             })
         }
     }
@@ -53,22 +73,68 @@ impl AudioBackend for AlsaBackend {
                 let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
                 let name = std::ffi::CString::new("default").unwrap();
                 if (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) != 0 { return None; }
-                if (alsa.snd_pcm_set_params)(pcm, 2, 3, 2, 44100, 1, 5000) != 0 { (alsa.snd_pcm_close)(pcm); return None; }
+
+                let mut hw_params: *mut std::ffi::c_void = std::ptr::null_mut();
+                (alsa.snd_pcm_hw_params_malloc)(&mut hw_params);
+                (alsa.snd_pcm_hw_params_any)(pcm, hw_params);
+                (alsa.snd_pcm_hw_params_set_access)(pcm, hw_params, 3); // SND_PCM_ACCESS_RW_INTERLEAVED
+                (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, 14); // SND_PCM_FORMAT_FLOAT_LE
+                (alsa.snd_pcm_hw_params_set_channels)(pcm, hw_params, 2);
+
+                let mut rate = 44100u32;
+                (alsa.snd_pcm_hw_params_set_rate_near)(pcm, hw_params, &mut rate, std::ptr::null_mut());
+
+                let mut period_size = 128u64;
+                (alsa.snd_pcm_hw_params_set_period_size_near)(pcm, hw_params, &mut period_size, std::ptr::null_mut());
+
+                let mut buffer_size = 512u64;
+                (alsa.snd_pcm_hw_params_set_buffer_size_near)(pcm, hw_params, &mut buffer_size);
+
+                // Attempt to set float format, fallback to S16 if float is unavailable
+                let mut is_float = true;
+                if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, 14) != 0 {
+                    is_float = false;
+                    if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, 2) != 0 { // SND_PCM_FORMAT_S16_LE
+                        (alsa.snd_pcm_hw_params_free)(hw_params);
+                        (alsa.snd_pcm_close)(pcm);
+                        return None;
+                    }
+                }
+
+                if (alsa.snd_pcm_hw_params)(pcm, hw_params) != 0 {
+                    (alsa.snd_pcm_hw_params_free)(hw_params);
+                    (alsa.snd_pcm_close)(pcm);
+                    return None;
+                }
+                (alsa.snd_pcm_hw_params_free)(hw_params);
+                (alsa.snd_pcm_prepare)(pcm);
+
                 let mut outputs_raw = [[0.0f32; 128]; 2];
-                let mut interleaved = [0i16; 256];
+                let mut interleaved_f32 = [0.0f32; 256];
+                let mut interleaved_s16 = [0i16; 256];
+
                 while running.load(Ordering::SeqCst) {
                     let (ch1, ch2) = outputs_raw.split_at_mut(1);
                     let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
                     engine.process_block(&[], &mut out_refs, 128);
-                    for i in 0..128 {
-                        let sample_l = (outputs_raw[0][i] * 32767.0).clamp(-32768.0, 32767.0);
-                        let sample_r = (outputs_raw[1][i] * 32767.0).clamp(-32768.0, 32767.0);
-                        interleaved[i*2] = sample_l as i16;
-                        interleaved[i*2+1] = sample_r as i16;
-                    }
-                    let written = (alsa.snd_pcm_writei)(pcm, interleaved.as_ptr() as *const _, 128);
+
+                    let written = if is_float {
+                        for i in 0..128 {
+                            interleaved_f32[i*2] = outputs_raw[0][i];
+                            interleaved_f32[i*2+1] = outputs_raw[1][i];
+                        }
+                        (alsa.snd_pcm_writei)(pcm, interleaved_f32.as_ptr() as *const _, 128)
+                    } else {
+                        for i in 0..128 {
+                            interleaved_s16[i*2] = (outputs_raw[0][i] * 32767.0).clamp(-32768.0, 32767.0) as i16;
+                            interleaved_s16[i*2+1] = (outputs_raw[1][i] * 32767.0).clamp(-32768.0, 32767.0) as i16;
+                        }
+                        (alsa.snd_pcm_writei)(pcm, interleaved_s16.as_ptr() as *const _, 128)
+                    };
+
                     if written < 0 {
                         (alsa.snd_pcm_recover)(pcm, written as i32, 1);
+                        (alsa.snd_pcm_prepare)(pcm);
                     }
                 }
                 (alsa.snd_pcm_close)(pcm);
