@@ -1,6 +1,4 @@
 use std::sync::atomic::{AtomicPtr, Ordering};
-#[cfg(not(target_arch = "x86_64"))]
-use std::time::Instant;
 use ipc_layer::{Producer, Consumer};
 use control_plane::TimestampedCommand;
 use crate::processors::AudioProcessor;
@@ -41,8 +39,14 @@ impl AudioEngine {
     pub fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize) {
         #[cfg(target_arch = "x86_64")]
         let start_cycles = unsafe { std::arch::x86_64::_rdtsc() };
-        #[cfg(not(target_arch = "x86_64"))]
-        let start_time = Instant::now();
+        #[cfg(target_arch = "aarch64")]
+        let start_cycles = unsafe {
+            let val: u64;
+            std::arch::asm!("mrs {}, cntvct_el0", out(reg) val, options(nomem, nostack));
+            val
+        };
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        let start_cycles = 0u64;
 
         let pending = self.pending_graph.swap(std::ptr::null_mut(), Ordering::Acquire);
         if !pending.is_null() {
@@ -91,8 +95,14 @@ impl AudioEngine {
 
         #[cfg(target_arch = "x86_64")]
         let elapsed_cycles = unsafe { std::arch::x86_64::_rdtsc() } - start_cycles;
-        #[cfg(not(target_arch = "x86_64"))]
-        let elapsed_cycles = start_time.elapsed().as_nanos() as u64; // Fallback to ns for non-x86
+        #[cfg(target_arch = "aarch64")]
+        let elapsed_cycles = unsafe {
+            let val: u64;
+            std::arch::asm!("mrs {}, cntvct_el0", out(reg) val, options(nomem, nostack));
+            val.wrapping_sub(start_cycles)
+        };
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        let elapsed_cycles = 0;
 
         let _ = self.telemetry_producer.push(Telemetry {
             process_time_cycles: elapsed_cycles,

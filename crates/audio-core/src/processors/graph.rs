@@ -381,12 +381,8 @@ impl AudioProcessor for ProcessorGraph {
             external_outputs[1].copy_from_slice(&self.buffers[p1].data[..num_samples]);
         }
 
-        let num_nodes_to_process = self.node_count.min(64);
-        for i in 0..num_nodes_to_process {
+        for i in 0..topo.node_count.min(64) {
             let mut peak = 0.0f32;
-            // The buffers are indexed by physical index in topo.
-            // But node telemetry is indexed by node index.
-            // Let's use the active topology to find the physical buffer for each node.
             let p_idx = topo.virtual_to_physical[i];
             for sample in &self.buffers[p_idx].data[..num_samples] {
                 let abs = sample.abs();

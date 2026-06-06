@@ -133,9 +133,48 @@ impl DjIsolator {
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_block_avx2(&mut self, input: &[f32], output: &mut [f32]) {
-        // SIMD crossover logic would go here.
-        // For prototype, we use the scalar fallback.
-        self.process_block(input, output);
+        use std::arch::x86_64::*;
+        let len = input.len();
+        if len == 0 { return; }
+
+        if self.low.ramp_duration > 0 || self.mid.ramp_duration > 0 || self.high.ramp_duration > 0 {
+            self.process_block(input, output);
+            return;
+        }
+
+        let b0 = _mm_set_ps(0.0, self.high.coeffs.b0, self.mid.coeffs.b0, self.low.coeffs.b0);
+        let b1 = _mm_set_ps(0.0, self.high.coeffs.b1, self.mid.coeffs.b1, self.low.coeffs.b1);
+        let b2 = _mm_set_ps(0.0, self.high.coeffs.b2, self.mid.coeffs.b2, self.low.coeffs.b2);
+        let a1 = _mm_set_ps(0.0, self.high.coeffs.a1, self.mid.coeffs.a1, self.low.coeffs.a1);
+        let a2 = _mm_set_ps(0.0, self.high.coeffs.a2, self.mid.coeffs.a2, self.low.coeffs.a2);
+        let gains = _mm_set_ps(0.0, self.gains[2], self.gains[1], self.gains[0]);
+
+        let mut z1 = _mm_set_ps(0.0, self.high.z1, self.mid.z1, self.low.z1);
+        let mut z2 = _mm_set_ps(0.0, self.high.z2, self.mid.z2, self.low.z2);
+
+        for i in 0..len {
+            let x = _mm_set1_ps(*input.get_unchecked(i));
+            let y = _mm_add_ps(_mm_mul_ps(x, b0), z1);
+            z1 = _mm_add_ps(_mm_sub_ps(_mm_mul_ps(x, b1), _mm_mul_ps(y, a1)), z2);
+            z2 = _mm_sub_ps(_mm_mul_ps(x, b2), _mm_mul_ps(y, a2));
+
+            let mixed = _mm_mul_ps(y, gains);
+            let sum = _mm_hadd_ps(mixed, mixed);
+            let sum = _mm_hadd_ps(sum, sum);
+            *output.get_unchecked_mut(i) = _mm_cvtss_f32(sum);
+        }
+
+        let mut final_z1 = [0.0f32; 4];
+        let mut final_z2 = [0.0f32; 4];
+        _mm_storeu_ps(final_z1.as_mut_ptr(), z1);
+        _mm_storeu_ps(final_z2.as_mut_ptr(), z2);
+
+        self.low.z1 = final_z1[0];
+        self.mid.z1 = final_z1[1];
+        self.high.z1 = final_z1[2];
+        self.low.z2 = final_z2[0];
+        self.mid.z2 = final_z2[1];
+        self.high.z2 = final_z2[2];
     }
 }
 
@@ -219,8 +258,18 @@ impl WavetableOscillator {
 
         for i in 0..output.len() {
             let modulated_inc = base_inc * (1.0 + fm[i]);
+
+            let mut modulated_phase = phase + pm[i] * 2048.0;
             // Fast wrapping for modulated phase
-            let modulated_phase = (phase + pm[i] * 2048.0).rem_euclid(2048.0);
+            if modulated_phase >= 2048.0 {
+                modulated_phase -= 2048.0;
+                if modulated_phase >= 2048.0 { modulated_phase %= 2048.0; }
+            } else if modulated_phase < 0.0 {
+                modulated_phase += 2048.0;
+                if modulated_phase < 0.0 {
+                    modulated_phase = modulated_phase.rem_euclid(2048.0);
+                }
+            }
 
             let idx = modulated_phase as usize;
             let next_idx = (idx + 1) & 2047;
@@ -228,7 +277,16 @@ impl WavetableOscillator {
 
             output[i] = self.table[idx] * (1.0 - frac) + self.table[next_idx] * frac;
 
-            phase = (phase + modulated_inc).rem_euclid(2048.0);
+            phase += modulated_inc;
+            if phase >= 2048.0 {
+                phase -= 2048.0;
+                if phase >= 2048.0 { phase %= 2048.0; }
+            } else if phase < 0.0 {
+                phase += 2048.0;
+                if phase < 0.0 {
+                    phase = phase.rem_euclid(2048.0);
+                }
+            }
         }
         self.phases[channel] = phase;
     }
