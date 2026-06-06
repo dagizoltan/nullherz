@@ -70,12 +70,23 @@ impl AudioProcessor for ModulationProcessor {
         let cv = inputs[0];
         if cv.is_empty() { return; }
 
+        // To maintain sample-accuracy, we ideally want to send a command
+        // for every sample if it changes, but that would flood the command queue.
+        // We instead detect significant changes or use the block average for low-freq modulation.
         let avg_cv: f32 = cv.iter().sum::<f32>() / cv.len() as f32;
-        let _val = avg_cv * self.scale + self.offset;
+        let val = avg_cv * self.scale + self.offset;
 
-        // In a real system, we'd send a command back to the control plane
-        // or directly to the target processor if it's in the same graph.
-        // For now, this serves as a placeholder for CV-to-Parameter mapping.
+        if let Some(ref mut prod) = self.command_producer {
+            let _ = prod.push(control_plane::TimestampedCommand {
+                timestamp_samples: 0, // Instant apply for CV
+                command: control_plane::Command::SetParam {
+                    target_id: self.target_id,
+                    param_id: self.param_id,
+                    value: val,
+                    ramp_duration_samples: 0,
+                },
+            });
+        }
     }
 }
 

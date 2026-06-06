@@ -51,7 +51,10 @@ pub struct Job {
     pub num_samples: usize,
     pub buffers_ptr: *mut AudioBlock,
     pub x_buffers_ptr: *mut AudioBlock,
-    pub topo_ptr: *const GraphTopology,
+    pub input_indices: [usize; 16],
+    pub output_indices: [usize; 16],
+    pub input_count: usize,
+    pub output_count: usize,
     pub node_idx: usize, // for telemetry
     pub telemetry_ptr: *const [AtomicU64; 64],
 }
@@ -86,14 +89,11 @@ impl TaskPool {
                         let node = unsafe { &*job.node_ptr };
                         let num_samples = job.num_samples;
                         let buffers_ptr = job.buffers_ptr;
-                        let topo = unsafe { &*job.topo_ptr };
-                        let routing = &topo.routing[job.node_idx];
 
                         let mut node_inputs_storage = [ &[][..]; 16 ];
-                        let input_count = routing.input_count.min(16);
+                        let input_count = job.input_count.min(16);
                         for i in 0..input_count {
-                            let v_idx = routing.input_indices[i].min(63);
-                            let p_idx = topo.virtual_to_physical[v_idx];
+                            let p_idx = job.input_indices[i];
                             if p_idx >= 64 {
                                 let x_idx = p_idx - 64;
                                 unsafe { node_inputs_storage[i] = &(&(*job.x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
@@ -103,10 +103,9 @@ impl TaskPool {
                         }
 
                         let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
-                        let output_count = routing.output_count.min(16);
+                        let output_count = job.output_count.min(16);
                         for i in 0..output_count {
-                            let v_idx = routing.output_indices[i].min(63);
-                            let p_idx = topo.virtual_to_physical[v_idx].min(63);
+                            let p_idx = job.output_indices[i].min(63);
                             unsafe {
                                 node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr(), num_samples);
                             }
@@ -350,12 +349,40 @@ impl AudioProcessor for ProcessorGraph {
                 let num_nodes = stage.len();
                 for (i, &n_idx) in stage.iter().enumerate() {
                     let worker_idx = i % pool.worker_producers.len();
+                    let routing = &topo.routing[n_idx];
+                    let mut resolved_inputs = [0usize; 16];
+                    let mut resolved_outputs = [0usize; 16];
+
+                    for j in 0..routing.input_count.min(16) {
+                        let v_idx = routing.input_indices[j].min(63);
+                        let mut p_idx = topo.virtual_to_physical[v_idx];
+
+                        // Apply crossfade override
+                        for x in &topo.crossfades {
+                            if let Some(state) = x {
+                                if state.node_idx == n_idx && state.input_idx == j {
+                                    p_idx = 64 + (state.node_idx % 8);
+                                    break;
+                                }
+                            }
+                        }
+                        resolved_inputs[j] = p_idx;
+                    }
+
+                    for j in 0..routing.output_count.min(16) {
+                        let v_idx = routing.output_indices[j].min(63);
+                        resolved_outputs[j] = topo.virtual_to_physical[v_idx];
+                    }
+
                     let _ = pool.worker_producers[worker_idx].push(Job {
                         node_ptr: &self.nodes[n_idx] as *const _,
                         num_samples,
                         buffers_ptr,
                         x_buffers_ptr,
-                        topo_ptr,
+                        input_indices: resolved_inputs,
+                        output_indices: resolved_outputs,
+                        input_count: routing.input_count,
+                        output_count: routing.output_count,
                         node_idx: n_idx,
                         telemetry_ptr: Arc::as_ptr(&self.node_times_cycles) as *const _,
                     });
@@ -378,7 +405,6 @@ impl AudioProcessor for ProcessorGraph {
                     let input_count = routing.input_count.min(16);
                     for i in 0..input_count {
                         let v_idx = routing.input_indices[i].min(63);
-
                         let mut p_idx = topo.virtual_to_physical[v_idx];
                         for x in &topo.crossfades {
                             if let Some(state) = x {

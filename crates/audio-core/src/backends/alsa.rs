@@ -74,11 +74,15 @@ impl AudioBackend for AlsaBackend {
                 let name = std::ffi::CString::new("default").unwrap();
                 if (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) != 0 { return None; }
 
+                const SND_PCM_ACCESS_RW_INTERLEAVED: i32 = 3;
+                const SND_PCM_FORMAT_S16_LE: i32 = 2;
+                const SND_PCM_FORMAT_FLOAT_LE: i32 = 14;
+
                 let mut hw_params: *mut std::ffi::c_void = std::ptr::null_mut();
                 (alsa.snd_pcm_hw_params_malloc)(&mut hw_params);
                 (alsa.snd_pcm_hw_params_any)(pcm, hw_params);
-                (alsa.snd_pcm_hw_params_set_access)(pcm, hw_params, 3); // SND_PCM_ACCESS_RW_INTERLEAVED
-                (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, 14); // SND_PCM_FORMAT_FLOAT_LE
+                (alsa.snd_pcm_hw_params_set_access)(pcm, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
+                (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_FLOAT_LE);
                 (alsa.snd_pcm_hw_params_set_channels)(pcm, hw_params, 2);
 
                 let mut rate = 44100u32;
@@ -92,9 +96,9 @@ impl AudioBackend for AlsaBackend {
 
                 // Attempt to set float format, fallback to S16 if float is unavailable
                 let mut is_float = true;
-                if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, 14) != 0 {
+                if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_FLOAT_LE) != 0 {
                     is_float = false;
-                    if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, 2) != 0 { // SND_PCM_FORMAT_S16_LE
+                    if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_S16_LE) != 0 {
                         (alsa.snd_pcm_hw_params_free)(hw_params);
                         (alsa.snd_pcm_close)(pcm);
                         return None;
