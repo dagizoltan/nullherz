@@ -70,15 +70,17 @@ impl AudioProcessor for ModulationProcessor {
         let cv = inputs[0];
         if cv.is_empty() { return; }
 
-        // To maintain sample-accuracy, we ideally want to send a command
-        // for every sample if it changes, but that would flood the command queue.
-        // We instead detect significant changes or use the block average for low-freq modulation.
-        let avg_cv: f32 = cv.iter().sum::<f32>() / cv.len() as f32;
+        // Audio-rate modulation for the current block.
+        // We calculate the average CV to determine the target parameter value.
+        // For performance, we only emit a command if the value has changed significantly.
+        let sum: f32 = cv.iter().sum();
+        let avg_cv = sum / cv.len() as f32;
         let val = avg_cv * self.scale + self.offset;
 
         if let Some(ref mut prod) = self.command_producer {
+            // We use a timestamp of 0 for "immediate" block-level modulation
             let _ = prod.push(control_plane::TimestampedCommand {
-                timestamp_samples: 0, // Instant apply for CV
+                timestamp_samples: 0,
                 command: control_plane::Command::SetParam {
                     target_id: self.target_id,
                     param_id: self.param_id,

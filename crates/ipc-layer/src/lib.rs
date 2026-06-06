@@ -235,6 +235,7 @@ impl<T> RingBuffer<T> {
     }
 }
 
+#[derive(Clone)]
 pub struct Producer<T> { inner: std::sync::Arc<RingBuffer<T>> }
 impl<T> Producer<T> {
     pub fn push(&mut self, item: T) -> Result<(), T> {

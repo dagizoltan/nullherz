@@ -13,12 +13,12 @@ This document tracks the implementation status of core architectural components 
 | **DSP Library** | SIMD Biquad Filters | ✅ | Optimized for AVX-512 and ARM Neon. |
 | | Fast Wavetable Oscillator | ✅ | Division-free phase wrapping, FM/PM support. |
 | | Dj Isolator (SSE3) | ✅ | Parallel band processing in SIMD lanes. |
-| | Spectral Engine (OLA) | ✅ | Robust Overlap-Add foundation with precomputed windows. |
-| | Modulation Matrix | ✅ | Audio-rate CV-to-Parameter mapping functional. |
+| | Spectral Engine (OLA) | ✅ | Functional spectral gate via precomputed Hann windows. |
+| | Modulation Matrix | ✅ | Block-level CV-to-Parameter bridge. |
 | | Convolution Reverb | ❌ | Requires full Partitioned Convolution implementation. |
 | **System & IPC** | Process Isolation (Sidecars) | ✅ | Independent DSP processes via SHM. |
 | | Zero-Copy SHM RingBuffer | ✅ | Lock-free SPSC communication. |
-| | Sidecar Heartbeat Watchdog | ✅ | Automatic recovery of crashed DSP nodes. |
+| | Sidecar Auto-Recovery | ✅ | Watchdog with automated node re-injection. |
 | | Cgroup / RT-Priority Management | ✅ | High-priority thread and resource isolation. |
 | **Backends** | Improved ALSA Backend | ✅ | Low-level hw_params, float32 native path. |
 | | Jack Backend | ✅ | Basic functionality verified. |

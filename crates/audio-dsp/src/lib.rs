@@ -463,6 +463,15 @@ impl SpectralProcessor {
 
         self.fft.process(&mut self.scratch_re, &mut self.scratch_im);
 
+        // --- SPECTRAL PROCESSING (Simple Gate) ---
+        for i in 0..n {
+            let mag_sq = self.scratch_re[i] * self.scratch_re[i] + self.scratch_im[i] * self.scratch_im[i];
+            if mag_sq < 0.0001 {
+                self.scratch_re[i] = 0.0;
+                self.scratch_im[i] = 0.0;
+            }
+        }
+
         // Inverse FFT
         for i in 0..n { self.scratch_im[i] = -self.scratch_im[i]; }
         self.fft.process(&mut self.scratch_re, &mut self.scratch_im);
