@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 fn main() {
     println!("Starting nullherz-bench Phase 3 Stress Test...");
 
-    let (_cmd_prod, cmd_cons) = RingBuffer::new(1024).split();
+    let (mut cmd_prod, cmd_cons) = RingBuffer::new(1024).split();
     let (garbage_prod, _garbage_cons) = RingBuffer::new(1024).split();
     let (tel_prod, mut tel_cons) = RingBuffer::new(1024).split();
 
@@ -45,7 +45,35 @@ fn main() {
         println!("Switching to backend {}...", current_backend_idx);
 
         if let Ok(_) = backend.start(engine) {
-            std::thread::sleep(Duration::from_secs(5));
+            // Run Command Fuzzer during playback
+            let fuzzer_start = Instant::now();
+            let mut i = 0;
+            while fuzzer_start.elapsed() < Duration::from_secs(5) {
+                // Fuzz parameter updates
+                let _ = cmd_prod.push(control_plane::TimestampedCommand {
+                    timestamp_samples: 0,
+                    command: control_plane::Command::SetParam {
+                        target_id: (i % 16) as u64,
+                        param_id: 0,
+                        value: (i as f32 * 0.1).sin(),
+                        ramp_duration_samples: 128,
+                    },
+                });
+
+                // Fuzz edge updates (topology stress)
+                let _ = cmd_prod.push(control_plane::TimestampedCommand {
+                    timestamp_samples: 0,
+                    command: control_plane::Command::UpdateEdgeCrossfaded {
+                        node_idx: (i % 64) as u32,
+                        input_idx: 0,
+                        new_buffer_idx: ((i + 1) % 64) as u32,
+                        duration_samples: 512,
+                    },
+                });
+
+                i += 1;
+                if i % 100 == 0 { std::thread::sleep(Duration::from_millis(1)); }
+            }
 
             // Check telemetry
             while let Some(telemetry) = tel_cons.pop() {

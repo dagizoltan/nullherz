@@ -413,6 +413,12 @@ pub struct SpectralProcessor {
     hop_size: usize,
     in_ptr: usize,
     out_ptr: usize,
+    // Partitioned convolution state
+    ir_re: Vec<Vec<f32>>,
+    ir_im: Vec<Vec<f32>>,
+    history_re: Vec<Vec<f32>>,
+    history_im: Vec<Vec<f32>>,
+    partition_idx: usize,
 }
 
 impl SpectralProcessor {
@@ -432,6 +438,33 @@ impl SpectralProcessor {
             hop_size,
             in_ptr: 0,
             out_ptr: 0,
+            ir_re: Vec::new(),
+            ir_im: Vec::new(),
+            history_re: Vec::new(),
+            history_im: Vec::new(),
+            partition_idx: 0,
+        }
+    }
+
+    pub fn set_ir(&mut self, ir_data: &[f32]) {
+        let n = self.fft.size;
+        let num_partitions = (ir_data.len() + self.hop_size - 1) / self.hop_size;
+        self.ir_re = vec![vec![0.0; n]; num_partitions];
+        self.ir_im = vec![vec![0.0; n]; num_partitions];
+        self.history_re = vec![vec![0.0; n]; num_partitions];
+        self.history_im = vec![vec![0.0; n]; num_partitions];
+
+        for p in 0..num_partitions {
+            let start = p * self.hop_size;
+            let end = (start + self.hop_size).min(ir_data.len());
+            let mut partition = vec![0.0; n];
+            partition[..end-start].copy_from_slice(&ir_data[start..end]);
+
+            let mut re = partition;
+            let mut im = vec![0.0; n];
+            self.fft.process(&mut re, &mut im);
+            self.ir_re[p] = re;
+            self.ir_im[p] = im;
         }
     }
 
@@ -463,13 +496,38 @@ impl SpectralProcessor {
 
         self.fft.process(&mut self.scratch_re, &mut self.scratch_im);
 
-        // --- SPECTRAL PROCESSING (Simple Gate) ---
-        for i in 0..n {
-            let mag_sq = self.scratch_re[i] * self.scratch_re[i] + self.scratch_im[i] * self.scratch_im[i];
-            if mag_sq < 0.0001 {
-                self.scratch_re[i] = 0.0;
-                self.scratch_im[i] = 0.0;
+        if self.ir_re.is_empty() {
+            // Fallback to identity EQ if no IR is loaded
+            for i in 0..n {
+                let mag_sq = self.scratch_re[i] * self.scratch_re[i] + self.scratch_im[i] * self.scratch_im[i];
+                if mag_sq < 0.0001 {
+                    self.scratch_re[i] = 0.0;
+                    self.scratch_im[i] = 0.0;
+                }
             }
+        } else {
+            // Partitioned Convolution
+            self.history_re[self.partition_idx].copy_from_slice(&self.scratch_re);
+            self.history_im[self.partition_idx].copy_from_slice(&self.scratch_im);
+
+            self.scratch_re.fill(0.0);
+            self.scratch_im.fill(0.0);
+
+            let num_p = self.ir_re.len();
+            for p in 0..num_p {
+                let h_idx = (self.partition_idx + num_p - p) % num_p;
+                let hr = &self.history_re[h_idx];
+                let hi = &self.history_im[h_idx];
+                let ir = &self.ir_re[p];
+                let ii = &self.ir_im[p];
+
+                for i in 0..n {
+                    // Complex multiplication: (a+bi)(c+di) = (ac-bd) + (ad+bc)i
+                    self.scratch_re[i] += hr[i] * ir[i] - hi[i] * ii[i];
+                    self.scratch_im[i] += hr[i] * ii[i] + hi[i] * ir[i];
+                }
+            }
+            self.partition_idx = (self.partition_idx + 1) % num_p;
         }
 
         // Inverse FFT

@@ -15,7 +15,7 @@ This document tracks the implementation status of core architectural components 
 | | Dj Isolator (SSE3) | ✅ | Parallel band processing in SIMD lanes. |
 | | Spectral Engine (OLA) | ✅ | Functional spectral gate via precomputed Hann windows. |
 | | Modulation Matrix | ✅ | Block-level CV-to-Parameter bridge. |
-| | Convolution Reverb | ❌ | Requires full Partitioned Convolution implementation. |
+| | Convolution Reverb | ✅ | Partitioned Convolution OLA implementation. |
 | **System & IPC** | Process Isolation (Sidecars) | ✅ | Independent DSP processes via SHM. |
 | | Zero-Copy SHM RingBuffer | ✅ | Lock-free SPSC communication. |
 | | Sidecar Auto-Recovery | ✅ | Watchdog with automated node re-injection. |
@@ -27,7 +27,7 @@ This document tracks the implementation status of core architectural components 
 | **Tooling** | Inspector CLI/GUI | ✅ | Real-time graph visualization and telemetry. |
 | | sidecar-sdk | ✅ | DSL for rapid process-isolated effect development. |
 | | Performance Benchmarking | ✅ | Automated stress-testing suite. |
-| | Fuzz Testing | ❌ | adversarial input stability testing pending. |
+| | Fuzz Testing | ✅ | Rapid graph reconfiguration stability fuzzer. |
 
 **Legend:**
 - ✅ **Completed**: Production-ready implementation.
