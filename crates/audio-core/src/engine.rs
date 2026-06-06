@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicPtr, Ordering};
+#[cfg(not(target_arch = "x86_64"))]
 use std::time::Instant;
 use ipc_layer::{Producer, Consumer};
 use control_plane::TimestampedCommand;
@@ -38,7 +39,11 @@ impl AudioEngine {
         if !old_pending.is_null() { unsafe { drop(Box::from_raw(old_pending)); } }
     }
     pub fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize) {
+        #[cfg(target_arch = "x86_64")]
+        let start_cycles = unsafe { std::arch::x86_64::_rdtsc() };
+        #[cfg(not(target_arch = "x86_64"))]
         let start_time = Instant::now();
+
         let pending = self.pending_graph.swap(std::ptr::null_mut(), Ordering::Acquire);
         if !pending.is_null() {
             let old = self.active_graph.swap(pending, Ordering::AcqRel);
@@ -84,8 +89,13 @@ impl AudioEngine {
         self.sample_counter = block_end_sample;
         graph.collect_telemetry(&mut node_times, &mut peak_levels);
 
+        #[cfg(target_arch = "x86_64")]
+        let elapsed_cycles = unsafe { std::arch::x86_64::_rdtsc() } - start_cycles;
+        #[cfg(not(target_arch = "x86_64"))]
+        let elapsed_cycles = start_time.elapsed().as_nanos() as u64; // Fallback to ns for non-x86
+
         let _ = self.telemetry_producer.push(Telemetry {
-            process_time_ns: start_time.elapsed().as_nanos() as u64,
+            process_time_cycles: elapsed_cycles,
             sample_counter: self.sample_counter,
             xrun_count: 0,
             node_times_cycles: node_times,

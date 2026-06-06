@@ -17,7 +17,6 @@ pub struct AudioBlock {
 /// A status-flagged item for the ring buffer to ensure stable layout for IPC.
 #[repr(C)]
 pub struct ShmSlot<T> {
-    occupied: AtomicBool,
     data: UnsafeCell<T>,
 }
 
@@ -52,12 +51,6 @@ impl<T: Copy> ShmRingBuffer<T> {
         std::ptr::write(&mut (*rb_ptr).tail, AtomicUsize::new(0));
         (*rb_ptr).capacity = capacity;
         (*rb_ptr).buffer_offset = offset;
-
-        let buffer_ptr = ptr.add(offset) as *mut ShmSlot<T>;
-        for i in 0..capacity {
-            let slot = &*buffer_ptr.add(i);
-            slot.occupied.store(false, Ordering::Relaxed);
-        }
         rb_ptr
     }
 
@@ -69,15 +62,14 @@ impl<T: Copy> ShmRingBuffer<T> {
     }
 
     pub fn push(&self, item: T) -> Result<(), T> {
-        let head = self.head.load(Ordering::Acquire);
         let tail = self.tail.load(Ordering::Relaxed);
+        let head = self.head.load(Ordering::Acquire);
         if (tail + 1) % self.capacity == head {
             return Err(item);
         }
         unsafe {
             let slot = &*self.buffer_ptr().add(tail);
             std::ptr::write(slot.data.get(), item);
-            slot.occupied.store(true, Ordering::Release);
         }
         self.tail.store((tail + 1) % self.capacity, Ordering::Release);
         Ok(())
@@ -89,17 +81,12 @@ impl<T: Copy> ShmRingBuffer<T> {
         if head == tail {
             return None;
         }
-        let item = unsafe {
+        let val = unsafe {
             let slot = &*self.buffer_ptr().add(head);
-            if !slot.occupied.load(Ordering::Acquire) {
-                return None;
-            }
-            let val = std::ptr::read(slot.data.get());
-            slot.occupied.store(false, Ordering::Release);
-            val
+            std::ptr::read(slot.data.get())
         };
         self.head.store((head + 1) % self.capacity, Ordering::Release);
-        Some(item)
+        Some(val)
     }
 }
 

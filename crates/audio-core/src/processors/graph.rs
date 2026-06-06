@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering, AtomicBool, AtomicU32, AtomicU64};
 use std::thread;
-use ipc_layer::{AudioBlock, RingBuffer, Producer, EventFd};
+use ipc_layer::{AudioBlock, RingBuffer, Producer};
 use crate::processors::AudioProcessor;
 
 #[derive(Clone, Copy)]
@@ -62,30 +62,26 @@ pub struct TaskPool {
     pub(crate) worker_producers: Vec<Producer<Job>>,
     pub(crate) completion: Arc<AtomicUsize>,
     pub(crate) running: Arc<AtomicBool>,
-    pub(crate) worker_efds: Vec<EventFd>,
-    pub(crate) completion_efd: EventFd,
 }
 
 impl TaskPool {
     pub fn new(num_workers: usize) -> Self {
         let mut workers = Vec::new();
         let mut worker_producers = Vec::new();
-        let mut worker_efds = Vec::new();
         let completion = Arc::new(AtomicUsize::new(0));
         let running = Arc::new(AtomicBool::new(true));
-        let completion_efd = EventFd::create().unwrap();
 
         for _ in 0..num_workers {
             let (prod, mut cons) = RingBuffer::<Job>::new(128).split();
             let running_worker = running.clone();
             let completion_worker = completion.clone();
-            let efd = EventFd::create().unwrap();
-            let efd_worker = EventFd::from_raw(efd.fd());
-            let comp_efd_worker = EventFd::from_raw(completion_efd.fd());
 
             let handle = thread::spawn(move || {
+                let _ = ipc_layer::set_rt_priority(85);
+                let mut spins = 0;
                 while running_worker.load(Ordering::Relaxed) {
                     if let Some(job) = cons.pop() {
+                        spins = 0;
                         let node = unsafe { &*job.node_ptr };
                         let num_samples = job.num_samples;
                         let buffers_ptr = job.buffers_ptr;
@@ -122,26 +118,28 @@ impl TaskPool {
                         }
 
                         completion_worker.fetch_add(1, Ordering::SeqCst);
-                        comp_efd_worker.notify();
                     } else {
-                        efd_worker.wait();
+                        if spins < 1000 {
+                            std::hint::spin_loop();
+                        } else {
+                            std::thread::yield_now();
+                        }
+                        spins += 1;
                     }
                 }
             });
 
             workers.push(handle);
             worker_producers.push(prod);
-            worker_efds.push(efd);
         }
 
-        Self { workers, worker_producers, completion, running, worker_efds, completion_efd }
+        Self { workers, worker_producers, completion, running }
     }
 }
 
 impl Drop for TaskPool {
     fn drop(&mut self) {
         self.running.store(false, Ordering::Release);
-        for efd in &self.worker_efds { efd.notify(); }
         for handle in self.workers.drain(..) {
             let _ = handle.join();
         }
@@ -328,17 +326,16 @@ impl AudioProcessor for ProcessorGraph {
                         node_idx: n_idx,
                         telemetry_ptr: Arc::as_ptr(&self.node_times_cycles) as *const _,
                     });
-                    pool.worker_efds[worker_idx].notify();
                 }
 
                 let mut spins = 0;
                 while pool.completion.load(Ordering::Acquire) < num_nodes {
                     if spins < 1000 {
                         std::hint::spin_loop();
-                        spins += 1;
                     } else {
-                        let _ = pool.completion_efd.wait();
+                        std::thread::yield_now();
                     }
+                    spins += 1;
                 }
             } else {
                 for &n_idx in stage {

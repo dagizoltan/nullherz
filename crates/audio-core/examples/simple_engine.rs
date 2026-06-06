@@ -31,7 +31,7 @@ fn main() {
     let tel_rb = RingBuffer::new(1024);
     let (tel_prod, _) = tel_rb.split();
 
-    let engine = AudioEngine::new(cons, garbage_prod, tel_prod, Box::new(ProcessorGraph::new()));
+    let mut engine = AudioEngine::new(cons, garbage_prod, tel_prod, Box::new(ProcessorGraph::new()));
 
     let osc = SineOscillator::new(44100.0, 440.0);
     engine.request_swap(Box::new(SineProcessor { osc }));

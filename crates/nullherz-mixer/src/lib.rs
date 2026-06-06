@@ -37,6 +37,12 @@ impl MixerManager {
         commands.push(Command::UpdateEdge { node_idx: gain_id, input_idx: 0, new_buffer_idx: input_buf as u32 });
 
         let mut prev_node = gain_id;
+        let mut prev_buf_l = self.next_buffer_id;
+        let prev_buf_r = self.next_buffer_id + 1;
+        self.next_buffer_id += 2;
+
+        commands.push(Command::UpdateOutputEdge { node_idx: gain_id, output_idx: 0, new_buffer_idx: prev_buf_l });
+
         for &fx_type in fx_ids {
             let fx_id = self.next_node_id;
             self.next_node_id += 1;
@@ -47,17 +53,16 @@ impl MixerManager {
             commands.push(Command::UpdateOutputEdge { node_idx: prev_node, output_idx: 0, new_buffer_idx: fx_buf });
             commands.push(Command::UpdateEdge { node_idx: fx_id, input_idx: 0, new_buffer_idx: fx_buf });
             prev_node = fx_id;
+            prev_buf_l = fx_buf;
+            // FX nodes currently seem to be mono, so we'd need more complex logic for stereo FX
         }
 
         let fader_id = self.next_node_id;
         self.next_node_id += 1;
         commands.push(Command::AddNode { node_idx: fader_id, processor_type_id: 2 });
-        let fader_in_l = self.next_buffer_id;
-        let fader_in_r = self.next_buffer_id + 1;
-        self.next_buffer_id += 2;
         
-        commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 0, new_buffer_idx: fader_in_l });
-        commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 1, new_buffer_idx: fader_in_r });
+        commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 0, new_buffer_idx: prev_buf_l });
+        commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 1, new_buffer_idx: prev_buf_r });
         commands.push(Command::UpdateOutputEdge { node_idx: fader_id, output_idx: 0, new_buffer_idx: BUF_MASTER_L as u32 });
         commands.push(Command::UpdateOutputEdge { node_idx: fader_id, output_idx: 1, new_buffer_idx: BUF_MASTER_R as u32 });
 

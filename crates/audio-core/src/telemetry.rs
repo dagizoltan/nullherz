@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Telemetry {
-    pub process_time_ns: u64,
+    pub process_time_cycles: u64,
     pub sample_counter: u64,
     pub xrun_count: u32,
     #[serde(with = "BigArray")]
