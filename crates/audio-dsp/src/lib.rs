@@ -65,8 +65,8 @@ impl Crossfader {
     pub fn set_position(&mut self, pos: f32) { self.position = pos.clamp(0.0, 1.0); }
 
     pub fn process_block(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
-        let gain_b = self.position;
-        let gain_a = 1.0 - gain_b;
+        let gain_b = self.position.sqrt();
+        let gain_a = (1.0 - self.position).sqrt();
 
         for i in 0..output.len() {
             output[i] = input_a[i] * gain_a + input_b[i] * gain_b;
@@ -78,8 +78,10 @@ impl Crossfader {
     pub unsafe fn process_block_avx2(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
         use std::arch::x86_64::*;
         let len = output.len();
-        let b_gain_b = _mm256_set1_ps(self.position);
-        let b_gain_a = _mm256_set1_ps(1.0 - self.position);
+        let gain_b = self.position.sqrt();
+        let gain_a = (1.0 - self.position).sqrt();
+        let b_gain_b = _mm256_set1_ps(gain_b);
+        let b_gain_a = _mm256_set1_ps(gain_a);
 
         let mut i = 0;
         while i + 8 <= len {
@@ -90,7 +92,7 @@ impl Crossfader {
             i += 8;
         }
         while i < len {
-            output[i] = input_a[i] * (1.0 - self.position) + input_b[i] * self.position;
+            output[i] = input_a[i] * gain_a + input_b[i] * gain_b;
             i += 1;
         }
     }

@@ -1,6 +1,10 @@
 use crate::backends::AudioBackend;
 
 pub struct JackBackend {
+    inner: Box<JackBackendInner>,
+}
+
+struct JackBackendInner {
     client: *mut std::ffi::c_void,
     ports: Vec<*mut std::ffi::c_void>,
     engine: Option<crate::engine::AudioEngine>,
@@ -8,9 +12,19 @@ pub struct JackBackend {
 }
 
 unsafe impl Send for JackBackend {}
+unsafe impl Send for JackBackendInner {}
 
 impl JackBackend {
-    pub fn new() -> Self { Self { client: std::ptr::null_mut(), ports: Vec::new(), engine: None, lib: None } }
+    pub fn new() -> Self {
+        Self {
+            inner: Box::new(JackBackendInner {
+                client: std::ptr::null_mut(),
+                ports: Vec::new(),
+                engine: None,
+                lib: None,
+            })
+        }
+    }
 }
 
 struct JackLib {
@@ -48,7 +62,7 @@ impl JackLib {
 }
 
 unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_void) -> i32 {
-    let backend = &mut *(data as *mut JackBackend);
+    let backend = &mut *(data as *mut JackBackendInner);
     let jack = match &backend.lib {
         Some(l) => l,
         None => return 0,
@@ -76,32 +90,34 @@ unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_
 impl AudioBackend for JackBackend {
     fn start(&mut self, engine: crate::engine::AudioEngine) -> Result<(), String> {
         unsafe {
-            if self.lib.is_none() { self.lib = Some(JackLib::load()?); }
+            let inner = &mut *self.inner;
+            if inner.lib.is_none() { inner.lib = Some(JackLib::load()?); }
             let mut status = 0;
 
-            self.client = (self.lib.as_ref().unwrap().jack_client_open)(b"nullherz\0".as_ptr() as *const i8, 0, &mut status);
-            if self.client.is_null() { return Err("Failed to open JACK client".to_string()); }
+            inner.client = (inner.lib.as_ref().unwrap().jack_client_open)(b"nullherz\0".as_ptr() as *const i8, 0, &mut status);
+            if inner.client.is_null() { return Err("Failed to open JACK client".to_string()); }
 
-            let out1 = (self.lib.as_ref().unwrap().jack_port_register)(self.client, b"out_1\0".as_ptr() as *const i8, b"32 bit float mono audio\0".as_ptr() as *const i8, 2, 0);
-            let out2 = (self.lib.as_ref().unwrap().jack_port_register)(self.client, b"out_2\0".as_ptr() as *const i8, b"32 bit float mono audio\0".as_ptr() as *const i8, 2, 0);
-            self.ports = vec![out1, out2];
+            let out1 = (inner.lib.as_ref().unwrap().jack_port_register)(inner.client, b"out_1\0".as_ptr() as *const i8, b"32 bit float mono audio\0".as_ptr() as *const i8, 2, 0);
+            let out2 = (inner.lib.as_ref().unwrap().jack_port_register)(inner.client, b"out_2\0".as_ptr() as *const i8, b"32 bit float mono audio\0".as_ptr() as *const i8, 2, 0);
+            inner.ports = vec![out1, out2];
 
-            self.engine = Some(engine);
-            let ptr = self as *mut _ as *mut _;
-            (self.lib.as_ref().unwrap().jack_set_process_callback)(self.client, jack_process_callback, ptr);
-            (self.lib.as_ref().unwrap().jack_activate)(self.client);
+            inner.engine = Some(engine);
+            let ptr = inner as *mut _ as *mut _;
+            (inner.lib.as_ref().unwrap().jack_set_process_callback)(inner.client, jack_process_callback, ptr);
+            (inner.lib.as_ref().unwrap().jack_activate)(inner.client);
         }
         Ok(())
     }
     fn stop(&mut self) -> Option<crate::engine::AudioEngine> {
         unsafe {
-            if !self.client.is_null() {
-                let jack = self.lib.as_ref().unwrap();
-                (jack.jack_deactivate)(self.client);
-                (jack.jack_client_close)(self.client);
-                self.client = std::ptr::null_mut();
+            let inner = &mut *self.inner;
+            if !inner.client.is_null() {
+                let jack = inner.lib.as_ref().unwrap();
+                (jack.jack_deactivate)(inner.client);
+                (jack.jack_client_close)(inner.client);
+                inner.client = std::ptr::null_mut();
             }
+            inner.engine.take()
         }
-        self.engine.take()
     }
 }

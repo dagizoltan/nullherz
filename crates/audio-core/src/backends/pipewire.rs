@@ -175,19 +175,22 @@ impl AudioBackend for PipewireBackend {
 
             self.stream = (pw.pw_stream_new)(self.context, b"nullherz-stream\0".as_ptr() as *const i8, std::ptr::null_mut());
 
-            let format_pod: [u32; 10] = [
-                3, // SPA_TYPE_OBJECT_Format
-                40, // size
-                1, // SPA_PARAM_EnumFormat
-                1, // media type (audio)
-                1, // media subtype (raw)
-                1, // format (F32)
-                44100, // rate
-                2, // channels
-                0, 0, // padding
+            let format_pod: [u32; 34] = [
+                128, 3, // size (body), type (Object=3)
+                1, 1,   // body.type (EnumFormat=1), body.id (EnumFormat=1)
+                // Prop 1: mediaType (1), flags (0), type (Id=11), size (4), value (audio=1), padding
+                1, 0, 11, 4, 1, 0,
+                // Prop 2: mediaSubtype (2), flags (0), type (Id=11), size (4), value (raw=1), padding
+                2, 0, 11, 4, 1, 0,
+                // Prop 3: format (3), flags (0), type (Id=11), size (4), value (F32=3), padding
+                3, 0, 11, 4, 3, 0,
+                // Prop 4: rate (4), flags (0), type (Int=4), size (4), value (44100), padding
+                4, 0, 4, 4, 44100, 0,
+                // Prop 5: channels (5), flags (0), type (Int=4), size (4), value (2), padding
+                5, 0, 4, 4, 2, 0,
             ];
             let format_ptr = format_pod.as_ptr() as *const std::ffi::c_void;
-            let _params = [format_ptr];
+            let params = [format_ptr];
 
             self.events = Some(Box::new(PwStreamEvents {
                 version: 1,
@@ -206,8 +209,8 @@ impl AudioBackend for PipewireBackend {
             let self_ptr = self as *mut _ as *mut _;
             let pw = self.lib.as_ref().unwrap();
             (pw.pw_stream_add_listener)(self.stream, self.listener.as_mut_ptr() as *mut _, ev_ptr, self_ptr);
-            // Pass null for params to avoid SPA pod format errors for now
-            (pw.pw_stream_connect)(self.stream, 1, 0xffffffff, 0x1, std::ptr::null(), 0);
+
+            (pw.pw_stream_connect)(self.stream, 1, 0xffffffff, 0x1, params.as_ptr() as *const _, 1);
             (pw.pw_thread_loop_start)(self.thread_loop);
         }
         Ok(())

@@ -8,6 +8,7 @@ struct AlsaLib {
     snd_pcm_open: unsafe extern "C" fn(*mut *mut std::ffi::c_void, *const std::os::raw::c_char, std::os::raw::c_int, std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_set_params: unsafe extern "C" fn(*mut std::ffi::c_void, std::os::raw::c_int, std::os::raw::c_int, std::os::raw::c_uint, std::os::raw::c_uint, std::os::raw::c_int, std::os::raw::c_uint) -> std::os::raw::c_int,
     snd_pcm_writei: unsafe extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void, std::os::raw::c_ulong) -> isize,
+    snd_pcm_recover: unsafe extern "C" fn(*mut std::ffi::c_void, std::os::raw::c_int, std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_close: unsafe extern "C" fn(*mut std::ffi::c_void) -> std::os::raw::c_int,
 }
 unsafe impl Send for AlsaLib {}
@@ -26,6 +27,7 @@ impl AlsaLib {
                 snd_pcm_open: std::mem::transmute(load_sym(b"snd_pcm_open\0").ok_or("sym failed")?),
                 snd_pcm_set_params: std::mem::transmute(load_sym(b"snd_pcm_set_params\0").ok_or("sym failed")?),
                 snd_pcm_writei: std::mem::transmute(load_sym(b"snd_pcm_writei\0").ok_or("sym failed")?),
+                snd_pcm_recover: std::mem::transmute(load_sym(b"snd_pcm_recover\0").ok_or("sym failed")?),
                 snd_pcm_close: std::mem::transmute(load_sym(b"snd_pcm_close\0").ok_or("sym failed")?),
             })
         }
@@ -64,7 +66,10 @@ impl AudioBackend for AlsaBackend {
                         interleaved[i*2] = sample_l as i16;
                         interleaved[i*2+1] = sample_r as i16;
                     }
-                    (alsa.snd_pcm_writei)(pcm, interleaved.as_ptr() as *const _, 128);
+                    let written = (alsa.snd_pcm_writei)(pcm, interleaved.as_ptr() as *const _, 128);
+                    if written < 0 {
+                        (alsa.snd_pcm_recover)(pcm, written as i32, 1);
+                    }
                 }
                 (alsa.snd_pcm_close)(pcm);
             }

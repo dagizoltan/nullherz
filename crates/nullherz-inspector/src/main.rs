@@ -293,10 +293,9 @@ impl InspectorApp {
                         ui.label(egui::RichText::new("128.0 BPM").strong().color(egui::Color32::from_gray(120)));
                         ui.separator();
                         let cpu_pct = telemetry.as_ref().map_or(0.0, |t| {
-                            // process_time_ns for 128 samples at 44100 Hz
-                            // Budget = 128/44100 * 1e9 = 2,902,494 ns
-                            let budget_ns = 2_902_494.0_f64;
-                            (t.process_time_ns as f64 / budget_ns * 100.0).min(100.0)
+                            // Assume 3.0 GHz CPU for rough estimate
+                            let budget_cycles = 128.0 / 44100.0 * 3.0e9;
+                            (t.process_time_cycles as f64 / budget_cycles * 100.0).min(100.0)
                         });
                         ui.label(egui::RichText::new(format!("CPU {:.0}%", cpu_pct)).small().color(egui::Color32::from_gray(80)));
                     });
