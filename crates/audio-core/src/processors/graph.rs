@@ -50,6 +50,7 @@ pub struct Job {
     pub node_ptr: *const ProcessorNode,
     pub num_samples: usize,
     pub buffers_ptr: *mut AudioBlock,
+    pub x_buffers_ptr: *mut AudioBlock,
     pub topo_ptr: *const GraphTopology,
     pub node_idx: usize, // for telemetry
     pub telemetry_ptr: *const [AtomicU64; 64],
@@ -92,8 +93,13 @@ impl TaskPool {
                         let input_count = routing.input_count.min(16);
                         for i in 0..input_count {
                             let v_idx = routing.input_indices[i].min(63);
-                            let p_idx = topo.virtual_to_physical[v_idx].min(63);
-                            unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[..num_samples.min(128)]; }
+                            let p_idx = topo.virtual_to_physical[v_idx];
+                            if p_idx >= 64 {
+                                let x_idx = p_idx - 64;
+                                unsafe { node_inputs_storage[i] = &(&(*job.x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
+                            } else {
+                                unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx.min(63))).data)[..num_samples]; }
+                            }
                         }
 
                         let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
@@ -102,7 +108,7 @@ impl TaskPool {
                             let v_idx = routing.output_indices[i].min(63);
                             let p_idx = topo.virtual_to_physical[v_idx].min(63);
                             unsafe {
-                                node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr(), num_samples.min(128));
+                                node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr(), num_samples);
                             }
                         }
 
@@ -291,7 +297,7 @@ impl ProcessorGraph {
         for i in 0..topo.routing[idx].output_count { topo.routing[idx].output_indices[i] = outputs[i]; }
         topo.node_count += 1;
 
-        self.calculate_stages();
+        // self.calculate_stages(); // Moved out of individual commands to avoid CPU spikes
     }
 }
 
@@ -301,14 +307,40 @@ impl AudioProcessor for ProcessorGraph {
         if num_samples == 0 { return; }
 
         if self.needs_commit {
+            self.calculate_stages();
             self.commit_graph();
             self.needs_commit = false;
         }
 
         let active_idx = self.active_topo_idx.load(Ordering::Acquire);
-        let topo = &self.topologies[active_idx];
-        let topo_ptr = topo as *const GraphTopology;
+        let topo_ptr = &self.topologies[active_idx] as *const GraphTopology;
+        let topo = unsafe { &*topo_ptr };
         let buffers_ptr = self.buffers.as_mut_ptr();
+        let x_buffers_ptr = self._crossfade_buffers.as_mut_ptr();
+
+        // 1. Resolve Crossfades for this block
+        let mut block_x_map = [None; 16]; // node_idx -> (input_idx, buffer_idx)
+        let crossfades_mut_ptr = &self.topologies[active_idx].crossfades as *const [Option<CrossfadeState>; 8] as *mut [Option<CrossfadeState>; 8];
+
+        for i in 0..8 {
+            let x_state_opt = unsafe { &mut (*crossfades_mut_ptr)[i] };
+            if let Some(state) = x_state_opt {
+                let x_buf_idx = state.node_idx % 8;
+                let old_data = &self.buffers[state.old_buffer_idx].data[..num_samples];
+                let new_data = &self.buffers[state.new_buffer_idx].data[..num_samples];
+                let x_data = &mut self._crossfade_buffers[x_buf_idx].data[..num_samples];
+
+                let total = state.total_samples as f32;
+                for j in 0..num_samples {
+                    let progress = (state.total_samples - state.remaining_samples) as f32 / total;
+                    x_data[j] = old_data[j] * (1.0 - progress) + new_data[j] * progress;
+                    if state.remaining_samples > 0 { state.remaining_samples -= 1; }
+                }
+
+                block_x_map[i] = Some((state.node_idx, state.input_idx, 64 + x_buf_idx));
+                if state.remaining_samples == 0 { *x_state_opt = None; }
+            }
+        }
 
         for s_idx in 0..topo.num_stages {
             let stage = &topo.stages[s_idx][..topo.stage_counts[s_idx]];
@@ -322,6 +354,7 @@ impl AudioProcessor for ProcessorGraph {
                         node_ptr: &self.nodes[n_idx] as *const _,
                         num_samples,
                         buffers_ptr,
+                        x_buffers_ptr,
                         topo_ptr,
                         node_idx: n_idx,
                         telemetry_ptr: Arc::as_ptr(&self.node_times_cycles) as *const _,
@@ -345,8 +378,23 @@ impl AudioProcessor for ProcessorGraph {
                     let input_count = routing.input_count.min(16);
                     for i in 0..input_count {
                         let v_idx = routing.input_indices[i].min(63);
-                        let p_idx = topo.virtual_to_physical[v_idx].min(63);
-                        unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[..num_samples.min(128)]; }
+
+                        let mut p_idx = topo.virtual_to_physical[v_idx];
+                        for x in &topo.crossfades {
+                            if let Some(state) = x {
+                                if state.node_idx == n_idx && state.input_idx == i {
+                                    p_idx = 64 + (state.node_idx % 8);
+                                    break;
+                                }
+                            }
+                        }
+
+                        if p_idx >= 64 {
+                            let x_idx = p_idx - 64;
+                            unsafe { node_inputs_storage[i] = &(&(*x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
+                        } else {
+                            unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx.min(63))).data)[..num_samples]; }
+                        }
                     }
                     let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
                     let output_count = routing.output_count.min(16);
@@ -354,7 +402,7 @@ impl AudioProcessor for ProcessorGraph {
                         let v_idx = routing.output_indices[i].min(63);
                         let p_idx = topo.virtual_to_physical[v_idx].min(63);
                         unsafe {
-                            node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr(), num_samples.min(128));
+                            node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr(), num_samples);
                         }
                     }
 
@@ -400,7 +448,7 @@ impl AudioProcessor for ProcessorGraph {
                     let topo = self.inactive_topology_mut();
                     if i_idx < topo.routing[n_idx].input_count {
                         topo.routing[n_idx].input_indices[i_idx] = (*new_buffer_idx as usize).min(63);
-                        self.calculate_stages();
+                        // self.calculate_stages();
                         self.needs_commit = true;
                     }
                 }
@@ -412,7 +460,8 @@ impl AudioProcessor for ProcessorGraph {
                     let topo = self.inactive_topology_mut();
                     if o_idx < topo.routing[n_idx].output_count {
                         topo.routing[n_idx].output_indices[o_idx] = (*new_buffer_idx as usize).min(63);
-                        self.calculate_stages();
+                        // self.calculate_stages();
+                        // self.calculate_stages();
                         self.needs_commit = true;
                     }
                 }

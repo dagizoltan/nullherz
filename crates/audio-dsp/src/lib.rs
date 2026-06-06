@@ -405,23 +405,74 @@ impl SimdFft {
 /// A Spectral Processor for partitioned convolution.
 pub struct SpectralProcessor {
     pub fft: SimdFft,
-    _buffer: Vec<f32>,
-    _hop_size: usize,
+    in_buffer: Vec<f32>,
+    out_buffer: Vec<f32>,
+    scratch_re: Vec<f32>,
+    scratch_im: Vec<f32>,
+    window: Vec<f32>,
+    hop_size: usize,
+    in_ptr: usize,
+    out_ptr: usize,
 }
 
 impl SpectralProcessor {
     pub fn new(fft_size: usize) -> Self {
+        let mut window = vec![0.0; fft_size];
+        for i in 0..fft_size {
+            window[i] = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (fft_size - 1) as f32).cos());
+        }
+        let hop_size = fft_size / 2;
         Self {
             fft: SimdFft::new(fft_size),
-            _buffer: vec![0.0; fft_size],
-            _hop_size: fft_size / 2,
+            in_buffer: vec![0.0; fft_size],
+            out_buffer: vec![0.0; fft_size + hop_size],
+            scratch_re: vec![0.0; fft_size],
+            scratch_im: vec![0.0; fft_size],
+            window,
+            hop_size,
+            in_ptr: 0,
+            out_ptr: 0,
         }
     }
 
     pub fn process_overlap_add(&mut self, input: &[f32], output: &mut [f32]) {
-        // Partitioned convolution logic.
-        for (i, &s) in input.iter().enumerate() {
-            if i < output.len() { output[i] = s; } // Pass-through for now
+        let len = input.len();
+        for i in 0..len {
+            self.in_buffer[self.in_ptr] = input[i];
+            output[i] = self.out_buffer[self.out_ptr];
+            self.out_buffer[self.out_ptr] = 0.0;
+
+            self.in_ptr += 1;
+            self.out_ptr = (self.out_ptr + 1) % self.out_buffer.len();
+
+            if self.in_ptr >= self.fft.size {
+                self.execute_spectral_block();
+                self.in_buffer.copy_within(self.hop_size..self.fft.size, 0);
+                self.in_ptr = self.fft.size - self.hop_size;
+            }
+        }
+    }
+
+    fn execute_spectral_block(&mut self) {
+        let n = self.fft.size;
+        self.scratch_im.fill(0.0);
+
+        for i in 0..n {
+            self.scratch_re[i] = self.in_buffer[i] * self.window[i];
+        }
+
+        self.fft.process(&mut self.scratch_re, &mut self.scratch_im);
+
+        // Inverse FFT
+        for i in 0..n { self.scratch_im[i] = -self.scratch_im[i]; }
+        self.fft.process(&mut self.scratch_re, &mut self.scratch_im);
+
+        let norm = 1.0 / n as f32;
+        let out_len = self.out_buffer.len();
+        for i in 0..n {
+            let val = (self.scratch_re[i] * norm) * self.window[i];
+            let target_ptr = (self.out_ptr + i) % out_len;
+            self.out_buffer[target_ptr] += val;
         }
     }
 }
@@ -552,8 +603,9 @@ impl BiquadFilter {
         }
     }
 
+    /// SSE-optimized block processing that parallelizes the three filter bands.
     #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2")]
+    #[target_feature(enable = "sse3")]
     pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
         let len = input.len();
         if len == 0 { return; }
