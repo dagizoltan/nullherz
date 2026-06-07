@@ -4,7 +4,7 @@ use audio_core::AudioProcessor;
 struct DummyProcessor;
 
 impl AudioProcessor for DummyProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut audio_core::processors::ProcessContext) {
         for (i, input) in inputs.iter().enumerate() {
             if i < outputs.len() {
                 outputs[i].copy_from_slice(input);

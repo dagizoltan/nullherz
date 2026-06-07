@@ -113,6 +113,11 @@ impl AudioBackend for AlsaBackend {
                 (alsa.snd_pcm_hw_params_free)(hw_params);
                 (alsa.snd_pcm_prepare)(pcm);
 
+                engine.set_config(crate::AudioConfig {
+                    sample_rate: rate as f32,
+                    block_size: period_size as usize,
+                });
+
                 let mut outputs_raw = [[0.0f32; 128]; 2];
                 let mut interleaved_f32 = [0.0f32; 256];
                 let mut interleaved_s16 = [0i16; 256];

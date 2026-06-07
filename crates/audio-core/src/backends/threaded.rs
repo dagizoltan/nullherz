@@ -17,6 +17,10 @@ impl AudioBackend for ThreadedBackend {
         let running = self.running.clone();
         let handle = thread::spawn(move || {
             let _ = ipc_layer::set_rt_priority(90);
+            engine.set_config(crate::AudioConfig {
+                sample_rate: 44100.0,
+                block_size: 128,
+            });
             let mut outputs_raw = [[0.0f32; 128]; 2];
             let interval = Duration::from_secs_f64(128.0 / 44100.0);
             while running.load(Ordering::SeqCst) {

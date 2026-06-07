@@ -47,7 +47,7 @@ impl SidecarProcessor {
 }
 
 impl AudioProcessor for SidecarProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         for i in 0..self.num_channels {
             if i < inputs.len() {
                 let mut block = AudioBlock { data: [0.0; 128] };

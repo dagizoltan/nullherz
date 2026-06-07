@@ -30,7 +30,7 @@ impl SamplerSidecar {
 }
 
 impl AudioProcessor for SamplerSidecar {
-    fn process(&mut self, _in: &[&[f32]], out: &mut [&mut [f32]]) {
+    fn process(&mut self, _in: &[&[f32]], out: &mut [&mut [f32]], _context: &mut audio_core::processors::ProcessContext) {
         for ch in 0..out.len().min(16) {
             if let Some(mut idx) = self.play_index[ch] {
                 if self.samples.is_empty() {

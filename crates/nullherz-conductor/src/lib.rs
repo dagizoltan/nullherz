@@ -8,6 +8,7 @@ pub struct Conductor {
     pub engine: Option<AudioEngine>,
     pub backend: Option<Box<dyn AudioBackend>>,
     garbage_consumer: Option<ipc_layer::Consumer<Box<dyn audio_core::AudioProcessor>>>,
+    pub topo_producer: Option<ipc_layer::NonRtProducer<control_plane::TopologyCommand>>,
 }
 
 impl Conductor {
@@ -17,19 +18,23 @@ impl Conductor {
             engine: None,
             backend: None,
             garbage_consumer: None,
+            topo_producer: None,
         }
     }
 
     pub fn setup_engine(&mut self) -> (ipc_layer::NonRtProducer<control_plane::TimestampedCommand>, ipc_layer::Consumer<audio_core::Telemetry>) {
         let (cmd_prod, cmd_cons) = RingBuffer::new(1024).split();
         let cmd_prod = ipc_layer::NonRtProducer::new(cmd_prod);
+        let (topo_prod, topo_cons) = RingBuffer::new(64).split();
+        let topo_prod = ipc_layer::NonRtProducer::new(topo_prod);
         let (garbage_prod, garbage_cons) = RingBuffer::new(1024).split();
         let (tel_prod, tel_cons) = RingBuffer::new(1024).split();
 
         let graph = ProcessorGraph::new();
-        let engine = AudioEngine::new(cmd_cons, garbage_prod, tel_prod, Box::new(graph));
+        let engine = AudioEngine::new(cmd_cons, Some(topo_cons), garbage_prod, tel_prod, Box::new(graph));
         self.engine = Some(engine);
         self.garbage_consumer = Some(garbage_cons);
+        self.topo_producer = Some(topo_prod);
 
         (cmd_prod, tel_cons)
     }

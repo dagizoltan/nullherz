@@ -140,7 +140,8 @@ impl<P: AudioProcessor> SidecarContext<P> {
                 }
             });
 
-            self.processor.process(&in_slices_arr[..num_channels], &mut out_slices_reconstructed[..num_channels]);
+            let mut context = audio_core::processors::ProcessContext { pool: None };
+            self.processor.process(&in_slices_arr[..num_channels], &mut out_slices_reconstructed[..num_channels], &mut context);
 
             for i in 0..num_channels {
                 let _ = self.output_buffers[i].push(out_blocks[i]);

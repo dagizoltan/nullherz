@@ -9,4 +9,10 @@ pub use processors::{AudioProcessor, ProcessorGraph, SidecarProcessor, Processor
 pub use backends::{AudioBackend, AlsaBackend, PipewireBackend, JackBackend, ThreadedBackend};
 pub use telemetry::Telemetry;
 
+#[derive(Debug, Clone, Copy)]
+pub struct AudioConfig {
+    pub sample_rate: f32,
+    pub block_size: usize,
+}
+
 pub const MAX_CHANNELS: usize = 16;

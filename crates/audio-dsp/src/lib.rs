@@ -255,6 +255,15 @@ impl WavetableOscillator {
         }
     }
 
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        let old_rate = self.sample_rate;
+        self.sample_rate = sample_rate;
+        // Adjust phase increments for new sample rate
+        for i in 0..16 {
+            self.phase_incs[i] = (self.phase_incs[i] * old_rate) / sample_rate;
+        }
+    }
+
     pub fn process_scalar(&mut self, channel: usize, fm: &[f32], pm: &[f32], output: &mut [f32]) {
         let mut phase = self.phases[channel];
         let base_inc = self.phase_incs[channel];
