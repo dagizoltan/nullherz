@@ -49,6 +49,9 @@ Audio buffers and DSP structures are aligned to 64-byte boundaries (supporting A
 ### 3.3 Sample-Accurate Automation
 Commands are applied by splitting audio blocks into sub-blocks at the exact sample where the command is timestamped. This ensures that parameter changes happen at the precise intended moment, regardless of the system's buffer size.
 
+### 3.4 Real-Time Safety and Jitter Considerations
+While the system adheres to a zero-allocation RT thread rule, certain graph management operations like `calculate_stages` (topological sort) are currently executed within the RT thread when a routing command is applied. This introduces a potential jitter risk ($O(N^3)$ complexity). Future iterations should move topological resolution to the Control Plane or a dedicated non-RT management thread, passing the pre-calculated stages to the RT core via atomic swap or a lock-free queue.
+
 ---
 
 ## 4. Rust Crate Architecture

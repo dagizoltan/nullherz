@@ -259,33 +259,22 @@ impl WavetableOscillator {
         for i in 0..output.len() {
             let modulated_inc = base_inc * (1.0 + fm[i]);
 
-            let mut modulated_phase = phase + pm[i] * 2048.0;
-            // Fast wrapping for modulated phase
-            if modulated_phase >= 2048.0 {
-                modulated_phase -= 2048.0;
-                if modulated_phase >= 2048.0 { modulated_phase %= 2048.0; }
-            } else if modulated_phase < 0.0 {
-                modulated_phase += 2048.0;
-                if modulated_phase < 0.0 {
-                    modulated_phase = modulated_phase.rem_euclid(2048.0);
-                }
-            }
-
-            let idx = modulated_phase as usize;
+            let modulated_phase = phase + pm[i] * 2048.0;
+            let idx_f = modulated_phase.floor();
+            let idx = (idx_f as i32 & 2047) as usize;
             let next_idx = (idx + 1) & 2047;
-            let frac = modulated_phase - idx as f32;
+            let frac = modulated_phase - idx_f;
 
             output[i] = self.table[idx] * (1.0 - frac) + self.table[next_idx] * frac;
 
             phase += modulated_inc;
             if phase >= 2048.0 {
                 phase -= 2048.0;
-                if phase >= 2048.0 { phase %= 2048.0; }
             } else if phase < 0.0 {
                 phase += 2048.0;
-                if phase < 0.0 {
-                    phase = phase.rem_euclid(2048.0);
-                }
+            }
+            if phase >= 2048.0 || phase < 0.0 {
+                phase = phase.rem_euclid(2048.0);
             }
         }
         self.phases[channel] = phase;

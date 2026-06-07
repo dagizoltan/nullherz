@@ -76,15 +76,33 @@ impl AudioProcessor for BiquadProcessor {
 
 pub struct SimdBiquadProcessor {
     inner: audio_dsp::SimdBiquad,
+    id: u64,
 }
 
 impl SimdBiquadProcessor {
-    pub fn new(coeffs: audio_dsp::BiquadCoefficients) -> Self {
-        Self { inner: audio_dsp::SimdBiquad::new(coeffs) }
+    pub fn new(id: u64, coeffs: audio_dsp::BiquadCoefficients) -> Self {
+        Self { inner: audio_dsp::SimdBiquad::new(coeffs), id }
     }
 }
 
 impl AudioProcessor for SimdBiquadProcessor {
+    fn apply_command(&mut self, command: &control_plane::Command) {
+        if let control_plane::Command::SetParam { target_id, param_id, value, .. } = command {
+            if *target_id == self.id {
+                let mut coeffs = self.inner.coeffs;
+                match param_id {
+                    0 => coeffs.b0 = *value,
+                    1 => coeffs.b1 = *value,
+                    2 => coeffs.b2 = *value,
+                    3 => coeffs.a1 = *value,
+                    4 => coeffs.a2 = *value,
+                    _ => {}
+                }
+                self.inner.coeffs = coeffs;
+            }
+        }
+    }
+
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         if inputs.is_empty() || outputs.is_empty() { return; }
         let len = inputs[0].len();
