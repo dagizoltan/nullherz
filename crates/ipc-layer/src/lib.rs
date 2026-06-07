@@ -8,11 +8,14 @@ use std::sync::Arc;
 /// Alignment for SIMD (AVX-512 requires 64 bytes).
 pub const SIMD_ALIGNMENT: usize = 64;
 
+pub const MAX_BLOCK_SIZE: usize = 256;
+
 /// A SIMD-aligned audio block.
 #[repr(C, align(64))]
 #[derive(Clone, Copy)]
 pub struct AudioBlock {
-    pub data: [f32; 128], // Fixed size for predictability
+    pub data: [f32; MAX_BLOCK_SIZE],
+    pub len: u32,
 }
 
 /// A status-flagged item for the ring buffer to ensure stable layout for IPC.
@@ -174,9 +177,10 @@ impl EventFd {
         let val: u64 = 1;
         unsafe { libc::write(self.fd, &val as *const u64 as *const libc::c_void, 8); }
     }
-    pub fn wait(&self) {
+    pub fn wait(&self) -> u64 {
         let mut val: u64 = 0;
         let _ = unsafe { libc::read(self.fd, &mut val as *mut u64 as *mut libc::c_void, 8) };
+        val
     }
     pub fn fd(&self) -> i32 { self.fd }
 }
@@ -217,15 +221,15 @@ pub fn move_to_cgroup(cgroup_name: &str, pid: i32) -> Result<(), String> {
 #[repr(C, align(64))]
 pub struct ShmSignal {
     pub(crate) flag: AtomicBool,
-    pub(crate) heartbeat: AtomicBool,
+    pub(crate) heartbeat: std::sync::atomic::AtomicU64,
 }
 
 impl ShmSignal {
-    pub fn new() -> Self { Self { flag: AtomicBool::new(false), heartbeat: AtomicBool::new(false) } }
+    pub fn new() -> Self { Self { flag: AtomicBool::new(false), heartbeat: std::sync::atomic::AtomicU64::new(0) } }
     pub fn notify(&self) { self.flag.store(true, Ordering::Release); }
     pub fn check_and_clear(&self) -> bool { self.flag.swap(false, Ordering::Acquire) }
-    pub fn pulse_heartbeat(&self) { self.heartbeat.store(true, Ordering::Release); }
-    pub fn check_and_clear_heartbeat(&self) -> bool { self.heartbeat.swap(false, Ordering::Acquire) }
+    pub fn pulse_heartbeat(&self) { self.heartbeat.fetch_add(1, Ordering::Release); }
+    pub fn get_heartbeat(&self) -> u64 { self.heartbeat.load(Ordering::Acquire) }
 }
 
 pub struct RingBuffer<T> {

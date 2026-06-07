@@ -50,15 +50,16 @@ impl AudioProcessor for SidecarProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         for i in 0..self.num_channels {
             if i < inputs.len() {
-                let mut block = AudioBlock { data: [0.0; 128] };
-                let len = inputs[i].len().min(128);
+                let mut block = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0 };
+                let len = inputs[i].len().min(ipc_layer::MAX_BLOCK_SIZE);
                 block.data[..len].copy_from_slice(&inputs[i][..len]);
+                block.len = len as u32;
                 unsafe { let _ = (*self.input_shm[i]).push(block); }
             }
             if i < outputs.len() {
                 unsafe {
                     if let Some(block) = (*self.output_shm[i]).pop() {
-                        let len = outputs[i].len().min(128);
+                        let len = outputs[i].len().min(block.len as usize);
                         outputs[i][..len].copy_from_slice(&block.data[..len]);
                     }
                 }

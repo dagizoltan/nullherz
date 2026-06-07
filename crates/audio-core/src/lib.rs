@@ -15,4 +15,12 @@ pub struct AudioConfig {
     pub block_size: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Transport {
+    pub bpm: f32,
+    pub beat_position: f64,
+    pub is_playing: bool,
+    pub sample_rate: f32,
+}
+
 pub const MAX_CHANNELS: usize = 16;

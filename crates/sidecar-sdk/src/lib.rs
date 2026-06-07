@@ -111,8 +111,8 @@ impl<P: AudioProcessor> SidecarContext<P> {
             self.processor.apply_command(&cmd);
         }
 
-        let mut in_blocks = [AudioBlock { data: [0.0; 128] }; 16];
-        let mut out_blocks = [AudioBlock { data: [0.0; 128] }; 16];
+        let mut in_blocks = [AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0 }; 16];
+        let mut out_blocks = [AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0 }; 16];
         let num_channels = self.input_buffers.len().min(self.output_buffers.len()).min(16);
 
         let mut available = true;
@@ -126,24 +126,29 @@ impl<P: AudioProcessor> SidecarContext<P> {
         }
 
         if available && num_channels > 0 {
+            let block_len = in_blocks[0].len as usize;
             let mut in_slices_arr: [&[f32]; 16] = [&[]; 16];
-            for i in 0..num_channels { in_slices_arr[i] = &in_blocks[i].data; }
+            for i in 0..num_channels { in_slices_arr[i] = &in_blocks[i].data[..block_len]; }
 
             let mut out_ptrs: [*mut f32; 16] = [std::ptr::null_mut(); 16];
             for i in 0..num_channels { out_ptrs[i] = out_blocks[i].data.as_mut_ptr(); }
 
             let mut out_slices_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|i| {
                 if i < num_channels {
-                    unsafe { std::slice::from_raw_parts_mut(out_ptrs[i], 128) }
+                    unsafe { std::slice::from_raw_parts_mut(out_ptrs[i], block_len) }
                 } else {
                     &mut []
                 }
             });
 
-            let mut context = audio_core::processors::ProcessContext { pool: None };
+            let mut context = audio_core::processors::ProcessContext {
+                pool: None,
+                transport: None,
+            };
             self.processor.process(&in_slices_arr[..num_channels], &mut out_slices_reconstructed[..num_channels], &mut context);
 
             for i in 0..num_channels {
+                out_blocks[i].len = block_len as u32;
                 let _ = self.output_buffers[i].push(out_blocks[i]);
             }
         }
@@ -156,15 +161,18 @@ impl<P: AudioProcessor> SidecarContext<P> {
         loop {
             if let Some(efd) = &self.event_fd {
                 // Blocking wait (efficient)
-                efd.wait();
+                let count = efd.wait();
+                for _ in 0..count {
+                    self.process_once();
+                }
             } else {
                 // Polling wait (low latency but high CPU)
                 if !self.signal.check_and_clear() {
                     std::thread::yield_now();
                     continue;
                 }
+                self.process_once();
             }
-            self.process_once();
         }
     }
 }

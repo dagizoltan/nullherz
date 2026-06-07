@@ -8,7 +8,7 @@ struct SineProcessor {
 }
 
 impl AudioProcessor for SineProcessor {
-    fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+    fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut audio_core::processors::ProcessContext) {
         for channel in outputs {
             for sample in channel.iter_mut() {
                 use audio_dsp::Oscillator;
@@ -32,7 +32,7 @@ fn main() {
     let (tel_prod, _) = tel_rb.split();
 
     let osc = SineOscillator::new(44100.0, 440.0);
-    let engine = AudioEngine::new(cons, garbage_prod, tel_prod, Box::new(SineProcessor { osc }));
+    let engine = AudioEngine::new(cons, None, garbage_prod, tel_prod, Box::new(SineProcessor { osc }));
 
     let mut backend = ThreadedBackend::new();
     backend.start(engine).unwrap();
