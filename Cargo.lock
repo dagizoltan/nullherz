@@ -2143,7 +2143,11 @@ version = "0.1.0"
 dependencies = [
  "audio-core",
  "control-plane",
+ "futures-util",
+ "ipc-layer",
  "sidecar-sdk",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]

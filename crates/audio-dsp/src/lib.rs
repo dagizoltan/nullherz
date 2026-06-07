@@ -478,6 +478,39 @@ impl SpectralProcessor {
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn complex_mul_accumulate_avx2(re: &mut [f32], im: &mut [f32], hr: &[f32], hi: &[f32], ir: &[f32], ii: &[f32]) {
+        use std::arch::x86_64::*;
+        let n = re.len();
+        let mut i = 0;
+        while i + 8 <= n {
+            let v_hr = unsafe { _mm256_loadu_ps(hr.as_ptr().add(i)) };
+            let v_hi = unsafe { _mm256_loadu_ps(hi.as_ptr().add(i)) };
+            let v_ir = unsafe { _mm256_loadu_ps(ir.as_ptr().add(i)) };
+            let v_ii = unsafe { _mm256_loadu_ps(ii.as_ptr().add(i)) };
+
+            let v_re = unsafe { _mm256_loadu_ps(re.as_ptr().add(i)) };
+            let v_im = unsafe { _mm256_loadu_ps(im.as_ptr().add(i)) };
+
+            // re = re + (hr * ir - hi * ii)
+            let res_re = unsafe { _mm256_add_ps(v_re, _mm256_sub_ps(_mm256_mul_ps(v_hr, v_ir), _mm256_mul_ps(v_hi, v_ii))) };
+            // im = im + (hr * ii + hi * ir)
+            let res_im = unsafe { _mm256_add_ps(v_im, _mm256_add_ps(_mm256_mul_ps(v_hr, v_ii), _mm256_mul_ps(v_hi, v_ir))) };
+
+            unsafe {
+                _mm256_storeu_ps(re.as_mut_ptr().add(i), res_re);
+                _mm256_storeu_ps(im.as_mut_ptr().add(i), res_im);
+            }
+            i += 8;
+        }
+        while i < n {
+            re[i] += hr[i] * ir[i] - hi[i] * ii[i];
+            im[i] += hr[i] * ii[i] + hi[i] * ir[i];
+            i += 1;
+        }
+    }
+
     pub fn process_overlap_add(&mut self, input: &[f32], output: &mut [f32]) {
         let len = input.len();
         for i in 0..len {
@@ -524,6 +557,8 @@ impl SpectralProcessor {
             self.scratch_im.fill(0.0);
 
             let num_p = self.ir_re.len();
+            #[cfg(target_arch = "x86_64")]
+            let has_avx2 = is_x86_feature_detected!("avx2");
             for p in 0..num_p {
                 let h_idx = (self.partition_idx + num_p - p) % num_p;
                 let hr = &self.history_re[h_idx];
@@ -531,8 +566,18 @@ impl SpectralProcessor {
                 let ir = &self.ir_re[p];
                 let ii = &self.ir_im[p];
 
+                #[cfg(target_arch = "x86_64")]
+                if has_avx2 {
+                    unsafe { Self::complex_mul_accumulate_avx2(&mut self.scratch_re, &mut self.scratch_im, hr, hi, ir, ii); }
+                } else {
+                    for i in 0..n {
+                        self.scratch_re[i] += hr[i] * ir[i] - hi[i] * ii[i];
+                        self.scratch_im[i] += hr[i] * ii[i] + hi[i] * ir[i];
+                    }
+                }
+
+                #[cfg(not(target_arch = "x86_64"))]
                 for i in 0..n {
-                    // Complex multiplication: (a+bi)(c+di) = (ac-bd) + (ad+bc)i
                     self.scratch_re[i] += hr[i] * ir[i] - hi[i] * ii[i];
                     self.scratch_im[i] += hr[i] * ii[i] + hi[i] * ir[i];
                 }
@@ -680,11 +725,12 @@ impl BiquadFilter {
         }
     }
 
-    /// SSE-optimized block processing using Direct Form II Transposed.
+    /// Optimized scalar block processing using Direct Form II Transposed.
+    /// SIMD speedup for single-stream biquads is often negligible due to serial dependencies;
+    /// unrolled scalar math typically outperforms 'pseudo-SIMD' intrinsics here.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "sse3")]
     pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
-        use std::arch::x86_64::*;
         let len = input.len();
         if len == 0 { return; }
 
@@ -695,30 +741,24 @@ impl BiquadFilter {
             return;
         }
 
-        let vb0 = _mm_set1_ps(self.coeffs.b0);
-        let vb1 = _mm_set1_ps(self.coeffs.b1);
-        let vb2 = _mm_set1_ps(self.coeffs.b2);
-        let va1 = _mm_set1_ps(self.coeffs.a1);
-        let va2 = _mm_set1_ps(self.coeffs.a2);
+        let mut z1 = self.z1;
+        let mut z2 = self.z2;
+        let b0 = self.coeffs.b0;
+        let b1 = self.coeffs.b1;
+        let b2 = self.coeffs.b2;
+        let a1 = self.coeffs.a1;
+        let a2 = self.coeffs.a2;
 
-        let mut vz1 = _mm_set1_ps(self.z1);
-        let mut vz2 = _mm_set1_ps(self.z2);
-
-        // Biquad is inherently serial, so we process 1 sample at a time but use SIMD
-        // for the internal MAC operations. For true speedup, we'd need to process 4 independent streams.
-        // But we can at least optimize the single-stream math.
         for i in 0..len {
-            let vx = _mm_set1_ps(*input.get_unchecked(i));
-            let vy = _mm_add_ss(_mm_mul_ss(vx, vb0), vz1);
-
-            vz1 = _mm_add_ss(_mm_sub_ss(_mm_mul_ss(vx, vb1), _mm_mul_ss(vy, va1)), vz2);
-            vz2 = _mm_sub_ss(_mm_mul_ss(vx, vb2), _mm_mul_ss(vy, va2));
-
-            *output.get_unchecked_mut(i) = _mm_cvtss_f32(vy);
+            let x = *input.get_unchecked(i);
+            let y = x * b0 + z1;
+            z1 = x * b1 - y * a1 + z2;
+            z2 = x * b2 - y * a2;
+            *output.get_unchecked_mut(i) = y;
         }
 
-        self.z1 = _mm_cvtss_f32(vz1);
-        self.z2 = _mm_cvtss_f32(vz2);
+        self.z1 = z1;
+        self.z2 = z2;
     }
 }
 
@@ -953,5 +993,27 @@ impl SimdBiquad {
             _mm256_storeu_ps(self.z1.as_mut_ptr(), z1);
             _mm256_storeu_ps(self.z2.as_mut_ptr(), z2);
         }
+    }
+}
+
+#[cfg(test)]
+mod dsp_tests {
+    use super::*;
+
+    #[test]
+    fn test_spectral_processor_convolution() {
+        let mut proc = SpectralProcessor::new(128);
+        let mut ir = vec![0.0; 128];
+        ir[0] = 1.0; // Impulse
+        proc.set_ir(&ir);
+
+        let input = vec![0.5; 256];
+        let mut output = vec![0.0; 256];
+        proc.process_overlap_add(&input, &mut output);
+
+        // Convolution with impulse should return the same signal (with some OLA delay/windowing artifacts)
+        // For simplicity, we just check that it's not all zeros and roughly the same magnitude
+        let sum: f32 = output.iter().sum();
+        assert!(sum > 10.0);
     }
 }

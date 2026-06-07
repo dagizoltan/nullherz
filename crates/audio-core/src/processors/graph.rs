@@ -58,6 +58,7 @@ pub struct Job {
     pub node_idx: usize, // for telemetry
     pub telemetry_ptr: *const [AtomicU64; 64],
     pub transport: Option<crate::Transport>,
+    pub is_last_sub_block: bool,
 }
 
 unsafe impl Send for Job {}
@@ -115,7 +116,11 @@ impl TaskPool {
                         #[cfg(target_arch = "x86_64")]
                         let start = unsafe { std::arch::x86_64::_rdtsc() };
 
-                        let mut inner_context = crate::processors::ProcessContext { pool: None, transport: job.transport.as_ref(), is_last_sub_block: false };
+                        let mut inner_context = crate::processors::ProcessContext {
+                            pool: None,
+                            transport: job.transport.as_ref(),
+                            is_last_sub_block: job.is_last_sub_block
+                        };
                         unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
 
                         #[cfg(target_arch = "x86_64")]
@@ -433,6 +438,7 @@ impl AudioProcessor for ProcessorGraph {
                         node_idx: n_idx,
                         telemetry_ptr: Arc::as_ptr(&self.node_times_cycles) as *const _,
                         transport: context.transport.copied(),
+                        is_last_sub_block: context.is_last_sub_block,
                     });
                 }
 

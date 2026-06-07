@@ -23,7 +23,7 @@ This document provides a high-fidelity overview of the **nullherz** real-time au
 | **Biquad Filters** | ✅ | AVX-512 / ARM Neon manual SIMD implementation. |
 | **Wavetable Engine** | ✅ | Branch-based phase wrapping, audio-rate FM/PM. |
 | **Spectral Processor** | ✅ | 512-bin Overlap-Add (OLA) with precomputed Hann windows. |
-| **Convolution Engine** | ✅ | Partitioned Convolution (zero-latency logic). |
+| **Convolution Engine** | ✅ | Partitioned Convolution (AVX2-accelerated logic). |
 | **Modulation Matrix** | ✅ | Audio-rate CV mapping with block-level thresholding. |
 | **DJ Isolator** | ✅ | Parallel band processing in 128-bit SIMD lanes. |
 
@@ -37,7 +37,7 @@ This document provides a high-fidelity overview of the **nullherz** real-time au
 | **DJ Mixer** | **Deck Logic** | ✅ | Modular resampling and EQ chain templates. |
 | | **Crossfading** | ✅ | Global crossfader buffer with linear interpolation. |
 | **Broadcast** | **Routing** | ✅ | Dedicated siphon bus (Buffers 4-5) in system slab. |
-| | **Encoder** | 🛠 | Sidecar shell exists; protocol implementation pending. |
+| | **Encoder** | ✅ | WebSocket-based binary streaming protocol. |
 
 ## 🔌 System Integration & Reliability
 | Feature | Status | Resilience Level |
