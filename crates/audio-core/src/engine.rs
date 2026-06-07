@@ -3,11 +3,12 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 use std::time::Instant;
 use ipc_layer::{Producer, Consumer};
 use control_plane::TimestampedCommand;
-use crate::processors::AudioProcessor;
+use crate::processors::{AudioProcessor, TaskPool, ProcessContext};
 use crate::telemetry::Telemetry;
 
 pub struct AudioEngine {
     command_consumer: Consumer<TimestampedCommand>,
+    topology_consumer: Option<Consumer<control_plane::TopologyCommand>>,
     active_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     pending_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     garbage_producer: Producer<Box<dyn AudioProcessor>>,
@@ -16,19 +17,21 @@ pub struct AudioEngine {
     xrun_count: std::sync::Arc<std::sync::atomic::AtomicU32>,
     pending_command: Option<TimestampedCommand>,
     ns_per_cycle: f64,
+    pub pool: Option<TaskPool>,
 }
 
 impl AudioEngine {
     pub fn new(
         command_consumer: Consumer<TimestampedCommand>,
+        topology_consumer: Option<Consumer<control_plane::TopologyCommand>>,
         garbage_producer: Producer<Box<dyn AudioProcessor>>,
         telemetry_producer: Producer<Telemetry>,
-        mut initial_graph: Box<dyn AudioProcessor>,
+        initial_graph: Box<dyn AudioProcessor>,
     ) -> Self {
-        initial_graph.set_garbage_producer(garbage_producer.clone());
         let ns_per_cycle = Self::calibrate_cycles();
         Self {
             command_consumer,
+            topology_consumer,
             active_graph: AtomicPtr::new(Box::into_raw(Box::new(initial_graph))),
             pending_graph: AtomicPtr::new(std::ptr::null_mut()),
             garbage_producer,
@@ -37,6 +40,7 @@ impl AudioEngine {
             xrun_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             pending_command: None,
             ns_per_cycle,
+            pool: Some(TaskPool::new(4)),
         }
     }
 
@@ -45,7 +49,10 @@ impl AudioEngine {
         {
             let start = std::time::Instant::now();
             let start_c = unsafe { std::arch::x86_64::_rdtsc() };
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            // Busy wait for ~10ms for more accurate calibration than sleep
+            while start.elapsed() < std::time::Duration::from_millis(10) {
+                std::hint::spin_loop();
+            }
             let elapsed = start.elapsed().as_nanos() as f64;
             let elapsed_c = (unsafe { std::arch::x86_64::_rdtsc() } - start_c) as f64;
             if elapsed_c > 0.0 { elapsed / elapsed_c } else { 1.0 }
@@ -56,12 +63,12 @@ impl AudioEngine {
     pub fn xrun_counter(&self) -> std::sync::Arc<std::sync::atomic::AtomicU32> {
         self.xrun_count.clone()
     }
-    pub fn request_swap(&mut self, mut new_graph: Box<dyn AudioProcessor>) {
-        new_graph.set_garbage_producer(self.garbage_producer.clone());
-        let new_ptr = Box::into_raw(Box::new(new_graph));
-        let old_pending = self.pending_graph.swap(new_ptr, Ordering::AcqRel);
-        if !old_pending.is_null() { unsafe { drop(Box::from_raw(old_pending)); } }
+    pub fn set_config(&mut self, config: crate::AudioConfig) {
+        let graph_ptr = self.active_graph.load(Ordering::Acquire);
+        let graph = unsafe { &mut **graph_ptr };
+        graph.setup(config);
     }
+
     pub fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize) {
         #[cfg(target_arch = "x86_64")]
         let start_cycles = unsafe { std::arch::x86_64::_rdtsc() };
@@ -89,6 +96,12 @@ impl AudioEngine {
         let mut current_sample_in_block = 0;
         let graph_ptr = self.active_graph.load(Ordering::Acquire);
         let graph = unsafe { &mut **graph_ptr };
+
+        if let Some(ref mut cons) = self.topology_consumer {
+            while let Some(topo_cmd) = cons.pop() {
+                graph.apply_topology_command(&topo_cmd);
+            }
+        }
 
         let mut node_times = [0u64; 64];
         let mut peak_levels = [0.0f32; 64];
@@ -158,6 +171,7 @@ impl AudioEngine {
     }
     fn process_sub_block(&mut self, graph: &mut dyn AudioProcessor, inputs: &[&[f32]], outputs: &mut [&mut [f32]], offset: usize, len: usize) {
         if len == 0 { return; }
+        let mut context = ProcessContext { pool: self.pool.as_mut() };
         let mut sub_inputs_ptr = [ &[][..]; crate::MAX_CHANNELS ];
         let num_inputs = inputs.len().min(crate::MAX_CHANNELS);
         for i in 0..num_inputs {
@@ -178,7 +192,7 @@ impl AudioEngine {
             }
         }
 
-        graph.process(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs]);
+        graph.process(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs], &mut context);
     }
 }
 

@@ -55,6 +55,10 @@ impl PwLib {
 }
 
 pub struct PipewireBackend {
+    inner: Box<PipewireBackendInner>,
+}
+
+pub struct PipewireBackendInner {
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
     thread_loop: *mut std::ffi::c_void,
     context: *mut std::ffi::c_void,
@@ -66,18 +70,21 @@ pub struct PipewireBackend {
 }
 
 unsafe impl Send for PipewireBackend {}
+unsafe impl Send for PipewireBackendInner {}
 
 impl PipewireBackend {
     pub fn new() -> Self {
         Self {
-            running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            thread_loop: std::ptr::null_mut(),
-            context: std::ptr::null_mut(),
-            stream: std::ptr::null_mut(),
-            engine: None,
-            lib: None,
-            events: None,
-            listener: [0; 8],
+            inner: Box::new(PipewireBackendInner {
+                running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                thread_loop: std::ptr::null_mut(),
+                context: std::ptr::null_mut(),
+                stream: std::ptr::null_mut(),
+                engine: None,
+                lib: None,
+                events: None,
+                listener: [0; 8],
+            })
         }
     }
 }
@@ -97,7 +104,7 @@ pub struct PwStreamEvents {
 }
 
 unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
-    let backend = &mut *(data as *mut PipewireBackend);
+    let backend = &mut *(data as *mut PipewireBackendInner);
     let pw = match &backend.lib {
         Some(l) => l,
         None => return,
@@ -158,38 +165,40 @@ unsafe extern "C" fn pw_param_changed(_data: *mut std::ffi::c_void, id: u32, _pa
 impl AudioBackend for PipewireBackend {
     fn start(&mut self, engine: AudioEngine) -> Result<(), String> {
         unsafe {
-            if self.lib.is_none() { self.lib = Some(PwLib::load()?); }
-            self.engine = Some(engine);
-            self.running.store(true, Ordering::SeqCst);
+            let inner = &mut *self.inner;
+            if inner.lib.is_none() { inner.lib = Some(PwLib::load()?); }
+            inner.engine = Some(engine);
+            inner.running.store(true, Ordering::SeqCst);
 
-            let pw = self.lib.as_ref().unwrap();
+            let pw = inner.lib.as_ref().unwrap();
             (pw.pw_init)(std::ptr::null_mut(), std::ptr::null_mut());
-            self.thread_loop = (pw.pw_thread_loop_new)(b"nullherz-loop\0".as_ptr() as *const i8, std::ptr::null_mut());
-            let loop_ptr = (pw.pw_thread_loop_get_loop)(self.thread_loop);
-            self.context = (pw.pw_context_new)(loop_ptr, std::ptr::null_mut(), 0);
-            let _core = (pw.pw_core_connect)(self.context, std::ptr::null_mut(), 0);
+            inner.thread_loop = (pw.pw_thread_loop_new)(b"nullherz-loop\0".as_ptr() as *const i8, std::ptr::null_mut());
+            let loop_ptr = (pw.pw_thread_loop_get_loop)(inner.thread_loop);
+            inner.context = (pw.pw_context_new)(loop_ptr, std::ptr::null_mut(), 0);
+            let _core = (pw.pw_core_connect)(inner.context, std::ptr::null_mut(), 0);
 
-            self.stream = (pw.pw_stream_new)(self.context, b"nullherz-stream\0".as_ptr() as *const i8, std::ptr::null_mut());
+            inner.stream = (pw.pw_stream_new)(inner.context, b"nullherz-stream\0".as_ptr() as *const i8, std::ptr::null_mut());
 
-            let format_pod: [u32; 34] = [
-                128, 3, // size (body), type (Object=3)
-                1, 1,   // body.type (EnumFormat=1), body.id (EnumFormat=1)
-                // Prop 1: mediaType (1), flags (0), type (Id=11), size (4), value (audio=1), padding
-                1, 0, 11, 4, 1, 0,
-                // Prop 2: mediaSubtype (2), flags (0), type (Id=11), size (4), value (raw=1), padding
-                2, 0, 11, 4, 1, 0,
-                // Prop 3: format (3), flags (0), type (Id=11), size (4), value (F32=3), padding
-                3, 0, 11, 4, 3, 0,
-                // Prop 4: rate (4), flags (0), type (Int=4), size (4), value (44100), padding
-                4, 0, 4, 4, 44100, 0,
-                // Prop 5: channels (5), flags (0), type (Int=4), size (4), value (2), padding
-                5, 0, 4, 4, 2, 0,
+            // SPA POD binary layout fix
+            // Object: size=120, type=Object(3), body.type=EnumFormat(1), body.id=EnumFormat(1)
+            // Prop 1: mediaType(1), flags=0, type=Id(11), size=4, value=audio(1), pad=0, 0
+            // Prop 2: mediaSubtype(2), flags=0, type=Id(11), size=4, value=raw(1), pad=0, 0
+            // Prop 3: format(3), flags=0, type=Id(11), size=4, value=F32(3), pad=0, 0
+            // Prop 4: rate(4), flags=0, type=Int(4), size=4, value=44100, pad=0, 0
+            // Prop 5: channels(5), flags=0, type=Int(4), size=4, value=2, pad=0, 0
+            let format_pod: [u32; 44] = [
+                120, 3, 1, 1,
+                1, 0, 11, 4, 1, 0, 0, 0,
+                2, 0, 11, 4, 1, 0, 0, 0,
+                3, 0, 11, 4, 3, 0, 0, 0,
+                4, 0, 4, 4, 44100, 0, 0, 0,
+                5, 0, 4, 4, 2, 0, 0, 0,
             ];
             let format_ptr = format_pod.as_ptr() as *const std::ffi::c_void;
             let params = [format_ptr];
 
-            self.events = Some(Box::new(PwStreamEvents {
-                version: 1,
+            inner.events = Some(Box::new(PwStreamEvents {
+                version: 3, // PW_VERSION_STREAM_EVENTS
                 destroy: None,
                 state_changed: None,
                 control_info: None,
@@ -201,37 +210,38 @@ impl AudioBackend for PipewireBackend {
                 drained: None,
             }));
 
-            let ev_ptr = self.events.as_ref().unwrap().as_ref() as *const _ as *const _;
-            let self_ptr = self as *mut _ as *mut _;
-            let pw = self.lib.as_ref().unwrap();
-            (pw.pw_stream_add_listener)(self.stream, self.listener.as_mut_ptr() as *mut _, ev_ptr, self_ptr);
+            let ev_ptr = inner.events.as_ref().unwrap().as_ref() as *const _ as *const _;
+            let inner_ptr = inner as *mut _ as *mut _;
+            let pw = inner.lib.as_ref().unwrap();
+            (pw.pw_stream_add_listener)(inner.stream, inner.listener.as_mut_ptr() as *mut _, ev_ptr, inner_ptr);
 
-            (pw.pw_stream_connect)(self.stream, 1, 0xffffffff, 0x1, params.as_ptr() as *const _, 1);
-            (pw.pw_thread_loop_start)(self.thread_loop);
+            (pw.pw_stream_connect)(inner.stream, 1, 0xffffffff, 0x1, params.as_ptr() as *const _, 1);
+            (pw.pw_thread_loop_start)(inner.thread_loop);
         }
         Ok(())
     }
     fn stop(&mut self) -> Option<AudioEngine> {
-        self.running.store(false, Ordering::SeqCst);
         unsafe {
-            if let Some(pw) = &self.lib {
-                if !self.thread_loop.is_null() {
-                    (pw.pw_thread_loop_stop)(self.thread_loop);
+            let inner = &mut *self.inner;
+            inner.running.store(false, Ordering::SeqCst);
+            if let Some(pw) = &inner.lib {
+                if !inner.thread_loop.is_null() {
+                    (pw.pw_thread_loop_stop)(inner.thread_loop);
                 }
-                if !self.stream.is_null() {
-                    (pw.pw_stream_destroy)(self.stream);
-                    self.stream = std::ptr::null_mut();
+                if !inner.stream.is_null() {
+                    (pw.pw_stream_destroy)(inner.stream);
+                    inner.stream = std::ptr::null_mut();
                 }
-                if !self.context.is_null() {
-                    (pw.pw_context_destroy)(self.context);
-                    self.context = std::ptr::null_mut();
+                if !inner.context.is_null() {
+                    (pw.pw_context_destroy)(inner.context);
+                    inner.context = std::ptr::null_mut();
                 }
-                if !self.thread_loop.is_null() {
-                    (pw.pw_thread_loop_destroy)(self.thread_loop);
-                    self.thread_loop = std::ptr::null_mut();
+                if !inner.thread_loop.is_null() {
+                    (pw.pw_thread_loop_destroy)(inner.thread_loop);
+                    inner.thread_loop = std::ptr::null_mut();
                 }
             }
+            inner.engine.take()
         }
-        self.engine.take()
     }
 }

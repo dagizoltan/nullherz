@@ -14,7 +14,7 @@ impl GainProcessor {
 }
 
 impl AudioProcessor for GainProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
         let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
         for i in 0..num_channels {
@@ -45,7 +45,7 @@ impl BiquadProcessor {
 }
 
 impl AudioProcessor for BiquadProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
         let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
 
@@ -101,24 +101,7 @@ impl SimdBiquadProcessor {
 }
 
 impl AudioProcessor for SimdBiquadProcessor {
-    fn apply_command(&mut self, command: &control_plane::Command) {
-        if let control_plane::Command::SetParam { target_id, param_id, value, .. } = command {
-            if *target_id == self.id {
-                let mut coeffs = self.inner.coeffs;
-                match param_id {
-                    0 => coeffs.b0 = *value,
-                    1 => coeffs.b1 = *value,
-                    2 => coeffs.b2 = *value,
-                    3 => coeffs.a1 = *value,
-                    4 => coeffs.a2 = *value,
-                    _ => {}
-                }
-                self.inner.coeffs = coeffs;
-            }
-        }
-    }
-
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
         let len = inputs[0].len();
         let num_channels = inputs.len().min(outputs.len()).min(16);
@@ -147,6 +130,24 @@ impl AudioProcessor for SimdBiquadProcessor {
             }
         }
     }
+
+    fn apply_command(&mut self, command: &control_plane::Command) {
+        if let control_plane::Command::SetParam { target_id, param_id, value, .. } = command {
+            if *target_id == self.id {
+                let mut coeffs = self.inner.coeffs;
+                match param_id {
+                    0 => coeffs.b0 = *value,
+                    1 => coeffs.b1 = *value,
+                    2 => coeffs.b2 = *value,
+                    3 => coeffs.a1 = *value,
+                    4 => coeffs.a2 = *value,
+                    _ => {}
+                }
+                self.inner.coeffs = coeffs;
+            }
+        }
+    }
+
 }
 
 pub struct CrossfaderProcessor {
@@ -158,7 +159,7 @@ impl CrossfaderProcessor {
 }
 
 impl AudioProcessor for CrossfaderProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         if inputs.len() < 2 || outputs.is_empty() { return; }
         self.inner.process_block(inputs[0], inputs[1], outputs[0]);
     }
@@ -173,7 +174,7 @@ impl SummingProcessor {
 }
 
 impl AudioProcessor for SummingProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         if outputs.is_empty() { return; }
         
         #[cfg(target_arch = "x86_64")]

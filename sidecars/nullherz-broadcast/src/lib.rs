@@ -16,7 +16,7 @@ impl BroadcastSidecar {
 }
 
 impl AudioProcessor for BroadcastSidecar {
-    fn process(&mut self, inputs: &[&[f32]], _out: &mut [&mut [f32]]) {
+    fn process(&mut self, inputs: &[&[f32]], _out: &mut [&mut [f32]], _context: &mut audio_core::processors::ProcessContext) {
         if !self.is_active || inputs.len() < 2 { return; }
 
         // Siphon logic: pulling from system slab buffers 4 and 5

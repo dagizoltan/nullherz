@@ -14,8 +14,8 @@ fn main() {
 
     println!("Engine initialized.");
 
-    let new_graph = ProcessorGraph::new();
-    engine.request_swap(Box::new(new_graph));
+    // Note: AudioEngine::request_swap was removed as it was not RT-safe or reachable after engine start.
+    // Graph swaps should now be handled via the command path or a future TopologyBus.
 
     let mut backend = ThreadedBackend::new();
     backend.start(engine).unwrap();

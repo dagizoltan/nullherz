@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     node_idx: 0,
                     processor_type_id: 100 // Marker for custom/re-injected sidecar
                 },
-            });
+            }).await;
         }
 
         conductor.drain_garbage();

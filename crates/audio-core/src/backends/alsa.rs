@@ -82,6 +82,18 @@ impl AudioBackend for AlsaBackend {
                 (alsa.snd_pcm_hw_params_malloc)(&mut hw_params);
                 (alsa.snd_pcm_hw_params_any)(pcm, hw_params);
                 (alsa.snd_pcm_hw_params_set_access)(pcm, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
+
+                // Format MUST be set before rate/period to satisfy ALSA constraints properly
+                let mut is_float = true;
+                if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_FLOAT_LE) != 0 {
+                    is_float = false;
+                    if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_S16_LE) != 0 {
+                        (alsa.snd_pcm_hw_params_free)(hw_params);
+                        (alsa.snd_pcm_close)(pcm);
+                        return None;
+                    }
+                }
+
                 (alsa.snd_pcm_hw_params_set_channels)(pcm, hw_params, 2);
 
                 let mut rate = 44100u32;
@@ -93,17 +105,6 @@ impl AudioBackend for AlsaBackend {
                 let mut buffer_size = 512u64;
                 (alsa.snd_pcm_hw_params_set_buffer_size_near)(pcm, hw_params, &mut buffer_size);
 
-                // Attempt to set float format, fallback to S16 if float is unavailable
-                let mut is_float = true;
-                if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_FLOAT_LE) != 0 {
-                    is_float = false;
-                    if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_S16_LE) != 0 {
-                        (alsa.snd_pcm_hw_params_free)(hw_params);
-                        (alsa.snd_pcm_close)(pcm);
-                        return None;
-                    }
-                }
-
                 if (alsa.snd_pcm_hw_params)(pcm, hw_params) != 0 {
                     (alsa.snd_pcm_hw_params_free)(hw_params);
                     (alsa.snd_pcm_close)(pcm);
@@ -112,27 +113,33 @@ impl AudioBackend for AlsaBackend {
                 (alsa.snd_pcm_hw_params_free)(hw_params);
                 (alsa.snd_pcm_prepare)(pcm);
 
+                engine.set_config(crate::AudioConfig {
+                    sample_rate: rate as f32,
+                    block_size: period_size as usize,
+                });
+
                 let mut outputs_raw = [[0.0f32; 128]; 2];
                 let mut interleaved_f32 = [0.0f32; 256];
                 let mut interleaved_s16 = [0i16; 256];
 
+                let actual_period = period_size as usize;
                 while running.load(Ordering::SeqCst) {
                     let (ch1, ch2) = outputs_raw.split_at_mut(1);
-                    let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
-                    engine.process_block(&[], &mut out_refs, 128);
+                    let mut out_refs = [&mut ch1[0][..actual_period], &mut ch2[0][..actual_period]];
+                    engine.process_block(&[], &mut out_refs, actual_period);
 
                     let written = if is_float {
-                        for i in 0..128 {
+                        for i in 0..actual_period {
                             interleaved_f32[i*2] = outputs_raw[0][i];
                             interleaved_f32[i*2+1] = outputs_raw[1][i];
                         }
-                        (alsa.snd_pcm_writei)(pcm, interleaved_f32.as_ptr() as *const _, 128)
+                        (alsa.snd_pcm_writei)(pcm, interleaved_f32.as_ptr() as *const _, actual_period as u64)
                     } else {
-                        for i in 0..128 {
+                        for i in 0..actual_period {
                             interleaved_s16[i*2] = (outputs_raw[0][i] * 32767.0).clamp(-32768.0, 32767.0) as i16;
                             interleaved_s16[i*2+1] = (outputs_raw[1][i] * 32767.0).clamp(-32768.0, 32767.0) as i16;
                         }
-                        (alsa.snd_pcm_writei)(pcm, interleaved_s16.as_ptr() as *const _, 128)
+                        (alsa.snd_pcm_writei)(pcm, interleaved_s16.as_ptr() as *const _, actual_period as u64)
                     };
 
                     if written < 0 {
