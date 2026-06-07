@@ -7,11 +7,12 @@ use control_plane::{TimestampedCommand};
 use ipc_layer::{Producer, Consumer, RingBuffer};
 use audio_core::Telemetry;
 
-pub fn connect_to_engine() -> Result<(Producer<TimestampedCommand>, Consumer<Telemetry>), Box<dyn std::error::Error>> {
+pub fn connect_to_engine() -> Result<(ipc_layer::NonRtProducer<TimestampedCommand>, Consumer<Telemetry>), Box<dyn std::error::Error>> {
     // In a real nullherz deployment, the Conductor spawns the Gateway
     // and passes these buffers via handle or SHM.
     // For now, we provide a clean split that the Conductor can utilize.
     let (cmd_prod, _cmd_cons) = RingBuffer::<TimestampedCommand>::new(1024).split();
+    let cmd_prod = ipc_layer::NonRtProducer::new(cmd_prod);
     let (_tel_prod, tel_cons) = RingBuffer::<Telemetry>::new(1024).split();
 
     Ok((cmd_prod, tel_cons))
@@ -19,19 +20,18 @@ pub fn connect_to_engine() -> Result<(Producer<TimestampedCommand>, Consumer<Tel
 
 pub async fn run_gateway(
     addr: &str,
-    cmd_prod: Producer<TimestampedCommand>,
+    cmd_prod: ipc_layer::NonRtProducer<TimestampedCommand>,
     tel_cons: Consumer<Telemetry>
 ) -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(addr).await?;
     println!("nullherz-gateway listening on: {}", addr);
 
-    let cmd_prod = Arc::new(Mutex::new(cmd_prod));
     let tel_cons = Arc::new(Mutex::new(tel_cons));
 
     while let Ok((stream, _)) = listener.accept().await {
-        let cmd_prod = Arc::clone(&cmd_prod);
-        let tel_cons = Arc::clone(&tel_cons);
-        tokio::spawn(handle_connection(stream, cmd_prod, tel_cons));
+        let cmd_prod_clone = cmd_prod.clone();
+        let tel_cons_clone = Arc::clone(&tel_cons);
+        tokio::spawn(handle_connection(stream, cmd_prod_clone, tel_cons_clone));
     }
 
     Ok(())
@@ -40,7 +40,7 @@ pub async fn run_gateway(
 
 async fn handle_connection(
     stream: TcpStream,
-    cmd_prod: Arc<Mutex<Producer<TimestampedCommand>>>,
+    cmd_prod: ipc_layer::NonRtProducer<TimestampedCommand>,
     tel_cons: Arc<Mutex<Consumer<Telemetry>>>
 ) {
     let ws_stream = accept_async(stream).await.expect("Error during the websocket handshake occurred");
@@ -72,8 +72,7 @@ async fn handle_connection(
         match msg {
             Ok(Message::Text(text)) => {
                 if let Ok(cmd) = serde_json::from_str::<TimestampedCommand>(&text) {
-                    let mut prod = cmd_prod.lock().unwrap();
-                    let _ = prod.push(cmd);
+                    let _ = cmd_prod.push(cmd).await;
                 }
             }
             Ok(Message::Close(_)) => break,

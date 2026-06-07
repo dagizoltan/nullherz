@@ -43,6 +43,7 @@ pub enum Command {
         processor_type_id: u32,
         node_idx: u32,
     },
+    CommitTopology,
 }
 
 /// A command with an associated timestamp for deterministic execution.

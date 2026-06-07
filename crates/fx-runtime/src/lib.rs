@@ -71,6 +71,17 @@ impl SidecarManager {
 
         // 5. Spawn process
         let mut cmd = Command::new(binary_path);
+        #[cfg(unix)]
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            cmd.pre_exec(move || {
+                let flags = libc::fcntl(efd_raw, libc::F_GETFD);
+                if flags != -1 {
+                    libc::fcntl(efd_raw, libc::F_SETFD, flags & !libc::FD_CLOEXEC);
+                }
+                Ok(())
+            });
+        }
         cmd.arg("--command-shm").arg(&cmd_shm_name)
            .arg("--feedback-shm").arg(&fb_shm_name)
            .arg("--channels").arg(num_channels.to_string())

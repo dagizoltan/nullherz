@@ -156,6 +156,7 @@ pub struct ProcessorGraph {
     pub(crate) node_count: usize,
     pub(crate) buffers: Box<[AudioBlock; 64]>,
     pub(crate) _crossfade_buffers: [AudioBlock; 8],
+    pub(crate) _old_path_buffers: Box<[AudioBlock; 64]>,
     pub(crate) topologies: Box<[GraphTopology; 2]>,
     pub(crate) active_topo_idx: Arc<AtomicUsize>,
     pub pool: Option<TaskPool>,
@@ -194,6 +195,7 @@ impl ProcessorGraph {
             node_count: 0,
             buffers,
             _crossfade_buffers: [AudioBlock { data: [0.0f32; 128] }; 8],
+            _old_path_buffers: Box::new([AudioBlock { data: [0.0f32; 128] }; 64]),
             topologies: Box::new([topo; 2]),
             active_topo_idx: Arc::new(AtomicUsize::new(0)),
             needs_commit: false,
@@ -324,7 +326,7 @@ impl AudioProcessor for ProcessorGraph {
             let x_state_opt = unsafe { &mut (*crossfades_mut_ptr)[i] };
             if let Some(state) = x_state_opt {
                 let x_buf_idx = state.node_idx % 8;
-                let old_data = &self.buffers[state.old_buffer_idx].data[..num_samples];
+                let old_data = &self._old_path_buffers[state.old_buffer_idx].data[..num_samples];
                 let new_data = &self.buffers[state.new_buffer_idx].data[..num_samples];
                 let x_data = &mut self._crossfade_buffers[x_buf_idx].data[..num_samples];
 
@@ -449,6 +451,11 @@ impl AudioProcessor for ProcessorGraph {
             external_outputs[1].copy_from_slice(&self.buffers[p1].data[..num_samples]);
         }
 
+        // Before finishing process, copy current buffers to old_path_buffers for crossfading in next block
+        for i in 0..64 {
+            self._old_path_buffers[i].data[..num_samples].copy_from_slice(&self.buffers[i].data[..num_samples]);
+        }
+
         #[cfg(target_arch = "x86_64")]
         let has_avx2 = is_x86_feature_detected!("avx2");
 
@@ -507,8 +514,7 @@ impl AudioProcessor for ProcessorGraph {
                     let topo = self.inactive_topology_mut();
                     if i_idx < topo.routing[n_idx].input_count {
                         topo.routing[n_idx].input_indices[i_idx] = (*new_buffer_idx as usize).min(63);
-                        self.calculate_stages();
-                        self.commit_graph();
+                        // DEFER: self.calculate_stages(); self.commit_graph();
                     }
                 }
             }
@@ -519,8 +525,7 @@ impl AudioProcessor for ProcessorGraph {
                     let topo = self.inactive_topology_mut();
                     if o_idx < topo.routing[n_idx].output_count {
                         topo.routing[n_idx].output_indices[o_idx] = (*new_buffer_idx as usize).min(63);
-                        self.calculate_stages();
-                        self.commit_graph();
+                        // DEFER: self.calculate_stages(); self.commit_graph();
                     }
                 }
             }
@@ -535,9 +540,10 @@ impl AudioProcessor for ProcessorGraph {
                         _ => return,
                     };
 
-                    if let Some(ref mut prod) = self.garbage_producer {
+                    if let Some(ref prod) = self.garbage_producer {
                         new_proc.set_garbage_producer(prod.clone());
                     }
+
 
                     let old_proc = unsafe { std::ptr::replace(node.processor.get(), new_proc) };
                     if let Some(ref mut prod) = self.garbage_producer {
@@ -561,7 +567,21 @@ impl AudioProcessor for ProcessorGraph {
                     40 => Box::new(crate::processors::complex::SequencerProcessor::new(44100.0, 120.0)),
                     _ => Box::new(crate::processors::standard::GainProcessor::new(0, 0.0)),
                 };
-                self.add_node(processor, vec![], vec![]);
+                // RT path AddNode: we should NOT calculate stages here.
+                if self.node_count < 64 {
+                    let idx = self.node_count;
+                    unsafe { *self.nodes[idx].processor.get() = processor; }
+                    self.node_count += 1;
+
+                    let topo = self.inactive_topology_mut();
+                    topo.routing[idx].input_count = 0;
+                    topo.routing[idx].output_count = 0;
+                    topo.node_count += 1;
+                }
+            }
+            control_plane::Command::CommitTopology => {
+                self.calculate_stages();
+                self.commit_graph();
             }
             _ => {
                 for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } }

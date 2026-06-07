@@ -45,7 +45,10 @@ impl AudioEngine {
         {
             let start = std::time::Instant::now();
             let start_c = unsafe { std::arch::x86_64::_rdtsc() };
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            // Busy wait for ~10ms for more accurate calibration than sleep
+            while start.elapsed() < std::time::Duration::from_millis(10) {
+                std::hint::spin_loop();
+            }
             let elapsed = start.elapsed().as_nanos() as f64;
             let elapsed_c = (unsafe { std::arch::x86_64::_rdtsc() } - start_c) as f64;
             if elapsed_c > 0.0 { elapsed / elapsed_c } else { 1.0 }
@@ -55,12 +58,6 @@ impl AudioEngine {
     }
     pub fn xrun_counter(&self) -> std::sync::Arc<std::sync::atomic::AtomicU32> {
         self.xrun_count.clone()
-    }
-    pub fn request_swap(&mut self, mut new_graph: Box<dyn AudioProcessor>) {
-        new_graph.set_garbage_producer(self.garbage_producer.clone());
-        let new_ptr = Box::into_raw(Box::new(new_graph));
-        let old_pending = self.pending_graph.swap(new_ptr, Ordering::AcqRel);
-        if !old_pending.is_null() { unsafe { drop(Box::from_raw(old_pending)); } }
     }
     pub fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize) {
         #[cfg(target_arch = "x86_64")]

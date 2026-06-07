@@ -3,6 +3,7 @@ use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 use std::alloc::Layout;
 use std::ffi::CString;
+use std::sync::Arc;
 
 /// Alignment for SIMD (AVX-512 requires 64 bytes).
 pub const SIMD_ALIGNMENT: usize = 64;
@@ -25,10 +26,23 @@ pub struct ShmSlot<T> {
 #[repr(C, align(64))]
 pub struct ShmRingBuffer<T> {
     head: AtomicUsize,
+    _pad1: [u8; 64],
     tail: AtomicUsize,
+    _pad2: [u8; 64],
     capacity: usize,
     buffer_offset: usize,
     _marker: PhantomData<T>,
+}
+
+pub struct ShmProducer<T: Copy> {
+    inner: *const ShmRingBuffer<T>,
+}
+unsafe impl<T: Copy + Send> Send for ShmProducer<T> {}
+impl<T: Copy> ShmProducer<T> {
+    pub fn new(inner: *const ShmRingBuffer<T>) -> Self { Self { inner } }
+    pub fn push(&self, item: T) -> Result<(), T> {
+        unsafe { (*self.inner).push(item) }
+    }
 }
 
 impl<T: Copy> ShmRingBuffer<T> {
@@ -150,7 +164,7 @@ pub struct EventFd {
 impl EventFd {
     pub fn create() -> Result<Self, String> {
         unsafe {
-            let fd = libc::eventfd(0, libc::EFD_NONBLOCK);
+            let fd = libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC);
             if fd < 0 { return Err("eventfd failed".to_string()); }
             Ok(Self { fd, owner: true })
         }
@@ -217,17 +231,47 @@ impl ShmSignal {
 pub struct RingBuffer<T> {
     buffer: Box<[UnsafeCell<Option<T>>]>,
     head: AtomicUsize,
+    _pad1: [u8; 64],
     tail: AtomicUsize,
+    _pad2: [u8; 64],
     capacity: usize,
 }
 
 unsafe impl<T: Send> Sync for RingBuffer<T> {}
 
+pub struct NonRtProducer<T> {
+    inner: Arc<tokio::sync::Mutex<Producer<T>>>,
+}
+
+impl<T> NonRtProducer<T> {
+    pub fn new(producer: Producer<T>) -> Self {
+        Self { inner: Arc::new(tokio::sync::Mutex::new(producer)) }
+    }
+
+    pub async fn push(&self, item: T) -> Result<(), T> {
+        let mut producer: tokio::sync::MutexGuard<'_, Producer<T>> = self.inner.lock().await;
+        producer.push(item)
+    }
+}
+
+impl<T> Clone for NonRtProducer<T> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
+}
+
 impl<T> RingBuffer<T> {
     pub fn new(capacity: usize) -> Self {
         let mut buffer = Vec::with_capacity(capacity);
         for _ in 0..capacity { buffer.push(UnsafeCell::new(None)); }
-        Self { buffer: buffer.into_boxed_slice(), head: AtomicUsize::new(0), tail: AtomicUsize::new(0), capacity }
+        Self {
+            buffer: buffer.into_boxed_slice(),
+            head: AtomicUsize::new(0),
+            _pad1: [0; 64],
+            tail: AtomicUsize::new(0),
+            _pad2: [0; 64],
+            capacity,
+        }
     }
     pub fn split(self) -> (Producer<T>, Consumer<T>) {
         let arc = std::sync::Arc::new(self);

@@ -20,8 +20,9 @@ impl Conductor {
         }
     }
 
-    pub fn setup_engine(&mut self) -> (ipc_layer::Producer<control_plane::TimestampedCommand>, ipc_layer::Consumer<audio_core::Telemetry>) {
+    pub fn setup_engine(&mut self) -> (ipc_layer::NonRtProducer<control_plane::TimestampedCommand>, ipc_layer::Consumer<audio_core::Telemetry>) {
         let (cmd_prod, cmd_cons) = RingBuffer::new(1024).split();
+        let cmd_prod = ipc_layer::NonRtProducer::new(cmd_prod);
         let (garbage_prod, garbage_cons) = RingBuffer::new(1024).split();
         let (tel_prod, tel_cons) = RingBuffer::new(1024).split();
 
