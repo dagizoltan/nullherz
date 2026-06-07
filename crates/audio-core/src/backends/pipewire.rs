@@ -131,24 +131,20 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
     let spa_buf = unsafe { &*(pw_buf.buffer as *const SpaBuffer) };
 
     let num_samples = 128; // Hard engine constraint
-    if spa_buf.n_datas >= 2 {
-        let data0 = unsafe { &*spa_buf.datas.add(0) };
-        let data1 = unsafe { &*spa_buf.datas.add(1) };
-        let ch0 = unsafe { std::slice::from_raw_parts_mut(data0.data as *mut f32, num_samples) };
-        let ch1 = unsafe { std::slice::from_raw_parts_mut(data1.data as *mut f32, num_samples) };
-        let mut out_refs = [ch0, ch1];
+    let num_channels = spa_buf.n_datas.min(16) as usize;
+    let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
 
-        if let Some(engine) = &mut backend.engine {
-            engine.process_block(&[], &mut out_refs, num_samples);
+    for i in 0..num_channels {
+        let data = unsafe { &*spa_buf.datas.add(i) };
+        if !data.data.is_null() {
+            out_refs_storage[i] = unsafe {
+                std::slice::from_raw_parts_mut(data.data as *mut f32, num_samples)
+            };
         }
-    } else if spa_buf.n_datas == 1 {
-        let data0 = unsafe { &*spa_buf.datas };
-        let ch0 = unsafe { std::slice::from_raw_parts_mut(data0.data as *mut f32, num_samples) };
-        let mut out_refs = [ch0];
+    }
 
-        if let Some(engine) = &mut backend.engine {
-            engine.process_block(&[], &mut out_refs, num_samples);
-        }
+    if let Some(engine) = &mut backend.engine {
+        engine.process_block(&[], &mut out_refs_storage[..num_channels], num_samples);
     }
 
     (pw.pw_stream_queue_buffer)(backend.stream, buffer);

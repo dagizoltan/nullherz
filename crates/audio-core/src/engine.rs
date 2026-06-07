@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicPtr, Ordering};
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 use std::time::Instant;
 use ipc_layer::{Producer, Consumer};
 use control_plane::TimestampedCommand;
@@ -41,7 +41,13 @@ impl AudioEngine {
     pub fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize) {
         #[cfg(target_arch = "x86_64")]
         let start_cycles = unsafe { std::arch::x86_64::_rdtsc() };
-        #[cfg(not(target_arch = "x86_64"))]
+        #[cfg(target_arch = "aarch64")]
+        let start_cycles = unsafe {
+            let val: u64;
+            std::arch::asm!("mrs {}, cntvct_el0", out(reg) val, options(nomem, nostack));
+            val
+        };
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
         let start_time = Instant::now();
 
         let pending = self.pending_graph.swap(std::ptr::null_mut(), Ordering::Acquire);
@@ -69,21 +75,33 @@ impl AudioEngine {
                 if cmd.timestamp_samples < block_end_sample {
                     let cmd_offset = if cmd.timestamp_samples > block_start_sample { (cmd.timestamp_samples - block_start_sample) as usize } else { 0 };
                     if cmd_offset > current_sample_in_block {
-                        let samples_to_process = cmd_offset - current_sample_in_block;
-                        self.process_sub_block(graph, inputs, outputs, current_sample_in_block, samples_to_process);
-                        current_sample_in_block += samples_to_process;
+                        let mut remaining_to_cmd = cmd_offset - current_sample_in_block;
+                        while remaining_to_cmd > 0 {
+                            let chunk = remaining_to_cmd.min(128);
+                            self.process_sub_block(graph, inputs, outputs, current_sample_in_block, chunk);
+                            current_sample_in_block += chunk;
+                            remaining_to_cmd -= chunk;
+                        }
                     }
                     graph.apply_command(&cmd.command);
                 } else {
                     self.pending_command = Some(cmd);
-                    let remaining = num_samples - current_sample_in_block;
-                    self.process_sub_block(graph, inputs, outputs, current_sample_in_block, remaining);
-                    current_sample_in_block = num_samples;
+                    let mut remaining = num_samples - current_sample_in_block;
+                    while remaining > 0 {
+                        let chunk = remaining.min(128);
+                        self.process_sub_block(graph, inputs, outputs, current_sample_in_block, chunk);
+                        current_sample_in_block += chunk;
+                        remaining -= chunk;
+                    }
                 }
             } else {
-                let remaining = num_samples - current_sample_in_block;
-                self.process_sub_block(graph, inputs, outputs, current_sample_in_block, remaining);
-                current_sample_in_block = num_samples;
+                let mut remaining = num_samples - current_sample_in_block;
+                while remaining > 0 {
+                    let chunk = remaining.min(128);
+                    self.process_sub_block(graph, inputs, outputs, current_sample_in_block, chunk);
+                    current_sample_in_block += chunk;
+                    remaining -= chunk;
+                }
             }
         }
         self.sample_counter = block_end_sample;
@@ -91,8 +109,14 @@ impl AudioEngine {
 
         #[cfg(target_arch = "x86_64")]
         let elapsed_cycles = unsafe { std::arch::x86_64::_rdtsc() } - start_cycles;
-        #[cfg(not(target_arch = "x86_64"))]
-        let elapsed_cycles = start_time.elapsed().as_nanos() as u64; // Fallback to ns for non-x86
+        #[cfg(target_arch = "aarch64")]
+        let elapsed_cycles = unsafe {
+            let val: u64;
+            std::arch::asm!("mrs {}, cntvct_el0", out(reg) val, options(nomem, nostack));
+            val.wrapping_sub(start_cycles)
+        };
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        let elapsed_cycles = start_time.elapsed().as_nanos() as u64;
 
         let _ = self.telemetry_producer.push(Telemetry {
             process_time_cycles: elapsed_cycles,

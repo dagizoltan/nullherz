@@ -47,4 +47,9 @@ impl Conductor {
             self.engine = backend.stop();
         }
     }
+
+    pub fn switch_backend(&mut self, name: &str) -> Result<(), String> {
+        self.stop_backend();
+        self.start_backend(name)
+    }
 }

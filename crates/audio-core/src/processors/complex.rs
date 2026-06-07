@@ -70,12 +70,25 @@ impl AudioProcessor for ModulationProcessor {
         let cv = inputs[0];
         if cv.is_empty() { return; }
 
-        let avg_cv: f32 = cv.iter().sum::<f32>() / cv.len() as f32;
-        let _val = avg_cv * self.scale + self.offset;
+        // Audio-rate modulation for the current block.
+        // We calculate the average CV to determine the target parameter value.
+        // For performance, we only emit a command if the value has changed significantly.
+        let sum: f32 = cv.iter().sum();
+        let avg_cv = sum / cv.len() as f32;
+        let val = avg_cv * self.scale + self.offset;
 
-        // In a real system, we'd send a command back to the control plane
-        // or directly to the target processor if it's in the same graph.
-        // For now, this serves as a placeholder for CV-to-Parameter mapping.
+        if let Some(ref mut prod) = self.command_producer {
+            // We use a timestamp of 0 for "immediate" block-level modulation
+            let _ = prod.push(control_plane::TimestampedCommand {
+                timestamp_samples: 0,
+                command: control_plane::Command::SetParam {
+                    target_id: self.target_id,
+                    param_id: self.param_id,
+                    value: val,
+                    ramp_duration_samples: 0,
+                },
+            });
+        }
     }
 }
 

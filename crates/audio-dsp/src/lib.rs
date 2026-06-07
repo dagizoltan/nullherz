@@ -133,9 +133,48 @@ impl DjIsolator {
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_block_avx2(&mut self, input: &[f32], output: &mut [f32]) {
-        // SIMD crossover logic would go here.
-        // For prototype, we use the scalar fallback.
-        self.process_block(input, output);
+        use std::arch::x86_64::*;
+        let len = input.len();
+        if len == 0 { return; }
+
+        if self.low.ramp_duration > 0 || self.mid.ramp_duration > 0 || self.high.ramp_duration > 0 {
+            self.process_block(input, output);
+            return;
+        }
+
+        let b0 = _mm_set_ps(0.0, self.high.coeffs.b0, self.mid.coeffs.b0, self.low.coeffs.b0);
+        let b1 = _mm_set_ps(0.0, self.high.coeffs.b1, self.mid.coeffs.b1, self.low.coeffs.b1);
+        let b2 = _mm_set_ps(0.0, self.high.coeffs.b2, self.mid.coeffs.b2, self.low.coeffs.b2);
+        let a1 = _mm_set_ps(0.0, self.high.coeffs.a1, self.mid.coeffs.a1, self.low.coeffs.a1);
+        let a2 = _mm_set_ps(0.0, self.high.coeffs.a2, self.mid.coeffs.a2, self.low.coeffs.a2);
+        let gains = _mm_set_ps(0.0, self.gains[2], self.gains[1], self.gains[0]);
+
+        let mut z1 = _mm_set_ps(0.0, self.high.z1, self.mid.z1, self.low.z1);
+        let mut z2 = _mm_set_ps(0.0, self.high.z2, self.mid.z2, self.low.z2);
+
+        for i in 0..len {
+            let x = _mm_set1_ps(*input.get_unchecked(i));
+            let y = _mm_add_ps(_mm_mul_ps(x, b0), z1);
+            z1 = _mm_add_ps(_mm_sub_ps(_mm_mul_ps(x, b1), _mm_mul_ps(y, a1)), z2);
+            z2 = _mm_sub_ps(_mm_mul_ps(x, b2), _mm_mul_ps(y, a2));
+
+            let mixed = _mm_mul_ps(y, gains);
+            let sum = _mm_hadd_ps(mixed, mixed);
+            let sum = _mm_hadd_ps(sum, sum);
+            *output.get_unchecked_mut(i) = _mm_cvtss_f32(sum);
+        }
+
+        let mut final_z1 = [0.0f32; 4];
+        let mut final_z2 = [0.0f32; 4];
+        _mm_storeu_ps(final_z1.as_mut_ptr(), z1);
+        _mm_storeu_ps(final_z2.as_mut_ptr(), z2);
+
+        self.low.z1 = final_z1[0];
+        self.mid.z1 = final_z1[1];
+        self.high.z1 = final_z1[2];
+        self.low.z2 = final_z2[0];
+        self.mid.z2 = final_z2[1];
+        self.high.z2 = final_z2[2];
     }
 }
 
@@ -219,8 +258,18 @@ impl WavetableOscillator {
 
         for i in 0..output.len() {
             let modulated_inc = base_inc * (1.0 + fm[i]);
+
+            let mut modulated_phase = phase + pm[i] * 2048.0;
             // Fast wrapping for modulated phase
-            let modulated_phase = (phase + pm[i] * 2048.0).rem_euclid(2048.0);
+            if modulated_phase >= 2048.0 {
+                modulated_phase -= 2048.0;
+                if modulated_phase >= 2048.0 { modulated_phase %= 2048.0; }
+            } else if modulated_phase < 0.0 {
+                modulated_phase += 2048.0;
+                if modulated_phase < 0.0 {
+                    modulated_phase = modulated_phase.rem_euclid(2048.0);
+                }
+            }
 
             let idx = modulated_phase as usize;
             let next_idx = (idx + 1) & 2047;
@@ -228,7 +277,16 @@ impl WavetableOscillator {
 
             output[i] = self.table[idx] * (1.0 - frac) + self.table[next_idx] * frac;
 
-            phase = (phase + modulated_inc).rem_euclid(2048.0);
+            phase += modulated_inc;
+            if phase >= 2048.0 {
+                phase -= 2048.0;
+                if phase >= 2048.0 { phase %= 2048.0; }
+            } else if phase < 0.0 {
+                phase += 2048.0;
+                if phase < 0.0 {
+                    phase = phase.rem_euclid(2048.0);
+                }
+            }
         }
         self.phases[channel] = phase;
     }
@@ -347,23 +405,141 @@ impl SimdFft {
 /// A Spectral Processor for partitioned convolution.
 pub struct SpectralProcessor {
     pub fft: SimdFft,
-    _buffer: Vec<f32>,
-    _hop_size: usize,
+    in_buffer: Vec<f32>,
+    out_buffer: Vec<f32>,
+    scratch_re: Vec<f32>,
+    scratch_im: Vec<f32>,
+    window: Vec<f32>,
+    hop_size: usize,
+    in_ptr: usize,
+    out_ptr: usize,
+    // Partitioned convolution state
+    ir_re: Vec<Vec<f32>>,
+    ir_im: Vec<Vec<f32>>,
+    history_re: Vec<Vec<f32>>,
+    history_im: Vec<Vec<f32>>,
+    partition_idx: usize,
 }
 
 impl SpectralProcessor {
     pub fn new(fft_size: usize) -> Self {
+        let mut window = vec![0.0; fft_size];
+        for i in 0..fft_size {
+            window[i] = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (fft_size - 1) as f32).cos());
+        }
+        let hop_size = fft_size / 2;
         Self {
             fft: SimdFft::new(fft_size),
-            _buffer: vec![0.0; fft_size],
-            _hop_size: fft_size / 2,
+            in_buffer: vec![0.0; fft_size],
+            out_buffer: vec![0.0; fft_size + hop_size],
+            scratch_re: vec![0.0; fft_size],
+            scratch_im: vec![0.0; fft_size],
+            window,
+            hop_size,
+            in_ptr: 0,
+            out_ptr: 0,
+            ir_re: Vec::new(),
+            ir_im: Vec::new(),
+            history_re: Vec::new(),
+            history_im: Vec::new(),
+            partition_idx: 0,
+        }
+    }
+
+    pub fn set_ir(&mut self, ir_data: &[f32]) {
+        let n = self.fft.size;
+        let num_partitions = (ir_data.len() + self.hop_size - 1) / self.hop_size;
+        self.ir_re = vec![vec![0.0; n]; num_partitions];
+        self.ir_im = vec![vec![0.0; n]; num_partitions];
+        self.history_re = vec![vec![0.0; n]; num_partitions];
+        self.history_im = vec![vec![0.0; n]; num_partitions];
+
+        for p in 0..num_partitions {
+            let start = p * self.hop_size;
+            let end = (start + self.hop_size).min(ir_data.len());
+            let mut partition = vec![0.0; n];
+            partition[..end-start].copy_from_slice(&ir_data[start..end]);
+
+            let mut re = partition;
+            let mut im = vec![0.0; n];
+            self.fft.process(&mut re, &mut im);
+            self.ir_re[p] = re;
+            self.ir_im[p] = im;
         }
     }
 
     pub fn process_overlap_add(&mut self, input: &[f32], output: &mut [f32]) {
-        // Partitioned convolution logic.
-        for (i, &s) in input.iter().enumerate() {
-            if i < output.len() { output[i] = s; } // Pass-through for now
+        let len = input.len();
+        for i in 0..len {
+            self.in_buffer[self.in_ptr] = input[i];
+            output[i] = self.out_buffer[self.out_ptr];
+            self.out_buffer[self.out_ptr] = 0.0;
+
+            self.in_ptr += 1;
+            self.out_ptr = (self.out_ptr + 1) % self.out_buffer.len();
+
+            if self.in_ptr >= self.fft.size {
+                self.execute_spectral_block();
+                self.in_buffer.copy_within(self.hop_size..self.fft.size, 0);
+                self.in_ptr = self.fft.size - self.hop_size;
+            }
+        }
+    }
+
+    fn execute_spectral_block(&mut self) {
+        let n = self.fft.size;
+        self.scratch_im.fill(0.0);
+
+        for i in 0..n {
+            self.scratch_re[i] = self.in_buffer[i] * self.window[i];
+        }
+
+        self.fft.process(&mut self.scratch_re, &mut self.scratch_im);
+
+        if self.ir_re.is_empty() {
+            // Fallback to identity EQ if no IR is loaded
+            for i in 0..n {
+                let mag_sq = self.scratch_re[i] * self.scratch_re[i] + self.scratch_im[i] * self.scratch_im[i];
+                if mag_sq < 0.0001 {
+                    self.scratch_re[i] = 0.0;
+                    self.scratch_im[i] = 0.0;
+                }
+            }
+        } else {
+            // Partitioned Convolution
+            self.history_re[self.partition_idx].copy_from_slice(&self.scratch_re);
+            self.history_im[self.partition_idx].copy_from_slice(&self.scratch_im);
+
+            self.scratch_re.fill(0.0);
+            self.scratch_im.fill(0.0);
+
+            let num_p = self.ir_re.len();
+            for p in 0..num_p {
+                let h_idx = (self.partition_idx + num_p - p) % num_p;
+                let hr = &self.history_re[h_idx];
+                let hi = &self.history_im[h_idx];
+                let ir = &self.ir_re[p];
+                let ii = &self.ir_im[p];
+
+                for i in 0..n {
+                    // Complex multiplication: (a+bi)(c+di) = (ac-bd) + (ad+bc)i
+                    self.scratch_re[i] += hr[i] * ir[i] - hi[i] * ii[i];
+                    self.scratch_im[i] += hr[i] * ii[i] + hi[i] * ir[i];
+                }
+            }
+            self.partition_idx = (self.partition_idx + 1) % num_p;
+        }
+
+        // Inverse FFT
+        for i in 0..n { self.scratch_im[i] = -self.scratch_im[i]; }
+        self.fft.process(&mut self.scratch_re, &mut self.scratch_im);
+
+        let norm = 1.0 / n as f32;
+        let out_len = self.out_buffer.len();
+        for i in 0..n {
+            let val = (self.scratch_re[i] * norm) * self.window[i];
+            let target_ptr = (self.out_ptr + i) % out_len;
+            self.out_buffer[target_ptr] += val;
         }
     }
 }
@@ -494,8 +670,9 @@ impl BiquadFilter {
         }
     }
 
+    /// SSE-optimized block processing that parallelizes the three filter bands.
     #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2")]
+    #[target_feature(enable = "sse3")]
     pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
         let len = input.len();
         if len == 0 { return; }
