@@ -87,14 +87,16 @@ impl<P: AudioProcessor> SidecarContext<P> {
         signal_ptr: *const ShmSignal,
         event_fd: Option<EventFd>,
     ) -> Self {
-        Self {
-            processor,
-            command_buffer: &*command_ptr,
-            feedback_buffer: feedback_ptr.map(|p| &*p),
-            input_buffers: inputs.into_iter().map(|p| &*p).collect(),
-            output_buffers: outputs.into_iter().map(|p| &*p).collect(),
-            signal: &*signal_ptr,
-            event_fd,
+        unsafe {
+            Self {
+                processor,
+                command_buffer: &*command_ptr,
+                feedback_buffer: feedback_ptr.map(|p| &*p),
+                input_buffers: inputs.into_iter().map(|p| &*p).collect(),
+                output_buffers: outputs.into_iter().map(|p| &*p).collect(),
+                signal: &*signal_ptr,
+                event_fd,
+            }
         }
     }
 

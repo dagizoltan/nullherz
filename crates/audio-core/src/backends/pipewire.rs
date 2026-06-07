@@ -104,20 +104,20 @@ pub struct PwStreamEvents {
 }
 
 unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
-    let backend = &mut *(data as *mut PipewireBackendInner);
+    let backend = unsafe { &mut *(data as *mut PipewireBackendInner) };
     let pw = match &backend.lib {
         Some(l) => l,
         None => return,
     };
 
-    let buffer = (pw.pw_stream_dequeue_buffer)(backend.stream);
+    let buffer = unsafe { (pw.pw_stream_dequeue_buffer)(backend.stream) };
     if buffer.is_null() { return; }
 
     #[repr(C)]
     struct PwBuffer {
         buffer: *mut SpaBuffer,
     }
-    let pw_buf = &*(buffer as *const PwBuffer);
+    let pw_buf = unsafe { &*(buffer as *const PwBuffer) };
     #[repr(C)]
     struct SpaBuffer {
         n_metas: u32,
@@ -154,12 +154,12 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
         engine.process_block(&[], &mut out_refs_storage[..num_channels], num_samples);
     }
 
-    (pw.pw_stream_queue_buffer)(backend.stream, buffer);
+    unsafe { (pw.pw_stream_queue_buffer)(backend.stream, buffer); }
 }
 
 unsafe extern "C" fn pw_param_changed(_data: *mut std::ffi::c_void, id: u32, _param: *const std::ffi::c_void) {
     if id != 2 { return; } // SPA_PARAM_Props
-    let _ = ipc_layer::set_rt_priority(90);
+    crate::setup_rt_thread(90);
 }
 
 impl AudioBackend for PipewireBackend {

@@ -24,3 +24,25 @@ pub struct Transport {
 }
 
 pub const MAX_CHANNELS: usize = 16;
+
+pub fn setup_rt_thread(priority: i32) {
+    let _ = ipc_layer::set_rt_priority(priority);
+
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        let mut mxcsr: u32 = 0;
+        std::arch::asm!("stmxcsr [{}]", in(reg) &mut mxcsr);
+        // Enable Flush-to-Zero (bit 15) and Denormals-Are-Zero (bit 6)
+        mxcsr |= 0x8000 | 0x0040;
+        std::arch::asm!("ldmxcsr [{}]", in(reg) &mxcsr);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        let mut fpcr: u64;
+        std::arch::asm!("mrs {}, fpcr", out(reg) fpcr);
+        // Bit 24 is FZ (Flush-to-Zero)
+        fpcr |= 1 << 24;
+        std::arch::asm!("msr fpcr, {}", in(reg) fpcr);
+    }
+}

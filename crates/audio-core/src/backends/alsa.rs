@@ -14,6 +14,7 @@ struct AlsaLib {
     snd_pcm_hw_params_set_rate_near: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, *mut std::os::raw::c_uint, *mut std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_hw_params_set_period_size_near: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, *mut std::os::raw::c_ulong, *mut std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_hw_params_set_buffer_size_near: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, *mut std::os::raw::c_ulong) -> std::os::raw::c_int,
+    snd_pcm_hw_params_set_period_size_max: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, *mut std::os::raw::c_ulong, *mut std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_hw_params: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> std::os::raw::c_int,
     snd_pcm_hw_params_free: unsafe extern "C" fn(*mut std::ffi::c_void),
     snd_pcm_writei: unsafe extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void, std::os::raw::c_ulong) -> isize,
@@ -43,6 +44,7 @@ impl AlsaLib {
                 snd_pcm_hw_params_set_rate_near: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_rate_near\0").ok_or("sym failed")?),
                 snd_pcm_hw_params_set_period_size_near: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_period_size_near\0").ok_or("sym failed")?),
                 snd_pcm_hw_params_set_buffer_size_near: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_buffer_size_near\0").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_period_size_max: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_period_size_max\0").ok_or("sym failed")?),
                 snd_pcm_hw_params: std::mem::transmute(load_sym(b"snd_pcm_hw_params\0").ok_or("sym failed")?),
                 snd_pcm_hw_params_free: std::mem::transmute(load_sym(b"snd_pcm_hw_params_free\0").ok_or("sym failed")?),
                 snd_pcm_writei: std::mem::transmute(load_sym(b"snd_pcm_writei\0").ok_or("sym failed")?),
@@ -68,7 +70,7 @@ impl AudioBackend for AlsaBackend {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let handle = thread::spawn(move || {
-            let _ = ipc_layer::set_rt_priority(90);
+            crate::setup_rt_thread(90);
             unsafe {
                 let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
                 let name = std::ffi::CString::new("default").unwrap();
@@ -100,9 +102,14 @@ impl AudioBackend for AlsaBackend {
                 (alsa.snd_pcm_hw_params_set_rate_near)(pcm, hw_params, &mut rate, std::ptr::null_mut());
 
                 let mut period_size = 128u64;
-                (alsa.snd_pcm_hw_params_set_period_size_near)(pcm, hw_params, &mut period_size, std::ptr::null_mut());
+                let mut dir = 0;
+                (alsa.snd_pcm_hw_params_set_period_size_near)(pcm, hw_params, &mut period_size, &mut dir);
 
-                let mut buffer_size = 512u64;
+                // Constrain period to engine max block size to prevent overflow
+                let mut max_period = ipc_layer::MAX_BLOCK_SIZE as u64;
+                (alsa.snd_pcm_hw_params_set_period_size_max)(pcm, hw_params, &mut max_period, &mut dir);
+
+                let mut buffer_size = period_size * 4;
                 (alsa.snd_pcm_hw_params_set_buffer_size_near)(pcm, hw_params, &mut buffer_size);
 
                 if (alsa.snd_pcm_hw_params)(pcm, hw_params) != 0 {
@@ -118,9 +125,9 @@ impl AudioBackend for AlsaBackend {
                     block_size: period_size as usize,
                 });
 
-                let mut outputs_raw = [[0.0f32; 128]; 2];
-                let mut interleaved_f32 = [0.0f32; 256];
-                let mut interleaved_s16 = [0i16; 256];
+                let mut outputs_raw = [[0.0f32; ipc_layer::MAX_BLOCK_SIZE]; 2];
+                let mut interleaved_f32 = [0.0f32; ipc_layer::MAX_BLOCK_SIZE * 2];
+                let mut interleaved_s16 = [0i16; ipc_layer::MAX_BLOCK_SIZE * 2];
 
                 let actual_period = period_size as usize;
                 while running.load(Ordering::SeqCst) {

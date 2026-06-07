@@ -83,7 +83,7 @@ impl TaskPool {
             let completion_worker = completion.clone();
 
             let handle = thread::spawn(move || {
-                let _ = ipc_layer::set_rt_priority(85);
+                crate::setup_rt_thread(85);
                 let mut spins = 0;
                 while running_worker.load(Ordering::Relaxed) {
                     if let Some(job) = cons.pop() {

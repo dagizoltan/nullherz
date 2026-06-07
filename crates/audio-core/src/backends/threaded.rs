@@ -16,18 +16,18 @@ impl AudioBackend for ThreadedBackend {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let handle = thread::spawn(move || {
-            let _ = ipc_layer::set_rt_priority(90);
+            crate::setup_rt_thread(90);
             engine.set_config(crate::AudioConfig {
                 sample_rate: 44100.0,
-                block_size: 128,
+                block_size: ipc_layer::MAX_BLOCK_SIZE,
             });
-            let mut outputs_raw = [[0.0f32; 128]; 2];
-            let interval = Duration::from_secs_f64(128.0 / 44100.0);
+            let mut outputs_raw = [[0.0f32; ipc_layer::MAX_BLOCK_SIZE]; 2];
+            let interval = Duration::from_secs_f64(ipc_layer::MAX_BLOCK_SIZE as f64 / 44100.0);
             while running.load(Ordering::SeqCst) {
                 let start = std::time::Instant::now();
                 let (ch1, ch2) = outputs_raw.split_at_mut(1);
                 let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
-                engine.process_block(&[], &mut out_refs, 128);
+                engine.process_block(&[], &mut out_refs, ipc_layer::MAX_BLOCK_SIZE);
                 let elapsed = start.elapsed();
                 if elapsed < interval {
                     thread::sleep(interval - elapsed);

@@ -64,10 +64,12 @@ impl<T: Copy> ShmRingBuffer<T> {
     pub unsafe fn init(ptr: *mut u8, capacity: usize) -> *mut Self {
         let (_, offset) = Self::layout(capacity);
         let rb_ptr = ptr as *mut Self;
-        std::ptr::write(&mut (*rb_ptr).head, AtomicUsize::new(0));
-        std::ptr::write(&mut (*rb_ptr).tail, AtomicUsize::new(0));
-        (*rb_ptr).capacity = capacity;
-        (*rb_ptr).buffer_offset = offset;
+        unsafe {
+            std::ptr::write(&mut (*rb_ptr).head, AtomicUsize::new(0));
+            std::ptr::write(&mut (*rb_ptr).tail, AtomicUsize::new(0));
+            (*rb_ptr).capacity = capacity;
+            (*rb_ptr).buffer_offset = offset;
+        }
         rb_ptr
     }
 

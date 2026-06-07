@@ -8,8 +8,6 @@ pub struct BroadcastSidecar {
     sample_rate: f32,
     tx: Option<mpsc::SyncSender<ipc_layer::AudioBlock>>,
     rt: Arc<tokio::runtime::Runtime>,
-    // Fixed-size pool for sending data to async thread without allocation
-    pool: Arc<ipc_layer::RingBuffer<ipc_layer::AudioBlock>>,
 }
 
 impl BroadcastSidecar {
@@ -29,7 +27,10 @@ impl BroadcastSidecar {
             if let Ok((mut ws_stream, _)) = connect_async(url).await {
                 while let Ok(block) = rx.recv() {
                     let data = &block.data[..block.len as usize];
-                    let bytes: Vec<u8> = data.iter().flat_map(|f: &f32| f.to_le_bytes().to_vec()).collect();
+                    let mut bytes = Vec::with_capacity(data.len() * 4);
+                    for &f in data {
+                        bytes.extend_from_slice(&f.to_le_bytes());
+                    }
                     if ws_stream.send(tokio_tungstenite::tungstenite::Message::Binary(bytes.into())).await.is_err() {
                         break;
                     }
@@ -42,7 +43,6 @@ impl BroadcastSidecar {
             sample_rate,
             tx: Some(tx),
             rt,
-            pool: Arc::new(ipc_layer::RingBuffer::new(128)),
         }
     }
 }

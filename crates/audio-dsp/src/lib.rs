@@ -282,11 +282,12 @@ impl WavetableOscillator {
             phase += modulated_inc;
             if phase >= 2048.0 {
                 phase -= 2048.0;
+                if phase >= 2048.0 { phase %= 2048.0; }
             } else if phase < 0.0 {
                 phase += 2048.0;
-            }
-            if phase >= 2048.0 || phase < 0.0 {
-                phase = phase.rem_euclid(2048.0);
+                if phase < 0.0 {
+                    phase = phase.rem_euclid(2048.0);
+                }
             }
         }
         self.phases[channel] = phase;
@@ -830,7 +831,7 @@ impl SimdBiquad {
                 _mm256_storeu_si256(idx_arr.as_mut_ptr() as *mut __m256i, idx);
 
                 for ch in 0..8 {
-                    *outputs[ch].add(i) = table[idx_arr[ch] as usize % 1024];
+                    unsafe { *outputs[ch].add(i) = table[idx_arr[ch] as usize % 1024] } ;
                 }
 
                 b_phase = _mm256_add_ps(b_phase, b_inc);
@@ -909,7 +910,7 @@ impl SimdBiquad {
             vst1q_f32(out0.as_mut_ptr(), y0);
             vst1q_f32(out1.as_mut_ptr(), y1);
 
-            for ch in 0..4 { *outputs[ch].add(i) = out0[ch]; }
+            for ch in 0..4 { unsafe { *outputs[ch].add(i) = out0[ch] } ; }
             for ch in 0..4 { *outputs[ch+4].add(i) = out1[ch]; }
         }
 
@@ -947,7 +948,7 @@ impl SimdBiquad {
 
             let mut out_v = [0.0f32; 16];
             _mm512_storeu_ps(out_v.as_mut_ptr(), y);
-            for ch in 0..16 { *outputs[ch].add(i) = out_v[ch]; }
+            for ch in 0..16 { unsafe { *outputs[ch].add(i) = out_v[ch] } ; }
         }
 
         _mm512_storeu_ps(self.z1.as_mut_ptr(), z1);
@@ -987,7 +988,7 @@ impl SimdBiquad {
 
                 let mut out_v = [0.0f32; 8];
                 _mm256_storeu_ps(out_v.as_mut_ptr(), y);
-                for ch in 0..8 { *outputs[ch].add(i) = out_v[ch]; }
+                for ch in 0..8 { unsafe { *outputs[ch].add(i) = out_v[ch] } ; }
             }
 
             _mm256_storeu_ps(self.z1.as_mut_ptr(), z1);
@@ -1015,5 +1016,27 @@ mod dsp_tests {
         // For simplicity, we just check that it's not all zeros and roughly the same magnitude
         let sum: f32 = output.iter().sum();
         assert!(sum > 10.0);
+    }
+}
+
+#[cfg(test)]
+mod wavetable_tests {
+    use super::*;
+
+    #[test]
+    fn test_wavetable_integrity() {
+        let mut osc = WavetableOscillator::new(44100.0);
+        osc.set_frequency(0, 440.0);
+        let mut out = vec![0.0; 1024];
+        let fm = vec![0.0; 1024];
+        let pm = vec![0.0; 1024];
+        osc.process_scalar(0, &fm, &pm, &mut out);
+
+        let sum: f32 = out.iter().map(|s| s.abs()).sum();
+        assert!(sum > 10.0);
+
+        for &s in &out {
+            assert!(s >= -1.05 && s <= 1.05);
+        }
     }
 }

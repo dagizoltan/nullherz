@@ -62,7 +62,7 @@ impl JackLib {
 }
 
 unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_void) -> i32 {
-    let backend = &mut *(data as *mut JackBackendInner);
+    let backend = unsafe { &mut *(data as *mut JackBackendInner) };
     let jack = match &backend.lib {
         Some(l) => l,
         None => return 0,
@@ -71,10 +71,11 @@ unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_
     let mut out_ptrs: [*mut f32; 16] = [std::ptr::null_mut(); 16];
     let num_ports = backend.ports.len().min(16);
     for i in 0..num_ports {
-        out_ptrs[i] = (jack.jack_port_get_buffer)(backend.ports[i], nframes) as *mut f32;
+        out_ptrs[i] = unsafe { (jack.jack_port_get_buffer)(backend.ports[i], nframes) } as *mut f32;
     }
 
     if let Some(engine) = &mut backend.engine {
+        crate::setup_rt_thread(90);
         let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|i| {
             if i < num_ports {
                 unsafe { std::slice::from_raw_parts_mut(out_ptrs[i], nframes as usize) }
