@@ -78,7 +78,7 @@ fn main() {
     thread::sleep(std::time::Duration::from_millis(100));
 
     while let Some(t) = tel_cons.pop() {
-        if t.sample_counter < 1000 { println!("Telemetry: process_time_cycles={}", t.process_time_cycles); }
+        if t.sample_counter < 1000 { println!("Telemetry: process_time_ns={}", t.process_time_ns); }
     }
 
     println!("Engine: Simulation finished.");

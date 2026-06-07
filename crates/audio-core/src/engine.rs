@@ -14,6 +14,7 @@ pub struct AudioEngine {
     telemetry_producer: Producer<Telemetry>,
     sample_counter: u64,
     pending_command: Option<TimestampedCommand>,
+    ns_per_cycle: f64,
 }
 
 impl AudioEngine {
@@ -23,6 +24,7 @@ impl AudioEngine {
         telemetry_producer: Producer<Telemetry>,
         initial_graph: Box<dyn AudioProcessor>,
     ) -> Self {
+        let ns_per_cycle = Self::calibrate_cycles();
         Self {
             command_consumer,
             active_graph: AtomicPtr::new(Box::into_raw(Box::new(initial_graph))),
@@ -31,7 +33,22 @@ impl AudioEngine {
             telemetry_producer,
             sample_counter: 0,
             pending_command: None,
+            ns_per_cycle,
         }
+    }
+
+    fn calibrate_cycles() -> f64 {
+        #[cfg(target_arch = "x86_64")]
+        {
+            let start = std::time::Instant::now();
+            let start_c = unsafe { std::arch::x86_64::_rdtsc() };
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            let elapsed = start.elapsed().as_nanos() as f64;
+            let elapsed_c = (unsafe { std::arch::x86_64::_rdtsc() } - start_c) as f64;
+            if elapsed_c > 0.0 { elapsed / elapsed_c } else { 1.0 }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        { 1.0 }
     }
     pub fn request_swap(&mut self, new_graph: Box<dyn AudioProcessor>) {
         let new_ptr = Box::into_raw(Box::new(new_graph));
@@ -69,6 +86,8 @@ impl AudioEngine {
         let mut node_times = [0u64; 64];
         let mut peak_levels = [0.0f32; 64];
 
+        let mut node_times_cycles = [0u64; 64];
+
         while current_sample_in_block < num_samples {
             let cmd = if let Some(pending) = self.pending_command.take() { Some(pending) } else { self.command_consumer.pop() };
             if let Some(cmd) = cmd {
@@ -105,7 +124,11 @@ impl AudioEngine {
             }
         }
         self.sample_counter = block_end_sample;
-        graph.collect_telemetry(&mut node_times, &mut peak_levels);
+        graph.collect_telemetry(&mut node_times_cycles, &mut peak_levels);
+
+        for i in 0..64 {
+            node_times[i] = (node_times_cycles[i] as f64 * self.ns_per_cycle) as u64;
+        }
 
         #[cfg(target_arch = "x86_64")]
         let elapsed_cycles = unsafe { std::arch::x86_64::_rdtsc() } - start_cycles;
@@ -119,10 +142,10 @@ impl AudioEngine {
         let elapsed_cycles = start_time.elapsed().as_nanos() as u64;
 
         let _ = self.telemetry_producer.push(Telemetry {
-            process_time_cycles: elapsed_cycles,
+            process_time_ns: (elapsed_cycles as f64 * self.ns_per_cycle) as u64,
             sample_counter: self.sample_counter,
             xrun_count: 0,
-            node_times_cycles: node_times,
+            node_times_ns: node_times,
             peak_levels,
         });
     }

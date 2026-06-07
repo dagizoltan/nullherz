@@ -294,8 +294,8 @@ impl InspectorApp {
                         ui.separator();
                         let cpu_pct = telemetry.as_ref().map_or(0.0, |t| {
                             // Assume 3.0 GHz CPU for rough estimate
-                            let budget_cycles = 128.0 / 44100.0 * 3.0e9;
-                            (t.process_time_cycles as f64 / budget_cycles * 100.0).min(100.0)
+                            let budget_ns = (128.0 / 44100.0) * 1e9;
+                            (t.process_time_ns as f64 / budget_ns * 100.0).min(100.0)
                         });
                         ui.label(egui::RichText::new(format!("CPU {:.0}%", cpu_pct)).small().color(egui::Color32::from_gray(80)));
                     });
@@ -355,7 +355,7 @@ impl InspectorApp {
         let painter = ui.painter();
         let cell_w = rect.width() / 64.0;
         for i in 0..64 {
-            let load = telemetry.as_ref().map_or(0.0, |t| (t.node_times_cycles[i] as f32 / 500000.0).min(1.0));
+            let load = telemetry.as_ref().map_or(0.0, |t| (t.node_times_ns[i] as f32 / 500000.0).min(1.0));
             painter.rect_filled(egui::Rect::from_min_size(rect.min + egui::vec2(i as f32 * cell_w, 0.0), egui::vec2(cell_w, 24.0)), 0.0, egui::Color32::from_rgb((load * 255.0) as u8, (255.0 * (1.0 - load)) as u8, 100));
         }
         ui.add_space(20.0);

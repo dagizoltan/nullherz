@@ -17,11 +17,21 @@ impl BroadcastSidecar {
 
 impl AudioProcessor for BroadcastSidecar {
     fn process(&mut self, inputs: &[&[f32]], _out: &mut [&mut [f32]]) {
-        if !self.is_active || inputs.is_empty() { return; }
+        if !self.is_active || inputs.len() < 2 { return; }
 
-        // In a full implementation, we would encode the buffers to MP3/Opus
-        // and push them to a TCP/UDP socket or a local icecast mount.
-        // For now, we simulate activity.
+        // Siphon logic: pulling from system slab buffers 4 and 5
+        let _left = inputs[0];
+        let _right = inputs[1];
+
+        // Simulate high-performance encoding loop.
+        // In production, this would be an Opus or FLAC encoder call.
+        let mut _encoded_size = 0;
+        for i in 0.._left.len() {
+            let _l = _left[i];
+            let _r = _right[i];
+            // Mock bitstream packaging
+            _encoded_size += 4;
+        }
     }
 
     fn apply_command(&mut self, cmd: &control_plane::Command) {

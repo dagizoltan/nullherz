@@ -296,7 +296,8 @@ impl ProcessorGraph {
         for i in 0..topo.routing[idx].output_count { topo.routing[idx].output_indices[i] = outputs[i]; }
         topo.node_count += 1;
 
-        self.needs_commit = true;
+        self.calculate_stages();
+        self.commit_graph();
     }
 }
 
@@ -304,12 +305,6 @@ impl AudioProcessor for ProcessorGraph {
     fn process(&mut self, _external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]]) {
         let num_samples = if !external_outputs.is_empty() { external_outputs[0].len() } else { 0 };
         if num_samples == 0 { return; }
-
-        if self.needs_commit {
-            self.calculate_stages();
-            self.commit_graph();
-            self.needs_commit = false;
-        }
 
         let active_idx = self.active_topo_idx.load(Ordering::Acquire);
         let topo_ptr = &self.topologies[active_idx] as *const GraphTopology;
@@ -456,12 +451,48 @@ impl AudioProcessor for ProcessorGraph {
         }
 
         for i in 0..topo.node_count.min(64) {
-            let mut peak = 0.0f32;
             let p_idx = topo.virtual_to_physical[i];
-            for sample in &self.buffers[p_idx].data[..num_samples] {
-                let abs = sample.abs();
-                if abs > peak { peak = abs; }
+            let data = &self.buffers[p_idx].data[..num_samples];
+            let mut peak = 0.0f32;
+
+            #[cfg(target_arch = "x86_64")]
+            {
+                if is_x86_feature_detected!("avx2") {
+                    unsafe {
+                        use std::arch::x86_64::*;
+                        let mut v_peak = _mm256_setzero_ps();
+                        let abs_mask = _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFFFFFF));
+                        let mut j = 0;
+                        while j + 8 <= num_samples {
+                            let v_data = _mm256_loadu_ps(data.as_ptr().add(j));
+                            let v_abs = _mm256_and_ps(v_data, abs_mask);
+                            v_peak = _mm256_max_ps(v_peak, v_abs);
+                            j += 8;
+                        }
+                        let mut res = [0.0f32; 8];
+                        _mm256_storeu_ps(res.as_mut_ptr(), v_peak);
+                        for &val in &res { if val > peak { peak = val; } }
+                        while j < num_samples {
+                            let abs = data[j].abs();
+                            if abs > peak { peak = abs; }
+                            j += 1;
+                        }
+                    }
+                } else {
+                    for &sample in data {
+                        let abs = sample.abs();
+                        if abs > peak { peak = abs; }
+                    }
+                }
             }
+            #[cfg(not(target_arch = "x86_64"))]
+            {
+                for &sample in data {
+                    let abs = sample.abs();
+                    if abs > peak { peak = abs; }
+                }
+            }
+
             self.peak_levels[i].store(peak.to_bits(), Ordering::Relaxed);
         }
     }
@@ -474,8 +505,8 @@ impl AudioProcessor for ProcessorGraph {
                     let topo = self.inactive_topology_mut();
                     if i_idx < topo.routing[n_idx].input_count {
                         topo.routing[n_idx].input_indices[i_idx] = (*new_buffer_idx as usize).min(63);
-                        // self.calculate_stages();
-                        self.needs_commit = true;
+                        self.calculate_stages();
+                        self.commit_graph();
                     }
                 }
             }
@@ -486,9 +517,8 @@ impl AudioProcessor for ProcessorGraph {
                     let topo = self.inactive_topology_mut();
                     if o_idx < topo.routing[n_idx].output_count {
                         topo.routing[n_idx].output_indices[o_idx] = (*new_buffer_idx as usize).min(63);
-                        // self.calculate_stages();
-                        // self.calculate_stages();
-                        self.needs_commit = true;
+                        self.calculate_stages();
+                        self.commit_graph();
                     }
                 }
             }
