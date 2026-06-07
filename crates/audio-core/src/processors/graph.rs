@@ -57,6 +57,7 @@ pub struct Job {
     pub output_count: usize,
     pub node_idx: usize, // for telemetry
     pub telemetry_ptr: *const [AtomicU64; 64],
+    pub transport: Option<crate::Transport>,
 }
 
 unsafe impl Send for Job {}
@@ -114,7 +115,7 @@ impl TaskPool {
                         #[cfg(target_arch = "x86_64")]
                         let start = unsafe { std::arch::x86_64::_rdtsc() };
 
-                        let mut inner_context = crate::processors::ProcessContext { pool: None };
+                        let mut inner_context = crate::processors::ProcessContext { pool: None, transport: job.transport.as_ref() };
                         unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
 
                         #[cfg(target_arch = "x86_64")]
@@ -173,7 +174,7 @@ pub struct ProcessorGraph {
 
 impl ProcessorGraph {
     pub fn new() -> Self {
-        let buffers = Box::new([AudioBlock { data: [0.0f32; 128] }; 64]);
+        let buffers = Box::new([AudioBlock { data: [0.0f32; ipc_layer::MAX_BLOCK_SIZE], len: 0 }; 64]);
         let mut v2p = [0usize; 64];
         for i in 0..64 { v2p[i] = i; }
         let topo = GraphTopology {
@@ -194,8 +195,8 @@ impl ProcessorGraph {
             nodes,
             node_count: 0,
             buffers,
-            _crossfade_buffers: [AudioBlock { data: [0.0f32; 128] }; 8],
-            _old_path_buffers: Box::new([AudioBlock { data: [0.0f32; 128] }; 64]),
+            _crossfade_buffers: [AudioBlock { data: [0.0f32; ipc_layer::MAX_BLOCK_SIZE], len: 0 }; 8],
+            _old_path_buffers: Box::new([AudioBlock { data: [0.0f32; ipc_layer::MAX_BLOCK_SIZE], len: 0 }; 64]),
             topologies: Box::new([topo; 2]),
             active_topo_idx: Arc::new(AtomicUsize::new(0)),
             needs_commit: false,
@@ -407,6 +408,7 @@ impl AudioProcessor for ProcessorGraph {
                         output_count: routing.output_count,
                         node_idx: n_idx,
                         telemetry_ptr: Arc::as_ptr(&self.node_times_cycles) as *const _,
+                        transport: context.transport.copied(),
                     });
                 }
 
@@ -453,7 +455,7 @@ impl AudioProcessor for ProcessorGraph {
                     #[cfg(target_arch = "x86_64")]
                     let start = unsafe { std::arch::x86_64::_rdtsc() };
 
-                    let mut inner_context = crate::processors::ProcessContext { pool: None };
+                    let mut inner_context = crate::processors::ProcessContext { pool: None, transport: context.transport };
                     unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
 
                     #[cfg(target_arch = "x86_64")]

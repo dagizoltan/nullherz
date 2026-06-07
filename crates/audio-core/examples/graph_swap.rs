@@ -10,7 +10,7 @@ fn main() {
     let (tel_prod, _) = tel_rb.split();
 
     let initial_graph = Box::new(ProcessorGraph::new());
-    let mut engine = AudioEngine::new(cons, garbage_prod, tel_prod, initial_graph);
+    let mut engine = AudioEngine::new(cons, None, garbage_prod, tel_prod, initial_graph);
 
     println!("Engine initialized.");
 

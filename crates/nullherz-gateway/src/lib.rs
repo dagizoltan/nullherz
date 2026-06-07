@@ -4,7 +4,7 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use futures_util::{StreamExt, SinkExt};
 use std::sync::{Arc, Mutex};
 use control_plane::{TimestampedCommand};
-use ipc_layer::{Producer, Consumer, RingBuffer};
+use ipc_layer::{Consumer, RingBuffer};
 use audio_core::Telemetry;
 
 pub fn connect_to_engine() -> Result<(ipc_layer::NonRtProducer<TimestampedCommand>, Consumer<Telemetry>), Box<dyn std::error::Error>> {

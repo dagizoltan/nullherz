@@ -13,6 +13,7 @@ pub struct SidecarHandle {
     pub shm_outputs: Vec<SharedMemory>,
     pub shm_signal: SharedMemory,
     pub last_heartbeat: std::time::Instant,
+    pub last_heartbeat_version: u64,
 }
 
 pub struct SidecarManager {
@@ -126,6 +127,7 @@ impl SidecarManager {
             shm_outputs,
             shm_signal,
             last_heartbeat: std::time::Instant::now(),
+            last_heartbeat_version: 0,
         });
 
         Ok(processor)
@@ -150,8 +152,10 @@ impl SidecarManager {
 
             // Check heartbeat from SHM
             let sig_ptr = handle.shm_signal.ptr() as *const ShmSignal;
-            if unsafe { (*sig_ptr).check_and_clear_heartbeat() } {
+            let current_heartbeat = unsafe { (*sig_ptr).get_heartbeat() };
+            if current_heartbeat != handle.last_heartbeat_version {
                 handle.last_heartbeat = std::time::Instant::now();
+                handle.last_heartbeat_version = current_heartbeat;
             }
 
             true
