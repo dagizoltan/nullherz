@@ -296,7 +296,7 @@ impl ProcessorGraph {
         for i in 0..topo.routing[idx].output_count { topo.routing[idx].output_indices[i] = outputs[i]; }
         topo.node_count += 1;
 
-        // self.calculate_stages(); // Moved out of individual commands to avoid CPU spikes
+        self.needs_commit = true;
     }
 }
 

@@ -82,7 +82,6 @@ impl AudioBackend for AlsaBackend {
                 (alsa.snd_pcm_hw_params_malloc)(&mut hw_params);
                 (alsa.snd_pcm_hw_params_any)(pcm, hw_params);
                 (alsa.snd_pcm_hw_params_set_access)(pcm, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
-                (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_FLOAT_LE);
                 (alsa.snd_pcm_hw_params_set_channels)(pcm, hw_params, 2);
 
                 let mut rate = 44100u32;
