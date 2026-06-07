@@ -519,53 +519,52 @@ impl AudioProcessor for ProcessorGraph {
 
         for n_idx in 0..topo.node_count.min(64) {
             let routing = &topo.routing[n_idx];
-            let mut peak = 0.0f32;
+            let mut node_peak = 0.0f32;
 
             for o_idx in 0..routing.output_count {
                 let v_out = routing.output_indices[o_idx].min(63);
                 let p_idx = topo.virtual_to_physical[v_out].min(63);
                 let data = &self.buffers[p_idx].data[..num_samples];
 
-            #[cfg(target_arch = "x86_64")]
-            {
-                if has_avx2 {
-                    unsafe {
-                        use std::arch::x86_64::*;
-                        let mut v_peak = _mm256_setzero_ps();
-                        let abs_mask = _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFFFFFF));
-                        let mut j = 0;
-                        while j + 8 <= num_samples {
-                            let v_data = _mm256_loadu_ps(data.as_ptr().add(j));
-                            let v_abs = _mm256_and_ps(v_data, abs_mask);
-                            v_peak = _mm256_max_ps(v_peak, v_abs);
-                            j += 8;
+                #[cfg(target_arch = "x86_64")]
+                {
+                    if has_avx2 {
+                        unsafe {
+                            use std::arch::x86_64::*;
+                            let mut v_peak = _mm256_setzero_ps();
+                            let abs_mask = _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFFFFFF));
+                            let mut j = 0;
+                            while j + 8 <= num_samples {
+                                let v_data = _mm256_loadu_ps(data.as_ptr().add(j));
+                                let v_abs = _mm256_and_ps(v_data, abs_mask);
+                                v_peak = _mm256_max_ps(v_peak, v_abs);
+                                j += 8;
+                            }
+                            let mut res = [0.0f32; 8];
+                            _mm256_storeu_ps(res.as_mut_ptr(), v_peak);
+                            for &val in &res { if val > node_peak { node_peak = val; } }
+                            while j < num_samples {
+                                let abs = data[j].abs();
+                                if abs > node_peak { node_peak = abs; }
+                                j += 1;
+                            }
                         }
-                        let mut res = [0.0f32; 8];
-                        _mm256_storeu_ps(res.as_mut_ptr(), v_peak);
-                        for &val in &res { if val > peak { peak = val; } }
-                        while j < num_samples {
-                            let abs = data[j].abs();
-                            if abs > peak { peak = abs; }
-                            j += 1;
+                    } else {
+                        for &sample in data {
+                            let abs = sample.abs();
+                            if abs > node_peak { node_peak = abs; }
                         }
                     }
-                } else {
+                }
+                #[cfg(not(target_arch = "x86_64"))]
+                {
                     for &sample in data {
                         let abs = sample.abs();
-                        if abs > peak { peak = abs; }
+                        if abs > node_peak { node_peak = abs; }
                     }
                 }
             }
-            #[cfg(not(target_arch = "x86_64"))]
-            {
-                for &sample in data {
-                    let abs = sample.abs();
-                    if abs > peak { peak = abs; }
-                }
-            }
-
-                self.peak_levels[n_idx].store(peak.to_bits(), Ordering::Relaxed);
-            }
+            self.peak_levels[n_idx].store(node_peak.to_bits(), Ordering::Relaxed);
         }
     }
     fn setup(&mut self, config: crate::AudioConfig) {

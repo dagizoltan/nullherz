@@ -27,7 +27,7 @@ fn main() {
         }
     }
 
-    let mut engine = AudioEngine::new(cmd_cons, None, garbage_prod, tel_prod, Box::new(graph));
+    let mut engine = AudioEngine::new(cmd_cons, None, None, garbage_prod, tel_prod, Box::new(graph));
 
     let mut backends: Vec<Box<dyn AudioBackend>> = vec![
         Box::new(ThreadedBackend::new()),

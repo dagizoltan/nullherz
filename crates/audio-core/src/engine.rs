@@ -8,6 +8,7 @@ use crate::telemetry::Telemetry;
 
 pub struct AudioEngine {
     command_consumer: Consumer<TimestampedCommand>,
+    bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
     topology_consumer: Option<Consumer<control_plane::TopologyCommand>>,
     active_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     pending_graph: AtomicPtr<Box<dyn AudioProcessor>>,
@@ -24,6 +25,7 @@ pub struct AudioEngine {
 impl AudioEngine {
     pub fn new(
         command_consumer: Consumer<TimestampedCommand>,
+        bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
         topology_consumer: Option<Consumer<control_plane::TopologyCommand>>,
         garbage_producer: Producer<Box<dyn AudioProcessor>>,
         telemetry_producer: Producer<Telemetry>,
@@ -32,6 +34,7 @@ impl AudioEngine {
         let ns_per_cycle = Self::calibrate_cycles();
         Self {
             command_consumer,
+            bundle_consumer,
             topology_consumer,
             active_graph: AtomicPtr::new(Box::into_raw(Box::new(initial_graph))),
             pending_graph: AtomicPtr::new(std::ptr::null_mut()),
@@ -104,6 +107,20 @@ impl AudioEngine {
         let mut current_sample_in_block = 0;
         let graph_ptr = self.active_graph.load(Ordering::Acquire);
         let graph = unsafe { &mut **graph_ptr };
+
+        // Process atomic command bundles first (immediate application)
+        if let Some(ref mut cons) = self.bundle_consumer {
+            while let Some(bundle) = cons.pop() {
+                for cmd in bundle {
+                    match cmd {
+                        control_plane::Command::Play => self.transport.is_playing = true,
+                        control_plane::Command::Stop => self.transport.is_playing = false,
+                        _ => {}
+                    }
+                    graph.apply_command(&cmd);
+                }
+            }
+        }
 
         if let Some(ref mut cons) = self.topology_consumer {
             while let Some(topo_cmd) = cons.pop() {
