@@ -144,6 +144,7 @@ impl<P: AudioProcessor> SidecarContext<P> {
             let mut context = audio_core::processors::ProcessContext {
                 pool: None,
                 transport: None,
+                is_last_sub_block: true,
             };
             self.processor.process(&in_slices_arr[..num_channels], &mut out_slices_reconstructed[..num_channels], &mut context);
 

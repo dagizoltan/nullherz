@@ -11,6 +11,7 @@ pub use complex::{WavetableProcessor, SpectralProcessor, ModulationProcessor};
 pub struct ProcessContext<'a> {
     pub pool: Option<&'a mut TaskPool>,
     pub transport: Option<&'a crate::Transport>,
+    pub is_last_sub_block: bool,
 }
 
 pub trait AudioProcessor: Send {

@@ -125,7 +125,8 @@ impl AudioEngine {
                         let mut remaining_to_cmd = cmd_offset - current_sample_in_block;
                         while remaining_to_cmd > 0 {
                             let chunk = remaining_to_cmd.min(ipc_layer::MAX_BLOCK_SIZE);
-                            self.process_sub_block(graph, inputs, outputs, current_sample_in_block, chunk);
+                                    let is_last = (current_sample_in_block + chunk) == num_samples;
+                                    self.process_sub_block(graph, inputs, outputs, current_sample_in_block, chunk, is_last);
                             current_sample_in_block += chunk;
                             remaining_to_cmd -= chunk;
                         }
@@ -141,7 +142,8 @@ impl AudioEngine {
                     let mut remaining = num_samples - current_sample_in_block;
                     while remaining > 0 {
                         let chunk = remaining.min(ipc_layer::MAX_BLOCK_SIZE);
-                        self.process_sub_block(graph, inputs, outputs, current_sample_in_block, chunk);
+                                let is_last = (current_sample_in_block + chunk) == num_samples;
+                                self.process_sub_block(graph, inputs, outputs, current_sample_in_block, chunk, is_last);
                         current_sample_in_block += chunk;
                         remaining -= chunk;
                     }
@@ -150,7 +152,8 @@ impl AudioEngine {
                 let mut remaining = num_samples - current_sample_in_block;
                 while remaining > 0 {
                     let chunk = remaining.min(ipc_layer::MAX_BLOCK_SIZE);
-                    self.process_sub_block(graph, inputs, outputs, current_sample_in_block, chunk);
+                            let is_last = (current_sample_in_block + chunk) == num_samples;
+                            self.process_sub_block(graph, inputs, outputs, current_sample_in_block, chunk, is_last);
                     current_sample_in_block += chunk;
                     remaining -= chunk;
                 }
@@ -182,11 +185,12 @@ impl AudioEngine {
             peak_levels,
         });
     }
-    fn process_sub_block(&mut self, graph: &mut dyn AudioProcessor, inputs: &[&[f32]], outputs: &mut [&mut [f32]], offset: usize, len: usize) {
+    fn process_sub_block(&mut self, graph: &mut dyn AudioProcessor, inputs: &[&[f32]], outputs: &mut [&mut [f32]], offset: usize, len: usize, is_last_sub_block: bool) {
         if len == 0 { return; }
         let mut context = ProcessContext {
             pool: self.pool.as_mut(),
             transport: Some(&self.transport),
+            is_last_sub_block,
         };
         let mut sub_inputs_ptr = [ &[][..]; crate::MAX_CHANNELS ];
         let num_inputs = inputs.len().min(crate::MAX_CHANNELS);

@@ -302,13 +302,15 @@ impl WavetableOscillator {
         let b_1 = _mm256_set1_ps(1.0);
 
         for i in 0..len {
-            let b_fm = _mm256_set_ps(
-                *fm[7].add(i), *fm[6].add(i), *fm[5].add(i), *fm[4].add(i),
-                *fm[3].add(i), *fm[2].add(i), *fm[1].add(i), *fm[0].add(i)
+            // Optimization: If buffers are aligned, we could use faster loads.
+            // For now, we still need to collect from 8 separate pointers.
+            let b_fm = _mm256_setr_ps(
+                *fm[0].add(i), *fm[1].add(i), *fm[2].add(i), *fm[3].add(i),
+                *fm[4].add(i), *fm[5].add(i), *fm[6].add(i), *fm[7].add(i)
             );
-            let b_pm = _mm256_set_ps(
-                *pm[7].add(i), *pm[6].add(i), *pm[5].add(i), *pm[4].add(i),
-                *pm[3].add(i), *pm[2].add(i), *pm[1].add(i), *pm[0].add(i)
+            let b_pm = _mm256_setr_ps(
+                *pm[0].add(i), *pm[1].add(i), *pm[2].add(i), *pm[3].add(i),
+                *pm[4].add(i), *pm[5].add(i), *pm[6].add(i), *pm[7].add(i)
             );
 
             let b_mod_inc = _mm256_mul_ps(b_base_incs, _mm256_add_ps(b_1, b_fm));
@@ -329,11 +331,17 @@ impl WavetableOscillator {
             // res = v0 + frac * (v1 - v0)
             let b_res = _mm256_add_ps(v0, _mm256_mul_ps(b_frac, _mm256_sub_ps(v1, v0)));
 
+            // Use storeu to an array and then distribute
             let mut out_v = [0.0f32; 8];
             _mm256_storeu_ps(out_v.as_mut_ptr(), b_res);
-            for ch in 0..8 {
-                *outputs[ch].add(i) = out_v[ch];
-            }
+            *outputs[0].add(i) = out_v[0];
+            *outputs[1].add(i) = out_v[1];
+            *outputs[2].add(i) = out_v[2];
+            *outputs[3].add(i) = out_v[3];
+            *outputs[4].add(i) = out_v[4];
+            *outputs[5].add(i) = out_v[5];
+            *outputs[6].add(i) = out_v[6];
+            *outputs[7].add(i) = out_v[7];
 
             b_phases = _mm256_add_ps(b_phases, b_mod_inc);
             let mask = _mm256_cmp_ps(b_phases, b_2048, _CMP_GE_OQ);
@@ -672,15 +680,14 @@ impl BiquadFilter {
         }
     }
 
-    /// SSE-optimized block processing that parallelizes the three filter bands.
+    /// SSE-optimized block processing using Direct Form II Transposed.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "sse3")]
     pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
+        use std::arch::x86_64::*;
         let len = input.len();
         if len == 0 { return; }
 
-        // If we are currently ramping, fall back to the ramped scalar implementation
-        // to ensure parameter continuity.
         if self.ramp_duration > 0 {
             for i in 0..len {
                 output[i] = self.process_sample(input[i]);
@@ -688,54 +695,30 @@ impl BiquadFilter {
             return;
         }
 
-        let mut z1 = self.z1;
-        let mut z2 = self.z2;
-        let b0 = self.coeffs.b0;
-        let b1 = self.coeffs.b1;
-        let b2 = self.coeffs.b2;
-        let a1 = self.coeffs.a1;
-        let a2 = self.coeffs.a2;
+        let vb0 = _mm_set1_ps(self.coeffs.b0);
+        let vb1 = _mm_set1_ps(self.coeffs.b1);
+        let vb2 = _mm_set1_ps(self.coeffs.b2);
+        let va1 = _mm_set1_ps(self.coeffs.a1);
+        let va2 = _mm_set1_ps(self.coeffs.a2);
 
-        let mut i = 0;
-        while i + 4 <= len {
-            let x0 = *input.get_unchecked(i);
-            let y0 = x0 * b0 + z1;
-            z1 = x0 * b1 - y0 * a1 + z2;
-            z2 = x0 * b2 - y0 * a2;
-            *output.get_unchecked_mut(i) = y0;
+        let mut vz1 = _mm_set1_ps(self.z1);
+        let mut vz2 = _mm_set1_ps(self.z2);
 
-            let x1 = *input.get_unchecked(i+1);
-            let y1 = x1 * b0 + z1;
-            z1 = x1 * b1 - y1 * a1 + z2;
-            z2 = x1 * b2 - y1 * a2;
-            *output.get_unchecked_mut(i+1) = y1;
+        // Biquad is inherently serial, so we process 1 sample at a time but use SIMD
+        // for the internal MAC operations. For true speedup, we'd need to process 4 independent streams.
+        // But we can at least optimize the single-stream math.
+        for i in 0..len {
+            let vx = _mm_set1_ps(*input.get_unchecked(i));
+            let vy = _mm_add_ss(_mm_mul_ss(vx, vb0), vz1);
 
-            let x2 = *input.get_unchecked(i+2);
-            let y2 = x2 * b0 + z1;
-            z1 = x2 * b1 - y2 * a1 + z2;
-            z2 = x2 * b2 - y2 * a2;
-            *output.get_unchecked_mut(i+2) = y2;
+            vz1 = _mm_add_ss(_mm_sub_ss(_mm_mul_ss(vx, vb1), _mm_mul_ss(vy, va1)), vz2);
+            vz2 = _mm_sub_ss(_mm_mul_ss(vx, vb2), _mm_mul_ss(vy, va2));
 
-            let x3 = *input.get_unchecked(i+3);
-            let y3 = x3 * b0 + z1;
-            z1 = x3 * b1 - y3 * a1 + z2;
-            z2 = x3 * b2 - y3 * a2;
-            *output.get_unchecked_mut(i+3) = y3;
-
-            i += 4;
+            *output.get_unchecked_mut(i) = _mm_cvtss_f32(vy);
         }
 
-        while i < len {
-            let x = *input.get_unchecked(i);
-            let y = x * b0 + z1;
-            z1 = x * b1 - y * a1 + z2;
-            z2 = x * b2 - y * a2;
-            *output.get_unchecked_mut(i) = y;
-            i += 1;
-        }
-
-        self.z1 = z1;
-        self.z2 = z2;
+        self.z1 = _mm_cvtss_f32(vz1);
+        self.z2 = _mm_cvtss_f32(vz2);
     }
 }
 

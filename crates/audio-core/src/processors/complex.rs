@@ -144,24 +144,18 @@ impl AudioProcessor for SequencerProcessor {
             let beats_per_block = seconds_per_block * (transport.bpm as f64 / 60.0);
             let end_beat = start_beat + beats_per_block;
 
-            // Step size in beats (16th note)
-            let step_size = 0.25;
+            let step_size = 0.25; // 16th note
 
-            let step_before = (start_beat / step_size) as u64;
-            let step_after = (end_beat / step_size) as u64;
+            let next_step_beat = (start_beat / step_size).ceil() * step_size;
 
-            if step_after > step_before {
-                // A step boundary was crossed.
-                // In a more precise implementation, we'd find the exact sample within the block.
-                // For now, we trigger at the block boundary corresponding to the step.
-                let active_step = (step_after % 16) as usize;
+            if next_step_beat < end_beat || (next_step_beat - start_beat).abs() < 1e-9 {
+                let step_idx = ((next_step_beat / step_size).round() as u64 % 16) as usize;
+
                 for track in 0..8 {
-                    if self.grid[track][active_step] {
+                    if self.grid[track][step_idx] {
                         if let Some(ref mut prod) = self.command_producer {
-                            // Find sample offset within the block where the step occurs
-                            let step_beat = step_after as f64 * step_size;
-                            let beat_offset = step_beat - start_beat;
-                            let sample_offset = (beat_offset * 60.0 / transport.bpm as f64 * transport.sample_rate as f64) as u64;
+                            let beat_offset = (next_step_beat - start_beat).max(0.0);
+                            let sample_offset = (beat_offset * 60.0 / transport.bpm as f64 * transport.sample_rate as f64).round() as u64;
 
                             let _ = prod.push(control_plane::TimestampedCommand {
                                 timestamp_samples: self.current_sample + sample_offset.min(block_len - 1),
