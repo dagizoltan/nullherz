@@ -25,7 +25,11 @@ impl AudioBackend for ThreadedBackend {
                 let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
                 engine.process_block(&[], &mut out_refs, 128);
                 let elapsed = start.elapsed();
-                if elapsed < interval { thread::sleep(interval - elapsed); }
+                if elapsed < interval {
+                    thread::sleep(interval - elapsed);
+                } else {
+                    engine.xrun_counter().fetch_add(1, Ordering::Relaxed);
+                }
             }
             Some(engine)
         });

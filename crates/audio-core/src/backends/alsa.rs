@@ -136,6 +136,9 @@ impl AudioBackend for AlsaBackend {
                     };
 
                     if written < 0 {
+                        if written == -32 { // EPIPE (Xrun)
+                            engine.xrun_counter().fetch_add(1, Ordering::Relaxed);
+                        }
                         (alsa.snd_pcm_recover)(pcm, written as i32, 1);
                         (alsa.snd_pcm_prepare)(pcm);
                     }

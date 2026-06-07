@@ -39,6 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
 
+        conductor.drain_garbage();
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

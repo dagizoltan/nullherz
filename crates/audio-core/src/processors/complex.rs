@@ -46,17 +46,27 @@ impl AudioProcessor for SpectralProcessor {
     }
 }
 
+const MODULATION_THRESHOLD: f32 = 0.001;
+
 pub struct ModulationProcessor {
     pub target_id: u64,
     pub param_id: u32,
     pub scale: f32,
     pub offset: f32,
     command_producer: Option<ipc_layer::Producer<control_plane::TimestampedCommand>>,
+    last_sent_value: f32,
 }
 
 impl ModulationProcessor {
     pub fn new(target_id: u64, param_id: u32, scale: f32, offset: f32) -> Self {
-        Self { target_id, param_id, scale, offset, command_producer: None }
+        Self {
+            target_id,
+            param_id,
+            scale,
+            offset,
+            command_producer: None,
+            last_sent_value: f32::NAN,
+        }
     }
 
     pub fn set_producer(&mut self, producer: ipc_layer::Producer<control_plane::TimestampedCommand>) {
@@ -77,17 +87,20 @@ impl AudioProcessor for ModulationProcessor {
         let avg_cv = sum / cv.len() as f32;
         let val = avg_cv * self.scale + self.offset;
 
-        if let Some(ref mut prod) = self.command_producer {
-            // We use a timestamp of 0 for "immediate" block-level modulation
-            let _ = prod.push(control_plane::TimestampedCommand {
-                timestamp_samples: 0,
-                command: control_plane::Command::SetParam {
-                    target_id: self.target_id,
-                    param_id: self.param_id,
-                    value: val,
-                    ramp_duration_samples: 0,
-                },
-            });
+        if (val - self.last_sent_value).abs() > MODULATION_THRESHOLD || self.last_sent_value.is_nan() {
+            if let Some(ref mut prod) = self.command_producer {
+                // We use a timestamp of 0 for "immediate" block-level modulation
+                let _ = prod.push(control_plane::TimestampedCommand {
+                    timestamp_samples: 0,
+                    command: control_plane::Command::SetParam {
+                        target_id: self.target_id,
+                        param_id: self.param_id,
+                        value: val,
+                        ramp_duration_samples: 0,
+                    },
+                });
+                self.last_sent_value = val;
+            }
         }
     }
 }

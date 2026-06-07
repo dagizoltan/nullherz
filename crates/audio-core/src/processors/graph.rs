@@ -167,6 +167,7 @@ pub struct ProcessorGraph {
     pub(crate) node_times_cycles: Arc<[AtomicU64; 64]>,
     pub(crate) peak_levels: Arc<[AtomicU32; 64]>,
     pub(crate) _telemetry_offset: AtomicUsize,
+    pub(crate) garbage_producer: Option<ipc_layer::Producer<Box<dyn AudioProcessor>>>,
 }
 
 impl ProcessorGraph {
@@ -202,6 +203,7 @@ impl ProcessorGraph {
             node_times_cycles: Arc::new(std::array::from_fn(|_| AtomicU64::new(0))),
             peak_levels: Arc::new(std::array::from_fn(|_| AtomicU32::new(0))),
             _telemetry_offset: AtomicUsize::new(0),
+            garbage_producer: None,
         }
     }
 
@@ -313,7 +315,9 @@ impl AudioProcessor for ProcessorGraph {
         let x_buffers_ptr = self._crossfade_buffers.as_mut_ptr();
 
         // 1. Resolve Crossfades for this block
-        let mut block_x_map = [None; 16]; // node_idx -> (input_idx, buffer_idx)
+        // Store crossfade overrides: [node_idx][input_idx] -> buffer_idx (0 means no override)
+        let mut block_x_map = [[0u8; 16]; 64];
+
         let crossfades_mut_ptr = &self.topologies[active_idx].crossfades as *const [Option<CrossfadeState>; 8] as *mut [Option<CrossfadeState>; 8];
 
         for i in 0..8 {
@@ -324,14 +328,17 @@ impl AudioProcessor for ProcessorGraph {
                 let new_data = &self.buffers[state.new_buffer_idx].data[..num_samples];
                 let x_data = &mut self._crossfade_buffers[x_buf_idx].data[..num_samples];
 
-                let total = state.total_samples as f32;
+                let inv_total = 1.0 / state.total_samples as f32;
                 for j in 0..num_samples {
-                    let progress = (state.total_samples - state.remaining_samples) as f32 / total;
+                    let progress = (state.total_samples - state.remaining_samples) as f32 * inv_total;
                     x_data[j] = old_data[j] * (1.0 - progress) + new_data[j] * progress;
                     if state.remaining_samples > 0 { state.remaining_samples -= 1; }
                 }
 
-                block_x_map[i] = Some((state.node_idx, state.input_idx, 64 + x_buf_idx));
+                if state.node_idx < 64 && state.input_idx < 16 {
+                    block_x_map[state.node_idx][state.input_idx] = (64 + x_buf_idx) as u8;
+                }
+
                 if state.remaining_samples == 0 { *x_state_opt = None; }
             }
         }
@@ -353,13 +360,9 @@ impl AudioProcessor for ProcessorGraph {
                         let mut p_idx = topo.virtual_to_physical[v_idx];
 
                         // Apply crossfade override
-                        for x in &topo.crossfades {
-                            if let Some(state) = x {
-                                if state.node_idx == n_idx && state.input_idx == j {
-                                    p_idx = 64 + (state.node_idx % 8);
-                                    break;
-                                }
-                            }
+                        let p_override = block_x_map[n_idx][j];
+                        if p_override != 0 {
+                            p_idx = p_override as usize;
                         }
                         resolved_inputs[j] = p_idx;
                     }
@@ -401,13 +404,9 @@ impl AudioProcessor for ProcessorGraph {
                     for i in 0..input_count {
                         let v_idx = routing.input_indices[i].min(63);
                         let mut p_idx = topo.virtual_to_physical[v_idx];
-                        for x in &topo.crossfades {
-                            if let Some(state) = x {
-                                if state.node_idx == n_idx && state.input_idx == i {
-                                    p_idx = 64 + (state.node_idx % 8);
-                                    break;
-                                }
-                            }
+                        let p_override = block_x_map[n_idx][i];
+                        if p_override != 0 {
+                            p_idx = p_override as usize;
                         }
 
                         if p_idx >= 64 {
@@ -450,6 +449,9 @@ impl AudioProcessor for ProcessorGraph {
             external_outputs[1].copy_from_slice(&self.buffers[p1].data[..num_samples]);
         }
 
+        #[cfg(target_arch = "x86_64")]
+        let has_avx2 = is_x86_feature_detected!("avx2");
+
         for i in 0..topo.node_count.min(64) {
             let p_idx = topo.virtual_to_physical[i];
             let data = &self.buffers[p_idx].data[..num_samples];
@@ -457,7 +459,7 @@ impl AudioProcessor for ProcessorGraph {
 
             #[cfg(target_arch = "x86_64")]
             {
-                if is_x86_feature_detected!("avx2") {
+                if has_avx2 {
                     unsafe {
                         use std::arch::x86_64::*;
                         let mut v_peak = _mm256_setzero_ps();
@@ -526,11 +528,22 @@ impl AudioProcessor for ProcessorGraph {
                 let n_idx = *node_idx as usize;
                 if n_idx < self.node_count {
                     let node = &self.nodes[n_idx];
-                    match processor_type_id {
-                        1 => { unsafe { *node.processor.get() = Box::new(crate::processors::standard::BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })); } }
-                        2 => { unsafe { *node.processor.get() = Box::new(crate::processors::standard::GainProcessor::new(0, 1.0)); } }
-                        20 => { unsafe { *node.processor.get() = Box::new(crate::processors::standard::CrossfaderProcessor::new()); } }
-                        _ => {}
+                    let mut new_proc: Box<dyn AudioProcessor> = match processor_type_id {
+                        1 => Box::new(crate::processors::standard::BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
+                        2 => Box::new(crate::processors::standard::GainProcessor::new(0, 1.0)),
+                        20 => Box::new(crate::processors::standard::CrossfaderProcessor::new()),
+                        _ => return,
+                    };
+
+                    if let Some(ref mut prod) = self.garbage_producer {
+                        new_proc.set_garbage_producer(prod.clone());
+                    }
+
+                    let old_proc = unsafe { std::ptr::replace(node.processor.get(), new_proc) };
+                    if let Some(ref mut prod) = self.garbage_producer {
+                        if let Err(leaked) = prod.push(old_proc) {
+                            let _ = Box::into_raw(leaked);
+                        }
                     }
                 }
             }
@@ -539,7 +552,7 @@ impl AudioProcessor for ProcessorGraph {
                 let processor: Box<dyn AudioProcessor> = match processor_type_id {
                     1 => Box::new(crate::processors::standard::BiquadProcessor::new(id, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
                     2 => Box::new(crate::processors::standard::GainProcessor::new(id, 1.0)),
-                    3 => Box::new(crate::processors::standard::SimdBiquadProcessor::new(audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
+                    3 => Box::new(crate::processors::standard::SimdBiquadProcessor::new(id, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
                     4 => Box::new(crate::processors::complex::WavetableProcessor::new(44100.0)),
                     5 => Box::new(crate::processors::complex::SpectralProcessor::new(512)),
                     10 => Box::new(crate::processors::complex::ModulationProcessor::new(0, 0, 1.0, 0.0)),
@@ -554,6 +567,9 @@ impl AudioProcessor for ProcessorGraph {
                 for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } }
             }
         }
+    }
+    fn set_garbage_producer(&mut self, producer: ipc_layer::Producer<Box<dyn AudioProcessor>>) {
+        self.garbage_producer = Some(producer);
     }
     fn collect_telemetry(&self, node_times: &mut [u64; 64], peak_levels: &mut [f32; 64]) {
         for i in 0..64 {
