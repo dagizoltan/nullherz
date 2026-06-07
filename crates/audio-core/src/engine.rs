@@ -10,9 +10,10 @@ pub struct AudioEngine {
     command_consumer: Consumer<TimestampedCommand>,
     active_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     pending_graph: AtomicPtr<Box<dyn AudioProcessor>>,
-    garbage_producer: Producer<Box<Box<dyn AudioProcessor>>>,
+    garbage_producer: Producer<Box<dyn AudioProcessor>>,
     telemetry_producer: Producer<Telemetry>,
     sample_counter: u64,
+    xrun_count: std::sync::Arc<std::sync::atomic::AtomicU32>,
     pending_command: Option<TimestampedCommand>,
     ns_per_cycle: f64,
 }
@@ -20,10 +21,11 @@ pub struct AudioEngine {
 impl AudioEngine {
     pub fn new(
         command_consumer: Consumer<TimestampedCommand>,
-        garbage_producer: Producer<Box<Box<dyn AudioProcessor>>>,
+        garbage_producer: Producer<Box<dyn AudioProcessor>>,
         telemetry_producer: Producer<Telemetry>,
-        initial_graph: Box<dyn AudioProcessor>,
+        mut initial_graph: Box<dyn AudioProcessor>,
     ) -> Self {
+        initial_graph.set_garbage_producer(garbage_producer.clone());
         let ns_per_cycle = Self::calibrate_cycles();
         Self {
             command_consumer,
@@ -32,6 +34,7 @@ impl AudioEngine {
             garbage_producer,
             telemetry_producer,
             sample_counter: 0,
+            xrun_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             pending_command: None,
             ns_per_cycle,
         }
@@ -50,7 +53,11 @@ impl AudioEngine {
         #[cfg(not(target_arch = "x86_64"))]
         { 1.0 }
     }
-    pub fn request_swap(&mut self, new_graph: Box<dyn AudioProcessor>) {
+    pub fn xrun_counter(&self) -> std::sync::Arc<std::sync::atomic::AtomicU32> {
+        self.xrun_count.clone()
+    }
+    pub fn request_swap(&mut self, mut new_graph: Box<dyn AudioProcessor>) {
+        new_graph.set_garbage_producer(self.garbage_producer.clone());
         let new_ptr = Box::into_raw(Box::new(new_graph));
         let old_pending = self.pending_graph.swap(new_ptr, Ordering::AcqRel);
         if !old_pending.is_null() { unsafe { drop(Box::from_raw(old_pending)); } }
@@ -72,8 +79,8 @@ impl AudioEngine {
             let old = self.active_graph.swap(pending, Ordering::AcqRel);
             if !old.is_null() {
                 let old_graph = unsafe { Box::from_raw(old) };
-                if let Err(leaked) = self.garbage_producer.push(old_graph) {
-                    let _ = Box::into_raw(leaked);
+                if let Err(leaked) = self.garbage_producer.push(*old_graph) {
+                    let _ = Box::into_raw(Box::new(leaked));
                 }
             }
         }
@@ -144,7 +151,7 @@ impl AudioEngine {
         let _ = self.telemetry_producer.push(Telemetry {
             process_time_ns: (elapsed_cycles as f64 * self.ns_per_cycle) as u64,
             sample_counter: self.sample_counter,
-            xrun_count: 0,
+            xrun_count: self.xrun_count.load(Ordering::Relaxed),
             node_times_ns: node_times,
             peak_levels,
         });

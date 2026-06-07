@@ -167,6 +167,7 @@ pub struct ProcessorGraph {
     pub(crate) node_times_cycles: Arc<[AtomicU64; 64]>,
     pub(crate) peak_levels: Arc<[AtomicU32; 64]>,
     pub(crate) _telemetry_offset: AtomicUsize,
+    pub(crate) garbage_producer: Option<ipc_layer::Producer<Box<dyn AudioProcessor>>>,
 }
 
 impl ProcessorGraph {
@@ -202,6 +203,7 @@ impl ProcessorGraph {
             node_times_cycles: Arc::new(std::array::from_fn(|_| AtomicU64::new(0))),
             peak_levels: Arc::new(std::array::from_fn(|_| AtomicU32::new(0))),
             _telemetry_offset: AtomicUsize::new(0),
+            garbage_producer: None,
         }
     }
 
@@ -526,11 +528,22 @@ impl AudioProcessor for ProcessorGraph {
                 let n_idx = *node_idx as usize;
                 if n_idx < self.node_count {
                     let node = &self.nodes[n_idx];
-                    match processor_type_id {
-                        1 => { unsafe { *node.processor.get() = Box::new(crate::processors::standard::BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })); } }
-                        2 => { unsafe { *node.processor.get() = Box::new(crate::processors::standard::GainProcessor::new(0, 1.0)); } }
-                        20 => { unsafe { *node.processor.get() = Box::new(crate::processors::standard::CrossfaderProcessor::new()); } }
-                        _ => {}
+                    let mut new_proc: Box<dyn AudioProcessor> = match processor_type_id {
+                        1 => Box::new(crate::processors::standard::BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
+                        2 => Box::new(crate::processors::standard::GainProcessor::new(0, 1.0)),
+                        20 => Box::new(crate::processors::standard::CrossfaderProcessor::new()),
+                        _ => return,
+                    };
+
+                    if let Some(ref mut prod) = self.garbage_producer {
+                        new_proc.set_garbage_producer(prod.clone());
+                    }
+
+                    let old_proc = unsafe { std::ptr::replace(node.processor.get(), new_proc) };
+                    if let Some(ref mut prod) = self.garbage_producer {
+                        if let Err(leaked) = prod.push(old_proc) {
+                            let _ = Box::into_raw(leaked);
+                        }
                     }
                 }
             }
@@ -554,6 +567,9 @@ impl AudioProcessor for ProcessorGraph {
                 for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } }
             }
         }
+    }
+    fn set_garbage_producer(&mut self, producer: ipc_layer::Producer<Box<dyn AudioProcessor>>) {
+        self.garbage_producer = Some(producer);
     }
     fn collect_telemetry(&self, node_times: &mut [u64; 64], peak_levels: &mut [f32; 64]) {
         for i in 0..64 {

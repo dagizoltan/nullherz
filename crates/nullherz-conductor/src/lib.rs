@@ -7,6 +7,7 @@ pub struct Conductor {
     pub manager: SidecarManager,
     pub engine: Option<AudioEngine>,
     pub backend: Option<Box<dyn AudioBackend>>,
+    garbage_consumer: Option<ipc_layer::Consumer<Box<dyn audio_core::AudioProcessor>>>,
 }
 
 impl Conductor {
@@ -15,17 +16,19 @@ impl Conductor {
             manager: SidecarManager::new(),
             engine: None,
             backend: None,
+            garbage_consumer: None,
         }
     }
 
     pub fn setup_engine(&mut self) -> (ipc_layer::Producer<control_plane::TimestampedCommand>, ipc_layer::Consumer<audio_core::Telemetry>) {
         let (cmd_prod, cmd_cons) = RingBuffer::new(1024).split();
-        let (garbage_prod, _garbage_cons) = RingBuffer::new(1024).split();
+        let (garbage_prod, garbage_cons) = RingBuffer::new(1024).split();
         let (tel_prod, tel_cons) = RingBuffer::new(1024).split();
 
         let graph = ProcessorGraph::new();
         let engine = AudioEngine::new(cmd_cons, garbage_prod, tel_prod, Box::new(graph));
         self.engine = Some(engine);
+        self.garbage_consumer = Some(garbage_cons);
 
         (cmd_prod, tel_cons)
     }
@@ -51,5 +54,13 @@ impl Conductor {
     pub fn switch_backend(&mut self, name: &str) -> Result<(), String> {
         self.stop_backend();
         self.start_backend(name)
+    }
+
+    pub fn drain_garbage(&mut self) {
+        if let Some(ref mut cons) = self.garbage_consumer {
+            while let Some(proc) = cons.pop() {
+                drop(proc);
+            }
+        }
     }
 }

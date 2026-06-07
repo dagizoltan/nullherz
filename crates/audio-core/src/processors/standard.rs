@@ -2,64 +2,77 @@ use crate::processors::AudioProcessor;
 use audio_dsp::Filter;
 
 pub struct GainProcessor {
-    gain: audio_dsp::Gain,
+    gains: [audio_dsp::Gain; crate::MAX_CHANNELS],
     id: u64,
 }
 
 impl GainProcessor {
     pub fn new(id: u64, initial_gain: f32) -> Self {
-        Self { gain: audio_dsp::Gain::new(initial_gain, 0.05), id }
+        let gains = std::array::from_fn(|_| audio_dsp::Gain::new(initial_gain, 0.05));
+        Self { gains, id }
     }
 }
 
 impl AudioProcessor for GainProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         if inputs.is_empty() || outputs.is_empty() { return; }
-        self.gain.process_block(inputs[0], outputs[0]);
+        let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
+        for i in 0..num_channels {
+            self.gains[i].process_block(inputs[i], outputs[i]);
+        }
     }
     fn apply_command(&mut self, command: &control_plane::Command) {
         if let control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = command {
             if *target_id == self.id && *param_id == 0 {
-                self.gain.set_gain(*value, *ramp_duration_samples);
+                for g in self.gains.iter_mut() {
+                    g.set_gain(*value, *ramp_duration_samples);
+                }
             }
         }
     }
 }
 
 pub struct BiquadProcessor {
-    filter: audio_dsp::BiquadFilter,
+    filters: [audio_dsp::BiquadFilter; crate::MAX_CHANNELS],
     id: u64,
 }
 
 impl BiquadProcessor {
     pub fn new(id: u64, coeffs: audio_dsp::BiquadCoefficients) -> Self {
-        Self { filter: audio_dsp::BiquadFilter::new(coeffs), id }
+        let filters = std::array::from_fn(|_| audio_dsp::BiquadFilter::new(coeffs));
+        Self { filters, id }
     }
 }
 
 impl AudioProcessor for BiquadProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         if inputs.is_empty() || outputs.is_empty() { return; }
+        let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
 
         #[cfg(target_arch = "x86_64")]
-        {
-            if is_x86_feature_detected!("avx2") {
-                unsafe {
-                    self.filter.process_block_simd(inputs[0], outputs[0]);
-                }
-                return;
-            }
-        }
+        let has_avx2 = is_x86_feature_detected!("avx2");
 
-        for i in 0..inputs[0].len() {
-            outputs[0][i] = self.filter.process_sample(inputs[0][i]);
+        for ch in 0..num_channels {
+            #[cfg(target_arch = "x86_64")]
+            {
+                if has_avx2 {
+                    unsafe {
+                        self.filters[ch].process_block_simd(inputs[ch], outputs[ch]);
+                    }
+                    continue;
+                }
+            }
+
+            for i in 0..inputs[ch].len() {
+                outputs[ch][i] = self.filters[ch].process_sample(inputs[ch][i]);
+            }
         }
     }
 
     fn apply_command(&mut self, command: &control_plane::Command) {
         if let control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = command {
             if *target_id == self.id {
-                let mut coeffs = self.filter.target_coeffs;
+                let mut coeffs = self.filters[0].target_coeffs;
                 match param_id {
                     0 => coeffs.b0 = *value,
                     1 => coeffs.b1 = *value,
@@ -68,7 +81,9 @@ impl AudioProcessor for BiquadProcessor {
                     4 => coeffs.a2 = *value,
                     _ => {}
                 }
-                self.filter.set_coeffs_ramped(coeffs, *ramp_duration_samples);
+                for f in self.filters.iter_mut() {
+                    f.set_coeffs_ramped(coeffs, *ramp_duration_samples);
+                }
             }
         }
     }
