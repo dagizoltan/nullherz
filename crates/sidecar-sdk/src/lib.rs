@@ -87,14 +87,16 @@ impl<P: AudioProcessor> SidecarContext<P> {
         signal_ptr: *const ShmSignal,
         event_fd: Option<EventFd>,
     ) -> Self {
-        Self {
-            processor,
-            command_buffer: &*command_ptr,
-            feedback_buffer: feedback_ptr.map(|p| &*p),
-            input_buffers: inputs.into_iter().map(|p| &*p).collect(),
-            output_buffers: outputs.into_iter().map(|p| &*p).collect(),
-            signal: &*signal_ptr,
-            event_fd,
+        unsafe {
+            Self {
+                processor,
+                command_buffer: &*command_ptr,
+                feedback_buffer: feedback_ptr.map(|p| &*p),
+                input_buffers: inputs.into_iter().map(|p| &*p).collect(),
+                output_buffers: outputs.into_iter().map(|p| &*p).collect(),
+                signal: &*signal_ptr,
+                event_fd,
+            }
         }
     }
 
@@ -144,6 +146,8 @@ impl<P: AudioProcessor> SidecarContext<P> {
             let mut context = audio_core::processors::ProcessContext {
                 pool: None,
                 transport: None,
+                sub_block_offset: 0,
+                is_last_sub_block: true,
             };
             self.processor.process(&in_slices_arr[..num_channels], &mut out_slices_reconstructed[..num_channels], &mut context);
 

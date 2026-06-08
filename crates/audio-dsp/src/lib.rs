@@ -34,6 +34,7 @@ impl SummingNode {
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_16_to_1_avx2(&self, inputs: &[&[f32]], output: &mut [f32]) {
+        unsafe {
         use std::arch::x86_64::*;
         let len = output.len();
         output.fill(0.0);
@@ -54,6 +55,7 @@ impl SummingNode {
                 output[i] += input[i] * self.gain;
                 i += 1;
             }
+        }
         }
     }
 }
@@ -79,6 +81,7 @@ impl Crossfader {
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_block_avx2(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
+        unsafe {
         use std::arch::x86_64::*;
         let len = output.len();
         let gain_b = self.position.sqrt();
@@ -97,6 +100,7 @@ impl Crossfader {
         while i < len {
             output[i] = input_a[i] * gain_a + input_b[i] * gain_b;
             i += 1;
+        }
         }
     }
 }
@@ -136,6 +140,7 @@ impl DjIsolator {
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_block_avx2(&mut self, input: &[f32], output: &mut [f32]) {
+        unsafe {
         use std::arch::x86_64::*;
         let len = input.len();
         if len == 0 { return; }
@@ -178,11 +183,41 @@ impl DjIsolator {
         self.low.z2 = final_z2[0];
         self.mid.z2 = final_z2[1];
         self.high.z2 = final_z2[2];
+        }
     }
 }
 
 pub trait Filter {
     fn process_sample(&mut self, input: f32) -> f32;
+}
+
+/// A high-fidelity Lagrange 4-point resampler.
+pub struct LagrangeResampler {
+    history: [f32; 4],
+}
+
+impl LagrangeResampler {
+    pub fn new() -> Self { Self { history: [0.0; 4] } }
+
+    pub fn process_sample(&mut self, input: f32, fraction: f32) -> f32 {
+        self.history[0] = self.history[1];
+        self.history[1] = self.history[2];
+        self.history[2] = self.history[3];
+        self.history[3] = input;
+
+        let a = self.history[0];
+        let b = self.history[1];
+        let c = self.history[2];
+        let d = self.history[3];
+
+        // 4-point Lagrange interpolation
+        let c0 = b;
+        let c1 = c - (1.0/3.0)*a - 0.5*b - (1.0/6.0)*d;
+        let c2 = 0.5*(a + c) - b;
+        let c3 = (1.0/6.0)*(d - a) + 0.5*(b - c);
+
+        c3*fraction*fraction*fraction + c2*fraction*fraction + c1*fraction + c0
+    }
 }
 
 const LUT_SIZE: usize = 1024;
@@ -282,11 +317,12 @@ impl WavetableOscillator {
             phase += modulated_inc;
             if phase >= 2048.0 {
                 phase -= 2048.0;
+                if phase >= 2048.0 { phase %= 2048.0; }
             } else if phase < 0.0 {
                 phase += 2048.0;
-            }
-            if phase >= 2048.0 || phase < 0.0 {
-                phase = phase.rem_euclid(2048.0);
+                if phase < 0.0 {
+                    phase = phase.rem_euclid(2048.0);
+                }
             }
         }
         self.phases[channel] = phase;
@@ -295,6 +331,7 @@ impl WavetableOscillator {
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_8_channels_avx2(&mut self, fm: [*const f32; 8], pm: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
+        unsafe {
         use std::arch::x86_64::*;
         let mut b_phases = _mm256_loadu_ps(self.phases.as_ptr());
         let b_base_incs = _mm256_loadu_ps(self.phase_incs.as_ptr());
@@ -302,13 +339,15 @@ impl WavetableOscillator {
         let b_1 = _mm256_set1_ps(1.0);
 
         for i in 0..len {
-            let b_fm = _mm256_set_ps(
-                *fm[7].add(i), *fm[6].add(i), *fm[5].add(i), *fm[4].add(i),
-                *fm[3].add(i), *fm[2].add(i), *fm[1].add(i), *fm[0].add(i)
+            // Optimization: If buffers are aligned, we could use faster loads.
+            // For now, we still need to collect from 8 separate pointers.
+            let b_fm = _mm256_setr_ps(
+                *fm[0].add(i), *fm[1].add(i), *fm[2].add(i), *fm[3].add(i),
+                *fm[4].add(i), *fm[5].add(i), *fm[6].add(i), *fm[7].add(i)
             );
-            let b_pm = _mm256_set_ps(
-                *pm[7].add(i), *pm[6].add(i), *pm[5].add(i), *pm[4].add(i),
-                *pm[3].add(i), *pm[2].add(i), *pm[1].add(i), *pm[0].add(i)
+            let b_pm = _mm256_setr_ps(
+                *pm[0].add(i), *pm[1].add(i), *pm[2].add(i), *pm[3].add(i),
+                *pm[4].add(i), *pm[5].add(i), *pm[6].add(i), *pm[7].add(i)
             );
 
             let b_mod_inc = _mm256_mul_ps(b_base_incs, _mm256_add_ps(b_1, b_fm));
@@ -329,17 +368,24 @@ impl WavetableOscillator {
             // res = v0 + frac * (v1 - v0)
             let b_res = _mm256_add_ps(v0, _mm256_mul_ps(b_frac, _mm256_sub_ps(v1, v0)));
 
+            // Use storeu to an array and then distribute
             let mut out_v = [0.0f32; 8];
             _mm256_storeu_ps(out_v.as_mut_ptr(), b_res);
-            for ch in 0..8 {
-                *outputs[ch].add(i) = out_v[ch];
-            }
+            *outputs[0].add(i) = out_v[0];
+            *outputs[1].add(i) = out_v[1];
+            *outputs[2].add(i) = out_v[2];
+            *outputs[3].add(i) = out_v[3];
+            *outputs[4].add(i) = out_v[4];
+            *outputs[5].add(i) = out_v[5];
+            *outputs[6].add(i) = out_v[6];
+            *outputs[7].add(i) = out_v[7];
 
             b_phases = _mm256_add_ps(b_phases, b_mod_inc);
-            let mask = _mm256_cmp_ps(b_phases, b_2048, _CMP_GE_OQ);
-            b_phases = _mm256_sub_ps(b_phases, _mm256_and_ps(mask, b_2048));
+            let wrap_mask = _mm256_cmp_ps(b_phases, b_2048, _CMP_GE_OQ);
+            b_phases = _mm256_sub_ps(b_phases, _mm256_and_ps(wrap_mask, b_2048));
         }
         _mm256_storeu_ps(self.phases.as_mut_ptr(), b_phases);
+        }
     }
 }
 
@@ -470,6 +516,39 @@ impl SpectralProcessor {
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn complex_mul_accumulate_avx2(re: &mut [f32], im: &mut [f32], hr: &[f32], hi: &[f32], ir: &[f32], ii: &[f32]) {
+        use std::arch::x86_64::*;
+        let n = re.len();
+        let mut i = 0;
+        while i + 8 <= n {
+            let v_hr = unsafe { _mm256_loadu_ps(hr.as_ptr().add(i)) };
+            let v_hi = unsafe { _mm256_loadu_ps(hi.as_ptr().add(i)) };
+            let v_ir = unsafe { _mm256_loadu_ps(ir.as_ptr().add(i)) };
+            let v_ii = unsafe { _mm256_loadu_ps(ii.as_ptr().add(i)) };
+
+            let v_re = unsafe { _mm256_loadu_ps(re.as_ptr().add(i)) };
+            let v_im = unsafe { _mm256_loadu_ps(im.as_ptr().add(i)) };
+
+            // re = re + (hr * ir - hi * ii)
+            let res_re = _mm256_add_ps(v_re, _mm256_sub_ps(_mm256_mul_ps(v_hr, v_ir), _mm256_mul_ps(v_hi, v_ii)));
+            // im = im + (hr * ii + hi * ir)
+            let res_im = _mm256_add_ps(v_im, _mm256_add_ps(_mm256_mul_ps(v_hr, v_ii), _mm256_mul_ps(v_hi, v_ir)));
+
+            unsafe {
+                _mm256_storeu_ps(re.as_mut_ptr().add(i), res_re);
+                _mm256_storeu_ps(im.as_mut_ptr().add(i), res_im);
+            }
+            i += 8;
+        }
+        while i < n {
+            re[i] += hr[i] * ir[i] - hi[i] * ii[i];
+            im[i] += hr[i] * ii[i] + hi[i] * ir[i];
+            i += 1;
+        }
+    }
+
     pub fn process_overlap_add(&mut self, input: &[f32], output: &mut [f32]) {
         let len = input.len();
         for i in 0..len {
@@ -516,6 +595,8 @@ impl SpectralProcessor {
             self.scratch_im.fill(0.0);
 
             let num_p = self.ir_re.len();
+            #[cfg(target_arch = "x86_64")]
+            let has_avx2 = is_x86_feature_detected!("avx2");
             for p in 0..num_p {
                 let h_idx = (self.partition_idx + num_p - p) % num_p;
                 let hr = &self.history_re[h_idx];
@@ -523,8 +604,18 @@ impl SpectralProcessor {
                 let ir = &self.ir_re[p];
                 let ii = &self.ir_im[p];
 
+                #[cfg(target_arch = "x86_64")]
+                if has_avx2 {
+                    unsafe { Self::complex_mul_accumulate_avx2(&mut self.scratch_re, &mut self.scratch_im, hr, hi, ir, ii); }
+                } else {
+                    for i in 0..n {
+                        self.scratch_re[i] += hr[i] * ir[i] - hi[i] * ii[i];
+                        self.scratch_im[i] += hr[i] * ii[i] + hi[i] * ir[i];
+                    }
+                }
+
+                #[cfg(not(target_arch = "x86_64"))]
                 for i in 0..n {
-                    // Complex multiplication: (a+bi)(c+di) = (ac-bd) + (ad+bc)i
                     self.scratch_re[i] += hr[i] * ir[i] - hi[i] * ii[i];
                     self.scratch_im[i] += hr[i] * ii[i] + hi[i] * ir[i];
                 }
@@ -672,15 +763,15 @@ impl BiquadFilter {
         }
     }
 
-    /// SSE-optimized block processing that parallelizes the three filter bands.
+    /// SSE3-optimized block processing using Direct Form II Transposed.
+    /// Manually unrolled scalar implementation for optimal single-stream throughput.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "sse3")]
     pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
+        unsafe {
         let len = input.len();
         if len == 0 { return; }
 
-        // If we are currently ramping, fall back to the ramped scalar implementation
-        // to ensure parameter continuity.
         if self.ramp_duration > 0 {
             for i in 0..len {
                 output[i] = self.process_sample(input[i]);
@@ -704,23 +795,23 @@ impl BiquadFilter {
             z2 = x0 * b2 - y0 * a2;
             *output.get_unchecked_mut(i) = y0;
 
-            let x1 = *input.get_unchecked(i+1);
+            let x1 = *input.get_unchecked(i + 1);
             let y1 = x1 * b0 + z1;
             z1 = x1 * b1 - y1 * a1 + z2;
             z2 = x1 * b2 - y1 * a2;
-            *output.get_unchecked_mut(i+1) = y1;
+            *output.get_unchecked_mut(i + 1) = y1;
 
-            let x2 = *input.get_unchecked(i+2);
+            let x2 = *input.get_unchecked(i + 2);
             let y2 = x2 * b0 + z1;
             z1 = x2 * b1 - y2 * a1 + z2;
             z2 = x2 * b2 - y2 * a2;
-            *output.get_unchecked_mut(i+2) = y2;
+            *output.get_unchecked_mut(i + 2) = y2;
 
-            let x3 = *input.get_unchecked(i+3);
+            let x3 = *input.get_unchecked(i + 3);
             let y3 = x3 * b0 + z1;
             z1 = x3 * b1 - y3 * a1 + z2;
             z2 = x3 * b2 - y3 * a2;
-            *output.get_unchecked_mut(i+3) = y3;
+            *output.get_unchecked_mut(i + 3) = y3;
 
             i += 4;
         }
@@ -736,6 +827,7 @@ impl BiquadFilter {
 
         self.z1 = z1;
         self.z2 = z2;
+        }
     }
 }
 
@@ -820,6 +912,7 @@ impl SimdBiquad {
 
     #[cfg(target_arch = "aarch64")]
     pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
+        unsafe {
         use std::arch::aarch64::*;
         let len = input.len();
         if len == 0 { return; }
@@ -841,12 +934,14 @@ impl SimdBiquad {
         }
         self.z1 = z1;
         self.z2 = z2;
+        }
     }
 }
 
 impl SimdBiquad {
     #[cfg(target_arch = "aarch64")]
     pub unsafe fn process_8_channels(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
+        unsafe {
         use std::arch::aarch64::*;
 
         let b0 = vdupq_n_f32(self.coeffs.b0);
@@ -861,15 +956,15 @@ impl SimdBiquad {
         let mut z2_1 = vld1q_f32(self.z2.as_ptr().add(4));
 
         for i in 0..len {
-            let x0 = vsetq_lane_f32(*inputs[0].add(i), vdupq_n_f32(0.0), 0);
-            let x0 = vsetq_lane_f32(*inputs[1].add(i), x0, 1);
-            let x0 = vsetq_lane_f32(*inputs[2].add(i), x0, 2);
-            let x0 = vsetq_lane_f32(*inputs[3].add(i), x0, 3);
+            let x0 = unsafe { vsetq_lane_f32(*inputs[0].add(i), vdupq_n_f32(0.0), 0) };
+            let x0 = unsafe { vsetq_lane_f32(*inputs[1].add(i), x0, 1) };
+            let x0 = unsafe { vsetq_lane_f32(*inputs[2].add(i), x0, 2) };
+            let x0 = unsafe { vsetq_lane_f32(*inputs[3].add(i), x0, 3) };
 
-            let x1 = vsetq_lane_f32(*inputs[4].add(i), vdupq_n_f32(0.0), 0);
-            let x1 = vsetq_lane_f32(*inputs[5].add(i), x1, 1);
-            let x1 = vsetq_lane_f32(*inputs[6].add(i), x1, 2);
-            let x1 = vsetq_lane_f32(*inputs[7].add(i), x1, 3);
+            let x1 = unsafe { vsetq_lane_f32(*inputs[4].add(i), vdupq_n_f32(0.0), 0) };
+            let x1 = unsafe { vsetq_lane_f32(*inputs[5].add(i), x1, 1) };
+            let x1 = unsafe { vsetq_lane_f32(*inputs[6].add(i), x1, 2) };
+            let x1 = unsafe { vsetq_lane_f32(*inputs[7].add(i), x1, 3) };
 
             // Group 0 (Ch 0-3)
             let y0 = vaddq_f32(vmulq_f32(x0, b0), z1_0);
@@ -886,19 +981,21 @@ impl SimdBiquad {
             vst1q_f32(out0.as_mut_ptr(), y0);
             vst1q_f32(out1.as_mut_ptr(), y1);
 
-            for ch in 0..4 { *outputs[ch].add(i) = out0[ch]; }
-            for ch in 0..4 { *outputs[ch+4].add(i) = out1[ch]; }
+            for ch in 0..4 { unsafe { *outputs[ch].add(i) = out0[ch] } ; }
+            for ch in 0..4 { unsafe { *outputs[ch+4].add(i) = out1[ch] } ; }
         }
 
         vst1q_f32(self.z1.as_mut_ptr(), z1_0);
         vst1q_f32(self.z1.as_mut_ptr().add(4), z1_1);
         vst1q_f32(self.z2.as_mut_ptr(), z2_0);
         vst1q_f32(self.z2.as_mut_ptr().add(4), z2_1);
+        }
     }
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
     pub unsafe fn process_16_channels(&mut self, inputs: [*const f32; 16], outputs: [*mut f32; 16], len: usize) {
+        unsafe {
         use std::arch::x86_64::*;
 
         let b0 = _mm512_set1_ps(self.coeffs.b0);
@@ -929,11 +1026,13 @@ impl SimdBiquad {
 
         _mm512_storeu_ps(self.z1.as_mut_ptr(), z1);
         _mm512_storeu_ps(self.z2.as_mut_ptr(), z2);
+        }
     }
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_8_channels(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
+        unsafe {
         {
             use std::arch::x86_64::*;
 
@@ -969,6 +1068,58 @@ impl SimdBiquad {
 
             _mm256_storeu_ps(self.z1.as_mut_ptr(), z1);
             _mm256_storeu_ps(self.z2.as_mut_ptr(), z2);
+        }
+        }
+    }
+}
+
+#[cfg(test)]
+mod dsp_tests {
+    use super::*;
+
+    #[test]
+    fn test_spectral_processor_convolution() {
+        let mut proc = SpectralProcessor::new(128);
+        let mut ir = vec![0.0; 128];
+        ir[0] = 1.0; // Impulse
+        proc.set_ir(&ir);
+
+        let input = vec![0.5; 256];
+        let mut output = vec![0.0; 256];
+        proc.process_overlap_add(&input, &mut output);
+
+        // Convolution with impulse should return the same signal (with some OLA delay/windowing artifacts)
+        // For simplicity, we just check that it's not all zeros and roughly the same magnitude
+        let sum: f32 = output.iter().sum();
+        assert!(sum > 10.0);
+    }
+}
+
+#[cfg(test)]
+mod wavetable_tests {
+    use super::*;
+
+    #[test]
+    fn test_lagrange_resampler() {
+        let mut resampler = LagrangeResampler::new();
+        let val = resampler.process_sample(1.0, 0.5);
+        assert!(val != 0.0);
+    }
+
+    #[test]
+    fn test_wavetable_integrity() {
+        let mut osc = WavetableOscillator::new(44100.0);
+        osc.set_frequency(0, 440.0);
+        let mut out = vec![0.0; 1024];
+        let fm = vec![0.0; 1024];
+        let pm = vec![0.0; 1024];
+        osc.process_scalar(0, &fm, &pm, &mut out);
+
+        let sum: f32 = out.iter().map(|s| s.abs()).sum();
+        assert!(sum > 10.0);
+
+        for &s in &out {
+            assert!(s >= -1.05 && s <= 1.05);
         }
     }
 }

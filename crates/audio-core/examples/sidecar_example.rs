@@ -51,7 +51,7 @@ fn main() {
                 let out_rb = unsafe { &mut *(out_shm_side.ptr() as *mut ShmRingBuffer<AudioBlock>) };
                 if let Some(in_block) = in_rb.pop() {
                     let mut out_block = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: in_block.len };
-                    let mut context = audio_core::processors::ProcessContext { pool: None, transport: None };
+                    let mut context = audio_core::processors::ProcessContext { pool: None, transport: None, sub_block_offset: 0, is_last_sub_block: true };
                     processor.process(&[&in_block.data[..in_block.len as usize]], &mut [&mut out_block.data[..in_block.len as usize]], &mut context);
                     let _ = out_rb.push(out_block);
                 }
@@ -61,8 +61,7 @@ fn main() {
     });
 
     // 3. Setup Engine
-    let rb = RingBuffer::new(1024);
-    let (_, cons) = rb.split();
+    let cons = std::sync::Arc::new(ipc_layer::MpscRingBuffer::new(1024));
     let garbage_rb = RingBuffer::new(32);
     let (garbage_prod, _) = garbage_rb.split();
     let tel_rb = RingBuffer::new(1024);
@@ -72,7 +71,7 @@ fn main() {
     let sidecar_proxy = unsafe { SidecarProcessor::new(cmd_rb_ptr, None, &[in_rb_ptr], &[out_rb_ptr], sig_ptr, None) };
     graph.add_node(Box::new(sidecar_proxy), vec![], vec![0]);
 
-    let engine = AudioEngine::new(cons, None, garbage_prod, tel_prod, Box::new(graph));
+    let engine = AudioEngine::new(cons, None, None, garbage_prod, None, tel_prod, Box::new(graph));
 
     let mut backend = ThreadedBackend::new();
     backend.start(engine).unwrap();

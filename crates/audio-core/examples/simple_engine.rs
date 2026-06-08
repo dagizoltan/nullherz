@@ -24,15 +24,15 @@ impl AudioProcessor for SineProcessor {
 }
 
 fn main() {
-    let rb = RingBuffer::new(1024);
-    let (mut prod, cons) = rb.split();
+    let cons = std::sync::Arc::new(ipc_layer::MpscRingBuffer::new(1024));
+    let mut prod = cons.clone();
     let garbage_rb = RingBuffer::new(32);
     let (garbage_prod, _) = garbage_rb.split();
     let tel_rb = RingBuffer::new(1024);
     let (tel_prod, _) = tel_rb.split();
 
     let osc = SineOscillator::new(44100.0, 440.0);
-    let engine = AudioEngine::new(cons, None, garbage_prod, tel_prod, Box::new(SineProcessor { osc }));
+    let engine = AudioEngine::new(cons, None, None, garbage_prod, None, tel_prod, Box::new(SineProcessor { osc }));
 
     let mut backend = ThreadedBackend::new();
     backend.start(engine).unwrap();

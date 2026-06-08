@@ -11,13 +11,12 @@ This document outlines the evolutionary phases of the **nullherz** deterministic
 *   **Autonomous Sidecars**: `SidecarManager` with heartbeat watchdog and automated SHM/resource orchestration.
 *   **Production State**: History-based undo/redo, command bundling, and manual JSON serialization.
 *   **Developer Tooling**: `#[sidecar]` DSL macro and `nullherz-inspector` CLI/GUI foundations.
+*   **Deep Linux Integration**: Automated RT-Cgroup migration, CPU affinity (pinning), and Hot-Swap safety.
 
 ---
 
 ## 🚀 Phase 3: Native Linux Deep Integration (Current Focus)
 *   **Native PipeWire SPA Backend**: Finalize the SPA protocol implementation to allow zero-copy buffer sharing directly with the PipeWire daemon.
-*   **RT Priority Tuning**: Implement automatic process migration to dedicated high-priority Cgroups for the main engine and managed sidecars.
-*   **Deterministic Backend Switching**: Allow hot-swapping between ALSA, PipeWire, and JACK without stopping the RT kernel.
 
 ---
 
@@ -36,6 +35,7 @@ This document outlines the evolutionary phases of the **nullherz** deterministic
 ---
 
 ## 🛠 Phase 6: Stability & Hardening (Path to 1.0)
+*   **Cross-Process Safety**: Hardened shared memory primitives with versioned heartbeat stall detection.
 *   **Fuzz Testing**: Continuous fuzzing of the command processor and IPC layer to ensure absolute stability under adversarial input.
 *   **Formal Verification**: Investigating formal verification for core synchronization primitives in the `ipc-layer`.
 *   **Documentation & SDK**: Comprehensive API documentation and tutorial suite for building sidecar effects.
