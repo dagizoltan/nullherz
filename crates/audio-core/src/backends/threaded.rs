@@ -16,7 +16,7 @@ impl AudioBackend for ThreadedBackend {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let handle = thread::spawn(move || {
-            crate::setup_rt_thread(90);
+            crate::setup_rt_thread(90, Some(0));
             engine.set_config(crate::AudioConfig {
                 sample_rate: 44100.0,
                 block_size: ipc_layer::MAX_BLOCK_SIZE,

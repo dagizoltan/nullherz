@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 fn main() {
     println!("Starting nullherz-bench Phase 3 Stress Test...");
 
-    let (mut cmd_prod, cmd_cons) = RingBuffer::new(1024).split();
+    let cmd_cons = std::sync::Arc::new(ipc_layer::MpscRingBuffer::new(1024));
+    let mut cmd_prod = cmd_cons.clone();
     let (garbage_prod, _garbage_cons) = RingBuffer::new(1024).split();
     let (tel_prod, mut tel_cons) = RingBuffer::new(1024).split();
 

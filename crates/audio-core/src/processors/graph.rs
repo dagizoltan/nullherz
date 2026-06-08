@@ -77,13 +77,13 @@ impl TaskPool {
         let completion = Arc::new(AtomicUsize::new(0));
         let running = Arc::new(AtomicBool::new(true));
 
-        for _ in 0..num_workers {
+        for i in 0..num_workers {
             let (prod, mut cons) = RingBuffer::<Job>::new(128).split();
             let running_worker = running.clone();
             let completion_worker = completion.clone();
 
             let handle = thread::spawn(move || {
-                crate::setup_rt_thread(85);
+                crate::setup_rt_thread(85, Some(i + 1)); // Pin workers to cores 1..N
                 let mut spins = 0;
                 while running_worker.load(Ordering::Relaxed) {
                     if let Some(job) = cons.pop() {
@@ -526,6 +526,7 @@ impl AudioProcessor for ProcessorGraph {
                 let p_idx = topo.virtual_to_physical[v_out].min(63);
                 let data = &self.buffers[p_idx].data[..num_samples];
 
+                let mut channel_peak = 0.0f32;
                 #[cfg(target_arch = "x86_64")]
                 {
                     if has_avx2 {
@@ -542,17 +543,17 @@ impl AudioProcessor for ProcessorGraph {
                             }
                             let mut res = [0.0f32; 8];
                             _mm256_storeu_ps(res.as_mut_ptr(), v_peak);
-                            for &val in &res { if val > node_peak { node_peak = val; } }
+                            for &val in &res { if val > channel_peak { channel_peak = val; } }
                             while j < num_samples {
                                 let abs = data[j].abs();
-                                if abs > node_peak { node_peak = abs; }
+                                if abs > channel_peak { channel_peak = abs; }
                                 j += 1;
                             }
                         }
                     } else {
                         for &sample in data {
                             let abs = sample.abs();
-                            if abs > node_peak { node_peak = abs; }
+                            if abs > channel_peak { channel_peak = abs; }
                         }
                     }
                 }
@@ -560,9 +561,10 @@ impl AudioProcessor for ProcessorGraph {
                 {
                     for &sample in data {
                         let abs = sample.abs();
-                        if abs > node_peak { node_peak = abs; }
+                        if abs > channel_peak { channel_peak = abs; }
                     }
                 }
+                if channel_peak > node_peak { node_peak = channel_peak; }
             }
             self.peak_levels[n_idx].store(node_peak.to_bits(), Ordering::Relaxed);
         }

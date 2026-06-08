@@ -75,7 +75,6 @@ unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_
     }
 
     if let Some(engine) = &mut backend.engine {
-        crate::setup_rt_thread(90);
         let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|i| {
             if i < num_ports {
                 unsafe { std::slice::from_raw_parts_mut(out_ptrs[i], nframes as usize) }

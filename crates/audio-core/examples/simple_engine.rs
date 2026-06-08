@@ -24,8 +24,8 @@ impl AudioProcessor for SineProcessor {
 }
 
 fn main() {
-    let rb = RingBuffer::new(1024);
-    let (mut prod, cons) = rb.split();
+    let cons = std::sync::Arc::new(ipc_layer::MpscRingBuffer::new(1024));
+    let mut prod = cons.clone();
     let garbage_rb = RingBuffer::new(32);
     let (garbage_prod, _) = garbage_rb.split();
     let tel_rb = RingBuffer::new(1024);

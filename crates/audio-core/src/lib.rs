@@ -25,8 +25,17 @@ pub struct Transport {
 
 pub const MAX_CHANNELS: usize = 16;
 
-pub fn setup_rt_thread(priority: i32) {
+pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
     let _ = ipc_layer::set_rt_priority(priority);
+
+    #[cfg(target_os = "linux")]
+    if let Some(id) = cpu_id {
+        unsafe {
+            let mut cpuset: libc::cpu_set_t = std::mem::zeroed();
+            libc::CPU_SET(id, &mut cpuset);
+            libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &cpuset);
+        }
+    }
 
     #[cfg(target_arch = "x86_64")]
     unsafe {

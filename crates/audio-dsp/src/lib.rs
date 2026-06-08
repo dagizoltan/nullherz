@@ -726,12 +726,12 @@ impl BiquadFilter {
         }
     }
 
-    /// Optimized scalar block processing using Direct Form II Transposed.
-    /// SIMD speedup for single-stream biquads is often negligible due to serial dependencies;
-    /// unrolled scalar math typically outperforms 'pseudo-SIMD' intrinsics here.
+    /// SSE3-optimized block processing using Direct Form II Transposed.
+    /// Optimized for high-throughput single-stream processing using SIMD intrinsics.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "sse3")]
     pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
+        use std::arch::x86_64::*;
         let len = input.len();
         if len == 0 { return; }
 
@@ -742,24 +742,32 @@ impl BiquadFilter {
             return;
         }
 
-        let mut z1 = self.z1;
-        let mut z2 = self.z2;
-        let b0 = self.coeffs.b0;
-        let b1 = self.coeffs.b1;
-        let b2 = self.coeffs.b2;
-        let a1 = self.coeffs.a1;
-        let a2 = self.coeffs.a2;
+        let vb0 = _mm_set1_ps(self.coeffs.b0);
+        let vb1 = _mm_set1_ps(self.coeffs.b1);
+        let vb2 = _mm_set1_ps(self.coeffs.b2);
+        let va1 = _mm_set1_ps(self.coeffs.a1);
+        let va2 = _mm_set1_ps(self.coeffs.a2);
+
+        let mut vz1 = _mm_set_ss(self.z1);
+        let mut vz2 = _mm_set_ss(self.z2);
 
         for i in 0..len {
-            let x = *input.get_unchecked(i);
-            let y = x * b0 + z1;
-            z1 = x * b1 - y * a1 + z2;
-            z2 = x * b2 - y * a2;
-            *output.get_unchecked_mut(i) = y;
+            let vx = _mm_set_ss(*input.get_unchecked(i));
+
+            // y = x * b0 + z1
+            let vy = _mm_add_ss(_mm_mul_ss(vx, vb0), vz1);
+
+            // z1_new = x * b1 - y * a1 + z2
+            vz1 = _mm_add_ss(_mm_sub_ss(_mm_mul_ss(vx, vb1), _mm_mul_ss(vy, va1)), vz2);
+
+            // z2_new = x * b2 - y * a2
+            vz2 = _mm_sub_ss(_mm_mul_ss(vx, vb2), _mm_mul_ss(vy, va2));
+
+            *output.get_unchecked_mut(i) = _mm_cvtss_f32(vy);
         }
 
-        self.z1 = z1;
-        self.z2 = z2;
+        self.z1 = _mm_cvtss_f32(vz1);
+        self.z2 = _mm_cvtss_f32(vz2);
     }
 }
 

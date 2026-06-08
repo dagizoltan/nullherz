@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use audio_core::{AudioEngine, ProcessorGraph, AudioBackend, AlsaBackend, ThreadedBackend};
 use fx_runtime::SidecarManager;
 use ipc_layer::RingBuffer;
@@ -22,9 +23,9 @@ impl Conductor {
         }
     }
 
-    pub fn setup_engine(&mut self) -> (ipc_layer::NonRtProducer<control_plane::TimestampedCommand>, ipc_layer::Consumer<audio_core::Telemetry>) {
-        let (cmd_prod, cmd_cons) = RingBuffer::new(1024).split();
-        let cmd_prod = ipc_layer::NonRtProducer::new(cmd_prod);
+    pub fn setup_engine(&mut self) -> (Arc<ipc_layer::MpscRingBuffer<control_plane::TimestampedCommand>>, ipc_layer::Consumer<audio_core::Telemetry>) {
+        let cmd_buffer = Arc::new(ipc_layer::MpscRingBuffer::new(1024));
+        let cmd_cons = cmd_buffer.clone();
         let (_, bundle_cons) = RingBuffer::<Vec<control_plane::Command>>::new(16).split();
         let (topo_prod, topo_cons) = RingBuffer::new(64).split();
         let topo_prod = ipc_layer::NonRtProducer::new(topo_prod);
@@ -37,7 +38,7 @@ impl Conductor {
         self.garbage_consumer = Some(garbage_cons);
         self.topo_producer = Some(topo_prod);
 
-        (cmd_prod, tel_cons)
+        (cmd_buffer, tel_cons)
     }
 
     pub fn start_backend(&mut self, name: &str) -> Result<(), String> {

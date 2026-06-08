@@ -159,7 +159,9 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
 
 unsafe extern "C" fn pw_param_changed(_data: *mut std::ffi::c_void, id: u32, _param: *const std::ffi::c_void) {
     if id != 2 { return; } // SPA_PARAM_Props
-    crate::setup_rt_thread(90);
+    // setup_rt_thread contains syscalls and should not be in this callback.
+    // It's handled by PipeWire's own thread loop priority usually,
+    // or should be called once on stream activation.
 }
 
 impl AudioBackend for PipewireBackend {

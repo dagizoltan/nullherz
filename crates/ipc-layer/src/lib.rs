@@ -245,18 +245,34 @@ pub struct RingBuffer<T> {
 
 unsafe impl<T: Send> Sync for RingBuffer<T> {}
 
+pub enum NonRtProducerInner<T> {
+    Spsc(tokio::sync::Mutex<Producer<T>>),
+    Mpsc(Arc<MpscRingBuffer<T>>),
+}
+
 pub struct NonRtProducer<T> {
-    inner: Arc<tokio::sync::Mutex<Producer<T>>>,
+    inner: Arc<NonRtProducerInner<T>>,
 }
 
 impl<T> NonRtProducer<T> {
     pub fn new(producer: Producer<T>) -> Self {
-        Self { inner: Arc::new(tokio::sync::Mutex::new(producer)) }
+        Self { inner: Arc::new(NonRtProducerInner::Spsc(tokio::sync::Mutex::new(producer))) }
+    }
+
+    pub fn from_mpsc(buffer: Arc<MpscRingBuffer<T>>) -> Self {
+        Self { inner: Arc::new(NonRtProducerInner::Mpsc(buffer)) }
     }
 
     pub async fn push(&self, item: T) -> Result<(), T> {
-        let mut producer: tokio::sync::MutexGuard<'_, Producer<T>> = self.inner.lock().await;
-        producer.push(item)
+        match self.inner.as_ref() {
+            NonRtProducerInner::Spsc(m) => {
+                let mut producer = m.lock().await;
+                producer.push(item)
+            }
+            NonRtProducerInner::Mpsc(b) => {
+                b.push(item)
+            }
+        }
     }
 }
 
@@ -317,6 +333,82 @@ impl<T> Consumer<T> {
         let tail = self.inner.tail.load(Ordering::Acquire);
         if head == tail { return None; }
         unsafe { let cell_ptr = self.inner.buffer[head].get(); (*cell_ptr).as_ref() }
+    }
+}
+
+/// A Multi-Producer Single-Consumer (MPSC) lock-free ring buffer.
+/// Uses a sequence-per-slot strategy to allow multiple RT producers.
+pub struct MpscRingBuffer<T> {
+    buffer: Box<[UnsafeCell<Option<T>>]>,
+    sequences: Box<[std::sync::atomic::AtomicUsize]>,
+    head: std::sync::atomic::AtomicUsize,
+    tail: std::sync::atomic::AtomicUsize,
+    capacity: usize,
+    mask: usize,
+}
+
+unsafe impl<T: Send> Sync for MpscRingBuffer<T> {}
+unsafe impl<T: Send> Send for MpscRingBuffer<T> {}
+
+impl<T> MpscRingBuffer<T> {
+    pub fn new(capacity: usize) -> Self {
+        assert!(capacity.is_power_of_two());
+        let mut buffer = Vec::with_capacity(capacity);
+        let mut sequences = Vec::with_capacity(capacity);
+        for i in 0..capacity {
+            buffer.push(UnsafeCell::new(None));
+            sequences.push(std::sync::atomic::AtomicUsize::new(i));
+        }
+        Self {
+            buffer: buffer.into_boxed_slice(),
+            sequences: sequences.into_boxed_slice(),
+            head: std::sync::atomic::AtomicUsize::new(0),
+            tail: std::sync::atomic::AtomicUsize::new(0),
+            capacity,
+            mask: capacity - 1,
+        }
+    }
+
+    pub fn push(&self, item: T) -> Result<(), T> {
+        let mut pos = self.tail.load(Ordering::Relaxed);
+        loop {
+            let seq_ptr = &self.sequences[pos & self.mask];
+            let seq = seq_ptr.load(Ordering::Acquire);
+            let diff = seq as isize - pos as isize;
+
+            if diff == 0 {
+                if self.tail.compare_exchange_weak(pos, pos + 1, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+                    unsafe { *self.buffer[pos & self.mask].get() = Some(item); }
+                    seq_ptr.store(pos + 1, Ordering::Release);
+                    return Ok(());
+                }
+            } else if diff < 0 {
+                return Err(item);
+            } else {
+                pos = self.tail.load(Ordering::Relaxed);
+            }
+        }
+    }
+
+    pub fn pop(&self) -> Option<T> {
+        let mut pos = self.head.load(Ordering::Relaxed);
+        loop {
+            let seq_ptr = &self.sequences[pos & self.mask];
+            let seq = seq_ptr.load(Ordering::Acquire);
+            let diff = seq as isize - (pos + 1) as isize;
+
+            if diff == 0 {
+                if self.head.compare_exchange_weak(pos, pos + 1, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+                    let item = unsafe { (*self.buffer[pos & self.mask].get()).take() };
+                    seq_ptr.store(pos + self.capacity, Ordering::Release);
+                    return item;
+                }
+            } else if diff < 0 {
+                return None;
+            } else {
+                pos = self.head.load(Ordering::Relaxed);
+            }
+        }
     }
 }
 

@@ -70,7 +70,7 @@ impl AudioBackend for AlsaBackend {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let handle = thread::spawn(move || {
-            crate::setup_rt_thread(90);
+            crate::setup_rt_thread(90, Some(0)); // Pin main RT thread to core 0
             unsafe {
                 let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
                 let name = std::ffi::CString::new("default").unwrap();

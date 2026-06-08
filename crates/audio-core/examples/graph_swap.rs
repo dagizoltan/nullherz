@@ -2,8 +2,7 @@ use audio_core::{AudioEngine, ProcessorGraph, ThreadedBackend, AudioBackend};
 use ipc_layer::{RingBuffer};
 
 fn main() {
-    let rb = RingBuffer::new(1024);
-    let (_, cons) = rb.split();
+    let cons = std::sync::Arc::new(ipc_layer::MpscRingBuffer::new(1024));
     let garbage_rb = RingBuffer::new(32);
     let (garbage_prod, _) = garbage_rb.split();
     let tel_rb = RingBuffer::new(1024);
