@@ -99,6 +99,10 @@ impl AudioEngine {
     }
 
     pub fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize) {
+        // Ensure Denormals-Are-Zero and Flush-to-Zero are set for this thread
+        // (Backends might have reset them or it might be a new thread)
+        crate::setup_rt_thread(90, None);
+
         #[cfg(target_arch = "x86_64")]
         let start_cycles = unsafe { std::arch::x86_64::_rdtsc() };
         #[cfg(target_arch = "aarch64")]

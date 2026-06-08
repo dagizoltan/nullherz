@@ -617,6 +617,30 @@ impl SpectralProcessor {
         let n = self.fft.size;
         self.scratch_im.fill(0.0);
 
+        #[cfg(target_arch = "x86_64")]
+        if is_x86_feature_detected!("avx2") {
+            unsafe {
+                use std::arch::x86_64::*;
+                let mut i = 0;
+                while i + 8 <= n {
+                    let v_in = _mm256_load_ps(self.in_buffer.as_ptr().add(i));
+                    let v_win = _mm256_load_ps(self.window.as_ptr().add(i));
+                    let v_res = _mm256_mul_ps(v_in, v_win);
+                    _mm256_store_ps(self.scratch_re.as_mut_ptr().add(i), v_res);
+                    i += 8;
+                }
+                while i < n {
+                    self.scratch_re[i] = self.in_buffer[i] * self.window[i];
+                    i += 1;
+                }
+            }
+        } else {
+            for i in 0..n {
+                self.scratch_re[i] = self.in_buffer[i] * self.window[i];
+            }
+        }
+
+        #[cfg(not(target_arch = "x86_64"))]
         for i in 0..n {
             self.scratch_re[i] = self.in_buffer[i] * self.window[i];
         }
@@ -675,6 +699,42 @@ impl SpectralProcessor {
 
         let norm = 1.0 / n as f32;
         let out_len = self.out_buffer.len();
+
+        #[cfg(target_arch = "x86_64")]
+        if is_x86_feature_detected!("avx2") {
+            unsafe {
+                use std::arch::x86_64::*;
+                let v_norm = _mm256_set1_ps(norm);
+                let mut i = 0;
+                while i + 8 <= n {
+                    let v_re = _mm256_load_ps(self.scratch_re.as_ptr().add(i));
+                    let v_win = _mm256_load_ps(self.window.as_ptr().add(i));
+                    let v_val = _mm256_mul_ps(_mm256_mul_ps(v_re, v_norm), v_win);
+
+                    let mut res = [0.0f32; 8];
+                    _mm256_storeu_ps(res.as_mut_ptr(), v_val);
+                    for j in 0..8 {
+                        let target_ptr = (self.out_ptr + i + j) % out_len;
+                        self.out_buffer[target_ptr] += res[j];
+                    }
+                    i += 8;
+                }
+                while i < n {
+                    let val = (self.scratch_re[i] * norm) * self.window[i];
+                    let target_ptr = (self.out_ptr + i) % out_len;
+                    self.out_buffer[target_ptr] += val;
+                    i += 1;
+                }
+            }
+        } else {
+            for i in 0..n {
+                let val = (self.scratch_re[i] * norm) * self.window[i];
+                let target_ptr = (self.out_ptr + i) % out_len;
+                self.out_buffer[target_ptr] += val;
+            }
+        }
+
+        #[cfg(not(target_arch = "x86_64"))]
         for i in 0..n {
             let val = (self.scratch_re[i] * norm) * self.window[i];
             let target_ptr = (self.out_ptr + i) % out_len;

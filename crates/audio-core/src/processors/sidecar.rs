@@ -12,6 +12,8 @@ pub struct SidecarProcessor {
     num_channels: usize,
     signal: *const ShmSignal,
     event_fd: Option<EventFd>,
+    last_heartbeat: u64,
+    missed_deadline_count: u32,
 }
 
 unsafe impl Send for SidecarProcessor {}
@@ -37,7 +39,9 @@ impl SidecarProcessor {
             output_shm,
             num_channels,
             signal,
-            event_fd
+            event_fd,
+            last_heartbeat: 0,
+            missed_deadline_count: 0,
         }
     }
 
@@ -48,6 +52,9 @@ impl SidecarProcessor {
 
 impl AudioProcessor for SidecarProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
+        let current_heartbeat = unsafe { (*self.signal).get_heartbeat() };
+        let is_stalled = current_heartbeat == self.last_heartbeat && self.last_heartbeat != 0;
+
         for i in 0..self.num_channels {
             if i < inputs.len() {
                 let mut block = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0 };
@@ -56,15 +63,32 @@ impl AudioProcessor for SidecarProcessor {
                 block.len = len as u32;
                 unsafe { let _ = (*self.input_shm[i]).push(block); }
             }
+
             if i < outputs.len() {
-                unsafe {
-                    if let Some(block) = (*self.output_shm[i]).pop() {
-                        let len = outputs[i].len().min(block.len as usize);
-                        outputs[i][..len].copy_from_slice(&block.data[..len]);
+                let mut consumed = false;
+                if !is_stalled {
+                    unsafe {
+                        if let Some(block) = (*self.output_shm[i]).pop() {
+                            let len = outputs[i].len().min(block.len as usize);
+                            outputs[i][..len].copy_from_slice(&block.data[..len]);
+                            consumed = true;
+                        }
                     }
+                }
+
+                if !consumed {
+                    // Fail-safe: Bypass or Silence on stall/missed deadline
+                    if i < inputs.len() {
+                        outputs[i].copy_from_slice(inputs[i]); // Bypass
+                    } else {
+                        outputs[i].fill(0.0); // Silence
+                    }
+                    if i == 0 { self.missed_deadline_count += 1; }
                 }
             }
         }
+
+        self.last_heartbeat = current_heartbeat;
         unsafe { (*self.signal).notify(); }
         if let Some(efd) = &self.event_fd { efd.notify(); }
     }

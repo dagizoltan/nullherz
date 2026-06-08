@@ -133,7 +133,7 @@ impl TaskPool {
                             unsafe { (*job.telemetry_ptr)[job.node_idx].store(elapsed, Ordering::Relaxed); }
                         }
 
-                        completion_worker.fetch_add(1, Ordering::SeqCst);
+                        completion_worker.fetch_add(1, Ordering::Release);
                     } else {
                         if spins < 10000 {
                             std::hint::spin_loop();
@@ -174,6 +174,62 @@ mod tests {
                 outputs[i].copy_from_slice(inputs[i]);
             }
         }
+    }
+
+    #[test]
+    fn test_task_pool_sync_no_reset_race() {
+        let mut pool = TaskPool::new(1);
+        let completion = pool.completion.clone();
+
+        // Initial state
+        assert_eq!(completion.load(Ordering::Relaxed), 0);
+
+        // Stage 1
+        let start_count = completion.load(Ordering::Acquire);
+        let node1 = ProcessorNode { processor: std::cell::UnsafeCell::new(Box::new(IdentityProcessor)) };
+        let _ = pool.worker_producers[0].push(Job {
+            node_ptr: &node1 as *const _,
+            num_samples: 10,
+            sub_block_offset: 0,
+            buffers_ptr: std::ptr::null_mut(),
+            x_buffers_ptr: std::ptr::null_mut(),
+            input_indices: [0; 16],
+            output_indices: [0; 16],
+            input_count: 0,
+            output_count: 0,
+            node_idx: 0,
+            telemetry_ptr: &std::array::from_fn(|_| AtomicU64::new(0)) as *const _,
+            transport: None,
+            is_last_sub_block: false,
+        });
+
+        let target = start_count + 1;
+        while completion.load(Ordering::Acquire) < target { std::hint::spin_loop(); }
+
+        // Stage 2 - Must not reset to 0
+        let start_count_2 = completion.load(Ordering::Acquire);
+        assert_eq!(start_count_2, 1);
+
+        let node2 = ProcessorNode { processor: std::cell::UnsafeCell::new(Box::new(IdentityProcessor)) };
+        let _ = pool.worker_producers[0].push(Job {
+            node_ptr: &node2 as *const _,
+            num_samples: 10,
+            sub_block_offset: 0,
+            buffers_ptr: std::ptr::null_mut(),
+            x_buffers_ptr: std::ptr::null_mut(),
+            input_indices: [0; 16],
+            output_indices: [0; 16],
+            input_count: 0,
+            output_count: 0,
+            node_idx: 0,
+            telemetry_ptr: &std::array::from_fn(|_| AtomicU64::new(0)) as *const _,
+            transport: None,
+            is_last_sub_block: false,
+        });
+
+        let target_2 = start_count_2 + 1;
+        while completion.load(Ordering::Acquire) < target_2 { std::hint::spin_loop(); }
+        assert_eq!(completion.load(Ordering::Relaxed), 2);
     }
 
     #[test]
@@ -460,7 +516,7 @@ impl AudioProcessor for ProcessorGraph {
             let stage = &topo.stages[s_idx][..topo.stage_counts[s_idx]];
 
             if let Some(pool) = &mut context.pool {
-                pool.completion.store(0, Ordering::Release);
+                let start_count = pool.completion.load(Ordering::Acquire);
                 let num_nodes = stage.len();
                 for (i, &n_idx) in stage.iter().enumerate() {
                     let worker_idx = i % pool.worker_producers.len();
@@ -503,7 +559,8 @@ impl AudioProcessor for ProcessorGraph {
                 }
 
                 let mut spins = 0;
-                while pool.completion.load(Ordering::Acquire) < num_nodes {
+                let target = start_count + num_nodes;
+                while pool.completion.load(Ordering::Acquire) < target {
                     if spins < 10000 {
                         std::hint::spin_loop();
                     } else {
