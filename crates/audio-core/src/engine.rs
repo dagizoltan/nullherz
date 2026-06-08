@@ -14,6 +14,7 @@ pub struct AudioEngine {
     active_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     pending_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     garbage_producer: Producer<Box<dyn AudioProcessor>>,
+    bundle_garbage_producer: Option<Producer<Vec<control_plane::Command>>>,
     telemetry_producer: Producer<Telemetry>,
     sample_counter: u64,
     xrun_count: std::sync::Arc<std::sync::atomic::AtomicU32>,
@@ -30,6 +31,7 @@ impl AudioEngine {
         bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
         topology_consumer: Option<Consumer<control_plane::TopologyCommand>>,
         garbage_producer: Producer<Box<dyn AudioProcessor>>,
+        bundle_garbage_producer: Option<Producer<Vec<control_plane::Command>>>,
         telemetry_producer: Producer<Telemetry>,
         initial_graph: Box<dyn AudioProcessor>,
     ) -> Self {
@@ -41,6 +43,7 @@ impl AudioEngine {
             active_graph: AtomicPtr::new(Box::into_raw(Box::new(initial_graph))),
             pending_graph: AtomicPtr::new(std::ptr::null_mut()),
             garbage_producer,
+            bundle_garbage_producer,
             telemetry_producer,
             sample_counter: 0,
             xrun_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
@@ -113,14 +116,21 @@ impl AudioEngine {
 
         // Process atomic command bundles first (immediate application)
         if let Some(ref mut cons) = self.bundle_consumer {
-            while let Some(bundle) = cons.pop() {
-                for cmd in bundle {
+            while let Some(mut bundle) = cons.pop() {
+                for cmd in &bundle {
                     match cmd {
                         control_plane::Command::Play => self.transport.is_playing = true,
                         control_plane::Command::Stop => self.transport.is_playing = false,
                         _ => {}
                     }
-                    graph.apply_command(&cmd);
+                    graph.apply_command(cmd);
+                }
+                // RT-safe deallocation: offload the vector to a garbage consumer
+                if let Some(ref mut prod) = self.bundle_garbage_producer {
+                    if let Err(b) = prod.push(bundle) {
+                        // If queue is full, we must leak to avoid deallocation in RT thread
+                        let _ = std::mem::forget(b);
+                    }
                 }
             }
         }

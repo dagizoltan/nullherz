@@ -79,7 +79,7 @@ impl ModulationProcessor {
 }
 
 impl AudioProcessor for ModulationProcessor {
-    fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]], context: &mut crate::processors::ProcessContext) {
+    fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         if inputs.is_empty() { return; }
         let cv = inputs[0];
         if cv.is_empty() { return; }

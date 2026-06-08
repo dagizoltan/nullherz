@@ -17,6 +17,7 @@ pub struct Conductor {
     pub engine: Option<AudioEngine>,
     pub backend: Option<Box<dyn AudioBackend>>,
     garbage_consumer: Option<ipc_layer::Consumer<Box<dyn audio_core::AudioProcessor>>>,
+    bundle_garbage_consumer: Option<ipc_layer::Consumer<Vec<control_plane::Command>>>,
     pub topo_producer: Option<ipc_layer::NonRtProducer<control_plane::TopologyCommand>>,
 }
 
@@ -33,6 +34,7 @@ impl Conductor {
             engine: None,
             backend: None,
             garbage_consumer: None,
+            bundle_garbage_consumer: None,
             topo_producer: None,
         }
     }
@@ -40,6 +42,7 @@ impl Conductor {
     pub fn setup_engine(&mut self) -> (Arc<ipc_layer::MpscRingBuffer<control_plane::TimestampedCommand>>, ipc_layer::Consumer<audio_core::Telemetry>) {
         let cmd_buffer = Arc::new(ipc_layer::MpscRingBuffer::new(1024));
         let cmd_cons = cmd_buffer.clone();
+        let (bundle_garbage_prod, bundle_garbage_cons) = RingBuffer::<Vec<control_plane::Command>>::new(16).split();
         let (_, bundle_cons) = RingBuffer::<Vec<control_plane::Command>>::new(16).split();
         let (topo_prod, topo_cons) = RingBuffer::new(64).split();
         let topo_prod = ipc_layer::NonRtProducer::new(topo_prod);
@@ -47,9 +50,10 @@ impl Conductor {
         let (tel_prod, tel_cons) = RingBuffer::new(1024).split();
 
         let graph = ProcessorGraph::new();
-        let engine = AudioEngine::new(cmd_cons, Some(bundle_cons), Some(topo_cons), garbage_prod, tel_prod, Box::new(graph));
+        let engine = AudioEngine::new(cmd_cons, Some(bundle_cons), Some(topo_cons), garbage_prod, Some(bundle_garbage_prod), tel_prod, Box::new(graph));
         self.engine = Some(engine);
         self.garbage_consumer = Some(garbage_cons);
+        self.bundle_garbage_consumer = Some(bundle_garbage_cons);
         self.topo_producer = Some(topo_prod);
 
         (cmd_buffer, tel_cons)
@@ -93,6 +97,11 @@ impl Conductor {
         if let Some(ref mut cons) = self.garbage_consumer {
             while let Some(proc) = cons.pop() {
                 drop(proc);
+            }
+        }
+        if let Some(ref mut cons) = self.bundle_garbage_consumer {
+            while let Some(bundle) = cons.pop() {
+                drop(bundle);
             }
         }
     }

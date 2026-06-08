@@ -71,7 +71,7 @@ fn main() {
     let sidecar_proxy = unsafe { SidecarProcessor::new(cmd_rb_ptr, None, &[in_rb_ptr], &[out_rb_ptr], sig_ptr, None) };
     graph.add_node(Box::new(sidecar_proxy), vec![], vec![0]);
 
-    let engine = AudioEngine::new(cons, None, None, garbage_prod, tel_prod, Box::new(graph));
+    let engine = AudioEngine::new(cons, None, None, garbage_prod, None, tel_prod, Box::new(graph));
 
     let mut backend = ThreadedBackend::new();
     backend.start(engine).unwrap();

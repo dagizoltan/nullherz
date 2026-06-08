@@ -32,7 +32,7 @@ fn main() {
     let (tel_prod, _) = tel_rb.split();
 
     let osc = SineOscillator::new(44100.0, 440.0);
-    let engine = AudioEngine::new(cons, None, None, garbage_prod, tel_prod, Box::new(SineProcessor { osc }));
+    let engine = AudioEngine::new(cons, None, None, garbage_prod, None, tel_prod, Box::new(SineProcessor { osc }));
 
     let mut backend = ThreadedBackend::new();
     backend.start(engine).unwrap();

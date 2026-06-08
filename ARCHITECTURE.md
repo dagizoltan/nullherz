@@ -50,7 +50,13 @@ Audio buffers and DSP structures are aligned to 64-byte boundaries (supporting A
 Commands are applied by splitting audio blocks into sub-blocks at the exact sample where the command is timestamped. This ensures that parameter changes happen at the precise intended moment, regardless of the system's buffer size.
 
 ### 3.4 Real-Time Safety and Jitter Considerations
-While the system adheres to a zero-allocation RT thread rule, certain graph management operations like `calculate_stages` (topological sort) are currently executed within the RT thread when a routing command is applied. This introduces a potential jitter risk ($O(N^3)$ complexity). Future iterations should move topological resolution to the Control Plane or a dedicated non-RT management thread, passing the pre-calculated stages to the RT core via atomic swap or a lock-free queue.
+The system employs several advanced techniques to minimize jitter:
+- **Topological Sorting**: Uses Kahn's algorithm ($O(V+E)$ complexity) with explicit **Write-After-Write (WAW)** hazard detection to ensure parallel execution stages are free of data races on shared buffers.
+- **Denormal Protection**: RT threads enable **Flush-to-Zero (FTZ)** and **Denormals-Are-Zero (DAZ)** bits to prevent CPU performance spikes from subnormal floating-point calculations.
+- **Thread Affinity**: Core execution threads are pinned to specific CPU cores to minimize OS scheduling interference and cache thrashing.
+
+### 3.5 Atomic Command Bundling
+The engine supports an optional high-priority bundle queue that allows multiple `Command` types to be applied atomically within a single block cycle. This is used for "Scene Recalls" and complex graph mutations that must appear instantaneous to the user.
 
 ---
 

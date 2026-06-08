@@ -335,6 +335,12 @@ impl ProcessorGraph {
     pub fn commit_graph(&mut self) {
         let active = self.active_topo_idx.load(Ordering::Acquire);
         let inactive = (active + 1) % 2;
+
+        // Safety: Ensure topological stages were actually calculated for the new topology
+        if self.topologies[inactive].num_stages == 0 && self.topologies[inactive].node_count > 0 {
+            return;
+        }
+
         self.active_topo_idx.store(inactive, Ordering::Release);
         self.needs_commit = false;
     }

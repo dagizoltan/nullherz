@@ -341,14 +341,14 @@ impl WavetableOscillator {
         for i in 0..len {
             // Optimization: If buffers are aligned, we could use faster loads.
             // For now, we still need to collect from 8 separate pointers.
-            let b_fm = unsafe { _mm256_setr_ps(
+            let b_fm = _mm256_setr_ps(
                 *fm[0].add(i), *fm[1].add(i), *fm[2].add(i), *fm[3].add(i),
                 *fm[4].add(i), *fm[5].add(i), *fm[6].add(i), *fm[7].add(i)
-            ) };
-            let b_pm = unsafe { _mm256_setr_ps(
+            );
+            let b_pm = _mm256_setr_ps(
                 *pm[0].add(i), *pm[1].add(i), *pm[2].add(i), *pm[3].add(i),
                 *pm[4].add(i), *pm[5].add(i), *pm[6].add(i), *pm[7].add(i)
-            ) };
+            );
 
             let b_mod_inc = _mm256_mul_ps(b_base_incs, _mm256_add_ps(b_1, b_fm));
             let b_mod_phase = _mm256_add_ps(b_phases, _mm256_mul_ps(b_pm, b_2048));
@@ -371,16 +371,14 @@ impl WavetableOscillator {
             // Use storeu to an array and then distribute
             let mut out_v = [0.0f32; 8];
             _mm256_storeu_ps(out_v.as_mut_ptr(), b_res);
-            unsafe {
-                *outputs[0].add(i) = out_v[0];
-                *outputs[1].add(i) = out_v[1];
-                *outputs[2].add(i) = out_v[2];
-                *outputs[3].add(i) = out_v[3];
-                *outputs[4].add(i) = out_v[4];
-                *outputs[5].add(i) = out_v[5];
-                *outputs[6].add(i) = out_v[6];
-                *outputs[7].add(i) = out_v[7];
-            }
+            *outputs[0].add(i) = out_v[0];
+            *outputs[1].add(i) = out_v[1];
+            *outputs[2].add(i) = out_v[2];
+            *outputs[3].add(i) = out_v[3];
+            *outputs[4].add(i) = out_v[4];
+            *outputs[5].add(i) = out_v[5];
+            *outputs[6].add(i) = out_v[6];
+            *outputs[7].add(i) = out_v[7];
 
             b_phases = _mm256_add_ps(b_phases, b_mod_inc);
             let wrap_mask = _mm256_cmp_ps(b_phases, b_2048, _CMP_GE_OQ);
@@ -534,9 +532,9 @@ impl SpectralProcessor {
             let v_im = unsafe { _mm256_loadu_ps(im.as_ptr().add(i)) };
 
             // re = re + (hr * ir - hi * ii)
-            let res_re = unsafe { _mm256_add_ps(v_re, _mm256_sub_ps(_mm256_mul_ps(v_hr, v_ir), _mm256_mul_ps(v_hi, v_ii))) };
+            let res_re = _mm256_add_ps(v_re, _mm256_sub_ps(_mm256_mul_ps(v_hr, v_ir), _mm256_mul_ps(v_hi, v_ii)));
             // im = im + (hr * ii + hi * ir)
-            let res_im = unsafe { _mm256_add_ps(v_im, _mm256_add_ps(_mm256_mul_ps(v_hr, v_ii), _mm256_mul_ps(v_hi, v_ir))) };
+            let res_im = _mm256_add_ps(v_im, _mm256_add_ps(_mm256_mul_ps(v_hr, v_ii), _mm256_mul_ps(v_hi, v_ir)));
 
             unsafe {
                 _mm256_storeu_ps(re.as_mut_ptr().add(i), res_re);
@@ -901,7 +899,7 @@ impl SimdBiquad {
                 _mm256_storeu_si256(idx_arr.as_mut_ptr() as *mut __m256i, idx);
 
                 for ch in 0..8 {
-                    unsafe { *outputs[ch].add(i) = table[idx_arr[ch] as usize % 1024] };
+                    *outputs[ch].add(i) = table[idx_arr[ch] as usize % 1024];
                 }
 
                 b_phase = _mm256_add_ps(b_phase, b_inc);
@@ -1010,12 +1008,12 @@ impl SimdBiquad {
         let mut z2 = _mm512_loadu_ps(self.z2.as_ptr());
 
         for i in 0..len {
-            let x = unsafe { _mm512_set_ps(
+            let x = _mm512_set_ps(
                 *inputs[15].add(i), *inputs[14].add(i), *inputs[13].add(i), *inputs[12].add(i),
                 *inputs[11].add(i), *inputs[10].add(i), *inputs[9].add(i), *inputs[8].add(i),
                 *inputs[7].add(i), *inputs[6].add(i), *inputs[5].add(i), *inputs[4].add(i),
                 *inputs[3].add(i), *inputs[2].add(i), *inputs[1].add(i), *inputs[0].add(i)
-            ) };
+            );
 
             let y = _mm512_add_ps(_mm512_mul_ps(x, b0), z1);
             z1 = _mm512_add_ps(_mm512_sub_ps(_mm512_mul_ps(x, b1), _mm512_mul_ps(y, a1)), z2);
@@ -1023,7 +1021,7 @@ impl SimdBiquad {
 
             let mut out_v = [0.0f32; 16];
             _mm512_storeu_ps(out_v.as_mut_ptr(), y);
-            for ch in 0..16 { unsafe { *outputs[ch].add(i) = out_v[ch] } ; }
+            for ch in 0..16 { *outputs[ch].add(i) = out_v[ch]; }
         }
 
         _mm512_storeu_ps(self.z1.as_mut_ptr(), z1);
@@ -1054,10 +1052,10 @@ impl SimdBiquad {
             // But they are separate buffers.
 
             for i in 0..len {
-                let x = unsafe { _mm256_set_ps(
+                let x = _mm256_set_ps(
                     *inputs[7].add(i), *inputs[6].add(i), *inputs[5].add(i), *inputs[4].add(i),
                     *inputs[3].add(i), *inputs[2].add(i), *inputs[1].add(i), *inputs[0].add(i)
-                ) };
+                );
 
                 let y = _mm256_add_ps(_mm256_mul_ps(x, b0), z1);
                 z1 = _mm256_add_ps(_mm256_sub_ps(_mm256_mul_ps(x, b1), _mm256_mul_ps(y, a1)), z2);
@@ -1065,7 +1063,7 @@ impl SimdBiquad {
 
                 let mut out_v = [0.0f32; 8];
                 _mm256_storeu_ps(out_v.as_mut_ptr(), y);
-                for ch in 0..8 { unsafe { *outputs[ch].add(i) = out_v[ch] } ; }
+                for ch in 0..8 { *outputs[ch].add(i) = out_v[ch]; }
             }
 
             _mm256_storeu_ps(self.z1.as_mut_ptr(), z1);
