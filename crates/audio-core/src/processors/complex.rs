@@ -139,24 +139,23 @@ impl AudioProcessor for SequencerProcessor {
         if let Some(transport) = context.transport {
             if !transport.is_playing { return; }
 
-            let start_beat = transport.beat_position;
-            let seconds_per_block = block_len as f64 / transport.sample_rate as f64;
-            let beats_per_block = seconds_per_block * (transport.bpm as f64 / 60.0);
-            let end_beat = start_beat + beats_per_block;
+            // Sample-absolute indexing to prevent precision drift
+            let samples_per_beat = (transport.sample_rate as f64 * 60.0) / transport.bpm as f64;
+            let samples_per_step = samples_per_beat * 0.25; // 16th note
 
-            let step_size = 0.25; // 16th note
+            let block_start_sample = (transport.beat_position * samples_per_beat).round() as u64;
+            let block_end_sample = block_start_sample + block_len;
 
-            let next_step_beat = (start_beat / step_size).ceil() * step_size;
+            let next_step_idx = (block_start_sample as f64 / samples_per_step).ceil() as u64;
+            let next_step_sample = (next_step_idx as f64 * samples_per_step).round() as u64;
 
-            if next_step_beat < end_beat || (next_step_beat - start_beat).abs() < 1e-9 {
-                let step_idx = ((next_step_beat / step_size).round() as u64 % 16) as usize;
+            if next_step_sample < block_end_sample {
+                let step_idx = (next_step_idx % 16) as usize;
+                let sample_offset = next_step_sample.saturating_sub(block_start_sample);
 
                 for track in 0..8 {
                     if self.grid[track][step_idx] {
                         if let Some(ref mut prod) = self.command_producer {
-                            let beat_offset = (next_step_beat - start_beat).max(0.0);
-                            let sample_offset = (beat_offset * 60.0 / transport.bpm as f64 * transport.sample_rate as f64).round() as u64;
-
                             let _ = prod.push(control_plane::TimestampedCommand {
                                 timestamp_samples: self.current_sample + sample_offset.min(block_len - 1),
                                 command: control_plane::Command::Play,

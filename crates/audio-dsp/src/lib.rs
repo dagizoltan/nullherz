@@ -507,6 +507,7 @@ pub struct SpectralProcessor {
     hop_size: usize,
     in_ptr: usize,
     out_ptr: usize,
+    out_mask: usize,
     // Partitioned convolution state
     ir_re: Vec<AlignedBuffer>,
     ir_im: Vec<AlignedBuffer>,
@@ -517,21 +518,25 @@ pub struct SpectralProcessor {
 
 impl SpectralProcessor {
     pub fn new(fft_size: usize) -> Self {
+        assert!(fft_size.is_power_of_two());
         let mut window = AlignedBuffer::new(fft_size);
         for i in 0..fft_size {
             window[i] = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (fft_size - 1) as f32).cos());
         }
         let hop_size = fft_size / 2;
+        // out_buffer must be power of two for bitwise mask optimization
+        let out_buffer_size = (fft_size + hop_size).next_power_of_two();
         Self {
             fft: SimdFft::new(fft_size),
             in_buffer: AlignedBuffer::new(fft_size),
-            out_buffer: AlignedBuffer::new(fft_size + hop_size),
+            out_buffer: AlignedBuffer::new(out_buffer_size),
             scratch_re: AlignedBuffer::new(fft_size),
             scratch_im: AlignedBuffer::new(fft_size),
             window,
             hop_size,
             in_ptr: 0,
             out_ptr: 0,
+            out_mask: out_buffer_size - 1,
             ir_re: Vec::new(),
             ir_im: Vec::new(),
             history_re: Vec::new(),
@@ -597,13 +602,14 @@ impl SpectralProcessor {
 
     pub fn process_overlap_add(&mut self, input: &[f32], output: &mut [f32]) {
         let len = input.len();
+        let mask = self.out_mask;
         for i in 0..len {
             self.in_buffer[self.in_ptr] = input[i];
             output[i] = self.out_buffer[self.out_ptr];
             self.out_buffer[self.out_ptr] = 0.0;
 
             self.in_ptr += 1;
-            self.out_ptr = (self.out_ptr + 1) % self.out_buffer.len();
+            self.out_ptr = (self.out_ptr + 1) & mask;
 
             if self.in_ptr >= self.fft.size {
                 self.execute_spectral_block();
@@ -698,7 +704,7 @@ impl SpectralProcessor {
         self.fft.process(&mut self.scratch_re, &mut self.scratch_im);
 
         let norm = 1.0 / n as f32;
-        let out_len = self.out_buffer.len();
+        let mask = self.out_mask;
 
         #[cfg(target_arch = "x86_64")]
         if is_x86_feature_detected!("avx2") {
@@ -714,14 +720,14 @@ impl SpectralProcessor {
                     let mut res = [0.0f32; 8];
                     _mm256_storeu_ps(res.as_mut_ptr(), v_val);
                     for j in 0..8 {
-                        let target_ptr = (self.out_ptr + i + j) % out_len;
+                        let target_ptr = (self.out_ptr + i + j) & mask;
                         self.out_buffer[target_ptr] += res[j];
                     }
                     i += 8;
                 }
                 while i < n {
                     let val = (self.scratch_re[i] * norm) * self.window[i];
-                    let target_ptr = (self.out_ptr + i) % out_len;
+                    let target_ptr = (self.out_ptr + i) & mask;
                     self.out_buffer[target_ptr] += val;
                     i += 1;
                 }
@@ -729,7 +735,7 @@ impl SpectralProcessor {
         } else {
             for i in 0..n {
                 let val = (self.scratch_re[i] * norm) * self.window[i];
-                let target_ptr = (self.out_ptr + i) % out_len;
+                let target_ptr = (self.out_ptr + i) & mask;
                 self.out_buffer[target_ptr] += val;
             }
         }
@@ -737,7 +743,7 @@ impl SpectralProcessor {
         #[cfg(not(target_arch = "x86_64"))]
         for i in 0..n {
             let val = (self.scratch_re[i] * norm) * self.window[i];
-            let target_ptr = (self.out_ptr + i) % out_len;
+            let target_ptr = (self.out_ptr + i) & mask;
             self.out_buffer[target_ptr] += val;
         }
     }

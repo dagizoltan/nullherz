@@ -53,7 +53,8 @@ impl SidecarProcessor {
 impl AudioProcessor for SidecarProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         let current_heartbeat = unsafe { (*self.signal).get_heartbeat() };
-        let is_stalled = current_heartbeat == self.last_heartbeat && self.last_heartbeat != 0;
+        // Use wrapping subtraction to detect progress robustly across u64 wrap
+        let is_stalled = current_heartbeat.wrapping_sub(self.last_heartbeat) == 0 && self.last_heartbeat != 0;
 
         for i in 0..self.num_channels {
             if i < inputs.len() {

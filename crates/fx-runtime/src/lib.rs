@@ -177,6 +177,15 @@ impl SidecarManager {
     }
 }
 
+impl Drop for SidecarManager {
+    fn drop(&mut self) {
+        for handle in self.active_sidecars.iter_mut() {
+            let _ = handle.process.kill();
+            let _ = handle.process.wait();
+        }
+    }
+}
+
 pub struct SidecarRegistry {
     pub known_binaries: Vec<String>,
 }

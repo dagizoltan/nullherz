@@ -448,8 +448,31 @@ impl ProcessorGraph {
             return;
         }
 
+        #[cfg(debug_assertions)]
+        self.verify_no_hazards(inactive);
+
         self.active_topo_idx.store(inactive, Ordering::Release);
         self.needs_commit = false;
+    }
+
+    #[cfg(debug_assertions)]
+    fn verify_no_hazards(&self, topo_idx: usize) {
+        let topo = &self.topologies[topo_idx];
+        for s_idx in 0..topo.num_stages {
+            let stage = &topo.stages[s_idx][..topo.stage_counts[s_idx]];
+            let mut physical_writes = [false; 64];
+            for &n_idx in stage {
+                let routing = &topo.routing[n_idx];
+                for k in 0..routing.output_count {
+                    let v_out = routing.output_indices[k].min(63);
+                    let p_out = topo.virtual_to_physical[v_out].min(63);
+                    if physical_writes[p_out] {
+                        panic!("CRITICAL: WAW Hazard detected in topology at stage {}. Multiple nodes writing to physical buffer {}.", s_idx, p_out);
+                    }
+                    physical_writes[p_out] = true;
+                }
+            }
+        }
     }
 
     pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
