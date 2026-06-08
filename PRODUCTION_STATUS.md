@@ -9,11 +9,11 @@ This document provides a high-fidelity overview of the **nullherz** real-time au
 
 | Feature | Status | Tech Spec |
 | :--- | :---: | :--- |
-| **Deterministic Scheduler** | ✅ | 128-sample SIMD chunking, zero-syscall telemetry. |
-| **Sample-Accurate Automation**| ✅ | Command application at exact sample offsets. |
+| **Deterministic Scheduler** | ✅ | 128-sample SIMD chunking, monotonic generation-based sync. |
+| **Sample-Accurate Automation**| ✅ | Sub-block splitting with correct offset propagation. |
 | **Topology Management** | ✅ | $O(V+E)$ stage grouping with WAW hazard detection. |
-| **Real-Time Safety** | ✅ | **Zero** heap allocation, **Zero** locks, **Zero** I/O in RT path. |
-| **Multi-Core Scaling** | ✅ | Pre-allocated `TaskPool` with lock-free completion. |
+| **Real-Time Safety** | ✅ | **Zero** heap allocation, **Zero** locks, RAII aligned buffers. |
+| **Multi-Core Scaling** | ✅ | Race-free `TaskPool` with monotonic stage synchronization. |
 
 ## 🎹 DSP Standard Library
 *Optimized primitives and spectral algorithms.*
@@ -43,7 +43,7 @@ This document provides a high-fidelity overview of the **nullherz** real-time au
 | Feature | Status | Resilience Level |
 | :--- | :--- | :---: | :--- |
 | **Sidecar Manager** | ✅ | **Process Isolation**: DSP crashes do not affect the kernel. |
-| **Auto-Recovery** | ✅ | **Watchdog**: Automated restart and graph re-injection. |
+| **Auto-Recovery** | ✅ | **Watchdog**: Sample-accurate heartbeat stall detection & bypass. |
 | **Shared Memory IPC** | ✅ | **Zero-Copy**: Lock-free SPSC ring buffers for control/audio. |
 | **Platform Control** | ✅ | **Cgroups**: Automatic migration to RT-priority CPU sets. |
 
