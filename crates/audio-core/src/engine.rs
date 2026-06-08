@@ -147,16 +147,24 @@ impl AudioEngine {
                 // RT-safe deallocation: offload the vector to a garbage consumer
                 if let Some(ref mut prod) = self.bundle_garbage_producer {
                     if let Err(b) = prod.push(bundle) {
-                        // If queue is full, we must leak to avoid deallocation in RT thread
-                        let _ = std::mem::forget(b);
+                        // If queue is full, we must leak to avoid deallocation in RT thread.
+                        // For a "bug-free" engine, we would ideally use a fixed-size bundle
+                        // to avoid Vec altogether, but for now we leak to preserve RT safety.
+                        std::mem::forget(b);
                     }
+                } else {
+                    // If no producer exists, we must leak the Vec to avoid dropping it here.
+                    std::mem::forget(bundle);
                 }
             }
         }
 
         if let Some(ref mut cons) = self.topology_consumer {
+            let mut topo_processed = 0;
             while let Some(topo_cmd) = cons.pop() {
                 graph.apply_topology_command(&topo_cmd);
+                topo_processed += 1;
+                if topo_processed >= 16 { break; } // Limit topology mutations per block
             }
         }
 

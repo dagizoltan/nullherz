@@ -640,7 +640,7 @@ impl AudioProcessor for ProcessorGraph {
 
         for n_idx in 0..topo.node_count.min(64) {
             let routing = &topo.routing[n_idx];
-            let mut node_peak = 0.0f32;
+            let mut node_peak = if context.sub_block_offset == 0 { 0.0f32 } else { f32::from_bits(self.peak_levels[n_idx].load(Ordering::Relaxed)) };
 
             for o_idx in 0..routing.output_count {
                 let v_out = routing.output_indices[o_idx].min(63);

@@ -10,9 +10,9 @@ This document provides a high-fidelity overview of the **nullherz** real-time au
 | Feature | Status | Tech Spec |
 | :--- | :---: | :--- |
 | **Deterministic Scheduler** | ✅ | 128-sample SIMD chunking, monotonic generation-based sync. |
-| **Sample-Accurate Automation**| ✅ | Sub-block splitting with correct offset propagation. |
-| **Topology Management** | ✅ | $O(V+E)$ stage grouping with WAW hazard detection. |
-| **Real-Time Safety** | ✅ | **Zero** heap allocation, **Zero** locks, RAII aligned buffers. |
+| **Sample-Accurate Automation**| ✅ | Sub-block splitting with peak accumulation. |
+| **Topology Management** | ✅ | $O(V+E)$ stage grouping with mutation limits. |
+| **Real-Time Safety** | ✅ | **Zero** heap allocation, deallocation-safe bundle leaks. |
 | **Multi-Core Scaling** | ✅ | Race-free `TaskPool` with monotonic stage synchronization. |
 
 ## 🎹 DSP Standard Library
