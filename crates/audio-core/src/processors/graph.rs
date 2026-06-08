@@ -755,6 +755,10 @@ impl AudioProcessor for ProcessorGraph {
                 let n_idx = *node_idx as usize;
                 if n_idx < self.node_count {
                     let node = &self.nodes[n_idx];
+
+                    // Production Hardening: Topology mutations that involve heap allocation
+                    // should ideally happen via a pre-allocated pool or in the control plane.
+                    // For now, we perform the allocation but ensure RT safety for the old processor.
                     let mut new_proc: Box<dyn AudioProcessor> = match processor_type_id {
                         1 => Box::new(crate::processors::standard::BiquadProcessor::new(0, audio_dsp::BiquadCoefficients { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 })),
                         2 => Box::new(crate::processors::standard::GainProcessor::new(0, 1.0)),
@@ -769,8 +773,13 @@ impl AudioProcessor for ProcessorGraph {
                     let old_proc = unsafe { std::ptr::replace(node.processor.get(), new_proc) };
                     if let Some(ref mut prod) = self.garbage_producer {
                         if let Err(leaked) = prod.push(old_proc) {
-                            let _ = Box::into_raw(leaked);
+                            // RT SAFETY: If garbage collector is full, leak the object
+                            // to avoid blocking deallocation in the audio thread.
+                            std::mem::forget(leaked);
                         }
+                    } else {
+                        // RT SAFETY: If no garbage collector exists, leak to preserve timing.
+                        std::mem::forget(old_proc);
                     }
                 }
             }
