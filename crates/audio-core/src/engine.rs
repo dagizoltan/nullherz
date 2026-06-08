@@ -63,15 +63,27 @@ impl AudioEngine {
     fn calibrate_cycles() -> f64 {
         #[cfg(target_arch = "x86_64")]
         {
-            let start = std::time::Instant::now();
-            let start_c = unsafe { std::arch::x86_64::_rdtsc() };
-            // Busy wait for ~10ms for more accurate calibration than sleep
-            while start.elapsed() < std::time::Duration::from_millis(10) {
-                std::hint::spin_loop();
+            // Perform multiple measurements to filter out jitter/interrupts.
+            // We take the median or average of "clean" runs to avoid biasing towards low frequency.
+            let mut ratios = Vec::with_capacity(7);
+
+            for _ in 0..7 {
+                let start = std::time::Instant::now();
+                let start_c = unsafe { std::arch::x86_64::_rdtsc() };
+                // Busy wait for ~10ms for more accurate calibration than sleep
+                while start.elapsed() < std::time::Duration::from_millis(10) {
+                    std::hint::spin_loop();
+                }
+                let elapsed = start.elapsed().as_nanos() as f64;
+                let elapsed_c = (unsafe { std::arch::x86_64::_rdtsc() } - start_c) as f64;
+                if elapsed_c > 0.0 {
+                    ratios.push(elapsed / elapsed_c);
+                }
             }
-            let elapsed = start.elapsed().as_nanos() as f64;
-            let elapsed_c = (unsafe { std::arch::x86_64::_rdtsc() } - start_c) as f64;
-            if elapsed_c > 0.0 { elapsed / elapsed_c } else { 1.0 }
+            if ratios.is_empty() { return 1.0; }
+            ratios.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            // Return median
+            ratios[ratios.len() / 2]
         }
         #[cfg(not(target_arch = "x86_64"))]
         { 1.0 }
@@ -114,6 +126,9 @@ impl AudioEngine {
         let graph_ptr = self.active_graph.load(Ordering::Acquire);
         let graph = unsafe { &mut **graph_ptr };
 
+        let mut commands_processed = 0;
+        const MAX_COMMANDS_PER_BLOCK: usize = 256;
+
         // Process atomic command bundles first (immediate application)
         if let Some(ref mut cons) = self.bundle_consumer {
             while let Some(mut bundle) = cons.pop() {
@@ -147,9 +162,16 @@ impl AudioEngine {
         let mut node_times_cycles = [0u64; 64];
 
         while current_sample_in_block < num_samples {
-            let cmd = if let Some(pending) = self.pending_command.take() { Some(pending) } else { self.command_consumer.pop() };
+            let cmd = if let Some(pending) = self.pending_command.take() { Some(pending) } else {
+                if commands_processed < MAX_COMMANDS_PER_BLOCK {
+                    self.command_consumer.pop()
+                } else {
+                    None
+                }
+            };
             if let Some(cmd) = cmd {
                 if cmd.timestamp_samples < block_end_sample {
+                    commands_processed += 1;
                     let cmd_offset = if cmd.timestamp_samples > block_start_sample { (cmd.timestamp_samples - block_start_sample) as usize } else { current_sample_in_block };
                     if cmd_offset > current_sample_in_block {
                         let mut remaining_to_cmd = cmd_offset - current_sample_in_block;

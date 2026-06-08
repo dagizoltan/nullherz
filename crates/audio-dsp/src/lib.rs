@@ -354,8 +354,10 @@ impl WavetableOscillator {
             let b_mod_phase = _mm256_add_ps(b_phases, _mm256_mul_ps(b_pm, b_2048));
 
             // Linear interpolation via gather
-            let b_idx = _mm256_cvttps_epi32(b_mod_phase);
-            let b_frac = _mm256_sub_ps(b_mod_phase, _mm256_cvtepi32_ps(b_idx));
+            // Use floor instead of truncate to handle negative phase correctly
+            let b_idx_f = _mm256_floor_ps(b_mod_phase);
+            let b_idx = _mm256_cvttps_epi32(b_idx_f);
+            let b_frac = _mm256_sub_ps(b_mod_phase, b_idx_f);
 
             // Mask indices to table size (2048)
             let b_mask = _mm256_set1_epi32(2047);
@@ -381,8 +383,14 @@ impl WavetableOscillator {
             *outputs[7].add(i) = out_v[7];
 
             b_phases = _mm256_add_ps(b_phases, b_mod_inc);
-            let wrap_mask = _mm256_cmp_ps(b_phases, b_2048, _CMP_GE_OQ);
-            b_phases = _mm256_sub_ps(b_phases, _mm256_and_ps(wrap_mask, b_2048));
+
+            // Robust wrap: handle both positive and negative overflow
+            let b_zero = _mm256_setzero_ps();
+            let wrap_pos_mask = _mm256_cmp_ps(b_phases, b_2048, _CMP_GE_OQ);
+            let wrap_neg_mask = _mm256_cmp_ps(b_phases, b_zero, _CMP_LT_OQ);
+
+            b_phases = _mm256_sub_ps(b_phases, _mm256_and_ps(wrap_pos_mask, b_2048));
+            b_phases = _mm256_add_ps(b_phases, _mm256_and_ps(wrap_neg_mask, b_2048));
         }
         _mm256_storeu_ps(self.phases.as_mut_ptr(), b_phases);
         }
@@ -450,38 +458,76 @@ impl SimdFft {
     }
 }
 
+/// A simple 64-byte aligned buffer for SIMD operations to avoid Undefined Behavior.
+pub struct AlignedBuffer {
+    ptr: *mut f32,
+    size: usize,
+    layout: std::alloc::Layout,
+}
+
+impl AlignedBuffer {
+    pub fn new(size: usize) -> Self {
+        let layout = std::alloc::Layout::from_size_align(size * std::mem::size_of::<f32>(), 64).unwrap();
+        let ptr = unsafe { std::alloc::alloc_zeroed(layout) as *mut f32 };
+        if ptr.is_null() { std::alloc::handle_alloc_error(layout); }
+        Self { ptr, size, layout }
+    }
+}
+
+unsafe impl Send for AlignedBuffer {}
+unsafe impl Sync for AlignedBuffer {}
+
+impl std::ops::Deref for AlignedBuffer {
+    type Target = [f32];
+    fn deref(&self) -> &Self::Target {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.size) }
+    }
+}
+
+impl std::ops::DerefMut for AlignedBuffer {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.size) }
+    }
+}
+
+impl Drop for AlignedBuffer {
+    fn drop(&mut self) {
+        unsafe { std::alloc::dealloc(self.ptr as *mut u8, self.layout); }
+    }
+}
+
 /// A Spectral Processor for partitioned convolution.
 pub struct SpectralProcessor {
     pub fft: SimdFft,
-    in_buffer: Vec<f32>,
-    out_buffer: Vec<f32>,
-    scratch_re: Vec<f32>,
-    scratch_im: Vec<f32>,
-    window: Vec<f32>,
+    in_buffer: AlignedBuffer,
+    out_buffer: AlignedBuffer,
+    scratch_re: AlignedBuffer,
+    scratch_im: AlignedBuffer,
+    window: AlignedBuffer,
     hop_size: usize,
     in_ptr: usize,
     out_ptr: usize,
     // Partitioned convolution state
-    ir_re: Vec<Vec<f32>>,
-    ir_im: Vec<Vec<f32>>,
-    history_re: Vec<Vec<f32>>,
-    history_im: Vec<Vec<f32>>,
+    ir_re: Vec<AlignedBuffer>,
+    ir_im: Vec<AlignedBuffer>,
+    history_re: Vec<AlignedBuffer>,
+    history_im: Vec<AlignedBuffer>,
     partition_idx: usize,
 }
 
 impl SpectralProcessor {
     pub fn new(fft_size: usize) -> Self {
-        let mut window = vec![0.0; fft_size];
+        let mut window = AlignedBuffer::new(fft_size);
         for i in 0..fft_size {
             window[i] = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (fft_size - 1) as f32).cos());
         }
         let hop_size = fft_size / 2;
         Self {
             fft: SimdFft::new(fft_size),
-            in_buffer: vec![0.0; fft_size],
-            out_buffer: vec![0.0; fft_size + hop_size],
-            scratch_re: vec![0.0; fft_size],
-            scratch_im: vec![0.0; fft_size],
+            in_buffer: AlignedBuffer::new(fft_size),
+            out_buffer: AlignedBuffer::new(fft_size + hop_size),
+            scratch_re: AlignedBuffer::new(fft_size),
+            scratch_im: AlignedBuffer::new(fft_size),
             window,
             hop_size,
             in_ptr: 0,
@@ -497,19 +543,19 @@ impl SpectralProcessor {
     pub fn set_ir(&mut self, ir_data: &[f32]) {
         let n = self.fft.size;
         let num_partitions = (ir_data.len() + self.hop_size - 1) / self.hop_size;
-        self.ir_re = vec![vec![0.0; n]; num_partitions];
-        self.ir_im = vec![vec![0.0; n]; num_partitions];
-        self.history_re = vec![vec![0.0; n]; num_partitions];
-        self.history_im = vec![vec![0.0; n]; num_partitions];
+        self.ir_re = (0..num_partitions).map(|_| AlignedBuffer::new(n)).collect();
+        self.ir_im = (0..num_partitions).map(|_| AlignedBuffer::new(n)).collect();
+        self.history_re = (0..num_partitions).map(|_| AlignedBuffer::new(n)).collect();
+        self.history_im = (0..num_partitions).map(|_| AlignedBuffer::new(n)).collect();
 
         for p in 0..num_partitions {
             let start = p * self.hop_size;
             let end = (start + self.hop_size).min(ir_data.len());
-            let mut partition = vec![0.0; n];
+            let mut partition = AlignedBuffer::new(n);
             partition[..end-start].copy_from_slice(&ir_data[start..end]);
 
             let mut re = partition;
-            let mut im = vec![0.0; n];
+            let mut im = AlignedBuffer::new(n);
             self.fft.process(&mut re, &mut im);
             self.ir_re[p] = re;
             self.ir_im[p] = im;
@@ -763,8 +809,8 @@ impl BiquadFilter {
         }
     }
 
-    /// SSE3-optimized block processing using Direct Form II Transposed.
-    /// Manually unrolled scalar implementation for optimal single-stream throughput.
+    /// Optimized block processing using Direct Form II Transposed.
+    /// Uses a manually unrolled loop to maximize throughput and minimize dependency stalls.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "sse3")]
     pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
@@ -787,29 +833,34 @@ impl BiquadFilter {
         let a1 = self.coeffs.a1;
         let a2 = self.coeffs.a2;
 
+        // Note: For a single channel biquad, feedback prevents trivial SIMD.
+        // However, we can still optimize the loop and use SSE for partial steps
+        // if we have multiple filters, but for this specific one,
+        // we'll stick to a highly optimized unrolled path with minimal dependency chains.
+
         let mut i = 0;
         while i + 4 <= len {
             let x0 = *input.get_unchecked(i);
             let y0 = x0 * b0 + z1;
-            z1 = x0 * b1 - y0 * a1 + z2;
-            z2 = x0 * b2 - y0 * a2;
+            let z1_0 = x0 * b1 - y0 * a1 + z2;
+            let z2_0 = x0 * b2 - y0 * a2;
             *output.get_unchecked_mut(i) = y0;
 
             let x1 = *input.get_unchecked(i + 1);
-            let y1 = x1 * b0 + z1;
-            z1 = x1 * b1 - y1 * a1 + z2;
-            z2 = x1 * b2 - y1 * a2;
+            let y1 = x1 * b0 + z1_0;
+            let z1_1 = x1 * b1 - y1 * a1 + z2_0;
+            let z2_1 = x1 * b2 - y1 * a2;
             *output.get_unchecked_mut(i + 1) = y1;
 
             let x2 = *input.get_unchecked(i + 2);
-            let y2 = x2 * b0 + z1;
-            z1 = x2 * b1 - y2 * a1 + z2;
-            z2 = x2 * b2 - y2 * a2;
+            let y2 = x2 * b0 + z1_1;
+            let z1_2 = x2 * b1 - y2 * a1 + z2_1;
+            let z2_2 = x2 * b2 - y2 * a2;
             *output.get_unchecked_mut(i + 2) = y2;
 
             let x3 = *input.get_unchecked(i + 3);
-            let y3 = x3 * b0 + z1;
-            z1 = x3 * b1 - y3 * a1 + z2;
+            let y3 = x3 * b0 + z1_2;
+            z1 = x3 * b1 - y3 * a1 + z2_2;
             z2 = x3 * b2 - y3 * a2;
             *output.get_unchecked_mut(i + 3) = y3;
 

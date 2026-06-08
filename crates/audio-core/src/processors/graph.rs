@@ -49,6 +49,7 @@ pub struct GraphTopology {
 pub struct Job {
     pub node_ptr: *const ProcessorNode,
     pub num_samples: usize,
+    pub sub_block_offset: usize,
     pub buffers_ptr: *mut AudioBlock,
     pub x_buffers_ptr: *mut AudioBlock,
     pub input_indices: [usize; 16],
@@ -94,13 +95,15 @@ impl TaskPool {
 
                         let mut node_inputs_storage = [ &[][..]; 16 ];
                         let input_count = job.input_count.min(16);
+                        let offset = job.sub_block_offset;
+
                         for i in 0..input_count {
                             let p_idx = job.input_indices[i];
                             if p_idx >= 64 {
                                 let x_idx = p_idx - 64;
                                 unsafe { node_inputs_storage[i] = &(&(*job.x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
                             } else {
-                                unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx.min(63))).data)[..num_samples]; }
+                                unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx.min(63))).data)[offset..offset + num_samples]; }
                             }
                         }
 
@@ -109,7 +112,7 @@ impl TaskPool {
                         for i in 0..output_count {
                             let p_idx = job.output_indices[i].min(63);
                             unsafe {
-                                node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr(), num_samples);
+                                node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr().add(offset), num_samples);
                             }
                         }
 
@@ -119,7 +122,7 @@ impl TaskPool {
                         let mut inner_context = crate::processors::ProcessContext {
                             pool: None,
                             transport: job.transport.as_ref(),
-                            sub_block_offset: 0, // Resolved in main RT thread if needed, but worker jobs use pre-resolved pointers
+                            sub_block_offset: offset,
                             is_last_sub_block: job.is_last_sub_block
                         };
                         unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
@@ -155,6 +158,54 @@ impl Drop for TaskPool {
         self.running.store(false, Ordering::Release);
         for handle in self.workers.drain(..) {
             let _ = handle.join();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::processors::ProcessContext;
+
+    struct IdentityProcessor;
+    impl AudioProcessor for IdentityProcessor {
+        fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
+            for i in 0..inputs.len().min(outputs.len()) {
+                outputs[i].copy_from_slice(inputs[i]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_graph_sub_block_routing() {
+        let mut graph = ProcessorGraph::new();
+        // Node 0: Identity, Input Buffer 2 -> Output Buffer 0
+        graph.add_node(Box::new(IdentityProcessor), vec![2], vec![0]);
+
+        let mut input_data = [0.0f32; 256];
+        for i in 0..256 { input_data[i] = i as f32; }
+
+        // Mock physical buffer 2
+        graph.buffers[2].data.copy_from_slice(&input_data);
+
+        let mut out_data = [0.0f32; 100];
+        let mut out_slice = &mut out_data[..];
+        let mut outputs = [out_slice];
+
+        let mut context = ProcessContext {
+            pool: None,
+            transport: None,
+            sub_block_offset: 10,
+            is_last_sub_block: false,
+        };
+
+        // Process a sub-block of 50 samples at offset 10
+        graph.process(&[], &mut outputs, &mut context);
+
+        // Check if output buffer 0 (which is mapped to external_outputs[0])
+        // contains the correct data at the correct offset
+        for i in 0..50 {
+            assert_eq!(out_data[i], (i + 10) as f32);
         }
     }
 }
@@ -381,12 +432,13 @@ impl AudioProcessor for ProcessorGraph {
 
         let crossfades_mut_ptr = &self.topologies[active_idx].crossfades as *const [Option<CrossfadeState>; 8] as *mut [Option<CrossfadeState>; 8];
 
+        let offset = context.sub_block_offset;
         for i in 0..8 {
             let x_state_opt = unsafe { &mut (*crossfades_mut_ptr)[i] };
             if let Some(state) = x_state_opt {
                 let x_buf_idx = i;
-                let old_data = &self._old_path_buffers[state.old_buffer_idx].data[..num_samples];
-                let new_data = &self.buffers[state.new_buffer_idx].data[..num_samples];
+                let old_data = &self._old_path_buffers[state.old_buffer_idx].data[offset..offset + num_samples];
+                let new_data = &self.buffers[state.new_buffer_idx].data[offset..offset + num_samples];
                 let x_data = &mut self._crossfade_buffers[x_buf_idx].data[..num_samples];
 
                 let inv_total = 1.0 / state.total_samples as f32;
@@ -436,6 +488,7 @@ impl AudioProcessor for ProcessorGraph {
                     let _ = pool.worker_producers[worker_idx].push(Job {
                         node_ptr: &self.nodes[n_idx] as *const _,
                         num_samples,
+                        sub_block_offset: context.sub_block_offset,
                         buffers_ptr,
                         x_buffers_ptr,
                         input_indices: resolved_inputs,
@@ -476,16 +529,18 @@ impl AudioProcessor for ProcessorGraph {
                             let x_idx = p_idx - 64;
                             unsafe { node_inputs_storage[i] = &(&(*x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
                         } else {
-                            unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx.min(63))).data)[..num_samples]; }
+                            let offset = context.sub_block_offset;
+                            unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx.min(63))).data)[offset..offset + num_samples]; }
                         }
                     }
                     let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
                     let output_count = routing.output_count.min(16);
+                    let offset = context.sub_block_offset;
                     for i in 0..output_count {
                         let v_idx = routing.output_indices[i].min(63);
                         let p_idx = topo.virtual_to_physical[v_idx].min(63);
                         unsafe {
-                            node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr(), num_samples);
+                            node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr().add(offset), num_samples);
                         }
                     }
 
@@ -506,18 +561,20 @@ impl AudioProcessor for ProcessorGraph {
 
         if external_outputs.len() >= 1 {
             let p0 = topo.virtual_to_physical[0];
-            external_outputs[0].copy_from_slice(&self.buffers[p0].data[..num_samples]);
+            let offset = context.sub_block_offset;
+            external_outputs[0].copy_from_slice(&self.buffers[p0].data[offset..offset + num_samples]);
         }
         if external_outputs.len() >= 2 {
             let p1 = topo.virtual_to_physical[1];
-            external_outputs[1].copy_from_slice(&self.buffers[p1].data[..num_samples]);
+            let offset = context.sub_block_offset;
+            external_outputs[1].copy_from_slice(&self.buffers[p1].data[offset..offset + num_samples]);
         }
 
         // Before finishing process, copy current buffers to old_path_buffers for crossfading in next block
-        // ONLY if this is the last sub-block of the engine cycle to preserve "previous block" state
+        // ONLY if this is the last sub-block of the engine cycle to preserve the entire "previous block" state
         if is_last_sub_block {
             for i in 0..64 {
-                self._old_path_buffers[i].data[..num_samples].copy_from_slice(&self.buffers[i].data[..num_samples]);
+                self._old_path_buffers[i].data.copy_from_slice(&self.buffers[i].data);
             }
         }
 
@@ -531,7 +588,8 @@ impl AudioProcessor for ProcessorGraph {
             for o_idx in 0..routing.output_count {
                 let v_out = routing.output_indices[o_idx].min(63);
                 let p_idx = topo.virtual_to_physical[v_out].min(63);
-                let data = &self.buffers[p_idx].data[..num_samples];
+                let offset = context.sub_block_offset;
+                let data = &self.buffers[p_idx].data[offset..offset + num_samples];
 
                 let mut channel_peak = 0.0f32;
                 #[cfg(target_arch = "x86_64")]
