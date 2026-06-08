@@ -119,6 +119,7 @@ impl TaskPool {
                         let mut inner_context = crate::processors::ProcessContext {
                             pool: None,
                             transport: job.transport.as_ref(),
+                            sub_block_offset: 0, // Resolved in main RT thread if needed, but worker jobs use pre-resolved pointers
                             is_last_sub_block: job.is_last_sub_block
                         };
                         unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
@@ -485,7 +486,7 @@ impl AudioProcessor for ProcessorGraph {
                     #[cfg(target_arch = "x86_64")]
                     let start = unsafe { std::arch::x86_64::_rdtsc() };
 
-                    let mut inner_context = crate::processors::ProcessContext { pool: None, transport: context.transport, is_last_sub_block: context.is_last_sub_block };
+                    let mut inner_context = crate::processors::ProcessContext { pool: None, transport: context.transport, sub_block_offset: context.sub_block_offset, is_last_sub_block: context.is_last_sub_block };
                     unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
 
                     #[cfg(target_arch = "x86_64")]

@@ -223,6 +223,7 @@ impl AudioEngine {
         let mut context = ProcessContext {
             pool: self.pool.as_mut(),
             transport: Some(&self.transport),
+            sub_block_offset: offset,
             is_last_sub_block,
         };
         let mut sub_inputs_ptr = [ &[][..]; crate::MAX_CHANNELS ];

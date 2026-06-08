@@ -4,8 +4,16 @@ use fx_runtime::SidecarManager;
 use ipc_layer::RingBuffer;
 
 
+pub struct Timeline {
+    pub bpm: f32,
+    pub signature_num: u32,
+    pub signature_den: u32,
+    pub current_beat: f64,
+}
+
 pub struct Conductor {
     pub manager: SidecarManager,
+    pub timeline: Timeline,
     pub engine: Option<AudioEngine>,
     pub backend: Option<Box<dyn AudioBackend>>,
     garbage_consumer: Option<ipc_layer::Consumer<Box<dyn audio_core::AudioProcessor>>>,
@@ -16,6 +24,12 @@ impl Conductor {
     pub fn new() -> Self {
         Self {
             manager: SidecarManager::new(),
+            timeline: Timeline {
+                bpm: 120.0,
+                signature_num: 4,
+                signature_den: 4,
+                current_beat: 0.0,
+            },
             engine: None,
             backend: None,
             garbage_consumer: None,
@@ -81,5 +95,14 @@ impl Conductor {
                 drop(proc);
             }
         }
+    }
+
+    pub fn update_timeline(&mut self, telemetry: &audio_core::Telemetry) {
+        // Sync conductor timeline with engine reality
+        self.timeline.current_beat = telemetry.sample_counter as f64 / 44100.0 * (self.timeline.bpm as f64 / 60.0);
+    }
+
+    pub fn quantize_beat(&self, beat: f64, grid: f64) -> f64 {
+        (beat / grid).ceil() * grid
     }
 }
