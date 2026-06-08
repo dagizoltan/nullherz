@@ -227,7 +227,7 @@ impl AudioEngine {
         graph.collect_telemetry(&mut node_times_cycles, &mut peak_levels);
 
         for i in 0..64 {
-            node_times[i] = (node_times_cycles[i] as f64 * self.ns_per_cycle) as u64;
+            node_times[i] = (node_times_cycles.get(i).copied().unwrap_or(0) as f64 * self.ns_per_cycle) as u64;
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -272,11 +272,13 @@ impl AudioEngine {
         };
         let mut sub_inputs_ptr = [ &[][..]; crate::MAX_CHANNELS ];
         let num_inputs = inputs.len().min(crate::MAX_CHANNELS);
+        let empty_input = &[][..];
         for i in 0..num_inputs {
-            let input_len = inputs[i].len();
+            let input = inputs.get(i).unwrap_or(&empty_input);
+            let input_len = input.len();
             let end = (offset + len).min(input_len);
             let actual_offset = offset.min(input_len);
-            sub_inputs_ptr[i] = &inputs[i][actual_offset..end];
+            sub_inputs_ptr[i] = &input[actual_offset..end];
         }
 
         let mut sub_outputs_reconstructed: [&mut [f32]; crate::MAX_CHANNELS] = std::array::from_fn(|_| &mut [][..]);

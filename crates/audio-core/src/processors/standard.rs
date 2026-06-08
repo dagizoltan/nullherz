@@ -106,7 +106,7 @@ impl AudioProcessor for SimdBiquadProcessor {
         let len = inputs[0].len();
         let num_channels = inputs.len().min(outputs.len()).min(16);
 
-        if num_channels == 8 {
+        if num_channels >= 8 && num_channels < 16 {
             let mut in_ptrs = [std::ptr::null(); 8];
             let mut out_ptrs = [std::ptr::null_mut(); 8];
             for i in 0..8 {
@@ -115,7 +115,7 @@ impl AudioProcessor for SimdBiquadProcessor {
             }
             #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
             unsafe { self.inner.process_8_channels(in_ptrs, out_ptrs, len); }
-        } else if num_channels == 16 {
+        } else if num_channels >= 16 {
             let mut in_ptrs = [std::ptr::null(); 16];
             let mut out_ptrs = [std::ptr::null_mut(); 16];
             for i in 0..16 {

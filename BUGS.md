@@ -2,17 +2,13 @@
 
 This document tracks identified bugs, limitations, and areas requiring further hardening to maintain "high-end product" stability.
 
-## 🔴 Critical Architectural Risks
+## 🔴 Critical Architectural Risks (Resolved)
 
-### 1. Static Topology Validation (Unverified)
-The engine relies on Kahn's algorithm for topological sorting and Write-After-Write (WAW) hazard detection.
-- **Risk**: A bug in the sorting logic or a malformed routing command from the control plane could cause multiple threads to write to the same physical buffer simultaneously.
-- **Mitigation**: Implement a runtime "Hazard Checker" (debug-only) that verifies routing sanity before graph commitment.
+### 1. Runtime Topology Validation (FIXED)
+Implemented `verify_no_hazards_prod` in the graph commitment path to formally check for WAW hazards before any graph is activated in the RT thread.
 
-### 2. Sidecar Memory Exhaustion
-The `SidecarProcessor` uses shared memory ring buffers.
-- **Risk**: If a sidecar process crashes or hangs without releasing its shared memory handles, the system may leak SHM segments or run out of file descriptors.
-- **Mitigation**: Implement a robust cleanup mechanism in `nullherz-conductor` that forcibly unlinks SHM segments of zombie processes.
+### 2. Sidecar Resource Leakage (FIXED)
+Implemented RAII `Drop` for `SidecarManager` and automated zombie reaping in the conductor to ensure external processes are reaped and SHM segments are unlinked.
 
 ## 🟡 Performance Debt
 
@@ -21,10 +17,8 @@ Many DSP components (e.g., `BiquadFilter`, `Gain`) use manually unrolled loops b
 - **Debt**: This results in suboptimal instruction density and higher power consumption than necessary for a high-end engine.
 - **Action**: Move to a unified SIMD abstraction (e.g., `wide` crate) for all core DSP primitives.
 
-### 2. Spectral OLA Micro-jitter
-The `SpectralProcessor` overlap-add loop uses modulo operators (`% out_len`) which can be expensive in the hot path.
-- **Debt**: Small but measurable jitter in the spectral processing stage.
-- **Action**: Use power-of-two buffer sizes and bitwise masks to eliminate modulo divisions.
+### 2. Spectral OLA Micro-jitter (FIXED)
+Enforced power-of-two buffer sizes and moved to bitwise mask indexing in the Spectral Processor, eliminating cycle-expensive modulo operations in the hot path.
 
 ## 🟢 Known Bugs & Glitches (Resolved)
 

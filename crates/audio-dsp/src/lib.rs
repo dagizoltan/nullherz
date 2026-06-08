@@ -331,6 +331,7 @@ impl WavetableOscillator {
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_8_channels_avx2(&mut self, fm: [*const f32; 8], pm: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
+        // Validation of channel availability is performed by the caller (processor)
         unsafe {
         use std::arch::x86_64::*;
         let mut b_phases = _mm256_loadu_ps(self.phases.as_ptr());
@@ -342,12 +343,12 @@ impl WavetableOscillator {
             // Optimization: If buffers are aligned, we could use faster loads.
             // For now, we still need to collect from 8 separate pointers.
             let b_fm = _mm256_setr_ps(
-                *fm[0].add(i), *fm[1].add(i), *fm[2].add(i), *fm[3].add(i),
-                *fm[4].add(i), *fm[5].add(i), *fm[6].add(i), *fm[7].add(i)
+                *fm.get_unchecked(0).add(i), *fm.get_unchecked(1).add(i), *fm.get_unchecked(2).add(i), *fm.get_unchecked(3).add(i),
+                *fm.get_unchecked(4).add(i), *fm.get_unchecked(5).add(i), *fm.get_unchecked(6).add(i), *fm.get_unchecked(7).add(i)
             );
             let b_pm = _mm256_setr_ps(
-                *pm[0].add(i), *pm[1].add(i), *pm[2].add(i), *pm[3].add(i),
-                *pm[4].add(i), *pm[5].add(i), *pm[6].add(i), *pm[7].add(i)
+                *pm.get_unchecked(0).add(i), *pm.get_unchecked(1).add(i), *pm.get_unchecked(2).add(i), *pm.get_unchecked(3).add(i),
+                *pm.get_unchecked(4).add(i), *pm.get_unchecked(5).add(i), *pm.get_unchecked(6).add(i), *pm.get_unchecked(7).add(i)
             );
 
             let b_mod_inc = _mm256_mul_ps(b_base_incs, _mm256_add_ps(b_1, b_fm));
@@ -373,14 +374,14 @@ impl WavetableOscillator {
             // Use storeu to an array and then distribute
             let mut out_v = [0.0f32; 8];
             _mm256_storeu_ps(out_v.as_mut_ptr(), b_res);
-            *outputs[0].add(i) = out_v[0];
-            *outputs[1].add(i) = out_v[1];
-            *outputs[2].add(i) = out_v[2];
-            *outputs[3].add(i) = out_v[3];
-            *outputs[4].add(i) = out_v[4];
-            *outputs[5].add(i) = out_v[5];
-            *outputs[6].add(i) = out_v[6];
-            *outputs[7].add(i) = out_v[7];
+            *outputs.get_unchecked(0).add(i) = out_v[0];
+            *outputs.get_unchecked(1).add(i) = out_v[1];
+            *outputs.get_unchecked(2).add(i) = out_v[2];
+            *outputs.get_unchecked(3).add(i) = out_v[3];
+            *outputs.get_unchecked(4).add(i) = out_v[4];
+            *outputs.get_unchecked(5).add(i) = out_v[5];
+            *outputs.get_unchecked(6).add(i) = out_v[6];
+            *outputs.get_unchecked(7).add(i) = out_v[7];
 
             b_phases = _mm256_add_ps(b_phases, b_mod_inc);
 
@@ -393,6 +394,10 @@ impl WavetableOscillator {
             b_phases = _mm256_add_ps(b_phases, _mm256_and_ps(wrap_neg_mask, b_2048));
         }
         _mm256_storeu_ps(self.phases.as_mut_ptr(), b_phases);
+
+        // No scalar tail loop needed here as process_8_channels processes 8 full channels
+        // for the entire block duration 'len'. The block splitting happens at the 'len' level.
+        // However, if we were processing blocks of samples in SIMD, we'd need one.
         }
     }
 }
@@ -629,10 +634,12 @@ impl SpectralProcessor {
                 use std::arch::x86_64::*;
                 let mut i = 0;
                 while i + 8 <= n {
-                    let v_in = _mm256_load_ps(self.in_buffer.as_ptr().add(i));
-                    let v_win = _mm256_load_ps(self.window.as_ptr().add(i));
+                    // Use unaligned loads if i is not a multiple of 8,
+                    // though AlignedBuffer guarantees base alignment.
+                    let v_in = _mm256_loadu_ps(self.in_buffer.as_ptr().add(i));
+                    let v_win = _mm256_loadu_ps(self.window.as_ptr().add(i));
                     let v_res = _mm256_mul_ps(v_in, v_win);
-                    _mm256_store_ps(self.scratch_re.as_mut_ptr().add(i), v_res);
+                    _mm256_storeu_ps(self.scratch_re.as_mut_ptr().add(i), v_res);
                     i += 8;
                 }
                 while i < n {
@@ -713,15 +720,15 @@ impl SpectralProcessor {
                 let v_norm = _mm256_set1_ps(norm);
                 let mut i = 0;
                 while i + 8 <= n {
-                    let v_re = _mm256_load_ps(self.scratch_re.as_ptr().add(i));
-                    let v_win = _mm256_load_ps(self.window.as_ptr().add(i));
+                    let v_re = _mm256_loadu_ps(self.scratch_re.as_ptr().add(i));
+                    let v_win = _mm256_loadu_ps(self.window.as_ptr().add(i));
                     let v_val = _mm256_mul_ps(_mm256_mul_ps(v_re, v_norm), v_win);
 
                     let mut res = [0.0f32; 8];
                     _mm256_storeu_ps(res.as_mut_ptr(), v_val);
                     for j in 0..8 {
                         let target_ptr = (self.out_ptr + i + j) & mask;
-                        self.out_buffer[target_ptr] += res[j];
+                        unsafe { *self.out_buffer.get_unchecked_mut(target_ptr) += *res.get_unchecked(j); }
                     }
                     i += 8;
                 }
@@ -742,9 +749,11 @@ impl SpectralProcessor {
 
         #[cfg(not(target_arch = "x86_64"))]
         for i in 0..n {
-            let val = (self.scratch_re[i] * norm) * self.window[i];
-            let target_ptr = (self.out_ptr + i) & mask;
-            self.out_buffer[target_ptr] += val;
+            unsafe {
+                let val = (*self.scratch_re.get_unchecked(i) * norm) * *self.window.get_unchecked(i);
+                let target_ptr = (self.out_ptr + i) & mask;
+                *self.out_buffer.get_unchecked_mut(target_ptr) += val;
+            }
         }
     }
 }
@@ -1098,8 +1107,8 @@ impl SimdBiquad {
             vst1q_f32(out0.as_mut_ptr(), y0);
             vst1q_f32(out1.as_mut_ptr(), y1);
 
-            for ch in 0..4 { unsafe { *outputs[ch].add(i) = out0[ch] } ; }
-            for ch in 0..4 { unsafe { *outputs[ch+4].add(i) = out1[ch] } ; }
+            for ch in 0..4 { unsafe { *outputs.get_unchecked(ch).add(i) = out0[ch] } ; }
+            for ch in 0..4 { unsafe { *outputs.get_unchecked(ch+4).add(i) = out1[ch] } ; }
         }
 
         vst1q_f32(self.z1.as_mut_ptr(), z1_0);
@@ -1125,11 +1134,11 @@ impl SimdBiquad {
         let mut z2 = _mm512_loadu_ps(self.z2.as_ptr());
 
         for i in 0..len {
-            let x = _mm512_set_ps(
-                *inputs[15].add(i), *inputs[14].add(i), *inputs[13].add(i), *inputs[12].add(i),
-                *inputs[11].add(i), *inputs[10].add(i), *inputs[9].add(i), *inputs[8].add(i),
-                *inputs[7].add(i), *inputs[6].add(i), *inputs[5].add(i), *inputs[4].add(i),
-                *inputs[3].add(i), *inputs[2].add(i), *inputs[1].add(i), *inputs[0].add(i)
+            let x = _mm512_setr_ps(
+                *inputs[0].add(i), *inputs[1].add(i), *inputs[2].add(i), *inputs[3].add(i),
+                *inputs[4].add(i), *inputs[5].add(i), *inputs[6].add(i), *inputs[7].add(i),
+                *inputs[8].add(i), *inputs[9].add(i), *inputs[10].add(i), *inputs[11].add(i),
+                *inputs[12].add(i), *inputs[13].add(i), *inputs[14].add(i), *inputs[15].add(i)
             );
 
             let y = _mm512_add_ps(_mm512_mul_ps(x, b0), z1);
@@ -1138,7 +1147,7 @@ impl SimdBiquad {
 
             let mut out_v = [0.0f32; 16];
             _mm512_storeu_ps(out_v.as_mut_ptr(), y);
-            for ch in 0..16 { *outputs[ch].add(i) = out_v[ch]; }
+            for ch in 0..16 { *outputs.get_unchecked(ch).add(i) = out_v[ch]; }
         }
 
         _mm512_storeu_ps(self.z1.as_mut_ptr(), z1);
@@ -1169,9 +1178,9 @@ impl SimdBiquad {
             // But they are separate buffers.
 
             for i in 0..len {
-                let x = _mm256_set_ps(
-                    *inputs[7].add(i), *inputs[6].add(i), *inputs[5].add(i), *inputs[4].add(i),
-                    *inputs[3].add(i), *inputs[2].add(i), *inputs[1].add(i), *inputs[0].add(i)
+                let x = _mm256_setr_ps(
+                    *inputs[0].add(i), *inputs[1].add(i), *inputs[2].add(i), *inputs[3].add(i),
+                    *inputs[4].add(i), *inputs[5].add(i), *inputs[6].add(i), *inputs[7].add(i)
                 );
 
                 let y = _mm256_add_ps(_mm256_mul_ps(x, b0), z1);
@@ -1180,7 +1189,7 @@ impl SimdBiquad {
 
                 let mut out_v = [0.0f32; 8];
                 _mm256_storeu_ps(out_v.as_mut_ptr(), y);
-                for ch in 0..8 { *outputs[ch].add(i) = out_v[ch]; }
+                for ch in 0..8 { *outputs.get_unchecked(ch).add(i) = out_v[ch]; }
             }
 
             _mm256_storeu_ps(self.z1.as_mut_ptr(), z1);

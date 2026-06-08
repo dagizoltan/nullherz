@@ -98,21 +98,25 @@ impl TaskPool {
                         let offset = job.sub_block_offset;
 
                         for i in 0..input_count {
-                            let p_idx = job.input_indices[i];
+                            let p_idx = *job.input_indices.get(i).unwrap_or(&0);
                             if p_idx >= 64 {
                                 let x_idx = p_idx - 64;
-                                unsafe { node_inputs_storage[i] = &(&(*job.x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
-                            } else {
-                                unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx.min(63))).data)[offset..offset + num_samples]; }
+                                if x_idx < 8 {
+                                    unsafe { node_inputs_storage[i] = &(&(*job.x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
+                                }
+                            } else if p_idx < 64 {
+                                unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[offset..offset + num_samples]; }
                             }
                         }
 
                         let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
                         let output_count = job.output_count.min(16);
                         for i in 0..output_count {
-                            let p_idx = job.output_indices[i].min(63);
-                            unsafe {
-                                node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr().add(offset), num_samples);
+                            let p_idx = *job.output_indices.get(i).unwrap_or(&0);
+                            if p_idx < 64 {
+                                unsafe {
+                                    node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr().add(offset), num_samples);
+                                }
                             }
                         }
 
@@ -448,15 +452,17 @@ impl ProcessorGraph {
             return;
         }
 
-        #[cfg(debug_assertions)]
-        self.verify_no_hazards(inactive);
+        // Production Hardening: Verify topology for hazards before commitment
+        if let Err(msg) = self.verify_no_hazards_prod(inactive) {
+            eprintln!("CRITICAL: Refusing to commit hazardous topology: {}", msg);
+            return;
+        }
 
         self.active_topo_idx.store(inactive, Ordering::Release);
         self.needs_commit = false;
     }
 
-    #[cfg(debug_assertions)]
-    fn verify_no_hazards(&self, topo_idx: usize) {
+    fn verify_no_hazards_prod(&self, topo_idx: usize) -> Result<(), String> {
         let topo = &self.topologies[topo_idx];
         for s_idx in 0..topo.num_stages {
             let stage = &topo.stages[s_idx][..topo.stage_counts[s_idx]];
@@ -464,15 +470,16 @@ impl ProcessorGraph {
             for &n_idx in stage {
                 let routing = &topo.routing[n_idx];
                 for k in 0..routing.output_count {
-                    let v_out = routing.output_indices[k].min(63);
-                    let p_out = topo.virtual_to_physical[v_out].min(63);
+                    let v_out = *routing.output_indices.get(k).unwrap_or(&0).min(&63);
+                    let p_out = *topo.virtual_to_physical.get(v_out).unwrap_or(&0).min(&63);
                     if physical_writes[p_out] {
-                        panic!("CRITICAL: WAW Hazard detected in topology at stage {}. Multiple nodes writing to physical buffer {}.", s_idx, p_out);
+                        return Err(format!("WAW Hazard at stage {}. Node {} attempts to write to physical buffer {} which is already used in this stage.", s_idx, n_idx, p_out));
                     }
                     physical_writes[p_out] = true;
                 }
             }
         }
+        Ok(())
     }
 
     pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
@@ -607,18 +614,20 @@ impl AudioProcessor for ProcessorGraph {
 
                         if p_idx >= 64 {
                             let x_idx = p_idx - 64;
-                            unsafe { node_inputs_storage[i] = &(&(*x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
-                        } else {
+                            if x_idx < 8 {
+                                unsafe { node_inputs_storage[i] = &(&(*x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
+                            }
+                        } else if p_idx < 64 {
                             let offset = context.sub_block_offset;
-                            unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx.min(63))).data)[offset..offset + num_samples]; }
+                            unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[offset..offset + num_samples]; }
                         }
                     }
                     let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
                     let output_count = routing.output_count.min(16);
                     let offset = context.sub_block_offset;
                     for i in 0..output_count {
-                        let v_idx = routing.output_indices[i].min(63);
-                        let p_idx = topo.virtual_to_physical[v_idx].min(63);
+                        let v_idx = routing.output_indices.get(i).copied().unwrap_or(0).min(63);
+                        let p_idx = topo.virtual_to_physical.get(v_idx).copied().unwrap_or(0).min(63);
                         unsafe {
                             node_outputs_reconstructed[i] = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr().add(offset), num_samples);
                         }

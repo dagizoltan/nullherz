@@ -26,6 +26,14 @@ pub struct Transport {
 pub const MAX_CHANNELS: usize = 16;
 
 pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
+    thread_local! {
+        static INITIALIZED: std::cell::Cell<bool> = std::cell::Cell::new(false);
+    }
+
+    if INITIALIZED.with(|i| i.get()) && cpu_id.is_none() {
+        return;
+    }
+
     let _ = ipc_layer::set_rt_priority(priority);
 
     #[cfg(target_os = "linux")]
@@ -54,4 +62,6 @@ pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
         fpcr |= 1 << 24;
         std::arch::asm!("msr fpcr, {}", in(reg) fpcr);
     }
+
+    INITIALIZED.with(|i| i.set(true));
 }

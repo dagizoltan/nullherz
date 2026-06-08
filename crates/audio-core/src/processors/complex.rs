@@ -23,6 +23,26 @@ impl AudioProcessor for WavetableProcessor {
         let fm_storage = [0.0f32; 128];
         let pm_storage = [0.0f32; 128];
 
+        // Optimization: Use AVX2 multi-channel path if exactly 8 channels are available
+        #[cfg(target_arch = "x86_64")]
+        if num_channels == 8 && is_x86_feature_detected!("avx2") {
+            let mut fm_ptrs = [std::ptr::null(); 8];
+            let mut pm_ptrs = [std::ptr::null(); 8];
+            let mut out_ptrs = [std::ptr::null_mut(); 8];
+
+            let fm_default = if inputs.len() > 0 { inputs[0] } else { &fm_storage[..len] };
+            let pm_default = if inputs.len() > 1 { inputs[1] } else { &pm_storage[..len] };
+
+            for ch in 0..8 {
+                fm_ptrs[ch] = fm_default.as_ptr();
+                pm_ptrs[ch] = pm_default.as_ptr();
+                out_ptrs[ch] = outputs[ch].as_mut_ptr();
+            }
+
+            unsafe { self.inner.process_8_channels_avx2(fm_ptrs, pm_ptrs, out_ptrs, len); }
+            return;
+        }
+
         for ch in 0..num_channels {
             let fm = if inputs.len() > 0 { inputs[0] } else { &fm_storage[..len] };
             let pm = if inputs.len() > 1 { inputs[1] } else { &pm_storage[..len] };
