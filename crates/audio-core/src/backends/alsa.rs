@@ -109,7 +109,7 @@ impl AudioBackend for AlsaBackend {
                 (alsa.snd_pcm_hw_params_set_rate_near)(pcm, hw_params, &mut rate, std::ptr::null_mut());
 
                 if (rate as f32 - engine.target_sample_rate).abs() > 0.1 {
-                    eprintln!("ALSA: Failed to negotiate target rate {}. Got {}.", engine.target_sample_rate, rate);
+                    engine.logger.log(crate::rt_logging::RtLogLevel::Error, "ALSA Rate Mismatch", 0);
                     (alsa.snd_pcm_hw_params_free)(hw_params);
                     (alsa.snd_pcm_close)(pcm);
                     return None;

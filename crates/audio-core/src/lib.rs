@@ -3,6 +3,7 @@ pub mod processors;
 pub mod engine;
 pub mod telemetry;
 pub mod error;
+pub mod rt_logging;
 
 #[cfg(test)]
 mod engine_tests;

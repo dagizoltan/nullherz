@@ -2,8 +2,10 @@ pub mod standard;
 pub mod sidecar;
 pub mod complex;
 pub mod graph;
+pub mod topology;
 
 pub use graph::{ProcessorGraph, ProcessorNode, GraphTopology, NodeRouting, CrossfadeState, TaskPool};
+pub use topology::TopologyManager;
 pub use sidecar::SidecarProcessor;
 pub use standard::{GainProcessor, BiquadProcessor, SimdBiquadProcessor, CrossfaderProcessor, SummingProcessor};
 pub use complex::{WavetableProcessor, SpectralProcessor, ModulationProcessor};

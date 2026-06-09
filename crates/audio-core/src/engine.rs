@@ -6,6 +6,7 @@ use ipc_layer::{Producer, Consumer};
 use control_plane::TimestampedCommand;
 use crate::processors::{AudioProcessor, TaskPool, ProcessContext};
 use crate::telemetry::Telemetry;
+use crate::rt_logging::{RtLogger, RtLogLevel};
 
 pub struct AudioEngine {
     command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
@@ -26,6 +27,7 @@ pub struct AudioEngine {
     pub pool: Option<TaskPool>,
     pub transport: crate::Transport,
     pub target_sample_rate: f32,
+    pub logger: Arc<RtLogger>,
 }
 
 impl AudioEngine {
@@ -63,6 +65,7 @@ impl AudioEngine {
                 sample_rate: 44100.0,
             },
             target_sample_rate: 44100.0,
+            logger: Arc::new(RtLogger::new(256)),
         }
     }
 
@@ -99,8 +102,7 @@ impl AudioEngine {
     }
     pub fn set_config(&mut self, config: crate::AudioConfig) {
         if (config.sample_rate - self.target_sample_rate).abs() > 0.1 {
-            eprintln!("CRITICAL ERROR: Hardware sample rate ({}) does not match target engine rate ({})", config.sample_rate, self.target_sample_rate);
-            // In a production scenario, we might want to shut down or trigger a bypass here.
+            self.logger.log(RtLogLevel::Error, "Hardware rate mismatch", self.sample_counter);
         }
         self.transport.sample_rate = config.sample_rate;
         let graph_ptr = self.active_graph.load(Ordering::Acquire);
