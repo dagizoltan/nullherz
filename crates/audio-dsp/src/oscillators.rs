@@ -117,14 +117,10 @@ impl WavetableOscillator {
 
     pub fn process_8_channels(&mut self, fm: [*const f32; 8], pm: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
         use wide::*;
-        let mut b_phases = f32x8::new([
-            self.phases[0], self.phases[1], self.phases[2], self.phases[3],
-            self.phases[4], self.phases[5], self.phases[6], self.phases[7]
-        ]);
-        let b_base_incs = f32x8::new([
-            self.phase_incs[0], self.phase_incs[1], self.phase_incs[2], self.phase_incs[3],
-            self.phase_incs[4], self.phase_incs[5], self.phase_incs[6], self.phase_incs[7]
-        ]);
+        use crate::simd_vec::*;
+
+        let mut b_phases = load_f32x8(&self.phases, 0);
+        let b_base_incs = load_f32x8(&self.phase_incs, 0);
         let b_2048 = f32x8::from(2048.0);
         let b_1 = f32x8::from(1.0);
 
@@ -172,7 +168,6 @@ impl WavetableOscillator {
             b_phases += wrap_neg_mask.blend(b_2048, f32x8::ZERO);
         }
 
-        let final_phases: [f32; 8] = b_phases.into();
-        self.phases[0..8].copy_from_slice(&final_phases);
+        store_f32x8(&mut self.phases, 0, b_phases);
     }
 }

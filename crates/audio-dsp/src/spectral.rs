@@ -73,25 +73,23 @@ impl SpectralProcessor {
     }
 
     pub fn complex_mul_accumulate_simd(re: &mut [f32], im: &mut [f32], hr: &[f32], hi: &[f32], ir: &[f32], ii: &[f32]) {
-        use wide::*;
+        use crate::simd_vec::*;
         let n = re.len();
         let mut i = 0;
         while i + 8 <= n {
-            let v_hr = f32x8::new(hr[i..i+8].try_into().unwrap());
-            let v_hi = f32x8::new(hi[i..i+8].try_into().unwrap());
-            let v_ir = f32x8::new(ir[i..i+8].try_into().unwrap());
-            let v_ii = f32x8::new(ii[i..i+8].try_into().unwrap());
+            let v_hr = load_f32x8(hr, i);
+            let v_hi = load_f32x8(hi, i);
+            let v_ir = load_f32x8(ir, i);
+            let v_ii = load_f32x8(ii, i);
 
-            let v_re = f32x8::new(re[i..i+8].try_into().unwrap());
-            let v_im = f32x8::new(im[i..i+8].try_into().unwrap());
+            let v_re = load_f32x8(re, i);
+            let v_im = load_f32x8(im, i);
 
             let res_re = v_re + (v_hr * v_ir - v_hi * v_ii);
             let res_im = v_im + (v_hr * v_ii + v_hi * v_ir);
 
-            let arr_re: [f32; 8] = res_re.into();
-            re[i..i+8].copy_from_slice(&arr_re);
-            let arr_im: [f32; 8] = res_im.into();
-            im[i..i+8].copy_from_slice(&arr_im);
+            store_f32x8(re, i, res_re);
+            store_f32x8(im, i, res_im);
             i += 8;
         }
         while i < n {
@@ -125,14 +123,13 @@ impl SpectralProcessor {
         self.scratch_im.fill(0.0);
 
         {
-            use wide::*;
+            use crate::simd_vec::*;
             let mut i = 0;
             while i + 8 <= n {
-                let v_in = f32x8::new(self.in_buffer[i..i+8].try_into().unwrap());
-                let v_win = f32x8::new(self.window[i..i+8].try_into().unwrap());
+                let v_in = load_f32x8(&self.in_buffer, i);
+                let v_win = load_f32x8(&self.window, i);
                 let v_res = v_in * v_win;
-                let arr_res: [f32; 8] = v_res.into();
-                self.scratch_re[i..i+8].copy_from_slice(&arr_res);
+                store_f32x8(&mut self.scratch_re, i, v_res);
                 i += 8;
             }
             while i < n {
@@ -181,12 +178,13 @@ impl SpectralProcessor {
         let mask = self.out_mask;
 
         {
+            use crate::simd_vec::*;
             use wide::*;
             let v_norm = f32x8::from(norm);
             let mut i = 0;
             while i + 8 <= n {
-                let v_re = f32x8::new(self.scratch_re[i..i+8].try_into().unwrap());
-                let v_win = f32x8::new(self.window[i..i+8].try_into().unwrap());
+                let v_re = load_f32x8(&self.scratch_re, i);
+                let v_win = load_f32x8(&self.window, i);
                 let v_val = (v_re * v_norm) * v_win;
 
                 let res: [f32; 8] = v_val.into();

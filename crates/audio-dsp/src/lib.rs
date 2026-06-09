@@ -39,6 +39,7 @@ impl SummingNode {
 
     pub fn process_16_to_1_simd(&self, inputs: &[&[f32]], output: &mut [f32]) {
         use wide::*;
+        use crate::simd_vec::*;
         let len = output.len();
         output.fill(0.0);
         let b_gain = f32x8::from(self.gain);
@@ -48,11 +49,10 @@ impl SummingNode {
             let process_len = len.min(input_len);
             let mut i = 0;
             while i + 8 <= process_len {
-                let v_in = f32x8::new(input[i..i+8].try_into().unwrap());
-                let v_out = f32x8::new(output[i..i+8].try_into().unwrap());
+                let v_in = load_f32x8(input, i);
+                let v_out = load_f32x8(output, i);
                 let res = v_out + (v_in * b_gain);
-                let arr_res: [f32; 8] = res.into();
-                output[i..i+8].copy_from_slice(&arr_res);
+                store_f32x8(output, i, res);
                 i += 8;
             }
             while i < process_len {
@@ -89,6 +89,7 @@ impl Crossfader {
 
     pub fn process_block_simd(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
         use wide::*;
+        use crate::simd_vec::*;
         let len = output.len();
         let gain_b = self.position.sqrt();
         let gain_a = (1.0 - self.position).sqrt();
@@ -97,11 +98,10 @@ impl Crossfader {
 
         let mut i = 0;
         while i + 8 <= len {
-            let va = f32x8::new(input_a[i..i+8].try_into().unwrap());
-            let vb = f32x8::new(input_b[i..i+8].try_into().unwrap());
+            let va = load_f32x8(input_a, i);
+            let vb = load_f32x8(input_b, i);
             let res = (va * b_gain_a) + (vb * b_gain_b);
-            let arr_res: [f32; 8] = res.into();
-            output[i..i+8].copy_from_slice(&arr_res);
+            store_f32x8(output, i, res);
             i += 8;
         }
         while i < len {

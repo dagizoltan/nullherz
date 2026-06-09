@@ -52,7 +52,7 @@ impl AudioProcessor for BiquadProcessor {
         let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
 
         for (ch, filter) in self.filters.iter_mut().enumerate().take(num_channels) {
-            filter.process_block_simd(inputs[ch], outputs[ch]);
+            filter.process_block_unrolled(inputs[ch], outputs[ch]);
         }
     }
 

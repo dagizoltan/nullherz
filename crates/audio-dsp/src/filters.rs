@@ -72,8 +72,8 @@ impl BiquadFilter {
         }
     }
 
-    /// Optimized block processing using SIMD.
-    pub fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
+    /// Optimized block processing using scalar unrolling.
+    pub fn process_block_unrolled(&mut self, input: &[f32], output: &mut [f32]) {
         let len = input.len();
         if len == 0 { return; }
 
