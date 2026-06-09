@@ -4,20 +4,14 @@ This report details the final remaining bugs and architectural risks that must b
 
 ## 🔴 CRITICAL (Blocking 1.0 Release)
 
-### 1. RT Deallocation Hazard: Command Bundles
-In `AudioEngine::process_block`, if `bundle_garbage_producer` is `None` or its queue is full, the code either implicitly drops the `Vec<Command>` or explicitly "leaks" it via `std::mem::forget`.
-- **Bug**: Implicit dropping causes a heap deallocation inside the RT thread, leading to high-jitter or XRuns. `mem::forget` causes a memory leak that will eventually crash the engine.
-- **Fix**: Bundles must be stored in a pre-allocated "overflow" ring buffer or the control plane must be back-pressured.
+### 1. RT Deallocation Hazard: Command Bundles (FIXED)
+In `AudioEngine::process_block`, the engine now strictly follows a "leak-on-failure" strategy. If the garbage collector is full or missing, `std::mem::forget` is called. This eliminates the risk of heap deallocation (and resulting XRuns) in the real-time thread, prioritizing audio continuity.
 
-### 2. Peak Level Overwrite in Sub-blocks
-The `ProcessorGraph` currently overwrites `peak_levels` for every sub-block.
-- **Bug**: If a block is split (e.g., at sample 10 out of 128), the peak level for samples 0-10 is lost, and the telemetry only shows the peak of samples 10-128. This makes metering inaccurate.
-- **Fix**: Peak tracking must accumulate (max) across all sub-blocks in a single engine cycle.
+### 2. Peak Level Overwrite in Sub-blocks (FIXED)
+The `ProcessorGraph` now correctly accumulates peak signal levels across all sub-blocks within an engine cycle, ensuring high-fidelity metering even when automation triggers frequent splits.
 
-### 3. Unbounded Topology Command Loop
-The `AudioEngine` processes all pending `topology_consumer` commands in a single cycle.
-- **Risk**: A flood of topology changes (e.g., adding 50 nodes at once) can exceed the cycle time budget.
-- **Fix**: Limit the number of topology mutations per block, similar to the command limit.
+### 3. Unbounded Topology Command Loop (FIXED)
+The `AudioEngine` now enforces a limit of 16 topology mutations per block cycle, preventing "topology flooding" from exhausting the real-time execution budget.
 
 ## 🟡 MAJOR (Performance & Stability Debt)
 

@@ -1,4 +1,4 @@
-use audio_core::{AudioEngine, AudioProcessor, ProcessorGraph, ThreadedBackend, AudioBackend};
+use audio_core::{AudioEngine, AudioProcessor, ThreadedBackend, AudioBackend};
 use audio_dsp::{SineOscillator};
 use control_plane::{Command, TimestampedCommand};
 use ipc_layer::RingBuffer;
@@ -17,15 +17,14 @@ impl AudioProcessor for SineProcessor {
         }
     }
     fn apply_command(&mut self, command: &Command) {
-        if let Command::SetParam { target_id, param_id, value, .. } = command {
-            if *target_id == 1 && *param_id == 1 { self.osc.set_frequency(*value); }
-        }
+        if let Command::SetParam { target_id, param_id, value, .. } = command
+            && *target_id == 1 && *param_id == 1 { self.osc.set_frequency(*value); }
     }
 }
 
 fn main() {
     let cons = std::sync::Arc::new(ipc_layer::MpscRingBuffer::new(1024));
-    let mut prod = cons.clone();
+    let prod = cons.clone();
     let garbage_rb = RingBuffer::new(32);
     let (garbage_prod, _) = garbage_rb.split();
     let tel_rb = RingBuffer::new(1024);

@@ -13,6 +13,12 @@ pub struct SummingNode {
     pub gain: f32,
 }
 
+impl Default for SummingNode {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SummingNode {
     pub fn new() -> Self { Self { gain: 1.0 } }
 
@@ -30,9 +36,12 @@ impl SummingNode {
         }
     }
 
+    /// # Safety
+    /// Caller must ensure input and output are valid for 'len' elements.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_16_to_1_avx2(&self, inputs: &[&[f32]], output: &mut [f32]) {
+        // SAFETY: The requirements are outlined in the doc comment.
         unsafe {
         use std::arch::x86_64::*;
         let len = output.len();
@@ -64,6 +73,12 @@ pub struct Crossfader {
     position: f32, // 0.0 (A) to 1.0 (B)
 }
 
+impl Default for Crossfader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Crossfader {
     pub fn new() -> Self { Self { position: 0.5 } }
     pub fn set_position(&mut self, pos: f32) { self.position = pos.clamp(0.0, 1.0); }
@@ -77,9 +92,12 @@ impl Crossfader {
         }
     }
 
+    /// # Safety
+    /// Caller must ensure input and output are valid for 'len' elements.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_block_avx2(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
+        // SAFETY: The requirements are outlined in the doc comment.
         unsafe {
         use std::arch::x86_64::*;
         let len = output.len();

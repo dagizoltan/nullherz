@@ -16,13 +16,14 @@ pub struct SidecarHandle {
     pub last_heartbeat_version: u64,
 }
 
+#[derive(Default)]
 pub struct SidecarManager {
     active_sidecars: Vec<SidecarHandle>,
 }
 
 impl SidecarManager {
     pub fn new() -> Self {
-        Self { active_sidecars: Vec::new() }
+        Self::default()
     }
 
     pub fn spawn_sidecar(&mut self, name: &str, binary_path: &str, num_channels: usize) -> Result<SidecarProcessor, String> {
@@ -186,13 +187,14 @@ impl Drop for SidecarManager {
     }
 }
 
+#[derive(Default)]
 pub struct SidecarRegistry {
     pub known_binaries: Vec<String>,
 }
 
 impl SidecarRegistry {
     pub fn new() -> Self {
-        Self { known_binaries: Vec::new() }
+        Self::default()
     }
 
     pub fn scan_directory(&mut self, path: &str) -> Result<(), String> {
@@ -200,10 +202,8 @@ impl SidecarRegistry {
         for entry in entries {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
-            if path.is_file() {
-                if let Some(s) = path.to_str() {
-                    self.known_binaries.push(s.to_string());
-                }
+            if let Some(s) = path.to_str().filter(|_| path.is_file()) {
+                self.known_binaries.push(s.to_string());
             }
         }
         Ok(())

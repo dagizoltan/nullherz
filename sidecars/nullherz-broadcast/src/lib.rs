@@ -7,7 +7,7 @@ pub struct BroadcastSidecar {
     #[allow(dead_code)]
     sample_rate: f32,
     tx: Option<mpsc::SyncSender<ipc_layer::AudioBlock>>,
-    rt: Arc<tokio::runtime::Runtime>,
+    _rt: Arc<tokio::runtime::Runtime>,
 }
 
 impl BroadcastSidecar {
@@ -42,7 +42,7 @@ impl BroadcastSidecar {
             is_active: false,
             sample_rate,
             tx: Some(tx),
-            rt,
+            _rt: rt,
         }
     }
 }

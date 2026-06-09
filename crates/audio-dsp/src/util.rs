@@ -8,30 +8,35 @@ pub struct AlignedBuffer {
 impl AlignedBuffer {
     pub fn new(size: usize) -> Self {
         let layout = std::alloc::Layout::from_size_align(size * std::mem::size_of::<f32>(), 64).unwrap();
+        // SAFETY: AlignedBuffer ensures 64-byte alignment and zero-initialization.
         let ptr = unsafe { std::alloc::alloc_zeroed(layout) as *mut f32 };
         if ptr.is_null() { std::alloc::handle_alloc_error(layout); }
         Self { ptr, size, layout }
     }
 }
 
+// SAFETY: AlignedBuffer owns its data and provides thread-safe access to its contents.
 unsafe impl Send for AlignedBuffer {}
 unsafe impl Sync for AlignedBuffer {}
 
 impl std::ops::Deref for AlignedBuffer {
     type Target = [f32];
     fn deref(&self) -> &Self::Target {
+        // SAFETY: ptr is valid for 'size' elements as guaranteed by new().
         unsafe { std::slice::from_raw_parts(self.ptr, self.size) }
     }
 }
 
 impl std::ops::DerefMut for AlignedBuffer {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        // SAFETY: ptr is valid and unique as AlignedBuffer owns the allocation.
         unsafe { std::slice::from_raw_parts_mut(self.ptr, self.size) }
     }
 }
 
 impl Drop for AlignedBuffer {
     fn drop(&mut self) {
+        // SAFETY: layout matches the one used in alloc_zeroed().
         unsafe { std::alloc::dealloc(self.ptr as *mut u8, self.layout); }
     }
 }
@@ -39,6 +44,12 @@ impl Drop for AlignedBuffer {
 /// A high-fidelity Lagrange 4-point resampler.
 pub struct LagrangeResampler {
     pub history: [f32; 4],
+}
+
+impl Default for LagrangeResampler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LagrangeResampler {

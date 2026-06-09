@@ -8,6 +8,27 @@ pub use sidecar::SidecarProcessor;
 pub use standard::{GainProcessor, BiquadProcessor, SimdBiquadProcessor, CrossfaderProcessor, SummingProcessor};
 pub use complex::{WavetableProcessor, SpectralProcessor, ModulationProcessor};
 
+pub enum TopologyMutation {
+    UpdateEdge {
+        node_idx: u32,
+        input_idx: u32,
+        new_buffer_idx: u32,
+    },
+    UpdateOutputEdge {
+        node_idx: u32,
+        output_idx: u32,
+        new_buffer_idx: u32,
+    },
+    SwapProcessor {
+        node_idx: u32,
+        processor: Box<dyn AudioProcessor>,
+    },
+    AddNode {
+        node_idx: u32,
+        processor: Box<dyn AudioProcessor>,
+    },
+}
+
 /// Shared execution context passed to processors during the audio block cycle.
 pub struct ProcessContext<'a> {
     /// Reference to the engine's worker task pool for parallel processing.
@@ -33,7 +54,7 @@ pub trait AudioProcessor: Send {
     fn apply_command(&mut self, _command: &control_plane::Command) {}
 
     /// Applies structural graph mutations to the processor (routing, swapping).
-    fn apply_topology_command(&mut self, _command: &control_plane::TopologyCommand) {}
+    fn apply_topology_mutation(&mut self, _mutation: TopologyMutation) {}
 
     /// Gathers performance and signal telemetry from the processor.
     fn collect_telemetry(&self, _node_times: &mut [u64; 64], _peak_levels: &mut [f32; 64]) {}

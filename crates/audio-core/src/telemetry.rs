@@ -9,7 +9,7 @@ pub struct Telemetry {
     pub sample_counter: u64,
     pub xrun_count: u32,
     #[serde(with = "BigArray")]
-    pub node_times_ns: [u64; 64],
+    pub node_times_ns: [u64; crate::MAX_NODES],
     #[serde(with = "BigArray")]
-    pub peak_levels: [f32; 64],
+    pub peak_levels: [f32; crate::MAX_NODES],
 }

@@ -43,6 +43,9 @@ pub struct AudioBlock {
     pub len: u32,
 }
 
+const _: () = assert!(std::mem::size_of::<AudioBlock>() == 1088); // 256*4 + 4 padded to 64
+const _: () = assert!(std::mem::align_of::<AudioBlock>() == 64);
+
 /// A status-flagged item for the ring buffer to ensure stable layout for IPC.
 #[repr(C)]
 pub struct ShmSlot<T> {
@@ -86,6 +89,8 @@ impl<T: Copy> ShmRingBuffer<T> {
         (buffer_layout.pad_to_align(), offset)
     }
 
+    /// # Safety
+    /// ptr must be a valid pointer to a memory region of the size returned by `layout(capacity)`.
     pub unsafe fn init(ptr: *mut u8, capacity: usize) -> *mut Self {
         let (_, offset) = Self::layout(capacity);
         let rb_ptr = ptr as *mut Self;
@@ -222,8 +227,8 @@ pub fn set_rt_priority(priority: i32) -> Result<(), IpcError> {
 
 pub fn set_rt_priority_for(pid: i32, priority: i32) -> Result<(), IpcError> {
     unsafe {
-        let mut param = libc::sched_param { sched_priority: priority };
-        let result = libc::sched_setscheduler(pid, libc::SCHED_FIFO, &mut param);
+        let param = libc::sched_param { sched_priority: priority };
+        let result = libc::sched_setscheduler(pid, libc::SCHED_FIFO, &param);
         if result == -1 {
             return Err(IpcError::PriorityFailed(format!("PID {}: {}", pid, std::io::Error::last_os_error())));
         }
@@ -236,9 +241,7 @@ pub fn move_to_cgroup(cgroup_name: &str, pid: i32) -> Result<(), IpcError> {
     let procs_path = format!("{}/cgroup.procs", base_path);
 
     if !std::path::Path::new(&base_path).exists() {
-        if let Err(e) = std::fs::create_dir_all(&base_path) {
-            return Err(IpcError::CgroupFailed(format!("Failed to create directory {}: {}", base_path, e)));
-        }
+        std::fs::create_dir_all(&base_path).map_err(|e| IpcError::CgroupFailed(format!("Failed to create directory {}: {}", base_path, e)))?;
     }
 
     std::fs::write(&procs_path, pid.to_string())
@@ -249,6 +252,15 @@ pub fn move_to_cgroup(cgroup_name: &str, pid: i32) -> Result<(), IpcError> {
 pub struct ShmSignal {
     pub(crate) flag: AtomicBool,
     pub(crate) heartbeat: std::sync::atomic::AtomicU64,
+}
+
+const _: () = assert!(std::mem::size_of::<ShmSignal>() == 64);
+const _: () = assert!(std::mem::align_of::<ShmSignal>() == 64);
+
+impl Default for ShmSignal {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ShmSignal {

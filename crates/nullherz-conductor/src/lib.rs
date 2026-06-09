@@ -18,7 +18,13 @@ pub struct Conductor {
     pub backend: Option<Box<dyn AudioBackend>>,
     garbage_consumer: Option<ipc_layer::Consumer<Box<dyn audio_core::AudioProcessor>>>,
     bundle_garbage_consumer: Option<ipc_layer::Consumer<Vec<control_plane::Command>>>,
-    pub topo_producer: Option<ipc_layer::NonRtProducer<control_plane::TopologyCommand>>,
+    pub topo_producer: Option<ipc_layer::NonRtProducer<audio_core::processors::TopologyMutation>>,
+}
+
+impl Default for Conductor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Conductor {
@@ -44,7 +50,7 @@ impl Conductor {
         let cmd_cons = cmd_buffer.clone();
         let (bundle_garbage_prod, bundle_garbage_cons) = RingBuffer::<Vec<control_plane::Command>>::new(16).split();
         let (_, bundle_cons) = RingBuffer::<Vec<control_plane::Command>>::new(16).split();
-        let (topo_prod, topo_cons) = RingBuffer::new(64).split();
+        let (topo_prod, topo_cons) = RingBuffer::<audio_core::processors::TopologyMutation>::new(64).split();
         let topo_prod = ipc_layer::NonRtProducer::new(topo_prod);
         let (garbage_prod, garbage_cons) = RingBuffer::new(1024).split();
         let (tel_prod, tel_cons) = RingBuffer::new(1024).split();

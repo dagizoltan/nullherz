@@ -52,7 +52,7 @@ impl SpectralProcessor {
 
     pub fn set_ir(&mut self, ir_data: &[f32]) {
         let n = self.fft.size;
-        let num_partitions = (ir_data.len() + self.hop_size - 1) / self.hop_size;
+        let num_partitions = ir_data.len().div_ceil(self.hop_size);
         self.ir_re = (0..num_partitions).map(|_| AlignedBuffer::new(n)).collect();
         self.ir_im = (0..num_partitions).map(|_| AlignedBuffer::new(n)).collect();
         self.history_re = (0..num_partitions).map(|_| AlignedBuffer::new(n)).collect();
@@ -74,25 +74,29 @@ impl SpectralProcessor {
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
+    /// # Safety
+    /// Caller must ensure all slices have the same length and are valid for reading/writing.
     pub unsafe fn complex_mul_accumulate_avx2(re: &mut [f32], im: &mut [f32], hr: &[f32], hi: &[f32], ir: &[f32], ii: &[f32]) {
         use std::arch::x86_64::*;
         let n = re.len();
         let mut i = 0;
+        // SAFETY: The caller ensures that re, im, hr, hi, ir, and ii all have the same length 'n'
+        // and that they are correctly aligned for AVX2 operations (or unaligned loads are used).
         while i + 8 <= n {
-            let v_hr = unsafe { _mm256_loadu_ps(hr.as_ptr().add(i)) };
-            let v_hi = unsafe { _mm256_loadu_ps(hi.as_ptr().add(i)) };
-            let v_ir = unsafe { _mm256_loadu_ps(ir.as_ptr().add(i)) };
-            let v_ii = unsafe { _mm256_loadu_ps(ii.as_ptr().add(i)) };
-
-            let v_re = unsafe { _mm256_loadu_ps(re.as_ptr().add(i)) };
-            let v_im = unsafe { _mm256_loadu_ps(im.as_ptr().add(i)) };
-
-            // re = re + (hr * ir - hi * ii)
-            let res_re = _mm256_add_ps(v_re, _mm256_sub_ps(_mm256_mul_ps(v_hr, v_ir), _mm256_mul_ps(v_hi, v_ii)));
-            // im = im + (hr * ii + hi * ir)
-            let res_im = _mm256_add_ps(v_im, _mm256_add_ps(_mm256_mul_ps(v_hr, v_ii), _mm256_mul_ps(v_hi, v_ir)));
-
             unsafe {
+                let v_hr = _mm256_loadu_ps(hr.as_ptr().add(i));
+                let v_hi = _mm256_loadu_ps(hi.as_ptr().add(i));
+                let v_ir = _mm256_loadu_ps(ir.as_ptr().add(i));
+                let v_ii = _mm256_loadu_ps(ii.as_ptr().add(i));
+
+                let v_re = _mm256_loadu_ps(re.as_ptr().add(i));
+                let v_im = _mm256_loadu_ps(im.as_ptr().add(i));
+
+                // re = re + (hr * ir - hi * ii)
+                let res_re = _mm256_add_ps(v_re, _mm256_sub_ps(_mm256_mul_ps(v_hr, v_ir), _mm256_mul_ps(v_hi, v_ii)));
+                // im = im + (hr * ii + hi * ir)
+                let res_im = _mm256_add_ps(v_im, _mm256_add_ps(_mm256_mul_ps(v_hr, v_ii), _mm256_mul_ps(v_hi, v_ir)));
+
                 _mm256_storeu_ps(re.as_mut_ptr().add(i), res_re);
                 _mm256_storeu_ps(im.as_mut_ptr().add(i), res_im);
             }
@@ -228,7 +232,7 @@ impl SpectralProcessor {
                     _mm256_storeu_ps(res.as_mut_ptr(), v_val);
                     for j in 0..8 {
                         let target_ptr = (self.out_ptr + i + j) & mask;
-                        unsafe { *self.out_buffer.get_unchecked_mut(target_ptr) += *res.get_unchecked(j); }
+                        *self.out_buffer.get_unchecked_mut(target_ptr) += *res.get_unchecked(j);
                     }
                     i += 8;
                 }

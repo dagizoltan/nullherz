@@ -10,6 +10,9 @@ Implemented `verify_no_hazards_prod` in the graph commitment path to formally ch
 ### 2. Sidecar Resource Leakage (FIXED)
 Implemented RAII `Drop` for `SidecarManager` and automated zombie reaping in the conductor to ensure external processes are reaped and SHM segments are unlinked.
 
+### 3. RT Deallocation Safety: Leak-on-Failure (FIXED)
+Implemented a "leak-on-failure" emergency strategy for command bundles and swapped processors. If the garbage collector queue is full, the engine explicitly leaks the memory to prevent a catastrophic real-time stall (XRun). While not a perfect solution for long-term memory management, it prioritizes audio continuity over resource consumption in extreme overload scenarios.
+
 ## 🟡 Performance Debt
 
 ### 1. SIMD Coverage Gaps

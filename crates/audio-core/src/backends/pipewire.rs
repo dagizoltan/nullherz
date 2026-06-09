@@ -25,30 +25,30 @@ struct PwLib {
 impl PwLib {
     fn load() -> Result<Self, String> {
         unsafe {
-            let lib = libc::dlopen(b"libpipewire-0.3.so.0\0".as_ptr() as *const _, libc::RTLD_NOW);
+            let lib = libc::dlopen(c"libpipewire-0.3.so.0".as_ptr(), libc::RTLD_NOW);
             if lib.is_null() { return Err("Could not load libpipewire-0.3.so.0".to_string()); }
-            let load_sym = |name: &[u8]| {
-                let sym = libc::dlsym(lib, name.as_ptr() as *const _);
+            let load_sym = |name: &std::ffi::CStr| {
+                let sym = libc::dlsym(lib, name.as_ptr());
                 if sym.is_null() { None } else { Some(sym) }
             };
             Ok(Self {
                 _handle: lib,
-                pw_init: std::mem::transmute(load_sym(b"pw_init\0").ok_or("pw_init failed")?),
-                pw_thread_loop_new: std::mem::transmute(load_sym(b"pw_thread_loop_new\0").ok_or("pw_thread_loop_new failed")?),
-                pw_thread_loop_start: std::mem::transmute(load_sym(b"pw_thread_loop_start\0").ok_or("pw_thread_loop_start failed")?),
-                pw_thread_loop_stop: std::mem::transmute(load_sym(b"pw_thread_loop_stop\0").ok_or("pw_thread_loop_stop failed")?),
-                pw_thread_loop_get_loop: std::mem::transmute(load_sym(b"pw_thread_loop_get_loop\0").ok_or("pw_thread_loop_get_loop failed")?),
-                pw_context_new: std::mem::transmute(load_sym(b"pw_context_new\0").ok_or("pw_context_new failed")?),
-                pw_core_connect: std::mem::transmute(load_sym(b"pw_core_connect\0").ok_or("pw_core_connect failed")?),
-                pw_stream_new: std::mem::transmute(load_sym(b"pw_stream_new\0").ok_or("pw_stream_new failed")?),
-                pw_stream_add_listener: std::mem::transmute(load_sym(b"pw_stream_add_listener\0").ok_or("pw_stream_add_listener failed")?),
-                pw_stream_connect: std::mem::transmute(load_sym(b"pw_stream_connect\0").ok_or("pw_stream_connect failed")?),
-                _pw_stream_update_params: std::mem::transmute(load_sym(b"pw_stream_update_params\0").ok_or("pw_stream_update_params failed")?),
-                pw_stream_dequeue_buffer: std::mem::transmute(load_sym(b"pw_stream_dequeue_buffer\0").ok_or("pw_stream_dequeue_buffer failed")?),
-                pw_stream_queue_buffer: std::mem::transmute(load_sym(b"pw_stream_queue_buffer\0").ok_or("pw_stream_queue_buffer failed")?),
-                pw_stream_destroy: std::mem::transmute(load_sym(b"pw_stream_destroy\0").ok_or("pw_stream_destroy failed")?),
-                pw_context_destroy: std::mem::transmute(load_sym(b"pw_context_destroy\0").ok_or("pw_context_destroy failed")?),
-                pw_thread_loop_destroy: std::mem::transmute(load_sym(b"pw_thread_loop_destroy\0").ok_or("pw_thread_loop_destroy failed")?),
+                pw_init: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut i32, *mut *mut *mut i8)>(load_sym(c"pw_init").ok_or("pw_init failed")?),
+                pw_thread_loop_new: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*const i8, *const std::ffi::c_void) -> *mut std::ffi::c_void>(load_sym(c"pw_thread_loop_new").ok_or("pw_thread_loop_new failed")?),
+                pw_thread_loop_start: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void) -> i32>(load_sym(c"pw_thread_loop_start").ok_or("pw_thread_loop_start failed")?),
+                pw_thread_loop_stop: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void)>(load_sym(c"pw_thread_loop_stop").ok_or("pw_thread_loop_stop failed")?),
+                pw_thread_loop_get_loop: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void>(load_sym(c"pw_thread_loop_get_loop").ok_or("pw_thread_loop_get_loop failed")?),
+                pw_context_new: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, usize) -> *mut std::ffi::c_void>(load_sym(c"pw_context_new").ok_or("pw_context_new failed")?),
+                pw_core_connect: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, usize) -> *mut std::ffi::c_void>(load_sym(c"pw_core_connect").ok_or("pw_core_connect failed")?),
+                pw_stream_new: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *const i8, *mut std::ffi::c_void) -> *mut std::ffi::c_void>(load_sym(c"pw_stream_new").ok_or("pw_stream_new failed")?),
+                pw_stream_add_listener: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void, *const libc::c_void, *mut libc::c_void)>(load_sym(c"pw_stream_add_listener").ok_or("pw_stream_add_listener failed")?),
+                pw_stream_connect: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, i32, u32, u32, *const std::ffi::c_void, u32) -> i32>(load_sym(c"pw_stream_connect").ok_or("pw_stream_connect failed")?),
+                _pw_stream_update_params: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut *const std::ffi::c_void, u32) -> i32>(load_sym(c"pw_stream_update_params").ok_or("pw_stream_update_params failed")?),
+                pw_stream_dequeue_buffer: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void>(load_sym(c"pw_stream_dequeue_buffer").ok_or("pw_stream_dequeue_buffer failed")?),
+                pw_stream_queue_buffer: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> i32>(load_sym(c"pw_stream_queue_buffer").ok_or("pw_stream_queue_buffer failed")?),
+                pw_stream_destroy: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void)>(load_sym(c"pw_stream_destroy").ok_or("pw_stream_destroy failed")?),
+                pw_context_destroy: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void)>(load_sym(c"pw_context_destroy").ok_or("pw_context_destroy failed")?),
+                pw_thread_loop_destroy: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void)>(load_sym(c"pw_thread_loop_destroy").ok_or("pw_thread_loop_destroy failed")?),
             })
         }
     }
@@ -71,6 +71,12 @@ pub struct PipewireBackendInner {
 
 unsafe impl Send for PipewireBackend {}
 unsafe impl Send for PipewireBackendInner {}
+
+impl Default for PipewireBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl PipewireBackend {
     pub fn new() -> Self {
@@ -141,10 +147,10 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
     let num_channels = spa_buf.n_datas.min(16) as usize;
     let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
 
-    for i in 0..num_channels {
+    for (i, out_ref) in out_refs_storage.iter_mut().enumerate().take(num_channels) {
         let data = unsafe { &*spa_buf.datas.add(i) };
         if !data.data.is_null() {
-            out_refs_storage[i] = unsafe {
+            *out_ref = unsafe {
                 std::slice::from_raw_parts_mut(data.data as *mut f32, num_samples)
             };
         }
@@ -158,8 +164,7 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
 }
 
 unsafe extern "C" fn pw_param_changed(_data: *mut std::ffi::c_void, id: u32, _param: *const std::ffi::c_void) {
-    if id != 2 { return; } // SPA_PARAM_Props
-    // setup_rt_thread contains syscalls and should not be in this callback.
+    if id != 2 { } // SPA_PARAM_Props
     // It's handled by PipeWire's own thread loop priority usually,
     // or should be called once on stream activation.
 }
@@ -174,12 +179,12 @@ impl AudioBackend for PipewireBackend {
 
             let pw = inner.lib.as_ref().unwrap();
             (pw.pw_init)(std::ptr::null_mut(), std::ptr::null_mut());
-            inner.thread_loop = (pw.pw_thread_loop_new)(b"nullherz-loop\0".as_ptr() as *const i8, std::ptr::null_mut());
+            inner.thread_loop = (pw.pw_thread_loop_new)(c"nullherz-loop".as_ptr(), std::ptr::null_mut());
             let loop_ptr = (pw.pw_thread_loop_get_loop)(inner.thread_loop);
             inner.context = (pw.pw_context_new)(loop_ptr, std::ptr::null_mut(), 0);
             let _core = (pw.pw_core_connect)(inner.context, std::ptr::null_mut(), 0);
 
-            inner.stream = (pw.pw_stream_new)(inner.context, b"nullherz-stream\0".as_ptr() as *const i8, std::ptr::null_mut());
+            inner.stream = (pw.pw_stream_new)(inner.context, c"nullherz-stream".as_ptr(), std::ptr::null_mut());
 
             // SPA POD binary layout fix
             // Object: size=120, type=Object(3), body.type=EnumFormat(1), body.id=EnumFormat(1)

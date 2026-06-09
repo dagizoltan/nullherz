@@ -8,6 +8,13 @@ pub struct ThreadedBackend {
     handle: Option<thread::JoinHandle<Option<AudioEngine>>>,
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
+
+impl Default for ThreadedBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ThreadedBackend {
     pub fn new() -> Self { Self { handle: None, running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)) } }
 }

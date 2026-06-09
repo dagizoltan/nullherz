@@ -76,7 +76,10 @@ impl BiquadFilter {
     /// Uses a manually unrolled loop to maximize throughput and minimize dependency stalls.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "sse3")]
+    /// # Safety
+    /// Caller must ensure input and output are valid for 'len' elements.
     pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
+        // SAFETY: The requirements are outlined in the doc comment.
         unsafe {
         let len = input.len();
         if len == 0 { return; }
@@ -222,8 +225,9 @@ impl SimdBiquad {
 
     #[cfg(target_arch = "aarch64")]
     pub unsafe fn process_8_channels(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
-        unsafe {
         use std::arch::aarch64::*;
+        // SAFETY: Caller ensures input/output pointers are valid for 'len' elements and 8 channels.
+        unsafe {
 
         let b0 = vdupq_n_f32(self.coeffs.b0);
         let b1 = vdupq_n_f32(self.coeffs.b1);
@@ -275,9 +279,12 @@ impl SimdBiquad {
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
+    /// # Safety
+    /// Caller must ensure all pointers are valid for 'len' elements.
     pub unsafe fn process_16_channels(&mut self, inputs: [*const f32; 16], outputs: [*mut f32; 16], len: usize) {
-        unsafe {
         use std::arch::x86_64::*;
+        // SAFETY: The requirements are outlined in the doc comment.
+        unsafe {
 
         let b0 = _mm512_set1_ps(self.coeffs.b0);
         let b1 = _mm512_set1_ps(self.coeffs.b1);
@@ -302,7 +309,7 @@ impl SimdBiquad {
 
             let mut out_v = [0.0f32; 16];
             _mm512_storeu_ps(out_v.as_mut_ptr(), y);
-            for ch in 0..16 { *outputs.get_unchecked(ch).add(i) = out_v[ch]; }
+            for (ch, &val) in out_v.iter().enumerate() { *outputs.get_unchecked(ch).add(i) = val; }
         }
 
         _mm512_storeu_ps(self.z1.as_mut_ptr(), z1);
@@ -312,10 +319,12 @@ impl SimdBiquad {
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
+    /// # Safety
+    /// Caller must ensure all pointers are valid for 'len' elements.
     pub unsafe fn process_8_channels(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
+        use std::arch::x86_64::*;
+        // SAFETY: The requirements are outlined in the doc comment.
         unsafe {
-        {
-            use std::arch::x86_64::*;
 
             let b0 = _mm256_set1_ps(self.coeffs.b0);
             let b1 = _mm256_set1_ps(self.coeffs.b1);
@@ -338,12 +347,11 @@ impl SimdBiquad {
 
                 let mut out_v = [0.0f32; 8];
                 _mm256_storeu_ps(out_v.as_mut_ptr(), y);
-                for ch in 0..8 { *outputs.get_unchecked(ch).add(i) = out_v[ch]; }
+                for (ch, &val) in out_v.iter().enumerate() { *outputs.get_unchecked(ch).add(i) = val; }
             }
 
             _mm256_storeu_ps(self.z1.as_mut_ptr(), z1);
             _mm256_storeu_ps(self.z2.as_mut_ptr(), z2);
-        }
         }
     }
 }
@@ -354,6 +362,12 @@ pub struct DjIsolator {
     pub mid: BiquadFilter,
     pub high: BiquadFilter,
     pub gains: [f32; 3], // Low, Mid, High gains (0.0 to 1.0+)
+}
+
+impl Default for DjIsolator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DjIsolator {
@@ -380,9 +394,12 @@ impl DjIsolator {
         }
     }
 
+    /// # Safety
+    /// Caller must ensure input and output are valid for 'len' elements.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_block_avx2(&mut self, input: &[f32], output: &mut [f32]) {
+        // SAFETY: The requirements are outlined in the doc comment.
         unsafe {
         use std::arch::x86_64::*;
         let len = input.len();

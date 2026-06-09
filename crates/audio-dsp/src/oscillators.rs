@@ -20,8 +20,8 @@ pub struct SineOscillator {
 impl SineOscillator {
     pub fn new(sample_rate: f32, frequency: f32) -> Self {
         let mut lut = [0.0f32; LUT_SIZE];
-        for i in 0..LUT_SIZE {
-            lut[i] = ((i as f32 * 2.0 * std::f32::consts::PI) / LUT_SIZE as f32).sin();
+        for (i, val) in lut.iter_mut().enumerate() {
+            *val = ((i as f32 * 2.0 * std::f32::consts::PI) / LUT_SIZE as f32).sin();
         }
         Self {
             phase: 0.0,
@@ -60,8 +60,8 @@ pub struct WavetableOscillator {
 impl WavetableOscillator {
     pub fn new(sample_rate: f32) -> Self {
         let mut table = [0.0f32; 2048];
-        for i in 0..2048 {
-            table[i] = ((i as f32 * 2.0 * std::f32::consts::PI) / 2048.0).sin();
+        for (i, val) in table.iter_mut().enumerate() {
+            *val = ((i as f32 * 2.0 * std::f32::consts::PI) / 2048.0).sin();
         }
         Self {
             table,
@@ -115,12 +115,15 @@ impl WavetableOscillator {
         self.phases[channel] = phase;
     }
 
+    /// # Safety
+    /// Caller must ensure all pointers in fm, pm, and outputs are valid for 'len' elements.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_8_channels_avx2(&mut self, fm: [*const f32; 8], pm: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
         // Validation of channel availability is performed by the caller (processor)
-        unsafe {
         use std::arch::x86_64::*;
+        // SAFETY: The requirements are outlined in the doc comment.
+        unsafe {
         let mut b_phases = _mm256_loadu_ps(self.phases.as_ptr());
         let b_base_incs = _mm256_loadu_ps(self.phase_incs.as_ptr());
         let b_2048 = _mm256_set1_ps(2048.0);

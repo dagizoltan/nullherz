@@ -19,6 +19,8 @@ pub struct SidecarProcessor {
 unsafe impl Send for SidecarProcessor {}
 
 impl SidecarProcessor {
+    /// # Safety
+    /// All pointers must be valid and point to pre-allocated shared memory structures.
     pub unsafe fn new(
         command_ptr: *const ShmRingBuffer<control_plane::Command>,
         feedback_ptr: Option<*const ShmRingBuffer<control_plane::SidecarMetadata>>,
@@ -30,7 +32,8 @@ impl SidecarProcessor {
         let mut input_shm = [std::ptr::null_mut(); MAX_CHANNELS];
         let mut output_shm = [std::ptr::null(); MAX_CHANNELS];
         let num_channels = inputs.len().min(MAX_CHANNELS).min(outputs.len());
-        for i in 0..num_channels { input_shm[i] = inputs[i]; output_shm[i] = outputs[i]; }
+        input_shm[..num_channels].copy_from_slice(&inputs[..num_channels]);
+        output_shm[..num_channels].copy_from_slice(&outputs[..num_channels]);
         Self {
             command_producer_ptr: command_ptr,
             feedback_consumer_ptr: feedback_ptr,

@@ -56,11 +56,10 @@ async fn handle_connection(
                 cons.pop()
             };
 
-            if let Some(t) = tel {
-                if let Ok(json) = serde_json::to_string(&t) {
-                    if write.send(Message::Text(json.into())).await.is_err() {
-                        break;
-                    }
+            if let Some(json) = tel.and_then(|t| serde_json::to_string(&t).ok()) {
+                let msg = Message::Text(json.into());
+                if write.send(msg).await.is_err() {
+                    break;
                 }
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(16)).await; // ~60fps

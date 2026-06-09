@@ -24,10 +24,11 @@ pub struct Transport {
 }
 
 pub const MAX_CHANNELS: usize = 16;
+pub const MAX_NODES: usize = 64;
 
 pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
     thread_local! {
-        static INITIALIZED: std::cell::Cell<bool> = std::cell::Cell::new(false);
+        static INITIALIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
 
     if INITIALIZED.with(|i| i.get()) && cpu_id.is_none() {

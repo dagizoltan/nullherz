@@ -10,7 +10,7 @@ use crate::telemetry::Telemetry;
 pub struct AudioEngine {
     command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
     bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
-    topology_consumer: Option<Consumer<control_plane::TopologyCommand>>,
+    topology_consumer: Option<Consumer<crate::processors::TopologyMutation>>,
     active_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     pending_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     garbage_producer: Producer<Box<dyn AudioProcessor>>,
@@ -29,7 +29,7 @@ impl AudioEngine {
     pub fn new(
         command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
         bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
-        topology_consumer: Option<Consumer<control_plane::TopologyCommand>>,
+        topology_consumer: Option<Consumer<crate::processors::TopologyMutation>>,
         garbage_producer: Producer<Box<dyn AudioProcessor>>,
         bundle_garbage_producer: Option<Producer<Vec<control_plane::Command>>>,
         telemetry_producer: Producer<Telemetry>,
@@ -135,7 +135,7 @@ impl AudioEngine {
 
         // Process atomic command bundles first (immediate application)
         if let Some(ref mut cons) = self.bundle_consumer {
-            while let Some(mut bundle) = cons.pop() {
+            while let Some(bundle) = cons.pop() {
                 for cmd in &bundle {
                     match cmd {
                         control_plane::Command::Play => self.transport.is_playing = true,
@@ -161,8 +161,8 @@ impl AudioEngine {
 
         if let Some(ref mut cons) = self.topology_consumer {
             let mut topo_processed = 0;
-            while let Some(topo_cmd) = cons.pop() {
-                graph.apply_topology_command(&topo_cmd);
+            while let Some(topo_mut) = cons.pop() {
+                graph.apply_topology_mutation(topo_mut);
                 topo_processed += 1;
                 if topo_processed >= 16 { break; } // Limit topology mutations per block
             }
@@ -226,8 +226,8 @@ impl AudioEngine {
         self.sample_counter = block_end_sample;
         graph.collect_telemetry(&mut node_times_cycles, &mut peak_levels);
 
-        for i in 0..64 {
-            node_times[i] = (node_times_cycles.get(i).copied().unwrap_or(0) as f64 * self.ns_per_cycle) as u64;
+        for (i, node_time) in node_times.iter_mut().enumerate() {
+            *node_time = (node_times_cycles.get(i).copied().unwrap_or(0) as f64 * self.ns_per_cycle) as u64;
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -249,7 +249,7 @@ impl AudioEngine {
         }
 
         // Reset peak every ~1000 blocks to track moving jitter
-        if self.sample_counter % (num_samples as u64 * 1024) == 0 {
+        if self.sample_counter.is_multiple_of(num_samples as u64 * 1024) {
             self.peak_ns.store(current_ns, Ordering::Relaxed);
         }
 
@@ -273,12 +273,12 @@ impl AudioEngine {
         let mut sub_inputs_ptr = [ &[][..]; crate::MAX_CHANNELS ];
         let num_inputs = inputs.len().min(crate::MAX_CHANNELS);
         let empty_input = &[][..];
-        for i in 0..num_inputs {
+        for (i, sub_input) in sub_inputs_ptr.iter_mut().enumerate().take(num_inputs) {
             let input = inputs.get(i).unwrap_or(&empty_input);
             let input_len = input.len();
             let end = (offset + len).min(input_len);
             let actual_offset = offset.min(input_len);
-            sub_inputs_ptr[i] = &input[actual_offset..end];
+            *sub_input = &input[actual_offset..end];
         }
 
         let mut sub_outputs_reconstructed: [&mut [f32]; crate::MAX_CHANNELS] = std::array::from_fn(|_| &mut [][..]);
