@@ -21,8 +21,10 @@ pub struct AudioEngine {
     pending_command: Option<TimestampedCommand>,
     ns_per_cycle: f64,
     peak_ns: std::sync::atomic::AtomicU64,
+    resource_leaks: u64,
     pub pool: Option<TaskPool>,
     pub transport: crate::Transport,
+    pub target_sample_rate: f32,
 }
 
 impl AudioEngine {
@@ -50,6 +52,7 @@ impl AudioEngine {
             pending_command: None,
             ns_per_cycle,
             peak_ns: std::sync::atomic::AtomicU64::new(0),
+            resource_leaks: 0,
             pool: Some(TaskPool::new(4)),
             transport: crate::Transport {
                 bpm: 120.0,
@@ -57,6 +60,7 @@ impl AudioEngine {
                 is_playing: false,
                 sample_rate: 44100.0,
             },
+            target_sample_rate: 44100.0,
         }
     }
 
@@ -92,6 +96,10 @@ impl AudioEngine {
         self.xrun_count.clone()
     }
     pub fn set_config(&mut self, config: crate::AudioConfig) {
+        if (config.sample_rate - self.target_sample_rate).abs() > 0.1 {
+            eprintln!("CRITICAL ERROR: Hardware sample rate ({}) does not match target engine rate ({})", config.sample_rate, self.target_sample_rate);
+            // In a production scenario, we might want to shut down or trigger a bypass here.
+        }
         self.transport.sample_rate = config.sample_rate;
         let graph_ptr = self.active_graph.load(Ordering::Acquire);
         let graph = unsafe { &mut **graph_ptr };
@@ -120,6 +128,7 @@ impl AudioEngine {
             if !old.is_null() {
                 let old_graph = unsafe { Box::from_raw(old) };
                 if let Err(leaked) = self.garbage_producer.push(*old_graph) {
+                    self.resource_leaks += 1;
                     let _ = Box::into_raw(Box::new(leaked));
                 }
             }
@@ -150,10 +159,12 @@ impl AudioEngine {
                         // If queue is full, we must leak to avoid deallocation in RT thread.
                         // For a "bug-free" engine, we would ideally use a fixed-size bundle
                         // to avoid Vec altogether, but for now we leak to preserve RT safety.
+                        self.resource_leaks += 1;
                         std::mem::forget(b);
                     }
                 } else {
                     // If no producer exists, we must leak the Vec to avoid dropping it here.
+                    self.resource_leaks += 1;
                     std::mem::forget(bundle);
                 }
             }
@@ -258,6 +269,7 @@ impl AudioEngine {
             peak_process_time_ns: peak,
             sample_counter: self.sample_counter,
             xrun_count: self.xrun_count.load(Ordering::Relaxed),
+            resource_leaks: self.resource_leaks,
             node_times_ns: node_times,
             peak_levels,
         });

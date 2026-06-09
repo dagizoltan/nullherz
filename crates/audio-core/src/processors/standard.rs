@@ -1,5 +1,4 @@
 use crate::processors::AudioProcessor;
-use audio_dsp::Filter;
 
 pub struct GainProcessor {
     gains: [audio_dsp::Gain; crate::MAX_CHANNELS],
@@ -52,24 +51,8 @@ impl AudioProcessor for BiquadProcessor {
         if inputs.is_empty() || outputs.is_empty() { return; }
         let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
 
-        #[cfg(target_arch = "x86_64")]
-        let has_avx2 = is_x86_feature_detected!("avx2");
-
         for (ch, filter) in self.filters.iter_mut().enumerate().take(num_channels) {
-            #[cfg(target_arch = "x86_64")]
-            {
-                if has_avx2 {
-                    // SAFETY: Filters and buffers are valid for num_channels and block size.
-                    unsafe {
-                        filter.process_block_simd(inputs[ch], outputs[ch]);
-                    }
-                    continue;
-                }
-            }
-
-            for i in 0..inputs[ch].len() {
-                outputs[ch][i] = filter.process_sample(inputs[ch][i]);
-            }
+            filter.process_block_simd(inputs[ch], outputs[ch]);
         }
     }
 
@@ -120,8 +103,7 @@ impl AudioProcessor for SimdBiquadProcessor {
                 in_ptrs[i] = inputs[i].as_ptr();
                 out_ptrs[i] = outputs[i].as_mut_ptr();
             }
-            #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-            unsafe { self.inner.process_8_channels(in_ptrs, out_ptrs, len); }
+            self.inner.process_8_channels(in_ptrs, out_ptrs, len);
         } else if num_channels >= 16 {
             let mut in_ptrs = [std::ptr::null(); 16];
             let mut out_ptrs = [std::ptr::null_mut(); 16];

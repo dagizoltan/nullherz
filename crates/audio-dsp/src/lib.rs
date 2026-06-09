@@ -2,6 +2,7 @@ pub mod filters;
 pub mod oscillators;
 pub mod spectral;
 pub mod util;
+pub mod simd_vec;
 
 pub use filters::*;
 pub use oscillators::*;
