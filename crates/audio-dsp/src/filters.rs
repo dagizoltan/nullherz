@@ -72,15 +72,8 @@ impl BiquadFilter {
         }
     }
 
-    /// Optimized block processing using Direct Form II Transposed.
-    /// Uses a manually unrolled loop to maximize throughput and minimize dependency stalls.
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "sse3")]
-    /// # Safety
-    /// Caller must ensure input and output are valid for 'len' elements.
-    pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
-        // SAFETY: The requirements are outlined in the doc comment.
-        unsafe {
+    /// Optimized block processing using SIMD.
+    pub fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
         let len = input.len();
         if len == 0 { return; }
 
@@ -100,46 +93,62 @@ impl BiquadFilter {
         let a2 = self.coeffs.a2;
 
         let mut i = 0;
+        // Scalar fallback for non-aligned or small blocks, but here we can use SIMD if len >= 4
         while i + 4 <= len {
-            let x0 = *input.get_unchecked(i);
-            let y0 = x0 * b0 + z1;
-            let z1_0 = x0 * b1 - y0 * a1 + z2;
-            let z2_0 = x0 * b2 - y0 * a2;
-            *output.get_unchecked_mut(i) = y0;
+            // We use a scalar loop with improved dependency chain for now,
+            // true parallel 4-lane SIMD for single-channel biquad is hard because of dependencies.
+            // But we can unroll it safely without architecture-specific unsafe.
 
-            let x1 = *input.get_unchecked(i + 1);
-            let y1 = x1 * b0 + z1_0;
-            let z1_1 = x1 * b1 - y1 * a1 + z2_0;
-            let z2_1 = x1 * b2 - y1 * a2;
-            *output.get_unchecked_mut(i + 1) = y1;
+            unsafe {
+                let x = *input.get_unchecked(i);
+                let y = x * b0 + z1;
+                let next_z1 = x * b1 - y * a1 + z2;
+                let next_z2 = x * b2 - y * a2;
+                *output.get_unchecked_mut(i) = y;
+                z1 = next_z1;
+                z2 = next_z2;
 
-            let x2 = *input.get_unchecked(i + 2);
-            let y2 = x2 * b0 + z1_1;
-            let z1_2 = x2 * b1 - y2 * a1 + z2_1;
-            let z2_2 = x2 * b2 - y2 * a2;
-            *output.get_unchecked_mut(i + 2) = y2;
+                let x = *input.get_unchecked(i + 1);
+                let y = x * b0 + z1;
+                let next_z1 = x * b1 - y * a1 + z2;
+                let next_z2 = x * b2 - y * a2;
+                *output.get_unchecked_mut(i + 1) = y;
+                z1 = next_z1;
+                z2 = next_z2;
 
-            let x3 = *input.get_unchecked(i + 3);
-            let y3 = x3 * b0 + z1_2;
-            z1 = x3 * b1 - y3 * a1 + z2_2;
-            z2 = x3 * b2 - y3 * a2;
-            *output.get_unchecked_mut(i + 3) = y3;
+                let x = *input.get_unchecked(i + 2);
+                let y = x * b0 + z1;
+                let next_z1 = x * b1 - y * a1 + z2;
+                let next_z2 = x * b2 - y * a2;
+                *output.get_unchecked_mut(i + 2) = y;
+                z1 = next_z1;
+                z2 = next_z2;
+
+                let x = *input.get_unchecked(i + 3);
+                let y = x * b0 + z1;
+                let next_z1 = x * b1 - y * a1 + z2;
+                let next_z2 = x * b2 - y * a2;
+                *output.get_unchecked_mut(i + 3) = y;
+                z1 = next_z1;
+                z2 = next_z2;
+            }
 
             i += 4;
         }
 
         while i < len {
-            let x = *input.get_unchecked(i);
-            let y = x * b0 + z1;
-            z1 = x * b1 - y * a1 + z2;
-            z2 = x * b2 - y * a2;
-            *output.get_unchecked_mut(i) = y;
+            unsafe {
+                let x = *input.get_unchecked(i);
+                let y = x * b0 + z1;
+                z1 = x * b1 - y * a1 + z2;
+                z2 = x * b2 - y * a2;
+                *output.get_unchecked_mut(i) = y;
+            }
             i += 1;
         }
 
         self.z1 = z1;
         self.z2 = z2;
-        }
     }
 }
 
@@ -317,42 +326,44 @@ impl SimdBiquad {
         }
     }
 
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2")]
-    /// # Safety
-    /// Caller must ensure all pointers are valid for 'len' elements.
-    pub unsafe fn process_8_channels(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
-        use std::arch::x86_64::*;
-        // SAFETY: The requirements are outlined in the doc comment.
-        unsafe {
+    pub fn process_8_channels(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
+        use wide::*;
 
-            let b0 = _mm256_set1_ps(self.coeffs.b0);
-            let b1 = _mm256_set1_ps(self.coeffs.b1);
-            let b2 = _mm256_set1_ps(self.coeffs.b2);
-            let a1 = _mm256_set1_ps(self.coeffs.a1);
-            let a2 = _mm256_set1_ps(self.coeffs.a2);
+        let b0 = f32x8::from(self.coeffs.b0);
+        let b1 = f32x8::from(self.coeffs.b1);
+        let b2 = f32x8::from(self.coeffs.b2);
+        let a1 = f32x8::from(self.coeffs.a1);
+        let a2 = f32x8::from(self.coeffs.a2);
 
-            let mut z1 = _mm256_loadu_ps(self.z1.as_ptr());
-            let mut z2 = _mm256_loadu_ps(self.z2.as_ptr());
+        let mut z1 = f32x8::new([
+            self.z1[0], self.z1[1], self.z1[2], self.z1[3],
+            self.z1[4], self.z1[5], self.z1[6], self.z1[7],
+        ]);
+        let mut z2 = f32x8::new([
+            self.z2[0], self.z2[1], self.z2[2], self.z2[3],
+            self.z2[4], self.z2[5], self.z2[6], self.z2[7],
+        ]);
 
-            for i in 0..len {
-                let x = _mm256_setr_ps(
+        for i in 0..len {
+            let x = unsafe {
+                f32x8::new([
                     *inputs[0].add(i), *inputs[1].add(i), *inputs[2].add(i), *inputs[3].add(i),
                     *inputs[4].add(i), *inputs[5].add(i), *inputs[6].add(i), *inputs[7].add(i)
-                );
+                ])
+            };
 
-                let y = _mm256_add_ps(_mm256_mul_ps(x, b0), z1);
-                z1 = _mm256_add_ps(_mm256_sub_ps(_mm256_mul_ps(x, b1), _mm256_mul_ps(y, a1)), z2);
-                z2 = _mm256_sub_ps(_mm256_mul_ps(x, b2), _mm256_mul_ps(y, a2));
+            let y = (x * b0) + z1;
+            z1 = ((x * b1) - (y * a1)) + z2;
+            z2 = (x * b2) - (y * a2);
 
-                let mut out_v = [0.0f32; 8];
-                _mm256_storeu_ps(out_v.as_mut_ptr(), y);
-                for (ch, &val) in out_v.iter().enumerate() { *outputs.get_unchecked(ch).add(i) = val; }
-            }
-
-            _mm256_storeu_ps(self.z1.as_mut_ptr(), z1);
-            _mm256_storeu_ps(self.z2.as_mut_ptr(), z2);
+            let out_v: [f32; 8] = y.into();
+            for (ch, &val) in out_v.iter().enumerate() { unsafe { *outputs.get_unchecked(ch).add(i) = val }; }
         }
+
+        let z1_arr: [f32; 8] = z1.into();
+        self.z1[0..8].copy_from_slice(&z1_arr);
+        let z2_arr: [f32; 8] = z2.into();
+        self.z2[0..8].copy_from_slice(&z2_arr);
     }
 }
 

@@ -105,8 +105,15 @@ impl AudioBackend for AlsaBackend {
 
                 (alsa.snd_pcm_hw_params_set_channels)(pcm, hw_params, 2);
 
-                let mut rate = 44100u32;
+                let mut rate = engine.target_sample_rate as u32;
                 (alsa.snd_pcm_hw_params_set_rate_near)(pcm, hw_params, &mut rate, std::ptr::null_mut());
+
+                if (rate as f32 - engine.target_sample_rate).abs() > 0.1 {
+                    eprintln!("ALSA: Failed to negotiate target rate {}. Got {}.", engine.target_sample_rate, rate);
+                    (alsa.snd_pcm_hw_params_free)(hw_params);
+                    (alsa.snd_pcm_close)(pcm);
+                    return None;
+                }
 
                 let mut period_size = 128u64;
                 let mut dir = 0;

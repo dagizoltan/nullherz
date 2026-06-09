@@ -8,6 +8,7 @@ pub struct Telemetry {
     pub peak_process_time_ns: u64,
     pub sample_counter: u64,
     pub xrun_count: u32,
+    pub resource_leaks: u64,
     #[serde(with = "BigArray")]
     pub node_times_ns: [u64; crate::MAX_NODES],
     #[serde(with = "BigArray")]
