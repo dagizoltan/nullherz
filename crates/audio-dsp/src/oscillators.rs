@@ -115,79 +115,64 @@ impl WavetableOscillator {
         self.phases[channel] = phase;
     }
 
-    /// # Safety
-    /// Caller must ensure all pointers in fm, pm, and outputs are valid for 'len' elements.
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2")]
-    pub unsafe fn process_8_channels_avx2(&mut self, fm: [*const f32; 8], pm: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
-        // Validation of channel availability is performed by the caller (processor)
-        use std::arch::x86_64::*;
-        // SAFETY: The requirements are outlined in the doc comment.
-        unsafe {
-        let mut b_phases = _mm256_loadu_ps(self.phases.as_ptr());
-        let b_base_incs = _mm256_loadu_ps(self.phase_incs.as_ptr());
-        let b_2048 = _mm256_set1_ps(2048.0);
-        let b_1 = _mm256_set1_ps(1.0);
+    pub fn process_8_channels(&mut self, fm: [*const f32; 8], pm: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
+        use wide::*;
+        let mut b_phases = f32x8::new([
+            self.phases[0], self.phases[1], self.phases[2], self.phases[3],
+            self.phases[4], self.phases[5], self.phases[6], self.phases[7]
+        ]);
+        let b_base_incs = f32x8::new([
+            self.phase_incs[0], self.phase_incs[1], self.phase_incs[2], self.phase_incs[3],
+            self.phase_incs[4], self.phase_incs[5], self.phase_incs[6], self.phase_incs[7]
+        ]);
+        let b_2048 = f32x8::from(2048.0);
+        let b_1 = f32x8::from(1.0);
 
         for i in 0..len {
-            // Optimization: If buffers are aligned, we could use faster loads.
-            // For now, we still need to collect from 8 separate pointers.
-            let b_fm = _mm256_setr_ps(
-                *fm.get_unchecked(0).add(i), *fm.get_unchecked(1).add(i), *fm.get_unchecked(2).add(i), *fm.get_unchecked(3).add(i),
-                *fm.get_unchecked(4).add(i), *fm.get_unchecked(5).add(i), *fm.get_unchecked(6).add(i), *fm.get_unchecked(7).add(i)
-            );
-            let b_pm = _mm256_setr_ps(
-                *pm.get_unchecked(0).add(i), *pm.get_unchecked(1).add(i), *pm.get_unchecked(2).add(i), *pm.get_unchecked(3).add(i),
-                *pm.get_unchecked(4).add(i), *pm.get_unchecked(5).add(i), *pm.get_unchecked(6).add(i), *pm.get_unchecked(7).add(i)
-            );
+            let b_fm = unsafe {
+                f32x8::new([
+                    *fm[0].add(i), *fm[1].add(i), *fm[2].add(i), *fm[3].add(i),
+                    *fm[4].add(i), *fm[5].add(i), *fm[6].add(i), *fm[7].add(i)
+                ])
+            };
+            let b_pm = unsafe {
+                f32x8::new([
+                    *pm[0].add(i), *pm[1].add(i), *pm[2].add(i), *pm[3].add(i),
+                    *pm[4].add(i), *pm[5].add(i), *pm[6].add(i), *pm[7].add(i)
+                ])
+            };
 
-            let b_mod_inc = _mm256_mul_ps(b_base_incs, _mm256_add_ps(b_1, b_fm));
-            let b_mod_phase = _mm256_add_ps(b_phases, _mm256_mul_ps(b_pm, b_2048));
+            let b_mod_inc = b_base_incs * (b_1 + b_fm);
+            let b_mod_phase = b_phases + (b_pm * b_2048);
 
-            // Linear interpolation via gather
-            // Use floor instead of truncate to handle negative phase correctly
-            let b_idx_f = _mm256_floor_ps(b_mod_phase);
-            let b_idx = _mm256_cvttps_epi32(b_idx_f);
-            let b_frac = _mm256_sub_ps(b_mod_phase, b_idx_f);
+            let b_idx_f = b_mod_phase.floor();
+            let b_frac = b_mod_phase - b_idx_f;
 
-            // Mask indices to table size (2048)
-            let b_mask = _mm256_set1_epi32(2047);
-            let b_idx0 = _mm256_and_si256(b_idx, b_mask);
-            let b_idx1 = _mm256_and_si256(_mm256_add_epi32(b_idx0, _mm256_set1_epi32(1)), b_mask);
+            let b_idx: [i32; 8] = b_idx_f.round_int().into();
 
-            let v0 = _mm256_i32gather_ps(self.table.as_ptr(), b_idx0, 4);
-            let v1 = _mm256_i32gather_ps(self.table.as_ptr(), b_idx1, 4);
-
-            // res = v0 + frac * (v1 - v0)
-            let b_res = _mm256_add_ps(v0, _mm256_mul_ps(b_frac, _mm256_sub_ps(v1, v0)));
-
-            // Use storeu to an array and then distribute
             let mut out_v = [0.0f32; 8];
-            _mm256_storeu_ps(out_v.as_mut_ptr(), b_res);
-            *outputs.get_unchecked(0).add(i) = out_v[0];
-            *outputs.get_unchecked(1).add(i) = out_v[1];
-            *outputs.get_unchecked(2).add(i) = out_v[2];
-            *outputs.get_unchecked(3).add(i) = out_v[3];
-            *outputs.get_unchecked(4).add(i) = out_v[4];
-            *outputs.get_unchecked(5).add(i) = out_v[5];
-            *outputs.get_unchecked(6).add(i) = out_v[6];
-            *outputs.get_unchecked(7).add(i) = out_v[7];
+            for ch in 0..8 {
+                let idx = (b_idx[ch] as i32 & 2047) as usize;
+                let next_idx = (idx + 1) & 2047;
+                let frac = b_frac.as_array_ref()[ch];
+                out_v[ch] = self.table[idx] * (1.0 - frac) + self.table[next_idx] * frac;
+            }
 
-            b_phases = _mm256_add_ps(b_phases, b_mod_inc);
+            for ch in 0..8 {
+                unsafe { *outputs[ch].add(i) = out_v[ch] };
+            }
 
-            // Robust wrap: handle both positive and negative overflow
-            let b_zero = _mm256_setzero_ps();
-            let wrap_pos_mask = _mm256_cmp_ps(b_phases, b_2048, _CMP_GE_OQ);
-            let wrap_neg_mask = _mm256_cmp_ps(b_phases, b_zero, _CMP_LT_OQ);
+            b_phases += b_mod_inc;
 
-            b_phases = _mm256_sub_ps(b_phases, _mm256_and_ps(wrap_pos_mask, b_2048));
-            b_phases = _mm256_add_ps(b_phases, _mm256_and_ps(wrap_neg_mask, b_2048));
+            // Robust wrap
+            let wrap_pos_mask = b_phases.cmp_ge(b_2048);
+            let wrap_neg_mask = b_phases.cmp_lt(f32x8::ZERO);
+
+            b_phases -= wrap_pos_mask.blend(b_2048, f32x8::ZERO);
+            b_phases += wrap_neg_mask.blend(b_2048, f32x8::ZERO);
         }
-        _mm256_storeu_ps(self.phases.as_mut_ptr(), b_phases);
 
-        // No scalar tail loop needed here as process_8_channels processes 8 full channels
-        // for the entire block duration 'len'. The block splitting happens at the 'len' level.
-        // However, if we were processing blocks of samples in SIMD, we'd need one.
-        }
+        let final_phases: [f32; 8] = b_phases.into();
+        self.phases[0..8].copy_from_slice(&final_phases);
     }
 }

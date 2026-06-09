@@ -21,7 +21,7 @@ pub struct AudioEngine {
     pending_command: Option<TimestampedCommand>,
     ns_per_cycle: f64,
     peak_ns: std::sync::atomic::AtomicU64,
-    resource_leaks: u64,
+    resource_leaks: std::sync::atomic::AtomicU64,
     pub pool: Option<TaskPool>,
     pub transport: crate::Transport,
     pub target_sample_rate: f32,
@@ -52,7 +52,7 @@ impl AudioEngine {
             pending_command: None,
             ns_per_cycle,
             peak_ns: std::sync::atomic::AtomicU64::new(0),
-            resource_leaks: 0,
+            resource_leaks: std::sync::atomic::AtomicU64::new(0),
             pool: Some(TaskPool::new(4)),
             transport: crate::Transport {
                 bpm: 120.0,
@@ -128,7 +128,7 @@ impl AudioEngine {
             if !old.is_null() {
                 let old_graph = unsafe { Box::from_raw(old) };
                 if let Err(leaked) = self.garbage_producer.push(*old_graph) {
-                    self.resource_leaks += 1;
+                    self.resource_leaks.fetch_add(1, Ordering::Relaxed);
                     let _ = Box::into_raw(Box::new(leaked));
                 }
             }
@@ -159,12 +159,12 @@ impl AudioEngine {
                         // If queue is full, we must leak to avoid deallocation in RT thread.
                         // For a "bug-free" engine, we would ideally use a fixed-size bundle
                         // to avoid Vec altogether, but for now we leak to preserve RT safety.
-                        self.resource_leaks += 1;
+                        self.resource_leaks.fetch_add(1, Ordering::Relaxed);
                         std::mem::forget(b);
                     }
                 } else {
                     // If no producer exists, we must leak the Vec to avoid dropping it here.
-                    self.resource_leaks += 1;
+                    self.resource_leaks.fetch_add(1, Ordering::Relaxed);
                     std::mem::forget(bundle);
                 }
             }
@@ -269,7 +269,7 @@ impl AudioEngine {
             peak_process_time_ns: peak,
             sample_counter: self.sample_counter,
             xrun_count: self.xrun_count.load(Ordering::Relaxed),
-            resource_leaks: self.resource_leaks,
+            resource_leaks: self.resource_leaks.load(Ordering::Relaxed),
             node_times_ns: node_times,
             peak_levels,
         });

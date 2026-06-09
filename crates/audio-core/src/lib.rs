@@ -4,6 +4,9 @@ pub mod engine;
 pub mod telemetry;
 pub mod error;
 
+#[cfg(test)]
+mod engine_tests;
+
 pub use engine::AudioEngine;
 pub use processors::{AudioProcessor, ProcessorGraph, SidecarProcessor, ProcessorNode, GraphTopology, NodeRouting, CrossfadeState};
 pub use backends::{AudioBackend, AlsaBackend, PipewireBackend, JackBackend, ThreadedBackend};

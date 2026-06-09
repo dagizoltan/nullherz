@@ -452,6 +452,25 @@ impl<T> MpscRingBuffer<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn test_mpsc_ring_buffer_consistency(
+            values in prop::collection::vec(0..1000i32, 1..100)
+        ) {
+            let buffer = MpscRingBuffer::new(128);
+            for &val in &values {
+                let _ = buffer.push(val);
+            }
+            let mut popped = Vec::new();
+            while let Some(val) = buffer.pop() {
+                popped.push(val);
+            }
+            // MPSC guarantees order from a single thread
+            prop_assert_eq!(values, popped);
+        }
+    }
 
     #[test]
     fn test_shm_ring_buffer() {

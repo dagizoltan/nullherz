@@ -72,34 +72,26 @@ impl SpectralProcessor {
         }
     }
 
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2")]
-    /// # Safety
-    /// Caller must ensure all slices have the same length and are valid for reading/writing.
-    pub unsafe fn complex_mul_accumulate_avx2(re: &mut [f32], im: &mut [f32], hr: &[f32], hi: &[f32], ir: &[f32], ii: &[f32]) {
-        use std::arch::x86_64::*;
+    pub fn complex_mul_accumulate_simd(re: &mut [f32], im: &mut [f32], hr: &[f32], hi: &[f32], ir: &[f32], ii: &[f32]) {
+        use wide::*;
         let n = re.len();
         let mut i = 0;
-        // SAFETY: The caller ensures that re, im, hr, hi, ir, and ii all have the same length 'n'
-        // and that they are correctly aligned for AVX2 operations (or unaligned loads are used).
         while i + 8 <= n {
-            unsafe {
-                let v_hr = _mm256_loadu_ps(hr.as_ptr().add(i));
-                let v_hi = _mm256_loadu_ps(hi.as_ptr().add(i));
-                let v_ir = _mm256_loadu_ps(ir.as_ptr().add(i));
-                let v_ii = _mm256_loadu_ps(ii.as_ptr().add(i));
+            let v_hr = f32x8::new(hr[i..i+8].try_into().unwrap());
+            let v_hi = f32x8::new(hi[i..i+8].try_into().unwrap());
+            let v_ir = f32x8::new(ir[i..i+8].try_into().unwrap());
+            let v_ii = f32x8::new(ii[i..i+8].try_into().unwrap());
 
-                let v_re = _mm256_loadu_ps(re.as_ptr().add(i));
-                let v_im = _mm256_loadu_ps(im.as_ptr().add(i));
+            let v_re = f32x8::new(re[i..i+8].try_into().unwrap());
+            let v_im = f32x8::new(im[i..i+8].try_into().unwrap());
 
-                // re = re + (hr * ir - hi * ii)
-                let res_re = _mm256_add_ps(v_re, _mm256_sub_ps(_mm256_mul_ps(v_hr, v_ir), _mm256_mul_ps(v_hi, v_ii)));
-                // im = im + (hr * ii + hi * ir)
-                let res_im = _mm256_add_ps(v_im, _mm256_add_ps(_mm256_mul_ps(v_hr, v_ii), _mm256_mul_ps(v_hi, v_ir)));
+            let res_re = v_re + (v_hr * v_ir - v_hi * v_ii);
+            let res_im = v_im + (v_hr * v_ii + v_hi * v_ir);
 
-                _mm256_storeu_ps(re.as_mut_ptr().add(i), res_re);
-                _mm256_storeu_ps(im.as_mut_ptr().add(i), res_im);
-            }
+            let arr_re: [f32; 8] = res_re.into();
+            re[i..i+8].copy_from_slice(&arr_re);
+            let arr_im: [f32; 8] = res_im.into();
+            im[i..i+8].copy_from_slice(&arr_im);
             i += 8;
         }
         while i < n {
@@ -132,34 +124,21 @@ impl SpectralProcessor {
         let n = self.fft.size;
         self.scratch_im.fill(0.0);
 
-        #[cfg(target_arch = "x86_64")]
-        if is_x86_feature_detected!("avx2") {
-            unsafe {
-                use std::arch::x86_64::*;
-                let mut i = 0;
-                while i + 8 <= n {
-                    // Use unaligned loads if i is not a multiple of 8,
-                    // though AlignedBuffer guarantees base alignment.
-                    let v_in = _mm256_loadu_ps(self.in_buffer.as_ptr().add(i));
-                    let v_win = _mm256_loadu_ps(self.window.as_ptr().add(i));
-                    let v_res = _mm256_mul_ps(v_in, v_win);
-                    _mm256_storeu_ps(self.scratch_re.as_mut_ptr().add(i), v_res);
-                    i += 8;
-                }
-                while i < n {
-                    self.scratch_re[i] = self.in_buffer[i] * self.window[i];
-                    i += 1;
-                }
+        {
+            use wide::*;
+            let mut i = 0;
+            while i + 8 <= n {
+                let v_in = f32x8::new(self.in_buffer[i..i+8].try_into().unwrap());
+                let v_win = f32x8::new(self.window[i..i+8].try_into().unwrap());
+                let v_res = v_in * v_win;
+                let arr_res: [f32; 8] = v_res.into();
+                self.scratch_re[i..i+8].copy_from_slice(&arr_res);
+                i += 8;
             }
-        } else {
-            for i in 0..n {
+            while i < n {
                 self.scratch_re[i] = self.in_buffer[i] * self.window[i];
+                i += 1;
             }
-        }
-
-        #[cfg(not(target_arch = "x86_64"))]
-        for i in 0..n {
-            self.scratch_re[i] = self.in_buffer[i] * self.window[i];
         }
 
         self.fft.process(&mut self.scratch_re, &mut self.scratch_im);
@@ -182,8 +161,6 @@ impl SpectralProcessor {
             self.scratch_im.fill(0.0);
 
             let num_p = self.ir_re.len();
-            #[cfg(target_arch = "x86_64")]
-            let has_avx2 = is_x86_feature_detected!("avx2");
             for p in 0..num_p {
                 let h_idx = (self.partition_idx + num_p - p) % num_p;
                 let hr = &self.history_re[h_idx];
@@ -191,21 +168,7 @@ impl SpectralProcessor {
                 let ir = &self.ir_re[p];
                 let ii = &self.ir_im[p];
 
-                #[cfg(target_arch = "x86_64")]
-                if has_avx2 {
-                    unsafe { Self::complex_mul_accumulate_avx2(&mut self.scratch_re, &mut self.scratch_im, hr, hi, ir, ii); }
-                } else {
-                    for i in 0..n {
-                        self.scratch_re[i] += hr[i] * ir[i] - hi[i] * ii[i];
-                        self.scratch_im[i] += hr[i] * ii[i] + hi[i] * ir[i];
-                    }
-                }
-
-                #[cfg(not(target_arch = "x86_64"))]
-                for i in 0..n {
-                    self.scratch_re[i] += hr[i] * ir[i] - hi[i] * ii[i];
-                    self.scratch_im[i] += hr[i] * ii[i] + hi[i] * ir[i];
-                }
+                Self::complex_mul_accumulate_simd(&mut self.scratch_re, &mut self.scratch_im, hr, hi, ir, ii);
             }
             self.partition_idx = (self.partition_idx + 1) % num_p;
         }
@@ -217,46 +180,27 @@ impl SpectralProcessor {
         let norm = 1.0 / n as f32;
         let mask = self.out_mask;
 
-        #[cfg(target_arch = "x86_64")]
-        if is_x86_feature_detected!("avx2") {
-            unsafe {
-                use std::arch::x86_64::*;
-                let v_norm = _mm256_set1_ps(norm);
-                let mut i = 0;
-                while i + 8 <= n {
-                    let v_re = _mm256_loadu_ps(self.scratch_re.as_ptr().add(i));
-                    let v_win = _mm256_loadu_ps(self.window.as_ptr().add(i));
-                    let v_val = _mm256_mul_ps(_mm256_mul_ps(v_re, v_norm), v_win);
+        {
+            use wide::*;
+            let v_norm = f32x8::from(norm);
+            let mut i = 0;
+            while i + 8 <= n {
+                let v_re = f32x8::new(self.scratch_re[i..i+8].try_into().unwrap());
+                let v_win = f32x8::new(self.window[i..i+8].try_into().unwrap());
+                let v_val = (v_re * v_norm) * v_win;
 
-                    let mut res = [0.0f32; 8];
-                    _mm256_storeu_ps(res.as_mut_ptr(), v_val);
-                    for j in 0..8 {
-                        let target_ptr = (self.out_ptr + i + j) & mask;
-                        *self.out_buffer.get_unchecked_mut(target_ptr) += *res.get_unchecked(j);
-                    }
-                    i += 8;
+                let res: [f32; 8] = v_val.into();
+                for j in 0..8 {
+                    let target_ptr = (self.out_ptr + i + j) & mask;
+                    unsafe { *self.out_buffer.get_unchecked_mut(target_ptr) += res[j]; }
                 }
-                while i < n {
-                    let val = (self.scratch_re[i] * norm) * self.window[i];
-                    let target_ptr = (self.out_ptr + i) & mask;
-                    self.out_buffer[target_ptr] += val;
-                    i += 1;
-                }
+                i += 8;
             }
-        } else {
-            for i in 0..n {
+            while i < n {
                 let val = (self.scratch_re[i] * norm) * self.window[i];
                 let target_ptr = (self.out_ptr + i) & mask;
                 self.out_buffer[target_ptr] += val;
-            }
-        }
-
-        #[cfg(not(target_arch = "x86_64"))]
-        for i in 0..n {
-            unsafe {
-                let val = (*self.scratch_re.get_unchecked(i) * norm) * *self.window.get_unchecked(i);
-                let target_ptr = (self.out_ptr + i) & mask;
-                *self.out_buffer.get_unchecked_mut(target_ptr) += val;
+                i += 1;
             }
         }
     }

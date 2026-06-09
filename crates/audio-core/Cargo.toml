@@ -13,3 +13,4 @@ libc = "0.2"
 
 [dev-dependencies]
 sidecar-sdk = { path = "../sidecar-sdk" }
+proptest = "1.6"
