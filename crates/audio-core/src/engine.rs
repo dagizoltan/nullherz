@@ -22,6 +22,7 @@ pub struct AudioEngine {
     ns_per_cycle: f64,
     peak_ns: std::sync::atomic::AtomicU64,
     resource_leaks: std::sync::atomic::AtomicU64,
+    pub health_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub pool: Option<TaskPool>,
     pub transport: crate::Transport,
     pub target_sample_rate: f32,
@@ -53,6 +54,7 @@ impl AudioEngine {
             ns_per_cycle,
             peak_ns: std::sync::atomic::AtomicU64::new(0),
             resource_leaks: std::sync::atomic::AtomicU64::new(0),
+            health_signal: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pool: Some(TaskPool::new(4)),
             transport: crate::Transport {
                 bpm: 120.0,
@@ -129,6 +131,7 @@ impl AudioEngine {
                 let old_graph = unsafe { Box::from_raw(old) };
                 if let Err(leaked) = self.garbage_producer.push(*old_graph) {
                     self.resource_leaks.fetch_add(1, Ordering::Relaxed);
+                    self.health_signal.store(true, Ordering::Relaxed);
                     let _ = Box::into_raw(Box::new(leaked));
                 }
             }
@@ -160,11 +163,13 @@ impl AudioEngine {
                         // For a "bug-free" engine, we would ideally use a fixed-size bundle
                         // to avoid Vec altogether, but for now we leak to preserve RT safety.
                         self.resource_leaks.fetch_add(1, Ordering::Relaxed);
+                        self.health_signal.store(true, Ordering::Relaxed);
                         std::mem::forget(b);
                     }
                 } else {
                     // If no producer exists, we must leak the Vec to avoid dropping it here.
                     self.resource_leaks.fetch_add(1, Ordering::Relaxed);
+                    self.health_signal.store(true, Ordering::Relaxed);
                     std::mem::forget(bundle);
                 }
             }

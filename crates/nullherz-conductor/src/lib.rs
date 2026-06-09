@@ -19,6 +19,7 @@ pub struct Conductor {
     garbage_consumer: Option<ipc_layer::Consumer<Box<dyn audio_core::AudioProcessor>>>,
     bundle_garbage_consumer: Option<ipc_layer::Consumer<Vec<control_plane::Command>>>,
     pub topo_producer: Option<ipc_layer::NonRtProducer<audio_core::processors::TopologyMutation>>,
+    pub health_signal: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl Default for Conductor {
@@ -42,6 +43,7 @@ impl Conductor {
             garbage_consumer: None,
             bundle_garbage_consumer: None,
             topo_producer: None,
+            health_signal: None,
         }
     }
 
@@ -57,6 +59,7 @@ impl Conductor {
 
         let graph = ProcessorGraph::new();
         let engine = AudioEngine::new(cmd_cons, Some(bundle_cons), Some(topo_cons), garbage_prod, Some(bundle_garbage_prod), tel_prod, Box::new(graph));
+        self.health_signal = Some(engine.health_signal.clone());
         self.engine = Some(engine);
         self.garbage_consumer = Some(garbage_cons);
         self.bundle_garbage_consumer = Some(bundle_garbage_cons);
