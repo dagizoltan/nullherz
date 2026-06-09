@@ -48,6 +48,9 @@ impl Conductor {
     }
 
     pub fn setup_engine(&mut self) -> (Arc<ipc_layer::MpscRingBuffer<control_plane::TimestampedCommand>>, ipc_layer::Consumer<audio_core::Telemetry>) {
+        // Harden system state: clean up stale SHM segments from previous runs
+        ipc_layer::SharedMemory::cleanup_stale_segments();
+
         let cmd_buffer = Arc::new(ipc_layer::MpscRingBuffer::new(1024));
         let cmd_cons = cmd_buffer.clone();
         let (bundle_garbage_prod, bundle_garbage_cons) = RingBuffer::<Vec<control_plane::Command>>::new(16).split();

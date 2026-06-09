@@ -177,6 +177,20 @@ impl SharedMemory {
 
     pub fn ptr(&self) -> *mut u8 { self.ptr }
     pub fn size(&self) -> usize { self.size }
+
+    /// Scans /dev/shm for stale nullherz segments and unlinks them.
+    pub fn cleanup_stale_segments() {
+        if let Ok(entries) = std::fs::read_dir("/dev/shm") {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name.starts_with("nullherz_") {
+                        let cname = CString::new(name).unwrap();
+                        unsafe { libc::shm_unlink(cname.as_ptr()); }
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Drop for SharedMemory {
