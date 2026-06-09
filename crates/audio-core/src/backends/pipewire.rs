@@ -109,12 +109,97 @@ pub struct PwStreamEvents {
     pub drained: Option<unsafe extern "C" fn(data: *mut std::ffi::c_void)>,
 }
 
+#[repr(C)]
+pub struct SpaBuffer {
+    pub n_metas: u32,
+    pub metas: *mut std::ffi::c_void,
+    pub n_datas: u32,
+    pub datas: *mut SpaData,
+}
+
+#[repr(C)]
+pub struct SpaData {
+    pub type_: u32,
+    pub flags: u32,
+    pub fd: i64,
+    pub mapoffset: u32,
+    pub maxsize: u32,
+    pub data: *mut std::ffi::c_void,
+    pub chunk: *mut SpaChunk,
+}
+
+#[repr(C)]
+pub struct SpaChunk {
+    pub offset: u32,
+    pub size: u32,
+    pub stride: i32,
+    pub flags: u32,
+}
+
+const SPA_TYPE_OBJECT: u32 = 3;
+const SPA_TYPE_INT: u32 = 4;
+const SPA_TYPE_ID: u32 = 11;
+
+const SPA_PARAM_ENUM_FORMAT: u32 = 1;
+const SPA_FORMAT_MEDIA_TYPE: u32 = 1;
+const SPA_FORMAT_MEDIA_SUBTYPE: u32 = 2;
+const SPA_FORMAT_FORMAT: u32 = 3;
+const SPA_FORMAT_RATE: u32 = 4;
+const SPA_FORMAT_CHANNELS: u32 = 5;
+
+const SPA_MEDIA_TYPE_AUDIO: u32 = 1;
+const SPA_MEDIA_SUBTYPE_RAW: u32 = 1;
+const SPA_AUDIO_FORMAT_F32: u32 = 3;
+
+pub struct SpaPodBuilder {
+    pub data: Vec<u32>,
+}
+
+impl SpaPodBuilder {
+    pub fn new() -> Self {
+        Self { data: Vec::with_capacity(64) }
+    }
+
+    pub fn begin_object(&mut self, type_: u32, id: u32) -> usize {
+        let offset = self.data.len();
+        self.data.push(0); // size placeholder
+        self.data.push(SPA_TYPE_OBJECT);
+        self.data.push(type_);
+        self.data.push(id);
+        offset
+    }
+
+    pub fn end_object(&mut self, offset: usize) {
+        let size = (self.data.len() - offset - 2) * 4;
+        self.data[offset] = size as u32;
+    }
+
+    pub fn add_prop_id(&mut self, key: u32, value: u32) {
+        self.data.push(key);
+        self.data.push(0); // flags
+        self.data.push(SPA_TYPE_ID);
+        self.data.push(4); // size
+        self.data.push(value);
+        self.data.push(0); // padding
+        self.data.push(0);
+        self.data.push(0);
+    }
+
+    pub fn add_prop_int(&mut self, key: u32, value: u32) {
+        self.data.push(key);
+        self.data.push(0); // flags
+        self.data.push(SPA_TYPE_INT);
+        self.data.push(4); // size
+        self.data.push(value);
+        self.data.push(0);
+        self.data.push(0);
+        self.data.push(0);
+    }
+}
+
 unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
     let backend = unsafe { &mut *(data as *mut PipewireBackendInner) };
-    let pw = match &backend.lib {
-        Some(l) => l,
-        None => return,
-    };
+    let Some(pw) = &backend.lib else { return };
 
     let buffer = unsafe { (pw.pw_stream_dequeue_buffer)(backend.stream) };
     if buffer.is_null() { return; }
@@ -124,24 +209,7 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
         buffer: *mut SpaBuffer,
     }
     let pw_buf = unsafe { &*(buffer as *const PwBuffer) };
-    #[repr(C)]
-    struct SpaBuffer {
-        n_metas: u32,
-        metas: *mut std::ffi::c_void,
-        n_datas: u32,
-        datas: *mut SpaData,
-    }
-    #[repr(C)]
-    struct SpaData {
-        _type: u32,
-        flags: u32,
-        fd: i64,
-        mapoffset: u32,
-        maxsize: u32,
-        data: *mut std::ffi::c_void,
-        chunk: *mut std::ffi::c_void,
-    }
-    let spa_buf = unsafe { &*(pw_buf.buffer as *const SpaBuffer) };
+    let spa_buf = unsafe { &*pw_buf.buffer };
 
     let num_samples = 128; // Hard engine constraint
     let num_channels = spa_buf.n_datas.min(16) as usize;
@@ -187,22 +255,16 @@ impl AudioBackend for PipewireBackend {
 
             inner.stream = (pw.pw_stream_new)(inner.context, c"nullherz-stream".as_ptr(), std::ptr::null_mut());
 
-            // SPA POD binary layout fix
-            // Object: size=120, type=Object(3), body.type=EnumFormat(1), body.id=EnumFormat(1)
-            // Prop 1: mediaType(1), flags=0, type=Id(11), size=4, value=audio(1), pad=0, 0
-            // Prop 2: mediaSubtype(2), flags=0, type=Id(11), size=4, value=raw(1), pad=0, 0
-            // Prop 3: format(3), flags=0, type=Id(11), size=4, value=F32(3), pad=0, 0
-            // Prop 4: rate(4), flags=0, type=Int(4), size=4, value=44100, pad=0, 0
-            // Prop 5: channels(5), flags=0, type=Int(4), size=4, value=2, pad=0, 0
-            let format_pod: [u32; 44] = [
-                120, 3, 1, 1,
-                1, 0, 11, 4, 1, 0, 0, 0,
-                2, 0, 11, 4, 1, 0, 0, 0,
-                3, 0, 11, 4, 3, 0, 0, 0,
-                4, 0, 4, 4, rate, 0, 0, 0,
-                5, 0, 4, 4, 2, 0, 0, 0,
-            ];
-            let format_ptr = format_pod.as_ptr() as *const std::ffi::c_void;
+            let mut builder = SpaPodBuilder::new();
+            let obj_offset = builder.begin_object(SPA_PARAM_ENUM_FORMAT, SPA_PARAM_ENUM_FORMAT);
+            builder.add_prop_id(SPA_FORMAT_MEDIA_TYPE, SPA_MEDIA_TYPE_AUDIO);
+            builder.add_prop_id(SPA_FORMAT_MEDIA_SUBTYPE, SPA_MEDIA_SUBTYPE_RAW);
+            builder.add_prop_id(SPA_FORMAT_FORMAT, SPA_AUDIO_FORMAT_F32);
+            builder.add_prop_int(SPA_FORMAT_RATE, rate);
+            builder.add_prop_int(SPA_FORMAT_CHANNELS, 2);
+            builder.end_object(obj_offset);
+
+            let format_ptr = builder.data.as_ptr() as *const std::ffi::c_void;
             let params = [format_ptr];
 
             inner.events = Some(Box::new(PwStreamEvents {
@@ -223,7 +285,8 @@ impl AudioBackend for PipewireBackend {
             let pw = inner.lib.as_ref().unwrap();
             (pw.pw_stream_add_listener)(inner.stream, inner.listener.as_mut_ptr() as *mut _, ev_ptr, inner_ptr);
 
-            (pw.pw_stream_connect)(inner.stream, 1, 0xffffffff, 0x1, params.as_ptr() as *const _, 1);
+            // Use PW_STREAM_FLAG_AUTOCONNECT (1) | PW_STREAM_FLAG_MAP_BUFFERS (2)
+            (pw.pw_stream_connect)(inner.stream, 1, 0xffffffff, 0x3, params.as_ptr() as *const _, 1);
             (pw.pw_thread_loop_start)(inner.thread_loop);
         }
         Ok(())

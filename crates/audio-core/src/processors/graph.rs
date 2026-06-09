@@ -18,6 +18,8 @@ pub struct ProcessorNode {
     pub processor: std::cell::UnsafeCell<Box<dyn AudioProcessor>>,
 }
 
+// SAFETY: ProcessorNode is Send/Sync because we manage safe access to the UnsafeCell
+// during the real-time processing cycle via the topological stage fencing.
 unsafe impl Send for ProcessorNode {}
 unsafe impl Sync for ProcessorNode {}
 
@@ -89,6 +91,7 @@ impl TaskPool {
                 while running_worker.load(Ordering::Relaxed) {
                     if let Some(job) = cons.pop() {
                         spins = 0;
+                        // SAFETY: job.node_ptr is guaranteed to be valid for the duration of the job execution.
                         let node = unsafe { &*job.node_ptr };
                         let num_samples = job.num_samples;
                         let buffers_ptr = job.buffers_ptr;
@@ -102,11 +105,11 @@ impl TaskPool {
                             if p_idx >= 64 {
                                 let x_idx = p_idx - 64;
                                 if x_idx < 8 {
-                                    // SAFETY: x_buffers_ptr is valid for 8 AudioBlocks.
+                                    // SAFETY: x_buffers_ptr is valid for 8 AudioBlocks as pre-allocated by ProcessorGraph.
                                     unsafe { *input_storage = &(&(*job.x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
                                 }
                             } else if p_idx < 64 {
-                                // SAFETY: buffers_ptr is valid for MAX_NODES AudioBlocks.
+                                // SAFETY: buffers_ptr is valid for MAX_NODES AudioBlocks as pre-allocated by ProcessorGraph.
                                 unsafe { *input_storage = &(&(*buffers_ptr.add(p_idx)).data)[offset..offset + num_samples]; }
                             }
                         }
@@ -124,6 +127,7 @@ impl TaskPool {
                         }
 
                         #[cfg(target_arch = "x86_64")]
+                        // SAFETY: rdtsc is safe on all modern x86_64 targets.
                         let start = unsafe { std::arch::x86_64::_rdtsc() };
 
                         let mut inner_context = crate::processors::ProcessContext {
@@ -132,11 +136,14 @@ impl TaskPool {
                             sub_block_offset: offset,
                             is_last_sub_block: job.is_last_sub_block
                         };
+                        // SAFETY: node.processor is an UnsafeCell. Access is synchronized via topological stage fencing.
                         unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
 
                         #[cfg(target_arch = "x86_64")]
                         {
-                            let elapsed = unsafe { std::arch::x86_64::_rdtsc() } - start;
+                            // SAFETY: rdtsc is safe on all modern x86_64 targets.
+                            let elapsed = (unsafe { std::arch::x86_64::_rdtsc() }).wrapping_sub(start);
+                            // SAFETY: telemetry_ptr is guaranteed valid for the engine lifetime.
                             unsafe { (*job.telemetry_ptr)[job.node_idx].store(elapsed, Ordering::Relaxed); }
                         }
 
@@ -560,6 +567,7 @@ impl ProcessorGraph {
     pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
         if self.node_count >= crate::MAX_NODES { return; }
         let idx = self.node_count;
+        // SAFETY: We have exclusive access to self (and thus self.nodes) during add_node.
         unsafe { *self.nodes[idx].processor.get() = processor; }
         self.node_count += 1;
 
@@ -594,10 +602,13 @@ impl AudioProcessor for ProcessorGraph {
         // Store crossfade overrides: [node_idx][input_idx] -> buffer_idx (0 means no override)
         let mut block_x_map = [[0u8; crate::MAX_CHANNELS]; crate::MAX_NODES];
 
+        // SAFETY: We mutate the active topology's crossfade state in-place. This is safe because only
+        // the main RT thread (this function) ever accesses or modifies crossfades.
         let crossfades_mut_ptr = &self.topologies[active_idx].crossfades as *const [Option<CrossfadeState>; 8] as *mut [Option<CrossfadeState>; 8];
 
         let offset = context.sub_block_offset;
         for i in 0..8 {
+            // SAFETY: crossfades_mut_ptr points to a valid [Option<CrossfadeState>; 8].
             let x_state_opt = unsafe { &mut (*crossfades_mut_ptr)[i] };
             if let Some(state) = x_state_opt {
                 let x_buf_idx = i;
@@ -623,7 +634,7 @@ impl AudioProcessor for ProcessorGraph {
         for s_idx in 0..topo.num_stages {
             let stage = &topo.stages[s_idx][..topo.stage_counts[s_idx]];
 
-            if let Some(pool) = &mut context.pool {
+            if let Some(pool) = context.pool.as_mut() {
                 let start_count = pool.completion.load(Ordering::Acquire);
                 let num_nodes = stage.len();
                 for (i, &n_idx) in stage.iter().enumerate() {
@@ -712,14 +723,17 @@ impl AudioProcessor for ProcessorGraph {
                     }
 
                     #[cfg(target_arch = "x86_64")]
+                    // SAFETY: rdtsc is safe on all modern x86_64 targets.
                     let start = unsafe { std::arch::x86_64::_rdtsc() };
 
                     let mut inner_context = crate::processors::ProcessContext { pool: None, transport: context.transport, sub_block_offset: context.sub_block_offset, is_last_sub_block: context.is_last_sub_block };
+                    // SAFETY: node.processor is an UnsafeCell. Serial execution ensures exclusive access.
                     unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
 
                     #[cfg(target_arch = "x86_64")]
                     {
-                        let elapsed = unsafe { std::arch::x86_64::_rdtsc() } - start;
+                        // SAFETY: rdtsc is safe on all modern x86_64 targets.
+                        let elapsed = (unsafe { std::arch::x86_64::_rdtsc() }).wrapping_sub(start);
                         self.telemetry.node_times_cycles[n_idx].store(elapsed, Ordering::Relaxed);
                     }
                 }
@@ -839,6 +853,7 @@ impl AudioProcessor for ProcessorGraph {
                     }
 
                     // SAFETY: We replace the processor inside UnsafeCell.
+                    // This is only called when the graph is NOT being processed or during a safe mutation point.
                     let old_proc = unsafe { std::ptr::replace(node.processor.get(), processor) };
                     if let Some(ref mut prod) = self.garbage_producer {
                         if let Err(leaked) = prod.push(old_proc) {
@@ -855,6 +870,7 @@ impl AudioProcessor for ProcessorGraph {
                     if let Some(ref prod) = self.garbage_producer {
                         processor.set_garbage_producer(prod.clone());
                     }
+                    // SAFETY: Exclusive access to self during command application.
                     unsafe { *self.nodes[idx].processor.get() = processor; }
                     self.node_count += 1;
 
