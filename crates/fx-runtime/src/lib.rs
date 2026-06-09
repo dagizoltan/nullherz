@@ -19,7 +19,10 @@ pub struct SidecarHandle {
 #[derive(Default)]
 pub struct SidecarManager {
     active_sidecars: Vec<SidecarHandle>,
+    pub current_memory_usage_bytes: usize,
 }
+
+const MAX_SIDECAR_MEMORY_BYTES: usize = 512 * 1024 * 1024; // 512MB Quota
 
 impl SidecarManager {
     pub fn new() -> Self {
@@ -28,6 +31,19 @@ impl SidecarManager {
 
     pub fn spawn_sidecar(&mut self, name: &str, binary_path: &str, num_channels: usize) -> Result<SidecarProcessor, String> {
         let num_channels = num_channels.min(MAX_CHANNELS);
+
+        // Calculate estimated memory usage for this sidecar
+        let (cmd_layout, _) = ShmRingBuffer::<control_plane::Command>::layout(64);
+        let (fb_layout, _) = ShmRingBuffer::<control_plane::SidecarMetadata>::layout(8);
+        let (audio_layout, _) = ShmRingBuffer::<AudioBlock>::layout(16);
+        let sig_size = std::mem::size_of::<ShmSignal>();
+
+        let estimated_size = cmd_layout.size() + fb_layout.size() + (audio_layout.size() * num_channels * 2) + sig_size;
+
+        if self.current_memory_usage_bytes + estimated_size > MAX_SIDECAR_MEMORY_BYTES {
+            return Err(format!("Sidecar '{}' exceeds system memory quota. (Current: {}MB, Requested: {}MB, Limit: {}MB)",
+                name, self.current_memory_usage_bytes / 1024 / 1024, estimated_size / 1024 / 1024, MAX_SIDECAR_MEMORY_BYTES / 1024 / 1024));
+        }
 
         // 1. Create SHM for commands
         let cmd_shm_name = format!("/nullherz_cmd_{}", name);
@@ -131,11 +147,18 @@ impl SidecarManager {
             last_heartbeat_version: 0,
         });
 
+        self.current_memory_usage_bytes += estimated_size;
+
         Ok(processor)
     }
 
     pub fn reap_zombies(&mut self) -> Vec<SidecarProcessor> {
         let mut to_restart = Vec::new();
+        let (cmd_layout, _) = ShmRingBuffer::<control_plane::Command>::layout(64);
+        let (fb_layout, _) = ShmRingBuffer::<control_plane::SidecarMetadata>::layout(8);
+        let (audio_layout, _) = ShmRingBuffer::<AudioBlock>::layout(16);
+        let sig_size = std::mem::size_of::<ShmSignal>();
+
         self.active_sidecars.retain_mut(|handle| {
             let exited = match handle.process.try_wait() {
                 Ok(Some(_status)) => true, // Process exited
@@ -147,6 +170,10 @@ impl SidecarManager {
 
             if exited || timed_out {
                 if timed_out { let _ = handle.process.kill(); }
+
+                let size = cmd_layout.size() + fb_layout.size() + (audio_layout.size() * handle.num_channels * 2) + sig_size;
+                self.current_memory_usage_bytes = self.current_memory_usage_bytes.saturating_sub(size);
+
                 to_restart.push((handle.name.clone(), handle.binary_path.clone(), handle.num_channels));
                 return false;
             }

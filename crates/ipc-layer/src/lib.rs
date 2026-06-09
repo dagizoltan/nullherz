@@ -177,6 +177,20 @@ impl SharedMemory {
 
     pub fn ptr(&self) -> *mut u8 { self.ptr }
     pub fn size(&self) -> usize { self.size }
+
+    /// Scans /dev/shm for stale nullherz segments and unlinks them.
+    pub fn cleanup_stale_segments() {
+        if let Ok(entries) = std::fs::read_dir("/dev/shm") {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name.starts_with("nullherz_") {
+                        let cname = CString::new(name).unwrap();
+                        unsafe { libc::shm_unlink(cname.as_ptr()); }
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Drop for SharedMemory {
@@ -452,6 +466,25 @@ impl<T> MpscRingBuffer<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn test_mpsc_ring_buffer_consistency(
+            values in prop::collection::vec(0..1000i32, 1..100)
+        ) {
+            let buffer = MpscRingBuffer::new(128);
+            for &val in &values {
+                let _ = buffer.push(val);
+            }
+            let mut popped = Vec::new();
+            while let Some(val) = buffer.pop() {
+                popped.push(val);
+            }
+            // MPSC guarantees order from a single thread
+            prop_assert_eq!(values, popped);
+        }
+    }
 
     #[test]
     fn test_shm_ring_buffer() {

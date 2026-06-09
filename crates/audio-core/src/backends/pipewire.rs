@@ -174,6 +174,7 @@ impl AudioBackend for PipewireBackend {
         unsafe {
             let inner = &mut *self.inner;
             if inner.lib.is_none() { inner.lib = Some(PwLib::load()?); }
+            let rate = engine.target_sample_rate as u32;
             inner.engine = Some(engine);
             inner.running.store(true, Ordering::SeqCst);
 
@@ -198,7 +199,7 @@ impl AudioBackend for PipewireBackend {
                 1, 0, 11, 4, 1, 0, 0, 0,
                 2, 0, 11, 4, 1, 0, 0, 0,
                 3, 0, 11, 4, 3, 0, 0, 0,
-                4, 0, 4, 4, 44100, 0, 0, 0,
+                4, 0, 4, 4, rate, 0, 0, 0,
                 5, 0, 4, 4, 2, 0, 0, 0,
             ];
             let format_ptr = format_pod.as_ptr() as *const std::ffi::c_void;

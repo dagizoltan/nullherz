@@ -177,6 +177,7 @@ impl Default for ProcessorGraph {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
     use super::*;
     use crate::processors::ProcessContext;
 
@@ -275,6 +276,39 @@ mod tests {
         // contains the correct data at the correct offset
         for i in 0..50 {
             assert_eq!(out_data[i], (i + 10) as f32);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_graph_topology_stability(
+            node_counts in 1..crate::MAX_NODES,
+            edge_counts in 1..100
+        ) {
+            let mut graph = ProcessorGraph::new();
+            for i in 0..node_counts {
+                // Add nodes with randomized but valid physical buffer indices
+                graph.add_node(Box::new(IdentityProcessor), vec![(i + 1) % 64], vec![i % 64]);
+            }
+
+            // The scheduler should have produced a valid execution plan
+            let active_idx = graph.active_topo_idx.load(Ordering::Acquire);
+            let topo = &graph.topologies[active_idx];
+
+            if topo.node_count > 0 {
+                assert!(topo.num_stages > 0);
+            }
+
+            // Verify that all assigned nodes are unique across stages
+            let mut seen_nodes = std::collections::HashSet::new();
+            for s_idx in 0..topo.num_stages {
+                for n_idx in &topo.stages[s_idx][..topo.stage_counts[s_idx]] {
+                    assert!(seen_nodes.insert(*n_idx), "Node {} assigned to multiple stages", n_idx);
+                }
+            }
+
+            // Verify that hazard check passes for the committed graph
+            assert!(graph.verify_no_hazards_prod(active_idx).is_ok());
         }
     }
 }
@@ -489,15 +523,34 @@ impl ProcessorGraph {
         for s_idx in 0..topo.num_stages {
             let stage = &topo.stages[s_idx][..topo.stage_counts[s_idx]];
             let mut physical_writes = [false; crate::MAX_NODES];
+            let mut physical_reads = [false; crate::MAX_NODES];
+
             for &n_idx in stage {
                 let routing = &topo.routing[n_idx];
+
+                // 1. Check for RAW (Read-After-Write) and WAR (Write-After-Read) Hazards
+                // A node in the same stage cannot write to a buffer being read by another node in that stage.
                 for k in 0..routing.output_count {
                     let v_out = *routing.output_indices.get(k).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
                     let p_out = *topo.virtual_to_physical.get(v_out).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
+
                     if physical_writes[p_out] {
-                        return Err(crate::error::AudioError::IpcError(format!("WAW Hazard at stage {}. Node {} attempts to write to physical buffer {} which is already used in this stage.", s_idx, n_idx, p_out)));
+                        return Err(crate::error::AudioError::IpcError(format!("WAW Hazard at stage {}. Node {} attempts to write to physical buffer {} which is already used for writing in this stage.", s_idx, n_idx, p_out)));
+                    }
+                    if physical_reads[p_out] {
+                        return Err(crate::error::AudioError::IpcError(format!("WAR Hazard at stage {}. Node {} attempts to write to physical buffer {} which is already being read in this stage.", s_idx, n_idx, p_out)));
                     }
                     physical_writes[p_out] = true;
+                }
+
+                for k in 0..routing.input_count {
+                    let v_in = *routing.input_indices.get(k).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
+                    let p_in = *topo.virtual_to_physical.get(v_in).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
+
+                    if physical_writes[p_in] {
+                        return Err(crate::error::AudioError::IpcError(format!("RAW Hazard at stage {}. Node {} attempts to read from physical buffer {} which is being written to in this stage.", s_idx, n_idx, p_in)));
+                    }
+                    physical_reads[p_in] = true;
                 }
             }
         }

@@ -37,34 +37,28 @@ impl SummingNode {
         }
     }
 
-    /// # Safety
-    /// Caller must ensure input and output are valid for 'len' elements.
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2")]
-    pub unsafe fn process_16_to_1_avx2(&self, inputs: &[&[f32]], output: &mut [f32]) {
-        // SAFETY: The requirements are outlined in the doc comment.
-        unsafe {
-        use std::arch::x86_64::*;
+    pub fn process_16_to_1_simd(&self, inputs: &[&[f32]], output: &mut [f32]) {
+        use wide::*;
         let len = output.len();
         output.fill(0.0);
-        let b_gain = _mm256_set1_ps(self.gain);
+        let b_gain = f32x8::from(self.gain);
 
         for input in inputs {
             let input_len = input.len();
             let process_len = len.min(input_len);
             let mut i = 0;
             while i + 8 <= process_len {
-                let v_in = _mm256_loadu_ps(input.as_ptr().add(i));
-                let v_out = _mm256_loadu_ps(output.as_ptr().add(i));
-                let res = _mm256_add_ps(v_out, _mm256_mul_ps(v_in, b_gain));
-                _mm256_storeu_ps(output.as_mut_ptr().add(i), res);
+                let v_in = f32x8::new(input[i..i+8].try_into().unwrap());
+                let v_out = f32x8::new(output[i..i+8].try_into().unwrap());
+                let res = v_out + (v_in * b_gain);
+                let arr_res: [f32; 8] = res.into();
+                output[i..i+8].copy_from_slice(&arr_res);
                 i += 8;
             }
             while i < process_len {
                 output[i] += input[i] * self.gain;
                 i += 1;
             }
-        }
         }
     }
 }
@@ -93,32 +87,26 @@ impl Crossfader {
         }
     }
 
-    /// # Safety
-    /// Caller must ensure input and output are valid for 'len' elements.
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2")]
-    pub unsafe fn process_block_avx2(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
-        // SAFETY: The requirements are outlined in the doc comment.
-        unsafe {
-        use std::arch::x86_64::*;
+    pub fn process_block_simd(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
+        use wide::*;
         let len = output.len();
         let gain_b = self.position.sqrt();
         let gain_a = (1.0 - self.position).sqrt();
-        let b_gain_b = _mm256_set1_ps(gain_b);
-        let b_gain_a = _mm256_set1_ps(gain_a);
+        let b_gain_b = f32x8::from(gain_b);
+        let b_gain_a = f32x8::from(gain_a);
 
         let mut i = 0;
         while i + 8 <= len {
-            let va = _mm256_loadu_ps(input_a.as_ptr().add(i));
-            let vb = _mm256_loadu_ps(input_b.as_ptr().add(i));
-            let res = _mm256_add_ps(_mm256_mul_ps(va, b_gain_a), _mm256_mul_ps(vb, b_gain_b));
-            _mm256_storeu_ps(output.as_mut_ptr().add(i), res);
+            let va = f32x8::new(input_a[i..i+8].try_into().unwrap());
+            let vb = f32x8::new(input_b[i..i+8].try_into().unwrap());
+            let res = (va * b_gain_a) + (vb * b_gain_b);
+            let arr_res: [f32; 8] = res.into();
+            output[i..i+8].copy_from_slice(&arr_res);
             i += 8;
         }
         while i < len {
             output[i] = input_a[i] * gain_a + input_b[i] * gain_b;
             i += 1;
-        }
         }
     }
 }

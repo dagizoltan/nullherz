@@ -19,6 +19,7 @@ pub struct Conductor {
     garbage_consumer: Option<ipc_layer::Consumer<Box<dyn audio_core::AudioProcessor>>>,
     bundle_garbage_consumer: Option<ipc_layer::Consumer<Vec<control_plane::Command>>>,
     pub topo_producer: Option<ipc_layer::NonRtProducer<audio_core::processors::TopologyMutation>>,
+    pub health_signal: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl Default for Conductor {
@@ -42,10 +43,14 @@ impl Conductor {
             garbage_consumer: None,
             bundle_garbage_consumer: None,
             topo_producer: None,
+            health_signal: None,
         }
     }
 
     pub fn setup_engine(&mut self) -> (Arc<ipc_layer::MpscRingBuffer<control_plane::TimestampedCommand>>, ipc_layer::Consumer<audio_core::Telemetry>) {
+        // Harden system state: clean up stale SHM segments from previous runs
+        ipc_layer::SharedMemory::cleanup_stale_segments();
+
         let cmd_buffer = Arc::new(ipc_layer::MpscRingBuffer::new(1024));
         let cmd_cons = cmd_buffer.clone();
         let (bundle_garbage_prod, bundle_garbage_cons) = RingBuffer::<Vec<control_plane::Command>>::new(16).split();
@@ -57,6 +62,7 @@ impl Conductor {
 
         let graph = ProcessorGraph::new();
         let engine = AudioEngine::new(cmd_cons, Some(bundle_cons), Some(topo_cons), garbage_prod, Some(bundle_garbage_prod), tel_prod, Box::new(graph));
+        self.health_signal = Some(engine.health_signal.clone());
         self.engine = Some(engine);
         self.garbage_consumer = Some(garbage_cons);
         self.bundle_garbage_consumer = Some(bundle_garbage_cons);

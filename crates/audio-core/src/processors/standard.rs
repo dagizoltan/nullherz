@@ -159,7 +159,7 @@ impl CrossfaderProcessor {
 impl AudioProcessor for CrossfaderProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         if inputs.len() < 2 || outputs.is_empty() { return; }
-        self.inner.process_block(inputs[0], inputs[1], outputs[0]);
+        self.inner.process_block_simd(inputs[0], inputs[1], outputs[0]);
     }
 }
 
@@ -180,15 +180,6 @@ impl SummingProcessor {
 impl AudioProcessor for SummingProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         if outputs.is_empty() { return; }
-        
-        #[cfg(target_arch = "x86_64")]
-        if is_x86_feature_detected!("avx2") {
-            unsafe {
-                self.inner.process_16_to_1_avx2(inputs, outputs[0]);
-            }
-            return;
-        }
-
-        self.inner.process_16_to_1(inputs, outputs[0]);
+        self.inner.process_16_to_1_simd(inputs, outputs[0]);
     }
 }
