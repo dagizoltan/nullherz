@@ -39,12 +39,12 @@ impl AudioProcessor for SamplerSidecar {
                 }
                 let sample_data = &self.samples[0]; // For now play first loaded
                 let len = out[ch].len();
-                for i in 0..len {
+                for val in out[ch].iter_mut().take(len) {
                     if idx < sample_data.len() {
-                        out[ch][i] = sample_data[idx];
+                        *val = sample_data[idx];
                         idx += 1;
                     } else {
-                        out[ch][i] = 0.0;
+                        *val = 0.0;
                         self.play_index[ch] = None;
                         break;
                     }

@@ -17,17 +17,20 @@ impl AudioProcessor for GainProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
         let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
-        for i in 0..num_channels {
-            self.gains[i].process_block(inputs[i], outputs[i]);
+        for (i, gain) in self.gains.iter_mut().enumerate().take(num_channels) {
+            gain.process_block(inputs[i], outputs[i]);
         }
     }
     fn apply_command(&mut self, command: &control_plane::Command) {
-        if let control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = command {
-            if *target_id == self.id && *param_id == 0 {
+        match *command {
+            control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
+                if target_id == self.id && param_id == 0 =>
+            {
                 for g in self.gains.iter_mut() {
-                    g.set_gain(*value, *ramp_duration_samples);
+                    g.set_gain(value, ramp_duration_samples);
                 }
             }
+            _ => {}
         }
     }
 }
@@ -52,39 +55,43 @@ impl AudioProcessor for BiquadProcessor {
         #[cfg(target_arch = "x86_64")]
         let has_avx2 = is_x86_feature_detected!("avx2");
 
-        for ch in 0..num_channels {
+        for (ch, filter) in self.filters.iter_mut().enumerate().take(num_channels) {
             #[cfg(target_arch = "x86_64")]
             {
                 if has_avx2 {
+                    // SAFETY: Filters and buffers are valid for num_channels and block size.
                     unsafe {
-                        self.filters[ch].process_block_simd(inputs[ch], outputs[ch]);
+                        filter.process_block_simd(inputs[ch], outputs[ch]);
                     }
                     continue;
                 }
             }
 
             for i in 0..inputs[ch].len() {
-                outputs[ch][i] = self.filters[ch].process_sample(inputs[ch][i]);
+                outputs[ch][i] = filter.process_sample(inputs[ch][i]);
             }
         }
     }
 
     fn apply_command(&mut self, command: &control_plane::Command) {
-        if let control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = command {
-            if *target_id == self.id {
+        match *command {
+            control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
+                if target_id == self.id =>
+            {
                 let mut coeffs = self.filters[0].target_coeffs;
                 match param_id {
-                    0 => coeffs.b0 = *value,
-                    1 => coeffs.b1 = *value,
-                    2 => coeffs.b2 = *value,
-                    3 => coeffs.a1 = *value,
-                    4 => coeffs.a2 = *value,
+                    0 => coeffs.b0 = value,
+                    1 => coeffs.b1 = value,
+                    2 => coeffs.b2 = value,
+                    3 => coeffs.a1 = value,
+                    4 => coeffs.a2 = value,
                     _ => {}
                 }
                 for f in self.filters.iter_mut() {
-                    f.set_coeffs_ramped(coeffs, *ramp_duration_samples);
+                    f.set_coeffs_ramped(coeffs, ramp_duration_samples);
                 }
             }
+            _ => {}
         }
     }
 }
@@ -104,9 +111,9 @@ impl AudioProcessor for SimdBiquadProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
         let len = inputs[0].len();
-        let num_channels = inputs.len().min(outputs.len()).min(16);
+        let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
 
-        if num_channels == 8 {
+        if (8..16).contains(&num_channels) {
             let mut in_ptrs = [std::ptr::null(); 8];
             let mut out_ptrs = [std::ptr::null_mut(); 8];
             for i in 0..8 {
@@ -115,7 +122,7 @@ impl AudioProcessor for SimdBiquadProcessor {
             }
             #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
             unsafe { self.inner.process_8_channels(in_ptrs, out_ptrs, len); }
-        } else if num_channels == 16 {
+        } else if num_channels >= 16 {
             let mut in_ptrs = [std::ptr::null(); 16];
             let mut out_ptrs = [std::ptr::null_mut(); 16];
             for i in 0..16 {
@@ -132,19 +139,22 @@ impl AudioProcessor for SimdBiquadProcessor {
     }
 
     fn apply_command(&mut self, command: &control_plane::Command) {
-        if let control_plane::Command::SetParam { target_id, param_id, value, .. } = command {
-            if *target_id == self.id {
+        match *command {
+            control_plane::Command::SetParam { target_id, param_id, value, .. }
+                if target_id == self.id =>
+            {
                 let mut coeffs = self.inner.coeffs;
                 match param_id {
-                    0 => coeffs.b0 = *value,
-                    1 => coeffs.b1 = *value,
-                    2 => coeffs.b2 = *value,
-                    3 => coeffs.a1 = *value,
-                    4 => coeffs.a2 = *value,
+                    0 => coeffs.b0 = value,
+                    1 => coeffs.b1 = value,
+                    2 => coeffs.b2 = value,
+                    3 => coeffs.a1 = value,
+                    4 => coeffs.a2 = value,
                     _ => {}
                 }
                 self.inner.coeffs = coeffs;
             }
+            _ => {}
         }
     }
 
@@ -152,6 +162,12 @@ impl AudioProcessor for SimdBiquadProcessor {
 
 pub struct CrossfaderProcessor {
     inner: audio_dsp::Crossfader,
+}
+
+impl Default for CrossfaderProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CrossfaderProcessor {
@@ -167,6 +183,12 @@ impl AudioProcessor for CrossfaderProcessor {
 
 pub struct SummingProcessor {
     inner: audio_dsp::SummingNode,
+}
+
+impl Default for SummingProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SummingProcessor {

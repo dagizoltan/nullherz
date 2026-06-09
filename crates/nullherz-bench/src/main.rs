@@ -7,7 +7,7 @@ fn main() {
     println!("Starting nullherz-bench Phase 3 Stress Test...");
 
     let cmd_cons = std::sync::Arc::new(ipc_layer::MpscRingBuffer::new(1024));
-    let mut cmd_prod = cmd_cons.clone();
+    let cmd_prod = cmd_cons.clone();
     let (garbage_prod, _garbage_cons) = RingBuffer::new(1024).split();
     let (tel_prod, mut tel_cons) = RingBuffer::new(1024).split();
 
@@ -45,7 +45,7 @@ fn main() {
         let backend = &mut backends[current_backend_idx];
         println!("Switching to backend {}...", current_backend_idx);
 
-        if let Ok(_) = backend.start(engine) {
+        if backend.start(engine).is_ok() {
             // Run Command Fuzzer during playback
             let fuzzer_start = Instant::now();
             let mut i = 0;

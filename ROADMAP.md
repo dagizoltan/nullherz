@@ -12,6 +12,7 @@ This document outlines the evolutionary phases of the **nullherz** deterministic
 *   **Production State**: History-based undo/redo, command bundling, and manual JSON serialization.
 *   **Developer Tooling**: `#[sidecar]` DSL macro and `nullherz-inspector` CLI/GUI foundations.
 *   **Deep Linux Integration**: Automated RT-Cgroup migration, CPU affinity (pinning), and Hot-Swap safety.
+*   **Hardened RT Core**: Race-free generation-based TaskPool, sample-accurate sidecar watchdogs, and RAII-aligned memory safety.
 
 ---
 

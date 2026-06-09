@@ -27,30 +27,30 @@ unsafe impl Send for AlsaLib {}
 impl AlsaLib {
     fn load() -> Result<Self, String> {
         unsafe {
-            let lib = libc::dlopen(b"libasound.so.2\0".as_ptr() as *const _, libc::RTLD_NOW);
+            let lib = libc::dlopen(c"libasound.so.2".as_ptr(), libc::RTLD_NOW);
             if lib.is_null() { return Err("Could not load libasound.so.2".to_string()); }
-            let load_sym = |name: &[u8]| {
-                let sym = libc::dlsym(lib, name.as_ptr() as *const _);
+            let load_sym = |name: &std::ffi::CStr| {
+                let sym = libc::dlsym(lib, name.as_ptr());
                 if sym.is_null() { None } else { Some(sym) }
             };
             Ok(Self {
                 handle: lib,
-                snd_pcm_open: std::mem::transmute(load_sym(b"snd_pcm_open\0").ok_or("sym failed")?),
-                snd_pcm_hw_params_malloc: std::mem::transmute(load_sym(b"snd_pcm_hw_params_malloc\0").ok_or("sym failed")?),
-                snd_pcm_hw_params_any: std::mem::transmute(load_sym(b"snd_pcm_hw_params_any\0").ok_or("sym failed")?),
-                snd_pcm_hw_params_set_access: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_access\0").ok_or("sym failed")?),
-                snd_pcm_hw_params_set_format: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_format\0").ok_or("sym failed")?),
-                snd_pcm_hw_params_set_channels: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_channels\0").ok_or("sym failed")?),
-                snd_pcm_hw_params_set_rate_near: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_rate_near\0").ok_or("sym failed")?),
-                snd_pcm_hw_params_set_period_size_near: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_period_size_near\0").ok_or("sym failed")?),
-                snd_pcm_hw_params_set_buffer_size_near: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_buffer_size_near\0").ok_or("sym failed")?),
-                snd_pcm_hw_params_set_period_size_max: std::mem::transmute(load_sym(b"snd_pcm_hw_params_set_period_size_max\0").ok_or("sym failed")?),
-                snd_pcm_hw_params: std::mem::transmute(load_sym(b"snd_pcm_hw_params\0").ok_or("sym failed")?),
-                snd_pcm_hw_params_free: std::mem::transmute(load_sym(b"snd_pcm_hw_params_free\0").ok_or("sym failed")?),
-                snd_pcm_writei: std::mem::transmute(load_sym(b"snd_pcm_writei\0").ok_or("sym failed")?),
-                snd_pcm_recover: std::mem::transmute(load_sym(b"snd_pcm_recover\0").ok_or("sym failed")?),
-                snd_pcm_close: std::mem::transmute(load_sym(b"snd_pcm_close\0").ok_or("sym failed")?),
-                snd_pcm_prepare: std::mem::transmute(load_sym(b"snd_pcm_prepare\0").ok_or("sym failed")?),
+                snd_pcm_open: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut *mut std::ffi::c_void, *const i8, i32, i32) -> i32>(load_sym(c"snd_pcm_open").ok_or("sym failed")?),
+                snd_pcm_hw_params_malloc: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut *mut std::ffi::c_void) -> i32>(load_sym(c"snd_pcm_hw_params_malloc").ok_or("sym failed")?),
+                snd_pcm_hw_params_any: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> i32>(load_sym(c"snd_pcm_hw_params_any").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_access: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, i32) -> i32>(load_sym(c"snd_pcm_hw_params_set_access").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_format: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, i32) -> i32>(load_sym(c"snd_pcm_hw_params_set_format").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_channels: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, u32) -> i32>(load_sym(c"snd_pcm_hw_params_set_channels").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_rate_near: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void, *mut u32, *mut i32) -> i32>(load_sym(c"snd_pcm_hw_params_set_rate_near").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_period_size_near: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void, *mut u64, *mut i32) -> i32>(load_sym(c"snd_pcm_hw_params_set_period_size_near").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_buffer_size_near: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void, *mut u64) -> i32>(load_sym(c"snd_pcm_hw_params_set_buffer_size_near").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_period_size_max: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void, *mut u64, *mut i32) -> i32>(load_sym(c"snd_pcm_hw_params_set_period_size_max").ok_or("sym failed")?),
+                snd_pcm_hw_params: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void) -> i32>(load_sym(c"snd_pcm_hw_params").ok_or("sym failed")?),
+                snd_pcm_hw_params_free: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void)>(load_sym(c"snd_pcm_hw_params_free").ok_or("sym failed")?),
+                snd_pcm_writei: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *const libc::c_void, u64) -> isize>(load_sym(c"snd_pcm_writei").ok_or("sym failed")?),
+                snd_pcm_recover: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, i32, i32) -> i32>(load_sym(c"snd_pcm_recover").ok_or("sym failed")?),
+                snd_pcm_close: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void) -> i32>(load_sym(c"snd_pcm_close").ok_or("sym failed")?),
+                snd_pcm_prepare: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void) -> i32>(load_sym(c"snd_pcm_prepare").ok_or("sym failed")?),
             })
         }
     }
@@ -61,6 +61,13 @@ pub struct AlsaBackend {
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
     handle: Option<thread::JoinHandle<Option<AudioEngine>>>,
 }
+
+impl Default for AlsaBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AlsaBackend {
     pub fn new() -> Self { Self { running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), handle: None } }
 }

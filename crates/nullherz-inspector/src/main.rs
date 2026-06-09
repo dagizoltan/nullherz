@@ -151,13 +151,12 @@ impl InspectorApp {
                         }
                     });
 
-                    while let Some(msg) = read.next().await {
-                        if let Ok(msg) = msg {
-                            if let Ok(text) = msg.to_text() {
-                                if let Ok(tel) = serde_json::from_str::<Telemetry>(text) {
-                                    let mut lock = tel_clone.lock().unwrap();
-                                    *lock = Some(tel);
-                                }
+                    while let Some(Ok(msg)) = read.next().await {
+                        if let Ok(text) = msg.to_text() {
+                            let tel_res = serde_json::from_str::<Telemetry>(text);
+                            if let Ok(tel) = tel_res {
+                                let mut lock = tel_clone.lock().unwrap();
+                                *lock = Some(tel);
                             }
                         }
                     }
@@ -424,7 +423,7 @@ impl InspectorApp {
 
 impl eframe::App for InspectorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let telemetry = self.last_telemetry.lock().unwrap().clone();
+        let telemetry = *self.last_telemetry.lock().unwrap();
 
         egui::TopBottomPanel::top("nav").frame(egui::Frame::none().fill(egui::Color32::from_gray(5)).inner_margin(12.0)).show(ctx, |ui| {
             ui.horizontal(|ui| {

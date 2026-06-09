@@ -23,10 +23,30 @@ impl AudioProcessor for WavetableProcessor {
         let fm_storage = [0.0f32; 128];
         let pm_storage = [0.0f32; 128];
 
-        for ch in 0..num_channels {
-            let fm = if inputs.len() > 0 { inputs[0] } else { &fm_storage[..len] };
+        // Optimization: Use AVX2 multi-channel path if exactly 8 channels are available
+        #[cfg(target_arch = "x86_64")]
+        if num_channels == 8 && is_x86_feature_detected!("avx2") {
+            let mut fm_ptrs = [std::ptr::null(); 8];
+            let mut pm_ptrs = [std::ptr::null(); 8];
+            let mut out_ptrs = [std::ptr::null_mut(); 8];
+
+            let fm_default = if !inputs.is_empty() { inputs[0] } else { &fm_storage[..len] };
+            let pm_default = if inputs.len() > 1 { inputs[1] } else { &pm_storage[..len] };
+
+            for (ch, (fm_ptr, (pm_ptr, out_ptr))) in fm_ptrs.iter_mut().zip(pm_ptrs.iter_mut().zip(out_ptrs.iter_mut())).enumerate() {
+                *fm_ptr = fm_default.as_ptr();
+                *pm_ptr = pm_default.as_ptr();
+                *out_ptr = outputs[ch].as_mut_ptr();
+            }
+
+            unsafe { self.inner.process_8_channels_avx2(fm_ptrs, pm_ptrs, out_ptrs, len); }
+            return;
+        }
+
+        for (ch, output) in outputs.iter_mut().enumerate().take(num_channels) {
+            let fm = if !inputs.is_empty() { inputs[0] } else { &fm_storage[..len] };
             let pm = if inputs.len() > 1 { inputs[1] } else { &pm_storage[..len] };
-            self.inner.process_scalar(ch, fm, pm, outputs[ch]);
+            self.inner.process_scalar(ch, fm, pm, output);
         }
     }
 }
@@ -90,8 +110,8 @@ impl AudioProcessor for ModulationProcessor {
         let avg_cv = sum / cv.len() as f32;
         let val = avg_cv * self.scale + self.offset;
 
-        if (val - self.last_sent_value).abs() > MODULATION_THRESHOLD || self.last_sent_value.is_nan() {
-            if let Some(ref mut prod) = self.command_producer {
+        let is_mod_needed = (val - self.last_sent_value).abs() > MODULATION_THRESHOLD || self.last_sent_value.is_nan();
+        if let (true, Some(prod)) = (is_mod_needed, &mut self.command_producer) {
                 // Determine block_start_sample for this cycle via telemetry or counter
                 // For now, we use a relative offset within the engine's block counter.
                 let _ = prod.push(control_plane::TimestampedCommand {
@@ -104,7 +124,6 @@ impl AudioProcessor for ModulationProcessor {
                     },
                 });
                 self.last_sent_value = val;
-            }
         }
     }
 }
@@ -112,7 +131,7 @@ impl AudioProcessor for ModulationProcessor {
 pub struct SequencerProcessor {
     sample_rate: f32,
     current_sample: u64,
-    grid: [[bool; 16]; 8], // 8 tracks, 16 steps
+    grid: [[bool; crate::MAX_CHANNELS]; 8], // 8 tracks, steps limited by MAX_CHANNELS for consistency
     command_producer: Option<ipc_layer::Producer<control_plane::TimestampedCommand>>,
 }
 
@@ -121,7 +140,7 @@ impl SequencerProcessor {
         Self {
             sample_rate,
             current_sample: 0,
-            grid: [[false; 16]; 8],
+            grid: [[false; crate::MAX_CHANNELS]; 8],
             command_producer: None,
         }
     }
@@ -139,29 +158,26 @@ impl AudioProcessor for SequencerProcessor {
         if let Some(transport) = context.transport {
             if !transport.is_playing { return; }
 
-            let start_beat = transport.beat_position;
-            let seconds_per_block = block_len as f64 / transport.sample_rate as f64;
-            let beats_per_block = seconds_per_block * (transport.bpm as f64 / 60.0);
-            let end_beat = start_beat + beats_per_block;
+            // Sample-absolute indexing to prevent precision drift
+            let samples_per_beat = (transport.sample_rate as f64 * 60.0) / transport.bpm as f64;
+            let samples_per_step = samples_per_beat * 0.25; // 16th note
 
-            let step_size = 0.25; // 16th note
+            let block_start_sample = (transport.beat_position * samples_per_beat).round() as u64;
+            let block_end_sample = block_start_sample + block_len;
 
-            let next_step_beat = (start_beat / step_size).ceil() * step_size;
+            let next_step_idx = (block_start_sample as f64 / samples_per_step).ceil() as u64;
+            let next_step_sample = (next_step_idx as f64 * samples_per_step).round() as u64;
 
-            if next_step_beat < end_beat || (next_step_beat - start_beat).abs() < 1e-9 {
-                let step_idx = ((next_step_beat / step_size).round() as u64 % 16) as usize;
+            if next_step_sample < block_end_sample {
+                let step_idx = (next_step_idx % crate::MAX_CHANNELS as u64) as usize;
+                let sample_offset = next_step_sample.saturating_sub(block_start_sample);
 
                 for track in 0..8 {
-                    if self.grid[track][step_idx] {
-                        if let Some(ref mut prod) = self.command_producer {
-                            let beat_offset = (next_step_beat - start_beat).max(0.0);
-                            let sample_offset = (beat_offset * 60.0 / transport.bpm as f64 * transport.sample_rate as f64).round() as u64;
-
+                    if let (true, Some(prod)) = (self.grid[track][step_idx], &mut self.command_producer) {
                             let _ = prod.push(control_plane::TimestampedCommand {
                                 timestamp_samples: self.current_sample + sample_offset.min(block_len - 1),
                                 command: control_plane::Command::Play,
                             });
-                        }
                     }
                 }
             }

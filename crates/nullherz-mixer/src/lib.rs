@@ -11,6 +11,7 @@ pub const BUF_DJ_A_R: usize = 9;
 pub const BUF_DJ_B_L: usize = 10;
 pub const BUF_DJ_B_R: usize = 11;
 
+#[derive(Default)]
 pub struct MixerManager {
     next_node_id: u32,
     next_buffer_id: u32,
@@ -34,7 +35,7 @@ impl MixerManager {
         let gain_id = self.next_node_id;
         self.next_node_id += 1;
         commands.push(Command::AddNode { node_idx: gain_id, processor_type_id: 2 });
-        commands.push(Command::UpdateEdge { node_idx: gain_id, input_idx: 0, new_buffer_idx: input_buf as u32 });
+        commands.push(Command::UpdateEdge { node_idx: gain_id, input_idx: 0, new_buffer_idx: input_buf });
 
         let mut prev_node = gain_id;
         let mut prev_buf_l = self.next_buffer_id;
@@ -112,7 +113,7 @@ impl MixerManager {
         let cf_id = self.next_node_id;
         self.next_node_id += 1;
         println!("Creating Master Crossfader (Node {})", cf_id);
-        commands.push(Command::AddNode { node_idx: cf_id as u32, processor_type_id: 20 }); // Crossfader type
+        commands.push(Command::AddNode { node_idx: cf_id, processor_type_id: 20 }); // Crossfader type
         commands
     }
 

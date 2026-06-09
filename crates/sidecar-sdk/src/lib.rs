@@ -13,6 +13,8 @@ pub struct SidecarHost {
 }
 
 impl SidecarHost {
+    /// # Safety
+    /// All shared memory segment names must exist and be accessible by the current process.
     pub unsafe fn new(cmd_name: &str, sig_name: &str, in_names: &[String], out_names: &[String], efd: i32) -> Self {
         let (cmd_layout, _) = ShmRingBuffer::<control_plane::Command>::layout(64);
         let shm_cmd = SharedMemory::open(cmd_name, cmd_layout.size()).unwrap();
@@ -78,6 +80,8 @@ pub struct SidecarContext<P: AudioProcessor> {
 }
 
 impl<P: AudioProcessor> SidecarContext<P> {
+    /// # Safety
+    /// All pointers must be valid and point to pre-allocated shared memory structures.
     pub unsafe fn new(
         processor: P,
         command_ptr: *const ShmRingBuffer<control_plane::Command>,
@@ -118,9 +122,9 @@ impl<P: AudioProcessor> SidecarContext<P> {
         let num_channels = self.input_buffers.len().min(self.output_buffers.len()).min(16);
 
         let mut available = true;
-        for i in 0..num_channels {
+        for (i, in_block) in in_blocks.iter_mut().enumerate().take(num_channels) {
             if let Some(block) = self.input_buffers[i].pop() {
-                in_blocks[i] = block;
+                *in_block = block;
             } else {
                 available = false;
                 break;
@@ -151,9 +155,9 @@ impl<P: AudioProcessor> SidecarContext<P> {
             };
             self.processor.process(&in_slices_arr[..num_channels], &mut out_slices_reconstructed[..num_channels], &mut context);
 
-            for i in 0..num_channels {
-                out_blocks[i].len = block_len as u32;
-                let _ = self.output_buffers[i].push(out_blocks[i]);
+            for (i, out_block) in out_blocks.iter_mut().enumerate().take(num_channels) {
+                out_block.len = block_len as u32;
+                let _ = self.output_buffers[i].push(*out_block);
             }
         }
     }

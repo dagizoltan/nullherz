@@ -16,13 +16,14 @@ pub struct SidecarHandle {
     pub last_heartbeat_version: u64,
 }
 
+#[derive(Default)]
 pub struct SidecarManager {
     active_sidecars: Vec<SidecarHandle>,
 }
 
 impl SidecarManager {
     pub fn new() -> Self {
-        Self { active_sidecars: Vec::new() }
+        Self::default()
     }
 
     pub fn spawn_sidecar(&mut self, name: &str, binary_path: &str, num_channels: usize) -> Result<SidecarProcessor, String> {
@@ -31,13 +32,13 @@ impl SidecarManager {
         // 1. Create SHM for commands
         let cmd_shm_name = format!("/nullherz_cmd_{}", name);
         let (cmd_layout, _) = ShmRingBuffer::<control_plane::Command>::layout(64);
-        let shm_cmd = SharedMemory::create(&cmd_shm_name, cmd_layout.size())?;
+        let shm_cmd = SharedMemory::create(&cmd_shm_name, cmd_layout.size()).map_err(|e| e.to_string())?;
         let cmd_rb_ptr = unsafe { ShmRingBuffer::init(shm_cmd.ptr(), 64) };
 
         // 1b. Create SHM for feedback
         let fb_shm_name = format!("/nullherz_fb_{}", name);
         let (fb_layout, _) = ShmRingBuffer::<control_plane::SidecarMetadata>::layout(8);
-        let shm_feedback = SharedMemory::create(&fb_shm_name, fb_layout.size())?;
+        let shm_feedback = SharedMemory::create(&fb_shm_name, fb_layout.size()).map_err(|e| e.to_string())?;
         let fb_rb_ptr = unsafe { ShmRingBuffer::init(shm_feedback.ptr(), 8) };
 
         // 2. Create SHM for audio blocks
@@ -46,7 +47,7 @@ impl SidecarManager {
         let (audio_layout, _) = ShmRingBuffer::<AudioBlock>::layout(16);
         for i in 0..num_channels {
             let in_name = format!("/nullherz_in_{}_{}", name, i);
-            let shm = SharedMemory::create(&in_name, audio_layout.size())?;
+            let shm = SharedMemory::create(&in_name, audio_layout.size()).map_err(|e| e.to_string())?;
             input_ptrs.push(unsafe { ShmRingBuffer::init(shm.ptr(), 16) });
             shm_inputs.push(shm);
         }
@@ -55,19 +56,19 @@ impl SidecarManager {
         let mut output_ptrs = Vec::new();
         for i in 0..num_channels {
             let out_name = format!("/nullherz_out_{}_{}", name, i);
-            let shm = SharedMemory::create(&out_name, audio_layout.size())?;
+            let shm = SharedMemory::create(&out_name, audio_layout.size()).map_err(|e| e.to_string())?;
             output_ptrs.push(unsafe { ShmRingBuffer::init(shm.ptr(), 16) } as *const ShmRingBuffer<AudioBlock>);
             shm_outputs.push(shm);
         }
 
         // 3. Create SHM for signal
         let sig_name = format!("/nullherz_sig_{}", name);
-        let shm_signal = SharedMemory::create(&sig_name, std::mem::size_of::<ShmSignal>())?;
+        let shm_signal = SharedMemory::create(&sig_name, std::mem::size_of::<ShmSignal>()).map_err(|e| e.to_string())?;
         let signal_ptr = shm_signal.ptr() as *mut ShmSignal;
         unsafe { std::ptr::write(signal_ptr, ShmSignal::new()); }
 
         // 4. Create EventFd
-        let efd = EventFd::create()?;
+        let efd = EventFd::create().map_err(|e| e.to_string())?;
         let efd_raw = efd.fd();
 
         // 5. Spawn process
@@ -177,13 +178,23 @@ impl SidecarManager {
     }
 }
 
+impl Drop for SidecarManager {
+    fn drop(&mut self) {
+        for handle in self.active_sidecars.iter_mut() {
+            let _ = handle.process.kill();
+            let _ = handle.process.wait();
+        }
+    }
+}
+
+#[derive(Default)]
 pub struct SidecarRegistry {
     pub known_binaries: Vec<String>,
 }
 
 impl SidecarRegistry {
     pub fn new() -> Self {
-        Self { known_binaries: Vec::new() }
+        Self::default()
     }
 
     pub fn scan_directory(&mut self, path: &str) -> Result<(), String> {
@@ -191,10 +202,8 @@ impl SidecarRegistry {
         for entry in entries {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
-            if path.is_file() {
-                if let Some(s) = path.to_str() {
-                    self.known_binaries.push(s.to_string());
-                }
+            if let Some(s) = path.to_str().filter(|_| path.is_file()) {
+                self.known_binaries.push(s.to_string());
             }
         }
         Ok(())

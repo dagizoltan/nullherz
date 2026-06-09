@@ -10,7 +10,7 @@ use crate::telemetry::Telemetry;
 pub struct AudioEngine {
     command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
     bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
-    topology_consumer: Option<Consumer<control_plane::TopologyCommand>>,
+    topology_consumer: Option<Consumer<crate::processors::TopologyMutation>>,
     active_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     pending_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     garbage_producer: Producer<Box<dyn AudioProcessor>>,
@@ -29,7 +29,7 @@ impl AudioEngine {
     pub fn new(
         command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
         bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
-        topology_consumer: Option<Consumer<control_plane::TopologyCommand>>,
+        topology_consumer: Option<Consumer<crate::processors::TopologyMutation>>,
         garbage_producer: Producer<Box<dyn AudioProcessor>>,
         bundle_garbage_producer: Option<Producer<Vec<control_plane::Command>>>,
         telemetry_producer: Producer<Telemetry>,
@@ -63,15 +63,27 @@ impl AudioEngine {
     fn calibrate_cycles() -> f64 {
         #[cfg(target_arch = "x86_64")]
         {
-            let start = std::time::Instant::now();
-            let start_c = unsafe { std::arch::x86_64::_rdtsc() };
-            // Busy wait for ~10ms for more accurate calibration than sleep
-            while start.elapsed() < std::time::Duration::from_millis(10) {
-                std::hint::spin_loop();
+            // Perform multiple measurements to filter out jitter/interrupts.
+            // We take the median or average of "clean" runs to avoid biasing towards low frequency.
+            let mut ratios = Vec::with_capacity(7);
+
+            for _ in 0..7 {
+                let start = std::time::Instant::now();
+                let start_c = unsafe { std::arch::x86_64::_rdtsc() };
+                // Busy wait for ~10ms for more accurate calibration than sleep
+                while start.elapsed() < std::time::Duration::from_millis(10) {
+                    std::hint::spin_loop();
+                }
+                let elapsed = start.elapsed().as_nanos() as f64;
+                let elapsed_c = (unsafe { std::arch::x86_64::_rdtsc() } - start_c) as f64;
+                if elapsed_c > 0.0 {
+                    ratios.push(elapsed / elapsed_c);
+                }
             }
-            let elapsed = start.elapsed().as_nanos() as f64;
-            let elapsed_c = (unsafe { std::arch::x86_64::_rdtsc() } - start_c) as f64;
-            if elapsed_c > 0.0 { elapsed / elapsed_c } else { 1.0 }
+            if ratios.is_empty() { return 1.0; }
+            ratios.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            // Return median
+            ratios[ratios.len() / 2]
         }
         #[cfg(not(target_arch = "x86_64"))]
         { 1.0 }
@@ -87,6 +99,10 @@ impl AudioEngine {
     }
 
     pub fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize) {
+        // Ensure Denormals-Are-Zero and Flush-to-Zero are set for this thread
+        // (Backends might have reset them or it might be a new thread)
+        crate::setup_rt_thread(90, None);
+
         #[cfg(target_arch = "x86_64")]
         let start_cycles = unsafe { std::arch::x86_64::_rdtsc() };
         #[cfg(target_arch = "aarch64")]
@@ -114,9 +130,12 @@ impl AudioEngine {
         let graph_ptr = self.active_graph.load(Ordering::Acquire);
         let graph = unsafe { &mut **graph_ptr };
 
+        let mut commands_processed = 0;
+        const MAX_COMMANDS_PER_BLOCK: usize = 256;
+
         // Process atomic command bundles first (immediate application)
         if let Some(ref mut cons) = self.bundle_consumer {
-            while let Some(mut bundle) = cons.pop() {
+            while let Some(bundle) = cons.pop() {
                 for cmd in &bundle {
                     match cmd {
                         control_plane::Command::Play => self.transport.is_playing = true,
@@ -128,16 +147,24 @@ impl AudioEngine {
                 // RT-safe deallocation: offload the vector to a garbage consumer
                 if let Some(ref mut prod) = self.bundle_garbage_producer {
                     if let Err(b) = prod.push(bundle) {
-                        // If queue is full, we must leak to avoid deallocation in RT thread
-                        let _ = std::mem::forget(b);
+                        // If queue is full, we must leak to avoid deallocation in RT thread.
+                        // For a "bug-free" engine, we would ideally use a fixed-size bundle
+                        // to avoid Vec altogether, but for now we leak to preserve RT safety.
+                        std::mem::forget(b);
                     }
+                } else {
+                    // If no producer exists, we must leak the Vec to avoid dropping it here.
+                    std::mem::forget(bundle);
                 }
             }
         }
 
         if let Some(ref mut cons) = self.topology_consumer {
-            while let Some(topo_cmd) = cons.pop() {
-                graph.apply_topology_command(&topo_cmd);
+            let mut topo_processed = 0;
+            while let Some(topo_mut) = cons.pop() {
+                graph.apply_topology_mutation(topo_mut);
+                topo_processed += 1;
+                if topo_processed >= 16 { break; } // Limit topology mutations per block
             }
         }
 
@@ -147,9 +174,16 @@ impl AudioEngine {
         let mut node_times_cycles = [0u64; 64];
 
         while current_sample_in_block < num_samples {
-            let cmd = if let Some(pending) = self.pending_command.take() { Some(pending) } else { self.command_consumer.pop() };
+            let cmd = if let Some(pending) = self.pending_command.take() { Some(pending) } else {
+                if commands_processed < MAX_COMMANDS_PER_BLOCK {
+                    self.command_consumer.pop()
+                } else {
+                    None
+                }
+            };
             if let Some(cmd) = cmd {
                 if cmd.timestamp_samples < block_end_sample {
+                    commands_processed += 1;
                     let cmd_offset = if cmd.timestamp_samples > block_start_sample { (cmd.timestamp_samples - block_start_sample) as usize } else { current_sample_in_block };
                     if cmd_offset > current_sample_in_block {
                         let mut remaining_to_cmd = cmd_offset - current_sample_in_block;
@@ -192,8 +226,8 @@ impl AudioEngine {
         self.sample_counter = block_end_sample;
         graph.collect_telemetry(&mut node_times_cycles, &mut peak_levels);
 
-        for i in 0..64 {
-            node_times[i] = (node_times_cycles[i] as f64 * self.ns_per_cycle) as u64;
+        for (i, node_time) in node_times.iter_mut().enumerate() {
+            *node_time = (node_times_cycles.get(i).copied().unwrap_or(0) as f64 * self.ns_per_cycle) as u64;
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -215,7 +249,7 @@ impl AudioEngine {
         }
 
         // Reset peak every ~1000 blocks to track moving jitter
-        if self.sample_counter % (num_samples as u64 * 1024) == 0 {
+        if self.sample_counter.is_multiple_of(num_samples as u64 * 1024) {
             self.peak_ns.store(current_ns, Ordering::Relaxed);
         }
 
@@ -238,11 +272,13 @@ impl AudioEngine {
         };
         let mut sub_inputs_ptr = [ &[][..]; crate::MAX_CHANNELS ];
         let num_inputs = inputs.len().min(crate::MAX_CHANNELS);
-        for i in 0..num_inputs {
-            let input_len = inputs[i].len();
+        let empty_input = &[][..];
+        for (i, sub_input) in sub_inputs_ptr.iter_mut().enumerate().take(num_inputs) {
+            let input = inputs.get(i).unwrap_or(&empty_input);
+            let input_len = input.len();
             let end = (offset + len).min(input_len);
             let actual_offset = offset.min(input_len);
-            sub_inputs_ptr[i] = &inputs[i][actual_offset..end];
+            *sub_input = &input[actual_offset..end];
         }
 
         let mut sub_outputs_reconstructed: [&mut [f32]; crate::MAX_CHANNELS] = std::array::from_fn(|_| &mut [][..]);

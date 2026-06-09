@@ -5,6 +5,31 @@ use std::alloc::Layout;
 use std::ffi::CString;
 use std::sync::Arc;
 
+#[derive(Debug)]
+pub enum IpcError {
+    ShmOpenFailed(String),
+    FtruncateFailed(String),
+    MmapFailed(String),
+    EventFdFailed(String),
+    PriorityFailed(String),
+    CgroupFailed(String),
+}
+
+impl std::fmt::Display for IpcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IpcError::ShmOpenFailed(s) => write!(f, "shm_open failed: {}", s),
+            IpcError::FtruncateFailed(s) => write!(f, "ftruncate failed: {}", s),
+            IpcError::MmapFailed(s) => write!(f, "mmap failed: {}", s),
+            IpcError::EventFdFailed(s) => write!(f, "eventfd failed: {}", s),
+            IpcError::PriorityFailed(s) => write!(f, "Failed to set RT priority: {}", s),
+            IpcError::CgroupFailed(s) => write!(f, "Cgroup operation failed: {}", s),
+        }
+    }
+}
+
+impl std::error::Error for IpcError {}
+
 /// Alignment for SIMD (AVX-512 requires 64 bytes).
 pub const SIMD_ALIGNMENT: usize = 64;
 
@@ -17,6 +42,9 @@ pub struct AudioBlock {
     pub data: [f32; MAX_BLOCK_SIZE],
     pub len: u32,
 }
+
+const _: () = assert!(std::mem::size_of::<AudioBlock>() == 1088); // 256*4 + 4 padded to 64
+const _: () = assert!(std::mem::align_of::<AudioBlock>() == 64);
 
 /// A status-flagged item for the ring buffer to ensure stable layout for IPC.
 #[repr(C)]
@@ -61,6 +89,8 @@ impl<T: Copy> ShmRingBuffer<T> {
         (buffer_layout.pad_to_align(), offset)
     }
 
+    /// # Safety
+    /// ptr must be a valid pointer to a memory region of the size returned by `layout(capacity)`.
     pub unsafe fn init(ptr: *mut u8, capacity: usize) -> *mut Self {
         let (_, offset) = Self::layout(capacity);
         let rb_ptr = ptr as *mut Self;
@@ -117,30 +147,30 @@ pub struct SharedMemory {
 }
 
 impl SharedMemory {
-    pub fn create(name: &str, size: usize) -> Result<Self, String> {
-        let cname = CString::new(name).map_err(|e| e.to_string())?;
+    pub fn create(name: &str, size: usize) -> Result<Self, IpcError> {
+        let cname = CString::new(name).map_err(|e| IpcError::ShmOpenFailed(e.to_string()))?;
         unsafe {
             let fd = libc::shm_open(cname.as_ptr(), libc::O_CREAT | libc::O_RDWR | libc::O_TRUNC, 0o600);
-            if fd < 0 { return Err("shm_open failed".to_string()); }
+            if fd < 0 { return Err(IpcError::ShmOpenFailed(std::io::Error::last_os_error().to_string())); }
             if libc::ftruncate(fd, size as libc::off_t) < 0 {
                 libc::close(fd);
-                return Err("ftruncate failed".to_string());
+                return Err(IpcError::FtruncateFailed(std::io::Error::last_os_error().to_string()));
             }
             let ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd, 0);
             libc::close(fd);
-            if ptr == libc::MAP_FAILED { return Err("mmap failed".to_string()); }
+            if ptr == libc::MAP_FAILED { return Err(IpcError::MmapFailed(std::io::Error::last_os_error().to_string())); }
             Ok(Self { ptr: ptr as *mut u8, size, name: name.to_string(), owner: true })
         }
     }
 
-    pub fn open(name: &str, size: usize) -> Result<Self, String> {
-        let cname = CString::new(name).map_err(|e| e.to_string())?;
+    pub fn open(name: &str, size: usize) -> Result<Self, IpcError> {
+        let cname = CString::new(name).map_err(|e| IpcError::ShmOpenFailed(e.to_string()))?;
         unsafe {
             let fd = libc::shm_open(cname.as_ptr(), libc::O_RDWR, 0o600);
-            if fd < 0 { return Err("shm_open failed".to_string()); }
+            if fd < 0 { return Err(IpcError::ShmOpenFailed(std::io::Error::last_os_error().to_string())); }
             let ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd, 0);
             libc::close(fd);
-            if ptr == libc::MAP_FAILED { return Err("mmap failed".to_string()); }
+            if ptr == libc::MAP_FAILED { return Err(IpcError::MmapFailed(std::io::Error::last_os_error().to_string())); }
             Ok(Self { ptr: ptr as *mut u8, size, name: name.to_string(), owner: false })
         }
     }
@@ -167,10 +197,10 @@ pub struct EventFd {
 }
 
 impl EventFd {
-    pub fn create() -> Result<Self, String> {
+    pub fn create() -> Result<Self, IpcError> {
         unsafe {
             let fd = libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC);
-            if fd < 0 { return Err("eventfd failed".to_string()); }
+            if fd < 0 { return Err(IpcError::EventFdFailed(std::io::Error::last_os_error().to_string())); }
             Ok(Self { fd, owner: true })
         }
     }
@@ -191,39 +221,46 @@ impl Drop for EventFd {
     fn drop(&mut self) { if self.owner { unsafe { libc::close(self.fd); } } }
 }
 
-pub fn set_rt_priority(priority: i32) -> Result<(), String> {
+pub fn set_rt_priority(priority: i32) -> Result<(), IpcError> {
     set_rt_priority_for(0, priority)
 }
 
-pub fn set_rt_priority_for(pid: i32, priority: i32) -> Result<(), String> {
+pub fn set_rt_priority_for(pid: i32, priority: i32) -> Result<(), IpcError> {
     unsafe {
-        let mut param = libc::sched_param { sched_priority: priority };
-        let result = libc::sched_setscheduler(pid, libc::SCHED_FIFO, &mut param);
+        let param = libc::sched_param { sched_priority: priority };
+        let result = libc::sched_setscheduler(pid, libc::SCHED_FIFO, &param);
         if result == -1 {
-            return Err(format!("Failed to set RT priority for PID {}: {}", pid, std::io::Error::last_os_error()));
+            return Err(IpcError::PriorityFailed(format!("PID {}: {}", pid, std::io::Error::last_os_error())));
         }
     }
     Ok(())
 }
 
-pub fn move_to_cgroup(cgroup_name: &str, pid: i32) -> Result<(), String> {
+pub fn move_to_cgroup(cgroup_name: &str, pid: i32) -> Result<(), IpcError> {
     let base_path = format!("/sys/fs/cgroup/{}", cgroup_name);
     let procs_path = format!("{}/cgroup.procs", base_path);
 
     if !std::path::Path::new(&base_path).exists() {
-        if let Err(e) = std::fs::create_dir_all(&base_path) {
-            return Err(format!("Failed to create cgroup directory {}: {}. Note: This usually requires root privileges or cgroup delegation.", base_path, e));
-        }
+        std::fs::create_dir_all(&base_path).map_err(|e| IpcError::CgroupFailed(format!("Failed to create directory {}: {}", base_path, e)))?;
     }
 
     std::fs::write(&procs_path, pid.to_string())
-        .map_err(|e| format!("Failed to write PID to {}: {}. Check permissions or cgroup v2 availability.", procs_path, e))
+        .map_err(|e| IpcError::CgroupFailed(format!("Failed to write PID to {}: {}", procs_path, e)))
 }
 
 #[repr(C, align(64))]
 pub struct ShmSignal {
     pub(crate) flag: AtomicBool,
     pub(crate) heartbeat: std::sync::atomic::AtomicU64,
+}
+
+const _: () = assert!(std::mem::size_of::<ShmSignal>() == 64);
+const _: () = assert!(std::mem::align_of::<ShmSignal>() == 64);
+
+impl Default for ShmSignal {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ShmSignal {
