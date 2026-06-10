@@ -23,6 +23,7 @@ pub struct ProcessorNode {
 unsafe impl Send for ProcessorNode {}
 unsafe impl Sync for ProcessorNode {}
 
+#[derive(Debug)]
 struct DummyProcessor;
 impl AudioProcessor for DummyProcessor {
     fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {}
@@ -182,144 +183,6 @@ impl Default for ProcessorGraph {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use proptest::prelude::*;
-    use super::*;
-    use crate::processors::ProcessContext;
-
-    struct IdentityProcessor;
-    impl AudioProcessor for IdentityProcessor {
-        fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
-            for i in 0..inputs.len().min(outputs.len()) {
-                outputs[i].copy_from_slice(inputs[i]);
-            }
-        }
-    }
-
-    #[test]
-    fn test_task_pool_sync_no_reset_race() {
-        let mut pool = TaskPool::new(1);
-        let completion = pool.completion.clone();
-
-        // Initial state
-        assert_eq!(completion.load(Ordering::Relaxed), 0);
-
-        // Stage 1
-        let start_count = completion.load(Ordering::Acquire);
-        let node1 = ProcessorNode { processor: std::cell::UnsafeCell::new(Box::new(IdentityProcessor)) };
-        let _ = pool.worker_producers[0].push(Job {
-            node_ptr: &node1 as *const _,
-            num_samples: 10,
-            sub_block_offset: 0,
-            buffers_ptr: std::ptr::null_mut(),
-            x_buffers_ptr: std::ptr::null_mut(),
-            input_indices: [0; 16],
-            output_indices: [0; 16],
-            input_count: 0,
-            output_count: 0,
-            node_idx: 0,
-            telemetry_ptr: &std::array::from_fn(|_| AtomicU64::new(0)) as *const _,
-            transport: None,
-            is_last_sub_block: false,
-        });
-
-        let target = start_count + 1;
-        while completion.load(Ordering::Acquire) < target { std::hint::spin_loop(); }
-
-        // Stage 2 - Must not reset to 0
-        let start_count_2 = completion.load(Ordering::Acquire);
-        assert_eq!(start_count_2, 1);
-
-        let node2 = ProcessorNode { processor: std::cell::UnsafeCell::new(Box::new(IdentityProcessor)) };
-        let _ = pool.worker_producers[0].push(Job {
-            node_ptr: &node2 as *const _,
-            num_samples: 10,
-            sub_block_offset: 0,
-            buffers_ptr: std::ptr::null_mut(),
-            x_buffers_ptr: std::ptr::null_mut(),
-            input_indices: [0; 16],
-            output_indices: [0; 16],
-            input_count: 0,
-            output_count: 0,
-            node_idx: 0,
-            telemetry_ptr: &std::array::from_fn(|_| AtomicU64::new(0)) as *const _,
-            transport: None,
-            is_last_sub_block: false,
-        });
-
-        let target_2 = start_count_2 + 1;
-        while completion.load(Ordering::Acquire) < target_2 { std::hint::spin_loop(); }
-        assert_eq!(completion.load(Ordering::Relaxed), 2);
-    }
-
-    #[test]
-    fn test_graph_sub_block_routing() {
-        let mut graph = ProcessorGraph::new();
-        // Node 0: Identity, Input Buffer 2 -> Output Buffer 0
-        graph.add_node(Box::new(IdentityProcessor), vec![2], vec![0]);
-
-        let mut input_data = [0.0f32; 256];
-        for i in 0..256 { input_data[i] = i as f32; }
-
-        // Mock physical buffer 2
-        graph.buffers[2].data.copy_from_slice(&input_data);
-
-        let mut out_data = [0.0f32; 100];
-        let out_slice = &mut out_data[..];
-        let mut outputs = [out_slice];
-
-        let mut context = ProcessContext {
-            pool: None,
-            transport: None,
-            sub_block_offset: 10,
-            is_last_sub_block: false,
-        };
-
-        // Process a sub-block of 50 samples at offset 10
-        graph.process(&[], &mut outputs, &mut context);
-
-        // Check if output buffer 0 (which is mapped to external_outputs[0])
-        // contains the correct data at the correct offset
-        for i in 0..50 {
-            assert_eq!(out_data[i], (i + 10) as f32);
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn test_graph_topology_stability(
-            node_counts in 1..crate::MAX_NODES,
-            edge_counts in 1..100
-        ) {
-            let mut graph = ProcessorGraph::new();
-            for i in 0..node_counts {
-                // Add nodes with randomized but valid physical buffer indices
-                graph.add_node(Box::new(IdentityProcessor), vec![(i + 1) % 64], vec![i % 64]);
-            }
-
-            // The scheduler should have produced a valid execution plan
-            let active_idx = graph.active_topo_idx.load(Ordering::Acquire);
-            let topo = &graph.topologies[active_idx];
-
-            if topo.node_count > 0 {
-                assert!(topo.num_stages > 0);
-            }
-
-            // Verify that all assigned nodes are unique across stages
-            let mut seen_nodes = std::collections::HashSet::new();
-            for s_idx in 0..topo.num_stages {
-                for n_idx in &topo.stages[s_idx][..topo.stage_counts[s_idx]] {
-                    assert!(seen_nodes.insert(*n_idx), "Node {} assigned to multiple stages", n_idx);
-                }
-            }
-
-            // Verify that hazard check passes for the committed graph
-            assert!(crate::processors::TopologyManager::verify_no_hazards(&graph.topologies[active_idx]).is_ok());
-        }
-    }
-}
-
 /// Encapsulates all real-time telemetry gathered during graph execution.
 pub struct GraphTelemetry {
     /// Atomic cycle counts per node for performance profiling.
@@ -347,11 +210,7 @@ pub struct ProcessorGraph {
     pub(crate) active_topo_idx: Arc<AtomicUsize>,
     pub(crate) needs_commit: bool,
 
-    pub(crate) _stage_scratch_assigned: [bool; crate::MAX_NODES],
-    pub(crate) _stage_scratch_in_degree: [usize; crate::MAX_NODES],
-
     pub(crate) telemetry: Arc<GraphTelemetry>,
-    pub(crate) _telemetry_offset: AtomicUsize,
     pub(crate) garbage_producer: Option<ipc_layer::Producer<Box<dyn AudioProcessor>>>,
 }
 
@@ -385,10 +244,7 @@ impl ProcessorGraph {
             topologies: Box::new([topo; 2]),
             active_topo_idx: Arc::new(AtomicUsize::new(0)),
             needs_commit: false,
-            _stage_scratch_assigned: [false; 64],
-            _stage_scratch_in_degree: [0; 64],
             telemetry: Arc::new(GraphTelemetry::default()),
-            _telemetry_offset: AtomicUsize::new(0),
             garbage_producer: None,
         }
     }
@@ -463,16 +319,12 @@ impl AudioProcessor for ProcessorGraph {
         let x_buffers_ptr = self._crossfade_buffers.as_mut_ptr();
 
         // 1. Resolve Crossfades for this block
-        // Store crossfade overrides: [node_idx][input_idx] -> buffer_idx (0 means no override)
         let mut block_x_map = [[0u8; crate::MAX_CHANNELS]; crate::MAX_NODES];
-
-        // SAFETY: We mutate the active topology's crossfade state in-place. This is safe because only
-        // the main RT thread (this function) ever accesses or modifies crossfades.
+        // SAFETY: Only the main RT thread accesses crossfades.
         let crossfades_mut_ptr = &self.topologies[active_idx].crossfades as *const [Option<CrossfadeState>; 8] as *mut [Option<CrossfadeState>; 8];
 
         let offset = context.sub_block_offset;
         for i in 0..8 {
-            // SAFETY: crossfades_mut_ptr points to a valid [Option<CrossfadeState>; 8].
             let x_state_opt = unsafe { &mut (*crossfades_mut_ptr)[i] };
             if let Some(state) = x_state_opt {
                 let x_buf_idx = i;
@@ -510,12 +362,8 @@ impl AudioProcessor for ProcessorGraph {
                     for j in 0..routing.input_count.min(crate::MAX_CHANNELS) {
                         let v_idx = routing.input_indices[j].min(crate::MAX_NODES - 1);
                         let mut p_idx = topo.virtual_to_physical[v_idx];
-
-                        // Apply crossfade override
                         let p_override = block_x_map[n_idx][j];
-                        if p_override != 0 {
-                            p_idx = p_override as usize;
-                        }
+                        if p_override != 0 { p_idx = p_override as usize; }
                         resolved_inputs[j] = p_idx;
                     }
 
@@ -544,11 +392,7 @@ impl AudioProcessor for ProcessorGraph {
                 let mut spins = 0;
                 let target = start_count + num_nodes;
                 while pool.completion.load(Ordering::Acquire) < target {
-                    if spins < 10000 {
-                        std::hint::spin_loop();
-                    } else {
-                        std::thread::yield_now();
-                    }
+                    if spins < 10000 { std::hint::spin_loop(); } else { std::thread::yield_now(); }
                     spins += 1;
                 }
             } else {
@@ -561,9 +405,7 @@ impl AudioProcessor for ProcessorGraph {
                         let v_idx = routing.input_indices.get(i).copied().unwrap_or(0).min(crate::MAX_NODES - 1);
                         let mut p_idx = topo.virtual_to_physical[v_idx];
                         let p_override = block_x_map[n_idx][i];
-                        if p_override != 0 {
-                            p_idx = p_override as usize;
-                        }
+                        if p_override != 0 { p_idx = p_override as usize; }
 
                         if p_idx >= 64 {
                             let x_idx = p_idx - 64;
@@ -587,16 +429,13 @@ impl AudioProcessor for ProcessorGraph {
                     }
 
                     #[cfg(target_arch = "x86_64")]
-                    // SAFETY: rdtsc is safe on all modern x86_64 targets.
                     let start = unsafe { std::arch::x86_64::_rdtsc() };
 
                     let mut inner_context = crate::processors::ProcessContext { pool: None, transport: context.transport, sub_block_offset: context.sub_block_offset, is_last_sub_block: context.is_last_sub_block };
-                    // SAFETY: node.processor is an UnsafeCell. Serial execution ensures exclusive access.
                     unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
 
                     #[cfg(target_arch = "x86_64")]
                     {
-                        // SAFETY: rdtsc is safe on all modern x86_64 targets.
                         let elapsed = (unsafe { std::arch::x86_64::_rdtsc() }).wrapping_sub(start);
                         self.telemetry.node_times_cycles[n_idx].store(elapsed, Ordering::Relaxed);
                     }
@@ -615,16 +454,9 @@ impl AudioProcessor for ProcessorGraph {
             external_outputs[1].copy_from_slice(&self.buffers[p1].data[offset..offset + num_samples]);
         }
 
-        // Before finishing process, copy current buffers to old_path_buffers for crossfading in next block
-        // ONLY if this is the last sub-block of the engine cycle to preserve the entire "previous block" state
         if is_last_sub_block {
-            for i in 0..crate::MAX_NODES {
-                self._old_path_buffers[i].data.copy_from_slice(&self.buffers[i].data);
-            }
+            for i in 0..crate::MAX_NODES { self._old_path_buffers[i].data.copy_from_slice(&self.buffers[i].data); }
         }
-
-        #[cfg(target_arch = "x86_64")]
-        let has_avx2 = is_x86_feature_detected!("avx2");
 
         for n_idx in 0..topo.node_count.min(crate::MAX_NODES) {
             let routing = &topo.routing[n_idx];
@@ -637,42 +469,9 @@ impl AudioProcessor for ProcessorGraph {
                 let data = &self.buffers[p_idx].data[offset..offset + num_samples];
 
                 let mut channel_peak = 0.0f32;
-                #[cfg(target_arch = "x86_64")]
-                {
-                    if has_avx2 {
-                        unsafe {
-                            use std::arch::x86_64::*;
-                            let mut v_peak = _mm256_setzero_ps();
-                            let abs_mask = _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFFFFFF));
-                            let mut j = 0;
-                            while j + 8 <= num_samples {
-                                let v_data = _mm256_loadu_ps(data.as_ptr().add(j));
-                                let v_abs = _mm256_and_ps(v_data, abs_mask);
-                                v_peak = _mm256_max_ps(v_peak, v_abs);
-                                j += 8;
-                            }
-                            let mut res = [0.0f32; 8];
-                            _mm256_storeu_ps(res.as_mut_ptr(), v_peak);
-                            for &val in &res { if val > channel_peak { channel_peak = val; } }
-                            while j < num_samples {
-                                let abs = data[j].abs();
-                                if abs > channel_peak { channel_peak = abs; }
-                                j += 1;
-                            }
-                        }
-                    } else {
-                        for &sample in data {
-                            let abs = sample.abs();
-                            if abs > channel_peak { channel_peak = abs; }
-                        }
-                    }
-                }
-                #[cfg(not(target_arch = "x86_64"))]
-                {
-                    for &sample in data {
-                        let abs = sample.abs();
-                        if abs > channel_peak { channel_peak = abs; }
-                    }
+                for &sample in data {
+                    let abs = sample.abs();
+                    if abs > channel_peak { channel_peak = abs; }
                 }
                 if channel_peak > node_peak { node_peak = channel_peak; }
             }
@@ -711,33 +510,19 @@ impl AudioProcessor for ProcessorGraph {
                 let n_idx = node_idx as usize;
                 if n_idx < self.node_count {
                     let node = &self.nodes[n_idx];
-
-                    if let Some(ref prod) = self.garbage_producer {
-                        processor.set_garbage_producer(prod.clone());
-                    }
-
-                    // SAFETY: We replace the processor inside UnsafeCell.
-                    // This is only called when the graph is NOT being processed or during a safe mutation point.
+                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(prod.clone()); }
                     let old_proc = unsafe { std::ptr::replace(node.processor.get(), processor) };
                     if let Some(ref mut prod) = self.garbage_producer {
-                        if let Err(leaked) = prod.push(old_proc) {
-                            std::mem::forget(leaked);
-                        }
-                    } else {
-                        std::mem::forget(old_proc);
-                    }
+                        if let Err(leaked) = prod.push(old_proc) { std::mem::forget(leaked); }
+                    } else { std::mem::forget(old_proc); }
                 }
             }
             TopologyMutation::AddNode { node_idx: _, mut processor } => {
                 if self.node_count < 64 {
                     let idx = self.node_count;
-                    if let Some(ref prod) = self.garbage_producer {
-                        processor.set_garbage_producer(prod.clone());
-                    }
-                    // SAFETY: Exclusive access to self during command application.
+                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(prod.clone()); }
                     unsafe { *self.nodes[idx].processor.get() = processor; }
                     self.node_count += 1;
-
                     let topo = self.inactive_topology_mut();
                     topo.routing[idx].input_count = 0;
                     topo.routing[idx].output_count = 0;
@@ -749,15 +534,15 @@ impl AudioProcessor for ProcessorGraph {
 
     fn apply_command(&mut self, command: &control_plane::Command) {
         match command {
-            control_plane::Command::CommitTopology => {
-                self.calculate_stages();
-                self.commit_graph();
-            }
-            _ => {
-                for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } }
-            }
+            control_plane::Command::CommitTopology => { self.calculate_stages(); self.commit_graph(); }
+            _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }
         }
     }
+
+    fn apply_midi(&mut self, event: ipc_layer::MidiEvent) {
+        for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_midi(event); } }
+    }
+
     fn set_garbage_producer(&mut self, producer: ipc_layer::Producer<Box<dyn AudioProcessor>>) {
         self.garbage_producer = Some(producer);
     }
@@ -765,6 +550,108 @@ impl AudioProcessor for ProcessorGraph {
         for i in 0..crate::MAX_NODES {
             node_times[i] = self.telemetry.node_times_cycles[i].load(Ordering::Relaxed);
             peak_levels[i] = f32::from_bits(self.telemetry.peak_levels[i].load(Ordering::Relaxed));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+    use super::*;
+    use crate::processors::ProcessContext;
+
+    struct IdentityProcessor;
+    impl std::fmt::Debug for IdentityProcessor {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "IdentityProcessor") }
+    }
+    impl AudioProcessor for IdentityProcessor {
+        fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
+            for i in 0..inputs.len().min(outputs.len()) { outputs[i].copy_from_slice(inputs[i]); }
+        }
+    }
+
+    #[test]
+    fn test_task_pool_sync_no_reset_race() {
+        let mut pool = TaskPool::new(1);
+        let completion = pool.completion.clone();
+        assert_eq!(completion.load(Ordering::Relaxed), 0);
+        let start_count = completion.load(Ordering::Acquire);
+        let node1 = ProcessorNode { processor: std::cell::UnsafeCell::new(Box::new(IdentityProcessor)) };
+        let _ = pool.worker_producers[0].push(Job {
+            node_ptr: &node1 as *const _,
+            num_samples: 10,
+            sub_block_offset: 0,
+            buffers_ptr: std::ptr::null_mut(),
+            x_buffers_ptr: std::ptr::null_mut(),
+            input_indices: [0; 16],
+            output_indices: [0; 16],
+            input_count: 0,
+            output_count: 0,
+            node_idx: 0,
+            telemetry_ptr: &std::array::from_fn(|_| AtomicU64::new(0)) as *const _,
+            transport: None,
+            is_last_sub_block: false,
+        });
+        let target = start_count + 1;
+        while completion.load(Ordering::Acquire) < target { std::hint::spin_loop(); }
+        let start_count_2 = completion.load(Ordering::Acquire);
+        assert_eq!(start_count_2, 1);
+        let node2 = ProcessorNode { processor: std::cell::UnsafeCell::new(Box::new(IdentityProcessor)) };
+        let _ = pool.worker_producers[0].push(Job {
+            node_ptr: &node2 as *const _,
+            num_samples: 10,
+            sub_block_offset: 0,
+            buffers_ptr: std::ptr::null_mut(),
+            x_buffers_ptr: std::ptr::null_mut(),
+            input_indices: [0; 16],
+            output_indices: [0; 16],
+            input_count: 0,
+            output_count: 0,
+            node_idx: 0,
+            telemetry_ptr: &std::array::from_fn(|_| AtomicU64::new(0)) as *const _,
+            transport: None,
+            is_last_sub_block: false,
+        });
+        let target_2 = start_count_2 + 1;
+        while completion.load(Ordering::Acquire) < target_2 { std::hint::spin_loop(); }
+        assert_eq!(completion.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn test_graph_sub_block_routing() {
+        let mut graph = ProcessorGraph::new();
+        graph.add_node(Box::new(IdentityProcessor), vec![2], vec![0]);
+        let mut input_data = [0.0f32; 256];
+        for i in 0..256 { input_data[i] = i as f32; }
+        graph.buffers[2].data.copy_from_slice(&input_data);
+        let mut out_data = [0.0f32; 100];
+        let out_slice = &mut out_data[..];
+        let mut outputs = [out_slice];
+        let mut context = ProcessContext { pool: None, transport: None, sub_block_offset: 10, is_last_sub_block: false, };
+        graph.process(&[], &mut outputs, &mut context);
+        for i in 0..50 { assert_eq!(out_data[i], (i + 10) as f32); }
+    }
+
+    proptest! {
+        #[test]
+        fn test_graph_topology_stability(
+            node_counts in 1..crate::MAX_NODES,
+            _edge_counts in 1..100
+        ) {
+            let mut graph = ProcessorGraph::new();
+            for i in 0..node_counts {
+                graph.add_node(Box::new(IdentityProcessor), vec![(i + 1) % 64], vec![i % 64]);
+            }
+            let active_idx = graph.active_topo_idx.load(Ordering::Acquire);
+            let topo = &graph.topologies[active_idx];
+            if topo.node_count > 0 { assert!(topo.num_stages > 0); }
+            let mut seen_nodes = std::collections::HashSet::new();
+            for s_idx in 0..topo.num_stages {
+                for n_idx in &topo.stages[s_idx][..topo.stage_counts[s_idx]] {
+                    assert!(seen_nodes.insert(*n_idx), "Node {} assigned to multiple stages", n_idx);
+                }
+            }
+            assert!(crate::processors::TopologyManager::verify_no_hazards(&graph.topologies[active_idx]).is_ok());
         }
     }
 }

@@ -46,6 +46,17 @@ pub struct AudioBlock {
 const _: () = assert!(std::mem::size_of::<AudioBlock>() == 1088); // 256*4 + 4 padded to 64
 const _: () = assert!(std::mem::align_of::<AudioBlock>() == 64);
 
+/// A standard MIDI event representation for real-time IPC.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MidiEvent {
+    pub timestamp_samples: u64,
+    pub status: u8,
+    pub data1: u8,
+    pub data2: u8,
+    pub _pad: u8,
+}
+
 /// A status-flagged item for the ring buffer to ensure stable layout for IPC.
 #[repr(C)]
 pub struct ShmSlot<T> {

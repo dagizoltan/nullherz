@@ -10,6 +10,7 @@ use crate::rt_logging::{RtLogger, RtLogLevel};
 
 pub struct AudioEngine {
     command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
+    midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
     bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
     topology_consumer: Option<Consumer<crate::processors::TopologyMutation>>,
     active_graph: AtomicPtr<Box<dyn AudioProcessor>>,
@@ -33,6 +34,7 @@ pub struct AudioEngine {
 impl AudioEngine {
     pub fn new(
         command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
+        midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
         bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
         topology_consumer: Option<Consumer<crate::processors::TopologyMutation>>,
         garbage_producer: Producer<Box<dyn AudioProcessor>>,
@@ -43,6 +45,7 @@ impl AudioEngine {
         let ns_per_cycle = Self::calibrate_cycles();
         Self {
             command_consumer,
+            midi_consumer,
             bundle_consumer,
             topology_consumer,
             active_graph: AtomicPtr::new(Box::into_raw(Box::new(initial_graph))),
@@ -183,6 +186,12 @@ impl AudioEngine {
                 graph.apply_topology_mutation(topo_mut);
                 topo_processed += 1;
                 if topo_processed >= 16 { break; } // Limit topology mutations per block
+            }
+        }
+
+        if let Some(ref mut cons) = self.midi_consumer {
+            while let Some(event) = cons.pop() {
+                graph.apply_midi(event);
             }
         }
 

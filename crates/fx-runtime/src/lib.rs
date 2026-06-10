@@ -186,6 +186,10 @@ impl SidecarSupervisor {
         let sig_size = std::mem::size_of::<ShmSignal>();
 
         self.active_sidecars.retain_mut(|handle| {
+            if handle.status == SidecarStatus::Bypassing || handle.status == SidecarStatus::Crashed {
+                return true; // Already handled, keep in list but don't process
+            }
+
             let exited = match handle.process.try_wait() {
                 Ok(Some(_status)) => true,
                 Ok(None) => false,
@@ -197,13 +201,10 @@ impl SidecarSupervisor {
             if exited || timed_out {
                 if timed_out { let _ = handle.process.kill(); }
 
-                handle.status = SidecarStatus::Crashed;
-
                 match handle.failure_policy {
                     FailurePolicy::Bypass => {
                         handle.status = SidecarStatus::Bypassing;
-                        // We keep the handle but it's effectively dead.
-                        // In a real system we'd notify the engine to bypass.
+                        return true;
                     }
                     FailurePolicy::AutoRestart => {
                         if handle.restart_count < 5 {

@@ -171,3 +171,61 @@ impl WavetableOscillator {
         store_f32x8(&mut self.phases, 0, b_phases);
     }
 }
+
+/// A high-performance sampler voice with Lagrange interpolation.
+/// Shared ownership of the sample buffer is managed via Arc to prevent dangling pointers.
+#[derive(Debug, Clone)]
+pub struct SamplerVoice {
+    pub buffer: Option<std::sync::Arc<Vec<f32>>>,
+    pub play_head: f32,
+    pub playback_rate: f32,
+    pub is_active: bool,
+    pub velocity: f32,
+}
+
+impl SamplerVoice {
+    pub fn new() -> Self {
+        Self {
+            buffer: None,
+            play_head: 0.0,
+            playback_rate: 1.0,
+            is_active: false,
+            velocity: 0.0,
+        }
+    }
+
+    pub fn trigger(&mut self, buffer: std::sync::Arc<Vec<f32>>, playback_rate: f32, velocity: f32) {
+        self.buffer = Some(buffer);
+        self.play_head = 0.0;
+        self.playback_rate = playback_rate;
+        self.velocity = velocity;
+        self.is_active = true;
+    }
+
+    pub fn process_scalar_frame(&mut self) -> f32 {
+        if !self.is_active { return 0.0; }
+        let Some(buffer) = &self.buffer else { return 0.0; };
+
+        let idx = self.play_head.floor() as usize;
+        if idx + 4 >= buffer.len() {
+            self.is_active = false;
+            return 0.0;
+        }
+
+        // 4-point Lagrange interpolation
+        let x = self.play_head - idx as f32;
+        let p0 = *buffer.get(idx.saturating_sub(1)).unwrap_or(&0.0);
+        let p1 = buffer[idx];
+        let p2 = buffer[idx + 1];
+        let p3 = buffer[idx + 2];
+
+        let c1 = p1;
+        let c2 = -0.5 * p0 + 0.5 * p2;
+        let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+        let c4 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+
+        let sample = (((c4 * x + c3) * x + c2) * x + c1) * self.velocity;
+        self.play_head += self.playback_rate;
+        sample
+    }
+}

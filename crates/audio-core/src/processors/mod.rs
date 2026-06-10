@@ -3,10 +3,12 @@ pub mod sidecar;
 pub mod complex;
 pub mod graph;
 pub mod topology;
+pub mod sampler;
 
 pub use graph::{ProcessorGraph, ProcessorNode, GraphTopology, NodeRouting, CrossfadeState, TaskPool};
 pub use topology::TopologyManager;
 pub use sidecar::SidecarProcessor;
+pub use sampler::SamplerProcessor;
 pub use standard::{GainProcessor, BiquadProcessor, SimdBiquadProcessor, CrossfaderProcessor, SummingProcessor};
 pub use complex::{WavetableProcessor, SpectralProcessor, ModulationProcessor};
 
@@ -57,6 +59,9 @@ pub trait AudioProcessor: Send {
 
     /// Applies structural graph mutations to the processor (routing, swapping).
     fn apply_topology_mutation(&mut self, _mutation: TopologyMutation) {}
+
+    /// Applies real-time MIDI events to the processor.
+    fn apply_midi(&mut self, _event: ipc_layer::MidiEvent) {}
 
     /// Gathers performance and signal telemetry from the processor.
     fn collect_telemetry(&self, _node_times: &mut [u64; 64], _peak_levels: &mut [f32; 64]) {}
