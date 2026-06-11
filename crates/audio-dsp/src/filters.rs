@@ -385,3 +385,87 @@ impl DjIsolator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    #[test]
+    fn test_biquad_unrolled_vs_sample() {
+        let coeffs = BiquadCoefficients {
+            b0: 0.1, b1: 0.2, b2: 0.3, a1: -0.5, a2: 0.2
+        };
+        let mut filter_scalar = BiquadFilter::new(coeffs);
+        let mut filter_unrolled = BiquadFilter::new(coeffs);
+
+        let input = vec![0.5; 100];
+        let mut out_scalar = vec![0.0; 100];
+        let mut out_unrolled = vec![0.0; 100];
+
+        for i in 0..100 {
+            out_scalar[i] = filter_scalar.process_sample(input[i]);
+        }
+        filter_unrolled.process_block_unrolled(&input, &mut out_unrolled);
+
+        for i in 0..100 {
+            assert!((out_scalar[i] - out_unrolled[i]).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_simd_biquad_8_channels() {
+        let coeffs = BiquadCoefficients {
+            b0: 0.1, b1: 0.2, b2: 0.3, a1: -0.5, a2: 0.2
+        };
+        let mut simd_filter = SimdBiquad::new(coeffs);
+        let mut scalar_filters: Vec<BiquadFilter> = (0..8).map(|_| BiquadFilter::new(coeffs)).collect();
+
+        let len = 64;
+        let mut inputs = vec![vec![0.0f32; len]; 8];
+        let mut outputs_simd = vec![vec![0.0f32; len]; 8];
+        let mut outputs_scalar = vec![vec![0.0f32; len]; 8];
+
+        for ch in 0..8 {
+            for i in 0..len { inputs[ch][i] = (ch + i) as f32 * 0.01; }
+        }
+
+        let in_ptrs: [*const f32; 8] = [
+            inputs[0].as_ptr(), inputs[1].as_ptr(), inputs[2].as_ptr(), inputs[3].as_ptr(),
+            inputs[4].as_ptr(), inputs[5].as_ptr(), inputs[6].as_ptr(), inputs[7].as_ptr(),
+        ];
+        let mut out_ptrs: [*mut f32; 8] = [
+            outputs_simd[0].as_mut_ptr(), outputs_simd[1].as_mut_ptr(), outputs_simd[2].as_mut_ptr(), outputs_simd[3].as_mut_ptr(),
+            outputs_simd[4].as_mut_ptr(), outputs_simd[5].as_mut_ptr(), outputs_simd[6].as_mut_ptr(), outputs_simd[7].as_mut_ptr(),
+        ];
+
+        simd_filter.process_8_channels(in_ptrs, out_ptrs, len);
+
+        for ch in 0..8 {
+            scalar_filters[ch].process_block_unrolled(&inputs[ch], &mut outputs_scalar[ch]);
+            for i in 0..len {
+                assert!((outputs_simd[ch][i] - outputs_scalar[ch][i]).abs() < 1e-6);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_biquad_stability(
+            b0 in -1.0f32..1.0f32,
+            b1 in -1.0f32..1.0f32,
+            b2 in -1.0f32..1.0f32,
+            a1 in -0.5f32..0.5f32,
+            a2 in -0.2f32..0.2f32,
+        ) {
+            let coeffs = BiquadCoefficients { b0, b1, b2, a1, a2 };
+            let mut filter = BiquadFilter::new(coeffs);
+            let input = vec![1.0; 100];
+            let mut output = vec![0.0; 100];
+            filter.process_block_unrolled(&input, &mut output);
+            for &sample in &output {
+                prop_assert!(sample.is_finite());
+            }
+        }
+    }
+}

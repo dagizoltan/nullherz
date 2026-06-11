@@ -277,7 +277,7 @@ pub fn move_to_cgroup(cgroup_name: &str, pid: i32) -> Result<(), IpcError> {
 #[repr(C, align(64))]
 pub struct ShmSignal {
     pub(crate) flag: AtomicBool,
-    pub(crate) heartbeat: std::sync::atomic::AtomicU64,
+    pub heartbeat: std::sync::atomic::AtomicU64,
 }
 
 const _: () = assert!(std::mem::size_of::<ShmSignal>() == 64);

@@ -676,6 +676,46 @@ mod tests {
         for i in 0..50 { assert_eq!(out_data[i], (i + 10) as f32); }
     }
 
+    #[test]
+    fn test_crossfade_state_progression() {
+        let mut graph = ProcessorGraph::new();
+        let topo_idx = graph.active_topo_idx.load(Ordering::Relaxed);
+
+        // Manually setup a crossfade
+        graph.topologies[topo_idx].crossfades[0] = Some(CrossfadeState {
+            node_idx: 1,
+            input_idx: 0,
+            old_buffer_idx: 10,
+            new_buffer_idx: 20,
+            remaining_samples: 100,
+            total_samples: 100,
+        });
+
+        // Fill old/new buffers with distinct values
+        graph._old_path_buffers[10].data.fill(1.0);
+        graph.buffers[20].data.fill(2.0);
+
+        let mut block_x_map = [[0u8; crate::MAX_CHANNELS]; crate::MAX_NODES];
+        graph.resolve_crossfades(topo_idx, 0, 50, &mut block_x_map);
+
+        // Check progression
+        let state = graph.topologies[topo_idx].crossfades[0].unwrap();
+        assert_eq!(state.remaining_samples, 50);
+        assert_eq!(block_x_map[1][0], 64); // 64 + x_idx
+
+        // Check buffer content (halfway should be ~1.5)
+        // at start it's 1.0, at end (100) it's 2.0.
+        // after 50 samples, it should be moving towards 2.0.
+        // progress = (100 - 100)/100 = 0.0 -> 1.0
+        // actually progress starts at (100-100)/100 = 0.0
+        // x_data[0] = 1.0 * 1.0 + 2.0 * 0.0 = 1.0
+        assert_eq!(graph._crossfade_buffers[0].data[0], 1.0);
+        assert!(graph._crossfade_buffers[0].data[49] > 1.0);
+
+        graph.resolve_crossfades(topo_idx, 50, 50, &mut block_x_map);
+        assert!(graph.topologies[topo_idx].crossfades[0].is_none());
+    }
+
     proptest! {
         #[test]
         fn test_graph_topology_stability(

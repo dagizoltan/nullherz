@@ -219,7 +219,14 @@ impl AudioEngine {
                                 });
                             }
                         }
-                        _ => {
+                        control_plane::Command::SetParam { .. }
+                        | control_plane::Command::UpdateEdge { .. }
+                        | control_plane::Command::UpdateOutputEdge { .. }
+                        | control_plane::Command::UpdateEdgeCrossfaded { .. }
+                        | control_plane::Command::SwapProcessor { .. }
+                        | control_plane::Command::AddNode { .. }
+                        | control_plane::Command::CommitTopology
+                        | control_plane::Command::SetSequencerStep { .. } => {
                             graph.apply_command(cmd);
                         }
                     }

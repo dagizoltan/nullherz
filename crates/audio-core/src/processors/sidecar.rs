@@ -131,3 +131,59 @@ impl AudioProcessor for SidecarProcessor {
         if let Some(efd) = &self.event_fd { efd.notify(); }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ipc_layer::AudioBlock;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn test_sidecar_processor_bypass_on_stall() {
+        let cmd_shm = SharedMemory::create("nullherz_test_cmd", 4096).unwrap();
+        let sig_shm = SharedMemory::create("nullherz_test_sig", 4096).unwrap();
+        let in_shm = SharedMemory::create("nullherz_test_in", 4096).unwrap();
+        let out_shm = SharedMemory::create("nullherz_test_out", 4096).unwrap();
+
+        unsafe {
+            let cmd_ptr = ShmRingBuffer::<control_plane::Command>::init(cmd_shm.ptr(), 16);
+            let sig_ptr = sig_shm.ptr() as *mut ShmSignal;
+            std::ptr::write(sig_ptr, ShmSignal::new());
+            let in_ptr = ShmRingBuffer::<AudioBlock>::init(in_shm.ptr(), 16);
+            let out_ptr = ShmRingBuffer::<AudioBlock>::init(out_shm.ptr(), 16);
+
+            let mut proc = SidecarProcessor::new(
+                cmd_ptr,
+                None,
+                &[in_ptr],
+                &[out_ptr as *const _],
+                sig_ptr,
+                None
+            );
+
+            let input = vec![1.0f32; 128];
+            let mut output = vec![0.0f32; 128];
+            let mut context = crate::processors::ProcessContext {
+                pool: None,
+                transport: None,
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+
+            // First call - no heartbeat yet, should bypass (or pop if available, but here it's empty)
+            proc.process(&[&input], &mut [&mut output], &mut context);
+            assert_eq!(output[0], 1.0); // Bypass
+
+            // Update heartbeat but leave output buffer empty
+            (*sig_ptr).pulse_heartbeat();
+            proc.process(&[&input], &mut [&mut output], &mut context);
+            assert_eq!(output[0], 1.0); // Still bypass because output ringbuffer empty
+
+            // Stall detection: don't update heartbeat
+            proc.last_heartbeat = 10;
+            (*sig_ptr).heartbeat.store(10, Ordering::Relaxed);
+            proc.process(&[&input], &mut [&mut output], &mut context);
+            assert_eq!(proc.missed_deadline_count, 3); // 3 total calls so far, all bypass/missed
+        }
+    }
+}
