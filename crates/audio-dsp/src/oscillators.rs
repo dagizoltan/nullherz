@@ -234,4 +234,31 @@ impl SamplerVoice {
         self.play_head += self.playback_rate;
         sample
     }
+
+    pub fn process_block(&mut self, output: &mut [f32]) {
+        if !self.is_active { return; }
+        let Some(buffer) = &self.buffer else { return; };
+
+        for sample_out in output.iter_mut() {
+            let idx = self.play_head.floor() as usize;
+            if idx + 4 >= buffer.len() {
+                self.is_active = false;
+                break;
+            }
+
+            let x = self.play_head - idx as f32;
+            let p0 = *buffer.get(idx.saturating_sub(1)).unwrap_or(&0.0);
+            let p1 = buffer[idx];
+            let p2 = buffer[idx + 1];
+            let p3 = buffer[idx + 2];
+
+            let c1 = p1;
+            let c2 = -0.5 * p0 + 0.5 * p2;
+            let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+            let c4 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+
+            *sample_out += (((c4 * x + c3) * x + c2) * x + c1) * self.velocity;
+            self.play_head += self.playback_rate;
+        }
+    }
 }

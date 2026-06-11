@@ -38,7 +38,7 @@ proptest! {
         let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
 
         let graph = ProcessorGraph::new();
-        let mut engine = AudioEngine::new(cmd_buffer, None, None, Some(topo_cons), garbage_prod, None, tel_prod, Box::new(graph));
+        let mut engine = AudioEngine::new(cmd_buffer, None, None, Some(topo_cons), garbage_prod, None, None, None, tel_prod, Box::new(graph));
 
         let mut topo_prod_cloned = topo_prod;
         for mutation in mutations {
@@ -73,7 +73,7 @@ proptest! {
         let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
 
         let graph = ProcessorGraph::new();
-        let mut engine = AudioEngine::new(cmd_cons, None, None, None, garbage_prod, None, tel_prod, Box::new(graph));
+        let mut engine = AudioEngine::new(cmd_cons, None, None, None, garbage_prod, None, None, None, tel_prod, Box::new(graph));
 
         for (ts, cmd) in commands {
             let _ = cmd_buffer.push(TimestampedCommand { timestamp_samples: ts, command: cmd });

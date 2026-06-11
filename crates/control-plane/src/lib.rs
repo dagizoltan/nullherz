@@ -44,6 +44,11 @@ pub enum Command {
         node_idx: u32,
     },
     CommitTopology,
+    SetSequencerStep {
+        track: u32,
+        step: u32,
+        value: bool,
+    },
 }
 
 #[repr(C)]

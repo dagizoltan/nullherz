@@ -150,6 +150,14 @@ impl AudioProcessor for SequencerProcessor {
         self.sample_rate = config.sample_rate;
     }
 
+    fn apply_command(&mut self, command: &control_plane::Command) {
+        if let control_plane::Command::SetSequencerStep { track, step, value } = command {
+            if *track < 8 && *step < crate::MAX_CHANNELS as u32 {
+                self.grid[*track as usize][*step as usize] = *value;
+            }
+        }
+    }
+
     fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut crate::processors::ProcessContext) {
         let block_len = if !outputs.is_empty() { outputs[0].len() as u64 } else { 0 };
         if block_len == 0 { return; }

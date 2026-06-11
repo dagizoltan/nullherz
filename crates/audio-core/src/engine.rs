@@ -8,6 +8,16 @@ use crate::processors::{AudioProcessor, TaskPool, ProcessContext};
 use crate::telemetry::Telemetry;
 use crate::rt_logging::{RtLogger, RtLogLevel};
 
+// SAFETY: AudioEngine is Send and Sync because all of its members are either
+// Send/Sync or are atomics that allow safe cross-thread access.
+// Specifically:
+// 1. AtomicPtr<Box<dyn AudioProcessor>>: AudioProcessor is Send, and we use
+//    proper Atomic ordering (Acquire/Release) to ensure visibility of the
+//    underlying processor when swapping or dereferencing.
+// 2. The engine is intended to be moved to a backend thread for the RT loop.
+unsafe impl Send for AudioEngine {}
+unsafe impl Sync for AudioEngine {}
+
 pub struct AudioEngine {
     command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
     midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
@@ -16,12 +26,14 @@ pub struct AudioEngine {
     active_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     pending_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     garbage_producer: Producer<Box<dyn AudioProcessor>>,
+    overflow_garbage_producer: Option<Producer<Box<dyn AudioProcessor>>>,
     bundle_garbage_producer: Option<Producer<Vec<control_plane::Command>>>,
+    bundle_overflow_producer: Option<Producer<Vec<control_plane::Command>>>,
     telemetry_producer: Producer<Telemetry>,
     sample_counter: u64,
     xrun_count: std::sync::Arc<std::sync::atomic::AtomicU32>,
     pending_command: Option<TimestampedCommand>,
-    ns_per_cycle: f64,
+    ns_per_cycle: std::sync::Arc<std::sync::atomic::AtomicU64>,
     peak_ns: std::sync::atomic::AtomicU64,
     resource_leaks: std::sync::atomic::AtomicU64,
     pub health_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -39,11 +51,19 @@ impl AudioEngine {
         bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
         topology_consumer: Option<Consumer<crate::processors::TopologyMutation>>,
         garbage_producer: Producer<Box<dyn AudioProcessor>>,
+        overflow_garbage_producer: Option<Producer<Box<dyn AudioProcessor>>>,
         bundle_garbage_producer: Option<Producer<Vec<control_plane::Command>>>,
+        bundle_overflow_producer: Option<Producer<Vec<control_plane::Command>>>,
         telemetry_producer: Producer<Telemetry>,
         initial_graph: Box<dyn AudioProcessor>,
     ) -> Self {
-        let ns_per_cycle = Self::calibrate_cycles();
+        let ns_per_cycle = std::sync::Arc::new(std::sync::atomic::AtomicU64::new((1.0f64).to_bits()));
+        let ns_per_cycle_clone = ns_per_cycle.clone();
+        std::thread::spawn(move || {
+            let calibrated = Self::calibrate_cycles();
+            ns_per_cycle_clone.store(calibrated.to_bits(), Ordering::Relaxed);
+        });
+
         Self {
             command_consumer,
             midi_consumer,
@@ -52,7 +72,9 @@ impl AudioEngine {
             active_graph: AtomicPtr::new(Box::into_raw(Box::new(initial_graph))),
             pending_graph: AtomicPtr::new(std::ptr::null_mut()),
             garbage_producer,
+            overflow_garbage_producer,
             bundle_garbage_producer,
+            bundle_overflow_producer,
             telemetry_producer,
             sample_counter: 0,
             xrun_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
@@ -115,7 +137,9 @@ impl AudioEngine {
             { 0 }
             #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
             {
-                std::time::Instant::now().elapsed().as_nanos() as u64
+                static BASELINE: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+                let start = BASELINE.get_or_init(std::time::Instant::now);
+                start.elapsed().as_nanos() as u64
             }
         }
     }
@@ -145,9 +169,17 @@ impl AudioEngine {
             if !old.is_null() {
                 let old_graph = unsafe { Box::from_raw(old) };
                 if let Err(leaked) = self.garbage_producer.push(*old_graph) {
-                    self.resource_leaks.fetch_add(1, Ordering::Relaxed);
-                    self.health_signal.store(true, Ordering::Relaxed);
-                    let _ = Box::into_raw(Box::new(leaked));
+                    if let Some(ref mut overflow) = self.overflow_garbage_producer {
+                        if let Err(leaked) = overflow.push(leaked) {
+                            self.resource_leaks.fetch_add(1, Ordering::Relaxed);
+                            self.health_signal.store(true, Ordering::Relaxed);
+                            let _ = Box::into_raw(Box::new(leaked));
+                        }
+                    } else {
+                        self.resource_leaks.fetch_add(1, Ordering::Relaxed);
+                        self.health_signal.store(true, Ordering::Relaxed);
+                        let _ = Box::into_raw(Box::new(leaked));
+                    }
                 }
             }
         }
@@ -195,7 +227,20 @@ impl AudioEngine {
                 // RT-safe deallocation: offload the vector to a garbage consumer
                 if let Some(ref mut prod) = self.bundle_garbage_producer {
                     if let Err(b) = prod.push(bundle) {
-                        // If queue is full, we must leak to avoid deallocation in RT thread.
+                        if let Some(ref mut overflow) = self.bundle_overflow_producer {
+                            if let Err(b) = overflow.push(b) {
+                                self.resource_leaks.fetch_add(1, Ordering::Relaxed);
+                                self.health_signal.store(true, Ordering::Relaxed);
+                                std::mem::forget(b);
+                            }
+                        } else {
+                            self.resource_leaks.fetch_add(1, Ordering::Relaxed);
+                            self.health_signal.store(true, Ordering::Relaxed);
+                            std::mem::forget(b);
+                        }
+                    }
+                } else if let Some(ref mut overflow) = self.bundle_overflow_producer {
+                    if let Err(b) = overflow.push(bundle) {
                         self.resource_leaks.fetch_add(1, Ordering::Relaxed);
                         self.health_signal.store(true, Ordering::Relaxed);
                         std::mem::forget(b);
@@ -282,13 +327,15 @@ impl AudioEngine {
         self.sample_counter = block_end_sample;
         graph.collect_telemetry(&mut node_times_cycles, &mut peak_levels);
 
+        let ns_per_cycle = f64::from_bits(self.ns_per_cycle.load(Ordering::Relaxed));
+
         for (i, node_time) in node_times.iter_mut().enumerate() {
-            *node_time = (node_times_cycles.get(i).copied().unwrap_or(0) as f64 * self.ns_per_cycle) as u64;
+            *node_time = (node_times_cycles.get(i).copied().unwrap_or(0) as f64 * ns_per_cycle) as u64;
         }
 
         let elapsed_cycles = Self::get_cycles().wrapping_sub(start_cycles);
 
-        let current_ns = (elapsed_cycles as f64 * self.ns_per_cycle) as u64;
+        let current_ns = (elapsed_cycles as f64 * ns_per_cycle) as u64;
         let mut peak = self.peak_ns.load(Ordering::Relaxed);
         if current_ns > peak {
             let _ = self.peak_ns.compare_exchange(peak, current_ns, Ordering::Relaxed, Ordering::Relaxed);

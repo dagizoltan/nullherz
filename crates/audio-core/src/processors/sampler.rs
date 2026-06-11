@@ -25,15 +25,10 @@ impl AudioProcessor for SamplerProcessor {
     fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         if outputs.is_empty() { return; }
 
-        let num_samples = outputs[0].len();
-
-        for i in 0..num_samples {
-            let mut frame_sum = 0.0f32;
+        for output in outputs.iter_mut() {
+            output.fill(0.0);
             for voice in self.voices.iter_mut() {
-                frame_sum += voice.process_scalar_frame();
-            }
-            for output in outputs.iter_mut() {
-                output[i] = frame_sum;
+                voice.process_block(output);
             }
         }
     }
