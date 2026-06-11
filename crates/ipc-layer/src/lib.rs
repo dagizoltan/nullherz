@@ -193,6 +193,7 @@ impl SharedMemory {
     pub fn cleanup_stale_segments() {
         if let Ok(entries) = std::fs::read_dir("/dev/shm") {
             for entry in entries.flatten() {
+                #[allow(clippy::collapsible_if)]
                 if let Some(name) = entry.file_name().to_str() {
                     if name.starts_with("nullherz_") {
                         let cname = CString::new(name).unwrap();
@@ -474,7 +475,8 @@ impl<T> MpscRingBuffer<T> {
     }
 }
 
-#[cfg(kani)]
+#[cfg(feature = "kani-verify")]
+#[allow(unexpected_cfgs)]
 mod proofs {
     use super::*;
 

@@ -205,94 +205,14 @@ impl SimdBiquad {
         self.z2[channel] = z2;
     }
 
-    #[cfg(target_arch = "aarch64")]
-    pub unsafe fn process_block_simd(&mut self, input: &[f32], output: &mut [f32]) {
-        unsafe {
-        use std::arch::aarch64::*;
-        let len = input.len();
-        if len == 0 { return; }
-
-        let mut z1 = self.z1;
-        let mut z2 = self.z2;
-        let b0 = self.coeffs.b0;
-        let b1 = self.coeffs.b1;
-        let b2 = self.coeffs.b2;
-        let a1 = self.coeffs.a1;
-        let a2 = self.coeffs.a2;
-
-        for i in 0..len {
-            let x = *input.get_unchecked(i);
-            let y = x * b0 + z1;
-            z1 = x * b1 - y * a1 + z2;
-            z2 = x * b2 - y * a2;
-            *output.get_unchecked_mut(i) = y;
-        }
-        // This ARM implementation needs fixing to use self.z1/z2 properly like x86
-        // but for now we maintain the previous logic structure.
-        }
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    pub unsafe fn process_8_channels(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
-        use std::arch::aarch64::*;
-        // SAFETY: Caller ensures input/output pointers are valid for 'len' elements and 8 channels.
-        unsafe {
-
-        let b0 = vdupq_n_f32(self.coeffs.b0);
-        let b1 = vdupq_n_f32(self.coeffs.b1);
-        let b2 = vdupq_n_f32(self.coeffs.b2);
-        let a1 = vdupq_n_f32(self.coeffs.a1);
-        let a2 = vdupq_n_f32(self.coeffs.a2);
-
-        let mut z1_0 = vld1q_f32(self.z1.as_ptr());
-        let mut z1_1 = vld1q_f32(self.z1.as_ptr().add(4));
-        let mut z2_0 = vld1q_f32(self.z2.as_ptr());
-        let mut z2_1 = vld1q_f32(self.z2.as_ptr().add(4));
-
-        for i in 0..len {
-            let x0 = unsafe { vsetq_lane_f32(*inputs[0].add(i), vdupq_n_f32(0.0), 0) };
-            let x0 = unsafe { vsetq_lane_f32(*inputs[1].add(i), x0, 1) };
-            let x0 = unsafe { vsetq_lane_f32(*inputs[2].add(i), x0, 2) };
-            let x0 = unsafe { vsetq_lane_f32(*inputs[3].add(i), x0, 3) };
-
-            let x1 = unsafe { vsetq_lane_f32(*inputs[4].add(i), vdupq_n_f32(0.0), 0) };
-            let x1 = unsafe { vsetq_lane_f32(*inputs[5].add(i), x1, 1) };
-            let x1 = unsafe { vsetq_lane_f32(*inputs[6].add(i), x1, 2) };
-            let x1 = unsafe { vsetq_lane_f32(*inputs[7].add(i), x1, 3) };
-
-            // Group 0 (Ch 0-3)
-            let y0 = vaddq_f32(vmulq_f32(x0, b0), z1_0);
-            z1_0 = vaddq_f32(vsubq_f32(vmulq_f32(x0, b1), vmulq_f32(y0, a1)), z2_0);
-            z2_0 = vsubq_f32(vmulq_f32(x0, b2), vmulq_f32(y0, a2));
-
-            // Group 1 (Ch 4-7)
-            let y1 = vaddq_f32(vmulq_f32(x1, b0), z1_1);
-            z1_1 = vaddq_f32(vsubq_f32(vmulq_f32(x1, b1), vmulq_f32(y1, a1)), z2_1);
-            z2_1 = vsubq_f32(vmulq_f32(x1, b2), vmulq_f32(y1, a2));
-
-            let mut out0 = [0.0f32; 4];
-            let mut out1 = [0.0f32; 4];
-            vst1q_f32(out0.as_mut_ptr(), y0);
-            vst1q_f32(out1.as_mut_ptr(), y1);
-
-            for ch in 0..4 { unsafe { *outputs.get_unchecked(ch).add(i) = out0[ch] } ; }
-            for ch in 0..4 { unsafe { *outputs.get_unchecked(ch+4).add(i) = out1[ch] } ; }
-        }
-
-        vst1q_f32(self.z1.as_mut_ptr(), z1_0);
-        vst1q_f32(self.z1.as_mut_ptr().add(4), z1_1);
-        vst1q_f32(self.z2.as_mut_ptr(), z2_0);
-        vst1q_f32(self.z2.as_mut_ptr().add(4), z2_1);
-        }
-    }
-
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
     /// # Safety
     /// Caller must ensure all pointers are valid for 'len' elements.
     pub unsafe fn process_16_channels(&mut self, inputs: [*const f32; 16], outputs: [*mut f32; 16], len: usize) {
         use std::arch::x86_64::*;
-        // SAFETY: The requirements are outlined in the doc comment.
+        // SAFETY: Caller must ensure that all input and output pointers are valid for 'len' elements,
+        // and that the CPU supports AVX-512F.
         unsafe {
 
         let b0 = _mm512_set1_ps(self.coeffs.b0);
@@ -345,6 +265,7 @@ impl SimdBiquad {
         ]);
 
         for i in 0..len {
+            // SAFETY: Caller ensures input pointers are valid for 'len' elements.
             let x = unsafe {
                 f32x8::new([
                     *inputs[0].add(i), *inputs[1].add(i), *inputs[2].add(i), *inputs[3].add(i),
@@ -357,7 +278,10 @@ impl SimdBiquad {
             z2 = (x * b2) - (y * a2);
 
             let out_v: [f32; 8] = y.into();
-            for (ch, &val) in out_v.iter().enumerate() { unsafe { *outputs.get_unchecked(ch).add(i) = val }; }
+            for (ch, &val) in out_v.iter().enumerate() {
+                // SAFETY: Caller ensures output pointers are valid for 'len' elements.
+                unsafe { *outputs.get_unchecked(ch).add(i) = val };
+            }
         }
 
         let z1_arr: [f32; 8] = z1.into();
@@ -405,12 +329,16 @@ impl DjIsolator {
         }
     }
 
+    /// Processes a block of audio using AVX2 SIMD instructions.
+    ///
     /// # Safety
-    /// Caller must ensure input and output are valid for 'len' elements.
+    /// Caller must ensure input and output slices are valid for 'len' elements
+    /// and that the CPU supports AVX2.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn process_block_avx2(&mut self, input: &[f32], output: &mut [f32]) {
-        // SAFETY: The requirements are outlined in the doc comment.
+        // SAFETY: CPU feature check is responsibility of the caller (target_feature enabled).
+        // Slices are checked by the caller.
         unsafe {
         use std::arch::x86_64::*;
         let len = input.len();

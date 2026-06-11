@@ -3,6 +3,9 @@ name = "ipc-layer"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+kani-verify = []
+
 [dependencies]
 libc = "0.2"
 tokio = { version = "1", features = ["sync"] }

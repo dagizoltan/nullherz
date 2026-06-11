@@ -32,6 +32,7 @@ pub struct AudioEngine {
 }
 
 impl AudioEngine {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
         midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
@@ -73,32 +74,50 @@ impl AudioEngine {
     }
 
     fn calibrate_cycles() -> f64 {
-        #[cfg(target_arch = "x86_64")]
-        {
-            // Perform multiple measurements to filter out jitter/interrupts.
-            // We take the median or average of "clean" runs to avoid biasing towards low frequency.
-            let mut ratios = Vec::with_capacity(7);
+        let mut ratios = Vec::with_capacity(7);
 
-            for _ in 0..7 {
-                let start = std::time::Instant::now();
-                let start_c = unsafe { std::arch::x86_64::_rdtsc() };
-                // Busy wait for ~10ms for more accurate calibration than sleep
-                while start.elapsed() < std::time::Duration::from_millis(10) {
-                    std::hint::spin_loop();
-                }
-                let elapsed = start.elapsed().as_nanos() as f64;
-                let elapsed_c = (unsafe { std::arch::x86_64::_rdtsc() } - start_c) as f64;
-                if elapsed_c > 0.0 {
-                    ratios.push(elapsed / elapsed_c);
-                }
+        for _ in 0..7 {
+            let start = std::time::Instant::now();
+            let start_c = Self::get_cycles();
+            // Busy wait for ~10ms for more accurate calibration than sleep
+            while start.elapsed() < std::time::Duration::from_millis(10) {
+                std::hint::spin_loop();
             }
-            if ratios.is_empty() { return 1.0; }
-            ratios.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            // Return median
-            ratios[ratios.len() / 2]
+            let elapsed = start.elapsed().as_nanos() as f64;
+            let elapsed_c = (Self::get_cycles().wrapping_sub(start_c)) as f64;
+            if elapsed_c > 0.0 {
+                ratios.push(elapsed / elapsed_c);
+            }
         }
-        #[cfg(not(target_arch = "x86_64"))]
-        { 1.0 }
+        if ratios.is_empty() { return 1.0; }
+        ratios.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // Return median
+        ratios[ratios.len() / 2]
+    }
+
+    #[inline(always)]
+    fn get_cycles() -> u64 {
+        #[cfg(target_arch = "x86_64")]
+        { unsafe { std::arch::x86_64::_rdtsc() } }
+        #[cfg(target_arch = "aarch64")]
+        {
+            unsafe {
+                let val: u64;
+                std::arch::asm!("mrs {}, cntvct_el0", out(reg) val, options(nomem, nostack));
+                val
+            }
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        {
+            // Fallback for non-x86/ARM platforms using a monotonic clock if possible.
+            // Since this is for telemetry/calibration, resolution matters.
+            #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+            { 0 }
+            #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+            {
+                std::time::Instant::now().elapsed().as_nanos() as u64
+            }
+        }
     }
     pub fn xrun_counter(&self) -> std::sync::Arc<std::sync::atomic::AtomicU32> {
         self.xrun_count.clone()
@@ -118,16 +137,7 @@ impl AudioEngine {
         // (Backends might have reset them or it might be a new thread)
         crate::setup_rt_thread(90, None);
 
-        #[cfg(target_arch = "x86_64")]
-        let start_cycles = unsafe { std::arch::x86_64::_rdtsc() };
-        #[cfg(target_arch = "aarch64")]
-        let start_cycles = unsafe {
-            let val: u64;
-            std::arch::asm!("mrs {}, cntvct_el0", out(reg) val, options(nomem, nostack));
-            val
-        };
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        let start_time = Instant::now();
+        let start_cycles = Self::get_cycles();
 
         let pending = self.pending_graph.swap(std::ptr::null_mut(), Ordering::Acquire);
         if !pending.is_null() {
@@ -157,6 +167,20 @@ impl AudioEngine {
                     match cmd {
                         control_plane::Command::Play => self.transport.is_playing = true,
                         control_plane::Command::Stop => self.transport.is_playing = false,
+                        control_plane::Command::Bundle { count, data } => {
+                            // Expand small bundle data if present
+                            for i in 0..(*count as usize).min(4) {
+                                let node_id = data[i * 3];
+                                let param_id = data[i * 3 + 1] as u32;
+                                let value = f32::from_bits(data[i * 3 + 2] as u32);
+                                graph.apply_command(&control_plane::Command::SetParam {
+                                    target_id: node_id,
+                                    param_id,
+                                    value,
+                                    ramp_duration_samples: 0,
+                                });
+                            }
+                        }
                         _ => {}
                     }
                     graph.apply_command(cmd);
@@ -165,8 +189,6 @@ impl AudioEngine {
                 if let Some(ref mut prod) = self.bundle_garbage_producer {
                     if let Err(b) = prod.push(bundle) {
                         // If queue is full, we must leak to avoid deallocation in RT thread.
-                        // For a "bug-free" engine, we would ideally use a fixed-size bundle
-                        // to avoid Vec altogether, but for now we leak to preserve RT safety.
                         self.resource_leaks.fetch_add(1, Ordering::Relaxed);
                         self.health_signal.store(true, Ordering::Relaxed);
                         std::mem::forget(b);
@@ -257,16 +279,7 @@ impl AudioEngine {
             *node_time = (node_times_cycles.get(i).copied().unwrap_or(0) as f64 * self.ns_per_cycle) as u64;
         }
 
-        #[cfg(target_arch = "x86_64")]
-        let elapsed_cycles = unsafe { std::arch::x86_64::_rdtsc() } - start_cycles;
-        #[cfg(target_arch = "aarch64")]
-        let elapsed_cycles = unsafe {
-            let val: u64;
-            std::arch::asm!("mrs {}, cntvct_el0", out(reg) val, options(nomem, nostack));
-            val.wrapping_sub(start_cycles)
-        };
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        let elapsed_cycles = start_time.elapsed().as_nanos() as u64;
+        let elapsed_cycles = Self::get_cycles().wrapping_sub(start_cycles);
 
         let current_ns = (elapsed_cycles as f64 * self.ns_per_cycle) as u64;
         let mut peak = self.peak_ns.load(Ordering::Relaxed);

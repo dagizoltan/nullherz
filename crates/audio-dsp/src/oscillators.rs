@@ -183,6 +183,12 @@ pub struct SamplerVoice {
     pub velocity: f32,
 }
 
+impl Default for SamplerVoice {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SamplerVoice {
     pub fn new() -> Self {
         Self {

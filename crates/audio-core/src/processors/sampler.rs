@@ -40,6 +40,7 @@ impl AudioProcessor for SamplerProcessor {
 
     fn apply_midi(&mut self, event: ipc_layer::MidiEvent) {
         let status = event.status & 0xF0;
+        #[allow(clippy::collapsible_if)]
         if status == 0x90 && event.data2 > 0 {
             if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
                 let freq = 440.0 * 2.0f32.powf((event.data1 as f32 - 69.0) / 12.0);
