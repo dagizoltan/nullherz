@@ -46,6 +46,17 @@ pub struct AudioBlock {
 const _: () = assert!(std::mem::size_of::<AudioBlock>() == 1088); // 256*4 + 4 padded to 64
 const _: () = assert!(std::mem::align_of::<AudioBlock>() == 64);
 
+/// A standard MIDI event representation for real-time IPC.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MidiEvent {
+    pub timestamp_samples: u64,
+    pub status: u8,
+    pub data1: u8,
+    pub data2: u8,
+    pub _pad: u8,
+}
+
 /// A status-flagged item for the ring buffer to ensure stable layout for IPC.
 #[repr(C)]
 pub struct ShmSlot<T> {
@@ -459,6 +470,48 @@ impl<T> MpscRingBuffer<T> {
             } else {
                 pos = self.head.load(Ordering::Relaxed);
             }
+        }
+    }
+}
+
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn prove_shm_ring_buffer_safety() {
+        let capacity = kani::any_where(|&c: &usize| c > 1 && c < 5);
+        let (layout, _) = ShmRingBuffer::<u32>::layout(capacity);
+
+        // Use a small fixed buffer for verification to stay within bounds
+        let mut mem = [0u8; 1024];
+        if layout.size() + 64 > mem.len() { return; }
+
+        let ptr = mem.as_mut_ptr();
+        let aligned_ptr = unsafe { ptr.add(ptr.align_offset(64)) };
+
+        let rb_ptr = unsafe { ShmRingBuffer::<u32>::init(aligned_ptr, capacity) };
+        let rb = unsafe { &*rb_ptr };
+
+        let val: u32 = kani::any();
+        if rb.push(val).is_ok() {
+            let popped = rb.pop();
+            kani::assert(popped == Some(val), "Popped value must match pushed value");
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn prove_mpsc_ring_buffer_safety() {
+        // MpscRingBuffer requires power-of-two capacity
+        let capacity = 4;
+        let buffer = MpscRingBuffer::<u32>::new(capacity);
+
+        let val: u32 = kani::any();
+        if buffer.push(val).is_ok() {
+            let popped = buffer.pop();
+            kani::assert(popped == Some(val), "Popped value must match pushed value");
         }
     }
 }

@@ -6,9 +6,11 @@ use ipc_layer::{Producer, Consumer};
 use control_plane::TimestampedCommand;
 use crate::processors::{AudioProcessor, TaskPool, ProcessContext};
 use crate::telemetry::Telemetry;
+use crate::rt_logging::{RtLogger, RtLogLevel};
 
 pub struct AudioEngine {
     command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
+    midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
     bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
     topology_consumer: Option<Consumer<crate::processors::TopologyMutation>>,
     active_graph: AtomicPtr<Box<dyn AudioProcessor>>,
@@ -26,11 +28,13 @@ pub struct AudioEngine {
     pub pool: Option<TaskPool>,
     pub transport: crate::Transport,
     pub target_sample_rate: f32,
+    pub logger: Arc<RtLogger>,
 }
 
 impl AudioEngine {
     pub fn new(
         command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
+        midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
         bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
         topology_consumer: Option<Consumer<crate::processors::TopologyMutation>>,
         garbage_producer: Producer<Box<dyn AudioProcessor>>,
@@ -41,6 +45,7 @@ impl AudioEngine {
         let ns_per_cycle = Self::calibrate_cycles();
         Self {
             command_consumer,
+            midi_consumer,
             bundle_consumer,
             topology_consumer,
             active_graph: AtomicPtr::new(Box::into_raw(Box::new(initial_graph))),
@@ -63,6 +68,7 @@ impl AudioEngine {
                 sample_rate: 44100.0,
             },
             target_sample_rate: 44100.0,
+            logger: Arc::new(RtLogger::new(256)),
         }
     }
 
@@ -99,8 +105,7 @@ impl AudioEngine {
     }
     pub fn set_config(&mut self, config: crate::AudioConfig) {
         if (config.sample_rate - self.target_sample_rate).abs() > 0.1 {
-            eprintln!("CRITICAL ERROR: Hardware sample rate ({}) does not match target engine rate ({})", config.sample_rate, self.target_sample_rate);
-            // In a production scenario, we might want to shut down or trigger a bypass here.
+            self.logger.log(RtLogLevel::Error, "Hardware rate mismatch", self.sample_counter);
         }
         self.transport.sample_rate = config.sample_rate;
         let graph_ptr = self.active_graph.load(Ordering::Acquire);
@@ -181,6 +186,12 @@ impl AudioEngine {
                 graph.apply_topology_mutation(topo_mut);
                 topo_processed += 1;
                 if topo_processed >= 16 { break; } // Limit topology mutations per block
+            }
+        }
+
+        if let Some(ref mut cons) = self.midi_consumer {
+            while let Some(event) = cons.pop() {
+                graph.apply_midi(event);
             }
         }
 

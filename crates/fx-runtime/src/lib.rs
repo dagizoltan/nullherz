@@ -2,6 +2,22 @@ use std::process::{Command, Child};
 use ipc_layer::{SharedMemory, ShmRingBuffer, ShmSignal, EventFd, AudioBlock, move_to_cgroup};
 use audio_core::{SidecarProcessor, MAX_CHANNELS};
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SidecarStatus {
+    Starting,
+    Running,
+    Bypassing,
+    Restarting,
+    Crashed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FailurePolicy {
+    Bypass,
+    AutoRestart,
+    SafeMode,
+}
+
 pub struct SidecarHandle {
     pub name: String,
     pub binary_path: String,
@@ -14,17 +30,22 @@ pub struct SidecarHandle {
     pub shm_signal: SharedMemory,
     pub last_heartbeat: std::time::Instant,
     pub last_heartbeat_version: u64,
+    pub status: SidecarStatus,
+    pub restart_count: u32,
+    pub failure_policy: FailurePolicy,
 }
 
+pub type SidecarManager = SidecarSupervisor;
+
 #[derive(Default)]
-pub struct SidecarManager {
+pub struct SidecarSupervisor {
     active_sidecars: Vec<SidecarHandle>,
     pub current_memory_usage_bytes: usize,
 }
 
 const MAX_SIDECAR_MEMORY_BYTES: usize = 512 * 1024 * 1024; // 512MB Quota
 
-impl SidecarManager {
+impl SidecarSupervisor {
     pub fn new() -> Self {
         Self::default()
     }
@@ -145,6 +166,9 @@ impl SidecarManager {
             shm_signal,
             last_heartbeat: std::time::Instant::now(),
             last_heartbeat_version: 0,
+            status: SidecarStatus::Running,
+            restart_count: 0,
+            failure_policy: FailurePolicy::AutoRestart,
         });
 
         self.current_memory_usage_bytes += estimated_size;
@@ -152,18 +176,24 @@ impl SidecarManager {
         Ok(processor)
     }
 
-    pub fn reap_zombies(&mut self) -> Vec<SidecarProcessor> {
+    pub fn supervise(&mut self) -> (Vec<SidecarProcessor>, bool) {
         let mut to_restart = Vec::new();
+        let mut enter_safe_mode = false;
+
         let (cmd_layout, _) = ShmRingBuffer::<control_plane::Command>::layout(64);
         let (fb_layout, _) = ShmRingBuffer::<control_plane::SidecarMetadata>::layout(8);
         let (audio_layout, _) = ShmRingBuffer::<AudioBlock>::layout(16);
         let sig_size = std::mem::size_of::<ShmSignal>();
 
         self.active_sidecars.retain_mut(|handle| {
+            if handle.status == SidecarStatus::Bypassing || handle.status == SidecarStatus::Crashed {
+                return true; // Already handled, keep in list but don't process
+            }
+
             let exited = match handle.process.try_wait() {
-                Ok(Some(_status)) => true, // Process exited
-                Ok(None) => false,          // Still running
-                Err(_) => true,             // Error, assume gone
+                Ok(Some(_status)) => true,
+                Ok(None) => false,
+                Err(_) => true,
             };
 
             let timed_out = handle.last_heartbeat.elapsed() > std::time::Duration::from_secs(5);
@@ -171,11 +201,26 @@ impl SidecarManager {
             if exited || timed_out {
                 if timed_out { let _ = handle.process.kill(); }
 
-                let size = cmd_layout.size() + fb_layout.size() + (audio_layout.size() * handle.num_channels * 2) + sig_size;
-                self.current_memory_usage_bytes = self.current_memory_usage_bytes.saturating_sub(size);
-
-                to_restart.push((handle.name.clone(), handle.binary_path.clone(), handle.num_channels));
-                return false;
+                match handle.failure_policy {
+                    FailurePolicy::Bypass => {
+                        handle.status = SidecarStatus::Bypassing;
+                        return true;
+                    }
+                    FailurePolicy::AutoRestart => {
+                        if handle.restart_count < 5 {
+                            handle.status = SidecarStatus::Restarting;
+                            let size = cmd_layout.size() + fb_layout.size() + (audio_layout.size() * handle.num_channels * 2) + sig_size;
+                            self.current_memory_usage_bytes = self.current_memory_usage_bytes.saturating_sub(size);
+                            to_restart.push((handle.name.clone(), handle.binary_path.clone(), handle.num_channels, handle.restart_count + 1));
+                            return false;
+                        } else {
+                            handle.status = SidecarStatus::Crashed;
+                        }
+                    }
+                    FailurePolicy::SafeMode => {
+                        enter_safe_mode = true;
+                    }
+                }
             }
 
             // Check heartbeat from SHM
@@ -190,12 +235,20 @@ impl SidecarManager {
         });
 
         let mut new_processors = Vec::new();
-        for (name, path, channels) in to_restart {
+        for (name, path, channels, restarts) in to_restart {
             if let Ok(p) = self.spawn_sidecar(&name, &path, channels) {
+                if let Some(h) = self.active_sidecars.last_mut() {
+                    h.restart_count = restarts;
+                }
                 new_processors.push(p);
             }
         }
-        new_processors
+        (new_processors, enter_safe_mode)
+    }
+
+    pub fn reap_zombies(&mut self) -> Vec<SidecarProcessor> {
+        let (procs, _) = self.supervise();
+        procs
     }
 
     pub fn update_heartbeat(&mut self, sidecar_idx: usize) {
@@ -205,7 +258,7 @@ impl SidecarManager {
     }
 }
 
-impl Drop for SidecarManager {
+impl Drop for SidecarSupervisor {
     fn drop(&mut self) {
         for handle in self.active_sidecars.iter_mut() {
             let _ = handle.process.kill();

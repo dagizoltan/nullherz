@@ -1,0 +1,80 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::UnsafeCell;
+
+#[derive(Debug, Clone, Copy)]
+pub enum RtLogLevel {
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(Clone, Copy)]
+pub struct RtLogEntry {
+    pub level: RtLogLevel,
+    pub message: [u8; 64],
+    pub length: usize,
+    pub timestamp: u64,
+}
+
+pub struct RtLogger {
+    buffer: Box<[UnsafeCell<RtLogEntry>]>,
+    head: AtomicUsize,
+    tail: AtomicUsize,
+    capacity: usize,
+}
+
+unsafe impl Sync for RtLogger {}
+
+impl RtLogger {
+    pub fn new(capacity: usize) -> Self {
+        let mut buffer = Vec::with_capacity(capacity);
+        for _ in 0..capacity {
+            buffer.push(UnsafeCell::new(RtLogEntry {
+                level: RtLogLevel::Info,
+                message: [0; 64],
+                length: 0,
+                timestamp: 0,
+            }));
+        }
+        Self {
+            buffer: buffer.into_boxed_slice(),
+            head: AtomicUsize::new(0),
+            tail: AtomicUsize::new(0),
+            capacity,
+        }
+    }
+
+    pub fn log(&self, level: RtLogLevel, msg: &str, timestamp: u64) {
+        let tail = self.tail.load(Ordering::Relaxed);
+        let head = self.head.load(Ordering::Acquire);
+
+        if (tail + 1) % self.capacity == head {
+            return; // Buffer full, discard log to preserve RT safety
+        }
+
+        let entry_ptr = self.buffer[tail].get();
+        unsafe {
+            (*entry_ptr).level = level;
+            let bytes = msg.as_bytes();
+            let len = bytes.len().min(64);
+            (&mut (*entry_ptr).message)[..len].copy_from_slice(&bytes[..len]);
+            (*entry_ptr).length = len;
+            (*entry_ptr).timestamp = timestamp;
+        }
+
+        self.tail.store((tail + 1) % self.capacity, Ordering::Release);
+    }
+
+    pub fn pop(&self) -> Option<RtLogEntry> {
+        let head = self.head.load(Ordering::Relaxed);
+        let tail = self.tail.load(Ordering::Acquire);
+
+        if head == tail {
+            return None;
+        }
+
+        let entry = unsafe { *self.buffer[head].get() };
+        self.head.store((head + 1) % self.capacity, Ordering::Release);
+        Some(entry)
+    }
+}

@@ -55,13 +55,14 @@ impl Conductor {
         let cmd_cons = cmd_buffer.clone();
         let (bundle_garbage_prod, bundle_garbage_cons) = RingBuffer::<Vec<control_plane::Command>>::new(16).split();
         let (_, bundle_cons) = RingBuffer::<Vec<control_plane::Command>>::new(16).split();
+        let (_, midi_cons) = RingBuffer::<ipc_layer::MidiEvent>::new(256).split();
         let (topo_prod, topo_cons) = RingBuffer::<audio_core::processors::TopologyMutation>::new(64).split();
         let topo_prod = ipc_layer::NonRtProducer::new(topo_prod);
         let (garbage_prod, garbage_cons) = RingBuffer::new(1024).split();
         let (tel_prod, tel_cons) = RingBuffer::new(1024).split();
 
         let graph = ProcessorGraph::new();
-        let engine = AudioEngine::new(cmd_cons, Some(bundle_cons), Some(topo_cons), garbage_prod, Some(bundle_garbage_prod), tel_prod, Box::new(graph));
+        let engine = AudioEngine::new(cmd_cons, Some(midi_cons), Some(bundle_cons), Some(topo_cons), garbage_prod, Some(bundle_garbage_prod), tel_prod, Box::new(graph));
         self.health_signal = Some(engine.health_signal.clone());
         self.engine = Some(engine);
         self.garbage_consumer = Some(garbage_cons);
