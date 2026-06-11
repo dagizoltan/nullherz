@@ -277,4 +277,50 @@ mod wavetable_tests {
             assert!((-1.05..=1.05).contains(&s));
         }
     }
+
+    #[test]
+    fn test_gain_ramping() {
+        let mut gain = Gain::new(0.0, 0.1);
+        gain.set_gain(1.0, 100);
+        let input = vec![1.0; 100];
+        let mut output = vec![0.0; 100];
+        gain.process_block(&input, &mut output);
+        assert!((gain.current_gain - 1.0).abs() < 1e-6);
+        assert!(output[0] > 0.0 && output[0] < 1.0);
+        assert!((output[99] - 1.0).abs() < 0.02); // last sample should be near 1.0
+    }
+
+    #[test]
+    fn test_summing_node_simd() {
+        let node = SummingNode::new();
+        let input1 = vec![0.1; 64];
+        let input2 = vec![0.2; 64];
+        let mut output_scalar = vec![0.0; 64];
+        let mut output_simd = vec![0.0; 64];
+
+        node.process_16_to_1(&[&input1, &input2], &mut output_scalar);
+        node.process_16_to_1_simd(&[&input1, &input2], &mut output_simd);
+
+        for i in 0..64 {
+            assert!((output_scalar[i] - output_simd[i]).abs() < 1e-6);
+            assert!((output_scalar[i] - 0.3).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_crossfader_simd() {
+        let mut xfade = Crossfader::new();
+        xfade.set_position(0.5);
+        let input_a = vec![1.0; 64];
+        let input_b = vec![2.0; 64];
+        let mut output_scalar = vec![0.0; 64];
+        let mut output_simd = vec![0.0; 64];
+
+        xfade.process_block(&input_a, &input_b, &mut output_scalar);
+        xfade.process_block_simd(&input_a, &input_b, &mut output_simd);
+
+        for i in 0..64 {
+            assert!((output_scalar[i] - output_simd[i]).abs() < 1e-6);
+        }
+    }
 }
