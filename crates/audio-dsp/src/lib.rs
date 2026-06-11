@@ -274,7 +274,7 @@ mod wavetable_tests {
         assert!(sum > 10.0);
 
         for &s in &out {
-            assert!(s >= -1.05 && s <= 1.05);
+            assert!((-1.05..=1.05).contains(&s));
         }
     }
 }

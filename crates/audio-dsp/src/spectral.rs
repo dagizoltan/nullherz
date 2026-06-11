@@ -188,9 +188,9 @@ impl SpectralProcessor {
                 let v_val = (v_re * v_norm) * v_win;
 
                 let res: [f32; 8] = v_val.into();
-                for j in 0..8 {
+                for (j, val) in res.iter().enumerate() {
                     let target_ptr = (self.out_ptr + i + j) & mask;
-                    unsafe { *self.out_buffer.get_unchecked_mut(target_ptr) += res[j]; }
+                    unsafe { *self.out_buffer.get_unchecked_mut(target_ptr) += *val; }
                 }
                 i += 8;
             }

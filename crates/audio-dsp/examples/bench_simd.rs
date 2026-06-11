@@ -40,7 +40,7 @@ fn main() {
 
     let start = Instant::now();
     for _ in 0..iterations {
-        unsafe { simd_filter.process_8_channels(in_ptrs, out_ptrs, block_size); }
+        simd_filter.process_8_channels(in_ptrs, out_ptrs, block_size);
     }
     println!("SIMD (8-channel): {:?}", start.elapsed());
 }

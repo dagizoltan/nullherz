@@ -155,6 +155,12 @@ pub struct SpaPodBuilder {
     pub data: Vec<u32>,
 }
 
+impl Default for SpaPodBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpaPodBuilder {
     pub fn new() -> Self {
         Self { data: Vec::with_capacity(64) }
