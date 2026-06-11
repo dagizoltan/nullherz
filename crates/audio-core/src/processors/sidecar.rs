@@ -1,5 +1,6 @@
-use ipc_layer::{ShmRingBuffer, AudioBlock, ShmSignal, EventFd};
+use ipc_layer::{ShmRingBuffer, AudioBlock, ShmSignal, EventFd, SharedMemory};
 use crate::processors::AudioProcessor;
+use std::sync::Arc;
 
 pub const MAX_CHANNELS: usize = 16;
 
@@ -14,6 +15,12 @@ pub struct SidecarProcessor {
     event_fd: Option<EventFd>,
     last_heartbeat: u64,
     missed_deadline_count: u32,
+    // Keep SHM segments alive to prevent use-after-free
+    _shm_cmd: Option<Arc<SharedMemory>>,
+    _shm_feedback: Option<Arc<SharedMemory>>,
+    _shm_inputs: Vec<Arc<SharedMemory>>,
+    _shm_outputs: Vec<Arc<SharedMemory>>,
+    _shm_signal: Option<Arc<SharedMemory>>,
 }
 
 unsafe impl Send for SidecarProcessor {}
@@ -45,7 +52,27 @@ impl SidecarProcessor {
             event_fd,
             last_heartbeat: 0,
             missed_deadline_count: 0,
+            _shm_cmd: None,
+            _shm_feedback: None,
+            _shm_inputs: Vec::new(),
+            _shm_outputs: Vec::new(),
+            _shm_signal: None,
         }
+    }
+
+    pub fn set_shm_references(
+        &mut self,
+        cmd: Arc<SharedMemory>,
+        fb: Option<Arc<SharedMemory>>,
+        inputs: Vec<Arc<SharedMemory>>,
+        outputs: Vec<Arc<SharedMemory>>,
+        signal: Arc<SharedMemory>,
+    ) {
+        self._shm_cmd = Some(cmd);
+        self._shm_feedback = fb;
+        self._shm_inputs = inputs;
+        self._shm_outputs = outputs;
+        self._shm_signal = Some(signal);
     }
 
     pub fn poll_feedback(&self) -> Option<control_plane::SidecarMetadata> {

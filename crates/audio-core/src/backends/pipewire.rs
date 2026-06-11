@@ -217,7 +217,18 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
     let pw_buf = unsafe { &*(buffer as *const PwBuffer) };
     let spa_buf = unsafe { &*pw_buf.buffer };
 
-    let num_samples = 128; // Hard engine constraint
+    let mut num_samples = 128;
+    if spa_buf.n_datas > 0 {
+        let first_data = unsafe { &*spa_buf.datas.add(0) };
+        let mut size_bytes = first_data.maxsize;
+        if !first_data.chunk.is_null() {
+            let chunk_size = unsafe { (*first_data.chunk).size };
+            if chunk_size > 0 {
+                size_bytes = chunk_size;
+            }
+        }
+        num_samples = (size_bytes as usize / 4).min(ipc_layer::MAX_BLOCK_SIZE);
+    }
     let num_channels = spa_buf.n_datas.min(16) as usize;
     let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
 
@@ -227,6 +238,13 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
             *out_ref = unsafe {
                 std::slice::from_raw_parts_mut(data.data as *mut f32, num_samples)
             };
+        }
+        if !data.chunk.is_null() {
+            unsafe {
+                (*data.chunk).offset = 0;
+                (*data.chunk).size = (num_samples * 4) as u32;
+                (*data.chunk).stride = 4;
+            }
         }
     }
 

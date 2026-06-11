@@ -1,4 +1,5 @@
 use std::process::{Command, Child};
+use std::sync::Arc;
 use ipc_layer::{SharedMemory, ShmRingBuffer, ShmSignal, EventFd, AudioBlock, move_to_cgroup};
 use audio_core::{SidecarProcessor, MAX_CHANNELS};
 
@@ -23,11 +24,11 @@ pub struct SidecarHandle {
     pub binary_path: String,
     pub num_channels: usize,
     pub process: Child,
-    pub shm_cmd: SharedMemory,
-    pub shm_feedback: SharedMemory,
-    pub shm_inputs: Vec<SharedMemory>,
-    pub shm_outputs: Vec<SharedMemory>,
-    pub shm_signal: SharedMemory,
+    pub shm_cmd: Arc<SharedMemory>,
+    pub shm_feedback: Arc<SharedMemory>,
+    pub shm_inputs: Vec<Arc<SharedMemory>>,
+    pub shm_outputs: Vec<Arc<SharedMemory>>,
+    pub shm_signal: Arc<SharedMemory>,
     pub last_heartbeat: std::time::Instant,
     pub last_heartbeat_version: u64,
     pub status: SidecarStatus,
@@ -71,12 +72,14 @@ impl SidecarSupervisor {
         let (cmd_layout, _) = ShmRingBuffer::<control_plane::Command>::layout(64);
         let shm_cmd = SharedMemory::create(&cmd_shm_name, cmd_layout.size()).map_err(|e| e.to_string())?;
         let cmd_rb_ptr = unsafe { ShmRingBuffer::init(shm_cmd.ptr(), 64) };
+        let shm_cmd = Arc::new(shm_cmd);
 
         // 1b. Create SHM for feedback
         let fb_shm_name = format!("/nullherz_fb_{}", name);
         let (fb_layout, _) = ShmRingBuffer::<control_plane::SidecarMetadata>::layout(8);
         let shm_feedback = SharedMemory::create(&fb_shm_name, fb_layout.size()).map_err(|e| e.to_string())?;
         let fb_rb_ptr = unsafe { ShmRingBuffer::init(shm_feedback.ptr(), 8) };
+        let shm_feedback = Arc::new(shm_feedback);
 
         // 2. Create SHM for audio blocks
         let mut shm_inputs = Vec::new();
@@ -86,7 +89,7 @@ impl SidecarSupervisor {
             let in_name = format!("/nullherz_in_{}_{}", name, i);
             let shm = SharedMemory::create(&in_name, audio_layout.size()).map_err(|e| e.to_string())?;
             input_ptrs.push(unsafe { ShmRingBuffer::init(shm.ptr(), 16) });
-            shm_inputs.push(shm);
+            shm_inputs.push(Arc::new(shm));
         }
 
         let mut shm_outputs = Vec::new();
@@ -95,7 +98,7 @@ impl SidecarSupervisor {
             let out_name = format!("/nullherz_out_{}_{}", name, i);
             let shm = SharedMemory::create(&out_name, audio_layout.size()).map_err(|e| e.to_string())?;
             output_ptrs.push(unsafe { ShmRingBuffer::init(shm.ptr(), 16) } as *const ShmRingBuffer<AudioBlock>);
-            shm_outputs.push(shm);
+            shm_outputs.push(Arc::new(shm));
         }
 
         // 3. Create SHM for signal
@@ -103,6 +106,7 @@ impl SidecarSupervisor {
         let shm_signal = SharedMemory::create(&sig_name, std::mem::size_of::<ShmSignal>()).map_err(|e| e.to_string())?;
         let signal_ptr = shm_signal.ptr() as *mut ShmSignal;
         unsafe { std::ptr::write(signal_ptr, ShmSignal::new()); }
+        let shm_signal = Arc::new(shm_signal);
 
         // 4. Create EventFd
         let efd = EventFd::create().map_err(|e| e.to_string())?;
@@ -143,7 +147,7 @@ impl SidecarSupervisor {
             eprintln!("Warning: could not set RT priority for sidecar {}: {}", name, e);
         }
 
-        let processor = unsafe {
+        let mut processor = unsafe {
             SidecarProcessor::new(
                 cmd_rb_ptr,
                 Some(fb_rb_ptr),
@@ -153,6 +157,13 @@ impl SidecarSupervisor {
                 Some(efd)
             )
         };
+        processor.set_shm_references(
+            shm_cmd.clone(),
+            Some(shm_feedback.clone()),
+            shm_inputs.clone(),
+            shm_outputs.clone(),
+            shm_signal.clone(),
+        );
 
         self.active_sidecars.push(SidecarHandle {
             name: name.to_string(),

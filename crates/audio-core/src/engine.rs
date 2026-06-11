@@ -165,8 +165,14 @@ impl AudioEngine {
             while let Some(bundle) = cons.pop() {
                 for cmd in &bundle {
                     match cmd {
-                        control_plane::Command::Play => self.transport.is_playing = true,
-                        control_plane::Command::Stop => self.transport.is_playing = false,
+                        control_plane::Command::Play => {
+                            self.transport.is_playing = true;
+                            graph.apply_command(cmd);
+                        }
+                        control_plane::Command::Stop => {
+                            self.transport.is_playing = false;
+                            graph.apply_command(cmd);
+                        }
                         control_plane::Command::Bundle { count, data } => {
                             // Expand small bundle data if present
                             for i in 0..(*count as usize).min(4) {
@@ -181,9 +187,10 @@ impl AudioEngine {
                                 });
                             }
                         }
-                        _ => {}
+                        _ => {
+                            graph.apply_command(cmd);
+                        }
                     }
-                    graph.apply_command(cmd);
                 }
                 // RT-safe deallocation: offload the vector to a garbage consumer
                 if let Some(ref mut prod) = self.bundle_garbage_producer {

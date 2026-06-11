@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering, AtomicBool};
 use std::cell::UnsafeCell;
 
 #[derive(Debug, Clone, Copy)]
@@ -16,8 +16,13 @@ pub struct RtLogEntry {
     pub timestamp: u64,
 }
 
+pub struct RtLogSlot {
+    pub entry: UnsafeCell<RtLogEntry>,
+    pub written: AtomicBool,
+}
+
 pub struct RtLogger {
-    buffer: Box<[UnsafeCell<RtLogEntry>]>,
+    buffer: Box<[RtLogSlot]>,
     head: AtomicUsize,
     tail: AtomicUsize,
     capacity: usize,
@@ -29,12 +34,15 @@ impl RtLogger {
     pub fn new(capacity: usize) -> Self {
         let mut buffer = Vec::with_capacity(capacity);
         for _ in 0..capacity {
-            buffer.push(UnsafeCell::new(RtLogEntry {
-                level: RtLogLevel::Info,
-                message: [0; 64],
-                length: 0,
-                timestamp: 0,
-            }));
+            buffer.push(RtLogSlot {
+                entry: UnsafeCell::new(RtLogEntry {
+                    level: RtLogLevel::Info,
+                    message: [0; 64],
+                    length: 0,
+                    timestamp: 0,
+                }),
+                written: AtomicBool::new(false),
+            });
         }
         Self {
             buffer: buffer.into_boxed_slice(),
@@ -45,14 +53,27 @@ impl RtLogger {
     }
 
     pub fn log(&self, level: RtLogLevel, msg: &str, timestamp: u64) {
-        let tail = self.tail.load(Ordering::Relaxed);
-        let head = self.head.load(Ordering::Acquire);
+        let mut tail = self.tail.load(Ordering::Relaxed);
+        let idx = loop {
+            let head = self.head.load(Ordering::Acquire);
 
-        if (tail + 1) % self.capacity == head {
-            return; // Buffer full, discard log to preserve RT safety
-        }
+            if (tail + 1) % self.capacity == head {
+                return; // Buffer full, discard log to preserve RT safety
+            }
 
-        let entry_ptr = self.buffer[tail].get();
+            match self.tail.compare_exchange_weak(
+                tail,
+                (tail + 1) % self.capacity,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break tail,
+                Err(actual) => tail = actual,
+            }
+        };
+
+        let slot = &self.buffer[idx];
+        let entry_ptr = slot.entry.get();
         unsafe {
             (*entry_ptr).level = level;
             let bytes = msg.as_bytes();
@@ -62,7 +83,7 @@ impl RtLogger {
             (*entry_ptr).timestamp = timestamp;
         }
 
-        self.tail.store((tail + 1) % self.capacity, Ordering::Release);
+        slot.written.store(true, Ordering::Release);
     }
 
     pub fn pop(&self) -> Option<RtLogEntry> {
@@ -73,7 +94,13 @@ impl RtLogger {
             return None;
         }
 
-        let entry = unsafe { *self.buffer[head].get() };
+        let slot = &self.buffer[head];
+        if !slot.written.load(Ordering::Acquire) {
+            return None; // Slot is reserved but not yet fully written by producer
+        }
+
+        let entry = unsafe { *slot.entry.get() };
+        slot.written.store(false, Ordering::Release);
         self.head.store((head + 1) % self.capacity, Ordering::Release);
         Some(entry)
     }
