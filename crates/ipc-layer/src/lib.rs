@@ -225,7 +225,7 @@ pub struct EventFd {
 impl EventFd {
     pub fn create() -> Result<Self, IpcError> {
         unsafe {
-            let fd = libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC);
+            let fd = libc::eventfd(0, libc::EFD_CLOEXEC);
             if fd < 0 { return Err(IpcError::EventFdFailed(std::io::Error::last_os_error().to_string())); }
             Ok(Self { fd, owner: true })
         }

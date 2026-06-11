@@ -33,7 +33,7 @@ pub struct AudioEngine {
     sample_counter: u64,
     xrun_count: std::sync::Arc<std::sync::atomic::AtomicU32>,
     pending_command: Option<TimestampedCommand>,
-    ns_per_cycle: f64,
+    ns_per_cycle: std::sync::Arc<std::sync::atomic::AtomicU64>,
     peak_ns: std::sync::atomic::AtomicU64,
     resource_leaks: std::sync::atomic::AtomicU64,
     pub health_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -57,7 +57,13 @@ impl AudioEngine {
         telemetry_producer: Producer<Telemetry>,
         initial_graph: Box<dyn AudioProcessor>,
     ) -> Self {
-        let ns_per_cycle = Self::calibrate_cycles();
+        let ns_per_cycle = std::sync::Arc::new(std::sync::atomic::AtomicU64::new((1.0f64).to_bits()));
+        let ns_per_cycle_clone = ns_per_cycle.clone();
+        std::thread::spawn(move || {
+            let calibrated = Self::calibrate_cycles();
+            ns_per_cycle_clone.store(calibrated.to_bits(), Ordering::Relaxed);
+        });
+
         Self {
             command_consumer,
             midi_consumer,
@@ -321,13 +327,15 @@ impl AudioEngine {
         self.sample_counter = block_end_sample;
         graph.collect_telemetry(&mut node_times_cycles, &mut peak_levels);
 
+        let ns_per_cycle = f64::from_bits(self.ns_per_cycle.load(Ordering::Relaxed));
+
         for (i, node_time) in node_times.iter_mut().enumerate() {
-            *node_time = (node_times_cycles.get(i).copied().unwrap_or(0) as f64 * self.ns_per_cycle) as u64;
+            *node_time = (node_times_cycles.get(i).copied().unwrap_or(0) as f64 * ns_per_cycle) as u64;
         }
 
         let elapsed_cycles = Self::get_cycles().wrapping_sub(start_cycles);
 
-        let current_ns = (elapsed_cycles as f64 * self.ns_per_cycle) as u64;
+        let current_ns = (elapsed_cycles as f64 * ns_per_cycle) as u64;
         let mut peak = self.peak_ns.load(Ordering::Relaxed);
         if current_ns > peak {
             let _ = self.peak_ns.compare_exchange(peak, current_ns, Ordering::Relaxed, Ordering::Relaxed);

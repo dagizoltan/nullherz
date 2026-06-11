@@ -83,26 +83,31 @@ pub struct TaskPool {
     pub(crate) worker_producers: Vec<Producer<Job>>,
     pub(crate) completion: Arc<AtomicUsize>,
     pub(crate) running: Arc<AtomicBool>,
+    pub(crate) worker_wake_fds: Vec<ipc_layer::EventFd>,
+    pub(crate) completion_fd: ipc_layer::EventFd,
 }
 
 impl TaskPool {
     pub fn new(num_workers: usize) -> Self {
         let mut workers = Vec::new();
         let mut worker_producers = Vec::new();
+        let mut worker_wake_fds = Vec::new();
         let completion = Arc::new(AtomicUsize::new(0));
         let running = Arc::new(AtomicBool::new(true));
+        let completion_fd = ipc_layer::EventFd::create().expect("Failed to create completion EventFd");
 
         for i in 0..num_workers {
             let (prod, mut cons) = RingBuffer::<Job>::new(128).split();
             let running_worker = running.clone();
             let completion_worker = completion.clone();
+            let wake_fd = ipc_layer::EventFd::create().expect("Failed to create worker wake EventFd");
+            let worker_wake_fd = ipc_layer::EventFd::from_raw(wake_fd.fd());
+            let completion_fd_worker = ipc_layer::EventFd::from_raw(completion_fd.fd());
 
             let handle = thread::spawn(move || {
                 crate::setup_rt_thread(85, Some(i + 1)); // Pin workers to cores 1..N
-                let mut spins = 0;
                 while running_worker.load(Ordering::Relaxed) {
                     if let Some(job) = cons.pop() {
-                        spins = 0;
                         // SAFETY: job.node_ptr is guaranteed to be valid for the duration of the job execution.
                         let node = unsafe { &*job.node_ptr };
                         let num_samples = job.num_samples;
@@ -160,28 +165,28 @@ impl TaskPool {
                         }
 
                         completion_worker.fetch_add(1, Ordering::Release);
+                        completion_fd_worker.notify();
                     } else {
-                        if spins < 10000 {
-                            std::hint::spin_loop();
-                        } else {
-                            std::thread::yield_now();
-                        }
-                        spins += 1;
+                        let _ = worker_wake_fd.wait();
                     }
                 }
             });
 
             workers.push(handle);
             worker_producers.push(prod);
+            worker_wake_fds.push(wake_fd);
         }
 
-        Self { workers, worker_producers, completion, running }
+        Self { workers, worker_producers, completion, running, worker_wake_fds, completion_fd }
     }
 }
 
 impl Drop for TaskPool {
     fn drop(&mut self) {
         self.running.store(false, Ordering::Release);
+        for fd in &self.worker_wake_fds {
+            fd.notify();
+        }
         for handle in self.workers.drain(..) {
             let _ = handle.join();
         }
@@ -262,8 +267,11 @@ impl ProcessorGraph {
         if let Some(pool) = context.pool.as_mut() {
             let start_count = pool.completion.load(Ordering::Acquire);
             let num_nodes = stage.len();
+            let mut workers_to_wake = [false; 64];
+
             for (i, &n_idx) in stage.iter().enumerate() {
                 let worker_idx = i % pool.worker_producers.len();
+                workers_to_wake[worker_idx] = true;
                 let routing = &topo.routing[n_idx];
                 let mut resolved_inputs = [0usize; 16];
                 let mut resolved_outputs = [0usize; 16];
@@ -298,11 +306,13 @@ impl ProcessorGraph {
                 });
             }
 
-            let mut spins = 0;
+            for (idx, &should_wake) in workers_to_wake.iter().enumerate().take(pool.worker_producers.len()) {
+                if should_wake { pool.worker_wake_fds[idx].notify(); }
+            }
+
             let target = start_count + num_nodes;
             while pool.completion.load(Ordering::Acquire) < target {
-                if spins < 10000 { std::hint::spin_loop(); } else { std::thread::yield_now(); }
-                spins += 1;
+                let _ = pool.completion_fd.wait();
             }
         } else {
             for &n_idx in stage {
@@ -471,7 +481,13 @@ impl AudioProcessor for ProcessorGraph {
         }
 
         if is_last_sub_block {
-            for i in 0..crate::MAX_NODES { self._old_path_buffers[i].data.copy_from_slice(&self.buffers[i].data); }
+            let active_idx = self.active_topo_idx.load(Ordering::Acquire);
+            let has_active_crossfades = self.topologies[active_idx].crossfades.iter().any(|x| x.is_some());
+            if has_active_crossfades {
+                for i in 0..crate::MAX_NODES {
+                    self._old_path_buffers[i].data.copy_from_slice(&self.buffers[i].data);
+                }
+            }
         }
 
         for n_idx in 0..topo.node_count.min(crate::MAX_NODES) {
@@ -484,10 +500,20 @@ impl AudioProcessor for ProcessorGraph {
                 let offset = context.sub_block_offset;
                 let data = &self.buffers[p_idx].data[offset..offset + num_samples];
 
-                let mut channel_peak = 0.0f32;
-                for &sample in data {
-                    let abs: f32 = sample.abs();
+                use wide::*;
+                let mut channel_peak_v = f32x8::ZERO;
+                let mut i = 0;
+                while i + 8 <= data.len() {
+                    let v = f32x8::new(data[i..i+8].try_into().unwrap());
+                    channel_peak_v = channel_peak_v.max(v.abs());
+                    i += 8;
+                }
+                let arr: [f32; 8] = channel_peak_v.into();
+                let mut channel_peak = arr.iter().fold(0.0f32, |m, &x| m.max(x));
+                while i < data.len() {
+                    let abs = data[i].abs();
                     if abs > channel_peak { channel_peak = abs; }
+                    i += 1;
                 }
                 if channel_peak > node_peak { node_peak = channel_peak; }
             }
@@ -608,8 +634,9 @@ mod tests {
             transport: None,
             is_last_sub_block: false,
         });
+        pool.worker_wake_fds[0].notify();
         let target = start_count + 1;
-        while completion.load(Ordering::Acquire) < target { std::hint::spin_loop(); }
+        while completion.load(Ordering::Acquire) < target { pool.completion_fd.wait(); }
         let start_count_2 = completion.load(Ordering::Acquire);
         assert_eq!(start_count_2, 1);
         let node2 = ProcessorNode { processor: std::cell::UnsafeCell::new(Box::new(IdentityProcessor)) };
@@ -628,8 +655,9 @@ mod tests {
             transport: None,
             is_last_sub_block: false,
         });
+        pool.worker_wake_fds[0].notify();
         let target_2 = start_count_2 + 1;
-        while completion.load(Ordering::Acquire) < target_2 { std::hint::spin_loop(); }
+        while completion.load(Ordering::Acquire) < target_2 { pool.completion_fd.wait(); }
         assert_eq!(completion.load(Ordering::Relaxed), 2);
     }
 
