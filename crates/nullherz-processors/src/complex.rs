@@ -160,6 +160,7 @@ impl AudioProcessor for SequencerProcessor {
     }
 
     fn apply_command(&mut self, command: &control_plane::Command) {
+        #[allow(clippy::collapsible_if)]
         if let control_plane::Command::SetSequencerStep { track, step, value } = command {
             if *track < 8 && *step < crate::MAX_CHANNELS as u32 {
                 self.grid[*track as usize][*step as usize] = *value;

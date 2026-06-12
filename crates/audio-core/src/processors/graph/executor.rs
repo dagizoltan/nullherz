@@ -5,6 +5,7 @@ use crate::processors::graph::{GraphTopology, TaskPool, Job, ProcessorNode};
 pub struct GraphExecutor {}
 
 impl GraphExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn resolve_crossfades(
         topologies: &mut [GraphTopology; 2],
         topo_idx: usize,
@@ -39,6 +40,7 @@ impl GraphExecutor {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn execute_stage(
         nodes: &[ProcessorNode; crate::MAX_NODES],
         buffers: &mut [AudioBlock; crate::MAX_NODES],

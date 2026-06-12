@@ -90,6 +90,7 @@ unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_
     }
 
     if let Some(ref handle) = backend.engine_handle {
+        #[allow(clippy::collapsible_if)]
         if let Some(ref mut engine) = *handle.lock().unwrap() {
             let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|i| {
                 if i < num_ports {

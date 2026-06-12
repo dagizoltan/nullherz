@@ -1365,6 +1365,7 @@ dependencies = [
  "control-plane",
  "ipc-layer",
  "libc",
+ "nullherz-processors",
 ]
 
 [[package]]
@@ -2203,6 +2204,8 @@ dependencies = [
  "nullherz-backends",
  "nullherz-gateway",
  "nullherz-mixer",
+ "nullherz-processors",
+ "nullherz-traits",
  "serde_json",
  "tokio",
 ]

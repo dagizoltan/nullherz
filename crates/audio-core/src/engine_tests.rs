@@ -31,7 +31,7 @@ mod tests {
                 match kind {
                     0 => TopologyMutation::UpdateEdge { node_idx, input_idx: idx, new_buffer_idx: buf },
                     1 => TopologyMutation::UpdateOutputEdge { node_idx, output_idx: idx, new_buffer_idx: buf },
-                    _ => TopologyMutation::SwapProcessor { node_idx, processor: Box::new(crate::processors::GainProcessor::new(1, 1.0)) },
+                    _ => TopologyMutation::SwapProcessor { node_idx, processor: Box::new(crate::processors::graph::DummyProcessor) },
                 }
             }).collect();
 

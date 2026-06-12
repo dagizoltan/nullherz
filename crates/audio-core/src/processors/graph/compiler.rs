@@ -58,17 +58,29 @@ impl GraphCompiler {
         while processed_count < n {
             let mut stage_nodes = [0usize; crate::MAX_NODES];
             let mut stage_count = 0;
-            let mut physical_buffers_in_stage = [false; crate::MAX_NODES];
+            let mut physical_writes_in_stage = [false; crate::MAX_NODES];
+            let mut physical_reads_in_stage = [false; crate::MAX_NODES];
 
             for i in 0..n {
                 if !is_processed[i] && in_degree[i] == 0 {
-                    // Check for WAW collision on physical buffers
+                    // Check for RAW/WAR/WAW collision with other nodes in the stage
                     let mut collision = false;
                     let routing = &topo.routing[i];
+
                     for k in 0..routing.output_count {
                         let v_out = routing.output_indices[k].min(63);
                         let p_out = topo.virtual_to_physical[v_out].min(63);
-                        if physical_buffers_in_stage[p_out] {
+                        if physical_writes_in_stage[p_out] || physical_reads_in_stage[p_out] {
+                            collision = true;
+                            break;
+                        }
+                    }
+                    if collision { continue; }
+
+                    for k in 0..routing.input_count {
+                        let v_in = routing.input_indices[k].min(63);
+                        let p_in = topo.virtual_to_physical[v_in].min(63);
+                        if physical_writes_in_stage[p_in] {
                             collision = true;
                             break;
                         }
@@ -80,7 +92,12 @@ impl GraphCompiler {
                         for k in 0..routing.output_count {
                             let v_out = routing.output_indices[k].min(63);
                             let p_out = topo.virtual_to_physical[v_out].min(63);
-                            physical_buffers_in_stage[p_out] = true;
+                            physical_writes_in_stage[p_out] = true;
+                        }
+                        for k in 0..routing.input_count {
+                            let v_in = routing.input_indices[k].min(63);
+                            let p_in = topo.virtual_to_physical[v_in].min(63);
+                            physical_reads_in_stage[p_in] = true;
                         }
                     }
                 }
@@ -113,18 +130,16 @@ impl GraphCompiler {
             for &n_idx in stage {
                 let routing = &topo.routing[n_idx];
 
-                // 1. Check for RAW (Read-After-Write) and WAR (Write-After-Read) Hazards
+                // Check for RAW/WAR/WAW hazards with OTHER nodes in the same stage.
+                // Intra-node reuse is permitted for in-place processing.
+
                 for k in 0..routing.output_count {
                     let v_out = *routing.output_indices.get(k).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
                     let p_out = *topo.virtual_to_physical.get(v_out).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
 
-                    if physical_writes[p_out] {
-                        return Err(AudioError::IpcError(format!("WAW Hazard at stage {}. Node {} attempts to write to physical buffer {} which is already used for writing in this stage.", s_idx, n_idx, p_out)));
+                    if physical_writes[p_out] || physical_reads[p_out] {
+                        return Err(AudioError::IpcError(format!("Hazard at stage {}. Node {} output collides with physical buffer {} already in use.", s_idx, n_idx, p_out)));
                     }
-                    if physical_reads[p_out] {
-                        return Err(AudioError::IpcError(format!("WAR Hazard at stage {}. Node {} attempts to write to physical buffer {} which is already being read in this stage.", s_idx, n_idx, p_out)));
-                    }
-                    physical_writes[p_out] = true;
                 }
 
                 for k in 0..routing.input_count {
@@ -132,12 +147,76 @@ impl GraphCompiler {
                     let p_in = *topo.virtual_to_physical.get(v_in).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
 
                     if physical_writes[p_in] {
-                        return Err(AudioError::IpcError(format!("RAW Hazard at stage {}. Node {} attempts to read from physical buffer {} which is being written to in this stage.", s_idx, n_idx, p_in)));
+                        return Err(AudioError::IpcError(format!("RAW Hazard at stage {}. Node {} input collides with physical buffer {} being written to.", s_idx, n_idx, p_in)));
                     }
+                }
+
+                // After checking, MARK them as used by this node for the rest of the stage
+                for k in 0..routing.output_count {
+                    let v_out = *routing.output_indices.get(k).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
+                    let p_out = *topo.virtual_to_physical.get(v_out).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
+                    physical_writes[p_out] = true;
+                }
+                for k in 0..routing.input_count {
+                    let v_in = *routing.input_indices.get(k).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
+                    let p_in = *topo.virtual_to_physical.get(v_in).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
                     physical_reads[p_in] = true;
                 }
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::processors::graph::{GraphTopology, NodeRouting};
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn test_compiler_hazard_detection_robustness(
+            v2p in prop::collection::vec(0..64usize, 64),
+            writes in prop::collection::vec((0..64usize, 0..16usize), 1..10),
+            reads in prop::collection::vec((0..64usize, 0..16usize), 1..10)
+        ) {
+            let mut v2p_arr = [0usize; 64];
+            v2p_arr.copy_from_slice(&v2p);
+
+            let mut topo = GraphTopology {
+                routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
+                virtual_to_physical: v2p_arr,
+                stages: [[0; 64]; 64],
+                stage_counts: [0; 64],
+                num_stages: 1,
+                crossfades: [None; 8],
+                node_count: 1,
+            };
+
+            topo.stage_counts[0] = 1;
+            topo.stages[0][0] = 0;
+
+            for (v_out, _) in writes {
+                if topo.routing[0].output_count < 16 {
+                    topo.routing[0].output_indices[topo.routing[0].output_count] = v_out;
+                    topo.routing[0].output_count += 1;
+                }
+            }
+
+            for (v_in, _) in reads {
+                if topo.routing[0].input_count < 16 {
+                    topo.routing[0].input_indices[topo.routing[0].input_count] = v_in;
+                    topo.routing[0].input_count += 1;
+                }
+            }
+
+            // A single node should never have a RAW/WAR/WAW hazard with ITSELF
+            // in the context of the compiler's stage verification (which checks for hazards BETWEEN nodes in a stage).
+            // Wait, actually the compiler checks if a node writes to a buffer that's already used.
+            // If a node appears once, it shouldn't trigger hazard unless there are multiple nodes.
+            let result = GraphCompiler::verify_no_hazards(&topo);
+            assert!(result.is_ok());
+        }
     }
 }

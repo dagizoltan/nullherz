@@ -1,7 +1,8 @@
 use std::process::{Command, Child};
 use std::sync::Arc;
 use ipc_layer::{SharedMemory, ShmRingBuffer, ShmSignal, EventFd, AudioBlock, move_to_cgroup};
-use audio_core::{SidecarProcessor, MAX_CHANNELS};
+use audio_core::{MAX_CHANNELS};
+use nullherz_processors::SidecarProcessor;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SidecarStatus {

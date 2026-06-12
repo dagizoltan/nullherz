@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 libc = "0.2"
 audio-core = { path = "../audio-core" }
+nullherz-processors = { path = "../nullherz-processors" }
 audio-dsp = { path = "../audio-dsp" }
 ipc-layer = { path = "../ipc-layer" }
 control-plane = { path = "../control-plane" }

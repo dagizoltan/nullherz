@@ -112,7 +112,7 @@ impl AudioEngine {
             if start_lock.is_none() {
                 *start_lock = Some(Instant::now());
                 self.calibration_start_cycles.store(crate::get_cycles(), Ordering::Relaxed);
-            } else if self.sample_counter % (num_samples as u64 * 1024) == 0 {
+            } else if self.sample_counter.is_multiple_of(num_samples as u64 * 1024) {
                 // Calibrate over ~1024 blocks to ensure high precision
                 let start_inst = start_lock.unwrap();
                 let elapsed = start_inst.elapsed().as_nanos() as f64;
@@ -279,19 +279,11 @@ impl AudioEngine {
                 self.transport.is_playing = false;
                 graph.apply_command(cmd);
             }
-            control_plane::Command::AddNode { processor_type_id, node_idx } => {
-                let processor = nullherz_processors::factory::create_processor(*processor_type_id, *node_idx, self.transport.sample_rate);
-                graph.apply_topology_mutation(nullherz_traits::TopologyMutation::AddNode {
-                    node_idx: *node_idx,
-                    processor,
-                });
+            control_plane::Command::AddNode { .. } => {
+                // Decoupled: AddNode is handled by the non-RT control plane (Conductor).
             }
-            control_plane::Command::SwapProcessor { node_idx, processor_type_id } => {
-                let processor = nullherz_processors::factory::create_processor(*processor_type_id, *node_idx, self.transport.sample_rate);
-                graph.apply_topology_mutation(nullherz_traits::TopologyMutation::SwapProcessor {
-                    node_idx: *node_idx,
-                    processor,
-                });
+            control_plane::Command::SwapProcessor { .. } => {
+                // Decoupled: SwapProcessor is handled by the non-RT control plane (Conductor).
             }
             control_plane::Command::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
                 graph.apply_topology_mutation(nullherz_traits::TopologyMutation::UpdateEdge {

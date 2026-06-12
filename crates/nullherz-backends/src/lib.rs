@@ -8,7 +8,6 @@ pub use pipewire::PipewireBackend;
 pub use jack::JackBackend;
 pub use threaded::ThreadedBackend;
 
-use audio_core::AudioEngine;
 
 use std::sync::{Arc, Mutex};
 
