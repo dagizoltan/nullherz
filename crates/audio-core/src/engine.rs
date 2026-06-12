@@ -249,17 +249,16 @@ impl AudioEngine {
         graph.collect_telemetry(&mut node_times_cycles, &mut peak_levels);
 
         let ns_per_cycle = f64::from_bits(self.ns_per_cycle.load(Ordering::Relaxed));
-        for (i, node_time) in node_times.iter_mut().enumerate() {
-            *node_time = (node_times_cycles.get(i).copied().unwrap_or(0) as f64 * ns_per_cycle) as u64;
-        }
+        crate::telemetry::TelemetryProcessor::collect_node_times(
+            unsafe { std::mem::transmute(&node_times_cycles) },
+            ns_per_cycle,
+            &mut node_times
+        );
 
         let elapsed_cycles = crate::get_cycles().wrapping_sub(start_cycles);
         let current_ns = (elapsed_cycles as f64 * ns_per_cycle) as u64;
-        let mut peak = self.peak_ns.load(Ordering::Relaxed);
-        if current_ns > peak {
-            let _ = self.peak_ns.compare_exchange(peak, current_ns, Ordering::Relaxed, Ordering::Relaxed);
-            peak = current_ns;
-        }
+        let peak = crate::telemetry::TelemetryProcessor::update_peak(&self.peak_ns, current_ns);
+
         if self.sample_counter.is_multiple_of(num_samples as u64 * 1024) { self.peak_ns.store(current_ns, Ordering::Relaxed); }
 
         let _ = self.telemetry_producer.push(Telemetry {

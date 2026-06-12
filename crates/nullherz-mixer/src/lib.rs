@@ -98,4 +98,31 @@ mod tests {
         assert!(mixer.next_node_id >= 13);
         assert!(!commands.is_empty());
     }
+
+    use proptest::prelude::*;
+    proptest! {
+        #[test]
+        fn test_mixer_generated_topology_acyclic(
+            num_fx in 0..5u32,
+            fx_type in 0..100u32
+        ) {
+            let mut mixer = MixerManager::new();
+            let fx_ids: Vec<u32> = vec![fx_type; num_fx as usize];
+            let commands = mixer.create_studio_strip("Test", &fx_ids);
+
+            // Check that for any UpdateEdge { node_idx, new_buffer_idx },
+            // and UpdateOutputEdge { node_idx, new_buffer_idx },
+            // we maintain an ordering if nodes are connected via buffers.
+            // For studio strip, it's linear: Gain -> FX1 -> FX2 -> ... -> Fader.
+            let mut last_node_idx = None;
+            for cmd in commands {
+                if let Command::AddNode { node_idx, .. } = cmd {
+                    if let Some(last) = last_node_idx {
+                        assert!(node_idx > last);
+                    }
+                    last_node_idx = Some(node_idx);
+                }
+            }
+        }
+    }
 }

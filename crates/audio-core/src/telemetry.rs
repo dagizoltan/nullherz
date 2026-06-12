@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use serde_big_array::BigArray;
 use serde::{Serialize, Deserialize};
 
@@ -13,4 +14,27 @@ pub struct Telemetry {
     pub node_times_ns: [u64; crate::MAX_NODES],
     #[serde(with = "BigArray")]
     pub peak_levels: [f32; crate::MAX_NODES],
+}
+
+pub struct TelemetryProcessor;
+
+impl TelemetryProcessor {
+    pub fn collect_node_times(
+        node_times_cycles: &[AtomicU64; crate::MAX_NODES],
+        ns_per_cycle: f64,
+        node_times_ns: &mut [u64; crate::MAX_NODES]
+    ) {
+        for (i, node_time) in node_times_ns.iter_mut().enumerate() {
+            *node_time = (node_times_cycles[i].load(Ordering::Relaxed) as f64 * ns_per_cycle) as u64;
+        }
+    }
+
+    pub fn update_peak(peak_ns: &AtomicU64, current_ns: u64) -> u64 {
+        let mut peak = peak_ns.load(Ordering::Relaxed);
+        if current_ns > peak {
+            let _ = peak_ns.compare_exchange(peak, current_ns, Ordering::Relaxed, Ordering::Relaxed);
+            peak = current_ns;
+        }
+        peak
+    }
 }
