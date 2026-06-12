@@ -5,6 +5,7 @@ use audio_dsp::SamplerVoice;
 pub struct SamplerProcessor {
     voices: Vec<SamplerVoice>,
     sample_buffer: std::sync::Arc<Vec<f32>>,
+    render_buffer: [f32; ipc_layer::MAX_BLOCK_SIZE],
 }
 
 impl SamplerProcessor {
@@ -13,6 +14,7 @@ impl SamplerProcessor {
         Self {
             voices,
             sample_buffer: std::sync::Arc::new(Vec::new()),
+            render_buffer: [0.0; ipc_layer::MAX_BLOCK_SIZE],
         }
     }
 
@@ -24,12 +26,23 @@ impl SamplerProcessor {
 impl AudioProcessor for SamplerProcessor {
     fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
         if outputs.is_empty() { return; }
+        let num_samples = outputs[0].len();
+        if num_samples == 0 { return; }
 
+        // Production Hardening: Ensure we don't overflow the fixed-size render_buffer.
+        // The engine should enforce this, but we protect the processor here.
+        let num_samples = num_samples.min(ipc_layer::MAX_BLOCK_SIZE);
+
+        // Render all voices into the temporary render_buffer once per cycle.
+        self.render_buffer[..num_samples].fill(0.0);
+        let render_slice = &mut self.render_buffer[..num_samples];
+        for voice in self.voices.iter_mut() {
+            voice.process_block(render_slice);
+        }
+
+        // Copy the rendered result to all output channels.
         for output in outputs.iter_mut() {
-            output.fill(0.0);
-            for voice in self.voices.iter_mut() {
-                voice.process_block(output);
-            }
+            output.copy_from_slice(render_slice);
         }
     }
 

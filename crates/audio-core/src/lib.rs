@@ -30,6 +30,33 @@ pub struct Transport {
 pub const MAX_CHANNELS: usize = 16;
 pub const MAX_NODES: usize = 64;
 
+#[inline(always)]
+pub fn get_cycles() -> u64 {
+    #[cfg(target_arch = "x86_64")]
+    { unsafe { std::arch::x86_64::_rdtsc() } }
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe {
+            let val: u64;
+            std::arch::asm!("mrs {}, cntvct_el0", out(reg) val, options(nomem, nostack));
+            val
+        }
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        // Fallback for non-x86/ARM platforms using a monotonic clock if possible.
+        // Since this is for telemetry/calibration, resolution matters.
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        { 0 }
+        #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+        {
+            static BASELINE: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+            let start = BASELINE.get_or_init(std::time::Instant::now);
+            start.elapsed().as_nanos() as u64
+        }
+    }
+}
+
 pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
     thread_local! {
         static INITIALIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };

@@ -100,13 +100,13 @@ impl AudioEngine {
 
         for _ in 0..7 {
             let start = std::time::Instant::now();
-            let start_c = Self::get_cycles();
+            let start_c = crate::get_cycles();
             // Busy wait for ~10ms for more accurate calibration than sleep
             while start.elapsed() < std::time::Duration::from_millis(10) {
                 std::hint::spin_loop();
             }
             let elapsed = start.elapsed().as_nanos() as f64;
-            let elapsed_c = (Self::get_cycles().wrapping_sub(start_c)) as f64;
+            let elapsed_c = (crate::get_cycles().wrapping_sub(start_c)) as f64;
             if elapsed_c > 0.0 {
                 ratios.push(elapsed / elapsed_c);
             }
@@ -115,33 +115,6 @@ impl AudioEngine {
         ratios.sort_by(|a, b| a.partial_cmp(b).unwrap());
         // Return median
         ratios[ratios.len() / 2]
-    }
-
-    #[inline(always)]
-    fn get_cycles() -> u64 {
-        #[cfg(target_arch = "x86_64")]
-        { unsafe { std::arch::x86_64::_rdtsc() } }
-        #[cfg(target_arch = "aarch64")]
-        {
-            unsafe {
-                let val: u64;
-                std::arch::asm!("mrs {}, cntvct_el0", out(reg) val, options(nomem, nostack));
-                val
-            }
-        }
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        {
-            // Fallback for non-x86/ARM platforms using a monotonic clock if possible.
-            // Since this is for telemetry/calibration, resolution matters.
-            #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-            { 0 }
-            #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-            {
-                static BASELINE: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-                let start = BASELINE.get_or_init(std::time::Instant::now);
-                start.elapsed().as_nanos() as u64
-            }
-        }
     }
     pub fn xrun_counter(&self) -> std::sync::Arc<std::sync::atomic::AtomicU32> {
         self.xrun_count.clone()
@@ -161,7 +134,7 @@ impl AudioEngine {
         // (Backends might have reset them or it might be a new thread)
         crate::setup_rt_thread(90, None);
 
-        let start_cycles = Self::get_cycles();
+        let start_cycles = crate::get_cycles();
 
         let pending = self.pending_graph.swap(std::ptr::null_mut(), Ordering::Acquire);
         if !pending.is_null() {
@@ -340,7 +313,7 @@ impl AudioEngine {
             *node_time = (node_times_cycles.get(i).copied().unwrap_or(0) as f64 * ns_per_cycle) as u64;
         }
 
-        let elapsed_cycles = Self::get_cycles().wrapping_sub(start_cycles);
+        let elapsed_cycles = crate::get_cycles().wrapping_sub(start_cycles);
 
         let current_ns = (elapsed_cycles as f64 * ns_per_cycle) as u64;
         let mut peak = self.peak_ns.load(Ordering::Relaxed);

@@ -143,9 +143,7 @@ impl TaskPool {
                             }
                         }
 
-                        #[cfg(target_arch = "x86_64")]
-                        // SAFETY: rdtsc is safe on all modern x86_64 targets.
-                        let start = unsafe { std::arch::x86_64::_rdtsc() };
+                        let start = crate::get_cycles();
 
                         let mut inner_context = crate::processors::ProcessContext {
                             pool: None,
@@ -156,13 +154,9 @@ impl TaskPool {
                         // SAFETY: node.processor is an UnsafeCell. Access is synchronized via topological stage fencing.
                         unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
 
-                        #[cfg(target_arch = "x86_64")]
-                        {
-                            // SAFETY: rdtsc is safe on all modern x86_64 targets.
-                            let elapsed = (unsafe { std::arch::x86_64::_rdtsc() }).wrapping_sub(start);
-                            // SAFETY: telemetry_ptr is guaranteed valid for the engine lifetime.
-                            unsafe { (*job.telemetry_ptr)[job.node_idx].store(elapsed, Ordering::Relaxed); }
-                        }
+                        let elapsed = crate::get_cycles().wrapping_sub(start);
+                        // SAFETY: telemetry_ptr is guaranteed valid for the engine lifetime.
+                        unsafe { (*job.telemetry_ptr)[job.node_idx].store(elapsed, Ordering::Relaxed); }
 
                         completion_worker.fetch_add(1, Ordering::Release);
                         completion_fd_worker.notify();
@@ -345,17 +339,13 @@ impl ProcessorGraph {
                     }
                 }
 
-                #[cfg(target_arch = "x86_64")]
-                let start = unsafe { std::arch::x86_64::_rdtsc() };
+                let start = crate::get_cycles();
 
                 let mut inner_context = crate::processors::ProcessContext { pool: None, transport: context.transport, sub_block_offset: offset, is_last_sub_block: context.is_last_sub_block };
                 unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
 
-                #[cfg(target_arch = "x86_64")]
-                {
-                    let elapsed = (unsafe { std::arch::x86_64::_rdtsc() }).wrapping_sub(start);
-                    self.telemetry.node_times_cycles[n_idx].store(elapsed, Ordering::Relaxed);
-                }
+                let elapsed = crate::get_cycles().wrapping_sub(start);
+                self.telemetry.node_times_cycles[n_idx].store(elapsed, Ordering::Relaxed);
             }
         }
     }

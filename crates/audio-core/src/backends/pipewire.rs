@@ -22,6 +22,12 @@ struct PwLib {
     pw_thread_loop_destroy: unsafe extern "C" fn(*mut std::ffi::c_void),
 }
 
+impl Drop for PwLib {
+    fn drop(&mut self) {
+        unsafe { libc::dlclose(self._handle); }
+    }
+}
+
 impl PwLib {
     fn load() -> Result<Self, String> {
         unsafe {
@@ -183,23 +189,19 @@ impl SpaPodBuilder {
     pub fn add_prop_id(&mut self, key: u32, value: u32) {
         self.data.push(key);
         self.data.push(0); // flags
-        self.data.push(SPA_TYPE_ID);
         self.data.push(4); // size
+        self.data.push(SPA_TYPE_ID); // type
         self.data.push(value);
-        self.data.push(0); // padding
-        self.data.push(0);
-        self.data.push(0);
+        self.data.push(0); // padding to 8 bytes (total 6 words = 24 bytes)
     }
 
     pub fn add_prop_int(&mut self, key: u32, value: u32) {
         self.data.push(key);
         self.data.push(0); // flags
-        self.data.push(SPA_TYPE_INT);
         self.data.push(4); // size
+        self.data.push(SPA_TYPE_INT); // type
         self.data.push(value);
-        self.data.push(0);
-        self.data.push(0);
-        self.data.push(0);
+        self.data.push(0); // padding to 8 bytes (total 6 words = 24 bytes)
     }
 }
 

@@ -44,6 +44,12 @@ struct JackLib {
     jack_port_get_buffer: unsafe extern "C" fn(*mut std::ffi::c_void, u32) -> *mut std::ffi::c_void,
 }
 
+impl Drop for JackLib {
+    fn drop(&mut self) {
+        unsafe { libc::dlclose(self._handle); }
+    }
+}
+
 impl JackLib {
     fn load() -> Result<Self, String> {
         unsafe {
