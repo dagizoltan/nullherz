@@ -1,4 +1,6 @@
 use std::thread;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use audio_core::AudioEngine;
 use crate::AudioBackend;
@@ -47,7 +49,7 @@ impl AlsaLib {
                 snd_pcm_hw_params_set_period_size_max: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void, *mut u64, *mut i32) -> i32>(load_sym(c"snd_pcm_hw_params_set_period_size_max").ok_or("sym failed")?),
                 snd_pcm_hw_params: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void) -> i32>(load_sym(c"snd_pcm_hw_params").ok_or("sym failed")?),
                 snd_pcm_hw_params_free: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void)>(load_sym(c"snd_pcm_hw_params_free").ok_or("sym failed")?),
-                snd_pcm_writei: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *const libc::c_void, u64) -> isize>(load_sym(c"snd_pcm_writei").ok_or("sym failed")?),
+                snd_pcm_writei: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *const std::ffi::c_void, u64) -> isize>(load_sym(c"snd_pcm_writei").ok_or("sym failed")?),
                 snd_pcm_recover: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, i32, i32) -> i32>(load_sym(c"snd_pcm_recover").ok_or("sym failed")?),
                 snd_pcm_close: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void) -> i32>(load_sym(c"snd_pcm_close").ok_or("sym failed")?),
                 snd_pcm_prepare: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void) -> i32>(load_sym(c"snd_pcm_prepare").ok_or("sym failed")?),
@@ -59,7 +61,7 @@ impl Drop for AlsaLib { fn drop(&mut self) { unsafe { libc::dlclose(self.handle)
 
 pub struct AlsaBackend {
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    handle: Option<thread::JoinHandle<Option<AudioEngine>>>,
+    handle: Option<thread::JoinHandle<()>>,
 }
 
 impl Default for AlsaBackend {
@@ -72,16 +74,18 @@ impl AlsaBackend {
     pub fn new() -> Self { Self { running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), handle: None } }
 }
 impl AudioBackend for AlsaBackend {
-    fn start(&mut self, mut engine: AudioEngine) -> Result<(), String> {
+    fn start(&mut self, engine_handle: Arc<Mutex<Option<AudioEngine>>>) -> Result<(), String> {
         let alsa = AlsaLib::load()?;
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
+
         let handle = thread::spawn(move || {
             audio_core::setup_rt_thread(90, Some(0)); // Pin main RT thread to core 0
+
+            let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
+            let name = std::ffi::CString::new("default").unwrap();
             unsafe {
-                let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
-                let name = std::ffi::CString::new("default").unwrap();
-                if (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) != 0 { return None; }
+                if (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) != 0 { return; }
 
                 const SND_PCM_ACCESS_RW_INTERLEAVED: i32 = 3;
                 const SND_PCM_FORMAT_S16_LE: i32 = 2;
@@ -92,52 +96,52 @@ impl AudioBackend for AlsaBackend {
                 (alsa.snd_pcm_hw_params_any)(pcm, hw_params);
                 (alsa.snd_pcm_hw_params_set_access)(pcm, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
 
-                // Format MUST be set before rate/period to satisfy ALSA constraints properly
                 let mut is_float = true;
                 if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_FLOAT_LE) != 0 {
                     is_float = false;
                     if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_S16_LE) != 0 {
                         (alsa.snd_pcm_hw_params_free)(hw_params);
                         (alsa.snd_pcm_close)(pcm);
-                        return None;
+                        return;
                     }
                 }
 
                 (alsa.snd_pcm_hw_params_set_channels)(pcm, hw_params, 2);
 
-                let mut rate = engine.target_sample_rate as u32;
-                (alsa.snd_pcm_hw_params_set_rate_near)(pcm, hw_params, &mut rate, std::ptr::null_mut());
-
-                if (rate as f32 - engine.target_sample_rate).abs() > 0.1 {
-                    engine.logger.log(audio_core::rt_logging::RtLogLevel::Error, "ALSA Rate Mismatch", 0);
-                    (alsa.snd_pcm_hw_params_free)(hw_params);
-                    (alsa.snd_pcm_close)(pcm);
-                    return None;
+                let mut target_rate = 44100u32;
+                {
+                    if let Some(ref engine) = *engine_handle.lock().unwrap() {
+                        target_rate = engine.target_sample_rate as u32;
+                    }
                 }
+
+                let mut rate = target_rate;
+                (alsa.snd_pcm_hw_params_set_rate_near)(pcm, hw_params, &mut rate, std::ptr::null_mut());
 
                 let mut period_size = 128u64;
                 let mut dir = 0;
                 (alsa.snd_pcm_hw_params_set_period_size_near)(pcm, hw_params, &mut period_size, &mut dir);
-
-                // Constrain period to engine max block size to prevent overflow
                 let mut max_period = ipc_layer::MAX_BLOCK_SIZE as u64;
                 (alsa.snd_pcm_hw_params_set_period_size_max)(pcm, hw_params, &mut max_period, &mut dir);
-
                 let mut buffer_size = period_size * 4;
                 (alsa.snd_pcm_hw_params_set_buffer_size_near)(pcm, hw_params, &mut buffer_size);
 
                 if (alsa.snd_pcm_hw_params)(pcm, hw_params) != 0 {
                     (alsa.snd_pcm_hw_params_free)(hw_params);
                     (alsa.snd_pcm_close)(pcm);
-                    return None;
+                    return;
                 }
                 (alsa.snd_pcm_hw_params_free)(hw_params);
                 (alsa.snd_pcm_prepare)(pcm);
 
-                engine.set_config(nullherz_traits::AudioConfig {
-                    sample_rate: rate as f32,
-                    block_size: period_size as usize,
-                });
+                {
+                    if let Some(ref mut engine) = *engine_handle.lock().unwrap() {
+                         engine.set_config(nullherz_traits::AudioConfig {
+                            sample_rate: rate as f32,
+                            block_size: period_size as usize,
+                        });
+                    }
+                }
 
                 let mut outputs_raw = [[0.0f32; ipc_layer::MAX_BLOCK_SIZE]; 2];
                 let mut interleaved_f32 = [0.0f32; ipc_layer::MAX_BLOCK_SIZE * 2];
@@ -145,9 +149,16 @@ impl AudioBackend for AlsaBackend {
 
                 let actual_period = period_size as usize;
                 while running.load(Ordering::SeqCst) {
-                    let (ch1, ch2) = outputs_raw.split_at_mut(1);
-                    let mut out_refs = [&mut ch1[0][..actual_period], &mut ch2[0][..actual_period]];
-                    engine.process_block(&[], &mut out_refs, actual_period);
+                    {
+                        if let Some(ref mut engine) = *engine_handle.lock().unwrap() {
+                            let (ch1, ch2) = outputs_raw.split_at_mut(1);
+                            let mut out_refs = [&mut ch1[0][..actual_period], &mut ch2[0][..actual_period]];
+                            engine.process_block(&[], &mut out_refs, actual_period);
+                        } else {
+                            outputs_raw[0].fill(0.0);
+                            outputs_raw[1].fill(0.0);
+                        }
+                    }
 
                     let written = if is_float {
                         for i in 0..actual_period {
@@ -164,26 +175,20 @@ impl AudioBackend for AlsaBackend {
                     };
 
                     if written < 0 {
-                        if written == -32 { // EPIPE (Xrun)
-                            engine.xrun_counter().fetch_add(1, Ordering::Relaxed);
-                        }
                         (alsa.snd_pcm_recover)(pcm, written as i32, 1);
                         (alsa.snd_pcm_prepare)(pcm);
                     }
                 }
                 (alsa.snd_pcm_close)(pcm);
             }
-            Some(engine)
         });
         self.handle = Some(handle);
         Ok(())
     }
-    fn stop(&mut self) -> Option<AudioEngine> {
+    fn stop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
         if let Some(handle) = self.handle.take() {
-            handle.join().unwrap_or(None)
-        } else {
-            None
+            let _ = handle.join();
         }
     }
 }

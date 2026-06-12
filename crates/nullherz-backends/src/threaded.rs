@@ -1,12 +1,12 @@
 use audio_core::AudioEngine;
 use crate::AudioBackend;
 use std::thread;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct ThreadedBackend {
-    handle: Option<thread::JoinHandle<Option<AudioEngine>>>,
-    running: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    running: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
 }
 
 impl Default for ThreadedBackend {
@@ -16,43 +16,48 @@ impl Default for ThreadedBackend {
 }
 
 impl ThreadedBackend {
-    pub fn new() -> Self { Self { handle: None, running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)) } }
+    pub fn new() -> Self {
+        Self {
+            running: Arc::new(AtomicBool::new(false)),
+            handle: None,
+        }
+    }
 }
+
 impl AudioBackend for ThreadedBackend {
-    fn start(&mut self, mut engine: AudioEngine) -> Result<(), String> {
+    fn start(&mut self, engine_handle: Arc<Mutex<Option<AudioEngine>>>) -> Result<(), String> {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let handle = thread::spawn(move || {
             audio_core::setup_rt_thread(90, Some(0));
-            engine.set_config(nullherz_traits::AudioConfig {
-                sample_rate: 44100.0,
-                block_size: ipc_layer::MAX_BLOCK_SIZE,
-            });
-            let mut outputs_raw = [[0.0f32; ipc_layer::MAX_BLOCK_SIZE]; 2];
-            let interval = Duration::from_secs_f64(ipc_layer::MAX_BLOCK_SIZE as f64 / 44100.0);
-            while running.load(Ordering::SeqCst) {
-                let start = std::time::Instant::now();
-                let (ch1, ch2) = outputs_raw.split_at_mut(1);
-                let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
-                engine.process_block(&[], &mut out_refs, ipc_layer::MAX_BLOCK_SIZE);
-                let elapsed = start.elapsed();
-                if elapsed < interval {
-                    thread::sleep(interval - elapsed);
-                } else {
-                    engine.xrun_counter().fetch_add(1, Ordering::Relaxed);
+            {
+                if let Some(ref mut engine) = *engine_handle.lock().unwrap() {
+                    engine.set_config(nullherz_traits::AudioConfig {
+                        sample_rate: 44100.0,
+                        block_size: 128,
+                    });
                 }
             }
-            Some(engine)
+
+            let mut outputs_raw = [[0.0f32; 128]; 2];
+            while running.load(Ordering::SeqCst) {
+                if let Some(ref mut engine) = *engine_handle.lock().unwrap() {
+                    let (ch1, ch2) = outputs_raw.split_at_mut(1);
+                    let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
+                    engine.process_block(&[], &mut out_refs, 128);
+                }
+                // Simulate audio hardware clock
+                thread::sleep(std::time::Duration::from_nanos(2902494)); // 128 samples at 44.1kHz
+            }
         });
         self.handle = Some(handle);
         Ok(())
     }
-    fn stop(&mut self) -> Option<AudioEngine> {
+
+    fn stop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
         if let Some(handle) = self.handle.take() {
-            handle.join().unwrap_or(None)
-        } else {
-            None
+            let _ = handle.join();
         }
     }
 }

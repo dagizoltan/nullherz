@@ -22,13 +22,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Main orchestration loop
     loop {
         // Check for engine health crisis
-        if let Some(ref signal) = conductor.health_signal {
-            if signal.swap(false, std::sync::atomic::Ordering::Relaxed) {
-                println!("CRITICAL: Engine health crisis detected. Prioritizing resource recovery...");
-                // Mitigation: Perform deep drain of garbage
-                for _ in 0..10 { conductor.drain_garbage(); }
-                // In a full implementation, we would also throttle the command producer here.
-            }
+        let health_crisis = if let Some(ref signal) = conductor.health_signal {
+            signal.swap(false, std::sync::atomic::Ordering::Relaxed)
+        } else {
+            false
+        };
+
+        if health_crisis {
+            println!("CRITICAL: Engine health crisis detected. Prioritizing resource recovery...");
+            // Mitigation: Perform deep drain of garbage
+            for _ in 0..100 { conductor.drain_garbage(); }
         }
 
         // Reap zombie sidecars and handle automated recovery

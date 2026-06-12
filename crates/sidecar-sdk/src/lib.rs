@@ -44,73 +44,60 @@ impl SidecarHost {
     }
 
     pub fn run(&mut self, processor: impl AudioProcessor) {
-        let cmd_rb_ptr = self.shm_cmd.ptr() as *const ShmRingBuffer<control_plane::Command>;
-        let signal_ptr = self.shm_signal.ptr() as *const ShmSignal;
-
-        let mut input_ptrs = Vec::new();
-        for shm in &self.shm_inputs { input_ptrs.push(shm.ptr() as *const ShmRingBuffer<AudioBlock>); }
-
-        let mut output_ptrs = Vec::new();
-        for shm in &self.shm_outputs { output_ptrs.push(shm.ptr() as *const ShmRingBuffer<AudioBlock>); }
-
-        let mut context = unsafe {
-            SidecarContext::new(
-                processor,
-                cmd_rb_ptr,
-                None, // Feedback SHM management could be added here
-                input_ptrs,
-                output_ptrs,
-                signal_ptr,
-                self.event_fd.take()
-            )
-        };
+        let mut context = SidecarContext::new(
+            processor,
+            &self.shm_cmd,
+            &self.shm_signal,
+            &self.shm_inputs,
+            &self.shm_outputs,
+            self.event_fd.take()
+        );
 
         context.run_loop();
     }
 }
 
-pub struct SidecarContext<P: AudioProcessor> {
+pub struct SidecarContext<'a, P: AudioProcessor> {
     processor: P,
-    command_buffer: &'static ShmRingBuffer<control_plane::Command>,
-    feedback_buffer: Option<&'static ShmRingBuffer<control_plane::SidecarMetadata>>,
-    input_buffers: Vec<&'static ShmRingBuffer<AudioBlock>>,
-    output_buffers: Vec<&'static ShmRingBuffer<AudioBlock>>,
-    signal: &'static ShmSignal,
+    command_buffer: &'a ShmRingBuffer<control_plane::Command>,
+    feedback_buffer: Option<&'a ShmRingBuffer<control_plane::SidecarMetadata>>,
+    input_buffers: Vec<&'a ShmRingBuffer<AudioBlock>>,
+    output_buffers: Vec<&'a ShmRingBuffer<AudioBlock>>,
+    signal: &'a ShmSignal,
     event_fd: Option<EventFd>,
 }
 
-impl<P: AudioProcessor> SidecarContext<P> {
-    /// # Safety
-    /// All pointers must be valid and point to pre-allocated shared memory structures.
-    pub unsafe fn new(
+impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
+    pub fn new(
         processor: P,
-        command_ptr: *const ShmRingBuffer<control_plane::Command>,
-        feedback_ptr: Option<*const ShmRingBuffer<control_plane::SidecarMetadata>>,
-        inputs: Vec<*const ShmRingBuffer<AudioBlock>>,
-        outputs: Vec<*const ShmRingBuffer<AudioBlock>>,
-        signal_ptr: *const ShmSignal,
+        shm_cmd: &'a SharedMemory,
+        shm_signal: &'a SharedMemory,
+        shm_inputs: &'a [SharedMemory],
+        shm_outputs: &'a [SharedMemory],
         event_fd: Option<EventFd>,
     ) -> Self {
-        unsafe {
-            Self {
-                processor,
-                command_buffer: &*command_ptr,
-                feedback_buffer: feedback_ptr.map(|p| &*p),
-                input_buffers: inputs.into_iter().map(|p| &*p).collect(),
-                output_buffers: outputs.into_iter().map(|p| &*p).collect(),
-                signal: &*signal_ptr,
-                event_fd,
-            }
+        let command_buffer = unsafe { &*(shm_cmd.ptr() as *const ShmRingBuffer<control_plane::Command>) };
+        let signal = unsafe { &*(shm_signal.ptr() as *const ShmSignal) };
+        let mut input_buffers = Vec::new();
+        for shm in shm_inputs {
+            input_buffers.push(unsafe { &*(shm.ptr() as *const ShmRingBuffer<AudioBlock>) });
+        }
+        let mut output_buffers = Vec::new();
+        for shm in shm_outputs {
+            output_buffers.push(unsafe { &*(shm.ptr() as *const ShmRingBuffer<AudioBlock>) });
+        }
+
+        Self {
+            processor,
+            command_buffer,
+            feedback_buffer: None,
+            input_buffers,
+            output_buffers,
+            signal,
+            event_fd,
         }
     }
 
-    pub fn report_metadata(&self, metadata: control_plane::SidecarMetadata) {
-        if let Some(fb) = self.feedback_buffer {
-            let _ = fb.push(metadata);
-        }
-    }
-
-    /// Process one iteration of the sidecar loop.
     pub fn process_once(&mut self) {
         self.signal.pulse_heartbeat();
         while let Some(cmd) = self.command_buffer.pop() {
@@ -122,9 +109,9 @@ impl<P: AudioProcessor> SidecarContext<P> {
         let num_channels = self.input_buffers.len().min(self.output_buffers.len()).min(16);
 
         let mut available = true;
-        for (i, in_block) in in_blocks.iter_mut().enumerate().take(num_channels) {
-            if let Some(block) = self.input_buffers[i].pop() {
-                *in_block = block;
+        for (i, in_buffer) in self.input_buffers.iter().enumerate().take(num_channels) {
+            if let Some(block) = in_buffer.pop() {
+                in_blocks[i] = block;
             } else {
                 available = false;
                 break;
@@ -136,45 +123,28 @@ impl<P: AudioProcessor> SidecarContext<P> {
             let mut in_slices_arr: [&[f32]; 16] = [&[]; 16];
             for i in 0..num_channels { in_slices_arr[i] = &in_blocks[i].data[..block_len]; }
 
-            let mut out_ptrs: [*mut f32; 16] = [std::ptr::null_mut(); 16];
-            for i in 0..num_channels { out_ptrs[i] = out_blocks[i].data.as_mut_ptr(); }
-
-            let mut out_slices_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|i| {
-                if i < num_channels {
-                    unsafe { std::slice::from_raw_parts_mut(out_ptrs[i], block_len) }
-                } else {
-                    &mut []
-                }
-            });
-
-            let mut context = ProcessContext {
-
-                transport: None,
-                sub_block_offset: 0,
-                is_last_sub_block: true,
-            };
-            self.processor.process(&in_slices_arr[..num_channels], &mut out_slices_reconstructed[..num_channels], &mut context);
-
             for (i, out_block) in out_blocks.iter_mut().enumerate().take(num_channels) {
+                let mut context = ProcessContext {
+                    transport: None,
+                    sub_block_offset: 0,
+                    is_last_sub_block: true,
+                };
+                let mut out_slice = [&mut out_block.data[..block_len]];
+                self.processor.process(&[in_slices_arr[i]], &mut out_slice, &mut context);
                 out_block.len = block_len as u32;
                 let _ = self.output_buffers[i].push(*out_block);
             }
         }
     }
 
-    /// Run the sidecar loop.
-    /// If an event_fd is present, it will perform a blocking wait to save CPU.
-    /// Otherwise it will poll the ShmSignal and yield.
     pub fn run_loop(&mut self) {
         loop {
             if let Some(efd) = &self.event_fd {
-                // Blocking wait (efficient)
                 let count = efd.wait();
                 for _ in 0..count {
                     self.process_once();
                 }
             } else {
-                // Polling wait (low latency but high CPU)
                 if !self.signal.check_and_clear() {
                     std::thread::yield_now();
                     continue;
