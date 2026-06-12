@@ -385,6 +385,29 @@ mod tests {
     }
 
     #[test]
+    fn test_graph_parallel_execution_consistency() {
+        let mut graph = ProcessorGraph::new();
+        // Setup a simple graph: Node 0 -> Node 1
+        graph.add_node(Box::new(IdentityProcessor), vec![10], vec![11]);
+        graph.add_node(Box::new(IdentityProcessor), vec![11], vec![0]);
+
+        let mut pool = TaskPool::new(2);
+        let mut input_data = [0.0f32; 128];
+        for i in 0..128 { input_data[i] = i as f32; }
+        graph.buffers[10].data[..128].copy_from_slice(&input_data);
+
+        let mut out_data = [0.0f32; 128];
+        let mut outputs = [&mut out_data[..]];
+        let mut context = ProcessContext { transport: None, sub_block_offset: 0, is_last_sub_block: true };
+
+        graph.process_parallel(&[], &mut outputs, &mut context, Some(&mut pool));
+
+        for i in 0..128 {
+            assert_eq!(out_data[i], i as f32);
+        }
+    }
+
+    #[test]
     fn test_task_pool_sync_no_reset_race() {
         let mut pool = TaskPool::new(1);
         let completion = pool.completion.clone();
