@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde-big-array = "0.5"
+nullherz-traits = { path = "../nullherz-traits" }
+nullherz-processors = { path = "../nullherz-processors" }
 audio-dsp = { path = "../audio-dsp" }
 control-plane = { path = "../control-plane" }
 ipc-layer = { path = "../ipc-layer" }
@@ -14,4 +16,6 @@ wide = "0.7.30"
 
 [dev-dependencies]
 sidecar-sdk = { path = "../sidecar-sdk" }
+nullherz-backends = { path = "../nullherz-backends" }
+nullherz-processors = { path = "../nullherz-processors" }
 proptest = "1.6"

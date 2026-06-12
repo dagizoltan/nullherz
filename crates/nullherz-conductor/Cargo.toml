@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 control-plane = { path = "../control-plane" }
+nullherz-backends = { path = "../nullherz-backends" }
 audio-core = { path = "../audio-core" }
 fx-runtime = { path = "../fx-runtime" }
 ipc-layer = { path = "../ipc-layer" }

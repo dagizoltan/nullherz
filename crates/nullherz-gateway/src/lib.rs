@@ -7,15 +7,15 @@ use control_plane::{TimestampedCommand};
 use ipc_layer::{Consumer, RingBuffer};
 use audio_core::Telemetry;
 
-pub fn connect_to_engine() -> Result<(ipc_layer::NonRtProducer<TimestampedCommand>, Consumer<Telemetry>), Box<dyn std::error::Error>> {
+pub fn connect_to_engine() -> Result<(ipc_layer::NonRtProducer<TimestampedCommand>, Consumer<Telemetry>, Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>, ipc_layer::Producer<Telemetry>), Box<dyn std::error::Error>> {
     // In a real nullherz deployment, the Conductor spawns the Gateway
     // and passes these buffers via handle or SHM.
-    // For now, we provide a clean split that the Conductor can utilize.
-    let (cmd_prod, _cmd_cons) = RingBuffer::<TimestampedCommand>::new(1024).split();
-    let cmd_prod = ipc_layer::NonRtProducer::new(cmd_prod);
-    let (_tel_prod, tel_cons) = RingBuffer::<Telemetry>::new(1024).split();
+    let cmd_buffer = Arc::new(ipc_layer::MpscRingBuffer::new(1024));
+    let cmd_prod = ipc_layer::NonRtProducer::from_mpsc(cmd_buffer.clone());
 
-    Ok((cmd_prod, tel_cons))
+    let (tel_prod, tel_cons) = RingBuffer::<Telemetry>::new(1024).split();
+
+    Ok((cmd_prod, tel_cons, cmd_buffer, tel_prod))
 }
 
 pub async fn run_gateway(

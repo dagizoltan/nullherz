@@ -1,5 +1,5 @@
-use crate::engine::AudioEngine;
-use crate::backends::AudioBackend;
+use audio_core::AudioEngine;
+use crate::AudioBackend;
 use std::thread;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -23,8 +23,8 @@ impl AudioBackend for ThreadedBackend {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let handle = thread::spawn(move || {
-            crate::setup_rt_thread(90, Some(0));
-            engine.set_config(crate::AudioConfig {
+            audio_core::setup_rt_thread(90, Some(0));
+            engine.set_config(nullherz_traits::AudioConfig {
                 sample_rate: 44100.0,
                 block_size: ipc_layer::MAX_BLOCK_SIZE,
             });

@@ -1,5 +1,5 @@
 use ipc_layer::{ShmRingBuffer, AudioBlock, ShmSignal, EventFd, SharedMemory};
-use crate::processors::AudioProcessor;
+use nullherz_traits::AudioProcessor;
 use std::sync::Arc;
 
 pub const MAX_CHANNELS: usize = 16;
@@ -81,7 +81,10 @@ impl SidecarProcessor {
 }
 
 impl AudioProcessor for SidecarProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         let current_heartbeat = unsafe { (*self.signal).get_heartbeat() };
         // Use wrapping subtraction to detect progress robustly across u64 wrap
         let is_stalled = current_heartbeat.wrapping_sub(self.last_heartbeat) == 0 && self.last_heartbeat != 0;
@@ -163,8 +166,8 @@ mod tests {
 
             let input = vec![1.0f32; 128];
             let mut output = vec![0.0f32; 128];
-            let mut context = crate::processors::ProcessContext {
-                pool: None,
+            let mut context = nullherz_traits::ProcessContext {
+
                 transport: None,
                 sub_block_offset: 0,
                 is_last_sub_block: true,

@@ -1,10 +1,9 @@
 use crate::processors::graph::{GraphTopology};
 use crate::error::AudioError;
 
-pub struct TopologyManager {
-}
+pub struct GraphCompiler {}
 
-impl TopologyManager {
+impl GraphCompiler {
     pub fn calculate_stages(topo: &mut GraphTopology) {
         let n = topo.node_count;
         if n == 0 { return; }

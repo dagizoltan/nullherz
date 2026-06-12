@@ -1,5 +1,5 @@
 use ipc_layer::{ShmRingBuffer, AudioBlock, ShmSignal, EventFd};
-use audio_core::AudioProcessor;
+pub use nullherz_traits::{AudioProcessor, ProcessContext};
 
 use ipc_layer::SharedMemory;
 
@@ -147,8 +147,8 @@ impl<P: AudioProcessor> SidecarContext<P> {
                 }
             });
 
-            let mut context = audio_core::processors::ProcessContext {
-                pool: None,
+            let mut context = ProcessContext {
+
                 transport: None,
                 sub_block_offset: 0,
                 is_last_sub_block: true,

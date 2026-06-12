@@ -1,5 +1,8 @@
 [workspace]
 members = [
+    "crates/nullherz-traits",
+    "crates/nullherz-processors",
+    "crates/nullherz-backends",
     "crates/audio-core",
     "crates/audio-dsp",
     "crates/fx-runtime",

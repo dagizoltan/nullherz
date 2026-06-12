@@ -1,10 +1,14 @@
-use audio_core::{AudioEngine, AudioProcessor, SidecarProcessor, ProcessorGraph, ThreadedBackend, AudioBackend};
+use audio_core::{AudioEngine, AudioProcessor, ProcessorGraph};
+use nullherz_processors::SidecarProcessor;
+use nullherz_backends::{ThreadedBackend, AudioBackend};
 use control_plane::{Command};
 use ipc_layer::{RingBuffer, ShmRingBuffer, AudioBlock, SharedMemory, ShmSignal};
 use std::thread;
 
 struct MockSidecarProcessor;
 impl AudioProcessor for MockSidecarProcessor {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut audio_core::processors::ProcessContext) {
         for i in 0..inputs.len().min(outputs.len()) {
             for j in 0..inputs[i].len() { outputs[i][j] = inputs[i][j] * 0.5; }
@@ -51,7 +55,7 @@ fn main() {
                 let out_rb = unsafe { &mut *(out_shm_side.ptr() as *mut ShmRingBuffer<AudioBlock>) };
                 if let Some(in_block) = in_rb.pop() {
                     let mut out_block = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: in_block.len };
-                    let mut context = audio_core::processors::ProcessContext { pool: None, transport: None, sub_block_offset: 0, is_last_sub_block: true };
+                    let mut context = audio_core::processors::ProcessContext { transport: None, sub_block_offset: 0, is_last_sub_block: true };
                     processor.process(&[&in_block.data[..in_block.len as usize]], &mut [&mut out_block.data[..in_block.len as usize]], &mut context);
                     let _ = out_rb.push(out_block);
                 }

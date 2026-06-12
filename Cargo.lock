@@ -446,6 +446,9 @@ dependencies = [
  "control-plane",
  "ipc-layer",
  "libc",
+ "nullherz-backends",
+ "nullherz-processors",
+ "nullherz-traits",
  "proptest",
  "serde",
  "serde-big-array",
@@ -2155,6 +2158,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
+name = "nullherz-backends"
+version = "0.1.0"
+dependencies = [
+ "audio-core",
+ "ipc-layer",
+ "libc",
+ "nullherz-traits",
+]
+
+[[package]]
 name = "nullherz-bench"
 version = "0.1.0"
 dependencies = [
@@ -2163,6 +2176,7 @@ dependencies = [
  "control-plane",
  "fx-runtime",
  "ipc-layer",
+ "nullherz-backends",
 ]
 
 [[package]]
@@ -2186,6 +2200,7 @@ dependencies = [
  "control-plane",
  "fx-runtime",
  "ipc-layer",
+ "nullherz-backends",
  "nullherz-gateway",
  "nullherz-mixer",
  "serde_json",
@@ -2243,12 +2258,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "nullherz-processors"
+version = "0.1.0"
+dependencies = [
+ "audio-dsp",
+ "control-plane",
+ "ipc-layer",
+ "nullherz-traits",
+ "serde",
+ "wide",
+]
+
+[[package]]
 name = "nullherz-sampler"
 version = "0.1.0"
 dependencies = [
  "audio-core",
  "control-plane",
  "sidecar-sdk",
+]
+
+[[package]]
+name = "nullherz-traits"
+version = "0.1.0"
+dependencies = [
+ "control-plane",
+ "ipc-layer",
+ "libc",
 ]
 
 [[package]]
@@ -3050,6 +3086,7 @@ dependencies = [
  "audio-core",
  "control-plane",
  "ipc-layer",
+ "nullherz-traits",
 ]
 
 [[package]]
