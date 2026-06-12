@@ -3,12 +3,14 @@ mod pool;
 mod telemetry;
 mod topology_types;
 mod compiler;
+mod executor;
 
 pub use node::{ProcessorNode, DummyProcessor};
 pub use pool::{TaskPool, Job};
 pub use telemetry::GraphTelemetry;
 pub use topology_types::{GraphTopology, NodeRouting, CrossfadeState};
-pub use compiler::TopologyManager;
+pub use compiler::GraphCompiler;
+pub use executor::GraphExecutor;
 
 use std::sync::Arc;
 use std::sync::atomic::{Ordering, AtomicUsize};
@@ -62,129 +64,6 @@ impl ProcessorGraph {
         }
     }
 
-    fn resolve_crossfades(&mut self, topo_idx: usize, offset: usize, num_samples: usize, block_x_map: &mut [[u8; crate::MAX_CHANNELS]; crate::MAX_NODES]) {
-        for i in 0..8 {
-            let x_state_opt = &mut self.topologies[topo_idx].crossfades[i];
-            if let Some(state) = x_state_opt {
-                let x_buf_idx = i;
-                let old_data = &self._old_path_buffers[state.old_buffer_idx].data[offset..offset + num_samples];
-                let new_data = &self.buffers[state.new_buffer_idx].data[offset..offset + num_samples];
-                let x_data = &mut self._crossfade_buffers[x_buf_idx].data[..num_samples];
-
-                let inv_total = 1.0 / state.total_samples as f32;
-                for j in 0..num_samples {
-                    let progress = (state.total_samples - state.remaining_samples) as f32 * inv_total;
-                    x_data[j] = old_data[j] * (1.0 - progress) + new_data[j] * progress;
-                    if state.remaining_samples > 0 { state.remaining_samples -= 1; }
-                }
-
-                if state.node_idx < 64 && state.input_idx < 16 {
-                    block_x_map[state.node_idx][state.input_idx] = (64 + x_buf_idx) as u8;
-                }
-
-                if state.remaining_samples == 0 { *x_state_opt = None; }
-            }
-        }
-    }
-
-    fn execute_stage(&mut self, topo_idx: usize, s_idx: usize, num_samples: usize, offset: usize, block_x_map: &[[u8; crate::MAX_CHANNELS]; crate::MAX_NODES], context: &mut crate::processors::ProcessContext) {
-        let topo = &self.topologies[topo_idx];
-        let stage = &topo.stages[s_idx][..topo.stage_counts[s_idx]];
-        let buffers_ptr = self.buffers.as_mut_ptr();
-        let x_buffers_ptr = self._crossfade_buffers.as_mut_ptr();
-
-        if let Some(pool) = context.pool.as_mut() {
-            let start_count = pool.completion.load(Ordering::Acquire);
-            let num_nodes = stage.len();
-            let mut workers_to_wake = [false; 64];
-
-            for (i, &n_idx) in stage.iter().enumerate() {
-                let worker_idx = i % pool.worker_producers.len();
-                workers_to_wake[worker_idx] = true;
-                let routing = &topo.routing[n_idx];
-                let mut resolved_inputs = [0usize; 16];
-                let mut resolved_outputs = [0usize; 16];
-
-                for j in 0..routing.input_count.min(crate::MAX_CHANNELS) {
-                    let v_idx = routing.input_indices[j].min(crate::MAX_NODES - 1);
-                    let mut p_idx = topo.virtual_to_physical[v_idx];
-                    let p_override = block_x_map[n_idx][j];
-                    if p_override != 0 { p_idx = p_override as usize; }
-                    resolved_inputs[j] = p_idx;
-                }
-
-                for (j, resolved_out) in resolved_outputs.iter_mut().enumerate().take(routing.output_count.min(crate::MAX_CHANNELS)) {
-                    let v_idx = routing.output_indices[j].min(crate::MAX_NODES - 1);
-                    *resolved_out = topo.virtual_to_physical[v_idx];
-                }
-
-                let _ = pool.worker_producers[worker_idx].push(Job {
-                    node_ptr: &self.nodes[n_idx] as *const _,
-                    num_samples,
-                    sub_block_offset: offset,
-                    buffers_ptr,
-                    x_buffers_ptr,
-                    input_indices: resolved_inputs,
-                    output_indices: resolved_outputs,
-                    input_count: routing.input_count,
-                    output_count: routing.output_count,
-                    node_idx: n_idx,
-                    telemetry_ptr: &self.telemetry.node_times_cycles as *const _,
-                    transport: context.transport.copied(),
-                    is_last_sub_block: context.is_last_sub_block,
-                });
-            }
-
-            for (idx, &should_wake) in workers_to_wake.iter().enumerate().take(pool.worker_producers.len()) {
-                if should_wake { pool.worker_wake_fds[idx].notify(); }
-            }
-
-            let target = start_count + num_nodes;
-            while pool.completion.load(Ordering::Acquire) < target {
-                let _ = pool.completion_fd.wait();
-            }
-        } else {
-            for &n_idx in stage {
-                let node = &self.nodes[n_idx];
-                let routing = &topo.routing[n_idx];
-                let mut node_inputs_storage = [ &[][..]; crate::MAX_CHANNELS ];
-                let input_count = routing.input_count.min(crate::MAX_CHANNELS);
-                for i in 0..input_count {
-                    let v_idx = routing.input_indices.get(i).copied().unwrap_or(0).min(crate::MAX_NODES - 1);
-                    let mut p_idx = topo.virtual_to_physical[v_idx];
-                    let p_override = block_x_map[n_idx][i];
-                    if p_override != 0 { p_idx = p_override as usize; }
-
-                    if p_idx >= 64 {
-                        let x_idx = p_idx - 64;
-                        if x_idx < 8 {
-                            unsafe { node_inputs_storage[i] = &(&(*x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
-                        }
-                    } else if p_idx < 64 {
-                        unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[offset..offset + num_samples]; }
-                    }
-                }
-                let mut node_outputs_reconstructed: [&mut [f32]; crate::MAX_CHANNELS] = std::array::from_fn(|_| &mut [][..]);
-                let output_count = routing.output_count.min(crate::MAX_CHANNELS);
-                for (i, node_out) in node_outputs_reconstructed.iter_mut().enumerate().take(output_count) {
-                    let v_idx = routing.output_indices.get(i).copied().unwrap_or(0).min(crate::MAX_NODES - 1);
-                    let p_idx = topo.virtual_to_physical.get(v_idx).copied().unwrap_or(0).min(crate::MAX_NODES - 1);
-                    unsafe {
-                        *node_out = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr().add(offset), num_samples);
-                    }
-                }
-
-                let start = crate::get_cycles();
-
-                let mut inner_context = crate::processors::ProcessContext { pool: None, transport: context.transport, sub_block_offset: offset, is_last_sub_block: context.is_last_sub_block };
-                unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
-
-                let elapsed = crate::get_cycles().wrapping_sub(start);
-                self.telemetry.node_times_cycles[n_idx].store(elapsed, Ordering::Relaxed);
-            }
-        }
-    }
-
     fn inactive_topology_mut(&mut self) -> &mut GraphTopology {
         let active = self.active_topo_idx.load(Ordering::Acquire);
         let inactive = (active + 1) % 2;
@@ -198,7 +77,7 @@ impl ProcessorGraph {
     pub fn calculate_stages(&mut self) {
         let active_idx = self.active_topo_idx.load(Ordering::Acquire);
         let inactive_idx = (active_idx + 1) % 2;
-        TopologyManager::calculate_stages(&mut self.topologies[inactive_idx]);
+        GraphCompiler::calculate_stages(&mut self.topologies[inactive_idx]);
     }
 
     pub fn commit_graph(&mut self) {
@@ -209,13 +88,102 @@ impl ProcessorGraph {
             return;
         }
 
-        if let Err(msg) = TopologyManager::verify_no_hazards(&self.topologies[inactive]) {
+        if let Err(msg) = GraphCompiler::verify_no_hazards(&self.topologies[inactive]) {
             eprintln!("CRITICAL: Refusing to commit hazardous topology: {}", msg);
             return;
         }
 
         self.active_topo_idx.store(inactive, Ordering::Release);
         self.needs_commit = false;
+    }
+
+    pub fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext, mut pool: Option<&mut TaskPool>) {
+        let is_last_sub_block = context.is_last_sub_block;
+        let num_samples = if !external_outputs.is_empty() { external_outputs[0].len() } else { 0 };
+        if num_samples == 0 { return; }
+
+        let active_idx = self.active_topo_idx.load(Ordering::Acquire);
+        let offset = context.sub_block_offset;
+
+        let mut block_x_map = [[0u8; crate::MAX_CHANNELS]; crate::MAX_NODES];
+        GraphExecutor::resolve_crossfades(
+            &mut self.topologies,
+            active_idx,
+            offset,
+            num_samples,
+            &self._old_path_buffers,
+            &self.buffers,
+            &mut self._crossfade_buffers,
+            &mut block_x_map
+        );
+
+        let num_stages = self.topologies[active_idx].num_stages;
+        let transport = context.transport;
+        for s_idx in 0..num_stages {
+            GraphExecutor::execute_stage(
+                &self.nodes,
+                &mut self.buffers,
+                &mut self._crossfade_buffers,
+                &self.topologies[active_idx],
+                s_idx,
+                num_samples,
+                offset,
+                &block_x_map,
+                &mut pool,
+                transport,
+                is_last_sub_block,
+                &self.telemetry.node_times_cycles
+            );
+        }
+
+        let topo = &self.topologies[active_idx];
+        if !external_outputs.is_empty() {
+            let p0 = topo.virtual_to_physical[0];
+            external_outputs[0].copy_from_slice(&self.buffers[p0].data[offset..offset + num_samples]);
+        }
+        if external_outputs.len() >= 2 {
+            let p1 = topo.virtual_to_physical[1];
+            external_outputs[1].copy_from_slice(&self.buffers[p1].data[offset..offset + num_samples]);
+        }
+
+        if is_last_sub_block {
+            let active_idx = self.active_topo_idx.load(Ordering::Acquire);
+            let has_active_crossfades = self.topologies[active_idx].crossfades.iter().any(|x| x.is_some());
+            if has_active_crossfades {
+                for i in 0..crate::MAX_NODES {
+                    self._old_path_buffers[i].data.copy_from_slice(&self.buffers[i].data);
+                }
+            }
+        }
+
+        for n_idx in 0..topo.node_count.min(crate::MAX_NODES) {
+            let routing = &topo.routing[n_idx];
+            let mut node_peak = if context.sub_block_offset == 0 { 0.0f32 } else { f32::from_bits(self.telemetry.peak_levels[n_idx].load(Ordering::Relaxed)) };
+
+            for o_idx in 0..routing.output_count {
+                let v_out = routing.output_indices.get(o_idx).copied().unwrap_or(0).min(crate::MAX_NODES - 1);
+                let p_idx = topo.virtual_to_physical.get(v_out).copied().unwrap_or(0).min(crate::MAX_NODES - 1);
+                let data = &self.buffers[p_idx].data[offset..offset + num_samples];
+
+                use wide::*;
+                let mut channel_peak_v = f32x8::ZERO;
+                let mut i = 0;
+                while i + 8 <= data.len() {
+                    let v = f32x8::new(data[i..i+8].try_into().unwrap());
+                    channel_peak_v = channel_peak_v.max(v.abs());
+                    i += 8;
+                }
+                let arr: [f32; 8] = channel_peak_v.into();
+                let mut channel_peak = arr.iter().fold(0.0f32, |m, &x| m.max(x));
+                while i < data.len() {
+                    let abs = data[i].abs();
+                    if abs > channel_peak { channel_peak = abs; }
+                    i += 1;
+                }
+                if channel_peak > node_peak { node_peak = channel_peak; }
+            }
+            self.telemetry.peak_levels[n_idx].store(node_peak.to_bits(), Ordering::Relaxed);
+        }
     }
 
     pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
@@ -246,75 +214,14 @@ impl Default for ProcessorGraph {
 }
 
 impl AudioProcessor for ProcessorGraph {
-    fn process(&mut self, _external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut crate::processors::ProcessContext) {
-        let is_last_sub_block = context.is_last_sub_block;
-        let num_samples = if !external_outputs.is_empty() { external_outputs[0].len() } else { 0 };
-        if num_samples == 0 { return; }
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
-        let active_idx = self.active_topo_idx.load(Ordering::Acquire);
-        let offset = context.sub_block_offset;
-
-        let mut block_x_map = [[0u8; crate::MAX_CHANNELS]; crate::MAX_NODES];
-        self.resolve_crossfades(active_idx, offset, num_samples, &mut block_x_map);
-
-        let num_stages = self.topologies[active_idx].num_stages;
-        for s_idx in 0..num_stages {
-            self.execute_stage(active_idx, s_idx, num_samples, offset, &block_x_map, context);
-        }
-
-        let topo = &self.topologies[active_idx];
-        if !external_outputs.is_empty() {
-            let p0 = topo.virtual_to_physical[0];
-            let offset = context.sub_block_offset;
-            external_outputs[0].copy_from_slice(&self.buffers[p0].data[offset..offset + num_samples]);
-        }
-        if external_outputs.len() >= 2 {
-            let p1 = topo.virtual_to_physical[1];
-            let offset = context.sub_block_offset;
-            external_outputs[1].copy_from_slice(&self.buffers[p1].data[offset..offset + num_samples]);
-        }
-
-        if is_last_sub_block {
-            let active_idx = self.active_topo_idx.load(Ordering::Acquire);
-            let has_active_crossfades = self.topologies[active_idx].crossfades.iter().any(|x| x.is_some());
-            if has_active_crossfades {
-                for i in 0..crate::MAX_NODES {
-                    self._old_path_buffers[i].data.copy_from_slice(&self.buffers[i].data);
-                }
-            }
-        }
-
-        for n_idx in 0..topo.node_count.min(crate::MAX_NODES) {
-            let routing = &topo.routing[n_idx];
-            let mut node_peak = if context.sub_block_offset == 0 { 0.0f32 } else { f32::from_bits(self.telemetry.peak_levels[n_idx].load(Ordering::Relaxed)) };
-
-            for o_idx in 0..routing.output_count {
-                let v_out = routing.output_indices.get(o_idx).copied().unwrap_or(0).min(crate::MAX_NODES - 1);
-                let p_idx = topo.virtual_to_physical.get(v_out).copied().unwrap_or(0).min(crate::MAX_NODES - 1);
-                let offset = context.sub_block_offset;
-                let data = &self.buffers[p_idx].data[offset..offset + num_samples];
-
-                use wide::*;
-                let mut channel_peak_v = f32x8::ZERO;
-                let mut i = 0;
-                while i + 8 <= data.len() {
-                    let v = f32x8::new(data[i..i+8].try_into().unwrap());
-                    channel_peak_v = channel_peak_v.max(v.abs());
-                    i += 8;
-                }
-                let arr: [f32; 8] = channel_peak_v.into();
-                let mut channel_peak = arr.iter().fold(0.0f32, |m, &x| m.max(x));
-                while i < data.len() {
-                    let abs = data[i].abs();
-                    if abs > channel_peak { channel_peak = abs; }
-                    i += 1;
-                }
-                if channel_peak > node_peak { node_peak = channel_peak; }
-            }
-            self.telemetry.peak_levels[n_idx].store(node_peak.to_bits(), Ordering::Relaxed);
-        }
+    fn process(&mut self, external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext) {
+        self.process_parallel(external_inputs, external_outputs, context, None);
     }
-    fn setup(&mut self, config: crate::AudioConfig) {
+
+    fn setup(&mut self, config: nullherz_traits::AudioConfig) {
         for node in self.nodes.iter() {
             unsafe { (*node.processor.get()).setup(config); }
         }
@@ -393,7 +300,7 @@ impl AudioProcessor for ProcessorGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::processors::ProcessContext;
+    use nullherz_traits::ProcessContext;
     use std::sync::atomic::AtomicU64;
 
     struct IdentityProcessor;
@@ -401,7 +308,10 @@ mod tests {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "IdentityProcessor") }
     }
     impl AudioProcessor for IdentityProcessor {
-        fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+        fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
             for i in 0..inputs.len().min(outputs.len()) { outputs[i].copy_from_slice(inputs[i]); }
         }
     }
@@ -416,7 +326,7 @@ mod tests {
         let mut out_data = [0.0f32; 100];
         let out_slice = &mut out_data[..];
         let mut outputs = [out_slice];
-        let mut context = ProcessContext { pool: None, transport: None, sub_block_offset: 10, is_last_sub_block: false, };
+        let mut context = ProcessContext {  transport: None, sub_block_offset: 10, is_last_sub_block: false, };
         graph.process(&[], &mut outputs, &mut context);
         for i in 0..50 { assert_eq!(out_data[i], (i + 10) as f32); }
     }
@@ -441,7 +351,7 @@ mod tests {
         graph.buffers[20].data.fill(2.0);
 
         let mut block_x_map = [[0u8; crate::MAX_CHANNELS]; crate::MAX_NODES];
-        graph.resolve_crossfades(topo_idx, 0, 50, &mut block_x_map);
+        GraphExecutor::resolve_crossfades(&mut graph.topologies, topo_idx, 0, 50, &graph._old_path_buffers, &graph.buffers, &mut graph._crossfade_buffers, &mut block_x_map);
 
         // Check progression
         let state = graph.topologies[topo_idx].crossfades[0].unwrap();
@@ -452,7 +362,7 @@ mod tests {
         assert_eq!(graph._crossfade_buffers[0].data[0], 1.0);
         assert!(graph._crossfade_buffers[0].data[49] > 1.0);
 
-        graph.resolve_crossfades(topo_idx, 50, 50, &mut block_x_map);
+        GraphExecutor::resolve_crossfades(&mut graph.topologies, topo_idx, 50, 50, &graph._old_path_buffers, &graph.buffers, &mut graph._crossfade_buffers, &mut block_x_map);
         assert!(graph.topologies[topo_idx].crossfades[0].is_none());
     }
 
@@ -471,7 +381,7 @@ mod tests {
                 assert!(seen_nodes.insert(*n_idx), "Node {} assigned to multiple stages", n_idx);
             }
         }
-        assert!(TopologyManager::verify_no_hazards(&graph.topologies[active_idx]).is_ok());
+        assert!(GraphCompiler::verify_no_hazards(&graph.topologies[active_idx]).is_ok());
     }
 
     #[test]

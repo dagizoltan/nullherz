@@ -1,48 +1,39 @@
-use audio_core::{AudioEngine, AudioProcessor, ThreadedBackend, AudioBackend};
-use audio_dsp::{SineOscillator};
-use control_plane::{Command, TimestampedCommand};
-use ipc_layer::RingBuffer;
+use audio_core::{AudioEngine, AudioProcessor};
+use nullherz_backends::{ThreadedBackend, AudioBackend};
+use control_plane::{TimestampedCommand};
+use ipc_layer::{RingBuffer, MpscRingBuffer};
+use std::sync::Arc;
+use std::thread;
 
-struct SineProcessor {
-    osc: SineOscillator,
+struct GainProcessor {
+    gain: f32,
 }
-
-impl AudioProcessor for SineProcessor {
-    fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut audio_core::processors::ProcessContext) {
-        for channel in outputs {
-            for sample in channel.iter_mut() {
-                use audio_dsp::Oscillator;
-                *sample = self.osc.next_sample();
+impl AudioProcessor for GainProcessor {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut audio_core::processors::ProcessContext) {
+        for i in 0..inputs.len().min(outputs.len()) {
+            for j in 0..inputs[i].len() {
+                outputs[i][j] = inputs[i][j] * self.gain;
             }
         }
-    }
-    fn apply_command(&mut self, command: &Command) {
-        if let Command::SetParam { target_id, param_id, value, .. } = command
-            && *target_id == 1 && *param_id == 1 { self.osc.set_frequency(*value); }
     }
 }
 
 fn main() {
-    let cons = std::sync::Arc::new(ipc_layer::MpscRingBuffer::new(1024));
-    let prod = cons.clone();
-    let garbage_rb = RingBuffer::new(32);
-    let (garbage_prod, _) = garbage_rb.split();
-    let tel_rb = RingBuffer::new(1024);
-    let (tel_prod, _) = tel_rb.split();
+    let cmd_buffer = Arc::new(MpscRingBuffer::<TimestampedCommand>::new(1024));
+    let (garbage_prod, _garbage_cons) = RingBuffer::new(1024).split();
+    let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
 
-    let osc = SineOscillator::new(44100.0, 440.0);
-    let engine = AudioEngine::new(cons, None, None, None, garbage_prod, None, None, None, tel_prod, Box::new(SineProcessor { osc }));
+    let initial_proc = Box::new(GainProcessor { gain: 0.5 });
+    let engine = AudioEngine::new(cmd_buffer, None, None, None, garbage_prod, None, None, None, tel_prod, initial_proc);
 
     let mut backend = ThreadedBackend::new();
     backend.start(engine).unwrap();
 
-    println!("Starting simulation...");
-    prod.push(TimestampedCommand {
-        timestamp_samples: 44100,
-        command: Command::SetParam { target_id: 1, param_id: 1, value: 880.0, ramp_duration_samples: 0 },
-    }).unwrap();
+    println!("Engine running with simple processor...");
+    thread::sleep(std::time::Duration::from_millis(200));
 
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    println!("Simulation finished.");
     backend.stop();
+    println!("Engine stopped.");
 }

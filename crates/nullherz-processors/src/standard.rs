@@ -1,4 +1,4 @@
-use crate::processors::AudioProcessor;
+use nullherz_traits::AudioProcessor;
 
 pub struct GainProcessor {
     gains: [audio_dsp::Gain; crate::MAX_CHANNELS],
@@ -13,7 +13,10 @@ impl GainProcessor {
 }
 
 impl AudioProcessor for GainProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
         let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
         for (i, gain) in self.gains.iter_mut().enumerate().take(num_channels) {
@@ -47,7 +50,10 @@ impl BiquadProcessor {
 }
 
 impl AudioProcessor for BiquadProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
         let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
 
@@ -91,7 +97,10 @@ impl SimdBiquadProcessor {
 }
 
 impl AudioProcessor for SimdBiquadProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
         let len = inputs[0].len();
         let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
@@ -157,7 +166,10 @@ impl CrossfaderProcessor {
 }
 
 impl AudioProcessor for CrossfaderProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if inputs.len() < 2 || outputs.is_empty() { return; }
         self.inner.process_block_simd(inputs[0], inputs[1], outputs[0]);
     }
@@ -178,7 +190,10 @@ impl SummingProcessor {
 }
 
 impl AudioProcessor for SummingProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if outputs.is_empty() { return; }
         self.inner.process_16_to_1_simd(inputs, outputs[0]);
     }

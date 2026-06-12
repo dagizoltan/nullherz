@@ -1,4 +1,4 @@
-use crate::backends::AudioBackend;
+use crate::AudioBackend;
 
 pub struct JackBackend {
     inner: Box<JackBackendInner>,
@@ -7,7 +7,7 @@ pub struct JackBackend {
 struct JackBackendInner {
     client: *mut std::ffi::c_void,
     ports: Vec<*mut std::ffi::c_void>,
-    engine: Option<crate::engine::AudioEngine>,
+    engine: Option<audio_core::AudioEngine>,
     lib: Option<JackLib>,
 }
 
@@ -105,7 +105,7 @@ unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_
 }
 
 impl AudioBackend for JackBackend {
-    fn start(&mut self, engine: crate::engine::AudioEngine) -> Result<(), String> {
+    fn start(&mut self, engine: audio_core::AudioEngine) -> Result<(), String> {
         unsafe {
             let inner = &mut *self.inner;
             if inner.lib.is_none() { inner.lib = Some(JackLib::load()?); }
@@ -125,7 +125,7 @@ impl AudioBackend for JackBackend {
         }
         Ok(())
     }
-    fn stop(&mut self) -> Option<crate::engine::AudioEngine> {
+    fn stop(&mut self) -> Option<audio_core::AudioEngine> {
         unsafe {
             let inner = &mut *self.inner;
             if !inner.client.is_null() {

@@ -90,11 +90,12 @@ impl TaskPool {
 
                         let start = crate::get_cycles();
 
-                        let mut inner_context = crate::processors::ProcessContext {
-                            pool: None,
+                        let mut inner_context = nullherz_traits::ProcessContext {
+
                             transport: job.transport.as_ref(),
                             sub_block_offset: offset,
-                            is_last_sub_block: job.is_last_sub_block
+                            is_last_sub_block: job.is_last_sub_block,
+
                         };
                         // SAFETY: node.processor is an UnsafeCell. Access is synchronized via topological stage fencing.
                         unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }

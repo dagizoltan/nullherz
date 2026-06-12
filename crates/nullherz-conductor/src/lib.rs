@@ -1,5 +1,6 @@
 use std::sync::Arc;
-use audio_core::{AudioEngine, ProcessorGraph, AudioBackend, AlsaBackend, ThreadedBackend};
+use audio_core::{AudioEngine, ProcessorGraph};
+use nullherz_backends::{AudioBackend, AlsaBackend, ThreadedBackend};
 use fx_runtime::SidecarManager;
 use ipc_layer::RingBuffer;
 
@@ -102,8 +103,8 @@ impl Conductor {
 
         let mut backend: Box<dyn AudioBackend> = match name {
             "alsa" => Box::new(AlsaBackend::new()),
-            "pipewire" => Box::new(audio_core::PipewireBackend::new()),
-            "jack" => Box::new(audio_core::JackBackend::new()),
+            "pipewire" => Box::new(nullherz_backends::PipewireBackend::new()),
+            "jack" => Box::new(nullherz_backends::JackBackend::new()),
             _ => Box::new(ThreadedBackend::new()),
         };
 

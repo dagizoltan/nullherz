@@ -1,7 +1,7 @@
 use std::thread;
 use std::sync::atomic::Ordering;
-use crate::engine::AudioEngine;
-use crate::backends::AudioBackend;
+use audio_core::AudioEngine;
+use crate::AudioBackend;
 
 struct AlsaLib {
     handle: *mut std::ffi::c_void,
@@ -77,7 +77,7 @@ impl AudioBackend for AlsaBackend {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let handle = thread::spawn(move || {
-            crate::setup_rt_thread(90, Some(0)); // Pin main RT thread to core 0
+            audio_core::setup_rt_thread(90, Some(0)); // Pin main RT thread to core 0
             unsafe {
                 let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
                 let name = std::ffi::CString::new("default").unwrap();
@@ -109,7 +109,7 @@ impl AudioBackend for AlsaBackend {
                 (alsa.snd_pcm_hw_params_set_rate_near)(pcm, hw_params, &mut rate, std::ptr::null_mut());
 
                 if (rate as f32 - engine.target_sample_rate).abs() > 0.1 {
-                    engine.logger.log(crate::rt_logging::RtLogLevel::Error, "ALSA Rate Mismatch", 0);
+                    engine.logger.log(audio_core::rt_logging::RtLogLevel::Error, "ALSA Rate Mismatch", 0);
                     (alsa.snd_pcm_hw_params_free)(hw_params);
                     (alsa.snd_pcm_close)(pcm);
                     return None;
@@ -134,7 +134,7 @@ impl AudioBackend for AlsaBackend {
                 (alsa.snd_pcm_hw_params_free)(hw_params);
                 (alsa.snd_pcm_prepare)(pcm);
 
-                engine.set_config(crate::AudioConfig {
+                engine.set_config(nullherz_traits::AudioConfig {
                     sample_rate: rate as f32,
                     block_size: period_size as usize,
                 });

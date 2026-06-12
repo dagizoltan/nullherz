@@ -1,4 +1,4 @@
-use crate::processors::AudioProcessor;
+use nullherz_traits::AudioProcessor;
 
 pub struct WavetableProcessor {
     inner: audio_dsp::WavetableOscillator,
@@ -11,11 +11,14 @@ impl WavetableProcessor {
 }
 
 impl AudioProcessor for WavetableProcessor {
-    fn setup(&mut self, config: crate::AudioConfig) {
+    fn setup(&mut self, config: nullherz_traits::AudioConfig) {
         self.inner.set_sample_rate(config.sample_rate);
     }
 
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         let num_channels = outputs.len().min(crate::MAX_CHANNELS);
         let len = if num_channels > 0 { outputs[0].len() } else { 0 };
         if len == 0 { return; }
@@ -61,7 +64,10 @@ impl SpectralProcessor {
 }
 
 impl AudioProcessor for SpectralProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
         // For prototype, we ensure lengths match.
         let len = inputs[0].len().min(outputs[0].len());
@@ -98,7 +104,10 @@ impl ModulationProcessor {
 }
 
 impl AudioProcessor for ModulationProcessor {
-    fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if inputs.is_empty() { return; }
         let cv = inputs[0];
         if cv.is_empty() { return; }
@@ -146,7 +155,7 @@ impl SequencerProcessor {
 }
 
 impl AudioProcessor for SequencerProcessor {
-    fn setup(&mut self, config: crate::AudioConfig) {
+    fn setup(&mut self, config: nullherz_traits::AudioConfig) {
         self.sample_rate = config.sample_rate;
     }
 
@@ -158,7 +167,10 @@ impl AudioProcessor for SequencerProcessor {
         }
     }
 
-    fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut crate::processors::ProcessContext) {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext) {
         let block_len = if !outputs.is_empty() { outputs[0].len() as u64 } else { 0 };
         if block_len == 0 { return; }
 

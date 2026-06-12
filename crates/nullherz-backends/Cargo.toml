@@ -1,10 +1,10 @@
 [package]
-name = "sidecar-sdk"
+name = "nullherz-backends"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ipc-layer = { path = "../ipc-layer" }
 nullherz-traits = { path = "../nullherz-traits" }
 audio-core = { path = "../audio-core" }
-control-plane = { path = "../control-plane" }
+ipc-layer = { path = "../ipc-layer" }
+libc = "0.2"

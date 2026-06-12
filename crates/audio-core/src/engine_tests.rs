@@ -31,7 +31,7 @@ mod tests {
                 match kind {
                     0 => TopologyMutation::UpdateEdge { node_idx, input_idx: idx, new_buffer_idx: buf },
                     1 => TopologyMutation::UpdateOutputEdge { node_idx, output_idx: idx, new_buffer_idx: buf },
-                    _ => TopologyMutation::SwapProcessor { node_idx, processor: Box::new(crate::processors::standard::GainProcessor::new(1, 1.0)) },
+                    _ => TopologyMutation::SwapProcessor { node_idx, processor: Box::new(crate::processors::GainProcessor::new(1, 1.0)) },
                 }
             }).collect();
 
@@ -104,6 +104,8 @@ mod tests {
             process_count: u32,
         }
         impl AudioProcessor for MockProcessor {
+            fn as_any(&self) -> &dyn std::any::Any { self }
+            fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut crate::processors::ProcessContext) {
                 self.process_count += 1;
             }

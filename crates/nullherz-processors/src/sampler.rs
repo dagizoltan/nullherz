@@ -1,4 +1,4 @@
-use crate::processors::AudioProcessor;
+use nullherz_traits::AudioProcessor;
 use audio_dsp::SamplerVoice;
 
 #[derive(Debug)]
@@ -24,7 +24,10 @@ impl SamplerProcessor {
 }
 
 impl AudioProcessor for SamplerProcessor {
-    fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if outputs.is_empty() { return; }
         let num_samples = outputs[0].len();
         if num_samples == 0 { return; }

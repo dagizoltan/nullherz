@@ -1,78 +1,15 @@
-pub mod standard;
-pub mod sidecar;
-pub mod complex;
 pub mod graph;
-pub mod sampler;
 
-pub use graph::{ProcessorGraph, ProcessorNode, GraphTopology, NodeRouting, CrossfadeState, TaskPool, TopologyManager};
-pub use sidecar::SidecarProcessor;
-pub use sampler::SamplerProcessor;
-pub use standard::{GainProcessor, BiquadProcessor, SimdBiquadProcessor, CrossfaderProcessor, SummingProcessor};
-pub use complex::{WavetableProcessor, SpectralProcessor, ModulationProcessor};
+pub use graph::{ProcessorGraph, ProcessorNode, GraphTopology, NodeRouting, CrossfadeState, TaskPool, GraphCompiler};
+pub use nullherz_processors::{
+    SidecarProcessor, SamplerProcessor, GainProcessor, BiquadProcessor, SimdBiquadProcessor,
+    CrossfaderProcessor, SummingProcessor, WavetableProcessor, SpectralProcessor, ModulationProcessor, SequencerProcessor
+};
 
-pub enum TopologyMutation {
-    UpdateEdge {
-        node_idx: u32,
-        input_idx: u32,
-        new_buffer_idx: u32,
-    },
-    UpdateOutputEdge {
-        node_idx: u32,
-        output_idx: u32,
-        new_buffer_idx: u32,
-    },
-    SwapProcessor {
-        node_idx: u32,
-        processor: Box<dyn AudioProcessor>,
-    },
-    AddNode {
-        node_idx: u32,
-        processor: Box<dyn AudioProcessor>,
-    },
-}
+pub use nullherz_traits::{
+    AudioProcessor, ProcessContext as GenericProcessContext, AudioConfig, Transport,
+    TopologyMutation, ProcessorCommand, MidiEvent, GarbageProducer
+};
 
-/// Shared execution context passed to processors during the audio block cycle.
-pub struct ProcessContext<'a> {
-    /// Reference to the engine's worker task pool for parallel processing.
-    pub pool: Option<&'a mut TaskPool>,
-    /// Global transport information (BPM, position, play state).
-    pub transport: Option<&'a crate::Transport>,
-    /// Current sample offset within the physical audio block (used for sample-accurate automation).
-    pub sub_block_offset: usize,
-    /// Flag indicating if this is the final sub-block for the current engine cycle.
-    pub is_last_sub_block: bool,
-}
-
-/// Command interface for processors to decouple from the control plane.
-pub type ProcessorCommand = control_plane::Command;
-
-/// MIDI event interface for processors to decouple from the IPC layer.
-pub type MidiEvent = ipc_layer::MidiEvent;
-
-/// Producer interface for processors to decouple from the IPC layer.
-pub type GarbageProducer = ipc_layer::Producer<Box<dyn AudioProcessor>>;
-
-/// The core trait for all audio processing nodes in the nullherz engine.
-pub trait AudioProcessor: Send {
-    /// Executes audio processing for the given buffers.
-    /// MUST be real-time safe: no allocations, no locks, no blocking syscalls.
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext);
-
-    /// Called when audio configuration (sample rate, block size) changes.
-    fn setup(&mut self, _config: crate::AudioConfig) {}
-
-    /// Applies high-level control plane commands (parameters, play/stop).
-    fn apply_command(&mut self, _command: &ProcessorCommand) {}
-
-    /// Applies structural graph mutations to the processor (routing, swapping).
-    fn apply_topology_mutation(&mut self, _mutation: TopologyMutation) {}
-
-    /// Applies real-time MIDI events to the processor.
-    fn apply_midi(&mut self, _event: MidiEvent) {}
-
-    /// Gathers performance and signal telemetry from the processor.
-    fn collect_telemetry(&self, _node_times: &mut [u64; 64], _peak_levels: &mut [f32; 64]) {}
-
-    /// Configures the garbage producer used for real-time safe deallocation.
-    fn set_garbage_producer(&mut self, _producer: GarbageProducer) {}
-}
+/// Engine-specific process context.
+pub type ProcessContext<'a> = GenericProcessContext<'a>;

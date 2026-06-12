@@ -340,7 +340,6 @@ impl AudioEngine {
     fn process_sub_block(&mut self, graph: &mut dyn AudioProcessor, inputs: &[&[f32]], outputs: &mut [&mut [f32]], offset: usize, len: usize, is_last_sub_block: bool) {
         if len == 0 { return; }
         let mut context = ProcessContext {
-            pool: self.pool.as_mut(),
             transport: Some(&self.transport),
             sub_block_offset: offset,
             is_last_sub_block,
@@ -367,7 +366,11 @@ impl AudioEngine {
             }
         }
 
-        graph.process(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs], &mut context);
+        if let Some(pg) = graph.as_any_mut().downcast_mut::<crate::processors::ProcessorGraph>() {
+            pg.process_parallel(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs], &mut context, self.pool.as_mut());
+        } else {
+            graph.process(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs], &mut context);
+        }
 
         if self.transport.is_playing {
             let seconds_per_block = len as f64 / self.transport.sample_rate as f64;

@@ -23,5 +23,8 @@ unsafe impl Sync for ProcessorNode {}
 #[derive(Debug)]
 pub struct DummyProcessor;
 impl AudioProcessor for DummyProcessor {
-    fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _context: &mut crate::processors::ProcessContext) {}
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {}
 }

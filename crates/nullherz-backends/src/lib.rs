@@ -8,7 +8,7 @@ pub use pipewire::PipewireBackend;
 pub use jack::JackBackend;
 pub use threaded::ThreadedBackend;
 
-use crate::engine::AudioEngine;
+use audio_core::AudioEngine;
 
 pub trait AudioBackend: Send {
     fn start(&mut self, engine: AudioEngine) -> Result<(), String>;

@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
-use crate::engine::AudioEngine;
-use crate::backends::AudioBackend;
+use audio_core::AudioEngine;
+use crate::AudioBackend;
 
 struct PwLib {
     _handle: *mut std::ffi::c_void,
@@ -269,7 +269,7 @@ impl AudioBackend for PipewireBackend {
             let inner = &mut *self.inner;
             if inner.lib.is_none() { inner.lib = Some(PwLib::load()?); }
             let rate = engine.target_sample_rate as u32;
-            engine.set_config(crate::AudioConfig { sample_rate: rate as f32, block_size: 128 });
+            engine.set_config(nullherz_traits::AudioConfig { sample_rate: rate as f32, block_size: 128 });
             inner.engine = Some(engine);
             inner.running.store(true, Ordering::SeqCst);
 
