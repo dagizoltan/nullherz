@@ -10,7 +10,7 @@ pub use threaded::ThreadedBackend;
 
 use crate::engine::AudioEngine;
 
-pub trait AudioBackend {
+pub trait AudioBackend: Send {
     fn start(&mut self, engine: AudioEngine) -> Result<(), String>;
     fn stop(&mut self) -> Option<AudioEngine>;
 }

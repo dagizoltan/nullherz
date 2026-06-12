@@ -2,11 +2,9 @@ pub mod standard;
 pub mod sidecar;
 pub mod complex;
 pub mod graph;
-pub mod topology;
 pub mod sampler;
 
-pub use graph::{ProcessorGraph, ProcessorNode, GraphTopology, NodeRouting, CrossfadeState, TaskPool};
-pub use topology::TopologyManager;
+pub use graph::{ProcessorGraph, ProcessorNode, GraphTopology, NodeRouting, CrossfadeState, TaskPool, TopologyManager};
 pub use sidecar::SidecarProcessor;
 pub use sampler::SamplerProcessor;
 pub use standard::{GainProcessor, BiquadProcessor, SimdBiquadProcessor, CrossfaderProcessor, SummingProcessor};
@@ -45,6 +43,15 @@ pub struct ProcessContext<'a> {
     pub is_last_sub_block: bool,
 }
 
+/// Command interface for processors to decouple from the control plane.
+pub type ProcessorCommand = control_plane::Command;
+
+/// MIDI event interface for processors to decouple from the IPC layer.
+pub type MidiEvent = ipc_layer::MidiEvent;
+
+/// Producer interface for processors to decouple from the IPC layer.
+pub type GarbageProducer = ipc_layer::Producer<Box<dyn AudioProcessor>>;
+
 /// The core trait for all audio processing nodes in the nullherz engine.
 pub trait AudioProcessor: Send {
     /// Executes audio processing for the given buffers.
@@ -55,17 +62,17 @@ pub trait AudioProcessor: Send {
     fn setup(&mut self, _config: crate::AudioConfig) {}
 
     /// Applies high-level control plane commands (parameters, play/stop).
-    fn apply_command(&mut self, _command: &control_plane::Command) {}
+    fn apply_command(&mut self, _command: &ProcessorCommand) {}
 
     /// Applies structural graph mutations to the processor (routing, swapping).
     fn apply_topology_mutation(&mut self, _mutation: TopologyMutation) {}
 
     /// Applies real-time MIDI events to the processor.
-    fn apply_midi(&mut self, _event: ipc_layer::MidiEvent) {}
+    fn apply_midi(&mut self, _event: MidiEvent) {}
 
     /// Gathers performance and signal telemetry from the processor.
     fn collect_telemetry(&self, _node_times: &mut [u64; 64], _peak_levels: &mut [f32; 64]) {}
 
     /// Configures the garbage producer used for real-time safe deallocation.
-    fn set_garbage_producer(&mut self, _producer: ipc_layer::Producer<Box<dyn AudioProcessor>>) {}
+    fn set_garbage_producer(&mut self, _producer: GarbageProducer) {}
 }
