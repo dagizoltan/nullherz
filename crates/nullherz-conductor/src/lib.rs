@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 use audio_core::{AudioEngine, ProcessorGraph};
 use nullherz_backends::{AudioBackend, AlsaBackend, ThreadedBackend};
+use nullherz_processors::ProcessorRegistry;
 use fx_runtime::SidecarManager;
 use ipc_layer::RingBuffer;
 
@@ -14,6 +15,7 @@ pub struct Timeline {
 
 pub struct Conductor {
     pub manager: SidecarManager,
+    pub registry: ProcessorRegistry,
     pub timeline: Timeline,
     pub engine_handle: Arc<Mutex<Option<AudioEngine>>>,
     pub backend: Option<Box<dyn AudioBackend>>,
@@ -36,6 +38,7 @@ impl Conductor {
     pub fn new() -> Self {
         Self {
             manager: SidecarManager::new(),
+            registry: ProcessorRegistry::new(),
             timeline: Timeline {
                 bpm: 120.0,
                 signature_num: 4,
@@ -166,20 +169,24 @@ impl Conductor {
             match cmd {
                 control_plane::Command::AddNode { processor_type_id, node_idx } => {
                     if let Some(ref mut prod) = self.topo_producer {
-                        let processor = nullherz_processors::factory::create_processor(processor_type_id, node_idx, 44100.0);
-                        let _ = prod.push(nullherz_traits::TopologyMutation::AddNode {
-                            node_idx,
-                            processor,
-                        });
+                        let p_type: nullherz_traits::ProcessorType = unsafe { std::mem::transmute(processor_type_id) };
+                        if let Some(processor) = self.registry.create(p_type, node_idx, 44100.0) {
+                            let _ = prod.push(nullherz_traits::TopologyMutation::AddNode {
+                                node_idx,
+                                processor,
+                            });
+                        }
                     }
                 }
                 control_plane::Command::SwapProcessor { node_idx, processor_type_id } => {
                     if let Some(ref mut prod) = self.topo_producer {
-                        let processor = nullherz_processors::factory::create_processor(processor_type_id, node_idx, 44100.0);
-                        let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor {
-                            node_idx,
-                            processor,
-                        });
+                        let p_type: nullherz_traits::ProcessorType = unsafe { std::mem::transmute(processor_type_id) };
+                        if let Some(processor) = self.registry.create(p_type, node_idx, 44100.0) {
+                            let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor {
+                                node_idx,
+                                processor,
+                            });
+                        }
                     }
                 }
                 control_plane::Command::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {

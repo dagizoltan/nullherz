@@ -1,13 +1,27 @@
-pub mod standard;
 pub mod sidecar;
-pub mod complex;
 pub mod sampler;
 pub mod factory;
+pub mod registry;
+pub mod gain;
+pub mod biquad;
+pub mod crossfader;
+pub mod summing;
+pub mod wavetable;
+pub mod spectral;
+pub mod modulation;
+pub mod sequencer;
 
 pub const MAX_CHANNELS: usize = 16;
 pub const MAX_NODES: usize = 64;
 
 pub use sidecar::SidecarProcessor;
 pub use sampler::SamplerProcessor;
-pub use standard::{GainProcessor, BiquadProcessor, SimdBiquadProcessor, CrossfaderProcessor, SummingProcessor};
-pub use complex::{WavetableProcessor, SpectralProcessor, ModulationProcessor, SequencerProcessor};
+pub use gain::GainProcessor;
+pub use biquad::{BiquadProcessor, SimdBiquadProcessor};
+pub use crossfader::CrossfaderProcessor;
+pub use summing::SummingProcessor;
+pub use wavetable::WavetableProcessor;
+pub use spectral::SpectralProcessor;
+pub use modulation::ModulationProcessor;
+pub use sequencer::SequencerProcessor;
+pub use registry::ProcessorRegistry;

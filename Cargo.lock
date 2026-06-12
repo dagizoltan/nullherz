@@ -2178,6 +2178,8 @@ dependencies = [
  "fx-runtime",
  "ipc-layer",
  "nullherz-backends",
+ "nullherz-conductor",
+ "nullherz-mixer",
 ]
 
 [[package]]

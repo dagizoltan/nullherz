@@ -270,6 +270,31 @@ impl SidecarSupervisor {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_supervisor_memory_quota() {
+        let mut supervisor = SidecarSupervisor::new();
+        supervisor.current_memory_usage_bytes = MAX_SIDECAR_MEMORY_BYTES - 100;
+
+        // This should fail due to quota
+        let result = supervisor.spawn_sidecar("test", "/usr/bin/true", 2);
+        match result {
+            Err(e) => assert!(e.contains("exceeds system memory quota")),
+            _ => panic!("Should have failed with memory quota error"),
+        }
+    }
+
+    #[test]
+    fn test_supervisor_initial_state() {
+        let supervisor = SidecarSupervisor::new();
+        assert_eq!(supervisor.active_sidecars.len(), 0);
+        assert_eq!(supervisor.current_memory_usage_bytes, 0);
+    }
+}
+
 impl Drop for SidecarSupervisor {
     fn drop(&mut self) {
         for handle in self.active_sidecars.iter_mut() {

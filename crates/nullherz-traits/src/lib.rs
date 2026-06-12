@@ -13,7 +13,7 @@ pub struct Transport {
 }
 
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ProcessorType {
     Biquad = 1,
     Gain = 2,

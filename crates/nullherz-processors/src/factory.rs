@@ -1,6 +1,10 @@
 use nullherz_traits::AudioProcessor;
-use crate::standard::*;
-use crate::complex::*;
+use crate::gain::*;
+use crate::biquad::*;
+use crate::crossfader::*;
+use crate::summing::*;
+use crate::wavetable::*;
+use crate::spectral::*;
 use crate::sampler::*;
 
 use nullherz_traits::ProcessorType;
