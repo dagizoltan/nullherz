@@ -2,7 +2,7 @@ use audio_core::{AudioEngine, ProcessorGraph};
 use nullherz_backends::{ThreadedBackend, AudioBackend};
 use control_plane::{TimestampedCommand};
 use ipc_layer::{RingBuffer, MpscRingBuffer};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 fn main() {
@@ -12,15 +12,14 @@ fn main() {
 
     let graph = ProcessorGraph::new();
     let engine = AudioEngine::new(cmd_buffer.clone(), None, None, None, garbage_prod, None, None, None, tel_prod, Box::new(graph));
+    let engine_handle = Arc::new(Mutex::new(Some(engine)));
 
     let mut backend = ThreadedBackend::new();
-    backend.start(engine).unwrap();
+    backend.start(engine_handle).unwrap();
 
     for i in 0..10 {
         println!("Swapping graph iteration {}", i);
-        let new_graph = Box::new(ProcessorGraph::new());
-        // In this prototype, we'd normally send a command to swap.
-        // For simplicity, we just sleep and exit.
+        let _new_graph = Box::new(ProcessorGraph::new());
         thread::sleep(std::time::Duration::from_millis(50));
     }
 

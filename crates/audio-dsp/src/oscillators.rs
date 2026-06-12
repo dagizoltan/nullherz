@@ -148,10 +148,15 @@ impl WavetableOscillator {
 
             let mut out_v = [0.0f32; 8];
             for ch in 0..8 {
-                let idx = (b_idx[ch] as i32 & 2047) as usize;
+                let idx = (b_idx[ch] & 2047) as usize;
                 let next_idx = (idx + 1) & 2047;
                 let frac = b_frac.as_array_ref()[ch];
-                out_v[ch] = self.table[idx] * (1.0 - frac) + self.table[next_idx] * frac;
+                // Safety: idx and next_idx are masked to [0, 2047], self.table is size 2048.
+                unsafe {
+                    let v1 = *self.table.get_unchecked(idx);
+                    let v2 = *self.table.get_unchecked(next_idx);
+                    out_v[ch] = v1 * (1.0 - frac) + v2 * frac;
+                }
             }
 
             for ch in 0..8 {

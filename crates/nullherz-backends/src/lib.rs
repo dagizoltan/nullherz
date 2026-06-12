@@ -10,7 +10,9 @@ pub use threaded::ThreadedBackend;
 
 use audio_core::AudioEngine;
 
+use std::sync::{Arc, Mutex};
+
 pub trait AudioBackend: Send {
-    fn start(&mut self, engine: AudioEngine) -> Result<(), String>;
-    fn stop(&mut self) -> Option<AudioEngine>;
+    fn start(&mut self, engine: Arc<Mutex<Option<audio_core::AudioEngine>>>) -> Result<(), String>;
+    fn stop(&mut self);
 }

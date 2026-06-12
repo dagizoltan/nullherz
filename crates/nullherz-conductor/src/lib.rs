@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use audio_core::{AudioEngine, ProcessorGraph};
 use nullherz_backends::{AudioBackend, AlsaBackend, ThreadedBackend};
 use fx_runtime::SidecarManager;
@@ -15,7 +15,7 @@ pub struct Timeline {
 pub struct Conductor {
     pub manager: SidecarManager,
     pub timeline: Timeline,
-    pub engine: Option<AudioEngine>,
+    pub engine_handle: Arc<Mutex<Option<AudioEngine>>>,
     pub backend: Option<Box<dyn AudioBackend>>,
     garbage_consumer: Option<ipc_layer::Consumer<Box<dyn audio_core::AudioProcessor>>>,
     overflow_garbage_consumer: Option<ipc_layer::Consumer<Box<dyn audio_core::AudioProcessor>>>,
@@ -42,7 +42,7 @@ impl Conductor {
                 signature_den: 4,
                 current_beat: 0.0,
             },
-            engine: None,
+            engine_handle: Arc::new(Mutex::new(None)),
             backend: None,
             garbage_consumer: None,
             overflow_garbage_consumer: None,
@@ -84,7 +84,7 @@ impl Conductor {
             Box::new(graph)
         );
         self.health_signal = Some(engine.health_signal.clone());
-        self.engine = Some(engine);
+        *self.engine_handle.lock().unwrap() = Some(engine);
         self.garbage_consumer = Some(garbage_cons);
         self.overflow_garbage_consumer = Some(overflow_garbage_cons);
         self.bundle_producer = Some(bundle_prod);
@@ -96,8 +96,6 @@ impl Conductor {
     }
 
     pub fn start_backend(&mut self, name: &str) -> Result<(), String> {
-        let engine = self.engine.take().ok_or("Engine not initialized")?;
-
         // Move current process to high-priority Cgroup
         let _ = ipc_layer::move_to_cgroup("nullherz", std::process::id() as i32);
 
@@ -108,14 +106,14 @@ impl Conductor {
             _ => Box::new(ThreadedBackend::new()),
         };
 
-        backend.start(engine)?;
+        backend.start(self.engine_handle.clone())?;
         self.backend = Some(backend);
         Ok(())
     }
 
     pub fn stop_backend(&mut self) {
         if let Some(mut backend) = self.backend.take() {
-            self.engine = backend.stop();
+            backend.stop();
         }
     }
 

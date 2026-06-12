@@ -52,6 +52,11 @@ pub type MidiEvent = ipc_layer::MidiEvent;
 /// Producer interface for processors to decouple from the IPC layer.
 pub type GarbageProducer = ipc_layer::Producer<Box<dyn AudioProcessor>>;
 
+/// Marker trait for real-time safe components.
+/// Types implementing this trait guarantee that their methods do not perform
+/// heap allocations, take locks, or execute blocking syscalls.
+pub trait RtSafe {}
+
 /// The core trait for all audio processing nodes in the nullherz engine.
 pub trait AudioProcessor: Send {
     /// Executes audio processing for the given buffers.

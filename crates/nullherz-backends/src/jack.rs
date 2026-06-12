@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::Mutex;
+use audio_core::AudioEngine;
 use crate::AudioBackend;
 
 pub struct JackBackend {
@@ -7,7 +10,7 @@ pub struct JackBackend {
 struct JackBackendInner {
     client: *mut std::ffi::c_void,
     ports: Vec<*mut std::ffi::c_void>,
-    engine: Option<audio_core::AudioEngine>,
+    engine_handle: Option<Arc<Mutex<Option<AudioEngine>>>>,
     lib: Option<JackLib>,
 }
 
@@ -26,7 +29,7 @@ impl JackBackend {
             inner: Box::new(JackBackendInner {
                 client: std::ptr::null_mut(),
                 ports: Vec::new(),
-                engine: None,
+                engine_handle: None,
                 lib: None,
             })
         }
@@ -73,10 +76,7 @@ impl JackLib {
     }
 }
 
-/// # Safety
-/// This is an FFI callback for JACK. 'data' must be a valid pointer to 'JackBackendInner'.
 unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_void) -> i32 {
-    // SAFETY: data is a pointer to the backend inner state provided in jack_set_process_callback.
     let backend = unsafe { &mut *(data as *mut JackBackendInner) };
     let jack = match &backend.lib {
         Some(l) => l,
@@ -86,26 +86,26 @@ unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_
     let mut out_ptrs: [*mut f32; 16] = [std::ptr::null_mut(); 16];
     let num_ports = backend.ports.len().min(16);
     for (i, out_ptr) in out_ptrs.iter_mut().enumerate().take(num_ports) {
-        // SAFETY: backend.ports[i] is a valid JACK port register and nframes is the callback length.
         *out_ptr = unsafe { (jack.jack_port_get_buffer)(backend.ports[i], nframes) } as *mut f32;
     }
 
-    if let Some(engine) = &mut backend.engine {
-        let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|i| {
-            if i < num_ports {
-                // SAFETY: JACK guarantees that the buffer returned by jack_port_get_buffer is valid for nframes.
-                unsafe { std::slice::from_raw_parts_mut(out_ptrs[i], nframes as usize) }
-            } else {
-                &mut []
-            }
-        });
-        engine.process_block(&[], &mut out_refs_storage[..num_ports], nframes as usize);
+    if let Some(ref handle) = backend.engine_handle {
+        if let Some(ref mut engine) = *handle.lock().unwrap() {
+            let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|i| {
+                if i < num_ports {
+                    unsafe { std::slice::from_raw_parts_mut(out_ptrs[i], nframes as usize) }
+                } else {
+                    &mut []
+                }
+            });
+            engine.process_block(&[], &mut out_refs_storage[..num_ports], nframes as usize);
+        }
     }
     0
 }
 
 impl AudioBackend for JackBackend {
-    fn start(&mut self, engine: audio_core::AudioEngine) -> Result<(), String> {
+    fn start(&mut self, engine_handle: Arc<Mutex<Option<AudioEngine>>>) -> Result<(), String> {
         unsafe {
             let inner = &mut *self.inner;
             if inner.lib.is_none() { inner.lib = Some(JackLib::load()?); }
@@ -118,14 +118,14 @@ impl AudioBackend for JackBackend {
             let out2 = (inner.lib.as_ref().unwrap().jack_port_register)(inner.client, c"out_2".as_ptr(), c"32 bit float mono audio".as_ptr(), 2, 0);
             inner.ports = vec![out1, out2];
 
-            inner.engine = Some(engine);
+            inner.engine_handle = Some(engine_handle);
             let ptr = inner as *mut _ as *mut _;
             (inner.lib.as_ref().unwrap().jack_set_process_callback)(inner.client, jack_process_callback, ptr);
             (inner.lib.as_ref().unwrap().jack_activate)(inner.client);
         }
         Ok(())
     }
-    fn stop(&mut self) -> Option<audio_core::AudioEngine> {
+    fn stop(&mut self) {
         unsafe {
             let inner = &mut *self.inner;
             if !inner.client.is_null() {
@@ -134,7 +134,6 @@ impl AudioBackend for JackBackend {
                 (jack.jack_client_close)(inner.client);
                 inner.client = std::ptr::null_mut();
             }
-            inner.engine.take()
         }
     }
 }

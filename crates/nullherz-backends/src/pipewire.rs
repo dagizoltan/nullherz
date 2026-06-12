@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use audio_core::AudioEngine;
 use crate::AudioBackend;
@@ -69,7 +71,7 @@ pub struct PipewireBackendInner {
     thread_loop: *mut std::ffi::c_void,
     context: *mut std::ffi::c_void,
     stream: *mut std::ffi::c_void,
-    engine: Option<AudioEngine>,
+    engine_handle: Option<Arc<Mutex<Option<AudioEngine>>>>,
     lib: Option<PwLib>,
     events: Option<Box<PwStreamEvents>>,
     listener: [u64; 8],
@@ -92,7 +94,7 @@ impl PipewireBackend {
                 thread_loop: std::ptr::null_mut(),
                 context: std::ptr::null_mut(),
                 stream: std::ptr::null_mut(),
-                engine: None,
+                engine_handle: None,
                 lib: None,
                 events: None,
                 listener: [0; 8],
@@ -250,8 +252,10 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
         }
     }
 
-    if let Some(engine) = &mut backend.engine {
-        engine.process_block(&[], &mut out_refs_storage[..num_channels], num_samples);
+    if let Some(ref handle) = backend.engine_handle {
+        if let Some(ref mut engine) = *handle.lock().unwrap() {
+            engine.process_block(&[], &mut out_refs_storage[..num_channels], num_samples);
+        }
     }
 
     unsafe { (pw.pw_stream_queue_buffer)(backend.stream, buffer); }
@@ -259,18 +263,23 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
 
 unsafe extern "C" fn pw_param_changed(_data: *mut std::ffi::c_void, id: u32, _param: *const std::ffi::c_void) {
     if id != 2 { } // SPA_PARAM_Props
-    // It's handled by PipeWire's own thread loop priority usually,
-    // or should be called once on stream activation.
 }
 
 impl AudioBackend for PipewireBackend {
-    fn start(&mut self, mut engine: AudioEngine) -> Result<(), String> {
+    fn start(&mut self, engine_handle: Arc<Mutex<Option<AudioEngine>>>) -> Result<(), String> {
         unsafe {
             let inner = &mut *self.inner;
             if inner.lib.is_none() { inner.lib = Some(PwLib::load()?); }
-            let rate = engine.target_sample_rate as u32;
-            engine.set_config(nullherz_traits::AudioConfig { sample_rate: rate as f32, block_size: 128 });
-            inner.engine = Some(engine);
+
+            let mut target_rate = 44100u32;
+            {
+                if let Some(ref mut engine) = *engine_handle.lock().unwrap() {
+                    target_rate = engine.target_sample_rate as u32;
+                    engine.set_config(nullherz_traits::AudioConfig { sample_rate: target_rate as f32, block_size: 128 });
+                }
+            }
+
+            inner.engine_handle = Some(engine_handle);
             inner.running.store(true, Ordering::SeqCst);
 
             let pw = inner.lib.as_ref().unwrap();
@@ -287,7 +296,7 @@ impl AudioBackend for PipewireBackend {
             builder.add_prop_id(SPA_FORMAT_MEDIA_TYPE, SPA_MEDIA_TYPE_AUDIO);
             builder.add_prop_id(SPA_FORMAT_MEDIA_SUBTYPE, SPA_MEDIA_SUBTYPE_RAW);
             builder.add_prop_id(SPA_FORMAT_FORMAT, SPA_AUDIO_FORMAT_F32);
-            builder.add_prop_int(SPA_FORMAT_RATE, rate);
+            builder.add_prop_int(SPA_FORMAT_RATE, target_rate);
             builder.add_prop_int(SPA_FORMAT_CHANNELS, 2);
             builder.end_object(obj_offset);
 
@@ -312,13 +321,12 @@ impl AudioBackend for PipewireBackend {
             let pw = inner.lib.as_ref().unwrap();
             (pw.pw_stream_add_listener)(inner.stream, inner.listener.as_mut_ptr() as *mut _, ev_ptr, inner_ptr);
 
-            // Use PW_STREAM_FLAG_AUTOCONNECT (1) | PW_STREAM_FLAG_MAP_BUFFERS (2)
             (pw.pw_stream_connect)(inner.stream, 1, 0xffffffff, 0x3, params.as_ptr() as *const _, 1);
             (pw.pw_thread_loop_start)(inner.thread_loop);
         }
         Ok(())
     }
-    fn stop(&mut self) -> Option<AudioEngine> {
+    fn stop(&mut self) {
         unsafe {
             let inner = &mut *self.inner;
             inner.running.store(false, Ordering::SeqCst);
@@ -339,7 +347,6 @@ impl AudioBackend for PipewireBackend {
                     inner.thread_loop = std::ptr::null_mut();
                 }
             }
-            inner.engine.take()
         }
     }
 }
