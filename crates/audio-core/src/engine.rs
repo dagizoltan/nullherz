@@ -269,6 +269,9 @@ impl AudioEngine {
         });
     }
 
+    /// Handles a single command in the real-time thread.
+    /// Structural mutations (AddNode, SwapProcessor) are ignored here as they are
+    /// handled by the non-RT Conductor and sent via the `topology_consumer`.
     fn handle_single_command(&mut self, graph: &mut dyn AudioProcessor, cmd: &control_plane::Command) {
         match cmd {
             control_plane::Command::Play => {
@@ -278,12 +281,6 @@ impl AudioEngine {
             control_plane::Command::Stop => {
                 self.transport.is_playing = false;
                 graph.apply_command(cmd);
-            }
-            control_plane::Command::AddNode { .. } => {
-                // Decoupled: AddNode is handled by the non-RT control plane (Conductor).
-            }
-            control_plane::Command::SwapProcessor { .. } => {
-                // Decoupled: SwapProcessor is handled by the non-RT control plane (Conductor).
             }
             control_plane::Command::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
                 graph.apply_topology_mutation(nullherz_traits::TopologyMutation::UpdateEdge {
@@ -311,6 +308,9 @@ impl AudioEngine {
                         target_id: node_id, param_id, value, ramp_duration_samples: 0,
                     });
                 }
+            }
+            control_plane::Command::AddNode { .. } | control_plane::Command::SwapProcessor { .. } => {
+                // Ignore structural mutations in RT command loop.
             }
             _ => { graph.apply_command(cmd); }
         }

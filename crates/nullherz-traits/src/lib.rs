@@ -12,6 +12,19 @@ pub struct Transport {
     pub sample_rate: f32,
 }
 
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum ProcessorType {
+    Biquad = 1,
+    Gain = 2,
+    Sampler = 10,
+    BiquadEQ = 11,
+    Crossfader = 20,
+    Summing = 30,
+    Spectral = 40,
+    Wavetable = 50,
+}
+
 pub enum TopologyMutation {
     UpdateEdge {
         node_idx: u32,

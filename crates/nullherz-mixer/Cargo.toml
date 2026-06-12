@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 audio-core = { path = "../audio-core" }
+nullherz-traits = { path = "../nullherz-traits" }
 control-plane = { path = "../control-plane" }

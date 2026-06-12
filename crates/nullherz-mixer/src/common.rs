@@ -1,0 +1,10 @@
+pub const BUF_MASTER_L: usize = 0;
+pub const BUF_MASTER_R: usize = 1;
+pub const BUF_CUE_L: usize = 2;
+pub const BUF_CUE_R: usize = 3;
+pub const BUF_BROADCAST_L: usize = 4;
+pub const BUF_BROADCAST_R: usize = 5;
+pub const BUF_DJ_A_L: usize = 8;
+pub const BUF_DJ_A_R: usize = 9;
+pub const BUF_DJ_B_L: usize = 10;
+pub const BUF_DJ_B_R: usize = 11;
