@@ -91,6 +91,65 @@ mod tests {
                 engine.process_block(&[], &mut out_refs, 128);
             }
         }
+
+        #[test]
+        fn test_random_dag_execution(
+            // Generate a random adjacency matrix for a DAG (upper triangular to ensure no cycles)
+            edges in prop::collection::vec(
+                (0..64usize, 0..64usize),
+                1..100
+            ).prop_map(|e| {
+                e.into_iter()
+                 .filter(|(src, dst)| src < dst) // Ensure acyclic
+                 .collect::<Vec<_>>()
+            })
+        ) {
+            let (topo_prod, topo_cons) = RingBuffer::<TopologyMutation>::new(256).split();
+            let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn AudioProcessor>>::new(1024).split();
+            let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
+            let cmd_buffer = Arc::new(MpscRingBuffer::<TimestampedCommand>::new(256));
+
+            let graph = ProcessorGraph::new();
+            let mut engine = AudioEngine::new(cmd_buffer.clone(), None, None, Some(topo_cons), garbage_prod, None, None, None, tel_prod, Box::new(graph));
+
+            let mut topo_prod = topo_prod;
+            // Add nodes first
+            for i in 0..64 {
+                let _ = topo_prod.push(TopologyMutation::AddNode {
+                    node_idx: i as u32,
+                    processor: Box::new(crate::processors::graph::DummyProcessor),
+                });
+            }
+
+            // Apply edges
+            for (src, dst) in edges {
+                // For simplicity, map src output 0 to dst input 0
+                let _ = topo_prod.push(TopologyMutation::UpdateEdge {
+                    node_idx: dst as u32,
+                    input_idx: 0,
+                    new_buffer_idx: src as u32,
+                });
+                let _ = topo_prod.push(TopologyMutation::UpdateOutputEdge {
+                    node_idx: src as u32,
+                    output_idx: 0,
+                    new_buffer_idx: src as u32,
+                });
+            }
+
+            let _ = cmd_buffer.push(TimestampedCommand {
+                timestamp_samples: 0,
+                command: Command::CommitTopology,
+            });
+
+            let mut outputs = [[0.0f32; 128], [0.0f32; 128]];
+            let (ch1, ch2) = outputs.split_at_mut(1);
+            let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
+
+            // Process a few blocks to ensure it doesn't crash or hang
+            for _ in 0..5 {
+                engine.process_block(&[], &mut out_refs, 128);
+            }
+        }
     }
 
     #[test]

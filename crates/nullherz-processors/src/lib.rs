@@ -2,6 +2,7 @@ pub mod standard;
 pub mod sidecar;
 pub mod complex;
 pub mod sampler;
+pub mod factory;
 
 pub const MAX_CHANNELS: usize = 16;
 pub const MAX_NODES: usize = 64;

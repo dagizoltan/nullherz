@@ -54,6 +54,9 @@ impl GraphExecutor {
         telemetry_node_times_cycles: &[std::sync::atomic::AtomicU64; crate::MAX_NODES],
     ) {
         let stage = &topo.stages[s_idx][..topo.stage_counts[s_idx]];
+        // SAFETY: buffers_ptr and x_buffers_ptr are used to reconstruct disjoint slices in worker threads.
+        // The topological scheduler (GraphCompiler) guarantees that no two nodes in the same stage
+        // read from or write to the same physical buffer in a way that creates hazards.
         let buffers_ptr = buffers.as_mut_ptr();
         let x_buffers_ptr = crossfade_buffers.as_mut_ptr();
 
@@ -82,6 +85,9 @@ impl GraphExecutor {
                     *resolved_out = topo.virtual_to_physical[v_idx];
                 }
 
+                // SAFETY: We pass a raw pointer to the ProcessorNode. The lifetime of nodes is guaranteed
+                // for the duration of the engine cycle, and the stage fencing in TaskPool ensures
+                // exclusive access to the processor.
                 let _ = pool.worker_producers[worker_idx].push(Job {
                     node_ptr: &nodes[n_idx] as *const _,
                     num_samples,

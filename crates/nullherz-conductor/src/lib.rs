@@ -158,4 +158,10 @@ impl Conductor {
     pub fn quantize_beat(&self, beat: f64, grid: f64) -> f64 {
         (beat / grid).ceil() * grid
     }
+
+    pub fn apply_mixer_commands(&mut self, commands: Vec<control_plane::Command>) {
+        if let Some(ref mut prod) = self.bundle_producer {
+            let _ = prod.push(commands);
+        }
+    }
 }
