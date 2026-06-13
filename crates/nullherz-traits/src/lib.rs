@@ -98,6 +98,51 @@ pub const MAX_BLOCK_SIZE: usize = 256;
 pub const MAX_NODES: usize = 64;
 pub const MAX_CHANNELS: usize = 16;
 
+pub struct SubBlock {
+    pub offset: usize,
+    pub len: usize,
+    pub is_last: bool,
+}
+
+pub struct SubBlockIterator {
+    pub total_len: usize,
+    pub max_block_size: usize,
+    pub current_offset: usize,
+}
+
+impl SubBlockIterator {
+    pub fn new(total_len: usize, max_block_size: usize) -> Self {
+        Self { total_len, max_block_size, current_offset: 0 }
+    }
+
+    pub fn next_chunk(&mut self) -> Option<SubBlock> {
+        if self.current_offset >= self.total_len { return None; }
+        let remaining = self.total_len - self.current_offset;
+        let len = remaining.min(self.max_block_size);
+        let block = SubBlock {
+            offset: self.current_offset,
+            len,
+            is_last: (self.current_offset + len) == self.total_len,
+        };
+        self.current_offset += len;
+        Some(block)
+    }
+
+    pub fn next_chunk_up_to(&mut self, end_offset: usize) -> Option<SubBlock> {
+        let end_limit = end_offset.min(self.total_len);
+        if self.current_offset >= end_limit { return None; }
+        let remaining = end_limit - self.current_offset;
+        let len = remaining.min(self.max_block_size);
+        let block = SubBlock {
+            offset: self.current_offset,
+            len,
+            is_last: (self.current_offset + len) == self.total_len,
+        };
+        self.current_offset += len;
+        Some(block)
+    }
+}
+
 /// A SIMD-aligned audio block.
 #[repr(C, align(64))]
 #[derive(Clone, Copy)]
