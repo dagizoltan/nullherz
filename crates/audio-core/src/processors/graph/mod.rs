@@ -28,7 +28,7 @@ pub struct ProcessorGraph {
     pub(crate) needs_commit: bool,
 
     pub(crate) telemetry: Arc<GraphTelemetry>,
-    pub(crate) garbage_producer: Option<Producer<Box<dyn AudioProcessor>>>,
+    pub(crate) garbage_producer: Option<Box<dyn nullherz_traits::GarbageProducer>>,
 }
 
 impl ProcessorGraph {
@@ -229,17 +229,17 @@ impl AudioProcessor for ProcessorGraph {
                 let n_idx = node_idx as usize;
                 if n_idx < self.node_count {
                     let node = &self.nodes[n_idx];
-                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(prod.clone()); }
+                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
                     let old_proc = unsafe { std::ptr::replace(node.processor.get(), processor) };
                     if let Some(ref mut prod) = self.garbage_producer {
-                        if let Err(leaked) = prod.push(old_proc) { std::mem::forget(leaked); }
+                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
                     } else { std::mem::forget(old_proc); }
                 }
             }
             TopologyMutation::AddNode { node_idx: _, mut processor } => {
-                if self.node_count < 64 {
+                if self.node_count < crate::MAX_NODES {
                     let idx = self.node_count;
-                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(prod.clone()); }
+                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
                     unsafe { *self.nodes[idx].processor.get() = processor; }
                     self.node_count += 1;
                     let topo = self.inactive_topology_mut();
@@ -262,7 +262,7 @@ impl AudioProcessor for ProcessorGraph {
         for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_midi(event); } }
     }
 
-    fn set_garbage_producer(&mut self, producer: Producer<Box<dyn AudioProcessor>>) {
+    fn set_garbage_producer(&mut self, producer: Box<dyn nullherz_traits::GarbageProducer>) {
         self.garbage_producer = Some(producer);
     }
     fn collect_telemetry(&self, node_times: &mut [u64; crate::MAX_NODES], peak_levels: &mut [f32; crate::MAX_NODES]) {
@@ -346,7 +346,7 @@ mod tests {
     fn test_graph_topology_stability() {
         let mut graph = ProcessorGraph::new();
         for i in 0..10 {
-            graph.add_node(Box::new(IdentityProcessor), vec![(i + 1) % 64], vec![i % 64]);
+            graph.add_node(Box::new(IdentityProcessor), vec![(i + 1) % crate::MAX_NODES], vec![i % crate::MAX_NODES]);
         }
         let active_idx = graph.active_topo_idx.load(Ordering::Acquire);
         let topo = &graph.topologies[active_idx];

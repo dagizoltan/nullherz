@@ -25,23 +25,27 @@ impl AudioProcessor for BiquadProcessor {
         }
     }
 
+    fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
+        let mut coeffs = self.filters[0].target_coeffs;
+        match param_id {
+            0 => coeffs.b0 = value,
+            1 => coeffs.b1 = value,
+            2 => coeffs.b2 = value,
+            3 => coeffs.a1 = value,
+            4 => coeffs.a2 = value,
+            _ => return,
+        }
+        for f in self.filters.iter_mut() {
+            f.set_coeffs_ramped(coeffs, ramp_duration_samples);
+        }
+    }
+
     fn apply_command(&mut self, command: &control_plane::Command) {
         match *command {
             control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
                 if target_id == self.id =>
             {
-                let mut coeffs = self.filters[0].target_coeffs;
-                match param_id {
-                    0 => coeffs.b0 = value,
-                    1 => coeffs.b1 = value,
-                    2 => coeffs.b2 = value,
-                    3 => coeffs.a1 = value,
-                    4 => coeffs.a2 = value,
-                    _ => {}
-                }
-                for f in self.filters.iter_mut() {
-                    f.set_coeffs_ramped(coeffs, ramp_duration_samples);
-                }
+                self.set_parameter(param_id, value, ramp_duration_samples);
             }
             _ => {}
         }
@@ -92,21 +96,25 @@ impl AudioProcessor for SimdBiquadProcessor {
         }
     }
 
+    fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
+        let mut coeffs = self.inner.coeffs;
+        match param_id {
+            0 => coeffs.b0 = value,
+            1 => coeffs.b1 = value,
+            2 => coeffs.b2 = value,
+            3 => coeffs.a1 = value,
+            4 => coeffs.a2 = value,
+            _ => return,
+        }
+        self.inner.coeffs = coeffs;
+    }
+
     fn apply_command(&mut self, command: &control_plane::Command) {
         match *command {
-            control_plane::Command::SetParam { target_id, param_id, value, .. }
+            control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
                 if target_id == self.id =>
             {
-                let mut coeffs = self.inner.coeffs;
-                match param_id {
-                    0 => coeffs.b0 = value,
-                    1 => coeffs.b1 = value,
-                    2 => coeffs.b2 = value,
-                    3 => coeffs.a1 = value,
-                    4 => coeffs.a2 = value,
-                    _ => {}
-                }
-                self.inner.coeffs = coeffs;
+                self.set_parameter(param_id, value, ramp_duration_samples);
             }
             _ => {}
         }

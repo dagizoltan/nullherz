@@ -65,6 +65,11 @@ impl CommandDispatcher {
             let node_id = data[i * 3];
             let param_id = data[i * 3 + 1] as u32;
             let value = f32::from_bits(data[i * 3 + 2] as u32);
+
+            // Optimization: if the graph is a ProcessorGraph, it might want to handle it specially.
+            // But for uniform trait access, we use set_parameter if it were targeted at the graph itself.
+            // Actually, SetParam usually targets individual nodes via target_id.
+            // So we still need to pass it to the graph to dispatch.
             graph.apply_command(&control_plane::Command::SetParam {
                 target_id: node_id, param_id, value, ramp_duration_samples: 0,
             });

@@ -23,14 +23,20 @@ impl AudioProcessor for GainProcessor {
             gain.process_block(inputs[i], outputs[i]);
         }
     }
+    fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
+        if param_id == 0 {
+            for g in self.gains.iter_mut() {
+                g.set_gain(value, ramp_duration_samples);
+            }
+        }
+    }
+
     fn apply_command(&mut self, command: &control_plane::Command) {
         match *command {
             control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
-                if target_id == self.id && param_id == 0 =>
+                if target_id == self.id =>
             {
-                for g in self.gains.iter_mut() {
-                    g.set_gain(value, ramp_duration_samples);
-                }
+                self.set_parameter(param_id, value, ramp_duration_samples);
             }
             _ => {}
         }
