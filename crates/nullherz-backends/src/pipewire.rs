@@ -253,6 +253,7 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
     }
 
     if let Some(ref handle) = backend.engine_handle {
+        #[allow(clippy::collapsible_if)]
         if let Some(ref mut engine) = *handle.lock().unwrap() {
             engine.process_block(&[], &mut out_refs_storage[..num_channels], num_samples);
         }

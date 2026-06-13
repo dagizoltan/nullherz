@@ -1,7 +1,8 @@
 use std::process::{Command, Child};
 use std::sync::Arc;
 use ipc_layer::{SharedMemory, ShmRingBuffer, ShmSignal, EventFd, AudioBlock, move_to_cgroup};
-use audio_core::{SidecarProcessor, MAX_CHANNELS};
+use audio_core::{MAX_CHANNELS};
+use nullherz_processors::SidecarProcessor;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SidecarStatus {
@@ -266,6 +267,31 @@ impl SidecarSupervisor {
         if let Some(handle) = self.active_sidecars.get_mut(sidecar_idx) {
             handle.last_heartbeat = std::time::Instant::now();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_supervisor_memory_quota() {
+        let mut supervisor = SidecarSupervisor::new();
+        supervisor.current_memory_usage_bytes = MAX_SIDECAR_MEMORY_BYTES - 100;
+
+        // This should fail due to quota
+        let result = supervisor.spawn_sidecar("test", "/usr/bin/true", 2);
+        match result {
+            Err(e) => assert!(e.contains("exceeds system memory quota")),
+            _ => panic!("Should have failed with memory quota error"),
+        }
+    }
+
+    #[test]
+    fn test_supervisor_initial_state() {
+        let supervisor = SidecarSupervisor::new();
+        assert_eq!(supervisor.active_sidecars.len(), 0);
+        assert_eq!(supervisor.current_memory_usage_bytes, 0);
     }
 }
 

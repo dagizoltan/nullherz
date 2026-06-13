@@ -177,6 +177,67 @@ impl WavetableOscillator {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_wavetable_frequency_accuracy() {
+        let sample_rate = 44100.0;
+        let freq = 441.0; // 100 samples per cycle
+        let mut osc = WavetableOscillator::new(sample_rate);
+        osc.set_frequency(0, freq);
+
+        let mut output = vec![0.0f32; 1000];
+        let fm = vec![0.0f32; 1000];
+        let pm = vec![0.0f32; 1000];
+        osc.process_scalar(0, &fm, &pm, &mut output);
+
+        // At 441Hz and 44100Hz SR, we expect a zero crossing every 50 samples
+        // or a full cycle every 100 samples.
+        // Sine table starts at 0.0
+        assert!(output[0].abs() < 1e-4);
+        // After 100 samples, should be back to ~0.0
+        assert!(output[100].abs() < 1e-2);
+        // Peak at sample 25
+        assert!(output[25] > 0.99);
+    }
+
+    #[test]
+    fn test_wavetable_simd_vs_scalar() {
+        let sample_rate = 48000.0;
+        let mut osc_simd = WavetableOscillator::new(sample_rate);
+        let mut osc_scalar = WavetableOscillator::new(sample_rate);
+
+        for ch in 0..8 {
+            osc_simd.set_frequency(ch, 100.0 * (ch + 1) as f32);
+            osc_scalar.set_frequency(ch, 100.0 * (ch + 1) as f32);
+        }
+
+        let len = 128;
+        let fm_data = vec![0.01f32; len];
+        let pm_data = vec![0.02f32; len];
+
+        let fm_ptrs: [*const f32; 8] = [fm_data.as_ptr(); 8];
+        let pm_ptrs: [*const f32; 8] = [pm_data.as_ptr(); 8];
+        let mut outputs_simd = vec![vec![0.0f32; len]; 8];
+        let mut out_ptrs: [*mut f32; 8] = [
+            outputs_simd[0].as_mut_ptr(), outputs_simd[1].as_mut_ptr(), outputs_simd[2].as_mut_ptr(), outputs_simd[3].as_mut_ptr(),
+            outputs_simd[4].as_mut_ptr(), outputs_simd[5].as_mut_ptr(), outputs_simd[6].as_mut_ptr(), outputs_simd[7].as_mut_ptr(),
+        ];
+
+        osc_simd.process_8_channels(fm_ptrs, pm_ptrs, out_ptrs, len);
+
+        for ch in 0..8 {
+            let mut out_scalar = vec![0.0f32; len];
+            osc_scalar.process_scalar(ch, &fm_data, &pm_data, &mut out_scalar);
+            for i in 0..len {
+                assert!((outputs_simd[ch][i] - out_scalar[i]).abs() < 1e-5);
+            }
+        }
+    }
+}
+
 /// A high-performance sampler voice with Lagrange interpolation.
 /// Shared ownership of the sample buffer is managed via Arc to prevent dangling pointers.
 #[derive(Debug, Clone)]

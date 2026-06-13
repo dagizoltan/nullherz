@@ -23,6 +23,12 @@ pub struct Job {
 
 unsafe impl Send for Job {}
 
+impl nullherz_traits::ParallelExecutor for TaskPool {
+    fn as_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
+
 pub struct TaskPool {
     workers: Vec<thread::JoinHandle<()>>,
     pub(crate) worker_producers: Vec<Producer<Job>>,

@@ -1365,6 +1365,7 @@ dependencies = [
  "control-plane",
  "ipc-layer",
  "libc",
+ "nullherz-processors",
 ]
 
 [[package]]
@@ -2177,6 +2178,8 @@ dependencies = [
  "fx-runtime",
  "ipc-layer",
  "nullherz-backends",
+ "nullherz-conductor",
+ "nullherz-mixer",
 ]
 
 [[package]]
@@ -2203,6 +2206,8 @@ dependencies = [
  "nullherz-backends",
  "nullherz-gateway",
  "nullherz-mixer",
+ "nullherz-processors",
+ "nullherz-traits",
  "serde_json",
  "tokio",
 ]
@@ -2255,6 +2260,8 @@ version = "0.1.0"
 dependencies = [
  "audio-core",
  "control-plane",
+ "nullherz-traits",
+ "proptest",
 ]
 
 [[package]]
@@ -2285,6 +2292,7 @@ dependencies = [
  "control-plane",
  "ipc-layer",
  "libc",
+ "serde",
 ]
 
 [[package]]

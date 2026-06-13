@@ -156,34 +156,7 @@ impl ProcessorGraph {
             }
         }
 
-        for n_idx in 0..topo.node_count.min(crate::MAX_NODES) {
-            let routing = &topo.routing[n_idx];
-            let mut node_peak = if context.sub_block_offset == 0 { 0.0f32 } else { f32::from_bits(self.telemetry.peak_levels[n_idx].load(Ordering::Relaxed)) };
-
-            for o_idx in 0..routing.output_count {
-                let v_out = routing.output_indices.get(o_idx).copied().unwrap_or(0).min(crate::MAX_NODES - 1);
-                let p_idx = topo.virtual_to_physical.get(v_out).copied().unwrap_or(0).min(crate::MAX_NODES - 1);
-                let data = &self.buffers[p_idx].data[offset..offset + num_samples];
-
-                use wide::*;
-                let mut channel_peak_v = f32x8::ZERO;
-                let mut i = 0;
-                while i + 8 <= data.len() {
-                    let v = f32x8::new(data[i..i+8].try_into().unwrap());
-                    channel_peak_v = channel_peak_v.max(v.abs());
-                    i += 8;
-                }
-                let arr: [f32; 8] = channel_peak_v.into();
-                let mut channel_peak = arr.iter().fold(0.0f32, |m, &x| m.max(x));
-                while i < data.len() {
-                    let abs = data[i].abs();
-                    if abs > channel_peak { channel_peak = abs; }
-                    i += 1;
-                }
-                if channel_peak > node_peak { node_peak = channel_peak; }
-            }
-            self.telemetry.peak_levels[n_idx].store(node_peak.to_bits(), Ordering::Relaxed);
-        }
+        self.telemetry.update_peak_levels(topo, &self.buffers, offset, num_samples);
     }
 
     pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
@@ -382,6 +355,29 @@ mod tests {
             }
         }
         assert!(GraphCompiler::verify_no_hazards(&graph.topologies[active_idx]).is_ok());
+    }
+
+    #[test]
+    fn test_graph_parallel_execution_consistency() {
+        let mut graph = ProcessorGraph::new();
+        // Setup a simple graph: Node 0 -> Node 1
+        graph.add_node(Box::new(IdentityProcessor), vec![10], vec![11]);
+        graph.add_node(Box::new(IdentityProcessor), vec![11], vec![0]);
+
+        let mut pool = TaskPool::new(2);
+        let mut input_data = [0.0f32; 128];
+        for i in 0..128 { input_data[i] = i as f32; }
+        graph.buffers[10].data[..128].copy_from_slice(&input_data);
+
+        let mut out_data = [0.0f32; 128];
+        let mut outputs = [&mut out_data[..]];
+        let mut context = ProcessContext { transport: None, sub_block_offset: 0, is_last_sub_block: true };
+
+        graph.process_parallel(&[], &mut outputs, &mut context, Some(&mut pool));
+
+        for i in 0..128 {
+            assert_eq!(out_data[i], i as f32);
+        }
     }
 
     #[test]

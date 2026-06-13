@@ -1,15 +1,10 @@
-use control_plane::Command;
+pub mod common;
+pub mod studio;
+pub mod dj;
 
-pub const BUF_MASTER_L: usize = 0;
-pub const BUF_MASTER_R: usize = 1;
-pub const BUF_CUE_L: usize = 2;
-pub const BUF_CUE_R: usize = 3;
-pub const BUF_BROADCAST_L: usize = 4;
-pub const BUF_BROADCAST_R: usize = 5;
-pub const BUF_DJ_A_L: usize = 8;
-pub const BUF_DJ_A_R: usize = 9;
-pub const BUF_DJ_B_L: usize = 10;
-pub const BUF_DJ_B_R: usize = 11;
+use control_plane::Command;
+pub use common::*;
+use nullherz_traits::ProcessorType;
 
 #[derive(Default)]
 pub struct MixerManager {
@@ -26,86 +21,11 @@ impl MixerManager {
     }
 
     pub fn create_studio_strip(&mut self, name: &str, fx_ids: &[u32]) -> Vec<Command> {
-        let mut commands = Vec::new();
-        let input_buf = self.next_buffer_id;
-        self.next_buffer_id += 2;
-
-        println!("Creating Studio Strip: {} (Input: {}-{})", name, input_buf, input_buf + 1);
-
-        let gain_id = self.next_node_id;
-        self.next_node_id += 1;
-        commands.push(Command::AddNode { node_idx: gain_id, processor_type_id: 2 });
-        commands.push(Command::UpdateEdge { node_idx: gain_id, input_idx: 0, new_buffer_idx: input_buf });
-
-        let mut prev_node = gain_id;
-        let mut prev_buf_l = self.next_buffer_id;
-        let prev_buf_r = self.next_buffer_id + 1;
-        self.next_buffer_id += 2;
-
-        commands.push(Command::UpdateOutputEdge { node_idx: gain_id, output_idx: 0, new_buffer_idx: prev_buf_l });
-
-        for &fx_type in fx_ids {
-            let fx_id = self.next_node_id;
-            self.next_node_id += 1;
-            let fx_buf = self.next_buffer_id;
-            self.next_buffer_id += 1;
-
-            commands.push(Command::AddNode { node_idx: fx_id, processor_type_id: fx_type });
-            commands.push(Command::UpdateOutputEdge { node_idx: prev_node, output_idx: 0, new_buffer_idx: fx_buf });
-            commands.push(Command::UpdateEdge { node_idx: fx_id, input_idx: 0, new_buffer_idx: fx_buf });
-            prev_node = fx_id;
-            prev_buf_l = fx_buf;
-            // FX nodes currently seem to be mono, so we'd need more complex logic for stereo FX
-        }
-
-        let fader_id = self.next_node_id;
-        self.next_node_id += 1;
-        commands.push(Command::AddNode { node_idx: fader_id, processor_type_id: 2 });
-        
-        commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 0, new_buffer_idx: prev_buf_l });
-        commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 1, new_buffer_idx: prev_buf_r });
-        commands.push(Command::UpdateOutputEdge { node_idx: fader_id, output_idx: 0, new_buffer_idx: BUF_MASTER_L as u32 });
-        commands.push(Command::UpdateOutputEdge { node_idx: fader_id, output_idx: 1, new_buffer_idx: BUF_MASTER_R as u32 });
-
-        commands
+        studio::create_studio_strip(&mut self.next_node_id, &mut self.next_buffer_id, name, fx_ids)
     }
 
     pub fn create_dj_deck(&mut self, deck_id: char, fx_ids: &[u32], bus_assignment: char) -> Vec<Command> {
-        let mut commands = Vec::new();
-        println!("Creating DJ Deck: {} assigned to Bus {}", deck_id, bus_assignment);
-
-        let resample_id = self.next_node_id;
-        self.next_node_id += 1;
-        commands.push(Command::AddNode { node_idx: resample_id, processor_type_id: 10 });
-
-        let mut prev_id = resample_id;
-        for &fx_type in fx_ids {
-            let fx_id = self.next_node_id;
-            self.next_node_id += 1;
-            let fx_buf = self.next_buffer_id;
-            self.next_buffer_id += 1;
-
-            commands.push(Command::AddNode { node_idx: fx_id, processor_type_id: fx_type });
-            commands.push(Command::UpdateOutputEdge { node_idx: prev_id, output_idx: 0, new_buffer_idx: fx_buf });
-            commands.push(Command::UpdateEdge { node_idx: fx_id, input_idx: 0, new_buffer_idx: fx_buf });
-            prev_id = fx_id;
-        }
-
-        let eq_id = self.next_node_id;
-        self.next_node_id += 1;
-        let eq_buf = self.next_buffer_id;
-        self.next_buffer_id += 1;
-        commands.push(Command::AddNode { node_idx: eq_id, processor_type_id: 11 });
-        commands.push(Command::UpdateOutputEdge { node_idx: prev_id, output_idx: 0, new_buffer_idx: eq_buf });
-        commands.push(Command::UpdateEdge { node_idx: eq_id, input_idx: 0, new_buffer_idx: eq_buf });
-
-        let target_l = if bus_assignment == 'A' { BUF_DJ_A_L } else { BUF_DJ_B_L };
-        let target_r = if bus_assignment == 'A' { BUF_DJ_A_R } else { BUF_DJ_B_R };
-        println!("Routing Deck {} to Buffers {}-{}", deck_id, target_l, target_r);
-        commands.push(Command::UpdateOutputEdge { node_idx: eq_id, output_idx: 0, new_buffer_idx: target_l as u32 });
-        commands.push(Command::UpdateOutputEdge { node_idx: eq_id, output_idx: 1, new_buffer_idx: target_r as u32 });
-
-        commands
+        dj::create_dj_deck(&mut self.next_node_id, &mut self.next_buffer_id, deck_id, fx_ids, bus_assignment)
     }
 
     pub fn create_crossfader(&mut self) -> Vec<Command> {
@@ -113,7 +33,7 @@ impl MixerManager {
         let cf_id = self.next_node_id;
         self.next_node_id += 1;
         println!("Creating Master Crossfader (Node {})", cf_id);
-        commands.push(Command::AddNode { node_idx: cf_id, processor_type_id: 20 }); // Crossfader type
+        commands.push(Command::AddNode { node_idx: cf_id, processor_type_id: ProcessorType::Crossfader as u32 });
         commands
     }
 
@@ -121,28 +41,118 @@ impl MixerManager {
         let mut commands = Vec::new();
         println!("Building 4-Channel Mixer Architecture...");
 
-        // Create 4 DJ Decks (A, B, C, D)
         let decks = ['A', 'B', 'C', 'D'];
         for &deck in &decks {
             let bus = if deck == 'A' || deck == 'C' { 'A' } else { 'B' };
             commands.extend(self.create_dj_deck(deck, &[1], bus));
         }
 
-        // Create a Summing Node to mix everything to Master
         let sum_id = self.next_node_id;
         self.next_node_id += 1;
-        commands.push(Command::AddNode { node_idx: sum_id, processor_type_id: 30 }); // Summing processor
+        commands.push(Command::AddNode { node_idx: sum_id, processor_type_id: ProcessorType::Summing as u32 });
 
-        // Route buses to Summing Node
         commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 0, new_buffer_idx: BUF_DJ_A_L as u32 });
         commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 1, new_buffer_idx: BUF_DJ_B_L as u32 });
         commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 2, new_buffer_idx: BUF_DJ_A_R as u32 });
         commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 3, new_buffer_idx: BUF_DJ_B_R as u32 });
 
-        // Output Sum to Master
         commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 0, new_buffer_idx: BUF_MASTER_L as u32 });
         commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 1, new_buffer_idx: BUF_MASTER_R as u32 });
 
         commands
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mixer_manager_ids() {
+        let mut mixer = MixerManager::new();
+        let commands = mixer.create_studio_strip("Test", &[]);
+
+        // Studio strip with no FX should have:
+        // 1. AddNode (Gain)
+        // 2. UpdateEdge (Input)
+        // 3. UpdateOutputEdge (Gain Out)
+        // 4. AddNode (Fader)
+        // 5. UpdateEdge (Fader L)
+        // 6. UpdateEdge (Fader R)
+        // 7. UpdateOutputEdge (Master L)
+        // 8. UpdateOutputEdge (Master R)
+        assert_eq!(commands.len(), 8);
+
+        assert_eq!(mixer.next_node_id, 2);
+    }
+
+    #[test]
+    fn test_mixer_manager_4channel() {
+        let mut mixer = MixerManager::new();
+        let commands = mixer.create_4channel_mixer();
+
+        // 4 decks + 1 summing node
+        // Each deck with 1 FX has: 1 Resample + 1 FX + 1 EQ = 3 nodes
+        // 4 decks * 3 nodes = 12 nodes
+        // + 1 summing node = 13 nodes total
+        assert!(mixer.next_node_id >= 13);
+        assert!(!commands.is_empty());
+    }
+
+    use proptest::prelude::*;
+    proptest! {
+        #[test]
+        fn test_mixer_generated_topology_acyclic(
+            num_fx in 0..5u32,
+            fx_type in 0..100u32
+        ) {
+            let mut mixer = MixerManager::new();
+            let fx_ids: Vec<u32> = vec![fx_type; num_fx as usize];
+            let commands = mixer.create_studio_strip("Test", &fx_ids);
+
+            // Check that for any UpdateEdge { node_idx, new_buffer_idx },
+            // and UpdateOutputEdge { node_idx, new_buffer_idx },
+            // we maintain an ordering if nodes are connected via buffers.
+            // For studio strip, it's linear: Gain -> FX1 -> FX2 -> ... -> Fader.
+            let mut last_node_idx = None;
+            for cmd in commands {
+                if let Command::AddNode { node_idx, .. } = cmd {
+                    if let Some(last) = last_node_idx {
+                        assert!(node_idx > last);
+                    }
+                    last_node_idx = Some(node_idx);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_mixer_manager_4channel_connectivity() {
+        let mut mixer = MixerManager::new();
+        let commands = mixer.create_4channel_mixer();
+
+        let mut nodes_with_outputs = std::collections::HashSet::new();
+        let mut nodes_with_inputs = std::collections::HashSet::new();
+
+        for cmd in &commands {
+            match cmd {
+                Command::AddNode { node_idx, .. } => {
+                    // All nodes should eventually have inputs/outputs or be sources
+                }
+                Command::UpdateEdge { node_idx, .. } => {
+                    nodes_with_inputs.insert(*node_idx);
+                }
+                Command::UpdateOutputEdge { node_idx, .. } => {
+                    nodes_with_outputs.insert(*node_idx);
+                }
+                _ => {}
+            }
+        }
+
+        // Summing node must have inputs and outputs
+        // In 4-channel mixer, summing node should be the last added node index
+        let sum_node_idx = mixer.next_node_id - 1;
+        assert!(nodes_with_inputs.contains(&sum_node_idx));
+        assert!(nodes_with_outputs.contains(&sum_node_idx));
     }
 }

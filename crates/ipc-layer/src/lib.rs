@@ -542,6 +542,50 @@ mod tests {
     }
 
     #[test]
+    fn test_mpsc_stress() {
+        let buffer = Arc::new(MpscRingBuffer::new(1024));
+        let num_producers = 4;
+        let items_per_producer = 1000;
+        let mut handles = Vec::new();
+
+        for p in 0..num_producers {
+            let buf = buffer.clone();
+            handles.push(std::thread::spawn(move || {
+                for i in 0..items_per_producer {
+                    while buf.push(p * 10000 + i).is_err() {
+                        std::hint::spin_loop();
+                    }
+                }
+            }));
+        }
+
+        let mut counts = vec![0; num_producers];
+        let mut received = 0;
+        while received < num_producers * items_per_producer {
+            if let Some(val) = buffer.pop() {
+                let producer = val / 10000;
+                counts[producer] += 1;
+                received += 1;
+            }
+        }
+
+        for h in handles { h.join().unwrap(); }
+        for count in counts {
+            assert_eq!(count, items_per_producer);
+        }
+    }
+
+    #[test]
+    fn test_shm_ring_buffer_alignment_and_offset() {
+        // Verify that different capacities result in correct layout sizes and alignment
+        for &capacity in &[2, 4, 8, 16, 32] {
+            let (layout, _) = ShmRingBuffer::<AudioBlock>::layout(capacity);
+            assert!(layout.size() > capacity * std::mem::size_of::<AudioBlock>());
+            assert_eq!(layout.align(), 64);
+        }
+    }
+
+    #[test]
     fn test_shm_ring_buffer() {
         let capacity = 4;
         let (layout, _) = ShmRingBuffer::<i32>::layout(capacity);

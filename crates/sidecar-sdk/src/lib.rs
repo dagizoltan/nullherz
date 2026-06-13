@@ -60,6 +60,7 @@ impl SidecarHost {
 pub struct SidecarContext<'a, P: AudioProcessor> {
     processor: P,
     command_buffer: &'a ShmRingBuffer<control_plane::Command>,
+    #[allow(dead_code)]
     feedback_buffer: Option<&'a ShmRingBuffer<control_plane::SidecarMetadata>>,
     input_buffers: Vec<&'a ShmRingBuffer<AudioBlock>>,
     output_buffers: Vec<&'a ShmRingBuffer<AudioBlock>>,

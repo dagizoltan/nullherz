@@ -12,6 +12,19 @@ pub struct Transport {
     pub sample_rate: f32,
 }
 
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ProcessorType {
+    Biquad = 1,
+    Gain = 2,
+    Sampler = 10,
+    BiquadEQ = 11,
+    Crossfader = 20,
+    Summing = 30,
+    Spectral = 40,
+    Wavetable = 50,
+}
+
 pub enum TopologyMutation {
     UpdateEdge {
         node_idx: u32,
@@ -41,6 +54,10 @@ pub struct ProcessContext<'a> {
     pub sub_block_offset: usize,
     /// Flag indicating if this is the final sub-block for the current engine cycle.
     pub is_last_sub_block: bool,
+}
+
+pub trait ParallelExecutor: Send + Sync {
+    fn as_any(&mut self) -> &mut dyn std::any::Any;
 }
 
 /// Command interface for processors to decouple from the control plane.

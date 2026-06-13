@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 audio-core = { path = "../audio-core" }
 nullherz-backends = { path = "../nullherz-backends" }
+nullherz-mixer = { path = "../nullherz-mixer" }
+nullherz-conductor = { path = "../nullherz-conductor" }
 audio-dsp = { path = "../audio-dsp" }
 control-plane = { path = "../control-plane" }
 fx-runtime = { path = "../fx-runtime" }

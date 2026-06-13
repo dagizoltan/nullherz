@@ -8,7 +8,7 @@ pub mod rt_logging;
 mod engine_tests;
 
 pub use engine::AudioEngine;
-pub use processors::{AudioProcessor, ProcessorGraph, SidecarProcessor, ProcessorNode, GraphTopology, NodeRouting, CrossfadeState};
+pub use processors::{AudioProcessor, ProcessorGraph, ProcessorNode, GraphTopology, NodeRouting, CrossfadeState};
 pub use telemetry::Telemetry;
 
 pub use nullherz_traits::{AudioConfig, Transport};
