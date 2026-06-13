@@ -576,6 +576,16 @@ mod tests {
     }
 
     #[test]
+    fn test_shm_ring_buffer_alignment_and_offset() {
+        // Verify that different capacities result in correct layout sizes and alignment
+        for &capacity in &[2, 4, 8, 16, 32] {
+            let (layout, _) = ShmRingBuffer::<AudioBlock>::layout(capacity);
+            assert!(layout.size() > capacity * std::mem::size_of::<AudioBlock>());
+            assert_eq!(layout.align(), 64);
+        }
+    }
+
+    #[test]
     fn test_shm_ring_buffer() {
         let capacity = 4;
         let (layout, _) = ShmRingBuffer::<i32>::layout(capacity);

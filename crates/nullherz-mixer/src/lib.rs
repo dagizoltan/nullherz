@@ -125,4 +125,34 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_mixer_manager_4channel_connectivity() {
+        let mut mixer = MixerManager::new();
+        let commands = mixer.create_4channel_mixer();
+
+        let mut nodes_with_outputs = std::collections::HashSet::new();
+        let mut nodes_with_inputs = std::collections::HashSet::new();
+
+        for cmd in &commands {
+            match cmd {
+                Command::AddNode { node_idx, .. } => {
+                    // All nodes should eventually have inputs/outputs or be sources
+                }
+                Command::UpdateEdge { node_idx, .. } => {
+                    nodes_with_inputs.insert(*node_idx);
+                }
+                Command::UpdateOutputEdge { node_idx, .. } => {
+                    nodes_with_outputs.insert(*node_idx);
+                }
+                _ => {}
+            }
+        }
+
+        // Summing node must have inputs and outputs
+        // In 4-channel mixer, summing node should be the last added node index
+        let sum_node_idx = mixer.next_node_id - 1;
+        assert!(nodes_with_inputs.contains(&sum_node_idx));
+        assert!(nodes_with_outputs.contains(&sum_node_idx));
+    }
 }

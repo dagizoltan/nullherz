@@ -56,6 +56,10 @@ pub struct ProcessContext<'a> {
     pub is_last_sub_block: bool,
 }
 
+pub trait ParallelExecutor: Send + Sync {
+    fn as_any(&mut self) -> &mut dyn std::any::Any;
+}
+
 /// Command interface for processors to decouple from the control plane.
 pub type ProcessorCommand = control_plane::Command;
 

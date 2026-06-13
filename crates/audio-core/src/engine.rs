@@ -33,7 +33,7 @@ pub struct AudioEngine {
     peak_ns: std::sync::atomic::AtomicU64,
     resource_leaks: std::sync::atomic::AtomicU64,
     pub health_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    pub pool: Option<TaskPool>,
+    pub pool: Option<Box<dyn nullherz_traits::ParallelExecutor>>,
     pub transport: nullherz_traits::Transport,
     pub target_sample_rate: f32,
     pub logger: Arc<RtLogger>,
@@ -76,7 +76,7 @@ impl AudioEngine {
             peak_ns: std::sync::atomic::AtomicU64::new(0),
             resource_leaks: std::sync::atomic::AtomicU64::new(0),
             health_signal: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            pool: Some(TaskPool::new(4)),
+            pool: Some(Box::new(TaskPool::new(4))),
             transport: nullherz_traits::Transport {
                 bpm: 120.0,
                 beat_position: 0.0,
@@ -336,7 +336,8 @@ impl AudioEngine {
         }
 
         if let Some(pg) = graph.as_any_mut().downcast_mut::<crate::processors::ProcessorGraph>() {
-            pg.process_parallel(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs], &mut context, self.pool.as_mut());
+            let pool = self.pool.as_mut().and_then(|p| p.as_any().downcast_mut::<TaskPool>());
+            pg.process_parallel(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs], &mut context, pool);
         } else {
             graph.process(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs], &mut context);
         }
