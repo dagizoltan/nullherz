@@ -47,7 +47,7 @@ impl EngineMetrics {
     }
 
     pub fn update_peak(&self, current_ns: u64, sample_counter: u64, num_samples: usize) -> u64 {
-        let peak = crate::telemetry::TelemetryProcessor::update_peak(&self.peak_ns, current_ns);
+        let peak = nullherz_traits::telemetry::TelemetryProcessor::update_peak(&self.peak_ns, current_ns);
         if sample_counter.is_multiple_of(num_samples as u64 * 1024) {
             self.peak_ns.store(current_ns, Ordering::Relaxed);
         }

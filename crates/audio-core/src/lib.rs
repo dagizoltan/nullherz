@@ -1,7 +1,5 @@
 pub mod processors;
 pub mod engine;
-pub mod telemetry;
-pub mod error;
 pub mod rt_logging;
 
 #[cfg(test)]
@@ -12,7 +10,8 @@ mod integration_tests;
 
 pub use engine::AudioEngine;
 pub use processors::{AudioProcessor, ProcessorGraph, ProcessorNode, GraphTopology, NodeRouting, CrossfadeState};
-pub use telemetry::Telemetry;
+pub use nullherz_traits::telemetry::Telemetry;
+pub use nullherz_traits::error::AudioError;
 
 pub use nullherz_traits::{AudioConfig, Transport, MAX_CHANNELS, MAX_NODES};
 

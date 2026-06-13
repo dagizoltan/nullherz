@@ -1,5 +1,5 @@
 use crate::processors::graph::{GraphTopology};
-use crate::error::AudioError;
+use nullherz_traits::error::AudioError;
 
 pub struct GraphCompiler {}
 

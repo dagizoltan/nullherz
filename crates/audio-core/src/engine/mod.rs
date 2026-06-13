@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 use ipc_layer::{Producer, Consumer};
 use control_plane::TimestampedCommand;
 use crate::processors::{AudioProcessor, TaskPool, ProcessContext};
-use crate::telemetry::Telemetry;
+use nullherz_traits::telemetry::Telemetry;
 use crate::rt_logging::RtLogger;
 use self::metrics::EngineMetrics;
 use self::command_dispatcher::CommandDispatcher;
@@ -219,7 +219,7 @@ impl AudioEngine {
         graph.collect_telemetry(&mut node_times_cycles, &mut peak_levels);
 
         let ns_per_cycle = f64::from_bits(self.metrics.ns_per_cycle.load(Ordering::Relaxed));
-        crate::telemetry::TelemetryProcessor::collect_node_times(
+        nullherz_traits::telemetry::TelemetryProcessor::collect_node_times(
             unsafe { std::mem::transmute(&node_times_cycles) },
             ns_per_cycle,
             &mut node_times
