@@ -25,6 +25,24 @@ pub enum ProcessorType {
     Wavetable = 50,
 }
 
+impl TryFrom<u32> for ProcessorType {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(ProcessorType::Biquad),
+            2 => Ok(ProcessorType::Gain),
+            10 => Ok(ProcessorType::Sampler),
+            11 => Ok(ProcessorType::BiquadEQ),
+            20 => Ok(ProcessorType::Crossfader),
+            30 => Ok(ProcessorType::Summing),
+            40 => Ok(ProcessorType::Spectral),
+            50 => Ok(ProcessorType::Wavetable),
+            _ => Err(()),
+        }
+    }
+}
+
 pub enum TopologyMutation {
     UpdateEdge {
         node_idx: u32,

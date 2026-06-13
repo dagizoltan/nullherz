@@ -1,11 +1,15 @@
+pub mod metrics;
+pub mod command_dispatcher;
+
 use std::sync::Arc;
-use std::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
-use std::time::Instant;
+use std::sync::atomic::{AtomicPtr, Ordering};
 use ipc_layer::{Producer, Consumer};
 use control_plane::TimestampedCommand;
 use crate::processors::{AudioProcessor, TaskPool, ProcessContext};
 use crate::telemetry::Telemetry;
-use crate::rt_logging::{RtLogger, RtLogLevel};
+use crate::rt_logging::RtLogger;
+use self::metrics::EngineMetrics;
+use self::command_dispatcher::CommandDispatcher;
 
 // SAFETY: AudioEngine is Send and Sync because all of its members are either
 // Send/Sync or are atomics that allow safe cross-thread access.
@@ -27,11 +31,7 @@ pub struct AudioEngine {
     sample_counter: u64,
     xrun_count: std::sync::Arc<std::sync::atomic::AtomicU32>,
     pending_command: Option<TimestampedCommand>,
-    ns_per_cycle: std::sync::Arc<std::sync::atomic::AtomicU64>,
-    calibration_start_instant: std::sync::Arc<std::sync::Mutex<Option<Instant>>>,
-    calibration_start_cycles: AtomicU64,
-    peak_ns: std::sync::atomic::AtomicU64,
-    resource_leaks: std::sync::atomic::AtomicU64,
+    pub metrics: EngineMetrics,
     pub health_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub pool: Option<Box<dyn nullherz_traits::ParallelExecutor>>,
     pub transport: nullherz_traits::Transport,
@@ -53,8 +53,6 @@ impl AudioEngine {
         telemetry_producer: Producer<Telemetry>,
         initial_graph: Box<dyn AudioProcessor>,
     ) -> Self {
-        let ns_per_cycle = std::sync::Arc::new(std::sync::atomic::AtomicU64::new((1.0f64).to_bits()));
-
         Self {
             command_consumer,
             midi_consumer,
@@ -70,11 +68,7 @@ impl AudioEngine {
             sample_counter: 0,
             xrun_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             pending_command: None,
-            ns_per_cycle,
-            calibration_start_instant: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            calibration_start_cycles: AtomicU64::new(0),
-            peak_ns: std::sync::atomic::AtomicU64::new(0),
-            resource_leaks: std::sync::atomic::AtomicU64::new(0),
+            metrics: EngineMetrics::new(),
             health_signal: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pool: Some(Box::new(TaskPool::new(4))),
             transport: nullherz_traits::Transport {
@@ -93,7 +87,7 @@ impl AudioEngine {
     }
     pub fn set_config(&mut self, config: nullherz_traits::AudioConfig) {
         if (config.sample_rate - self.target_sample_rate).abs() > 0.1 {
-            self.logger.log(RtLogLevel::Error, "Hardware rate mismatch", self.sample_counter);
+            self.logger.log(crate::rt_logging::RtLogLevel::Error, "Hardware rate mismatch", self.sample_counter);
         }
         self.transport.sample_rate = config.sample_rate;
         let graph_ptr = self.active_graph.load(Ordering::Acquire);
@@ -105,25 +99,7 @@ impl AudioEngine {
         crate::setup_rt_thread(90, None);
         let start_cycles = crate::get_cycles();
 
-        // Non-blocking lazy calibration
-        let ns_bits = self.ns_per_cycle.load(Ordering::Acquire);
-        if f64::from_bits(ns_bits) == 1.0 {
-            let mut start_lock = self.calibration_start_instant.lock().unwrap();
-            if start_lock.is_none() {
-                *start_lock = Some(Instant::now());
-                self.calibration_start_cycles.store(crate::get_cycles(), Ordering::Relaxed);
-            } else if self.sample_counter.is_multiple_of(num_samples as u64 * 1024) {
-                // Calibrate over ~1024 blocks to ensure high precision
-                let start_inst = start_lock.unwrap();
-                let elapsed = start_inst.elapsed().as_nanos() as f64;
-                let start_c = self.calibration_start_cycles.load(Ordering::Relaxed);
-                let elapsed_c = crate::get_cycles().wrapping_sub(start_c) as f64;
-                if elapsed_c > 0.0 {
-                    let ratio = elapsed / elapsed_c;
-                    self.ns_per_cycle.store(ratio.to_bits(), Ordering::Release);
-                }
-            }
-        }
+        self.metrics.calibrate(self.sample_counter, num_samples);
 
         let pending = self.pending_graph.swap(std::ptr::null_mut(), Ordering::Acquire);
         if !pending.is_null() {
@@ -133,13 +109,11 @@ impl AudioEngine {
                 if let Err(leaked) = self.garbage_producer.push(*old_graph) {
                     if let Some(ref mut overflow) = self.overflow_garbage_producer {
                         if let Err(leaked) = overflow.push(leaked) {
-                            self.resource_leaks.fetch_add(1, Ordering::Relaxed);
-                            self.health_signal.store(true, Ordering::Relaxed);
+                            self.metrics.report_resource_leak(&self.health_signal);
                             let _ = Box::into_raw(Box::new(leaked));
                         }
                     } else {
-                        self.resource_leaks.fetch_add(1, Ordering::Relaxed);
-                        self.health_signal.store(true, Ordering::Relaxed);
+                        self.metrics.report_resource_leak(&self.health_signal);
                         let _ = Box::into_raw(Box::new(leaked));
                     }
                 }
@@ -157,31 +131,27 @@ impl AudioEngine {
         if self.bundle_consumer.is_some() {
             while let Some(bundle) = self.bundle_consumer.as_mut().unwrap().pop() {
                 for cmd in &bundle {
-                    self.handle_single_command(graph, cmd);
+                    CommandDispatcher::handle_single_command(&mut self.transport, graph, cmd);
                 }
                 if let Some(ref mut prod) = self.bundle_garbage_producer {
                     if let Err(b) = prod.push(bundle) {
                         if let Some(ref mut overflow) = self.bundle_overflow_producer {
                             if let Err(b) = overflow.push(b) {
-                                self.resource_leaks.fetch_add(1, Ordering::Relaxed);
-                                self.health_signal.store(true, Ordering::Relaxed);
+                                self.metrics.report_resource_leak(&self.health_signal);
                                 std::mem::forget(b);
                             }
                         } else {
-                            self.resource_leaks.fetch_add(1, Ordering::Relaxed);
-                            self.health_signal.store(true, Ordering::Relaxed);
+                            self.metrics.report_resource_leak(&self.health_signal);
                             std::mem::forget(b);
                         }
                     }
                 } else if let Some(ref mut overflow) = self.bundle_overflow_producer {
                     if let Err(b) = overflow.push(bundle) {
-                        self.resource_leaks.fetch_add(1, Ordering::Relaxed);
-                        self.health_signal.store(true, Ordering::Relaxed);
+                        self.metrics.report_resource_leak(&self.health_signal);
                         std::mem::forget(b);
                     }
                 } else {
-                    self.resource_leaks.fetch_add(1, Ordering::Relaxed);
-                    self.health_signal.store(true, Ordering::Relaxed);
+                    self.metrics.report_resource_leak(&self.health_signal);
                     std::mem::forget(bundle);
                 }
             }
@@ -222,7 +192,7 @@ impl AudioEngine {
                             remaining_to_cmd -= chunk;
                         }
                     }
-                    self.handle_single_command(graph, &cmd.command);
+                    CommandDispatcher::handle_single_command(&mut self.transport, graph, &cmd.command);
                 } else {
                     self.pending_command = Some(cmd);
                     let mut remaining = num_samples - current_sample_in_block;
@@ -248,7 +218,7 @@ impl AudioEngine {
         self.sample_counter = block_end_sample;
         graph.collect_telemetry(&mut node_times_cycles, &mut peak_levels);
 
-        let ns_per_cycle = f64::from_bits(self.ns_per_cycle.load(Ordering::Relaxed));
+        let ns_per_cycle = f64::from_bits(self.metrics.ns_per_cycle.load(Ordering::Relaxed));
         crate::telemetry::TelemetryProcessor::collect_node_times(
             unsafe { std::mem::transmute(&node_times_cycles) },
             ns_per_cycle,
@@ -257,83 +227,15 @@ impl AudioEngine {
 
         let elapsed_cycles = crate::get_cycles().wrapping_sub(start_cycles);
         let current_ns = (elapsed_cycles as f64 * ns_per_cycle) as u64;
-        let peak = crate::telemetry::TelemetryProcessor::update_peak(&self.peak_ns, current_ns);
-
-        if self.sample_counter.is_multiple_of(num_samples as u64 * 1024) { self.peak_ns.store(current_ns, Ordering::Relaxed); }
+        let peak = self.metrics.update_peak(current_ns, self.sample_counter, num_samples);
 
         let _ = self.telemetry_producer.push(Telemetry {
             process_time_ns: current_ns, peak_process_time_ns: peak, sample_counter: self.sample_counter,
-            xrun_count: self.xrun_count.load(Ordering::Relaxed), resource_leaks: self.resource_leaks.load(Ordering::Relaxed),
+            xrun_count: self.xrun_count.load(Ordering::Relaxed), resource_leaks: self.metrics.resource_leaks.load(Ordering::Relaxed),
             node_times_ns: node_times, peak_levels,
         });
     }
 
-    /// Handles a single command in the real-time thread.
-    /// Structural mutations (AddNode, SwapProcessor) are ignored here as they are
-    /// handled by the non-RT Conductor and sent via the `topology_consumer`.
-    fn handle_single_command(&mut self, graph: &mut dyn AudioProcessor, cmd: &control_plane::Command) {
-        match cmd {
-            control_plane::Command::Play => {
-                if !self.transport.is_playing {
-                    self.transport.is_playing = true;
-                    graph.apply_command(cmd);
-                }
-            }
-            control_plane::Command::Stop => {
-                if self.transport.is_playing {
-                    self.transport.is_playing = false;
-                    graph.apply_command(cmd);
-                }
-            }
-            control_plane::Command::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
-                self.apply_topology_update(graph, *node_idx, Some(*input_idx), None, *new_buffer_idx);
-            }
-            control_plane::Command::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
-                self.apply_topology_update(graph, *node_idx, None, Some(*output_idx), *new_buffer_idx);
-            }
-            control_plane::Command::CommitTopology => {
-                self.commit_topology(graph);
-            }
-            control_plane::Command::Bundle { count, data } => {
-                self.handle_bundle_command(graph, *count, *data);
-            }
-            control_plane::Command::AddNode { .. } | control_plane::Command::SwapProcessor { .. } => {
-                // Ignore structural mutations in RT command loop.
-            }
-            _ => { graph.apply_command(cmd); }
-        }
-    }
-
-    fn apply_topology_update(&mut self, graph: &mut dyn AudioProcessor, node_idx: u32, input_idx: Option<u32>, output_idx: Option<u32>, new_buffer_idx: u32) {
-        if let Some(input_idx) = input_idx {
-            graph.apply_topology_mutation(nullherz_traits::TopologyMutation::UpdateEdge {
-                node_idx,
-                input_idx,
-                new_buffer_idx,
-            });
-        } else if let Some(output_idx) = output_idx {
-            graph.apply_topology_mutation(nullherz_traits::TopologyMutation::UpdateOutputEdge {
-                node_idx,
-                output_idx,
-                new_buffer_idx,
-            });
-        }
-    }
-
-    fn commit_topology(&mut self, graph: &mut dyn AudioProcessor) {
-        graph.apply_command(&control_plane::Command::CommitTopology);
-    }
-
-    fn handle_bundle_command(&mut self, graph: &mut dyn AudioProcessor, count: u32, data: [u64; 12]) {
-        for i in 0..(count as usize).min(4) {
-            let node_id = data[i * 3];
-            let param_id = data[i * 3 + 1] as u32;
-            let value = f32::from_bits(data[i * 3 + 2] as u32);
-            graph.apply_command(&control_plane::Command::SetParam {
-                target_id: node_id, param_id, value, ramp_duration_samples: 0,
-            });
-        }
-    }
 
     fn process_sub_block(&mut self, graph: &mut dyn AudioProcessor, inputs: &[&[f32]], outputs: &mut [&mut [f32]], offset: usize, len: usize, is_last_sub_block: bool) {
         if len == 0 { return; }
