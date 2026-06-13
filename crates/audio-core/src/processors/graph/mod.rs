@@ -153,7 +153,7 @@ impl AudioProcessor for ProcessorGraph {
             &mut block_x_map
         );
 
-        let mut pool = executor.and_then(|e| e.as_any().downcast_mut::<TaskPool>());
+        let mut pool = executor;
 
         let num_stages = self.topologies[active_idx].num_stages;
         let transport = context.transport;

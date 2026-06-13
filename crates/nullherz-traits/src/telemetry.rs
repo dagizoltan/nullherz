@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use serde_big_array::BigArray;
 use serde::{Serialize, Deserialize};
+use crate::MAX_NODES;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -11,18 +12,18 @@ pub struct Telemetry {
     pub xrun_count: u32,
     pub resource_leaks: u64,
     #[serde(with = "BigArray")]
-    pub node_times_ns: [u64; crate::MAX_NODES],
+    pub node_times_ns: [u64; MAX_NODES],
     #[serde(with = "BigArray")]
-    pub peak_levels: [f32; crate::MAX_NODES],
+    pub peak_levels: [f32; MAX_NODES],
 }
 
 pub struct TelemetryProcessor;
 
 impl TelemetryProcessor {
     pub fn collect_node_times(
-        node_times_cycles: &[AtomicU64; crate::MAX_NODES],
+        node_times_cycles: &[AtomicU64; MAX_NODES],
         ns_per_cycle: f64,
-        node_times_ns: &mut [u64; crate::MAX_NODES]
+        node_times_ns: &mut [u64; MAX_NODES]
     ) {
         for (i, node_time) in node_times_ns.iter_mut().enumerate() {
             *node_time = (node_times_cycles[i].load(Ordering::Relaxed) as f64 * ns_per_cycle) as u64;

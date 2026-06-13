@@ -2238,6 +2238,7 @@ dependencies = [
  "control-plane",
  "futures-util",
  "ipc-layer",
+ "nullherz-traits",
  "serde",
  "serde_json",
  "tokio",
@@ -2302,6 +2303,7 @@ dependencies = [
  "dyn-clone",
  "libc",
  "serde",
+ "serde-big-array",
 ]
 
 [[package]]

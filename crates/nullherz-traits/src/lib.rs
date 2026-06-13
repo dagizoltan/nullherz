@@ -1,5 +1,7 @@
 #[cfg(feature = "test-utils")]
 pub mod test_kit;
+pub mod telemetry;
+pub mod error;
 
 #[derive(Debug, Clone, Copy)]
 pub struct AudioConfig {
@@ -78,6 +80,15 @@ pub struct ProcessContext<'a> {
 }
 
 pub trait ParallelExecutor: Send + Sync {
+    fn as_any(&mut self) -> &mut dyn std::any::Any;
+    fn num_workers(&self) -> usize;
+    fn push_job(&mut self, worker_idx: usize, job: Box<dyn std::any::Any + Send>) -> Result<(), Box<dyn std::any::Any + Send>>;
+    fn wait_for_completion(&mut self, target_count: usize);
+    fn current_completion_count(&self) -> usize;
+    fn notify_workers(&mut self);
+}
+
+pub trait ExecutionProvider: Send + Sync {
     fn as_any(&mut self) -> &mut dyn std::any::Any;
 }
 

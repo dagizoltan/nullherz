@@ -50,7 +50,7 @@ impl GraphExecutor {
         num_samples: usize,
         offset: usize,
         block_x_map: &[[u8; crate::MAX_CHANNELS]; crate::MAX_NODES],
-        pool: &mut Option<&mut TaskPool>,
+        pool: &mut Option<&mut (dyn nullherz_traits::ParallelExecutor + '_)>,
         transport: Option<&nullherz_traits::Transport>,
         is_last_sub_block: bool,
         telemetry_node_times_cycles: &[std::sync::atomic::AtomicU64; crate::MAX_NODES],
@@ -63,19 +63,17 @@ impl GraphExecutor {
         let x_buffers_ptr = crossfade_buffers.as_mut_ptr();
 
         if let Some(pool) = pool.as_mut() {
-            let start_count = pool.completion.load(Ordering::Acquire);
+            let start_count = pool.current_completion_count();
             let num_nodes = stage.len();
-            let mut workers_to_wake = [false; 64];
 
             for (i, &n_idx) in stage.iter().enumerate() {
-                let worker_idx = i % pool.worker_producers.len();
-                workers_to_wake[worker_idx] = true;
+                let worker_idx = i % pool.num_workers();
                 let routing = &topo.routing[n_idx];
                 let mut resolved_inputs = [0usize; 16];
                 let mut resolved_outputs = [0usize; 16];
 
                 for j in 0..routing.input_count.min(crate::MAX_CHANNELS) {
-                    let v_idx = routing.input_indices[j].min(crate::MAX_NODES - 1);
+                    let v_idx = *routing.input_indices.get(j).unwrap_or(&0) % crate::MAX_NODES;
                     let mut p_idx = topo.virtual_to_physical[v_idx];
                     let p_override = block_x_map[n_idx][j];
                     if p_override != 0 { p_idx = p_override as usize; }
@@ -83,14 +81,11 @@ impl GraphExecutor {
                 }
 
                 for (j, resolved_out) in resolved_outputs.iter_mut().enumerate().take(routing.output_count.min(crate::MAX_CHANNELS)) {
-                    let v_idx = routing.output_indices[j].min(crate::MAX_NODES - 1);
+                    let v_idx = *routing.output_indices.get(j).unwrap_or(&0) % crate::MAX_NODES;
                     *resolved_out = topo.virtual_to_physical[v_idx];
                 }
 
-                // SAFETY: We pass a raw pointer to the ProcessorNode. The lifetime of nodes is guaranteed
-                // for the duration of the engine cycle, and the stage fencing in TaskPool ensures
-                // exclusive access to the processor.
-                let _ = pool.worker_producers[worker_idx].push(Job {
+                let job = Job {
                     node_ptr: &nodes[n_idx] as *const _,
                     num_samples,
                     sub_block_offset: offset,
@@ -104,17 +99,12 @@ impl GraphExecutor {
                     telemetry_ptr: telemetry_node_times_cycles as *const _,
                     transport: transport.copied(),
                     is_last_sub_block,
-                });
+                };
+                let _ = pool.push_job(worker_idx, Box::new(job));
             }
 
-            for (idx, &should_wake) in workers_to_wake.iter().enumerate().take(pool.worker_producers.len()) {
-                if should_wake { pool.worker_wake_fds[idx].notify(); }
-            }
-
-            let target = start_count + num_nodes;
-            while pool.completion.load(Ordering::Acquire) < target {
-                let _ = pool.completion_fd.wait();
-            }
+            pool.notify_workers();
+            pool.wait_for_completion(start_count + num_nodes);
         } else {
             for &n_idx in stage {
                 let node = &nodes[n_idx];

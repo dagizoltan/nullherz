@@ -5,7 +5,7 @@ use futures_util::{StreamExt, SinkExt};
 use std::sync::{Arc, Mutex};
 use control_plane::{TimestampedCommand};
 use ipc_layer::{Consumer, RingBuffer};
-use audio_core::Telemetry;
+use nullherz_traits::telemetry::Telemetry;
 
 pub fn connect_to_engine() -> Result<(ipc_layer::NonRtProducer<TimestampedCommand>, Consumer<Telemetry>, Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>, ipc_layer::Producer<Telemetry>), Box<dyn std::error::Error>> {
     // In a real nullherz deployment, the Conductor spawns the Gateway
@@ -17,6 +17,19 @@ pub fn connect_to_engine() -> Result<(ipc_layer::NonRtProducer<TimestampedComman
 
     Ok((cmd_prod, tel_cons, cmd_buffer, tel_prod))
 }
+
+pub trait TelemetryProvider: Send + Sync {
+    fn pop_telemetry(&self) -> Option<Telemetry>;
+}
+
+impl TelemetryProvider for Mutex<Consumer<Telemetry>> {
+    fn pop_telemetry(&self) -> Option<Telemetry> {
+        self.lock().unwrap().pop()
+    }
+}
+
+#[cfg(test)]
+mod tests;
 
 pub async fn run_gateway(
     addr: &str,
@@ -41,7 +54,7 @@ pub async fn run_gateway(
 async fn handle_connection(
     stream: TcpStream,
     cmd_prod: ipc_layer::NonRtProducer<TimestampedCommand>,
-    tel_cons: Arc<Mutex<Consumer<Telemetry>>>
+    tel_provider: Arc<dyn TelemetryProvider>
 ) {
     let ws_stream = accept_async(stream).await.expect("Error during the websocket handshake occurred");
     println!("New WebSocket connection");
@@ -51,10 +64,7 @@ async fn handle_connection(
     // Spawn a task to broadcast telemetry
     let tel_task = tokio::spawn(async move {
         loop {
-            let tel = {
-                let mut cons = tel_cons.lock().unwrap();
-                cons.pop()
-            };
+            let tel = tel_provider.pop_telemetry();
 
             if let Some(json) = tel.and_then(|t| serde_json::to_string(&t).ok()) {
                 let msg = Message::Text(json.into());

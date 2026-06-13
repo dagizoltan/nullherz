@@ -27,6 +27,26 @@ impl nullherz_traits::ParallelExecutor for TaskPool {
     fn as_any(&mut self) -> &mut dyn std::any::Any {
         self
     }
+    fn num_workers(&self) -> usize {
+        self.worker_producers.len()
+    }
+    fn push_job(&mut self, worker_idx: usize, job: Box<dyn std::any::Any + Send>) -> Result<(), Box<dyn std::any::Any + Send>> {
+        let job = job.downcast::<Job>().map_err(|e| e)?;
+        self.worker_producers[worker_idx].push(*job).map_err(|j| Box::new(j) as Box<dyn std::any::Any + Send>)
+    }
+    fn wait_for_completion(&mut self, target_count: usize) {
+        while self.completion.load(Ordering::Acquire) < target_count {
+            self.completion_fd.wait();
+        }
+    }
+    fn current_completion_count(&self) -> usize {
+        self.completion.load(Ordering::Acquire)
+    }
+    fn notify_workers(&mut self) {
+        for fd in &self.worker_wake_fds {
+            fd.notify();
+        }
+    }
 }
 
 pub struct TaskPool {
