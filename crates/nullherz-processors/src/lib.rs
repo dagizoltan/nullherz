@@ -11,8 +11,7 @@ pub mod spectral;
 pub mod modulation;
 pub mod sequencer;
 
-pub const MAX_CHANNELS: usize = 16;
-pub const MAX_NODES: usize = 64;
+pub use nullherz_traits::{MAX_CHANNELS, MAX_NODES};
 
 pub use sidecar::SidecarProcessor;
 pub use sampler::SamplerProcessor;

@@ -8,6 +8,7 @@ pub fn create_dj_deck(
     deck_id: char,
     fx_ids: &[u32],
     bus_assignment: char,
+    config: &MixerConfig,
 ) -> Vec<Command> {
     let mut commands = Vec::new();
     println!("Creating DJ Deck: {} assigned to Bus {}", deck_id, bus_assignment);
@@ -37,8 +38,8 @@ pub fn create_dj_deck(
     commands.push(Command::UpdateOutputEdge { node_idx: prev_id, output_idx: 0, new_buffer_idx: eq_buf });
     commands.push(Command::UpdateEdge { node_idx: eq_id, input_idx: 0, new_buffer_idx: eq_buf });
 
-    let target_l = if bus_assignment == 'A' { BUF_DJ_A_L } else { BUF_DJ_B_L };
-    let target_r = if bus_assignment == 'A' { BUF_DJ_A_R } else { BUF_DJ_B_R };
+    let target_l = if bus_assignment == 'A' { config.dj_a_l } else { config.dj_b_l };
+    let target_r = if bus_assignment == 'A' { config.dj_a_r } else { config.dj_b_r };
     println!("Routing Deck {} to Buffers {}-{}", deck_id, target_l, target_r);
     commands.push(Command::UpdateOutputEdge { node_idx: eq_id, output_idx: 0, new_buffer_idx: target_l as u32 });
     commands.push(Command::UpdateOutputEdge { node_idx: eq_id, output_idx: 1, new_buffer_idx: target_r as u32 });

@@ -444,6 +444,7 @@ version = "0.1.0"
 dependencies = [
  "audio-dsp",
  "control-plane",
+ "dyn-clone",
  "ipc-layer",
  "libc",
  "nullherz-backends",
@@ -977,6 +978,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
+name = "dyn-clone"
+version = "1.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+
+[[package]]
 name = "ecolor"
 version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1366,6 +1373,7 @@ dependencies = [
  "ipc-layer",
  "libc",
  "nullherz-processors",
+ "nullherz-traits",
 ]
 
 [[package]]
@@ -1829,6 +1837,7 @@ name = "ipc-layer"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "nullherz-traits",
  "proptest",
  "tokio",
 ]
@@ -2290,7 +2299,7 @@ name = "nullherz-traits"
 version = "0.1.0"
 dependencies = [
  "control-plane",
- "ipc-layer",
+ "dyn-clone",
  "libc",
  "serde",
 ]

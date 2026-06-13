@@ -30,32 +30,16 @@ impl std::fmt::Display for IpcError {
 
 impl std::error::Error for IpcError {}
 
-/// Alignment for SIMD (AVX-512 requires 64 bytes).
-pub const SIMD_ALIGNMENT: usize = 64;
+pub use nullherz_traits::{AudioBlock, MidiEvent, SIMD_ALIGNMENT, MAX_BLOCK_SIZE};
 
-pub const MAX_BLOCK_SIZE: usize = 256;
-
-/// A SIMD-aligned audio block.
-#[repr(C, align(64))]
-#[derive(Clone, Copy)]
-pub struct AudioBlock {
-    pub data: [f32; MAX_BLOCK_SIZE],
-    pub len: u32,
+impl nullherz_traits::GarbageProducer for crate::Producer<Box<dyn nullherz_traits::AudioProcessor>> {
+    fn push_processor(&mut self, processor: Box<dyn nullherz_traits::AudioProcessor>) -> Result<(), Box<dyn nullherz_traits::AudioProcessor>> {
+        self.push(processor)
+    }
 }
 
 const _: () = assert!(std::mem::size_of::<AudioBlock>() == 1088); // 256*4 + 4 padded to 64
 const _: () = assert!(std::mem::align_of::<AudioBlock>() == 64);
-
-/// A standard MIDI event representation for real-time IPC.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MidiEvent {
-    pub timestamp_samples: u64,
-    pub status: u8,
-    pub data1: u8,
-    pub data2: u8,
-    pub _pad: u8,
-}
 
 /// A status-flagged item for the ring buffer to ensure stable layout for IPC.
 #[repr(C)]

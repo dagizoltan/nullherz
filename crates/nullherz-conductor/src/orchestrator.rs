@@ -118,49 +118,10 @@ impl Conductor {
         let mut bundle = Vec::with_capacity(commands.len());
 
         for cmd in commands {
-            match cmd {
-                control_plane::Command::AddNode { processor_type_id, node_idx } => {
-                    if let Some(ref mut prod) = self.topo_producer {
-                        let p_type: nullherz_traits::ProcessorType = unsafe { std::mem::transmute(processor_type_id) };
-                        if let Some(processor) = self.registry.create(p_type, node_idx, 44100.0) {
-                            let _ = prod.push(nullherz_traits::TopologyMutation::AddNode {
-                                node_idx,
-                                processor,
-                            });
-                        }
-                    }
-                }
-                control_plane::Command::SwapProcessor { node_idx, processor_type_id } => {
-                    if let Some(ref mut prod) = self.topo_producer {
-                        let p_type: nullherz_traits::ProcessorType = unsafe { std::mem::transmute(processor_type_id) };
-                        if let Some(processor) = self.registry.create(p_type, node_idx, 44100.0) {
-                            let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor {
-                                node_idx,
-                                processor,
-                            });
-                        }
-                    }
-                }
-                control_plane::Command::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
-                    if let Some(ref mut prod) = self.topo_producer {
-                        let _ = prod.push(nullherz_traits::TopologyMutation::UpdateEdge {
-                            node_idx,
-                            input_idx,
-                            new_buffer_idx,
-                        });
-                    }
-                }
-                control_plane::Command::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
-                    if let Some(ref mut prod) = self.topo_producer {
-                        let _ = prod.push(nullherz_traits::TopologyMutation::UpdateOutputEdge {
-                            node_idx,
-                            output_idx,
-                            new_buffer_idx,
-                        });
-                    }
-                }
-                _ => bundle.push(cmd),
+            if self.handle_topology_command(&cmd) {
+                continue;
             }
+            bundle.push(cmd);
         }
 
         if !bundle.is_empty() {
@@ -168,5 +129,34 @@ impl Conductor {
                 let _ = prod.push(bundle);
             }
         }
+    }
+
+    fn handle_topology_command(&mut self, cmd: &control_plane::Command) -> bool {
+        let Some(ref mut prod) = self.topo_producer else { return false; };
+
+        match *cmd {
+            control_plane::Command::AddNode { processor_type_id, node_idx } => {
+                if let Some(processor) = self.registry.create_by_id(processor_type_id, node_idx, 44100.0) {
+                    let _ = prod.push(nullherz_traits::TopologyMutation::AddNode { node_idx, processor });
+                    return true;
+                }
+            }
+            control_plane::Command::SwapProcessor { node_idx, processor_type_id } => {
+                if let Some(processor) = self.registry.create_by_id(processor_type_id, node_idx, 44100.0) {
+                    let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor { node_idx, processor });
+                    return true;
+                }
+            }
+            control_plane::Command::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
+                let _ = prod.push(nullherz_traits::TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx });
+                return true;
+            }
+            control_plane::Command::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
+                let _ = prod.push(nullherz_traits::TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx });
+                return true;
+            }
+            _ => {}
+        }
+        false
     }
 }

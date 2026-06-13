@@ -7,14 +7,14 @@ pub mod rt_logging;
 #[cfg(test)]
 mod engine_tests;
 
+#[cfg(test)]
+mod integration_tests;
+
 pub use engine::AudioEngine;
 pub use processors::{AudioProcessor, ProcessorGraph, ProcessorNode, GraphTopology, NodeRouting, CrossfadeState};
 pub use telemetry::Telemetry;
 
-pub use nullherz_traits::{AudioConfig, Transport};
-
-pub const MAX_CHANNELS: usize = 16;
-pub const MAX_NODES: usize = 64;
+pub use nullherz_traits::{AudioConfig, Transport, MAX_CHANNELS, MAX_NODES};
 
 #[inline(always)]
 pub fn get_cycles() -> u64 {

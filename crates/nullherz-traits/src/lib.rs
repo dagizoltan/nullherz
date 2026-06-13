@@ -1,3 +1,6 @@
+#[cfg(feature = "test-utils")]
+pub mod test_kit;
+
 #[derive(Debug, Clone, Copy)]
 pub struct AudioConfig {
     pub sample_rate: f32,
@@ -23,6 +26,24 @@ pub enum ProcessorType {
     Summing = 30,
     Spectral = 40,
     Wavetable = 50,
+}
+
+impl TryFrom<u32> for ProcessorType {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(ProcessorType::Biquad),
+            2 => Ok(ProcessorType::Gain),
+            10 => Ok(ProcessorType::Sampler),
+            11 => Ok(ProcessorType::BiquadEQ),
+            20 => Ok(ProcessorType::Crossfader),
+            30 => Ok(ProcessorType::Summing),
+            40 => Ok(ProcessorType::Spectral),
+            50 => Ok(ProcessorType::Wavetable),
+            _ => Err(()),
+        }
+    }
 }
 
 pub enum TopologyMutation {
@@ -60,14 +81,40 @@ pub trait ParallelExecutor: Send + Sync {
     fn as_any(&mut self) -> &mut dyn std::any::Any;
 }
 
+/// Alignment for SIMD (AVX-512 requires 64 bytes).
+pub const SIMD_ALIGNMENT: usize = 64;
+pub const MAX_BLOCK_SIZE: usize = 256;
+pub const MAX_NODES: usize = 64;
+pub const MAX_CHANNELS: usize = 16;
+
+/// A SIMD-aligned audio block.
+#[repr(C, align(64))]
+#[derive(Clone, Copy)]
+pub struct AudioBlock {
+    pub data: [f32; MAX_BLOCK_SIZE],
+    pub len: u32,
+}
+
+/// A standard MIDI event representation for real-time IPC.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MidiEvent {
+    pub timestamp_samples: u64,
+    pub status: u8,
+    pub data1: u8,
+    pub data2: u8,
+    pub _pad: u8,
+}
+
+/// Interface for real-time safe deallocation of processors.
+pub trait GarbageProducer: Send + dyn_clone::DynClone {
+    fn push_processor(&mut self, processor: Box<dyn AudioProcessor>) -> Result<(), Box<dyn AudioProcessor>>;
+}
+
+dyn_clone::clone_trait_object!(GarbageProducer);
+
 /// Command interface for processors to decouple from the control plane.
 pub type ProcessorCommand = control_plane::Command;
-
-/// MIDI event interface for processors to decouple from the IPC layer.
-pub type MidiEvent = ipc_layer::MidiEvent;
-
-/// Producer interface for processors to decouple from the IPC layer.
-pub type GarbageProducer = ipc_layer::Producer<Box<dyn AudioProcessor>>;
 
 /// Marker trait for real-time safe components.
 /// Types implementing this trait guarantee that their methods do not perform
@@ -80,11 +127,20 @@ pub trait AudioProcessor: Send {
     /// MUST be real-time safe: no allocations, no locks, no blocking syscalls.
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext);
 
+    /// Executes audio processing, potentially utilizing a parallel executor.
+    /// Defaults to calling `process` if no specialized parallel logic is implemented.
+    fn process_parallel(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext, _executor: Option<&mut (dyn ParallelExecutor + '_)>) {
+        self.process(inputs, outputs, context);
+    }
+
     /// Called when audio configuration (sample rate, block size) changes.
     fn setup(&mut self, _config: AudioConfig) {}
 
     /// Applies high-level control plane commands (parameters, play/stop).
     fn apply_command(&mut self, _command: &ProcessorCommand) {}
+
+    /// Sets a processor parameter with optional ramping.
+    fn set_parameter(&mut self, _param_id: u32, _value: f32, _ramp_duration_samples: u32) {}
 
     /// Applies structural graph mutations to the processor (routing, swapping).
     fn apply_topology_mutation(&mut self, _mutation: TopologyMutation) {}
@@ -93,10 +149,13 @@ pub trait AudioProcessor: Send {
     fn apply_midi(&mut self, _event: MidiEvent) {}
 
     /// Gathers performance and signal telemetry from the processor.
-    fn collect_telemetry(&self, _node_times: &mut [u64; 64], _peak_levels: &mut [f32; 64]) {}
+    fn collect_telemetry(&self, _node_times: &mut [u64; MAX_NODES], _peak_levels: &mut [f32; MAX_NODES]) {}
+
+    /// Returns metadata about the processor (parameters, name, etc.)
+    fn metadata(&self) -> Option<control_plane::SidecarMetadata> { None }
 
     /// Configures the garbage producer used for real-time safe deallocation.
-    fn set_garbage_producer(&mut self, _producer: GarbageProducer) {}
+    fn set_garbage_producer(&mut self, _producer: Box<dyn GarbageProducer>) {}
 
     /// Allows safe downcasting to concrete processor types.
     fn as_any(&self) -> &dyn std::any::Any { panic!("as_any not implemented") }

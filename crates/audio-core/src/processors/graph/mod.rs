@@ -28,7 +28,7 @@ pub struct ProcessorGraph {
     pub(crate) needs_commit: bool,
 
     pub(crate) telemetry: Arc<GraphTelemetry>,
-    pub(crate) garbage_producer: Option<Producer<Box<dyn AudioProcessor>>>,
+    pub(crate) garbage_producer: Option<Box<dyn nullherz_traits::GarbageProducer>>,
 }
 
 impl ProcessorGraph {
@@ -97,7 +97,43 @@ impl ProcessorGraph {
         self.needs_commit = false;
     }
 
-    pub fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext, mut pool: Option<&mut TaskPool>) {
+
+    pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
+        if self.node_count >= crate::MAX_NODES { return; }
+        let idx = self.node_count;
+        unsafe { *self.nodes[idx].processor.get() = processor; }
+        self.node_count += 1;
+
+        let topo = self.inactive_topology_mut();
+        let input_count = inputs.len().min(crate::MAX_CHANNELS);
+        topo.routing[idx].input_count = input_count;
+        topo.routing[idx].input_indices[..input_count].copy_from_slice(&inputs[..input_count]);
+
+        let output_count = outputs.len().min(crate::MAX_CHANNELS);
+        topo.routing[idx].output_count = output_count;
+        topo.routing[idx].output_indices[..output_count].copy_from_slice(&outputs[..output_count]);
+        topo.node_count += 1;
+
+        self.calculate_stages();
+        self.commit_graph();
+    }
+}
+
+impl Default for ProcessorGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AudioProcessor for ProcessorGraph {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext) {
+        self.process_parallel(external_inputs, external_outputs, context, None);
+    }
+
+    fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext, executor: Option<&mut (dyn nullherz_traits::ParallelExecutor + '_)>) {
         let is_last_sub_block = context.is_last_sub_block;
         let num_samples = if !external_outputs.is_empty() { external_outputs[0].len() } else { 0 };
         if num_samples == 0 { return; }
@@ -116,6 +152,8 @@ impl ProcessorGraph {
             &mut self._crossfade_buffers,
             &mut block_x_map
         );
+
+        let mut pool = executor.and_then(|e| e.as_any().downcast_mut::<TaskPool>());
 
         let num_stages = self.topologies[active_idx].num_stages;
         let transport = context.transport;
@@ -159,41 +197,6 @@ impl ProcessorGraph {
         self.telemetry.update_peak_levels(topo, &self.buffers, offset, num_samples);
     }
 
-    pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
-        if self.node_count >= crate::MAX_NODES { return; }
-        let idx = self.node_count;
-        unsafe { *self.nodes[idx].processor.get() = processor; }
-        self.node_count += 1;
-
-        let topo = self.inactive_topology_mut();
-        let input_count = inputs.len().min(crate::MAX_CHANNELS);
-        topo.routing[idx].input_count = input_count;
-        topo.routing[idx].input_indices[..input_count].copy_from_slice(&inputs[..input_count]);
-
-        let output_count = outputs.len().min(crate::MAX_CHANNELS);
-        topo.routing[idx].output_count = output_count;
-        topo.routing[idx].output_indices[..output_count].copy_from_slice(&outputs[..output_count]);
-        topo.node_count += 1;
-
-        self.calculate_stages();
-        self.commit_graph();
-    }
-}
-
-impl Default for ProcessorGraph {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl AudioProcessor for ProcessorGraph {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn process(&mut self, external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext) {
-        self.process_parallel(external_inputs, external_outputs, context, None);
-    }
-
     fn setup(&mut self, config: nullherz_traits::AudioConfig) {
         for node in self.nodes.iter() {
             unsafe { (*node.processor.get()).setup(config); }
@@ -208,7 +211,7 @@ impl AudioProcessor for ProcessorGraph {
                 if n_idx < self.node_count && i_idx < 16 {
                     let topo = self.inactive_topology_mut();
                     if i_idx < topo.routing[n_idx].input_count {
-                        topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(63);
+                        topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
                     }
                 }
             }
@@ -218,7 +221,7 @@ impl AudioProcessor for ProcessorGraph {
                 if n_idx < self.node_count && o_idx < 16 {
                     let topo = self.inactive_topology_mut();
                     if o_idx < topo.routing[n_idx].output_count {
-                        topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(63);
+                        topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
                     }
                 }
             }
@@ -226,17 +229,17 @@ impl AudioProcessor for ProcessorGraph {
                 let n_idx = node_idx as usize;
                 if n_idx < self.node_count {
                     let node = &self.nodes[n_idx];
-                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(prod.clone()); }
+                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
                     let old_proc = unsafe { std::ptr::replace(node.processor.get(), processor) };
                     if let Some(ref mut prod) = self.garbage_producer {
-                        if let Err(leaked) = prod.push(old_proc) { std::mem::forget(leaked); }
+                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
                     } else { std::mem::forget(old_proc); }
                 }
             }
             TopologyMutation::AddNode { node_idx: _, mut processor } => {
-                if self.node_count < 64 {
+                if self.node_count < crate::MAX_NODES {
                     let idx = self.node_count;
-                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(prod.clone()); }
+                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
                     unsafe { *self.nodes[idx].processor.get() = processor; }
                     self.node_count += 1;
                     let topo = self.inactive_topology_mut();
@@ -259,7 +262,7 @@ impl AudioProcessor for ProcessorGraph {
         for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_midi(event); } }
     }
 
-    fn set_garbage_producer(&mut self, producer: Producer<Box<dyn AudioProcessor>>) {
+    fn set_garbage_producer(&mut self, producer: Box<dyn nullherz_traits::GarbageProducer>) {
         self.garbage_producer = Some(producer);
     }
     fn collect_telemetry(&self, node_times: &mut [u64; crate::MAX_NODES], peak_levels: &mut [f32; crate::MAX_NODES]) {
@@ -343,7 +346,7 @@ mod tests {
     fn test_graph_topology_stability() {
         let mut graph = ProcessorGraph::new();
         for i in 0..10 {
-            graph.add_node(Box::new(IdentityProcessor), vec![(i + 1) % 64], vec![i % 64]);
+            graph.add_node(Box::new(IdentityProcessor), vec![(i + 1) % crate::MAX_NODES], vec![i % crate::MAX_NODES]);
         }
         let active_idx = graph.active_topo_idx.load(Ordering::Acquire);
         let topo = &graph.topologies[active_idx];

@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 use nullherz_traits::{AudioProcessor, ProcessorType};
-use crate::factory::create_processor;
-
-pub type ProcessorCreator = fn(u32, f32) -> Box<dyn AudioProcessor>;
+use crate::factory::*;
 
 pub struct ProcessorRegistry {
-    creators: HashMap<ProcessorType, ProcessorCreator>,
+    factories: HashMap<u32, Box<dyn ProcessorFactory>>,
+    type_to_id: HashMap<ProcessorType, u32>,
 }
 
 impl Default for ProcessorRegistry {
@@ -17,28 +16,40 @@ impl Default for ProcessorRegistry {
 impl ProcessorRegistry {
     pub fn new() -> Self {
         let mut registry = Self {
-            creators: HashMap::new(),
+            factories: HashMap::new(),
+            type_to_id: HashMap::new(),
         };
         registry.register_defaults();
         registry
     }
 
     fn register_defaults(&mut self) {
-        self.register(ProcessorType::Biquad, |idx, sr| create_processor(ProcessorType::Biquad as u32, idx, sr));
-        self.register(ProcessorType::Gain, |idx, sr| create_processor(ProcessorType::Gain as u32, idx, sr));
-        self.register(ProcessorType::Sampler, |idx, sr| create_processor(ProcessorType::Sampler as u32, idx, sr));
-        self.register(ProcessorType::BiquadEQ, |idx, sr| create_processor(ProcessorType::BiquadEQ as u32, idx, sr));
-        self.register(ProcessorType::Crossfader, |idx, sr| create_processor(ProcessorType::Crossfader as u32, idx, sr));
-        self.register(ProcessorType::Summing, |idx, sr| create_processor(ProcessorType::Summing as u32, idx, sr));
-        self.register(ProcessorType::Spectral, |idx, sr| create_processor(ProcessorType::Spectral as u32, idx, sr));
-        self.register(ProcessorType::Wavetable, |idx, sr| create_processor(ProcessorType::Wavetable as u32, idx, sr));
+        self.register_with_type(ProcessorType::Biquad, Box::new(BiquadFactory));
+        self.register_with_type(ProcessorType::Gain, Box::new(GainFactory));
+        self.register_with_type(ProcessorType::Sampler, Box::new(SamplerFactory));
+        self.register_with_type(ProcessorType::BiquadEQ, Box::new(BiquadFactory)); // Reuse for now
+        self.register_with_type(ProcessorType::Crossfader, Box::new(CrossfaderFactory));
+        self.register_with_type(ProcessorType::Summing, Box::new(SummingFactory));
+        self.register_with_type(ProcessorType::Spectral, Box::new(SpectralFactory));
+        self.register_with_type(ProcessorType::Wavetable, Box::new(WavetableFactory));
     }
 
-    pub fn register(&mut self, p_type: ProcessorType, creator: ProcessorCreator) {
-        self.creators.insert(p_type, creator);
+    pub fn register(&mut self, id: u32, factory: Box<dyn ProcessorFactory>) {
+        self.factories.insert(id, factory);
+    }
+
+    pub fn register_with_type(&mut self, p_type: ProcessorType, factory: Box<dyn ProcessorFactory>) {
+        let id = p_type as u32;
+        self.type_to_id.insert(p_type, id);
+        self.factories.insert(id, factory);
+    }
+
+    pub fn create_by_id(&self, id: u32, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        self.factories.get(&id).and_then(|f| f.create_processor(node_idx, sample_rate))
     }
 
     pub fn create(&self, p_type: ProcessorType, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        self.creators.get(&p_type).map(|creator| creator(node_idx, sample_rate))
+        let id = self.type_to_id.get(&p_type)?;
+        self.create_by_id(*id, node_idx, sample_rate)
     }
 }
