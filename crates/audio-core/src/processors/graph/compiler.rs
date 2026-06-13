@@ -219,4 +219,101 @@ mod tests {
             assert!(result.is_ok());
         }
     }
+
+    #[test]
+    fn test_hazard_detection_raw() {
+        let mut v2p = [0usize; 64];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
+        let mut topo = GraphTopology {
+            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
+            virtual_to_physical: v2p,
+            stages: [[0; 64]; 64],
+            stage_counts: [0; 64],
+            num_stages: 1,
+            crossfades: [None; 8],
+            node_count: 2,
+        };
+
+        // Node 0 writes to buffer 10
+        topo.routing[0].output_indices[0] = 10;
+        topo.routing[0].output_count = 1;
+
+        // Node 1 reads from buffer 10
+        topo.routing[1].input_indices[0] = 10;
+        topo.routing[1].input_count = 1;
+
+        // Put them in the same stage
+        topo.num_stages = 1;
+        topo.stage_counts[0] = 2;
+        topo.stages[0][0] = 0;
+        topo.stages[0][1] = 1;
+
+        let result = GraphCompiler::verify_no_hazards(&topo);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("RAW Hazard"));
+    }
+
+    #[test]
+    fn test_hazard_detection_war() {
+        let mut v2p = [0usize; 64];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
+        let mut topo = GraphTopology {
+            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
+            virtual_to_physical: v2p,
+            stages: [[0; 64]; 64],
+            stage_counts: [0; 64],
+            num_stages: 1,
+            crossfades: [None; 8],
+            node_count: 2,
+        };
+
+        // Node 0 reads from buffer 10
+        topo.routing[0].input_indices[0] = 10;
+        topo.routing[0].input_count = 1;
+
+        // Node 1 writes to buffer 10
+        topo.routing[1].output_indices[0] = 10;
+        topo.routing[1].output_count = 1;
+
+        // Same stage
+        topo.num_stages = 1;
+        topo.stage_counts[0] = 2;
+        topo.stages[0][0] = 0;
+        topo.stages[0][1] = 1;
+
+        let result = GraphCompiler::verify_no_hazards(&topo);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("collides with physical buffer 10 already in use"));
+    }
+
+    #[test]
+    fn test_hazard_detection_waw() {
+        let mut v2p = [0usize; 64];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
+        let mut topo = GraphTopology {
+            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
+            virtual_to_physical: v2p,
+            stages: [[0; 64]; 64],
+            stage_counts: [0; 64],
+            num_stages: 1,
+            crossfades: [None; 8],
+            node_count: 2,
+        };
+
+        // Both nodes write to buffer 10
+        topo.routing[0].output_indices[0] = 10;
+        topo.routing[0].output_count = 1;
+        topo.routing[1].output_indices[0] = 10;
+        topo.routing[1].output_count = 1;
+
+        // Same stage
+        topo.num_stages = 1;
+        topo.stage_counts[0] = 2;
+        topo.stages[0][0] = 0;
+        topo.stages[0][1] = 1;
+
+        let result = GraphCompiler::verify_no_hazards(&topo);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("collides with physical buffer 10 already in use"));
+    }
 }

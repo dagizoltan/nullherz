@@ -274,44 +274,64 @@ impl AudioEngine {
     fn handle_single_command(&mut self, graph: &mut dyn AudioProcessor, cmd: &control_plane::Command) {
         match cmd {
             control_plane::Command::Play => {
-                self.transport.is_playing = true;
-                graph.apply_command(cmd);
+                if !self.transport.is_playing {
+                    self.transport.is_playing = true;
+                    graph.apply_command(cmd);
+                }
             }
             control_plane::Command::Stop => {
-                self.transport.is_playing = false;
-                graph.apply_command(cmd);
+                if self.transport.is_playing {
+                    self.transport.is_playing = false;
+                    graph.apply_command(cmd);
+                }
             }
             control_plane::Command::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
-                graph.apply_topology_mutation(nullherz_traits::TopologyMutation::UpdateEdge {
-                    node_idx: *node_idx,
-                    input_idx: *input_idx,
-                    new_buffer_idx: *new_buffer_idx,
-                });
+                self.apply_topology_update(graph, *node_idx, Some(*input_idx), None, *new_buffer_idx);
             }
             control_plane::Command::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
-                graph.apply_topology_mutation(nullherz_traits::TopologyMutation::UpdateOutputEdge {
-                    node_idx: *node_idx,
-                    output_idx: *output_idx,
-                    new_buffer_idx: *new_buffer_idx,
-                });
+                self.apply_topology_update(graph, *node_idx, None, Some(*output_idx), *new_buffer_idx);
             }
             control_plane::Command::CommitTopology => {
-                graph.apply_command(cmd);
+                self.commit_topology(graph);
             }
             control_plane::Command::Bundle { count, data } => {
-                for i in 0..(*count as usize).min(4) {
-                    let node_id = data[i * 3];
-                    let param_id = data[i * 3 + 1] as u32;
-                    let value = f32::from_bits(data[i * 3 + 2] as u32);
-                    graph.apply_command(&control_plane::Command::SetParam {
-                        target_id: node_id, param_id, value, ramp_duration_samples: 0,
-                    });
-                }
+                self.handle_bundle_command(graph, *count, *data);
             }
             control_plane::Command::AddNode { .. } | control_plane::Command::SwapProcessor { .. } => {
                 // Ignore structural mutations in RT command loop.
             }
             _ => { graph.apply_command(cmd); }
+        }
+    }
+
+    fn apply_topology_update(&mut self, graph: &mut dyn AudioProcessor, node_idx: u32, input_idx: Option<u32>, output_idx: Option<u32>, new_buffer_idx: u32) {
+        if let Some(input_idx) = input_idx {
+            graph.apply_topology_mutation(nullherz_traits::TopologyMutation::UpdateEdge {
+                node_idx,
+                input_idx,
+                new_buffer_idx,
+            });
+        } else if let Some(output_idx) = output_idx {
+            graph.apply_topology_mutation(nullherz_traits::TopologyMutation::UpdateOutputEdge {
+                node_idx,
+                output_idx,
+                new_buffer_idx,
+            });
+        }
+    }
+
+    fn commit_topology(&mut self, graph: &mut dyn AudioProcessor) {
+        graph.apply_command(&control_plane::Command::CommitTopology);
+    }
+
+    fn handle_bundle_command(&mut self, graph: &mut dyn AudioProcessor, count: u32, data: [u64; 12]) {
+        for i in 0..(count as usize).min(4) {
+            let node_id = data[i * 3];
+            let param_id = data[i * 3 + 1] as u32;
+            let value = f32::from_bits(data[i * 3 + 2] as u32);
+            graph.apply_command(&control_plane::Command::SetParam {
+                target_id: node_id, param_id, value, ramp_duration_samples: 0,
+            });
         }
     }
 
@@ -335,12 +355,7 @@ impl AudioEngine {
             if end > act { sub_outputs_reconstructed[i] = &mut out[act..end]; }
         }
 
-        if let Some(pg) = graph.as_any_mut().downcast_mut::<crate::processors::ProcessorGraph>() {
-            let pool = self.pool.as_mut().and_then(|p| p.as_any().downcast_mut::<TaskPool>());
-            pg.process_parallel(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs], &mut context, pool);
-        } else {
-            graph.process(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs], &mut context);
-        }
+        graph.process_parallel(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs], &mut context, self.pool.as_deref_mut());
 
         if self.transport.is_playing {
             let beats = (len as f64 / self.transport.sample_rate as f64) * (self.transport.bpm as f64 / 60.0);

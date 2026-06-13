@@ -80,6 +80,12 @@ pub trait AudioProcessor: Send {
     /// MUST be real-time safe: no allocations, no locks, no blocking syscalls.
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext);
 
+    /// Executes audio processing, potentially utilizing a parallel executor.
+    /// Defaults to calling `process` if no specialized parallel logic is implemented.
+    fn process_parallel(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext, _executor: Option<&mut (dyn ParallelExecutor + '_)>) {
+        self.process(inputs, outputs, context);
+    }
+
     /// Called when audio configuration (sample rate, block size) changes.
     fn setup(&mut self, _config: AudioConfig) {}
 

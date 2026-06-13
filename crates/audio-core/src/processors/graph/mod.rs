@@ -97,7 +97,43 @@ impl ProcessorGraph {
         self.needs_commit = false;
     }
 
-    pub fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext, mut pool: Option<&mut TaskPool>) {
+
+    pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
+        if self.node_count >= crate::MAX_NODES { return; }
+        let idx = self.node_count;
+        unsafe { *self.nodes[idx].processor.get() = processor; }
+        self.node_count += 1;
+
+        let topo = self.inactive_topology_mut();
+        let input_count = inputs.len().min(crate::MAX_CHANNELS);
+        topo.routing[idx].input_count = input_count;
+        topo.routing[idx].input_indices[..input_count].copy_from_slice(&inputs[..input_count]);
+
+        let output_count = outputs.len().min(crate::MAX_CHANNELS);
+        topo.routing[idx].output_count = output_count;
+        topo.routing[idx].output_indices[..output_count].copy_from_slice(&outputs[..output_count]);
+        topo.node_count += 1;
+
+        self.calculate_stages();
+        self.commit_graph();
+    }
+}
+
+impl Default for ProcessorGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AudioProcessor for ProcessorGraph {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext) {
+        self.process_parallel(external_inputs, external_outputs, context, None);
+    }
+
+    fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext, executor: Option<&mut (dyn nullherz_traits::ParallelExecutor + '_)>) {
         let is_last_sub_block = context.is_last_sub_block;
         let num_samples = if !external_outputs.is_empty() { external_outputs[0].len() } else { 0 };
         if num_samples == 0 { return; }
@@ -116,6 +152,8 @@ impl ProcessorGraph {
             &mut self._crossfade_buffers,
             &mut block_x_map
         );
+
+        let mut pool = executor.and_then(|e| e.as_any().downcast_mut::<TaskPool>());
 
         let num_stages = self.topologies[active_idx].num_stages;
         let transport = context.transport;
@@ -157,41 +195,6 @@ impl ProcessorGraph {
         }
 
         self.telemetry.update_peak_levels(topo, &self.buffers, offset, num_samples);
-    }
-
-    pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
-        if self.node_count >= crate::MAX_NODES { return; }
-        let idx = self.node_count;
-        unsafe { *self.nodes[idx].processor.get() = processor; }
-        self.node_count += 1;
-
-        let topo = self.inactive_topology_mut();
-        let input_count = inputs.len().min(crate::MAX_CHANNELS);
-        topo.routing[idx].input_count = input_count;
-        topo.routing[idx].input_indices[..input_count].copy_from_slice(&inputs[..input_count]);
-
-        let output_count = outputs.len().min(crate::MAX_CHANNELS);
-        topo.routing[idx].output_count = output_count;
-        topo.routing[idx].output_indices[..output_count].copy_from_slice(&outputs[..output_count]);
-        topo.node_count += 1;
-
-        self.calculate_stages();
-        self.commit_graph();
-    }
-}
-
-impl Default for ProcessorGraph {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl AudioProcessor for ProcessorGraph {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn process(&mut self, external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext) {
-        self.process_parallel(external_inputs, external_outputs, context, None);
     }
 
     fn setup(&mut self, config: nullherz_traits::AudioConfig) {
