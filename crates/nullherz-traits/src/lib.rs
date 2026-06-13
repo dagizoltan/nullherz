@@ -151,6 +151,9 @@ pub trait AudioProcessor: Send {
     /// Gathers performance and signal telemetry from the processor.
     fn collect_telemetry(&self, _node_times: &mut [u64; MAX_NODES], _peak_levels: &mut [f32; MAX_NODES]) {}
 
+    /// Returns metadata about the processor (parameters, name, etc.)
+    fn metadata(&self) -> Option<control_plane::SidecarMetadata> { None }
+
     /// Configures the garbage producer used for real-time safe deallocation.
     fn set_garbage_producer(&mut self, _producer: Box<dyn GarbageProducer>) {}
 

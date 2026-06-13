@@ -7,6 +7,7 @@ pub fn create_studio_strip(
     next_buffer_id: &mut u32,
     name: &str,
     fx_ids: &[u32],
+    config: &MixerConfig,
 ) -> Vec<Command> {
     let mut commands = Vec::new();
     let input_buf = *next_buffer_id;
@@ -45,8 +46,8 @@ pub fn create_studio_strip(
 
     commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 0, new_buffer_idx: prev_buf_l });
     commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 1, new_buffer_idx: prev_buf_r });
-    commands.push(Command::UpdateOutputEdge { node_idx: fader_id, output_idx: 0, new_buffer_idx: BUF_MASTER_L as u32 });
-    commands.push(Command::UpdateOutputEdge { node_idx: fader_id, output_idx: 1, new_buffer_idx: BUF_MASTER_R as u32 });
+    commands.push(Command::UpdateOutputEdge { node_idx: fader_id, output_idx: 0, new_buffer_idx: config.master_l as u32 });
+    commands.push(Command::UpdateOutputEdge { node_idx: fader_id, output_idx: 1, new_buffer_idx: config.master_r as u32 });
 
     commands
 }

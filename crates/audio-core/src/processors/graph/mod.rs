@@ -211,7 +211,7 @@ impl AudioProcessor for ProcessorGraph {
                 if n_idx < self.node_count && i_idx < 16 {
                     let topo = self.inactive_topology_mut();
                     if i_idx < topo.routing[n_idx].input_count {
-                        topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(63);
+                        topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
                     }
                 }
             }
@@ -221,7 +221,7 @@ impl AudioProcessor for ProcessorGraph {
                 if n_idx < self.node_count && o_idx < 16 {
                     let topo = self.inactive_topology_mut();
                     if o_idx < topo.routing[n_idx].output_count {
-                        topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(63);
+                        topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
                     }
                 }
             }

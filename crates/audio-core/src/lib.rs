@@ -7,6 +7,9 @@ pub mod rt_logging;
 #[cfg(test)]
 mod engine_tests;
 
+#[cfg(test)]
+mod integration_tests;
+
 pub use engine::AudioEngine;
 pub use processors::{AudioProcessor, ProcessorGraph, ProcessorNode, GraphTopology, NodeRouting, CrossfadeState};
 pub use telemetry::Telemetry;

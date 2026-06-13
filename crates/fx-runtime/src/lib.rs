@@ -1,8 +1,7 @@
 use std::process::{Command, Child};
 use std::sync::Arc;
 use ipc_layer::{SharedMemory, ShmRingBuffer, ShmSignal, EventFd, AudioBlock, move_to_cgroup};
-use audio_core::{MAX_CHANNELS};
-use nullherz_processors::SidecarProcessor;
+use nullherz_traits::{AudioProcessor, MAX_CHANNELS};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SidecarStatus {
@@ -52,7 +51,7 @@ impl SidecarSupervisor {
         Self::default()
     }
 
-    pub fn spawn_sidecar(&mut self, name: &str, binary_path: &str, num_channels: usize) -> Result<SidecarProcessor, String> {
+    pub fn spawn_sidecar(&mut self, name: &str, binary_path: &str, num_channels: usize) -> Result<Box<dyn AudioProcessor>, String> {
         let num_channels = num_channels.min(MAX_CHANNELS);
 
         // Calculate estimated memory usage for this sidecar
@@ -148,8 +147,8 @@ impl SidecarSupervisor {
             eprintln!("Warning: could not set RT priority for sidecar {}: {}", name, e);
         }
 
-        let mut processor = unsafe {
-            SidecarProcessor::new(
+        let mut sidecar = unsafe {
+            nullherz_processors::SidecarProcessor::new(
                 cmd_rb_ptr,
                 Some(fb_rb_ptr),
                 &input_ptrs,
@@ -158,7 +157,7 @@ impl SidecarSupervisor {
                 Some(efd)
             )
         };
-        processor.set_shm_references(
+        sidecar.set_shm_references(
             shm_cmd.clone(),
             Some(shm_feedback.clone()),
             shm_inputs.clone(),
@@ -185,10 +184,10 @@ impl SidecarSupervisor {
 
         self.current_memory_usage_bytes += estimated_size;
 
-        Ok(processor)
+        Ok(Box::new(sidecar))
     }
 
-    pub fn supervise(&mut self) -> (Vec<SidecarProcessor>, bool) {
+    pub fn supervise(&mut self) -> (Vec<Box<dyn AudioProcessor>>, bool) {
         let mut to_restart = Vec::new();
         let mut enter_safe_mode = false;
 
@@ -258,7 +257,7 @@ impl SidecarSupervisor {
         (new_processors, enter_safe_mode)
     }
 
-    pub fn reap_zombies(&mut self) -> Vec<SidecarProcessor> {
+    pub fn reap_zombies(&mut self) -> Vec<Box<dyn AudioProcessor>> {
         let (procs, _) = self.supervise();
         procs
     }

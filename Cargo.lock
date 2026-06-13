@@ -1373,6 +1373,7 @@ dependencies = [
  "ipc-layer",
  "libc",
  "nullherz-processors",
+ "nullherz-traits",
 ]
 
 [[package]]
