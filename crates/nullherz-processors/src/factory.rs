@@ -1,4 +1,4 @@
-use nullherz_traits::AudioProcessor;
+use nullherz_traits::{AudioProcessor, ProcessorFactory};
 use crate::gain::*;
 use crate::biquad::*;
 use crate::crossfader::*;
@@ -7,15 +7,12 @@ use crate::wavetable::*;
 use crate::spectral::*;
 use crate::sampler::*;
 
-pub trait ProcessorFactory: Send + Sync {
-    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>>;
-}
-
 pub struct GainFactory;
 impl ProcessorFactory for GainFactory {
     fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
         Some(Box::new(GainProcessor::new(node_idx as u64, 1.0)))
     }
+    fn name(&self) -> &'static str { "Gain" }
 }
 
 pub struct BiquadFactory;
@@ -26,6 +23,7 @@ impl ProcessorFactory for BiquadFactory {
         };
         Some(Box::new(BiquadProcessor::new(node_idx as u64, coeffs)))
     }
+    fn name(&self) -> &'static str { "Biquad" }
 }
 
 pub struct SamplerFactory;
@@ -33,6 +31,7 @@ impl ProcessorFactory for SamplerFactory {
     fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
         Some(Box::new(SamplerProcessor::new(node_idx as u64)))
     }
+    fn name(&self) -> &'static str { "Sampler" }
 }
 
 pub struct CrossfaderFactory;
@@ -40,6 +39,7 @@ impl ProcessorFactory for CrossfaderFactory {
     fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
         Some(Box::new(CrossfaderProcessor::new()))
     }
+    fn name(&self) -> &'static str { "Crossfader" }
 }
 
 pub struct SummingFactory;
@@ -47,6 +47,7 @@ impl ProcessorFactory for SummingFactory {
     fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
         Some(Box::new(SummingProcessor::new()))
     }
+    fn name(&self) -> &'static str { "Summing" }
 }
 
 pub struct SpectralFactory;
@@ -54,6 +55,7 @@ impl ProcessorFactory for SpectralFactory {
     fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
         Some(Box::new(SpectralProcessor::new(1024)))
     }
+    fn name(&self) -> &'static str { "Spectral" }
 }
 
 pub struct WavetableFactory;
@@ -61,4 +63,5 @@ impl ProcessorFactory for WavetableFactory {
     fn create_processor(&self, _node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
         Some(Box::new(WavetableProcessor::new(sample_rate)))
     }
+    fn name(&self) -> &'static str { "Wavetable" }
 }

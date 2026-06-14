@@ -9,6 +9,12 @@ pub use oscillators::*;
 pub use spectral::*;
 pub use util::*;
 
+pub trait DspKernel: Send {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]);
+    fn reset(&mut self) {}
+    fn set_parameter(&mut self, _id: u32, _value: f32, _ramp_samples: u32) {}
+}
+
 /// A SIMD Summing Node that mixes up to 16 input buffers into one output.
 pub struct SummingNode {
     pub gain: f32,
@@ -118,6 +124,19 @@ pub struct Gain {
     pub _smoothing_factor: f32,
     pub ramp_remaining: u32,
     pub ramp_step: f32,
+}
+
+impl DspKernel for Gain {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        if inputs.is_empty() || outputs.is_empty() { return; }
+        self.process_block(inputs[0], outputs[0]);
+    }
+
+    fn set_parameter(&mut self, id: u32, value: f32, ramp_samples: u32) {
+        if id == 0 {
+            self.set_gain(value, ramp_samples);
+        }
+    }
 }
 
 impl Gain {

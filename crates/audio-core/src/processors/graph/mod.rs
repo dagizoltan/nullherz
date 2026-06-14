@@ -4,6 +4,8 @@ mod telemetry;
 mod topology_types;
 mod compiler;
 mod executor;
+mod topology_coordinator;
+mod buffer_pool;
 
 pub use node::{ProcessorNode, DummyProcessor};
 pub use pool::{TaskPool, Job};
@@ -11,21 +13,19 @@ pub use telemetry::GraphTelemetry;
 pub use topology_types::{GraphTopology, NodeRouting, CrossfadeState};
 pub use compiler::GraphCompiler;
 pub use executor::GraphExecutor;
+pub use topology_coordinator::TopologyCoordinator;
+pub use buffer_pool::GraphBufferPool;
 
 use std::sync::Arc;
-use std::sync::atomic::{Ordering, AtomicUsize};
-use ipc_layer::{AudioBlock, Producer};
+use std::sync::atomic::Ordering;
+use ipc_layer::Producer;
 use crate::processors::{AudioProcessor, TopologyMutation};
 
 pub struct ProcessorGraph {
     pub(crate) nodes: Box<[ProcessorNode; crate::MAX_NODES]>,
     pub(crate) node_count: usize,
-    pub(crate) buffers: Box<[AudioBlock; crate::MAX_NODES]>,
-    pub(crate) _crossfade_buffers: [AudioBlock; 8],
-    pub(crate) _old_path_buffers: Box<[AudioBlock; crate::MAX_NODES]>,
-    pub(crate) topologies: Box<[GraphTopology; 2]>,
-    pub(crate) active_topo_idx: Arc<AtomicUsize>,
-    pub(crate) needs_commit: bool,
+    pub(crate) buffer_pool: GraphBufferPool,
+    pub(crate) topology_coordinator: TopologyCoordinator,
 
     pub(crate) telemetry: Arc<GraphTelemetry>,
     pub(crate) garbage_producer: Option<Box<dyn nullherz_traits::GarbageProducer>>,
@@ -33,7 +33,6 @@ pub struct ProcessorGraph {
 
 impl ProcessorGraph {
     pub fn new() -> Self {
-        let buffers = Box::new([AudioBlock { data: [0.0f32; ipc_layer::MAX_BLOCK_SIZE], len: 0 }; crate::MAX_NODES]);
         let mut v2p = [0usize; crate::MAX_NODES];
         for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
         let topo = GraphTopology {
@@ -53,53 +52,32 @@ impl ProcessorGraph {
         Self {
             nodes,
             node_count: 0,
-            buffers,
-            _crossfade_buffers: [AudioBlock { data: [0.0f32; ipc_layer::MAX_BLOCK_SIZE], len: 0 }; 8],
-            _old_path_buffers: Box::new([AudioBlock { data: [0.0f32; ipc_layer::MAX_BLOCK_SIZE], len: 0 }; crate::MAX_NODES]),
-            topologies: Box::new([topo; 2]),
-            active_topo_idx: Arc::new(AtomicUsize::new(0)),
-            needs_commit: false,
+            buffer_pool: GraphBufferPool::new(),
+            topology_coordinator: TopologyCoordinator::new(topo),
             telemetry: Arc::new(GraphTelemetry::default()),
             garbage_producer: None,
         }
     }
 
     fn inactive_topology_mut(&mut self) -> &mut GraphTopology {
-        let active = self.active_topo_idx.load(Ordering::Acquire);
-        let inactive = (active + 1) % 2;
-        if !self.needs_commit {
-            self.topologies[inactive] = self.topologies[active];
-            self.needs_commit = true;
-        }
-        &mut self.topologies[inactive]
+        self.topology_coordinator.inactive_topology_mut()
     }
 
     pub fn calculate_stages(&mut self) {
-        let active_idx = self.active_topo_idx.load(Ordering::Acquire);
-        let inactive_idx = (active_idx + 1) % 2;
-        GraphCompiler::calculate_stages(&mut self.topologies[inactive_idx]);
+        self.topology_coordinator.prepare_commit();
     }
 
     pub fn commit_graph(&mut self) {
-        let active = self.active_topo_idx.load(Ordering::Acquire);
-        let inactive = (active + 1) % 2;
-
-        if self.topologies[inactive].num_stages == 0 && self.topologies[inactive].node_count > 0 {
-            return;
-        }
-
-        if let Err(msg) = GraphCompiler::verify_no_hazards(&self.topologies[inactive]) {
+        if let Err(msg) = self.topology_coordinator.commit() {
             eprintln!("CRITICAL: Refusing to commit hazardous topology: {}", msg);
-            return;
         }
-
-        self.active_topo_idx.store(inactive, Ordering::Release);
-        self.needs_commit = false;
     }
 
 
     pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
         if self.node_count >= crate::MAX_NODES { return; }
+        if self.topology_coordinator.has_active_crossfades() { return; }
+
         let idx = self.node_count;
         unsafe { *self.nodes[idx].processor.get() = processor; }
         self.node_count += 1;
@@ -138,31 +116,31 @@ impl AudioProcessor for ProcessorGraph {
         let num_samples = if !external_outputs.is_empty() { external_outputs[0].len() } else { 0 };
         if num_samples == 0 { return; }
 
-        let active_idx = self.active_topo_idx.load(Ordering::Acquire);
+        let active_idx = self.topology_coordinator.active_idx();
         let offset = context.sub_block_offset;
 
         let mut block_x_map = [[0u8; crate::MAX_CHANNELS]; crate::MAX_NODES];
         GraphExecutor::resolve_crossfades(
-            &mut self.topologies,
+            &mut self.topology_coordinator.topologies,
             active_idx,
             offset,
             num_samples,
-            &self._old_path_buffers,
-            &self.buffers,
-            &mut self._crossfade_buffers,
+            &self.buffer_pool.old_path_buffers,
+            &self.buffer_pool.buffers,
+            &mut self.buffer_pool.crossfade_buffers,
             &mut block_x_map
         );
 
         let mut pool = executor;
 
-        let num_stages = self.topologies[active_idx].num_stages;
+        let num_stages = self.topology_coordinator.topologies[active_idx].num_stages;
         let transport = context.transport;
         for s_idx in 0..num_stages {
             GraphExecutor::execute_stage(
                 &self.nodes,
-                &mut self.buffers,
-                &mut self._crossfade_buffers,
-                &self.topologies[active_idx],
+                &mut self.buffer_pool.buffers,
+                &mut self.buffer_pool.crossfade_buffers,
+                &self.topology_coordinator.topologies[active_idx],
                 s_idx,
                 num_samples,
                 offset,
@@ -174,27 +152,23 @@ impl AudioProcessor for ProcessorGraph {
             );
         }
 
-        let topo = &self.topologies[active_idx];
+        let topo = &self.topology_coordinator.topologies[active_idx];
         if !external_outputs.is_empty() {
             let p0 = topo.virtual_to_physical[0];
-            external_outputs[0].copy_from_slice(&self.buffers[p0].data[offset..offset + num_samples]);
+            external_outputs[0].copy_from_slice(&self.buffer_pool.buffers[p0].data[offset..offset + num_samples]);
         }
         if external_outputs.len() >= 2 {
             let p1 = topo.virtual_to_physical[1];
-            external_outputs[1].copy_from_slice(&self.buffers[p1].data[offset..offset + num_samples]);
+            external_outputs[1].copy_from_slice(&self.buffer_pool.buffers[p1].data[offset..offset + num_samples]);
         }
 
         if is_last_sub_block {
-            let active_idx = self.active_topo_idx.load(Ordering::Acquire);
-            let has_active_crossfades = self.topologies[active_idx].crossfades.iter().any(|x| x.is_some());
-            if has_active_crossfades {
-                for i in 0..crate::MAX_NODES {
-                    self._old_path_buffers[i].data.copy_from_slice(&self.buffers[i].data);
-                }
+            if self.topology_coordinator.has_active_crossfades() {
+                self.buffer_pool.capture_old_buffers();
             }
         }
 
-        self.telemetry.update_peak_levels(topo, &self.buffers, offset, num_samples);
+        self.telemetry.update_peak_levels(topo, &self.buffer_pool.buffers, offset, num_samples);
     }
 
     fn setup(&mut self, config: nullherz_traits::AudioConfig) {
@@ -204,6 +178,13 @@ impl AudioProcessor for ProcessorGraph {
     }
 
     fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
+        if self.topology_coordinator.has_active_crossfades() {
+             // Defer structural mutations if crossfades are active to avoid signal discontinuity
+             // In a full implementation, we might queue these. For now, we drop with a log.
+             eprintln!("WARN: Dropping topology mutation during active crossfade");
+             return;
+        }
+
         match mutation {
             TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
                 let n_idx = node_idx as usize;
@@ -298,7 +279,7 @@ mod tests {
         graph.add_node(Box::new(IdentityProcessor), vec![2], vec![0]);
         let mut input_data = [0.0f32; 256];
         for i in 0..256 { input_data[i] = i as f32; }
-        graph.buffers[2].data.copy_from_slice(&input_data);
+        graph.buffer_pool.buffers[2].data.copy_from_slice(&input_data);
         let mut out_data = [0.0f32; 100];
         let out_slice = &mut out_data[..];
         let mut outputs = [out_slice];
@@ -310,10 +291,10 @@ mod tests {
     #[test]
     fn test_crossfade_state_progression() {
         let mut graph = ProcessorGraph::new();
-        let topo_idx = graph.active_topo_idx.load(Ordering::Relaxed);
+        let topo_idx = graph.topology_coordinator.active_idx();
 
         // Manually setup a crossfade
-        graph.topologies[topo_idx].crossfades[0] = Some(CrossfadeState {
+        graph.topology_coordinator.topologies[topo_idx].crossfades[0] = Some(CrossfadeState {
             node_idx: 1,
             input_idx: 0,
             old_buffer_idx: 10,
@@ -323,23 +304,23 @@ mod tests {
         });
 
         // Fill old/new buffers with distinct values
-        graph._old_path_buffers[10].data.fill(1.0);
-        graph.buffers[20].data.fill(2.0);
+        graph.buffer_pool.old_path_buffers[10].data.fill(1.0);
+        graph.buffer_pool.buffers[20].data.fill(2.0);
 
         let mut block_x_map = [[0u8; crate::MAX_CHANNELS]; crate::MAX_NODES];
-        GraphExecutor::resolve_crossfades(&mut graph.topologies, topo_idx, 0, 50, &graph._old_path_buffers, &graph.buffers, &mut graph._crossfade_buffers, &mut block_x_map);
+        GraphExecutor::resolve_crossfades(&mut graph.topology_coordinator.topologies, topo_idx, 0, 50, &graph.buffer_pool.old_path_buffers, &graph.buffer_pool.buffers, &mut graph.buffer_pool.crossfade_buffers, &mut block_x_map);
 
         // Check progression
-        let state = graph.topologies[topo_idx].crossfades[0].unwrap();
+        let state = graph.topology_coordinator.topologies[topo_idx].crossfades[0].unwrap();
         assert_eq!(state.remaining_samples, 50);
         assert_eq!(block_x_map[1][0], 64); // 64 + x_idx
 
         // Check buffer content (halfway should be ~1.5)
-        assert_eq!(graph._crossfade_buffers[0].data[0], 1.0);
-        assert!(graph._crossfade_buffers[0].data[49] > 1.0);
+        assert_eq!(graph.buffer_pool.crossfade_buffers[0].data[0], 1.0);
+        assert!(graph.buffer_pool.crossfade_buffers[0].data[49] > 1.0);
 
-        GraphExecutor::resolve_crossfades(&mut graph.topologies, topo_idx, 50, 50, &graph._old_path_buffers, &graph.buffers, &mut graph._crossfade_buffers, &mut block_x_map);
-        assert!(graph.topologies[topo_idx].crossfades[0].is_none());
+        GraphExecutor::resolve_crossfades(&mut graph.topology_coordinator.topologies, topo_idx, 50, 50, &graph.buffer_pool.old_path_buffers, &graph.buffer_pool.buffers, &mut graph.buffer_pool.crossfade_buffers, &mut block_x_map);
+        assert!(graph.topology_coordinator.topologies[topo_idx].crossfades[0].is_none());
     }
 
     #[test]
@@ -348,8 +329,8 @@ mod tests {
         for i in 0..10 {
             graph.add_node(Box::new(IdentityProcessor), vec![(i + 1) % crate::MAX_NODES], vec![i % crate::MAX_NODES]);
         }
-        let active_idx = graph.active_topo_idx.load(Ordering::Acquire);
-        let topo = &graph.topologies[active_idx];
+        let active_idx = graph.topology_coordinator.active_idx();
+        let topo = &graph.topology_coordinator.topologies[active_idx];
         if topo.node_count > 0 { assert!(topo.num_stages > 0); }
         let mut seen_nodes = std::collections::HashSet::new();
         for s_idx in 0..topo.num_stages {
@@ -357,7 +338,7 @@ mod tests {
                 assert!(seen_nodes.insert(*n_idx), "Node {} assigned to multiple stages", n_idx);
             }
         }
-        assert!(GraphCompiler::verify_no_hazards(&graph.topologies[active_idx]).is_ok());
+        assert!(GraphCompiler::verify_no_hazards(&graph.topology_coordinator.topologies[active_idx]).is_ok());
     }
 
     #[test]
@@ -370,7 +351,7 @@ mod tests {
         let mut pool = TaskPool::new(2);
         let mut input_data = [0.0f32; 128];
         for i in 0..128 { input_data[i] = i as f32; }
-        graph.buffers[10].data[..128].copy_from_slice(&input_data);
+        graph.buffer_pool.buffers[10].data[..128].copy_from_slice(&input_data);
 
         let mut out_data = [0.0f32; 128];
         let mut outputs = [&mut out_data[..]];

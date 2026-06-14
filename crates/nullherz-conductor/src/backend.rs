@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 use audio_core::AudioEngine;
-use nullherz_backends::{AudioBackend, AlsaBackend, ThreadedBackend};
+use nullherz_backends::{AudioBackend, AlsaBackend, ThreadedBackend, AudioBackendType};
 
 pub struct BackendManager {
     pub backend: Option<Box<dyn AudioBackend>>,
@@ -17,15 +17,16 @@ impl Default for BackendManager {
 }
 
 impl BackendManager {
-    pub fn start(&mut self, name: &str) -> Result<(), String> {
+    pub fn start(&mut self, backend_type: AudioBackendType) -> Result<(), String> {
         // Move current process to high-priority Cgroup
         let _ = ipc_layer::move_to_cgroup("nullherz", std::process::id() as i32);
 
-        let mut backend: Box<dyn AudioBackend> = match name {
-            "alsa" => Box::new(AlsaBackend::new()),
-            "pipewire" => Box::new(nullherz_backends::PipewireBackend::new()),
-            "jack" => Box::new(nullherz_backends::JackBackend::new()),
-            _ => Box::new(ThreadedBackend::new()),
+        let mut backend: Box<dyn AudioBackend> = match backend_type {
+            AudioBackendType::Alsa => Box::new(AlsaBackend::new()),
+            AudioBackendType::Pipewire => Box::new(nullherz_backends::PipewireBackend::new()),
+            AudioBackendType::Jack => Box::new(nullherz_backends::JackBackend::new()),
+            AudioBackendType::Threaded => Box::new(ThreadedBackend::new()),
+            AudioBackendType::Mock => Box::new(ThreadedBackend::new()), // Fallback for now
         };
 
         backend.start(self.engine_handle.clone())?;
@@ -39,9 +40,9 @@ impl BackendManager {
         }
     }
 
-    pub fn switch(&mut self, name: &str) -> Result<(), String> {
+    pub fn switch(&mut self, backend_type: AudioBackendType) -> Result<(), String> {
         self.stop();
         std::thread::sleep(std::time::Duration::from_millis(50));
-        self.start(name)
+        self.start(backend_type)
     }
 }

@@ -10,6 +10,8 @@ pub mod wavetable;
 pub mod spectral;
 pub mod modulation;
 pub mod sequencer;
+#[cfg(feature = "test-utils")]
+pub mod test_kit;
 
 pub use nullherz_traits::{MAX_CHANNELS, MAX_NODES};
 

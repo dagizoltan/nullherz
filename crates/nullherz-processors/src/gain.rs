@@ -12,22 +12,24 @@ impl GainProcessor {
     }
 }
 
+impl nullherz_traits::RtSafe for GainProcessor {}
+
 impl AudioProcessor for GainProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
+        use audio_dsp::DspKernel;
         if inputs.is_empty() || outputs.is_empty() { return; }
         let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
         for (i, gain) in self.gains.iter_mut().enumerate().take(num_channels) {
-            gain.process_block(inputs[i], outputs[i]);
+            gain.process(&inputs[i..i+1], &mut outputs[i..i+1]);
         }
     }
     fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
-        if param_id == 0 {
-            for g in self.gains.iter_mut() {
-                g.set_gain(value, ramp_duration_samples);
-            }
+        use audio_dsp::DspKernel;
+        for g in self.gains.iter_mut() {
+            g.set_parameter(param_id, value, ramp_duration_samples);
         }
     }
 

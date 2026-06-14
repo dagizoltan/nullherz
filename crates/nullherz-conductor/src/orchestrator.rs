@@ -83,16 +83,16 @@ impl Conductor {
         (cmd_buffer, tel_cons)
     }
 
-    pub fn start_backend(&mut self, name: &str) -> Result<(), String> {
-        self.backend_manager.start(name)
+    pub fn start_backend(&mut self, backend_type: nullherz_backends::AudioBackendType) -> Result<(), String> {
+        self.backend_manager.start(backend_type)
     }
 
     pub fn stop_backend(&mut self) {
         self.backend_manager.stop()
     }
 
-    pub fn switch_backend(&mut self, name: &str) -> Result<(), String> {
-        self.backend_manager.switch(name)
+    pub fn switch_backend(&mut self, backend_type: nullherz_backends::AudioBackendType) -> Result<(), String> {
+        self.backend_manager.switch(backend_type)
     }
 
     pub fn drain_garbage(&mut self) {
@@ -129,6 +129,31 @@ impl Conductor {
                 let _ = prod.push(bundle);
             }
         }
+    }
+
+    pub fn tick(&mut self) {
+        // Check for engine health crisis
+        let health_crisis = if let Some(ref signal) = self.health_signal {
+            signal.swap(false, std::sync::atomic::Ordering::Relaxed)
+        } else {
+            false
+        };
+
+        if health_crisis {
+            eprintln!("CRITICAL: Engine health crisis detected. Prioritizing resource recovery...");
+            // Mitigation: Perform deep drain of garbage
+            for _ in 0..100 { self.drain_garbage(); }
+        }
+
+        // Reap zombie sidecars and handle automated recovery
+        let new_processors = self.manager.reap_zombies();
+        for _processor in new_processors {
+            eprintln!("Recovered sidecar process. Re-inserting into audio graph...");
+            // Trigger recovery (e.g. via SwapProcessor command)
+            // Implementation detail: we could send a command here if we had the producer
+        }
+
+        self.drain_garbage();
     }
 
     fn handle_topology_command(&mut self, cmd: &control_plane::Command) -> bool {

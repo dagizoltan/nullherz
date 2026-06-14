@@ -1,8 +1,10 @@
 pub mod metrics;
 pub mod command_dispatcher;
+pub mod graph_manager;
+pub mod builder;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::Ordering;
 use ipc_layer::{Producer, Consumer};
 use control_plane::TimestampedCommand;
 use crate::processors::{AudioProcessor, TaskPool, ProcessContext};
@@ -10,6 +12,7 @@ use nullherz_traits::telemetry::Telemetry;
 use crate::rt_logging::RtLogger;
 use self::metrics::EngineMetrics;
 use self::command_dispatcher::CommandDispatcher;
+use self::graph_manager::GraphManager;
 
 // SAFETY: AudioEngine is Send and Sync because all of its members are either
 // Send/Sync or are atomics that allow safe cross-thread access.
@@ -21,10 +24,7 @@ pub struct AudioEngine {
     midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
     bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
     topology_consumer: Option<Consumer<nullherz_traits::TopologyMutation>>,
-    active_graph: AtomicPtr<Box<dyn AudioProcessor>>,
-    pending_graph: AtomicPtr<Box<dyn AudioProcessor>>,
-    garbage_producer: Producer<Box<dyn AudioProcessor>>,
-    overflow_garbage_producer: Option<Producer<Box<dyn AudioProcessor>>>,
+    graph_manager: GraphManager,
     bundle_garbage_producer: Option<Producer<Vec<control_plane::Command>>>,
     bundle_overflow_producer: Option<Producer<Vec<control_plane::Command>>>,
     telemetry_producer: Producer<Telemetry>,
@@ -58,10 +58,7 @@ impl AudioEngine {
             midi_consumer,
             bundle_consumer,
             topology_consumer,
-            active_graph: AtomicPtr::new(Box::into_raw(Box::new(initial_graph))),
-            pending_graph: AtomicPtr::new(std::ptr::null_mut()),
-            garbage_producer,
-            overflow_garbage_producer,
+            graph_manager: GraphManager::new(initial_graph, garbage_producer, overflow_garbage_producer),
             bundle_garbage_producer,
             bundle_overflow_producer,
             telemetry_producer,
@@ -90,9 +87,12 @@ impl AudioEngine {
             self.logger.log(crate::rt_logging::RtLogLevel::Error, "Hardware rate mismatch", self.sample_counter);
         }
         self.transport.sample_rate = config.sample_rate;
-        let graph_ptr = self.active_graph.load(Ordering::Acquire);
-        let graph = unsafe { &mut **graph_ptr };
+        let graph = self.graph_manager.get_active_graph();
         graph.setup(config);
+    }
+
+    pub fn set_pending_graph(&self, graph: Box<dyn AudioProcessor>) {
+        self.graph_manager.set_pending_graph(graph);
     }
 
     pub fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize) {
@@ -101,63 +101,71 @@ impl AudioEngine {
 
         self.metrics.calibrate(self.sample_counter, num_samples);
 
-        let pending = self.pending_graph.swap(std::ptr::null_mut(), Ordering::Acquire);
-        if !pending.is_null() {
-            let old = self.active_graph.swap(pending, Ordering::AcqRel);
-            if !old.is_null() {
-                let old_graph = unsafe { Box::from_raw(old) };
-                if let Err(leaked) = self.garbage_producer.push(*old_graph) {
-                    if let Some(ref mut overflow) = self.overflow_garbage_producer {
-                        if let Err(leaked) = overflow.push(leaked) {
-                            self.metrics.report_resource_leak(&self.health_signal);
-                            let _ = Box::into_raw(Box::new(leaked));
-                        }
-                    } else {
-                        self.metrics.report_resource_leak(&self.health_signal);
-                        let _ = Box::into_raw(Box::new(leaked));
-                    }
-                }
-            }
-        }
-        let block_start_sample = self.sample_counter;
-        let block_end_sample = block_start_sample + num_samples as u64;
-        let mut current_sample_in_block = 0;
-        let graph_ptr = self.active_graph.load(Ordering::Acquire);
-        let graph = unsafe { &mut **graph_ptr };
+        let graph = unsafe { self.graph_manager.swap_if_pending(&self.metrics, &self.health_signal) };
 
-        let mut commands_processed = 0;
-        const MAX_COMMANDS_PER_BLOCK: usize = 256;
+        Self::handle_async_inputs_static(
+            graph,
+            &mut self.transport,
+            &mut self.bundle_consumer,
+            &mut self.topology_consumer,
+            &mut self.midi_consumer,
+            &mut self.bundle_garbage_producer,
+            &mut self.bundle_overflow_producer,
+            &self.metrics,
+            &self.health_signal,
+        );
 
-        if self.bundle_consumer.is_some() {
-            while let Some(bundle) = self.bundle_consumer.as_mut().unwrap().pop() {
+        Self::execute_processing_kernel_static(
+            graph,
+            &mut self.transport,
+            &mut self.pool,
+            &mut self.command_consumer,
+            &mut self.pending_command,
+            self.sample_counter,
+            inputs,
+            outputs,
+            num_samples
+        );
+
+        Self::finalize_block_telemetry_static(
+            graph,
+            &self.metrics,
+            &mut self.telemetry_producer,
+            &self.xrun_count,
+            &mut self.sample_counter,
+            start_cycles,
+            num_samples
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn handle_async_inputs_static(
+        graph: &mut dyn AudioProcessor,
+        transport: &mut nullherz_traits::Transport,
+        bundle_consumer: &mut Option<Consumer<Vec<control_plane::Command>>>,
+        topology_consumer: &mut Option<Consumer<nullherz_traits::TopologyMutation>>,
+        midi_consumer: &mut Option<Consumer<ipc_layer::MidiEvent>>,
+        bundle_garbage_producer: &mut Option<Producer<Vec<control_plane::Command>>>,
+        bundle_overflow_producer: &mut Option<Producer<Vec<control_plane::Command>>>,
+        metrics: &EngineMetrics,
+        health_signal: &Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        if let Some(cons) = bundle_consumer {
+            while let Some(bundle) = cons.pop() {
                 for cmd in &bundle {
-                    CommandDispatcher::handle_single_command(&mut self.transport, graph, cmd);
+                    CommandDispatcher::handle_single_command(transport, graph, cmd);
                 }
-                if let Some(ref mut prod) = self.bundle_garbage_producer {
-                    if let Err(b) = prod.push(bundle) {
-                        if let Some(ref mut overflow) = self.bundle_overflow_producer {
-                            if let Err(b) = overflow.push(b) {
-                                self.metrics.report_resource_leak(&self.health_signal);
-                                std::mem::forget(b);
-                            }
-                        } else {
-                            self.metrics.report_resource_leak(&self.health_signal);
-                            std::mem::forget(b);
-                        }
-                    }
-                } else if let Some(ref mut overflow) = self.bundle_overflow_producer {
-                    if let Err(b) = overflow.push(bundle) {
-                        self.metrics.report_resource_leak(&self.health_signal);
-                        std::mem::forget(b);
-                    }
-                } else {
-                    self.metrics.report_resource_leak(&self.health_signal);
-                    std::mem::forget(bundle);
-                }
+                Self::recycle_bundle_static(
+                    bundle,
+                    bundle_garbage_producer,
+                    bundle_overflow_producer,
+                    metrics,
+                    health_signal,
+                );
             }
         }
 
-        if let Some(ref mut cons) = self.topology_consumer {
+        if let Some(cons) = topology_consumer {
             let mut topo_processed = 0;
             while let Some(topo_mut) = cons.pop() {
                 graph.apply_topology_mutation(topo_mut);
@@ -166,59 +174,105 @@ impl AudioEngine {
             }
         }
 
-        if let Some(ref mut cons) = self.midi_consumer {
+        if let Some(cons) = midi_consumer {
             while let Some(event) = cons.pop() { graph.apply_midi(event); }
         }
+    }
 
+    fn recycle_bundle_static(
+        bundle: Vec<control_plane::Command>,
+        garbage_producer: &mut Option<Producer<Vec<control_plane::Command>>>,
+        overflow_producer: &mut Option<Producer<Vec<control_plane::Command>>>,
+        metrics: &EngineMetrics,
+        health_signal: &Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        if let Some(prod) = garbage_producer {
+            if let Err(b) = prod.push(bundle) {
+                if let Some(overflow) = overflow_producer {
+                    if let Err(leak) = overflow.push(b) {
+                        metrics.report_resource_leak(health_signal);
+                        std::mem::forget(leak);
+                    }
+                } else {
+                    metrics.report_resource_leak(health_signal);
+                    std::mem::forget(b);
+                }
+            }
+        } else if let Some(overflow) = overflow_producer {
+            if let Err(b) = overflow.push(bundle) {
+                metrics.report_resource_leak(health_signal);
+                std::mem::forget(b);
+            }
+        } else {
+            metrics.report_resource_leak(health_signal);
+            std::mem::forget(bundle);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn execute_processing_kernel_static(
+        graph: &mut dyn AudioProcessor,
+        transport: &mut nullherz_traits::Transport,
+        pool: &mut Option<Box<dyn nullherz_traits::ParallelExecutor>>,
+        command_consumer: &mut Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
+        pending_command: &mut Option<TimestampedCommand>,
+        sample_counter: u64,
+        inputs: &[&[f32]],
+        outputs: &mut [&mut [f32]],
+        num_samples: usize,
+    ) {
+        let block_start_sample = sample_counter;
+        let block_end_sample = block_start_sample + num_samples as u64;
+        let mut commands_processed = 0;
+        const MAX_COMMANDS_PER_BLOCK: usize = 256;
+
+        let mut sub_block_iter = nullherz_traits::SubBlockIterator::new(num_samples, ipc_layer::MAX_BLOCK_SIZE);
+
+        while sub_block_iter.current_offset < num_samples {
+            let cmd = if let Some(pending) = pending_command.take() { Some(pending) } else {
+                if commands_processed < MAX_COMMANDS_PER_BLOCK { command_consumer.pop() } else { None }
+            };
+
+            if let Some(cmd) = cmd {
+                if cmd.timestamp_samples < block_end_sample {
+                    commands_processed += 1;
+                    let cmd_offset = if cmd.timestamp_samples > block_start_sample { (cmd.timestamp_samples - block_start_sample) as usize } else { sub_block_iter.current_offset };
+
+                    while let Some(sb) = sub_block_iter.next_chunk_up_to(cmd_offset) {
+                        Self::process_sub_block_and_advance_transport(graph, transport, pool, inputs, outputs, sb);
+                    }
+
+                    CommandDispatcher::handle_single_command(transport, graph, &cmd.command);
+                } else {
+                    *pending_command = Some(cmd);
+                    while let Some(sb) = sub_block_iter.next_chunk() {
+                        Self::process_sub_block_and_advance_transport(graph, transport, pool, inputs, outputs, sb);
+                    }
+                }
+            } else {
+                while let Some(sb) = sub_block_iter.next_chunk() {
+                    Self::process_sub_block_and_advance_transport(graph, transport, pool, inputs, outputs, sb);
+                }
+            }
+        }
+    }
+
+    fn finalize_block_telemetry_static(
+        graph: &mut dyn AudioProcessor,
+        metrics: &EngineMetrics,
+        telemetry_producer: &mut Producer<Telemetry>,
+        xrun_count_atomic: &Arc<std::sync::atomic::AtomicU32>,
+        sample_counter: &mut u64,
+        start_cycles: u64,
+        num_samples: usize,
+    ) {
         let mut node_times = [0u64; 64];
         let mut peak_levels = [0.0f32; 64];
         let mut node_times_cycles = [0u64; 64];
 
-        while current_sample_in_block < num_samples {
-            let cmd = if let Some(pending) = self.pending_command.take() { Some(pending) } else {
-                if commands_processed < MAX_COMMANDS_PER_BLOCK { self.command_consumer.pop() } else { None }
-            };
-            if let Some(cmd) = cmd {
-                if cmd.timestamp_samples < block_end_sample {
-                    commands_processed += 1;
-                    let cmd_offset = if cmd.timestamp_samples > block_start_sample { (cmd.timestamp_samples - block_start_sample) as usize } else { current_sample_in_block };
-                    if cmd_offset > current_sample_in_block {
-                        let mut remaining_to_cmd = cmd_offset - current_sample_in_block;
-                        while remaining_to_cmd > 0 {
-                            let chunk = remaining_to_cmd.min(ipc_layer::MAX_BLOCK_SIZE);
-                            let is_last = (current_sample_in_block + chunk) == num_samples;
-                            self.process_sub_block(graph, inputs, outputs, current_sample_in_block, chunk, is_last);
-                            current_sample_in_block += chunk;
-                            remaining_to_cmd -= chunk;
-                        }
-                    }
-                    CommandDispatcher::handle_single_command(&mut self.transport, graph, &cmd.command);
-                } else {
-                    self.pending_command = Some(cmd);
-                    let mut remaining = num_samples - current_sample_in_block;
-                    while remaining > 0 {
-                        let chunk = remaining.min(ipc_layer::MAX_BLOCK_SIZE);
-                        let is_last = (current_sample_in_block + chunk) == num_samples;
-                        self.process_sub_block(graph, inputs, outputs, current_sample_in_block, chunk, is_last);
-                        current_sample_in_block += chunk;
-                        remaining -= chunk;
-                    }
-                }
-            } else {
-                let mut remaining = num_samples - current_sample_in_block;
-                while remaining > 0 {
-                    let chunk = remaining.min(ipc_layer::MAX_BLOCK_SIZE);
-                    let is_last = (current_sample_in_block + chunk) == num_samples;
-                    self.process_sub_block(graph, inputs, outputs, current_sample_in_block, chunk, is_last);
-                    current_sample_in_block += chunk;
-                    remaining -= chunk;
-                }
-            }
-        }
-        self.sample_counter = block_end_sample;
         graph.collect_telemetry(&mut node_times_cycles, &mut peak_levels);
 
-        let ns_per_cycle = f64::from_bits(self.metrics.ns_per_cycle.load(Ordering::Relaxed));
+        let ns_per_cycle = f64::from_bits(metrics.ns_per_cycle.load(Ordering::Relaxed));
         nullherz_traits::telemetry::TelemetryProcessor::collect_node_times(
             unsafe { std::mem::transmute(&node_times_cycles) },
             ns_per_cycle,
@@ -227,19 +281,46 @@ impl AudioEngine {
 
         let elapsed_cycles = crate::get_cycles().wrapping_sub(start_cycles);
         let current_ns = (elapsed_cycles as f64 * ns_per_cycle) as u64;
-        let peak = self.metrics.update_peak(current_ns, self.sample_counter, num_samples);
+        let peak = metrics.update_peak(current_ns, *sample_counter, num_samples);
 
-        let _ = self.telemetry_producer.push(Telemetry {
-            process_time_ns: current_ns, peak_process_time_ns: peak, sample_counter: self.sample_counter,
-            xrun_count: self.xrun_count.load(Ordering::Relaxed), resource_leaks: self.metrics.resource_leaks.load(Ordering::Relaxed),
+        let block_end_sample = *sample_counter + num_samples as u64;
+        *sample_counter = block_end_sample;
+
+        let _ = telemetry_producer.push(Telemetry {
+            process_time_ns: current_ns, peak_process_time_ns: peak, sample_counter: *sample_counter,
+            xrun_count: xrun_count_atomic.load(Ordering::Relaxed), resource_leaks: metrics.resource_leaks.load(Ordering::Relaxed),
             node_times_ns: node_times, peak_levels,
         });
     }
 
+    fn process_sub_block_and_advance_transport(
+        graph: &mut dyn AudioProcessor,
+        transport: &mut nullherz_traits::Transport,
+        pool: &mut Option<Box<dyn nullherz_traits::ParallelExecutor>>,
+        inputs: &[&[f32]],
+        outputs: &mut [&mut [f32]],
+        sb: nullherz_traits::SubBlock,
+    ) {
+        Self::process_sub_block_static(graph, transport, pool, inputs, outputs, sb.offset, sb.len, sb.is_last);
+        if transport.is_playing {
+            let beats = (sb.len as f64 / transport.sample_rate as f64) * (transport.bpm as f64 / 60.0);
+            transport.beat_position += beats;
+        }
+    }
 
-    fn process_sub_block(&mut self, graph: &mut dyn AudioProcessor, inputs: &[&[f32]], outputs: &mut [&mut [f32]], offset: usize, len: usize, is_last_sub_block: bool) {
+    #[allow(clippy::too_many_arguments)]
+    fn process_sub_block_static(
+        graph: &mut dyn AudioProcessor,
+        transport: &nullherz_traits::Transport,
+        pool: &mut Option<Box<dyn nullherz_traits::ParallelExecutor>>,
+        inputs: &[&[f32]],
+        outputs: &mut [&mut [f32]],
+        offset: usize,
+        len: usize,
+        is_last_sub_block: bool,
+    ) {
         if len == 0 { return; }
-        let mut context = ProcessContext { transport: Some(&self.transport), sub_block_offset: offset, is_last_sub_block };
+        let mut context = ProcessContext { transport: Some(transport), sub_block_offset: offset, is_last_sub_block };
         let mut sub_inputs_ptr = [ &[][..]; crate::MAX_CHANNELS ];
         let num_inputs = inputs.len().min(crate::MAX_CHANNELS);
         let empty_input = &[][..];
@@ -257,20 +338,10 @@ impl AudioEngine {
             if end > act { sub_outputs_reconstructed[i] = &mut out[act..end]; }
         }
 
-        graph.process_parallel(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs], &mut context, self.pool.as_deref_mut());
-
-        if self.transport.is_playing {
-            let beats = (len as f64 / self.transport.sample_rate as f64) * (self.transport.bpm as f64 / 60.0);
-            self.transport.beat_position += beats;
-        }
+        graph.process_parallel(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs], &mut context, pool.as_deref_mut());
     }
+
+
 }
 
-impl Drop for AudioEngine {
-    fn drop(&mut self) {
-        let ptr = self.active_graph.load(Ordering::Acquire);
-        if !ptr.is_null() { unsafe { drop(Box::from_raw(ptr)); } }
-        let pending = self.pending_graph.load(Ordering::Acquire);
-        if !pending.is_null() { unsafe { drop(Box::from_raw(pending)); } }
-    }
-}
+// GraphManager handles its own drop.

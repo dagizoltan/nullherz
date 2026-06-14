@@ -9,7 +9,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (cmd_buffer, tel_cons) = conductor.setup_engine();
 
     // Start the backend (defaulting to threaded for safety in sandbox)
-    conductor.start_backend("threaded")?;
+    conductor.start_backend(nullherz_backends::AudioBackendType::Threaded)?;
     println!("Audio engine started.");
 
     let cmd_prod_gateway = ipc_layer::NonRtProducer::from_mpsc(cmd_buffer.clone());
@@ -21,35 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Main orchestration loop
     loop {
-        // Check for engine health crisis
-        let health_crisis = if let Some(ref signal) = conductor.health_signal {
-            signal.swap(false, std::sync::atomic::Ordering::Relaxed)
-        } else {
-            false
-        };
-
-        if health_crisis {
-            println!("CRITICAL: Engine health crisis detected. Prioritizing resource recovery...");
-            // Mitigation: Perform deep drain of garbage
-            for _ in 0..100 { conductor.drain_garbage(); }
-        }
-
-        // Reap zombie sidecars and handle automated recovery
-        let new_processors = conductor.manager.reap_zombies();
-        for _processor in new_processors {
-            println!("Recovered sidecar process. Re-inserting into audio graph...");
-            // Swap the old (dead) processor in the engine with the new one
-            // We assume node_idx 0 for this prototype recovery
-            let _ = cmd_buffer.push(control_plane::TimestampedCommand {
-                timestamp_samples: 0,
-                command: control_plane::Command::SwapProcessor {
-                    node_idx: 0,
-                    processor_type_id: 100 // Marker for custom/re-injected sidecar
-                },
-            });
-        }
-
-        conductor.drain_garbage();
+        conductor.tick();
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
