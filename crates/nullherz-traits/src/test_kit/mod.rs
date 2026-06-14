@@ -108,6 +108,39 @@ impl ConformanceSuite {
         Ok(())
     }
 
+    pub fn verify_bypass_conformance(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+        let mut host = VirtualClockHost::new();
+        let block_size = 128;
+        let mut input = vec![0.0f32; block_size];
+        let mut output = vec![0.0f32; block_size];
+
+        for (i, val) in input.iter_mut().enumerate() { *val = i as f32 * 0.01; }
+
+        processor.apply_command(&crate::ProcessorCommand::SetParam {
+            target_id: 0, // Assume 0 is bypass in some processors, but better via explicit trait if existed
+            param_id: 999, // Reserved for bypass in our convention
+            value: 1.0,
+            ramp_duration_samples: 0,
+        });
+
+        let inputs = [ &input[..] ];
+        let mut outputs = [ &mut output[..] ];
+        let mut ctx = crate::ProcessContext {
+            transport: Some(&host.transport),
+            sub_block_offset: 0,
+            is_last_sub_block: true,
+        };
+        processor.process(&inputs, &mut outputs, &mut ctx);
+
+        // Check if output matches input (passthrough)
+        for i in 0..block_size {
+            if (output[i] - input[i]).abs() > 1e-6 {
+                return Err(format!("Bypass conformance failed at sample {}: expected {}, got {}", i, input[i], output[i]));
+            }
+        }
+        Ok(())
+    }
+
     pub fn measure_latency_samples(processor: &mut dyn crate::AudioProcessor) -> usize {
         let mut host = VirtualClockHost::new();
         let block_size = 256;

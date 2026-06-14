@@ -15,3 +15,12 @@ pub trait AudioBackend: Send {
     fn start(&mut self, engine: Arc<Mutex<Option<audio_core::AudioEngine>>>) -> Result<(), String>;
     fn stop(&mut self);
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioBackendType {
+    Alsa,
+    Pipewire,
+    Jack,
+    Threaded,
+    Mock,
+}

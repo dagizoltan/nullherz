@@ -1,6 +1,7 @@
 pub mod metrics;
 pub mod command_dispatcher;
 pub mod graph_manager;
+pub mod builder;
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
