@@ -53,6 +53,93 @@ impl StabilityTester {
     }
 }
 
+pub struct ConformanceSuite;
+
+impl ConformanceSuite {
+    pub fn verify_sub_block_consistency(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+        let mut host = VirtualClockHost::new();
+        let block_size = 128;
+        let mut input = vec![1.0f32; block_size];
+        let mut output_single = vec![0.0f32; block_size];
+        let mut output_split = vec![0.0f32; block_size];
+
+        // Process as single block
+        {
+            let inputs = [ &input[..] ];
+            let mut outputs = [ &mut output_single[..] ];
+            let mut ctx = crate::ProcessContext {
+                transport: Some(&host.transport),
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+            processor.process(&inputs, &mut outputs, &mut ctx);
+        }
+
+        // Reset and process as two sub-blocks
+        // Note: We need a way to reset processor state if it's stateful.
+        // Assuming Identity or stateless for this basic check, or caller handles reset.
+
+        {
+            let inputs_a = [ &input[0..64] ];
+            let mut outputs_a = [ &mut output_split[0..64] ];
+            let mut ctx_a = crate::ProcessContext {
+                transport: Some(&host.transport),
+                sub_block_offset: 0,
+                is_last_sub_block: false,
+            };
+            processor.process(&inputs_a, &mut outputs_a, &mut ctx_a);
+
+            let inputs_b = [ &input[64..128] ];
+            let mut outputs_b = [ &mut output_split[64..128] ];
+            let mut ctx_b = crate::ProcessContext {
+                transport: Some(&host.transport),
+                sub_block_offset: 64,
+                is_last_sub_block: true,
+            };
+            processor.process(&inputs_b, &mut outputs_b, &mut ctx_b);
+        }
+
+        for i in 0..block_size {
+            if (output_single[i] - output_split[i]).abs() > 1e-6 {
+                return Err(format!("Sub-block inconsistency at sample {}: single={}, split={}", i, output_single[i], output_split[i]));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn measure_latency_samples(processor: &mut dyn crate::AudioProcessor) -> usize {
+        let mut host = VirtualClockHost::new();
+        let block_size = 256;
+        let mut input = vec![0.0f32; block_size];
+        let mut output = vec![0.0f32; block_size];
+
+        input[0] = 1.0; // Impulse
+
+        let mut total_latency = 0;
+        for _ in 0..10 { // Check up to 10 blocks
+            let inputs = [ &input[..] ];
+            let mut outputs = [ &mut output[..] ];
+            let mut ctx = crate::ProcessContext {
+                transport: Some(&host.transport),
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+            processor.process(&inputs, &mut outputs, &mut ctx);
+
+            for (i, &sample) in output.iter().enumerate() {
+                if sample.abs() > 1e-6 {
+                    return total_latency + i;
+                }
+            }
+            total_latency += block_size;
+            input.fill(0.0);
+        }
+
+        usize::MAX // No signal passed
+    }
+}
+
 impl AudioProcessor for MockProcessor {
     fn process(&mut self, _inputs: &[&[f32]], _outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         self.process_called_count += 1;
@@ -132,6 +219,12 @@ mod tests {
         assert_eq!(sb2.offset, 10);
         assert_eq!(sb2.len, 54);
         assert!(!sb2.is_last);
+    }
+
+    #[test]
+    fn test_conformance_sub_block_consistency() {
+        let mut mock = super::MockProcessor::new();
+        super::ConformanceSuite::verify_sub_block_consistency(&mut mock).expect("Conformance check failed");
     }
 
     #[test]
