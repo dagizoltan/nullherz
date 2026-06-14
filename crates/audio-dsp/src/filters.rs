@@ -386,6 +386,18 @@ impl DjIsolator {
     }
 }
 
+impl crate::DspKernel for BiquadFilter {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        if inputs.is_empty() || outputs.is_empty() { return; }
+        self.process_block_unrolled(inputs[0], outputs[0]);
+    }
+
+    fn reset(&mut self) {
+        self.z1 = 0.0;
+        self.z2 = 0.0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -12,16 +12,19 @@ impl BiquadProcessor {
     }
 }
 
+impl nullherz_traits::RtSafe for BiquadProcessor {}
+
 impl AudioProcessor for BiquadProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
+        use audio_dsp::DspKernel;
         if inputs.is_empty() || outputs.is_empty() { return; }
         let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
 
         for (ch, filter) in self.filters.iter_mut().enumerate().take(num_channels) {
-            filter.process_block_unrolled(inputs[ch], outputs[ch]);
+            filter.process(&inputs[ch..ch+1], &mut outputs[ch..ch+1]);
         }
     }
 

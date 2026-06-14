@@ -177,6 +177,11 @@ pub type ProcessorCommand = control_plane::Command;
 /// heap allocations, take locks, or execute blocking syscalls.
 pub trait RtSafe {}
 
+pub trait ProcessorFactory: Send + Sync {
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>>;
+    fn name(&self) -> &'static str;
+}
+
 /// The core trait for all audio processing nodes in the nullherz engine.
 pub trait AudioProcessor: Send {
     /// Executes audio processing for the given buffers.

@@ -16,6 +16,43 @@ impl MockProcessor {
     }
 }
 
+pub struct StabilityTester;
+
+impl StabilityTester {
+    pub fn verify_signal_bounds(processor: &mut dyn crate::AudioProcessor, duration_blocks: usize) -> Result<(), String> {
+        let mut host = VirtualClockHost::new();
+        let block_size = 256;
+        let mut input = vec![0.0f32; block_size];
+        let mut output = vec![0.0f32; block_size];
+
+        // Impulse test
+        input[0] = 1.0;
+
+        for _ in 0..duration_blocks {
+            let inputs = [ &input[..] ];
+            let mut outputs = [ &mut output[..] ];
+            let mut ctx = crate::ProcessContext {
+                transport: Some(&host.transport),
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+            processor.process(&inputs, &mut outputs, &mut ctx);
+
+            for &sample in &output {
+                if !sample.is_finite() {
+                    return Err("Signal went non-finite (NaN or Inf)".into());
+                }
+                if sample.abs() > 100.0 {
+                    return Err(format!("Signal exceeded absolute bound of 100.0: {}", sample));
+                }
+            }
+            input.fill(0.0); // Only impulse at start
+        }
+
+        Ok(())
+    }
+}
+
 impl AudioProcessor for MockProcessor {
     fn process(&mut self, _inputs: &[&[f32]], _outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         self.process_called_count += 1;
