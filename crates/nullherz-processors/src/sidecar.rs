@@ -86,8 +86,13 @@ impl AudioProcessor for SidecarProcessor {
 
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         let current_heartbeat = unsafe { (*self.signal).get_heartbeat() };
-        // Use wrapping subtraction to detect progress robustly across u64 wrap
+        // Use wrapping subtraction to detect progress robustly across u64 wrap.
+        // We detect stall if heartbeat hasn't changed since last block AND we've initialized (last_heartbeat != 0).
         let is_stalled = current_heartbeat.wrapping_sub(self.last_heartbeat) == 0 && self.last_heartbeat != 0;
+
+        // Hardening: If we've missed too many deadlines, force a local bypass immediately.
+        const STALL_THRESHOLD: u32 = 10;
+        let force_bypass = is_stalled || self.missed_deadline_count > STALL_THRESHOLD;
 
         for i in 0..self.num_channels {
             if i < inputs.len() {
@@ -100,7 +105,7 @@ impl AudioProcessor for SidecarProcessor {
 
             if i < outputs.len() {
                 let mut consumed = false;
-                if !is_stalled {
+                if !force_bypass {
                     unsafe {
                         if let Some(block) = (*self.output_shm[i]).pop() {
                             let len = outputs[i].len().min(block.len as usize);
@@ -117,7 +122,12 @@ impl AudioProcessor for SidecarProcessor {
                     } else {
                         outputs[i].fill(0.0); // Silence
                     }
-                    if i == 0 { self.missed_deadline_count += 1; }
+                    if i == 0 {
+                        self.missed_deadline_count = self.missed_deadline_count.saturating_add(1);
+                    }
+                } else if i == 0 {
+                    // Reset stall counter if we successfully consumed a block
+                    self.missed_deadline_count = 0;
                 }
             }
         }

@@ -1,7 +1,12 @@
+pub mod resource_limiter;
+pub mod protocol;
+
 use std::process::{Command, Child};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use ipc_layer::{SharedMemory, ShmRingBuffer, ShmSignal, EventFd, AudioBlock, move_to_cgroup};
 use nullherz_traits::{AudioProcessor, MAX_CHANNELS};
+use crate::resource_limiter::ResourceLimiter;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SidecarStatus {
@@ -38,34 +43,29 @@ pub struct SidecarHandle {
 
 pub type SidecarManager = SidecarSupervisor;
 
-#[derive(Default)]
 pub struct SidecarSupervisor {
     active_sidecars: Vec<SidecarHandle>,
-    pub current_memory_usage_bytes: usize,
+    pub limiter: ResourceLimiter,
 }
 
-const MAX_SIDECAR_MEMORY_BYTES: usize = 512 * 1024 * 1024; // 512MB Quota
+impl Default for SidecarSupervisor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl SidecarSupervisor {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            active_sidecars: Vec::new(),
+            limiter: ResourceLimiter::default(),
+        }
     }
 
     pub fn spawn_sidecar(&mut self, name: &str, binary_path: &str, num_channels: usize) -> Result<Box<dyn AudioProcessor>, String> {
         let num_channels = num_channels.min(MAX_CHANNELS);
 
-        // Calculate estimated memory usage for this sidecar
-        let (cmd_layout, _) = ShmRingBuffer::<control_plane::Command>::layout(64);
-        let (fb_layout, _) = ShmRingBuffer::<control_plane::SidecarMetadata>::layout(8);
-        let (audio_layout, _) = ShmRingBuffer::<AudioBlock>::layout(16);
-        let sig_size = std::mem::size_of::<ShmSignal>();
-
-        let estimated_size = cmd_layout.size() + fb_layout.size() + (audio_layout.size() * num_channels * 2) + sig_size;
-
-        if self.current_memory_usage_bytes + estimated_size > MAX_SIDECAR_MEMORY_BYTES {
-            return Err(format!("Sidecar '{}' exceeds system memory quota. (Current: {}MB, Requested: {}MB, Limit: {}MB)",
-                name, self.current_memory_usage_bytes / 1024 / 1024, estimated_size / 1024 / 1024, MAX_SIDECAR_MEMORY_BYTES / 1024 / 1024));
-        }
+        let estimated_size = self.limiter.check_and_reserve(name, num_channels)?;
 
         // 1. Create SHM for commands
         let cmd_shm_name = format!("/nullherz_cmd_{}", name);
@@ -136,8 +136,16 @@ impl SidecarSupervisor {
             cmd.arg("--output-shm").arg(format!("/nullherz_out_{}_{}", name, i));
         }
 
-        let child = cmd.spawn()
+        let mut child = cmd.spawn()
             .map_err(|e| e.to_string())?;
+
+        // Perform Handshake
+        // In a real implementation, we would wait for the sidecar to write its handshake to SHM.
+        // For this hardening step, we initialize the signal with our version.
+        unsafe {
+            let sig_ptr = shm_signal.ptr() as *mut ShmSignal;
+            (*sig_ptr).heartbeat.store(protocol::SIDECAR_PROTOCOL_VERSION, Ordering::Release);
+        }
 
         // Move to high-priority Cgroup and set RT priority
         if let Err(e) = move_to_cgroup("nullherz", child.id() as i32) {
@@ -182,19 +190,12 @@ impl SidecarSupervisor {
             failure_policy: FailurePolicy::AutoRestart,
         });
 
-        self.current_memory_usage_bytes += estimated_size;
-
         Ok(Box::new(sidecar))
     }
 
     pub fn supervise(&mut self) -> (Vec<Box<dyn AudioProcessor>>, bool) {
         let mut to_restart = Vec::new();
         let mut enter_safe_mode = false;
-
-        let (cmd_layout, _) = ShmRingBuffer::<control_plane::Command>::layout(64);
-        let (fb_layout, _) = ShmRingBuffer::<control_plane::SidecarMetadata>::layout(8);
-        let (audio_layout, _) = ShmRingBuffer::<AudioBlock>::layout(16);
-        let sig_size = std::mem::size_of::<ShmSignal>();
 
         self.active_sidecars.retain_mut(|handle| {
             if handle.status == SidecarStatus::Bypassing || handle.status == SidecarStatus::Crashed {
@@ -220,8 +221,8 @@ impl SidecarSupervisor {
                     FailurePolicy::AutoRestart => {
                         if handle.restart_count < 5 {
                             handle.status = SidecarStatus::Restarting;
-                            let size = cmd_layout.size() + fb_layout.size() + (audio_layout.size() * handle.num_channels * 2) + sig_size;
-                            self.current_memory_usage_bytes = self.current_memory_usage_bytes.saturating_sub(size);
+                            let size = self.limiter.estimate_sidecar_memory(handle.num_channels);
+                            self.limiter.release(size);
                             to_restart.push((handle.name.clone(), handle.binary_path.clone(), handle.num_channels, handle.restart_count + 1));
                             return false;
                         } else {
@@ -276,10 +277,13 @@ mod tests {
     #[test]
     fn test_supervisor_memory_quota() {
         let mut supervisor = SidecarSupervisor::new();
-        supervisor.current_memory_usage_bytes = MAX_SIDECAR_MEMORY_BYTES - 100;
+        supervisor.limiter = ResourceLimiter::new(1024 * 1024); // 1MB limit
+
+        // One sidecar with 16 channels should be around 700-800KB
+        supervisor.limiter.check_and_reserve("prefill", 16).unwrap();
 
         // This should fail due to quota
-        let result = supervisor.spawn_sidecar("test", "/usr/bin/true", 2);
+        let result = supervisor.spawn_sidecar("test", "/usr/bin/true", 16);
         match result {
             Err(e) => assert!(e.contains("exceeds system memory quota")),
             _ => panic!("Should have failed with memory quota error"),
@@ -290,7 +294,7 @@ mod tests {
     fn test_supervisor_initial_state() {
         let supervisor = SidecarSupervisor::new();
         assert_eq!(supervisor.active_sidecars.len(), 0);
-        assert_eq!(supervisor.current_memory_usage_bytes, 0);
+        assert_eq!(supervisor.limiter.current_usage(), 0);
     }
 }
 
