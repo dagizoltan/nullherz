@@ -33,6 +33,15 @@ impl AudioProcessor for GainProcessor {
         }
     }
 
+    fn reset(&mut self) {
+        // audio_dsp::Gain doesn't have internal state like delay lines,
+        // but we can reset current_gain to target_gain if we want bit-exact reset during ramps.
+        for g in self.gains.iter_mut() {
+            g.current_gain = g.target_gain;
+            g.ramp_remaining = 0;
+        }
+    }
+
     fn apply_command(&mut self, command: &control_plane::Command) {
         match *command {
             control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples }

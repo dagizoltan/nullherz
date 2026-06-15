@@ -18,6 +18,7 @@ pub struct Job {
     pub node_idx: usize, // for telemetry
     pub telemetry_ptr: *const [AtomicU64; crate::MAX_NODES],
     pub transport: Option<crate::Transport>,
+    pub host_ptr: Option<*const dyn nullherz_traits::Host>,
     pub is_last_sub_block: bool,
 }
 
@@ -119,9 +120,9 @@ impl TaskPool {
                         let mut inner_context = nullherz_traits::ProcessContext {
 
                             transport: job.transport.as_ref(),
+                            host: job.host_ptr.and_then(|ptr| unsafe { Some(&*ptr) }),
                             sub_block_offset: offset,
                             is_last_sub_block: job.is_last_sub_block,
-
                         };
                         // SAFETY: node.processor is an UnsafeCell. Access is synchronized via topological stage fencing.
                         unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }

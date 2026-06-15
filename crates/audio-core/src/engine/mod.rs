@@ -5,7 +5,7 @@ pub mod builder;
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use ipc_layer::{Producer, Consumer};
+use ipc_layer::{Producer, Consumer, RingBuffer};
 use control_plane::TimestampedCommand;
 use crate::processors::{AudioProcessor, TaskPool, ProcessContext};
 use nullherz_traits::telemetry::Telemetry;
@@ -13,6 +13,19 @@ use crate::rt_logging::RtLogger;
 use self::metrics::EngineMetrics;
 use self::command_dispatcher::CommandDispatcher;
 use self::graph_manager::GraphManager;
+
+pub struct EngineHost {
+    command_producer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
+}
+
+impl nullherz_traits::Host for EngineHost {
+    fn push_command(&self, timestamp_samples: u64, command: control_plane::Command) {
+        let _ = self.command_producer.push(TimestampedCommand {
+            timestamp_samples,
+            command,
+        });
+    }
+}
 
 // SAFETY: AudioEngine is Send and Sync because all of its members are either
 // Send/Sync or are atomics that allow safe cross-thread access.
@@ -33,6 +46,7 @@ pub struct AudioEngine {
     pending_command: Option<TimestampedCommand>,
     pub metrics: EngineMetrics,
     pub health_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub host: Option<EngineHost>,
     pub pool: Option<Box<dyn nullherz_traits::ParallelExecutor>>,
     pub transport: nullherz_traits::Transport,
     pub target_sample_rate: f32,
@@ -54,7 +68,7 @@ impl AudioEngine {
         initial_graph: Box<dyn AudioProcessor>,
     ) -> Self {
         Self {
-            command_consumer,
+            command_consumer: command_consumer.clone(),
             midi_consumer,
             bundle_consumer,
             topology_consumer,
@@ -67,6 +81,7 @@ impl AudioEngine {
             pending_command: None,
             metrics: EngineMetrics::new(),
             health_signal: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            host: Some(EngineHost { command_producer: command_consumer }),
             pool: Some(Box::new(TaskPool::new(4))),
             transport: nullherz_traits::Transport {
                 bpm: 120.0,
@@ -102,6 +117,7 @@ impl AudioEngine {
         self.metrics.calibrate(self.sample_counter, num_samples);
 
         let graph = unsafe { self.graph_manager.swap_if_pending(&self.metrics, &self.health_signal) };
+        let host_ref = self.host.as_ref().map(|h| h as &dyn nullherz_traits::Host);
 
         Self::handle_async_inputs_static(
             graph,
@@ -118,6 +134,7 @@ impl AudioEngine {
         Self::execute_processing_kernel_static(
             graph,
             &mut self.transport,
+            host_ref,
             &mut self.pool,
             &mut self.command_consumer,
             &mut self.pending_command,
@@ -213,6 +230,7 @@ impl AudioEngine {
     fn execute_processing_kernel_static(
         graph: &mut dyn AudioProcessor,
         transport: &mut nullherz_traits::Transport,
+        host: Option<&dyn nullherz_traits::Host>,
         pool: &mut Option<Box<dyn nullherz_traits::ParallelExecutor>>,
         command_consumer: &mut Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
         pending_command: &mut Option<TimestampedCommand>,
@@ -239,19 +257,19 @@ impl AudioEngine {
                     let cmd_offset = if cmd.timestamp_samples > block_start_sample { (cmd.timestamp_samples - block_start_sample) as usize } else { sub_block_iter.current_offset };
 
                     while let Some(sb) = sub_block_iter.next_chunk_up_to(cmd_offset) {
-                        Self::process_sub_block_and_advance_transport(graph, transport, pool, inputs, outputs, sb);
+                        Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
                     }
 
                     CommandDispatcher::handle_single_command(transport, graph, &cmd.command);
                 } else {
                     *pending_command = Some(cmd);
                     while let Some(sb) = sub_block_iter.next_chunk() {
-                        Self::process_sub_block_and_advance_transport(graph, transport, pool, inputs, outputs, sb);
+                        Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
                     }
                 }
             } else {
                 while let Some(sb) = sub_block_iter.next_chunk() {
-                    Self::process_sub_block_and_advance_transport(graph, transport, pool, inputs, outputs, sb);
+                    Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
                 }
             }
         }
@@ -296,12 +314,13 @@ impl AudioEngine {
     fn process_sub_block_and_advance_transport(
         graph: &mut dyn AudioProcessor,
         transport: &mut nullherz_traits::Transport,
+        host: Option<&dyn nullherz_traits::Host>,
         pool: &mut Option<Box<dyn nullherz_traits::ParallelExecutor>>,
         inputs: &[&[f32]],
         outputs: &mut [&mut [f32]],
         sb: nullherz_traits::SubBlock,
     ) {
-        Self::process_sub_block_static(graph, transport, pool, inputs, outputs, sb.offset, sb.len, sb.is_last);
+        Self::process_sub_block_static(graph, transport, host, pool, inputs, outputs, sb.offset, sb.len, sb.is_last);
         if transport.is_playing {
             let beats = (sb.len as f64 / transport.sample_rate as f64) * (transport.bpm as f64 / 60.0);
             transport.beat_position += beats;
@@ -312,6 +331,7 @@ impl AudioEngine {
     fn process_sub_block_static(
         graph: &mut dyn AudioProcessor,
         transport: &nullherz_traits::Transport,
+        host: Option<&dyn nullherz_traits::Host>,
         pool: &mut Option<Box<dyn nullherz_traits::ParallelExecutor>>,
         inputs: &[&[f32]],
         outputs: &mut [&mut [f32]],
@@ -320,7 +340,7 @@ impl AudioEngine {
         is_last_sub_block: bool,
     ) {
         if len == 0 { return; }
-        let mut context = ProcessContext { transport: Some(transport), sub_block_offset: offset, is_last_sub_block };
+        let mut context = ProcessContext { transport: Some(transport), host, sub_block_offset: offset, is_last_sub_block };
         let mut sub_inputs_ptr = [ &[][..]; crate::MAX_CHANNELS ];
         let num_inputs = inputs.len().min(crate::MAX_CHANNELS);
         let empty_input = &[][..];

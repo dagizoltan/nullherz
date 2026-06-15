@@ -179,8 +179,8 @@ impl Filter for BiquadFilter {
 #[repr(C, align(64))]
 pub struct SimdBiquad {
     pub coeffs: BiquadCoefficients,
-    pub(crate) z1: [f32; 16],
-    pub(crate) z2: [f32; 16],
+    pub z1: [f32; 16],
+    pub z2: [f32; 16],
 }
 
 impl SimdBiquad {

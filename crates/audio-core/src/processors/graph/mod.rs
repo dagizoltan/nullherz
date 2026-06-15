@@ -135,6 +135,7 @@ impl AudioProcessor for ProcessorGraph {
 
         let num_stages = self.topology_coordinator.topologies[active_idx].num_stages;
         let transport = context.transport;
+        let host = context.host;
         for s_idx in 0..num_stages {
             GraphExecutor::execute_stage(
                 &self.nodes,
@@ -147,6 +148,7 @@ impl AudioProcessor for ProcessorGraph {
                 &block_x_map,
                 &mut pool,
                 transport,
+                host,
                 is_last_sub_block,
                 &self.telemetry.node_times_cycles
             );
@@ -283,7 +285,7 @@ mod tests {
         let mut out_data = [0.0f32; 100];
         let out_slice = &mut out_data[..];
         let mut outputs = [out_slice];
-        let mut context = ProcessContext {  transport: None, sub_block_offset: 10, is_last_sub_block: false, };
+        let mut context = ProcessContext {  transport: None, host: None, sub_block_offset: 10, is_last_sub_block: false, };
         graph.process(&[], &mut outputs, &mut context);
         for i in 0..50 { assert_eq!(out_data[i], (i + 10) as f32); }
     }
@@ -355,7 +357,7 @@ mod tests {
 
         let mut out_data = [0.0f32; 128];
         let mut outputs = [&mut out_data[..]];
-        let mut context = ProcessContext { transport: None, sub_block_offset: 0, is_last_sub_block: true };
+        let mut context = ProcessContext { transport: None, host: None, sub_block_offset: 0, is_last_sub_block: true };
 
         graph.process_parallel(&[], &mut outputs, &mut context, Some(&mut pool));
 
@@ -384,6 +386,7 @@ mod tests {
             node_idx: 0,
             telemetry_ptr: &std::array::from_fn(|_| AtomicU64::new(0)) as *const _,
             transport: None,
+            host_ptr: None,
             is_last_sub_block: false,
         });
         pool.worker_wake_fds[0].notify();
@@ -405,6 +408,7 @@ mod tests {
             node_idx: 0,
             telemetry_ptr: &std::array::from_fn(|_| AtomicU64::new(0)) as *const _,
             transport: None,
+            host_ptr: None,
             is_last_sub_block: false,
         });
         pool.worker_wake_fds[0].notify();

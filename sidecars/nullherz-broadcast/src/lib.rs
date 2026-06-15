@@ -48,6 +48,9 @@ impl BroadcastSidecar {
 }
 
 impl AudioProcessor for BroadcastSidecar {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
     fn process(&mut self, inputs: &[&[f32]], _out: &mut [&mut [f32]], _context: &mut audio_core::processors::ProcessContext) {
         if !self.is_active || inputs.len() < 2 { return; }
 

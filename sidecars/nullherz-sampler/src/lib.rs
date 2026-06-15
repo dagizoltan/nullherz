@@ -30,6 +30,9 @@ impl SamplerSidecar {
 }
 
 impl AudioProcessor for SamplerSidecar {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
     fn process(&mut self, _in: &[&[f32]], out: &mut [&mut [f32]], _context: &mut audio_core::processors::ProcessContext) {
         for ch in 0..out.len().min(16) {
             if let Some(mut idx) = self.play_index[ch] {

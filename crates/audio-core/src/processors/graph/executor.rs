@@ -52,6 +52,7 @@ impl GraphExecutor {
         block_x_map: &[[u8; crate::MAX_CHANNELS]; crate::MAX_NODES],
         pool: &mut Option<&mut (dyn nullherz_traits::ParallelExecutor + '_)>,
         transport: Option<&nullherz_traits::Transport>,
+        host: Option<&dyn nullherz_traits::Host>,
         is_last_sub_block: bool,
         telemetry_node_times_cycles: &[std::sync::atomic::AtomicU64; crate::MAX_NODES],
     ) {
@@ -98,6 +99,7 @@ impl GraphExecutor {
                     node_idx: n_idx,
                     telemetry_ptr: telemetry_node_times_cycles as *const _,
                     transport: transport.copied(),
+                    host_ptr: host.map(|h| h as *const dyn nullherz_traits::Host),
                     is_last_sub_block,
                 };
                 let _ = pool.push_job(worker_idx, Box::new(job));
@@ -138,7 +140,7 @@ impl GraphExecutor {
 
                 let start = crate::get_cycles();
 
-                let mut inner_context = nullherz_traits::ProcessContext { transport, sub_block_offset: offset, is_last_sub_block };
+                let mut inner_context = nullherz_traits::ProcessContext { transport, host, sub_block_offset: offset, is_last_sub_block };
                 unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
 
                 let elapsed = crate::get_cycles().wrapping_sub(start);

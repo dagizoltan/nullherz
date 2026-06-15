@@ -18,7 +18,7 @@ fn main() {
         command: control_plane::Command::CommitTopology,
     });
 
-    conductor.start_backend("threaded").unwrap();
+    conductor.start_backend(nullherz_backends::AudioBackendType::Threaded).unwrap();
 
     let mut samples_collected = 0;
     let mut total_ns = 0;

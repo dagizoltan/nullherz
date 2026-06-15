@@ -43,6 +43,13 @@ impl AudioProcessor for BiquadProcessor {
         }
     }
 
+    fn reset(&mut self) {
+        use audio_dsp::DspKernel;
+        for f in self.filters.iter_mut() {
+            f.reset();
+        }
+    }
+
     fn apply_command(&mut self, command: &control_plane::Command) {
         match *command {
             control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
@@ -110,6 +117,11 @@ impl AudioProcessor for SimdBiquadProcessor {
             _ => return,
         }
         self.inner.coeffs = coeffs;
+    }
+
+    fn reset(&mut self) {
+        self.inner.z1.fill(0.0);
+        self.inner.z2.fill(0.0);
     }
 
     fn apply_command(&mut self, command: &control_plane::Command) {
