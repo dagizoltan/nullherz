@@ -18,7 +18,6 @@ pub use buffer_pool::GraphBufferPool;
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use ipc_layer::Producer;
 use crate::processors::{AudioProcessor, TopologyMutation};
 
 pub struct ProcessorGraph {
@@ -32,6 +31,69 @@ pub struct ProcessorGraph {
 }
 
 impl ProcessorGraph {
+    pub fn apply_topology_mutation_fallible(&mut self, mutation: TopologyMutation) -> Result<(), nullherz_traits::error::AudioError> {
+        if self.topology_coordinator.has_active_crossfades() {
+             return Err(nullherz_traits::error::AudioError::ProcessorError("Cannot mutate topology during active crossfade".into()));
+        }
+
+        match mutation {
+            TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
+                let n_idx = node_idx as usize;
+                let i_idx = input_idx as usize;
+                if n_idx >= self.node_count { return Err(nullherz_traits::error::AudioError::InvalidNodeId(node_idx as u64)); }
+                if i_idx >= 16 { return Err(nullherz_traits::error::AudioError::ConfigurationError("Input index out of bounds".into())); }
+
+                let topo = self.inactive_topology_mut();
+                if i_idx < topo.routing[n_idx].input_count {
+                    topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
+                } else {
+                    return Err(nullherz_traits::error::AudioError::ConfigurationError("Input index exceeds node input count".into()));
+                }
+            }
+            TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
+                let n_idx = node_idx as usize;
+                let o_idx = output_idx as usize;
+                if n_idx >= self.node_count { return Err(nullherz_traits::error::AudioError::InvalidNodeId(node_idx as u64)); }
+                if o_idx >= 16 { return Err(nullherz_traits::error::AudioError::ConfigurationError("Output index out of bounds".into())); }
+
+                let topo = self.inactive_topology_mut();
+                if o_idx < topo.routing[n_idx].output_count {
+                    topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
+                } else {
+                    return Err(nullherz_traits::error::AudioError::ConfigurationError("Output index exceeds node output count".into()));
+                }
+            }
+            TopologyMutation::SwapProcessor { node_idx, mut processor } => {
+                let n_idx = node_idx as usize;
+                if n_idx < self.node_count {
+                    let node = &self.nodes[n_idx];
+                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
+                    let old_proc = unsafe { std::ptr::replace(node.processor.get(), processor) };
+                    if let Some(ref mut prod) = self.garbage_producer {
+                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
+                    } else { std::mem::forget(old_proc); }
+                } else {
+                    return Err(nullherz_traits::error::AudioError::InvalidNodeId(node_idx as u64));
+                }
+            }
+            TopologyMutation::AddNode { node_idx: _, mut processor } => {
+                if self.node_count < crate::MAX_NODES {
+                    let idx = self.node_count;
+                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
+                    unsafe { *self.nodes[idx].processor.get() = processor; }
+                    self.node_count += 1;
+                    let topo = self.inactive_topology_mut();
+                    topo.routing[idx].input_count = 0;
+                    topo.routing[idx].output_count = 0;
+                    topo.node_count += 1;
+                } else {
+                    return Err(nullherz_traits::error::AudioError::GraphFull);
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn new() -> Self {
         let mut v2p = [0usize; crate::MAX_NODES];
         for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
@@ -74,9 +136,9 @@ impl ProcessorGraph {
     }
 
 
-    pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
-        if self.node_count >= crate::MAX_NODES { return; }
-        if self.topology_coordinator.has_active_crossfades() { return; }
+    pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) -> Result<(), nullherz_traits::error::AudioError> {
+        if self.node_count >= crate::MAX_NODES { return Err(nullherz_traits::error::AudioError::GraphFull); }
+        if self.topology_coordinator.has_active_crossfades() { return Err(nullherz_traits::error::AudioError::ProcessorError("Cannot add node during active crossfade".into())); }
 
         let idx = self.node_count;
         unsafe { *self.nodes[idx].processor.get() = processor; }
@@ -94,6 +156,7 @@ impl ProcessorGraph {
 
         self.calculate_stages();
         self.commit_graph();
+        Ok(())
     }
 }
 
@@ -178,57 +241,8 @@ impl AudioProcessor for ProcessorGraph {
     }
 
     fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
-        if self.topology_coordinator.has_active_crossfades() {
-             // Defer structural mutations if crossfades are active to avoid signal discontinuity
-             // In a full implementation, we might queue these. For now, we drop with a log.
-             eprintln!("WARN: Dropping topology mutation during active crossfade");
-             return;
-        }
-
-        match mutation {
-            TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
-                let n_idx = node_idx as usize;
-                let i_idx = input_idx as usize;
-                if n_idx < self.node_count && i_idx < 16 {
-                    let topo = self.inactive_topology_mut();
-                    if i_idx < topo.routing[n_idx].input_count {
-                        topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
-                    }
-                }
-            }
-            TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
-                let n_idx = node_idx as usize;
-                let o_idx = output_idx as usize;
-                if n_idx < self.node_count && o_idx < 16 {
-                    let topo = self.inactive_topology_mut();
-                    if o_idx < topo.routing[n_idx].output_count {
-                        topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
-                    }
-                }
-            }
-            TopologyMutation::SwapProcessor { node_idx, mut processor } => {
-                let n_idx = node_idx as usize;
-                if n_idx < self.node_count {
-                    let node = &self.nodes[n_idx];
-                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
-                    let old_proc = unsafe { std::ptr::replace(node.processor.get(), processor) };
-                    if let Some(ref mut prod) = self.garbage_producer {
-                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
-                    } else { std::mem::forget(old_proc); }
-                }
-            }
-            TopologyMutation::AddNode { node_idx: _, mut processor } => {
-                if self.node_count < crate::MAX_NODES {
-                    let idx = self.node_count;
-                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
-                    unsafe { *self.nodes[idx].processor.get() = processor; }
-                    self.node_count += 1;
-                    let topo = self.inactive_topology_mut();
-                    topo.routing[idx].input_count = 0;
-                    topo.routing[idx].output_count = 0;
-                    topo.node_count += 1;
-                }
-            }
+        if let Err(e) = self.apply_topology_mutation_fallible(mutation) {
+            eprintln!("ERROR: Topology mutation failed: {}", e);
         }
     }
 
@@ -276,7 +290,7 @@ mod tests {
     #[test]
     fn test_graph_sub_block_routing() {
         let mut graph = ProcessorGraph::new();
-        graph.add_node(Box::new(IdentityProcessor), vec![2], vec![0]);
+        graph.add_node(Box::new(IdentityProcessor), vec![2], vec![0]).unwrap();
         let mut input_data = [0.0f32; 256];
         for i in 0..256 { input_data[i] = i as f32; }
         graph.buffer_pool.buffers[2].data.copy_from_slice(&input_data);
@@ -327,7 +341,7 @@ mod tests {
     fn test_graph_topology_stability() {
         let mut graph = ProcessorGraph::new();
         for i in 0..10 {
-            graph.add_node(Box::new(IdentityProcessor), vec![(i + 1) % crate::MAX_NODES], vec![i % crate::MAX_NODES]);
+            graph.add_node(Box::new(IdentityProcessor), vec![(i + 1) % crate::MAX_NODES], vec![i % crate::MAX_NODES]).unwrap();
         }
         let active_idx = graph.topology_coordinator.active_idx();
         let topo = &graph.topology_coordinator.topologies[active_idx];
@@ -345,8 +359,8 @@ mod tests {
     fn test_graph_parallel_execution_consistency() {
         let mut graph = ProcessorGraph::new();
         // Setup a simple graph: Node 0 -> Node 1
-        graph.add_node(Box::new(IdentityProcessor), vec![10], vec![11]);
-        graph.add_node(Box::new(IdentityProcessor), vec![11], vec![0]);
+        graph.add_node(Box::new(IdentityProcessor), vec![10], vec![11]).unwrap();
+        graph.add_node(Box::new(IdentityProcessor), vec![11], vec![0]).unwrap();
 
         let mut pool = TaskPool::new(2);
         let mut input_data = [0.0f32; 128];

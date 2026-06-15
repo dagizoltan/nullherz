@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-nullherz-traits = { path = "../nullherz-traits" }
+nullherz-traits = { path = "../nullherz-traits", features = ["test-utils"] }
 audio-dsp = { path = "../audio-dsp" }
 control-plane = { path = "../control-plane" }
 ipc-layer = { path = "../ipc-layer" }

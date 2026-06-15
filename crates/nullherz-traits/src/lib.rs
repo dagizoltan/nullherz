@@ -79,6 +79,12 @@ pub struct ProcessContext<'a> {
     pub is_last_sub_block: bool,
 }
 
+/// Standard interface for components that can be bypassed.
+pub trait Bypassable {
+    fn set_bypass(&mut self, bypassed: bool);
+    fn is_bypassed(&self) -> bool;
+}
+
 pub trait ParallelExecutor: Send + Sync {
     fn as_any(&mut self) -> &mut dyn std::any::Any;
     fn num_workers(&self) -> usize;

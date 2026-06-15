@@ -1,7 +1,7 @@
 use std::sync::Arc;
-use ipc_layer::{RingBuffer, MpscRingBuffer, Producer, Consumer};
+use ipc_layer::{RingBuffer, MpscRingBuffer, Consumer};
 use control_plane::TimestampedCommand;
-use nullherz_traits::{AudioProcessor, TopologyMutation, telemetry::Telemetry};
+use nullherz_traits::{AudioProcessor, telemetry::Telemetry};
 use crate::engine::AudioEngine;
 use crate::processors::ProcessorGraph;
 

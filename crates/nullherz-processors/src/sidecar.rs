@@ -1,8 +1,6 @@
 use ipc_layer::{ShmRingBuffer, AudioBlock, ShmSignal, EventFd, SharedMemory};
-use nullherz_traits::AudioProcessor;
+use nullherz_traits::{AudioProcessor, MAX_CHANNELS};
 use std::sync::Arc;
-
-pub const MAX_CHANNELS: usize = 16;
 
 pub struct SidecarProcessor {
     command_producer_ptr: *const ShmRingBuffer<control_plane::Command>,

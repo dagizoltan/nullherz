@@ -3,16 +3,22 @@ use nullherz_traits::AudioProcessor;
 pub struct BiquadProcessor {
     filters: [audio_dsp::BiquadFilter; crate::MAX_CHANNELS],
     id: u64,
+    bypassed: bool,
 }
 
 impl BiquadProcessor {
     pub fn new(id: u64, coeffs: audio_dsp::BiquadCoefficients) -> Self {
         let filters = std::array::from_fn(|_| audio_dsp::BiquadFilter::new(coeffs));
-        Self { filters, id }
+        Self { filters, id, bypassed: false }
     }
 }
 
 impl nullherz_traits::RtSafe for BiquadProcessor {}
+
+impl nullherz_traits::Bypassable for BiquadProcessor {
+    fn set_bypass(&mut self, bypassed: bool) { self.bypassed = bypassed; }
+    fn is_bypassed(&self) -> bool { self.bypassed }
+}
 
 impl AudioProcessor for BiquadProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
@@ -22,6 +28,13 @@ impl AudioProcessor for BiquadProcessor {
         use audio_dsp::DspKernel;
         if inputs.is_empty() || outputs.is_empty() { return; }
         let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
+
+        if self.bypassed {
+            for i in 0..num_channels {
+                outputs[i].copy_from_slice(inputs[i]);
+            }
+            return;
+        }
 
         for (ch, filter) in self.filters.iter_mut().enumerate().take(num_channels) {
             filter.process(&inputs[ch..ch+1], &mut outputs[ch..ch+1]);
@@ -48,7 +61,12 @@ impl AudioProcessor for BiquadProcessor {
             control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
                 if target_id == self.id =>
             {
-                self.set_parameter(param_id, value, ramp_duration_samples);
+                if param_id == 999 {
+                    use nullherz_traits::Bypassable;
+                    self.set_bypass(value > 0.5);
+                } else {
+                    self.set_parameter(param_id, value, ramp_duration_samples);
+                }
             }
             _ => {}
         }

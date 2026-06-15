@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 use ipc_layer::AudioBlock;
-use crate::processors::graph::{GraphTopology, TaskPool, Job, ProcessorNode};
+use crate::processors::graph::{GraphTopology, Job, ProcessorNode};
 
 pub struct GraphExecutor {}
 

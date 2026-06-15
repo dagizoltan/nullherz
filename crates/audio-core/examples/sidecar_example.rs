@@ -74,7 +74,7 @@ fn main() {
 
     let mut graph = ProcessorGraph::new();
     let sidecar_proxy = unsafe { SidecarProcessor::new(cmd_rb_ptr, None, &[in_rb_ptr], &[out_rb_ptr], sig_ptr, None) };
-    graph.add_node(Box::new(sidecar_proxy), vec![], vec![0]);
+    graph.add_node(Box::new(sidecar_proxy), vec![], vec![0]).unwrap();
 
     let engine = AudioEngine::new(cons, None, None, None, garbage_prod, None, None, None, tel_prod, Box::new(graph));
     let engine_handle = Arc::new(Mutex::new(Some(engine)));

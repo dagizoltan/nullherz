@@ -20,7 +20,7 @@ pub struct StabilityTester;
 
 impl StabilityTester {
     pub fn verify_signal_bounds(processor: &mut dyn crate::AudioProcessor, duration_blocks: usize) -> Result<(), String> {
-        let mut host = VirtualClockHost::new();
+        let host = VirtualClockHost::new();
         let block_size = 256;
         let mut input = vec![0.0f32; block_size];
         let mut output = vec![0.0f32; block_size];
@@ -51,15 +51,60 @@ impl StabilityTester {
 
         Ok(())
     }
+
+    pub fn verify_stability_extended(processor: &mut dyn crate::AudioProcessor, duration_blocks: usize) -> Result<(), String> {
+        let host = VirtualClockHost::new();
+        let block_size = 256;
+        let mut input = vec![0.0f32; block_size];
+        let mut output = vec![0.0f32; block_size];
+
+        let mut rng = 0u64; // Simple LCG for deterministic randomness
+        let next_rng = |state: &mut u64| {
+            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (*state >> 32) as u32
+        };
+
+        for b in 0..duration_blocks {
+            // Random impulse sequence every few blocks
+            if b % 10 == 0 {
+                for i in 0..block_size {
+                    if next_rng(&mut rng) % 100 == 0 {
+                        input[i] = (next_rng(&mut rng) as f32 / u32::MAX as f32) * 2.0 - 1.0;
+                    }
+                }
+            }
+
+            let inputs = [ &input[..] ];
+            let mut outputs = [ &mut output[..] ];
+            let mut ctx = crate::ProcessContext {
+                transport: Some(&host.transport),
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+            processor.process(&inputs, &mut outputs, &mut ctx);
+
+            for &sample in &output {
+                if !sample.is_finite() {
+                    return Err(format!("Extended stability failed: non-finite sample at block {}", b));
+                }
+                if sample.abs() > 1000.0 {
+                    return Err(format!("Extended stability failed: blowup ({}) at block {}", sample, b));
+                }
+            }
+            input.fill(0.0);
+        }
+
+        Ok(())
+    }
 }
 
 pub struct ConformanceSuite;
 
 impl ConformanceSuite {
     pub fn verify_sub_block_consistency(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
-        let mut host = VirtualClockHost::new();
+        let host = VirtualClockHost::new();
         let block_size = 128;
-        let mut input = vec![1.0f32; block_size];
+        let input = vec![1.0f32; block_size];
         let mut output_single = vec![0.0f32; block_size];
         let mut output_split = vec![0.0f32; block_size];
 
@@ -109,7 +154,7 @@ impl ConformanceSuite {
     }
 
     pub fn verify_bypass_conformance(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
-        let mut host = VirtualClockHost::new();
+        let host = VirtualClockHost::new();
         let block_size = 128;
         let mut input = vec![0.0f32; block_size];
         let mut output = vec![0.0f32; block_size];
@@ -142,7 +187,7 @@ impl ConformanceSuite {
     }
 
     pub fn measure_latency_samples(processor: &mut dyn crate::AudioProcessor) -> usize {
-        let mut host = VirtualClockHost::new();
+        let host = VirtualClockHost::new();
         let block_size = 256;
         let mut input = vec![0.0f32; block_size];
         let mut output = vec![0.0f32; block_size];
@@ -214,7 +259,6 @@ impl TestHost {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::SubBlockIterator;
 
     #[test]
@@ -346,6 +390,75 @@ impl VirtualClockHost {
         let inputs = [ &[][..]; 0 ];
         let mut outputs = [ &mut [][..]; 0 ];
         processor.process(&inputs, &mut outputs, &mut ctx);
+
+        if self.transport.is_playing {
+            let beats = (len as f64 / self.transport.sample_rate as f64) * (self.transport.bpm as f64 / 60.0);
+            self.transport.beat_position += beats;
+        }
+    }
+
+    pub fn process_with_commands_and_buffers<P: AudioProcessor>(
+        &mut self,
+        processor: &mut P,
+        num_samples: usize,
+        commands: &[(u64, crate::ProcessorCommand)],
+        inputs: &[&[f32]],
+        outputs: &mut [&mut [f32]],
+    ) {
+        let mut iter = crate::SubBlockIterator::new(num_samples, crate::MAX_BLOCK_SIZE);
+        let block_start = self.sample_counter;
+        let block_end = block_start + num_samples as u64;
+
+        let mut commands_processed_indices = std::collections::HashSet::new();
+
+        while iter.current_offset < num_samples {
+            let next_cmd_idx = commands.iter().enumerate()
+                .filter(|(idx, (ts, _))| !commands_processed_indices.contains(idx) && *ts >= block_start + iter.current_offset as u64 && *ts < block_end)
+                .min_by_key(|(_, (ts, _))| *ts)
+                .map(|(idx, _)| idx);
+
+            if let Some(idx) = next_cmd_idx {
+                let (ts, cmd) = &commands[idx];
+                let cmd_offset = (*ts - block_start) as usize;
+                if iter.current_offset < cmd_offset {
+                    while let Some(sb) = iter.next_chunk_up_to(cmd_offset) {
+                        self.run_sub_block_with_buffers(processor, sb.offset, sb.len, sb.is_last, inputs, outputs);
+                    }
+                }
+                processor.apply_command(cmd);
+                commands_processed_indices.insert(idx);
+            } else {
+                while let Some(sb) = iter.next_chunk() {
+                    self.run_sub_block_with_buffers(processor, sb.offset, sb.len, sb.is_last, inputs, outputs);
+                }
+            }
+        }
+        self.sample_counter = block_end;
+    }
+
+    fn run_sub_block_with_buffers(&mut self, processor: &mut dyn AudioProcessor, offset: usize, len: usize, is_last: bool, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        let mut ctx = crate::ProcessContext {
+            transport: Some(&self.transport),
+            sub_block_offset: offset,
+            is_last_sub_block: is_last,
+        };
+
+        let mut sub_inputs = Vec::with_capacity(inputs.len());
+        for input in inputs {
+            sub_inputs.push(&input[offset..offset+len]);
+        }
+
+        let mut sub_outputs_vec = Vec::with_capacity(outputs.len());
+        // This is tricky because we need to split mutably.
+        // For simplicity in test kit, we use unsafe or just recreate slices.
+        unsafe {
+            for output in outputs.iter_mut() {
+                let ptr = output.as_mut_ptr().add(offset);
+                sub_outputs_vec.push(std::slice::from_raw_parts_mut(ptr, len));
+            }
+        }
+
+        processor.process(&sub_inputs, &mut sub_outputs_vec, &mut ctx);
 
         if self.transport.is_playing {
             let beats = (len as f64 / self.transport.sample_rate as f64) * (self.transport.bpm as f64 / 60.0);
