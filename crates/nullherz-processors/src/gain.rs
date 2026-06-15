@@ -42,9 +42,9 @@ impl AudioProcessor for GainProcessor {
         }
     }
 
-    fn apply_command(&mut self, command: &control_plane::Command) {
+    fn apply_command(&mut self, command: &nullherz_traits::Command) {
         match *command {
-            control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
+            nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
                 if target_id == self.id =>
             {
                 self.set_parameter(param_id, value, ramp_duration_samples);

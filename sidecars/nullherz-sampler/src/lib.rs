@@ -59,8 +59,8 @@ impl AudioProcessor for SamplerSidecar {
         }
     }
 
-    fn apply_command(&mut self, cmd: &control_plane::Command) {
-        if let control_plane::Command::Play = cmd {
+    fn apply_command(&mut self, cmd: &nullherz_traits::Command) {
+        if let nullherz_traits::Command::Play = cmd {
             self.trigger(0, 0);
         }
     }

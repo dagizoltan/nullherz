@@ -1,7 +1,7 @@
 use audio_core::{AudioEngine, AudioProcessor, ProcessorGraph};
 use nullherz_processors::SidecarProcessor;
 use nullherz_backends::{ThreadedBackend, AudioBackend};
-use control_plane::{Command};
+use nullherz_traits::{Command};
 use ipc_layer::{RingBuffer, ShmRingBuffer, AudioBlock, SharedMemory, ShmSignal};
 use std::thread;
 use std::sync::{Arc, Mutex};

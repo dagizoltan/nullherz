@@ -1,6 +1,6 @@
 use crate::AudioEngine;
 use crate::processors::{ProcessorGraph, AudioProcessor, TopologyMutation};
-use control_plane::{TimestampedCommand, Command};
+use nullherz_traits::{TimestampedCommand, Command};
 use ipc_layer::{RingBuffer, MpscRingBuffer};
 use std::sync::Arc;
 use proptest::prelude::*;

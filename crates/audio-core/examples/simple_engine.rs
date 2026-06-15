@@ -1,6 +1,6 @@
 use audio_core::{AudioEngine, AudioProcessor};
 use nullherz_backends::{ThreadedBackend, AudioBackend};
-use control_plane::{TimestampedCommand};
+use nullherz_traits::{TimestampedCommand};
 use ipc_layer::{RingBuffer, MpscRingBuffer};
 use std::sync::{Arc, Mutex};
 use std::thread;

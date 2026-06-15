@@ -69,14 +69,14 @@ impl SidecarSupervisor {
 
         // 1. Create SHM for commands
         let cmd_shm_name = format!("/nullherz_cmd_{}", name);
-        let (cmd_layout, _) = ShmRingBuffer::<control_plane::Command>::layout(64);
+        let (cmd_layout, _) = ShmRingBuffer::<nullherz_traits::Command>::layout(64);
         let shm_cmd = SharedMemory::create(&cmd_shm_name, cmd_layout.size()).map_err(|e| e.to_string())?;
         let cmd_rb_ptr = unsafe { ShmRingBuffer::init(shm_cmd.ptr(), 64) };
         let shm_cmd = Arc::new(shm_cmd);
 
         // 1b. Create SHM for feedback
         let fb_shm_name = format!("/nullherz_fb_{}", name);
-        let (fb_layout, _) = ShmRingBuffer::<control_plane::SidecarMetadata>::layout(8);
+        let (fb_layout, _) = ShmRingBuffer::<nullherz_traits::SidecarMetadata>::layout(8);
         let shm_feedback = SharedMemory::create(&fb_shm_name, fb_layout.size()).map_err(|e| e.to_string())?;
         let fb_rb_ptr = unsafe { ShmRingBuffer::init(shm_feedback.ptr(), 8) };
         let shm_feedback = Arc::new(shm_feedback);

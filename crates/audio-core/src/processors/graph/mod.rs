@@ -234,9 +234,9 @@ impl AudioProcessor for ProcessorGraph {
         }
     }
 
-    fn apply_command(&mut self, command: &control_plane::Command) {
+    fn apply_command(&mut self, command: &nullherz_traits::Command) {
         match command {
-            control_plane::Command::CommitTopology => { self.calculate_stages(); self.commit_graph(); }
+            nullherz_traits::Command::CommitTopology => { self.calculate_stages(); self.commit_graph(); }
             _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }
         }
     }

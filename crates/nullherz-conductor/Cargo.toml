@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-control-plane = { path = "../control-plane" }
 nullherz-backends = { path = "../nullherz-backends" }
 audio-core = { path = "../audio-core" }
 nullherz-processors = { path = "../nullherz-processors" }

@@ -1,4 +1,4 @@
-use control_plane::Command;
+use nullherz_traits::Command;
 use crate::common::*;
 use nullherz_traits::ProcessorType;
 

@@ -2,9 +2,9 @@ pub mod common;
 pub mod studio;
 pub mod dj;
 
-use control_plane::Command;
+use nullherz_traits::{Command, ProcessorType};
+
 pub use common::*;
-use nullherz_traits::ProcessorType;
 
 #[derive(Default)]
 pub struct MixerManager {

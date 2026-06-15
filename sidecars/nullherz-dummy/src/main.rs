@@ -14,7 +14,7 @@ impl AudioProcessor for DummyProcessor {
             }
         }
     }
-    fn apply_command(&mut self, _cmd: &control_plane::Command) {}
+    fn apply_command(&mut self, _cmd: &nullherz_traits::Command) {}
 }
 
 fn main() {

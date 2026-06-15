@@ -48,6 +48,108 @@ impl TryFrom<u32> for ProcessorType {
     }
 }
 
+/// Represents an action to be performed by the audio engine.
+/// Fixed-size strings are used to avoid heap allocations in the RT thread.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum Command {
+    SetParam {
+        /// Target ID (e.g. hash of a name or a fixed-size buffer)
+        target_id: u64,
+        param_id: u32,
+        value: f32,
+        ramp_duration_samples: u32,
+    },
+    Play,
+    Stop,
+    UpdateEdge {
+        node_idx: u32,
+        input_idx: u32,
+        new_buffer_idx: u32,
+    },
+    UpdateOutputEdge {
+        node_idx: u32,
+        output_idx: u32,
+        new_buffer_idx: u32,
+    },
+    UpdateEdgeCrossfaded {
+        node_idx: u32,
+        input_idx: u32,
+        new_buffer_idx: u32,
+        duration_samples: u32,
+    },
+    SwapProcessor {
+        node_idx: u32,
+        // In a real system, we'd pass a factory or ID for the new processor.
+        // For this prototype, we'll use a numeric ID.
+        processor_type_id: u32,
+    },
+    Bundle {
+        // Flat array of parameter updates: [node_id, param_id, value_bits, ...]
+        count: u32,
+        data: [u64; 12], // Supports up to 4 bundled SetParam commands
+    },
+    AddNode {
+        processor_type_id: u32,
+        node_idx: u32,
+    },
+    CommitTopology,
+    SetSequencerStep {
+        track: u32,
+        step: u32,
+        value: bool,
+    },
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum TopologyCommand {
+    AddNode {
+        processor_type_id: u32,
+        node_idx: u32,
+    },
+    UpdateEdge {
+        node_idx: u32,
+        input_idx: u32,
+        new_buffer_idx: u32,
+    },
+    UpdateOutputEdge {
+        node_idx: u32,
+        output_idx: u32,
+        new_buffer_idx: u32,
+    },
+    SwapProcessor {
+        node_idx: u32,
+        processor_type_id: u32,
+    },
+}
+
+/// A command with an associated timestamp for deterministic execution.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TimestampedCommand {
+    pub timestamp_samples: u64,
+    pub command: Command,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ParameterMetadata {
+    pub id: u32,
+    pub name: [u8; 32],
+    pub min: f32,
+    pub max: f32,
+    pub default: f32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SidecarMetadata {
+    pub sidecar_id: u64,
+    pub num_parameters: u32,
+    pub parameters: [ParameterMetadata; 16],
+}
+
 pub enum TopologyMutation {
     UpdateEdge {
         node_idx: u32,
@@ -72,7 +174,7 @@ pub enum TopologyMutation {
 /// Interface for processors to interact with the engine host (e.g., scheduling commands).
 pub trait Host: Send + Sync + 'static {
     /// Pushes a command to be executed by the engine at a specific timestamp.
-    fn push_command(&self, timestamp_samples: u64, command: control_plane::Command);
+    fn push_command(&self, timestamp_samples: u64, command: Command);
 }
 
 /// Shared execution context passed to processors during the audio block cycle.
@@ -178,7 +280,7 @@ pub trait GarbageProducer: Send + dyn_clone::DynClone {
 dyn_clone::clone_trait_object!(GarbageProducer);
 
 /// Command interface for processors to decouple from the control plane.
-pub type ProcessorCommand = control_plane::Command;
+pub type ProcessorCommand = Command;
 
 /// Marker trait for real-time safe components.
 /// Types implementing this trait guarantee that their methods do not perform
@@ -221,7 +323,7 @@ pub trait AudioProcessor: Send {
     fn collect_telemetry(&self, _node_times: &mut [u64; MAX_NODES], _peak_levels: &mut [f32; MAX_NODES]) {}
 
     /// Returns metadata about the processor (parameters, name, etc.)
-    fn metadata(&self) -> Option<control_plane::SidecarMetadata> { None }
+    fn metadata(&self) -> Option<SidecarMetadata> { None }
 
     /// Configures the garbage producer used for real-time safe deallocation.
     fn set_garbage_producer(&mut self, _producer: Box<dyn GarbageProducer>) {}

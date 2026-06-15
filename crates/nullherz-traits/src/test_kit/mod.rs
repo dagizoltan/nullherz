@@ -226,6 +226,79 @@ impl ConformanceSuite {
 
         usize::MAX // No signal passed
     }
+
+    pub fn verify_parameter_ramping(processor: &mut dyn crate::AudioProcessor, param_id: u32) -> Result<(), String> {
+        processor.reset();
+        let host = VirtualClockHost::new();
+        let block_size = 128;
+        let input = vec![1.0f32; block_size];
+        let mut output = vec![0.0f32; block_size];
+
+        // 1. Initial state
+        processor.apply_command(&crate::ProcessorCommand::SetParam {
+            target_id: 0,
+            param_id,
+            value: 0.0,
+            ramp_duration_samples: 0,
+        });
+
+        // 2. Start ramp to 1.0 over the block size
+        processor.apply_command(&crate::ProcessorCommand::SetParam {
+            target_id: 0,
+            param_id,
+            value: 1.0,
+            ramp_duration_samples: block_size as u32,
+        });
+
+        let inputs = [ &input[..] ];
+        let mut outputs = [ &mut output[..] ];
+        let mut ctx = crate::ProcessContext {
+            transport: Some(&host.transport),
+            host: None,
+            sub_block_offset: 0,
+            is_last_sub_block: true,
+        };
+        processor.process(&inputs, &mut outputs, &mut ctx);
+
+        // Verify all samples are finite
+        for &sample in &output {
+            if !sample.is_finite() {
+                return Err("Non-finite output during ramping".into());
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn verify_multichannel_consistency(processor: &mut dyn crate::AudioProcessor, num_channels: usize) -> Result<(), String> {
+        processor.reset();
+        let host = VirtualClockHost::new();
+        let block_size = 64;
+        let input_data = vec![1.0f32; block_size];
+        let mut outputs_data = vec![vec![0.0f32; block_size]; num_channels];
+
+        let inputs: Vec<&[f32]> = (0..num_channels).map(|_| &input_data[..]).collect();
+        let mut outputs_refs: Vec<&mut [f32]> = outputs_data.iter_mut().map(|v| &mut v[..]).collect();
+
+        let mut ctx = crate::ProcessContext {
+            transport: Some(&host.transport),
+            host: None,
+            sub_block_offset: 0,
+            is_last_sub_block: true,
+        };
+
+        processor.process(&inputs, &mut outputs_refs, &mut ctx);
+
+        for c in 0..num_channels {
+            for i in 0..block_size {
+                if !outputs_data[c][i].is_finite() {
+                    return Err(format!("Non-finite output on channel {} at sample {}", c, i));
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl AudioProcessor for MockProcessor {
@@ -295,6 +368,18 @@ mod tests {
         assert!(sb2.is_last);
 
         assert!(iter.next_chunk().is_none());
+    }
+
+    #[test]
+    fn test_conformance_parameter_ramping() {
+        let mut mock = MockProcessor::new();
+        ConformanceSuite::verify_parameter_ramping(&mut mock, 1).expect("Ramping conformance failed");
+    }
+
+    #[test]
+    fn test_conformance_multichannel() {
+        let mut mock = MockProcessor::new();
+        ConformanceSuite::verify_multichannel_consistency(&mut mock, 4).expect("Multichannel conformance failed");
     }
 
     #[test]

@@ -3,7 +3,7 @@ use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use futures_util::{StreamExt, SinkExt};
 use std::sync::{Arc, Mutex};
-use control_plane::{TimestampedCommand};
+use nullherz_traits::{TimestampedCommand};
 use ipc_layer::{Consumer, RingBuffer};
 use nullherz_traits::telemetry::Telemetry;
 

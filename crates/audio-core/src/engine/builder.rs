@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use ipc_layer::{RingBuffer, MpscRingBuffer, Producer, Consumer};
-use control_plane::TimestampedCommand;
+use nullherz_traits::TimestampedCommand;
 use nullherz_traits::{AudioProcessor, TopologyMutation, MidiEvent, telemetry::Telemetry};
 use crate::engine::AudioEngine;
 use crate::processors::ProcessorGraph;
@@ -8,7 +8,7 @@ use crate::processors::ProcessorGraph;
 pub struct EngineHandle {
     pub command_producer: Arc<MpscRingBuffer<TimestampedCommand>>,
     pub midi_producer: Producer<MidiEvent>,
-    pub bundle_producer: Producer<Vec<control_plane::Command>>,
+    pub bundle_producer: Producer<Vec<nullherz_traits::Command>>,
     pub topology_producer: Producer<TopologyMutation>,
     pub telemetry_consumer: Consumer<Telemetry>,
     pub garbage_consumer: Consumer<Box<dyn AudioProcessor>>,

@@ -1,4 +1,4 @@
-use control_plane::TimestampedCommand;
+use nullherz_traits::TimestampedCommand;
 use nullherz_mixer::MixerManager;
 use nullherz_conductor::Conductor;
 
@@ -15,7 +15,7 @@ fn main() {
     // Commit topology
     let _ = cmd_buffer.push(TimestampedCommand {
         timestamp_samples: 0,
-        command: control_plane::Command::CommitTopology,
+        command: nullherz_traits::Command::CommitTopology,
     });
 
     conductor.start_backend(nullherz_backends::AudioBackendType::Threaded).unwrap();

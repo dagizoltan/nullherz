@@ -16,7 +16,7 @@ impl SidecarHost {
     /// # Safety
     /// All shared memory segment names must exist and be accessible by the current process.
     pub unsafe fn new(cmd_name: &str, sig_name: &str, in_names: &[String], out_names: &[String], efd: i32) -> Self {
-        let (cmd_layout, _) = ShmRingBuffer::<control_plane::Command>::layout(64);
+        let (cmd_layout, _) = ShmRingBuffer::<nullherz_traits::Command>::layout(64);
         let shm_cmd = SharedMemory::open(cmd_name, cmd_layout.size()).unwrap();
 
         let shm_signal = SharedMemory::open(sig_name, std::mem::size_of::<ShmSignal>()).unwrap();
@@ -59,9 +59,9 @@ impl SidecarHost {
 
 pub struct SidecarContext<'a, P: AudioProcessor> {
     processor: P,
-    command_buffer: &'a ShmRingBuffer<control_plane::Command>,
+    command_buffer: &'a ShmRingBuffer<nullherz_traits::Command>,
     #[allow(dead_code)]
-    feedback_buffer: Option<&'a ShmRingBuffer<control_plane::SidecarMetadata>>,
+    feedback_buffer: Option<&'a ShmRingBuffer<nullherz_traits::SidecarMetadata>>,
     input_buffers: Vec<&'a ShmRingBuffer<AudioBlock>>,
     output_buffers: Vec<&'a ShmRingBuffer<AudioBlock>>,
     signal: &'a ShmSignal,
@@ -77,7 +77,7 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
         shm_outputs: &'a [SharedMemory],
         event_fd: Option<EventFd>,
     ) -> Self {
-        let command_buffer = unsafe { &*(shm_cmd.ptr() as *const ShmRingBuffer<control_plane::Command>) };
+        let command_buffer = unsafe { &*(shm_cmd.ptr() as *const ShmRingBuffer<nullherz_traits::Command>) };
         let signal = unsafe { &*(shm_signal.ptr() as *const ShmSignal) };
         let mut input_buffers = Vec::new();
         for shm in shm_inputs {

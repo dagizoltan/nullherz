@@ -76,10 +76,10 @@ impl AudioProcessor for BroadcastSidecar {
         }
     }
 
-    fn apply_command(&mut self, cmd: &control_plane::Command) {
+    fn apply_command(&mut self, cmd: &nullherz_traits::Command) {
         match cmd {
-            control_plane::Command::Play => self.is_active = true,
-            control_plane::Command::Stop => self.is_active = false,
+            nullherz_traits::Command::Play => self.is_active = true,
+            nullherz_traits::Command::Stop => self.is_active = false,
             _ => {}
         }
     }

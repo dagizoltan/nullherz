@@ -6,7 +6,7 @@ pub mod builder;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use ipc_layer::{Producer, Consumer, RingBuffer};
-use control_plane::TimestampedCommand;
+use nullherz_traits::TimestampedCommand;
 use crate::processors::{AudioProcessor, TaskPool, ProcessContext};
 use nullherz_traits::telemetry::Telemetry;
 use crate::rt_logging::RtLogger;
@@ -19,7 +19,7 @@ pub struct EngineHost {
 }
 
 impl nullherz_traits::Host for EngineHost {
-    fn push_command(&self, timestamp_samples: u64, command: control_plane::Command) {
+    fn push_command(&self, timestamp_samples: u64, command: nullherz_traits::Command) {
         let _ = self.command_producer.push(TimestampedCommand {
             timestamp_samples,
             command,
@@ -35,11 +35,11 @@ unsafe impl Sync for AudioEngine {}
 pub struct AudioEngine {
     command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
     midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
-    bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
+    bundle_consumer: Option<Consumer<Vec<nullherz_traits::Command>>>,
     topology_consumer: Option<Consumer<nullherz_traits::TopologyMutation>>,
     graph_manager: GraphManager,
-    bundle_garbage_producer: Option<Producer<Vec<control_plane::Command>>>,
-    bundle_overflow_producer: Option<Producer<Vec<control_plane::Command>>>,
+    bundle_garbage_producer: Option<Producer<Vec<nullherz_traits::Command>>>,
+    bundle_overflow_producer: Option<Producer<Vec<nullherz_traits::Command>>>,
     telemetry_producer: Producer<Telemetry>,
     sample_counter: u64,
     xrun_count: std::sync::Arc<std::sync::atomic::AtomicU32>,
@@ -58,12 +58,12 @@ impl AudioEngine {
     pub fn new(
         command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
         midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
-        bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
+        bundle_consumer: Option<Consumer<Vec<nullherz_traits::Command>>>,
         topology_consumer: Option<Consumer<nullherz_traits::TopologyMutation>>,
         garbage_producer: Producer<Box<dyn AudioProcessor>>,
         overflow_garbage_producer: Option<Producer<Box<dyn AudioProcessor>>>,
-        bundle_garbage_producer: Option<Producer<Vec<control_plane::Command>>>,
-        bundle_overflow_producer: Option<Producer<Vec<control_plane::Command>>>,
+        bundle_garbage_producer: Option<Producer<Vec<nullherz_traits::Command>>>,
+        bundle_overflow_producer: Option<Producer<Vec<nullherz_traits::Command>>>,
         telemetry_producer: Producer<Telemetry>,
         initial_graph: Box<dyn AudioProcessor>,
     ) -> Self {
@@ -159,11 +159,11 @@ impl AudioEngine {
     fn handle_async_inputs_static(
         graph: &mut dyn AudioProcessor,
         transport: &mut nullherz_traits::Transport,
-        bundle_consumer: &mut Option<Consumer<Vec<control_plane::Command>>>,
+        bundle_consumer: &mut Option<Consumer<Vec<nullherz_traits::Command>>>,
         topology_consumer: &mut Option<Consumer<nullherz_traits::TopologyMutation>>,
         midi_consumer: &mut Option<Consumer<ipc_layer::MidiEvent>>,
-        bundle_garbage_producer: &mut Option<Producer<Vec<control_plane::Command>>>,
-        bundle_overflow_producer: &mut Option<Producer<Vec<control_plane::Command>>>,
+        bundle_garbage_producer: &mut Option<Producer<Vec<nullherz_traits::Command>>>,
+        bundle_overflow_producer: &mut Option<Producer<Vec<nullherz_traits::Command>>>,
         metrics: &EngineMetrics,
         health_signal: &Arc<std::sync::atomic::AtomicBool>,
     ) {
@@ -197,9 +197,9 @@ impl AudioEngine {
     }
 
     fn recycle_bundle_static(
-        bundle: Vec<control_plane::Command>,
-        garbage_producer: &mut Option<Producer<Vec<control_plane::Command>>>,
-        overflow_producer: &mut Option<Producer<Vec<control_plane::Command>>>,
+        bundle: Vec<nullherz_traits::Command>,
+        garbage_producer: &mut Option<Producer<Vec<nullherz_traits::Command>>>,
+        overflow_producer: &mut Option<Producer<Vec<nullherz_traits::Command>>>,
         metrics: &EngineMetrics,
         health_signal: &Arc<std::sync::atomic::AtomicBool>,
     ) {
