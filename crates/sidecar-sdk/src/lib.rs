@@ -127,6 +127,7 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
             for (i, out_block) in out_blocks.iter_mut().enumerate().take(num_channels) {
                 let mut context = ProcessContext {
                     transport: None,
+                    host: None,
                     sub_block_offset: 0,
                     is_last_sub_block: true,
                 };

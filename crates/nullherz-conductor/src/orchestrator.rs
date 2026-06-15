@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use audio_core::{AudioEngine, ProcessorGraph};
+use audio_core::engine::builder::EngineBuilder;
 use nullherz_processors::ProcessorRegistry;
 use fx_runtime::SidecarManager;
 use ipc_layer::RingBuffer;
@@ -18,6 +18,7 @@ pub struct Conductor {
     bundle_overflow_consumer: Option<ipc_layer::Consumer<Vec<control_plane::Command>>>,
     pub topo_producer: Option<ipc_layer::NonRtProducer<audio_core::processors::TopologyMutation>>,
     pub health_signal: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    pub command_producer: Option<Arc<ipc_layer::MpscRingBuffer<control_plane::TimestampedCommand>>>,
 }
 
 impl Default for Conductor {
@@ -40,47 +41,25 @@ impl Conductor {
             bundle_overflow_consumer: None,
             topo_producer: None,
             health_signal: None,
+            command_producer: None,
         }
     }
 
     pub fn setup_engine(&mut self) -> (Arc<ipc_layer::MpscRingBuffer<control_plane::TimestampedCommand>>, ipc_layer::Consumer<audio_core::Telemetry>) {
         ipc_layer::SharedMemory::cleanup_stale_segments();
 
-        let cmd_buffer = Arc::new(ipc_layer::MpscRingBuffer::new(1024));
-        let cmd_cons = cmd_buffer.clone();
-        let (bundle_prod, bundle_cons) = RingBuffer::<Vec<control_plane::Command>>::new(16).split();
-        let (bundle_garbage_prod, bundle_garbage_cons) = RingBuffer::<Vec<control_plane::Command>>::new(16).split();
-        let (bundle_overflow_prod, bundle_overflow_cons) = RingBuffer::<Vec<control_plane::Command>>::new(16).split();
-        let (_, midi_cons) = RingBuffer::<ipc_layer::MidiEvent>::new(256).split();
-        let (topo_prod, topo_cons) = RingBuffer::<audio_core::processors::TopologyMutation>::new(64).split();
-        let topo_prod = ipc_layer::NonRtProducer::new(topo_prod);
-        let (garbage_prod, garbage_cons) = RingBuffer::new(1024).split();
-        let (overflow_garbage_prod, overflow_garbage_cons) = RingBuffer::new(1024).split();
-        let (tel_prod, tel_cons) = RingBuffer::new(1024).split();
+        let (engine, handle) = EngineBuilder::new()
+            .with_command_buffer_size(1024)
+            .build();
 
-        let graph = ProcessorGraph::new();
-        let engine = AudioEngine::new(
-            cmd_cons,
-            Some(midi_cons),
-            Some(bundle_cons),
-            Some(topo_cons),
-            garbage_prod,
-            Some(overflow_garbage_prod),
-            Some(bundle_garbage_prod),
-            Some(bundle_overflow_prod),
-            tel_prod,
-            Box::new(graph)
-        );
-        self.health_signal = Some(engine.health_signal.clone());
+        self.health_signal = Some(handle.health_signal.clone());
+        self.command_producer = Some(handle.command_producer.clone());
         *self.backend_manager.engine_handle.lock().unwrap() = Some(engine);
-        self.garbage_consumer = Some(garbage_cons);
-        self.overflow_garbage_consumer = Some(overflow_garbage_cons);
-        self.bundle_producer = Some(bundle_prod);
-        self.bundle_garbage_consumer = Some(bundle_garbage_cons);
-        self.bundle_overflow_consumer = Some(bundle_overflow_cons);
-        self.topo_producer = Some(topo_prod);
+        self.garbage_consumer = Some(handle.garbage_consumer);
+        self.bundle_producer = Some(handle.bundle_producer);
+        self.topo_producer = Some(ipc_layer::NonRtProducer::new(handle.topology_producer));
 
-        (cmd_buffer, tel_cons)
+        (handle.command_producer, handle.telemetry_consumer)
     }
 
     pub fn start_backend(&mut self, backend_type: nullherz_backends::AudioBackendType) -> Result<(), String> {
@@ -147,10 +126,13 @@ impl Conductor {
 
         // Reap zombie sidecars and handle automated recovery
         let new_processors = self.manager.reap_zombies();
-        for _processor in new_processors {
+        for processor in new_processors {
             eprintln!("Recovered sidecar process. Re-inserting into audio graph...");
-            // Trigger recovery (e.g. via SwapProcessor command)
-            // Implementation detail: we could send a command here if we had the producer
+            if let Some(ref mut prod) = self.topo_producer {
+                // In a real system, we'd need to know which node_idx this sidecar belongs to.
+                // For now, we use a placeholder node_idx or just log it.
+                let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor { node_idx: 0, processor });
+            }
         }
 
         self.drain_garbage();

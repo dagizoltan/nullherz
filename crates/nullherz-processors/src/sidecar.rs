@@ -182,8 +182,8 @@ mod tests {
             let input = vec![1.0f32; 128];
             let mut output = vec![0.0f32; 128];
             let mut context = nullherz_traits::ProcessContext {
-
                 transport: None,
+                host: None,
                 sub_block_offset: 0,
                 is_last_sub_block: true,
             };

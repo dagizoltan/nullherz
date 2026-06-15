@@ -4,7 +4,6 @@ pub struct SequencerProcessor {
     sample_rate: f32,
     current_sample: u64,
     grid: [[bool; crate::MAX_CHANNELS]; 8], // 8 tracks, steps limited by MAX_CHANNELS for consistency
-    command_producer: Option<ipc_layer::Producer<control_plane::TimestampedCommand>>,
 }
 
 impl SequencerProcessor {
@@ -13,7 +12,6 @@ impl SequencerProcessor {
             sample_rate,
             current_sample: 0,
             grid: [[false; crate::MAX_CHANNELS]; 8],
-            command_producer: None,
         }
     }
 }
@@ -60,12 +58,14 @@ impl AudioProcessor for SequencerProcessor {
                 let step_idx = (next_step_idx % crate::MAX_CHANNELS as u64) as usize;
                 let sample_offset = next_step_sample.saturating_sub(block_start_sample);
 
-                for track in 0..8 {
-                    if let (true, Some(prod)) = (self.grid[track][step_idx], &mut self.command_producer) {
-                            let _ = prod.push(control_plane::TimestampedCommand {
-                                timestamp_samples: self.current_sample + sample_offset.min(block_len - 1),
-                                command: control_plane::Command::Play,
-                            });
+                if let Some(host) = context.host {
+                    for track in 0..8 {
+                        if self.grid[track][step_idx] {
+                            host.push_command(
+                                self.current_sample + sample_offset.min(block_len - 1),
+                                control_plane::Command::Play,
+                            );
+                        }
                     }
                 }
             }

@@ -35,6 +35,7 @@ impl StabilityTester {
             let mut outputs = [ &mut output[..] ];
             let mut ctx = crate::ProcessContext {
                 transport: Some(&host.transport),
+                host: None,
                 sub_block_offset: 0,
                 is_last_sub_block: true,
             };
@@ -72,6 +73,7 @@ impl ConformanceSuite {
             let mut outputs = [ &mut output_single[..] ];
             let mut ctx = crate::ProcessContext {
                 transport: Some(&host.transport),
+                host: None,
                 sub_block_offset: 0,
                 is_last_sub_block: true,
             };
@@ -86,6 +88,7 @@ impl ConformanceSuite {
             let mut outputs_a = [ &mut output_split[0..64] ];
             let mut ctx_a = crate::ProcessContext {
                 transport: Some(&host.transport),
+                host: None,
                 sub_block_offset: 0,
                 is_last_sub_block: false,
             };
@@ -95,6 +98,7 @@ impl ConformanceSuite {
             let mut outputs_b = [ &mut output_split[64..128] ];
             let mut ctx_b = crate::ProcessContext {
                 transport: Some(&host.transport),
+                host: None,
                 sub_block_offset: 64,
                 is_last_sub_block: true,
             };
@@ -129,6 +133,7 @@ impl ConformanceSuite {
         let mut outputs = [ &mut output[..] ];
         let mut ctx = crate::ProcessContext {
             transport: Some(&host.transport),
+            host: None,
             sub_block_offset: 0,
             is_last_sub_block: true,
         };
@@ -158,6 +163,7 @@ impl ConformanceSuite {
             let mut outputs = [ &mut output_1[..] ];
             let mut ctx = crate::ProcessContext {
                 transport: Some(&host.transport),
+                host: None,
                 sub_block_offset: 0,
                 is_last_sub_block: true,
             };
@@ -173,6 +179,7 @@ impl ConformanceSuite {
             let mut outputs = [ &mut output_2[..] ];
             let mut ctx = crate::ProcessContext {
                 transport: Some(&host.transport),
+                host: None,
                 sub_block_offset: 0,
                 is_last_sub_block: true,
             };
@@ -202,6 +209,7 @@ impl ConformanceSuite {
             let mut outputs = [ &mut output[..] ];
             let mut ctx = crate::ProcessContext {
                 transport: Some(&host.transport),
+                host: None,
                 sub_block_offset: 0,
                 is_last_sub_block: true,
             };
@@ -259,6 +267,7 @@ impl TestHost {
     pub fn process_processor(&self, processor: &mut dyn AudioProcessor, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         let mut context = ProcessContext {
             transport: None,
+            host: None,
             sub_block_offset: 0,
             is_last_sub_block: true,
         };
@@ -401,6 +410,7 @@ impl VirtualClockHost {
     fn run_sub_block(&mut self, processor: &mut dyn AudioProcessor, offset: usize, len: usize, is_last: bool) {
         let mut ctx = crate::ProcessContext {
             transport: Some(&self.transport),
+            host: None,
             sub_block_offset: offset,
             is_last_sub_block: is_last,
         };

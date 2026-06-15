@@ -69,10 +69,18 @@ pub enum TopologyMutation {
     },
 }
 
+/// Interface for processors to interact with the engine host (e.g., scheduling commands).
+pub trait Host: Send + Sync + 'static {
+    /// Pushes a command to be executed by the engine at a specific timestamp.
+    fn push_command(&self, timestamp_samples: u64, command: control_plane::Command);
+}
+
 /// Shared execution context passed to processors during the audio block cycle.
 pub struct ProcessContext<'a> {
     /// Global transport information (BPM, position, play state).
     pub transport: Option<&'a Transport>,
+    /// Interface to the engine host.
+    pub host: Option<&'a dyn Host>,
     /// Current sample offset within the physical audio block (used for sample-accurate automation).
     pub sub_block_offset: usize,
     /// Flag indicating if this is the final sub-block for the current engine cycle.
