@@ -27,6 +27,13 @@ impl AudioProcessor for SamplerProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
+    fn reset(&mut self) {
+        for v in self.voices.iter_mut() {
+            v.is_active = false;
+            v.play_head = 0.0;
+        }
+    }
+
     fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if outputs.is_empty() { return; }
         let num_samples = outputs[0].len();

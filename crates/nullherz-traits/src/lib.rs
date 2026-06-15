@@ -218,7 +218,10 @@ pub trait AudioProcessor: Send {
     /// Configures the garbage producer used for real-time safe deallocation.
     fn set_garbage_producer(&mut self, _producer: Box<dyn GarbageProducer>) {}
 
+    /// Resets the internal state of the processor (e.g., filter delays, oscillator phase).
+    fn reset(&mut self) {}
+
     /// Allows safe downcasting to concrete processor types.
-    fn as_any(&self) -> &dyn std::any::Any { panic!("as_any not implemented") }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { panic!("as_any_mut not implemented") }
+    fn as_any(&self) -> &dyn std::any::Any;
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }

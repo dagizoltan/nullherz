@@ -2,6 +2,7 @@ use crate::{AudioProcessor, ProcessContext, AudioConfig, Transport};
 
 pub struct MockProcessor {
     pub process_called_count: usize,
+    pub reset_called_count: usize,
     pub last_param_id: u32,
     pub last_param_value: f32,
 }
@@ -10,6 +11,7 @@ impl MockProcessor {
     pub fn new() -> Self {
         Self {
             process_called_count: 0,
+            reset_called_count: 0,
             last_param_id: 0,
             last_param_value: 0.0,
         }
@@ -20,7 +22,7 @@ pub struct StabilityTester;
 
 impl StabilityTester {
     pub fn verify_signal_bounds(processor: &mut dyn crate::AudioProcessor, duration_blocks: usize) -> Result<(), String> {
-        let mut host = VirtualClockHost::new();
+        let host = VirtualClockHost::new();
         let block_size = 256;
         let mut input = vec![0.0f32; block_size];
         let mut output = vec![0.0f32; block_size];
@@ -57,9 +59,10 @@ pub struct ConformanceSuite;
 
 impl ConformanceSuite {
     pub fn verify_sub_block_consistency(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
-        let mut host = VirtualClockHost::new();
+        processor.reset();
+        let host = VirtualClockHost::new();
         let block_size = 128;
-        let mut input = vec![1.0f32; block_size];
+        let input = vec![1.0f32; block_size];
         let mut output_single = vec![0.0f32; block_size];
         let mut output_split = vec![0.0f32; block_size];
 
@@ -76,8 +79,7 @@ impl ConformanceSuite {
         }
 
         // Reset and process as two sub-blocks
-        // Note: We need a way to reset processor state if it's stateful.
-        // Assuming Identity or stateless for this basic check, or caller handles reset.
+        processor.reset();
 
         {
             let inputs_a = [ &input[0..64] ];
@@ -109,7 +111,7 @@ impl ConformanceSuite {
     }
 
     pub fn verify_bypass_conformance(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
-        let mut host = VirtualClockHost::new();
+        let host = VirtualClockHost::new();
         let block_size = 128;
         let mut input = vec![0.0f32; block_size];
         let mut output = vec![0.0f32; block_size];
@@ -117,7 +119,7 @@ impl ConformanceSuite {
         for (i, val) in input.iter_mut().enumerate() { *val = i as f32 * 0.01; }
 
         processor.apply_command(&crate::ProcessorCommand::SetParam {
-            target_id: 0, // Assume 0 is bypass in some processors, but better via explicit trait if existed
+            target_id: 0,
             param_id: 999, // Reserved for bypass in our convention
             value: 1.0,
             ramp_duration_samples: 0,
@@ -141,8 +143,53 @@ impl ConformanceSuite {
         Ok(())
     }
 
+    pub fn verify_reset_consistency(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+        processor.reset();
+        let block_size = 128;
+        let input = vec![1.0f32; block_size];
+        let mut output_1 = vec![0.0f32; block_size];
+        let mut output_2 = vec![0.0f32; block_size];
+
+        let host = VirtualClockHost::new();
+
+        // 1. Process one block to potentially change internal state
+        {
+            let inputs = [ &input[..] ];
+            let mut outputs = [ &mut output_1[..] ];
+            let mut ctx = crate::ProcessContext {
+                transport: Some(&host.transport),
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+            processor.process(&inputs, &mut outputs, &mut ctx);
+        }
+
+        // 2. Reset the processor
+        processor.reset();
+
+        // 3. Process another block
+        {
+            let inputs = [ &input[..] ];
+            let mut outputs = [ &mut output_2[..] ];
+            let mut ctx = crate::ProcessContext {
+                transport: Some(&host.transport),
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+            processor.process(&inputs, &mut outputs, &mut ctx);
+        }
+
+        for i in 0..block_size {
+            if (output_1[i] - output_2[i]).abs() > 1e-6 {
+                return Err(format!("Reset consistency failed at sample {}: first_run={}, after_reset={}", i, output_1[i], output_2[i]));
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn measure_latency_samples(processor: &mut dyn crate::AudioProcessor) -> usize {
-        let mut host = VirtualClockHost::new();
+        let host = VirtualClockHost::new();
         let block_size = 256;
         let mut input = vec![0.0f32; block_size];
         let mut output = vec![0.0f32; block_size];
@@ -174,8 +221,15 @@ impl ConformanceSuite {
 }
 
 impl AudioProcessor for MockProcessor {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
     fn process(&mut self, _inputs: &[&[f32]], _outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         self.process_called_count += 1;
+    }
+
+    fn reset(&mut self) {
+        self.reset_called_count += 1;
     }
 
     fn apply_command(&mut self, command: &crate::ProcessorCommand) {
@@ -256,14 +310,22 @@ mod tests {
 
     #[test]
     fn test_conformance_sub_block_consistency() {
-        let mut mock = super::MockProcessor::new();
-        super::ConformanceSuite::verify_sub_block_consistency(&mut mock).expect("Conformance check failed");
+        let mut mock = MockProcessor::new();
+        ConformanceSuite::verify_sub_block_consistency(&mut mock).expect("Conformance check failed");
+    }
+
+    #[test]
+    fn test_conformance_reset_consistency() {
+        let mut mock = MockProcessor::new();
+        ConformanceSuite::verify_reset_consistency(&mut mock).expect("Reset conformance failed");
+        // verify_reset_consistency calls reset twice: once at the beginning, once after first block.
+        assert_eq!(mock.reset_called_count, 2);
     }
 
     #[test]
     fn test_virtual_clock_host_command_alignment() {
-        let mut host = super::VirtualClockHost::new();
-        let mut mock = super::MockProcessor::new();
+        let mut host = VirtualClockHost::new();
+        let mut mock = MockProcessor::new();
 
         // Command at sample 100
         let commands = vec![(100, crate::ProcessorCommand::SetParam { target_id: 0, param_id: 1, value: 0.5, ramp_duration_samples: 0 })];

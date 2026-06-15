@@ -84,6 +84,11 @@ impl AudioProcessor for SidecarProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
+    fn reset(&mut self) {
+        self.last_heartbeat = 0;
+        self.missed_deadline_count = 0;
+    }
+
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         let current_heartbeat = unsafe { (*self.signal).get_heartbeat() };
         // Use wrapping subtraction to detect progress robustly across u64 wrap.

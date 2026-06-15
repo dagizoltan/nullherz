@@ -22,4 +22,6 @@ impl AudioProcessor for CrossfaderProcessor {
         if inputs.len() < 2 || outputs.is_empty() { return; }
         self.inner.process_block_simd(inputs[0], inputs[1], outputs[0]);
     }
+
+    fn reset(&mut self) {}
 }

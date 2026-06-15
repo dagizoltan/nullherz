@@ -32,6 +32,10 @@ impl AudioProcessor for ModulationProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
+    fn reset(&mut self) {
+        self.last_sent_value = f32::NAN;
+    }
+
     fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if inputs.is_empty() { return; }
         let cv = inputs[0];

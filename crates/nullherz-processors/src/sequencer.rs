@@ -35,6 +35,10 @@ impl AudioProcessor for SequencerProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
+    fn reset(&mut self) {
+        self.current_sample = 0;
+    }
+
     fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext) {
         let block_len = if !outputs.is_empty() { outputs[0].len() as u64 } else { 0 };
         if block_len == 0 { return; }
