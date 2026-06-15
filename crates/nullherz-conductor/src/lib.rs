@@ -17,7 +17,7 @@ mod tests {
         conductor.setup_engine();
 
         let mut mixer = MixerManager::new();
-        let commands = mixer.create_studio_strip("TestStrip", &[]);
+        let commands = mixer.create_studio_strip("TestStrip", &[]).unwrap();
 
         conductor.apply_mixer_commands(commands);
 

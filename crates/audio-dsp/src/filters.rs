@@ -392,6 +392,19 @@ impl crate::DspKernel for BiquadFilter {
         self.process_block_unrolled(inputs[0], outputs[0]);
     }
 
+    fn set_parameter(&mut self, id: u32, value: f32, ramp_samples: u32) {
+        let mut coeffs = self.target_coeffs;
+        match id {
+            0 => coeffs.b0 = value,
+            1 => coeffs.b1 = value,
+            2 => coeffs.b2 = value,
+            3 => coeffs.a1 = value,
+            4 => coeffs.a2 = value,
+            _ => return,
+        }
+        self.set_coeffs_ramped(coeffs, ramp_samples);
+    }
+
     fn reset(&mut self) {
         self.z1 = 0.0;
         self.z2 = 0.0;

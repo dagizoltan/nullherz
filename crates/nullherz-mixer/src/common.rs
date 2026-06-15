@@ -1,19 +1,7 @@
-pub const BUF_MASTER_L: usize = 0;
-pub const BUF_MASTER_R: usize = 1;
-pub const BUF_CUE_L: usize = 2;
-pub const BUF_CUE_R: usize = 3;
-pub const BUF_BROADCAST_L: usize = 4;
-pub const BUF_BROADCAST_R: usize = 5;
-pub const BUF_DJ_A_L: usize = 8;
-pub const BUF_DJ_A_R: usize = 9;
-pub const BUF_DJ_B_L: usize = 10;
-pub const BUF_DJ_B_R: usize = 11;
-
+#[derive(Debug, Clone)]
 pub struct MixerConfig {
     pub master_l: usize,
     pub master_r: usize,
-    pub cue_l: usize,
-    pub cue_r: usize,
     pub dj_a_l: usize,
     pub dj_a_r: usize,
     pub dj_b_l: usize,
@@ -23,14 +11,33 @@ pub struct MixerConfig {
 impl Default for MixerConfig {
     fn default() -> Self {
         Self {
-            master_l: BUF_MASTER_L,
-            master_r: BUF_MASTER_R,
-            cue_l: BUF_CUE_L,
-            cue_r: BUF_CUE_R,
-            dj_a_l: BUF_DJ_A_L,
-            dj_a_r: BUF_DJ_A_R,
-            dj_b_l: BUF_DJ_B_L,
-            dj_b_r: BUF_DJ_B_R,
+            master_l: 0,
+            master_r: 1,
+            dj_a_l: 2,
+            dj_a_r: 3,
+            dj_b_l: 4,
+            dj_b_r: 5,
+        }
+    }
+}
+
+pub struct BufferAllocator {
+    next_id: u32,
+    max_id: u32,
+}
+
+impl BufferAllocator {
+    pub fn new(start_id: u32, max_id: u32) -> Self {
+        Self { next_id: start_id, max_id }
+    }
+
+    pub fn allocate(&mut self) -> Result<u32, String> {
+        if self.next_id < self.max_id {
+            let id = self.next_id;
+            self.next_id += 1;
+            Ok(id)
+        } else {
+            Err("Buffer allocation limit reached".into())
         }
     }
 }

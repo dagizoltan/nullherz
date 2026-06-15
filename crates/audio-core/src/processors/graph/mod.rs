@@ -19,7 +19,7 @@ pub use buffer_pool::GraphBufferPool;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use crate::processors::{AudioProcessor, TopologyMutation};
-use nullherz_traits::{MidiHandler, CommandHandler, TopologyHandler, TelemetryProvider};
+use nullherz_traits::{MidiHandler, CommandHandler, TopologyHandler, TelemetryProvider, error::AudioError};
 
 pub struct ProcessorGraph {
     pub(crate) nodes: Box<[ProcessorNode; crate::MAX_NODES]>,
@@ -67,10 +67,8 @@ impl ProcessorGraph {
         self.topology_coordinator.prepare_commit();
     }
 
-    pub fn commit_graph(&mut self) {
-        if let Err(msg) = self.topology_coordinator.commit() {
-            eprintln!("CRITICAL: Refusing to commit hazardous topology: {}", msg);
-        }
+    pub fn commit_graph(&mut self) -> Result<(), AudioError> {
+        self.topology_coordinator.commit().map_err(|e| AudioError::Generic(e))
     }
 
 
@@ -93,7 +91,7 @@ impl ProcessorGraph {
         topo.node_count += 1;
 
         self.calculate_stages();
-        self.commit_graph();
+        let _ = self.commit_graph();
     }
 }
 
@@ -111,16 +109,15 @@ impl MidiHandler for ProcessorGraph {
 impl CommandHandler for ProcessorGraph {
     fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
         match command {
-            nullherz_traits::Command::CommitTopology => { self.calculate_stages(); self.commit_graph(); }
+            nullherz_traits::Command::CommitTopology => { self.calculate_stages(); let _ = self.commit_graph(); }
             _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }
         }
     }
 }
 impl TopologyHandler for ProcessorGraph {
-    fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
+    fn apply_topology_mutation(&mut self, mutation: TopologyMutation) -> Result<(), AudioError> {
         if self.topology_coordinator.has_active_crossfades() {
-             eprintln!("WARN: Dropping topology mutation during active crossfade");
-             return;
+             return Err(AudioError::Generic("Cannot apply mutation during crossfade".into()));
         }
 
         match mutation {
@@ -165,9 +162,12 @@ impl TopologyHandler for ProcessorGraph {
                     topo.routing[idx].input_count = 0;
                     topo.routing[idx].output_count = 0;
                     topo.node_count += 1;
+                } else {
+                    return Err(AudioError::GraphFull);
                 }
             }
         }
+        Ok(())
     }
 }
 impl TelemetryProvider for ProcessorGraph {

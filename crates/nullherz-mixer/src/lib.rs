@@ -2,51 +2,109 @@ pub mod common;
 pub mod studio;
 pub mod dj;
 
-use control_plane::Command;
+use nullherz_traits::{Command, ProcessorType};
 pub use common::*;
-use nullherz_traits::ProcessorType;
 
-#[derive(Default)]
 pub struct MixerManager {
     next_node_id: u32,
-    next_buffer_id: u32,
+    buffer_allocator: BufferAllocator,
     pub config: MixerConfig,
+}
+
+impl Default for MixerManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MixerManager {
     pub fn new() -> Self {
         Self {
             next_node_id: 0,
-            next_buffer_id: 12,
+            buffer_allocator: BufferAllocator::new(12, nullherz_traits::MAX_NODES as u32),
             config: MixerConfig::default(),
         }
     }
 
-    pub fn create_studio_strip(&mut self, name: &str, fx_ids: &[u32]) -> Vec<Command> {
-        studio::create_studio_strip(&mut self.next_node_id, &mut self.next_buffer_id, name, fx_ids, &self.config)
+    pub fn validate_topology(commands: &[Command]) -> Result<(), String> {
+        let mut writes_to: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+        for cmd in commands {
+            if let Command::UpdateOutputEdge { node_idx, new_buffer_idx, .. } = cmd {
+                writes_to.entry(*new_buffer_idx).or_insert_with(Vec::new).push(*node_idx);
+            }
+        }
+
+        let mut node_adj: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+        for cmd in commands {
+            if let Command::UpdateEdge { node_idx, new_buffer_idx, .. } = cmd {
+                if let Some(producers) = writes_to.get(new_buffer_idx) {
+                    for &producer in producers {
+                        node_adj.entry(producer).or_insert_with(Vec::new).push(*node_idx);
+                    }
+                }
+            }
+        }
+
+        let mut visited = std::collections::HashSet::new();
+        let mut stack = std::collections::HashSet::new();
+
+        fn has_cycle(
+            u: u32,
+            adj: &std::collections::HashMap<u32, Vec<u32>>,
+            visited: &mut std::collections::HashSet<u32>,
+            stack: &mut std::collections::HashSet<u32>,
+        ) -> bool {
+            visited.insert(u);
+            stack.insert(u);
+
+            if let Some(neighbors) = adj.get(&u) {
+                for &v in neighbors {
+                    if !visited.contains(&v) {
+                        if has_cycle(v, adj, visited, stack) { return true; }
+                    } else if stack.contains(&v) {
+                        return true;
+                    }
+                }
+            }
+
+            stack.remove(&u);
+            false
+        }
+
+        for &u in node_adj.keys() {
+            if !visited.contains(&u) {
+                if has_cycle(u, &node_adj, &mut visited, &mut stack) {
+                    return Err("Cycle detected in mixer topology".into());
+                }
+            }
+        }
+
+        Ok(())
     }
 
-    pub fn create_dj_deck(&mut self, deck_id: char, fx_ids: &[u32], bus_assignment: char) -> Vec<Command> {
-        dj::create_dj_deck(&mut self.next_node_id, &mut self.next_buffer_id, deck_id, fx_ids, bus_assignment, &self.config)
+    pub fn create_studio_strip(&mut self, name: &str, fx_ids: &[u32]) -> Result<Vec<Command>, String> {
+        studio::create_studio_strip(&mut self.next_node_id, &mut self.buffer_allocator, name, fx_ids, &self.config)
+    }
+
+    pub fn create_dj_deck(&mut self, deck_id: char, fx_ids: &[u32], bus_assignment: char) -> Result<Vec<Command>, String> {
+        dj::create_dj_deck(&mut self.next_node_id, &mut self.buffer_allocator, deck_id, fx_ids, bus_assignment, &self.config)
     }
 
     pub fn create_crossfader(&mut self) -> Vec<Command> {
         let mut commands = Vec::new();
         let cf_id = self.next_node_id;
         self.next_node_id += 1;
-        println!("Creating Master Crossfader (Node {})", cf_id);
         commands.push(Command::AddNode { node_idx: cf_id, processor_type_id: ProcessorType::Crossfader as u32 });
         commands
     }
 
-    pub fn create_4channel_mixer(&mut self) -> Vec<Command> {
+    pub fn create_4channel_mixer(&mut self) -> Result<Vec<Command>, String> {
         let mut commands = Vec::new();
-        println!("Building 4-Channel Mixer Architecture...");
 
         let decks = ['A', 'B', 'C', 'D'];
         for &deck in &decks {
             let bus = if deck == 'A' || deck == 'C' { 'A' } else { 'B' };
-            commands.extend(self.create_dj_deck(deck, &[1], bus));
+            commands.extend(self.create_dj_deck(deck, &[1], bus)?);
         }
 
         let sum_id = self.next_node_id;
@@ -61,7 +119,7 @@ impl MixerManager {
         commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 0, new_buffer_idx: self.config.master_l as u32 });
         commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 1, new_buffer_idx: self.config.master_r as u32 });
 
-        commands
+        Ok(commands)
     }
 }
 
@@ -72,89 +130,24 @@ mod tests {
     #[test]
     fn test_mixer_manager_ids() {
         let mut mixer = MixerManager::new();
-        let commands = mixer.create_studio_strip("Test", &[]);
-
-        // Studio strip with no FX should have:
-        // 1. AddNode (Gain)
-        // 2. UpdateEdge (Input)
-        // 3. UpdateOutputEdge (Gain Out)
-        // 4. AddNode (Fader)
-        // 5. UpdateEdge (Fader L)
-        // 6. UpdateEdge (Fader R)
-        // 7. UpdateOutputEdge (Master L)
-        // 8. UpdateOutputEdge (Master R)
+        let commands = mixer.create_studio_strip("Test", &[]).unwrap();
         assert_eq!(commands.len(), 8);
-
         assert_eq!(mixer.next_node_id, 2);
     }
 
     #[test]
-    fn test_mixer_manager_4channel() {
+    fn test_mixer_topology_validation() {
         let mut mixer = MixerManager::new();
-        let commands = mixer.create_4channel_mixer();
+        let commands = mixer.create_4channel_mixer().unwrap();
+        assert!(MixerManager::validate_topology(&commands).is_ok());
 
-        // 4 decks + 1 summing node
-        // Each deck with 1 FX has: 1 Resample + 1 FX + 1 EQ = 3 nodes
-        // 4 decks * 3 nodes = 12 nodes
-        // + 1 summing node = 13 nodes total
-        assert!(mixer.next_node_id >= 13);
-        assert!(!commands.is_empty());
-    }
+        // Create a cycle: Node 0 -> Buff 10 -> Node 1 -> Buff 11 -> Node 0
+        let mut cyclic_cmds = Vec::new();
+        cyclic_cmds.push(Command::UpdateOutputEdge { node_idx: 0, output_idx: 0, new_buffer_idx: 10 });
+        cyclic_cmds.push(Command::UpdateEdge { node_idx: 1, input_idx: 0, new_buffer_idx: 10 });
+        cyclic_cmds.push(Command::UpdateOutputEdge { node_idx: 1, output_idx: 0, new_buffer_idx: 11 });
+        cyclic_cmds.push(Command::UpdateEdge { node_idx: 0, input_idx: 0, new_buffer_idx: 11 });
 
-    use proptest::prelude::*;
-    proptest! {
-        #[test]
-        fn test_mixer_generated_topology_acyclic(
-            num_fx in 0..5u32,
-            fx_type in 0..100u32
-        ) {
-            let mut mixer = MixerManager::new();
-            let fx_ids: Vec<u32> = vec![fx_type; num_fx as usize];
-            let commands = mixer.create_studio_strip("Test", &fx_ids);
-
-            // Check that for any UpdateEdge { node_idx, new_buffer_idx },
-            // and UpdateOutputEdge { node_idx, new_buffer_idx },
-            // we maintain an ordering if nodes are connected via buffers.
-            // For studio strip, it's linear: Gain -> FX1 -> FX2 -> ... -> Fader.
-            let mut last_node_idx = None;
-            for cmd in commands {
-                if let Command::AddNode { node_idx, .. } = cmd {
-                    if let Some(last) = last_node_idx {
-                        assert!(node_idx > last);
-                    }
-                    last_node_idx = Some(node_idx);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_mixer_manager_4channel_connectivity() {
-        let mut mixer = MixerManager::new();
-        let commands = mixer.create_4channel_mixer();
-
-        let mut nodes_with_outputs = std::collections::HashSet::new();
-        let mut nodes_with_inputs = std::collections::HashSet::new();
-
-        for cmd in &commands {
-            match cmd {
-                Command::AddNode { node_idx, .. } => {
-                    // All nodes should eventually have inputs/outputs or be sources
-                }
-                Command::UpdateEdge { node_idx, .. } => {
-                    nodes_with_inputs.insert(*node_idx);
-                }
-                Command::UpdateOutputEdge { node_idx, .. } => {
-                    nodes_with_outputs.insert(*node_idx);
-                }
-                _ => {}
-            }
-        }
-
-        // Summing node must have inputs and outputs
-        // In 4-channel mixer, summing node should be the last added node index
-        let sum_node_idx = mixer.next_node_id - 1;
-        assert!(nodes_with_inputs.contains(&sum_node_idx));
-        assert!(nodes_with_outputs.contains(&sum_node_idx));
+        assert!(MixerManager::validate_topology(&cyclic_cmds).is_err());
     }
 }

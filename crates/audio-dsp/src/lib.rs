@@ -12,7 +12,7 @@ pub use util::*;
 pub trait DspKernel: Send {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]);
     fn reset(&mut self) {}
-    fn set_parameter(&mut self, _id: u32, _value: f32, _ramp_samples: u32) {}
+    fn set_parameter(&mut self, id: u32, value: f32, ramp_samples: u32);
 }
 
 /// A SIMD Summing Node that mixes up to 16 input buffers into one output.
@@ -69,6 +69,16 @@ impl SummingNode {
     }
 }
 
+impl DspKernel for SummingNode {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        if outputs.is_empty() { return; }
+        self.process_16_to_1_simd(inputs, outputs[0]);
+    }
+    fn set_parameter(&mut self, id: u32, value: f32, _ramp: u32) {
+        if id == 0 { self.gain = value; }
+    }
+}
+
 /// A SIMD-optimized Crossfader.
 pub struct Crossfader {
     position: f32, // 0.0 (A) to 1.0 (B)
@@ -114,6 +124,16 @@ impl Crossfader {
             output[i] = input_a[i] * gain_a + input_b[i] * gain_b;
             i += 1;
         }
+    }
+}
+
+impl DspKernel for Crossfader {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        if inputs.len() < 2 || outputs.is_empty() { return; }
+        self.process_block_simd(inputs[0], inputs[1], outputs[0]);
+    }
+    fn set_parameter(&mut self, id: u32, value: f32, _ramp: u32) {
+        if id == 0 { self.set_position(value); }
     }
 }
 
@@ -311,14 +331,14 @@ mod wavetable_tests {
 
     #[test]
     fn test_summing_node_simd() {
-        let node = SummingNode::new();
+        let mut node = SummingNode::new();
         let input1 = vec![0.1; 64];
         let input2 = vec![0.2; 64];
         let mut output_scalar = vec![0.0; 64];
         let mut output_simd = vec![0.0; 64];
 
         node.process_16_to_1(&[&input1, &input2], &mut output_scalar);
-        node.process_16_to_1_simd(&[&input1, &input2], &mut output_simd);
+        node.process(&[&input1, &input2], &mut [&mut output_simd]);
 
         for i in 0..64 {
             assert!((output_scalar[i] - output_simd[i]).abs() < 1e-6);
@@ -329,14 +349,14 @@ mod wavetable_tests {
     #[test]
     fn test_crossfader_simd() {
         let mut xfade = Crossfader::new();
-        xfade.set_position(0.5);
+        xfade.set_parameter(0, 0.5, 0);
         let input_a = vec![1.0; 64];
         let input_b = vec![2.0; 64];
         let mut output_scalar = vec![0.0; 64];
         let mut output_simd = vec![0.0; 64];
 
         xfade.process_block(&input_a, &input_b, &mut output_scalar);
-        xfade.process_block_simd(&input_a, &input_b, &mut output_simd);
+        xfade.process(&[&input_a, &input_b], &mut [&mut output_simd]);
 
         for i in 0..64 {
             assert!((output_scalar[i] - output_simd[i]).abs() < 1e-6);

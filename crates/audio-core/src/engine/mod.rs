@@ -175,7 +175,7 @@ impl AudioEngine {
         if let Some(cons) = topology_consumer {
             let mut topo_processed = 0;
             while let Some(topo_mut) = cons.pop() {
-                graph.apply_topology_mutation(topo_mut);
+                let _ = graph.apply_topology_mutation(topo_mut);
                 topo_processed += 1;
                 if topo_processed >= 16 { break; }
             }

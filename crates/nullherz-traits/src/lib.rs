@@ -300,7 +300,7 @@ pub trait CommandHandler {
 }
 
 pub trait TopologyHandler {
-    fn apply_topology_mutation(&mut self, _mutation: TopologyMutation) {}
+    fn apply_topology_mutation(&mut self, _mutation: TopologyMutation) -> Result<(), error::AudioError> { Ok(()) }
 }
 
 pub trait TelemetryProvider {

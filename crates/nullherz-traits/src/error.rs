@@ -8,6 +8,7 @@ pub enum AudioError {
     IpcError(String),
     ProcessorError(String),
     ConfigurationError(String),
+    Generic(String),
 }
 
 impl std::fmt::Display for AudioError {
@@ -19,6 +20,7 @@ impl std::fmt::Display for AudioError {
             AudioError::IpcError(s) => write!(f, "IPC error: {}", s),
             AudioError::ProcessorError(s) => write!(f, "Processor error: {}", s),
             AudioError::ConfigurationError(s) => write!(f, "Configuration error: {}", s),
+            AudioError::Generic(s) => write!(f, "Error: {}", s),
         }
     }
 }

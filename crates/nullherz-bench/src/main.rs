@@ -9,7 +9,7 @@ fn main() {
     let (cmd_buffer, mut tel_cons) = conductor.setup_engine();
 
     let mut mixer = MixerManager::new();
-    let commands = mixer.create_4channel_mixer();
+    let commands = mixer.create_4channel_mixer().expect("Failed to build mixer graph");
     conductor.apply_mixer_commands(commands);
 
     // Commit topology
