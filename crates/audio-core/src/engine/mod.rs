@@ -2,25 +2,26 @@ pub mod metrics;
 pub mod command_dispatcher;
 pub mod graph_manager;
 pub mod builder;
+pub mod recycler;
+pub mod telemetry_collector;
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
-use ipc_layer::{Producer, Consumer, RingBuffer};
-use control_plane::TimestampedCommand;
+use ipc_layer::{Consumer, RingBuffer};
 use crate::processors::{AudioProcessor, TaskPool, ProcessContext};
-use nullherz_traits::telemetry::Telemetry;
 use crate::rt_logging::RtLogger;
 use self::metrics::EngineMetrics;
 use self::command_dispatcher::CommandDispatcher;
 use self::graph_manager::GraphManager;
+use self::recycler::ResourceRecycler;
+use self::telemetry_collector::TelemetryCollector;
 
 pub struct EngineHost {
-    command_producer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
+    command_producer: Arc<ipc_layer::MpscRingBuffer<nullherz_traits::TimestampedCommand>>,
 }
 
 impl nullherz_traits::Host for EngineHost {
-    fn push_command(&self, timestamp_samples: u64, command: control_plane::Command) {
-        let _ = self.command_producer.push(TimestampedCommand {
+    fn push_command(&self, timestamp_samples: u64, command: nullherz_traits::Command) {
+        let _ = self.command_producer.push(nullherz_traits::TimestampedCommand {
             timestamp_samples,
             command,
         });
@@ -33,17 +34,16 @@ unsafe impl Send for AudioEngine {}
 unsafe impl Sync for AudioEngine {}
 
 pub struct AudioEngine {
-    command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
-    midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
-    bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
+    command_consumer: Arc<ipc_layer::MpscRingBuffer<nullherz_traits::TimestampedCommand>>,
+    midi_consumer: Option<Consumer<nullherz_traits::MidiEvent>>,
+    bundle_consumer: Option<Consumer<Vec<nullherz_traits::Command>>>,
     topology_consumer: Option<Consumer<nullherz_traits::TopologyMutation>>,
     graph_manager: GraphManager,
-    bundle_garbage_producer: Option<Producer<Vec<control_plane::Command>>>,
-    bundle_overflow_producer: Option<Producer<Vec<control_plane::Command>>>,
-    telemetry_producer: Producer<Telemetry>,
+    recycler: ResourceRecycler,
+    telemetry_collector: TelemetryCollector,
     sample_counter: u64,
     xrun_count: std::sync::Arc<std::sync::atomic::AtomicU32>,
-    pending_command: Option<TimestampedCommand>,
+    pending_command: Option<nullherz_traits::TimestampedCommand>,
     pub metrics: EngineMetrics,
     pub health_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub host: Option<EngineHost>,
@@ -56,15 +56,15 @@ pub struct AudioEngine {
 impl AudioEngine {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        command_consumer: Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
-        midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
-        bundle_consumer: Option<Consumer<Vec<control_plane::Command>>>,
+        command_consumer: Arc<ipc_layer::MpscRingBuffer<nullherz_traits::TimestampedCommand>>,
+        midi_consumer: Option<Consumer<nullherz_traits::MidiEvent>>,
+        bundle_consumer: Option<Consumer<Vec<nullherz_traits::Command>>>,
         topology_consumer: Option<Consumer<nullherz_traits::TopologyMutation>>,
-        garbage_producer: Producer<Box<dyn AudioProcessor>>,
-        overflow_garbage_producer: Option<Producer<Box<dyn AudioProcessor>>>,
-        bundle_garbage_producer: Option<Producer<Vec<control_plane::Command>>>,
-        bundle_overflow_producer: Option<Producer<Vec<control_plane::Command>>>,
-        telemetry_producer: Producer<Telemetry>,
+        garbage_producer: ipc_layer::Producer<Box<dyn AudioProcessor>>,
+        overflow_garbage_producer: Option<ipc_layer::Producer<Box<dyn AudioProcessor>>>,
+        bundle_garbage_producer: Option<ipc_layer::Producer<Vec<nullherz_traits::Command>>>,
+        bundle_overflow_producer: Option<ipc_layer::Producer<Vec<nullherz_traits::Command>>>,
+        telemetry_producer: ipc_layer::Producer<nullherz_traits::telemetry::Telemetry>,
         initial_graph: Box<dyn AudioProcessor>,
     ) -> Self {
         Self {
@@ -73,9 +73,8 @@ impl AudioEngine {
             bundle_consumer,
             topology_consumer,
             graph_manager: GraphManager::new(initial_graph, garbage_producer, overflow_garbage_producer),
-            bundle_garbage_producer,
-            bundle_overflow_producer,
-            telemetry_producer,
+            recycler: ResourceRecycler::new(bundle_garbage_producer, bundle_overflow_producer),
+            telemetry_collector: TelemetryCollector::new(telemetry_producer),
             sample_counter: 0,
             xrun_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             pending_command: None,
@@ -125,8 +124,7 @@ impl AudioEngine {
             &mut self.bundle_consumer,
             &mut self.topology_consumer,
             &mut self.midi_consumer,
-            &mut self.bundle_garbage_producer,
-            &mut self.bundle_overflow_producer,
+            &mut self.recycler,
             &self.metrics,
             &self.health_signal,
         );
@@ -144,10 +142,9 @@ impl AudioEngine {
             num_samples
         );
 
-        Self::finalize_block_telemetry_static(
+        self.telemetry_collector.finalize_block(
             graph,
             &self.metrics,
-            &mut self.telemetry_producer,
             &self.xrun_count,
             &mut self.sample_counter,
             start_cycles,
@@ -159,11 +156,10 @@ impl AudioEngine {
     fn handle_async_inputs_static(
         graph: &mut dyn AudioProcessor,
         transport: &mut nullherz_traits::Transport,
-        bundle_consumer: &mut Option<Consumer<Vec<control_plane::Command>>>,
+        bundle_consumer: &mut Option<Consumer<Vec<nullherz_traits::Command>>>,
         topology_consumer: &mut Option<Consumer<nullherz_traits::TopologyMutation>>,
-        midi_consumer: &mut Option<Consumer<ipc_layer::MidiEvent>>,
-        bundle_garbage_producer: &mut Option<Producer<Vec<control_plane::Command>>>,
-        bundle_overflow_producer: &mut Option<Producer<Vec<control_plane::Command>>>,
+        midi_consumer: &mut Option<Consumer<nullherz_traits::MidiEvent>>,
+        recycler: &mut ResourceRecycler,
         metrics: &EngineMetrics,
         health_signal: &Arc<std::sync::atomic::AtomicBool>,
     ) {
@@ -172,13 +168,7 @@ impl AudioEngine {
                 for cmd in &bundle {
                     CommandDispatcher::handle_single_command(transport, graph, cmd);
                 }
-                Self::recycle_bundle_static(
-                    bundle,
-                    bundle_garbage_producer,
-                    bundle_overflow_producer,
-                    metrics,
-                    health_signal,
-                );
+                recycler.recycle_bundle(bundle, metrics, health_signal);
             }
         }
 
@@ -196,44 +186,14 @@ impl AudioEngine {
         }
     }
 
-    fn recycle_bundle_static(
-        bundle: Vec<control_plane::Command>,
-        garbage_producer: &mut Option<Producer<Vec<control_plane::Command>>>,
-        overflow_producer: &mut Option<Producer<Vec<control_plane::Command>>>,
-        metrics: &EngineMetrics,
-        health_signal: &Arc<std::sync::atomic::AtomicBool>,
-    ) {
-        if let Some(prod) = garbage_producer {
-            if let Err(b) = prod.push(bundle) {
-                if let Some(overflow) = overflow_producer {
-                    if let Err(leak) = overflow.push(b) {
-                        metrics.report_resource_leak(health_signal);
-                        std::mem::forget(leak);
-                    }
-                } else {
-                    metrics.report_resource_leak(health_signal);
-                    std::mem::forget(b);
-                }
-            }
-        } else if let Some(overflow) = overflow_producer {
-            if let Err(b) = overflow.push(bundle) {
-                metrics.report_resource_leak(health_signal);
-                std::mem::forget(b);
-            }
-        } else {
-            metrics.report_resource_leak(health_signal);
-            std::mem::forget(bundle);
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn execute_processing_kernel_static(
         graph: &mut dyn AudioProcessor,
         transport: &mut nullherz_traits::Transport,
         host: Option<&dyn nullherz_traits::Host>,
         pool: &mut Option<Box<dyn nullherz_traits::ParallelExecutor>>,
-        command_consumer: &mut Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>,
-        pending_command: &mut Option<TimestampedCommand>,
+        command_consumer: &mut Arc<ipc_layer::MpscRingBuffer<nullherz_traits::TimestampedCommand>>,
+        pending_command: &mut Option<nullherz_traits::TimestampedCommand>,
         sample_counter: u64,
         inputs: &[&[f32]],
         outputs: &mut [&mut [f32]],
@@ -275,42 +235,6 @@ impl AudioEngine {
         }
     }
 
-    fn finalize_block_telemetry_static(
-        graph: &mut dyn AudioProcessor,
-        metrics: &EngineMetrics,
-        telemetry_producer: &mut Producer<Telemetry>,
-        xrun_count_atomic: &Arc<std::sync::atomic::AtomicU32>,
-        sample_counter: &mut u64,
-        start_cycles: u64,
-        num_samples: usize,
-    ) {
-        let mut node_times = [0u64; 64];
-        let mut peak_levels = [0.0f32; 64];
-        let mut node_times_cycles = [0u64; 64];
-
-        graph.collect_telemetry(&mut node_times_cycles, &mut peak_levels);
-
-        let ns_per_cycle = f64::from_bits(metrics.ns_per_cycle.load(Ordering::Relaxed));
-        nullherz_traits::telemetry::TelemetryProcessor::collect_node_times(
-            unsafe { std::mem::transmute(&node_times_cycles) },
-            ns_per_cycle,
-            &mut node_times
-        );
-
-        let elapsed_cycles = crate::get_cycles().wrapping_sub(start_cycles);
-        let current_ns = (elapsed_cycles as f64 * ns_per_cycle) as u64;
-        let peak = metrics.update_peak(current_ns, *sample_counter, num_samples);
-
-        let block_end_sample = *sample_counter + num_samples as u64;
-        *sample_counter = block_end_sample;
-
-        let _ = telemetry_producer.push(Telemetry {
-            process_time_ns: current_ns, peak_process_time_ns: peak, sample_counter: *sample_counter,
-            xrun_count: xrun_count_atomic.load(Ordering::Relaxed), resource_leaks: metrics.resource_leaks.load(Ordering::Relaxed),
-            node_times_ns: node_times, peak_levels,
-        });
-    }
-
     fn process_sub_block_and_advance_transport(
         graph: &mut dyn AudioProcessor,
         transport: &mut nullherz_traits::Transport,
@@ -341,8 +265,8 @@ impl AudioEngine {
     ) {
         if len == 0 { return; }
         let mut context = ProcessContext { transport: Some(transport), host, sub_block_offset: offset, is_last_sub_block };
-        let mut sub_inputs_ptr = [ &[][..]; crate::MAX_CHANNELS ];
-        let num_inputs = inputs.len().min(crate::MAX_CHANNELS);
+        let mut sub_inputs_ptr = [ &[][..]; nullherz_traits::MAX_CHANNELS ];
+        let num_inputs = inputs.len().min(nullherz_traits::MAX_CHANNELS);
         let empty_input = &[][..];
         for (i, sub_input) in sub_inputs_ptr.iter_mut().enumerate().take(num_inputs) {
             let input = inputs.get(i).copied().unwrap_or(empty_input);
@@ -350,8 +274,8 @@ impl AudioEngine {
             let act = offset.min(input.len());
             *sub_input = &input[act..end];
         }
-        let mut sub_outputs_reconstructed: [&mut [f32]; crate::MAX_CHANNELS] = std::array::from_fn(|_| &mut [][..]);
-        let num_outputs = outputs.len().min(crate::MAX_CHANNELS);
+        let mut sub_outputs_reconstructed: [&mut [f32]; nullherz_traits::MAX_CHANNELS] = std::array::from_fn(|_| &mut [][..]);
+        let num_outputs = outputs.len().min(nullherz_traits::MAX_CHANNELS);
         for (i, out) in outputs.iter_mut().take(num_outputs).enumerate() {
             let end = (offset + len).min(out.len());
             let act = offset.min(out.len());

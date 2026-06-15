@@ -3,6 +3,8 @@ pub mod test_kit;
 pub mod telemetry;
 pub mod error;
 
+use serde::{Serialize, Deserialize};
+
 #[derive(Debug, Clone, Copy)]
 pub struct AudioConfig {
     pub sample_rate: f32,
@@ -18,7 +20,7 @@ pub struct Transport {
 }
 
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProcessorType {
     Biquad = 1,
     Gain = 2,
@@ -48,6 +50,104 @@ impl TryFrom<u32> for ProcessorType {
     }
 }
 
+/// Represents an action to be performed by the audio engine.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum Command {
+    SetParam {
+        /// Target ID (e.g. hash of a name or a fixed-size buffer)
+        target_id: u64,
+        param_id: u32,
+        value: f32,
+        ramp_duration_samples: u32,
+    },
+    Play,
+    Stop,
+    UpdateEdge {
+        node_idx: u32,
+        input_idx: u32,
+        new_buffer_idx: u32,
+    },
+    UpdateOutputEdge {
+        node_idx: u32,
+        output_idx: u32,
+        new_buffer_idx: u32,
+    },
+    UpdateEdgeCrossfaded {
+        node_idx: u32,
+        input_idx: u32,
+        new_buffer_idx: u32,
+        duration_samples: u32,
+    },
+    SwapProcessor {
+        node_idx: u32,
+        processor_type_id: u32,
+    },
+    Bundle {
+        count: u32,
+        data: [u64; 12],
+    },
+    AddNode {
+        processor_type_id: u32,
+        node_idx: u32,
+    },
+    CommitTopology,
+    SetSequencerStep {
+        track: u32,
+        step: u32,
+        value: bool,
+    },
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum TopologyCommand {
+    AddNode {
+        processor_type_id: u32,
+        node_idx: u32,
+    },
+    UpdateEdge {
+        node_idx: u32,
+        input_idx: u32,
+        new_buffer_idx: u32,
+    },
+    UpdateOutputEdge {
+        node_idx: u32,
+        output_idx: u32,
+        new_buffer_idx: u32,
+    },
+    SwapProcessor {
+        node_idx: u32,
+        processor_type_id: u32,
+    },
+}
+
+/// A command with an associated timestamp for deterministic execution.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TimestampedCommand {
+    pub timestamp_samples: u64,
+    pub command: Command,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ParameterMetadata {
+    pub id: u32,
+    pub name: [u8; 32],
+    pub min: f32,
+    pub max: f32,
+    pub default: f32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct SidecarMetadata {
+    pub sidecar_id: u64,
+    pub num_parameters: u32,
+    pub parameters: [ParameterMetadata; 16],
+}
+
 pub enum TopologyMutation {
     UpdateEdge {
         node_idx: u32,
@@ -72,7 +172,7 @@ pub enum TopologyMutation {
 /// Interface for processors to interact with the engine host (e.g., scheduling commands).
 pub trait Host: Send + Sync + 'static {
     /// Pushes a command to be executed by the engine at a specific timestamp.
-    fn push_command(&self, timestamp_samples: u64, command: control_plane::Command);
+    fn push_command(&self, timestamp_samples: u64, command: Command);
 }
 
 /// Shared execution context passed to processors during the audio block cycle.
@@ -161,7 +261,7 @@ pub struct AudioBlock {
 
 /// A standard MIDI event representation for real-time IPC.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MidiEvent {
     pub timestamp_samples: u64,
     pub status: u8,
@@ -178,7 +278,7 @@ pub trait GarbageProducer: Send + dyn_clone::DynClone {
 dyn_clone::clone_trait_object!(GarbageProducer);
 
 /// Command interface for processors to decouple from the control plane.
-pub type ProcessorCommand = control_plane::Command;
+pub type ProcessorCommand = Command;
 
 /// Marker trait for real-time safe components.
 /// Types implementing this trait guarantee that their methods do not perform
@@ -190,8 +290,26 @@ pub trait ProcessorFactory: Send + Sync {
     fn name(&self) -> &'static str;
 }
 
+pub trait MidiHandler {
+    fn apply_midi(&mut self, _event: MidiEvent) {}
+}
+
+pub trait CommandHandler {
+    fn apply_command(&mut self, _command: &ProcessorCommand) {}
+    fn set_parameter(&mut self, _param_id: u32, _value: f32, _ramp_duration_samples: u32) {}
+}
+
+pub trait TopologyHandler {
+    fn apply_topology_mutation(&mut self, _mutation: TopologyMutation) {}
+}
+
+pub trait TelemetryProvider {
+    fn collect_telemetry(&self, _node_times: &mut [u64; MAX_NODES], _peak_levels: &mut [f32; MAX_NODES]) {}
+    fn metadata(&self) -> Option<SidecarMetadata> { None }
+}
+
 /// The core trait for all audio processing nodes in the nullherz engine.
-pub trait AudioProcessor: Send {
+pub trait AudioProcessor: MidiHandler + CommandHandler + TopologyHandler + TelemetryProvider + Send {
     /// Executes audio processing for the given buffers.
     /// MUST be real-time safe: no allocations, no locks, no blocking syscalls.
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext);
@@ -204,24 +322,6 @@ pub trait AudioProcessor: Send {
 
     /// Called when audio configuration (sample rate, block size) changes.
     fn setup(&mut self, _config: AudioConfig) {}
-
-    /// Applies high-level control plane commands (parameters, play/stop).
-    fn apply_command(&mut self, _command: &ProcessorCommand) {}
-
-    /// Sets a processor parameter with optional ramping.
-    fn set_parameter(&mut self, _param_id: u32, _value: f32, _ramp_duration_samples: u32) {}
-
-    /// Applies structural graph mutations to the processor (routing, swapping).
-    fn apply_topology_mutation(&mut self, _mutation: TopologyMutation) {}
-
-    /// Applies real-time MIDI events to the processor.
-    fn apply_midi(&mut self, _event: MidiEvent) {}
-
-    /// Gathers performance and signal telemetry from the processor.
-    fn collect_telemetry(&self, _node_times: &mut [u64; MAX_NODES], _peak_levels: &mut [f32; MAX_NODES]) {}
-
-    /// Returns metadata about the processor (parameters, name, etc.)
-    fn metadata(&self) -> Option<control_plane::SidecarMetadata> { None }
 
     /// Configures the garbage producer used for real-time safe deallocation.
     fn set_garbage_producer(&mut self, _producer: Box<dyn GarbageProducer>) {}

@@ -1,4 +1,4 @@
-use crate::{AudioProcessor, ProcessContext, AudioConfig, Transport};
+use crate::{AudioProcessor, ProcessContext, AudioConfig, Transport, Host, Command, MidiEvent, GarbageProducer};
 
 pub struct MockProcessor {
     pub process_called_count: usize,
@@ -21,7 +21,7 @@ impl MockProcessor {
 pub struct StabilityTester;
 
 impl StabilityTester {
-    pub fn verify_signal_bounds(processor: &mut dyn crate::AudioProcessor, duration_blocks: usize) -> Result<(), String> {
+    pub fn verify_signal_bounds(processor: &mut dyn AudioProcessor, duration_blocks: usize) -> Result<(), String> {
         let host = VirtualClockHost::new();
         let block_size = 256;
         let mut input = vec![0.0f32; block_size];
@@ -33,7 +33,7 @@ impl StabilityTester {
         for _ in 0..duration_blocks {
             let inputs = [ &input[..] ];
             let mut outputs = [ &mut output[..] ];
-            let mut ctx = crate::ProcessContext {
+            let mut ctx = ProcessContext {
                 transport: Some(&host.transport),
                 host: None,
                 sub_block_offset: 0,
@@ -59,7 +59,7 @@ impl StabilityTester {
 pub struct ConformanceSuite;
 
 impl ConformanceSuite {
-    pub fn verify_sub_block_consistency(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+    pub fn verify_sub_block_consistency(processor: &mut dyn AudioProcessor) -> Result<(), String> {
         processor.reset();
         let host = VirtualClockHost::new();
         let block_size = 128;
@@ -71,7 +71,7 @@ impl ConformanceSuite {
         {
             let inputs = [ &input[..] ];
             let mut outputs = [ &mut output_single[..] ];
-            let mut ctx = crate::ProcessContext {
+            let mut ctx = ProcessContext {
                 transport: Some(&host.transport),
                 host: None,
                 sub_block_offset: 0,
@@ -86,7 +86,7 @@ impl ConformanceSuite {
         {
             let inputs_a = [ &input[0..64] ];
             let mut outputs_a = [ &mut output_split[0..64] ];
-            let mut ctx_a = crate::ProcessContext {
+            let mut ctx_a = ProcessContext {
                 transport: Some(&host.transport),
                 host: None,
                 sub_block_offset: 0,
@@ -96,7 +96,7 @@ impl ConformanceSuite {
 
             let inputs_b = [ &input[64..128] ];
             let mut outputs_b = [ &mut output_split[64..128] ];
-            let mut ctx_b = crate::ProcessContext {
+            let mut ctx_b = ProcessContext {
                 transport: Some(&host.transport),
                 host: None,
                 sub_block_offset: 64,
@@ -114,7 +114,7 @@ impl ConformanceSuite {
         Ok(())
     }
 
-    pub fn verify_bypass_conformance(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+    pub fn verify_bypass_conformance(processor: &mut dyn AudioProcessor) -> Result<(), String> {
         let host = VirtualClockHost::new();
         let block_size = 128;
         let mut input = vec![0.0f32; block_size];
@@ -122,7 +122,7 @@ impl ConformanceSuite {
 
         for (i, val) in input.iter_mut().enumerate() { *val = i as f32 * 0.01; }
 
-        processor.apply_command(&crate::ProcessorCommand::SetParam {
+        processor.apply_command(&Command::SetParam {
             target_id: 0,
             param_id: 999, // Reserved for bypass in our convention
             value: 1.0,
@@ -131,7 +131,7 @@ impl ConformanceSuite {
 
         let inputs = [ &input[..] ];
         let mut outputs = [ &mut output[..] ];
-        let mut ctx = crate::ProcessContext {
+        let mut ctx = ProcessContext {
             transport: Some(&host.transport),
             host: None,
             sub_block_offset: 0,
@@ -148,7 +148,7 @@ impl ConformanceSuite {
         Ok(())
     }
 
-    pub fn verify_reset_consistency(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+    pub fn verify_reset_consistency(processor: &mut dyn AudioProcessor) -> Result<(), String> {
         processor.reset();
         let block_size = 128;
         let input = vec![1.0f32; block_size];
@@ -161,7 +161,7 @@ impl ConformanceSuite {
         {
             let inputs = [ &input[..] ];
             let mut outputs = [ &mut output_1[..] ];
-            let mut ctx = crate::ProcessContext {
+            let mut ctx = ProcessContext {
                 transport: Some(&host.transport),
                 host: None,
                 sub_block_offset: 0,
@@ -177,7 +177,7 @@ impl ConformanceSuite {
         {
             let inputs = [ &input[..] ];
             let mut outputs = [ &mut output_2[..] ];
-            let mut ctx = crate::ProcessContext {
+            let mut ctx = ProcessContext {
                 transport: Some(&host.transport),
                 host: None,
                 sub_block_offset: 0,
@@ -195,7 +195,35 @@ impl ConformanceSuite {
         Ok(())
     }
 
-    pub fn measure_latency_samples(processor: &mut dyn crate::AudioProcessor) -> usize {
+    pub fn verify_parameter_ramping(processor: &mut dyn AudioProcessor, param_id: u32, target_value: f32) -> Result<(), String> {
+        processor.reset();
+        let host = VirtualClockHost::new();
+        let ramp_duration = 128;
+        let mut output = vec![0.0f32; ramp_duration];
+
+        processor.set_parameter(param_id, target_value, ramp_duration as u32);
+
+        let inputs = [ &[][..]; 0 ];
+        let mut outputs = [ &mut output[..] ];
+        let mut ctx = ProcessContext {
+            transport: Some(&host.transport),
+            host: None,
+            sub_block_offset: 0,
+            is_last_sub_block: true,
+        };
+        processor.process(&inputs, &mut outputs, &mut ctx);
+
+        // Simple check: if ramping is implemented, first sample shouldn't be target_value
+        // unless it was already at target_value (but we assume it wasn't).
+        // This is a basic check; real verification might need more signal analysis.
+        if (output[0] - target_value).abs() < 1e-6 && ramp_duration > 1 {
+            return Err("Parameter changed instantly instead of ramping".into());
+        }
+
+        Ok(())
+    }
+
+    pub fn measure_latency_samples(processor: &mut dyn AudioProcessor) -> usize {
         let host = VirtualClockHost::new();
         let block_size = 256;
         let mut input = vec![0.0f32; block_size];
@@ -207,7 +235,7 @@ impl ConformanceSuite {
         for _ in 0..10 { // Check up to 10 blocks
             let inputs = [ &input[..] ];
             let mut outputs = [ &mut output[..] ];
-            let mut ctx = crate::ProcessContext {
+            let mut ctx = ProcessContext {
                 transport: Some(&host.transport),
                 host: None,
                 sub_block_offset: 0,
@@ -228,6 +256,23 @@ impl ConformanceSuite {
     }
 }
 
+impl crate::MidiHandler for MockProcessor {}
+impl crate::CommandHandler for MockProcessor {
+    fn apply_command(&mut self, command: &Command) {
+        if let Command::SetParam { param_id, value, .. } = command {
+            self.last_param_id = *param_id;
+            self.last_param_value = *value;
+        }
+    }
+
+    fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration: u32) {
+        self.last_param_id = param_id;
+        self.last_param_value = value;
+    }
+}
+impl crate::TopologyHandler for MockProcessor {}
+impl crate::TelemetryProvider for MockProcessor {}
+
 impl AudioProcessor for MockProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
@@ -239,17 +284,39 @@ impl AudioProcessor for MockProcessor {
     fn reset(&mut self) {
         self.reset_called_count += 1;
     }
+}
 
-    fn apply_command(&mut self, command: &crate::ProcessorCommand) {
-        if let crate::ProcessorCommand::SetParam { param_id, value, .. } = command {
-            self.last_param_id = *param_id;
-            self.last_param_value = *value;
-        }
+pub struct MockHost {
+    pub scheduled_commands: std::sync::Mutex<Vec<(u64, Command)>>,
+}
+
+impl MockHost {
+    pub fn new() -> Self {
+        Self { scheduled_commands: std::sync::Mutex::new(Vec::new()) }
     }
+}
 
-    fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration: u32) {
-        self.last_param_id = param_id;
-        self.last_param_value = value;
+impl Host for MockHost {
+    fn push_command(&self, timestamp_samples: u64, command: Command) {
+        self.scheduled_commands.lock().unwrap().push((timestamp_samples, command));
+    }
+}
+
+#[derive(Clone)]
+pub struct MockGarbageProducer {
+    pub processors: std::sync::Arc<std::sync::Mutex<Vec<Box<dyn AudioProcessor>>>>,
+}
+
+impl MockGarbageProducer {
+    pub fn new() -> Self {
+        Self { processors: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())) }
+    }
+}
+
+impl GarbageProducer for MockGarbageProducer {
+    fn push_processor(&mut self, processor: Box<dyn AudioProcessor>) -> Result<(), Box<dyn AudioProcessor>> {
+        self.processors.lock().unwrap().push(processor);
+        Ok(())
     }
 }
 
@@ -337,7 +404,7 @@ mod tests {
         let mut mock = MockProcessor::new();
 
         // Command at sample 100
-        let commands = vec![(100, crate::ProcessorCommand::SetParam { target_id: 0, param_id: 1, value: 0.5, ramp_duration_samples: 0 })];
+        let commands = vec![(100, Command::SetParam { target_id: 0, param_id: 1, value: 0.5, ramp_duration_samples: 0 })];
 
         // Process first block (128 samples)
         host.process_with_commands(&mut mock, 128, &commands);
@@ -372,7 +439,7 @@ impl VirtualClockHost {
         &mut self,
         processor: &mut P,
         num_samples: usize,
-        commands: &[(u64, crate::ProcessorCommand)],
+        commands: &[(u64, Command)],
     ) {
         let mut iter = crate::SubBlockIterator::new(num_samples, crate::MAX_BLOCK_SIZE);
         let block_start = self.sample_counter;
@@ -408,7 +475,7 @@ impl VirtualClockHost {
 
 
     fn run_sub_block(&mut self, processor: &mut dyn AudioProcessor, offset: usize, len: usize, is_last: bool) {
-        let mut ctx = crate::ProcessContext {
+        let mut ctx = ProcessContext {
             transport: Some(&self.transport),
             host: None,
             sub_block_offset: offset,

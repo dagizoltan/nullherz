@@ -14,6 +14,10 @@ impl CrossfaderProcessor {
     pub fn new() -> Self { Self { inner: audio_dsp::Crossfader::new() } }
 }
 
+impl nullherz_traits::MidiHandler for CrossfaderProcessor {}
+impl nullherz_traits::CommandHandler for CrossfaderProcessor {}
+impl nullherz_traits::TopologyHandler for CrossfaderProcessor {}
+impl nullherz_traits::TelemetryProvider for CrossfaderProcessor {}
 impl AudioProcessor for CrossfaderProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }

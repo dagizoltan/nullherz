@@ -14,6 +14,10 @@ impl SummingProcessor {
     pub fn new() -> Self { Self { inner: audio_dsp::SummingNode::new() } }
 }
 
+impl nullherz_traits::MidiHandler for SummingProcessor {}
+impl nullherz_traits::CommandHandler for SummingProcessor {}
+impl nullherz_traits::TopologyHandler for SummingProcessor {}
+impl nullherz_traits::TelemetryProvider for SummingProcessor {}
 impl AudioProcessor for SummingProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }

@@ -1,4 +1,4 @@
-use nullherz_traits::AudioProcessor;
+use nullherz_traits::{AudioProcessor, MidiHandler, CommandHandler, TopologyHandler, TelemetryProvider};
 use audio_dsp::SamplerVoice;
 
 #[derive(Debug)]
@@ -22,6 +22,24 @@ impl SamplerProcessor {
         self.sample_buffer = std::sync::Arc::new(buffer);
     }
 }
+
+impl MidiHandler for SamplerProcessor {
+    fn apply_midi(&mut self, event: nullherz_traits::MidiEvent) {
+        let status = event.status & 0xF0;
+        #[allow(clippy::collapsible_if)]
+        if status == 0x90 && event.data2 > 0 {
+            if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
+                let freq = 440.0 * 2.0f32.powf((event.data1 as f32 - 69.0) / 12.0);
+                let playback_rate = freq / 440.0;
+                let velocity = event.data2 as f32 / 127.0;
+                voice.trigger(self.sample_buffer.clone(), playback_rate, velocity);
+            }
+        }
+    }
+}
+impl CommandHandler for SamplerProcessor {}
+impl TopologyHandler for SamplerProcessor {}
+impl TelemetryProvider for SamplerProcessor {}
 
 impl AudioProcessor for SamplerProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
@@ -53,19 +71,6 @@ impl AudioProcessor for SamplerProcessor {
         // Copy the rendered result to all output channels.
         for output in outputs.iter_mut() {
             output.copy_from_slice(render_slice);
-        }
-    }
-
-    fn apply_midi(&mut self, event: ipc_layer::MidiEvent) {
-        let status = event.status & 0xF0;
-        #[allow(clippy::collapsible_if)]
-        if status == 0x90 && event.data2 > 0 {
-            if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
-                let freq = 440.0 * 2.0f32.powf((event.data1 as f32 - 69.0) / 12.0);
-                let playback_rate = freq / 440.0;
-                let velocity = event.data2 as f32 / 127.0;
-                voice.trigger(self.sample_buffer.clone(), playback_rate, velocity);
-            }
         }
     }
 }

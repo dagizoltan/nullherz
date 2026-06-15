@@ -1,4 +1,4 @@
-use nullherz_traits::AudioProcessor;
+use nullherz_traits::{AudioProcessor, MidiHandler, CommandHandler, TopologyHandler, TelemetryProvider};
 
 pub struct SequencerProcessor {
     sample_rate: f32,
@@ -16,18 +16,22 @@ impl SequencerProcessor {
     }
 }
 
-impl AudioProcessor for SequencerProcessor {
-    fn setup(&mut self, config: nullherz_traits::AudioConfig) {
-        self.sample_rate = config.sample_rate;
-    }
-
-    fn apply_command(&mut self, command: &control_plane::Command) {
+impl MidiHandler for SequencerProcessor {}
+impl CommandHandler for SequencerProcessor {
+    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
         #[allow(clippy::collapsible_if)]
-        if let control_plane::Command::SetSequencerStep { track, step, value } = command {
+        if let nullherz_traits::Command::SetSequencerStep { track, step, value } = command {
             if *track < 8 && *step < crate::MAX_CHANNELS as u32 {
                 self.grid[*track as usize][*step as usize] = *value;
             }
         }
+    }
+}
+impl TopologyHandler for SequencerProcessor {}
+impl TelemetryProvider for SequencerProcessor {}
+impl AudioProcessor for SequencerProcessor {
+    fn setup(&mut self, config: nullherz_traits::AudioConfig) {
+        self.sample_rate = config.sample_rate;
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
@@ -63,7 +67,7 @@ impl AudioProcessor for SequencerProcessor {
                         if self.grid[track][step_idx] {
                             host.push_command(
                                 self.current_sample + sample_offset.min(block_len - 1),
-                                control_plane::Command::Play,
+                                nullherz_traits::Command::Play,
                             );
                         }
                     }

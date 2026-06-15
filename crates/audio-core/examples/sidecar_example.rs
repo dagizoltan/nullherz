@@ -1,12 +1,20 @@
 use audio_core::{AudioEngine, AudioProcessor, ProcessorGraph};
 use nullherz_processors::SidecarProcessor;
 use nullherz_backends::{ThreadedBackend, AudioBackend};
-use control_plane::{Command};
+use nullherz_traits::{Command, MidiHandler, CommandHandler, TopologyHandler, TelemetryProvider};
 use ipc_layer::{RingBuffer, ShmRingBuffer, AudioBlock, SharedMemory, ShmSignal};
 use std::thread;
 use std::sync::{Arc, Mutex};
 
 struct MockSidecarProcessor;
+impl MidiHandler for MockSidecarProcessor {}
+impl CommandHandler for MockSidecarProcessor {
+    fn apply_command(&mut self, command: &Command) {
+        if let Command::Play = command { println!("Sidecar: Received Play command!"); }
+    }
+}
+impl TopologyHandler for MockSidecarProcessor {}
+impl TelemetryProvider for MockSidecarProcessor {}
 impl AudioProcessor for MockSidecarProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
@@ -14,9 +22,6 @@ impl AudioProcessor for MockSidecarProcessor {
         for i in 0..inputs.len().min(outputs.len()) {
             for j in 0..inputs[i].len() { outputs[i][j] = inputs[i][j] * 0.5; }
         }
-    }
-    fn apply_command(&mut self, command: &Command) {
-        if let Command::Play = command { println!("Sidecar: Received Play command!"); }
     }
 }
 

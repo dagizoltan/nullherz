@@ -10,6 +10,10 @@ impl WavetableProcessor {
     }
 }
 
+impl nullherz_traits::MidiHandler for WavetableProcessor {}
+impl nullherz_traits::CommandHandler for WavetableProcessor {}
+impl nullherz_traits::TopologyHandler for WavetableProcessor {}
+impl nullherz_traits::TelemetryProvider for WavetableProcessor {}
 impl AudioProcessor for WavetableProcessor {
     fn setup(&mut self, config: nullherz_traits::AudioConfig) {
         self.inner.set_sample_rate(config.sample_rate);

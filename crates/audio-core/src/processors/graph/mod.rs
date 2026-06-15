@@ -18,8 +18,8 @@ pub use buffer_pool::GraphBufferPool;
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use ipc_layer::Producer;
 use crate::processors::{AudioProcessor, TopologyMutation};
+use nullherz_traits::{MidiHandler, CommandHandler, TopologyHandler, TelemetryProvider};
 
 pub struct ProcessorGraph {
     pub(crate) nodes: Box<[ProcessorNode; crate::MAX_NODES]>,
@@ -103,6 +103,82 @@ impl Default for ProcessorGraph {
     }
 }
 
+impl MidiHandler for ProcessorGraph {
+    fn apply_midi(&mut self, event: nullherz_traits::MidiEvent) {
+        for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_midi(event); } }
+    }
+}
+impl CommandHandler for ProcessorGraph {
+    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+        match command {
+            nullherz_traits::Command::CommitTopology => { self.calculate_stages(); self.commit_graph(); }
+            _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }
+        }
+    }
+}
+impl TopologyHandler for ProcessorGraph {
+    fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
+        if self.topology_coordinator.has_active_crossfades() {
+             eprintln!("WARN: Dropping topology mutation during active crossfade");
+             return;
+        }
+
+        match mutation {
+            TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
+                let n_idx = node_idx as usize;
+                let i_idx = input_idx as usize;
+                if n_idx < self.node_count && i_idx < 16 {
+                    let topo = self.inactive_topology_mut();
+                    if i_idx < topo.routing[n_idx].input_count {
+                        topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
+                    }
+                }
+            }
+            TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
+                let n_idx = node_idx as usize;
+                let o_idx = output_idx as usize;
+                if n_idx < self.node_count && o_idx < 16 {
+                    let topo = self.inactive_topology_mut();
+                    if o_idx < topo.routing[n_idx].output_count {
+                        topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
+                    }
+                }
+            }
+            TopologyMutation::SwapProcessor { node_idx, mut processor } => {
+                let n_idx = node_idx as usize;
+                if n_idx < self.node_count {
+                    let node = &self.nodes[n_idx];
+                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
+                    let old_proc = unsafe { std::ptr::replace(node.processor.get(), processor) };
+                    if let Some(ref mut prod) = self.garbage_producer {
+                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
+                    } else { std::mem::forget(old_proc); }
+                }
+            }
+            TopologyMutation::AddNode { node_idx: _, mut processor } => {
+                if self.node_count < crate::MAX_NODES {
+                    let idx = self.node_count;
+                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
+                    unsafe { *self.nodes[idx].processor.get() = processor; }
+                    self.node_count += 1;
+                    let topo = self.inactive_topology_mut();
+                    topo.routing[idx].input_count = 0;
+                    topo.routing[idx].output_count = 0;
+                    topo.node_count += 1;
+                }
+            }
+        }
+    }
+}
+impl TelemetryProvider for ProcessorGraph {
+    fn collect_telemetry(&self, node_times: &mut [u64; crate::MAX_NODES], peak_levels: &mut [f32; crate::MAX_NODES]) {
+        for i in 0..crate::MAX_NODES {
+            node_times[i] = self.telemetry.node_times_cycles[i].load(Ordering::Relaxed);
+            peak_levels[i] = f32::from_bits(self.telemetry.peak_levels[i].load(Ordering::Relaxed));
+        }
+    }
+}
+
 impl AudioProcessor for ProcessorGraph {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
@@ -179,80 +255,8 @@ impl AudioProcessor for ProcessorGraph {
         }
     }
 
-    fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
-        if self.topology_coordinator.has_active_crossfades() {
-             // Defer structural mutations if crossfades are active to avoid signal discontinuity
-             // In a full implementation, we might queue these. For now, we drop with a log.
-             eprintln!("WARN: Dropping topology mutation during active crossfade");
-             return;
-        }
-
-        match mutation {
-            TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
-                let n_idx = node_idx as usize;
-                let i_idx = input_idx as usize;
-                if n_idx < self.node_count && i_idx < 16 {
-                    let topo = self.inactive_topology_mut();
-                    if i_idx < topo.routing[n_idx].input_count {
-                        topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
-                    }
-                }
-            }
-            TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
-                let n_idx = node_idx as usize;
-                let o_idx = output_idx as usize;
-                if n_idx < self.node_count && o_idx < 16 {
-                    let topo = self.inactive_topology_mut();
-                    if o_idx < topo.routing[n_idx].output_count {
-                        topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
-                    }
-                }
-            }
-            TopologyMutation::SwapProcessor { node_idx, mut processor } => {
-                let n_idx = node_idx as usize;
-                if n_idx < self.node_count {
-                    let node = &self.nodes[n_idx];
-                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
-                    let old_proc = unsafe { std::ptr::replace(node.processor.get(), processor) };
-                    if let Some(ref mut prod) = self.garbage_producer {
-                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
-                    } else { std::mem::forget(old_proc); }
-                }
-            }
-            TopologyMutation::AddNode { node_idx: _, mut processor } => {
-                if self.node_count < crate::MAX_NODES {
-                    let idx = self.node_count;
-                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
-                    unsafe { *self.nodes[idx].processor.get() = processor; }
-                    self.node_count += 1;
-                    let topo = self.inactive_topology_mut();
-                    topo.routing[idx].input_count = 0;
-                    topo.routing[idx].output_count = 0;
-                    topo.node_count += 1;
-                }
-            }
-        }
-    }
-
-    fn apply_command(&mut self, command: &control_plane::Command) {
-        match command {
-            control_plane::Command::CommitTopology => { self.calculate_stages(); self.commit_graph(); }
-            _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }
-        }
-    }
-
-    fn apply_midi(&mut self, event: ipc_layer::MidiEvent) {
-        for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_midi(event); } }
-    }
-
     fn set_garbage_producer(&mut self, producer: Box<dyn nullherz_traits::GarbageProducer>) {
         self.garbage_producer = Some(producer);
-    }
-    fn collect_telemetry(&self, node_times: &mut [u64; crate::MAX_NODES], peak_levels: &mut [f32; crate::MAX_NODES]) {
-        for i in 0..crate::MAX_NODES {
-            node_times[i] = self.telemetry.node_times_cycles[i].load(Ordering::Relaxed);
-            peak_levels[i] = f32::from_bits(self.telemetry.peak_levels[i].load(Ordering::Relaxed));
-        }
     }
 }
 
@@ -266,6 +270,10 @@ mod tests {
     impl std::fmt::Debug for IdentityProcessor {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "IdentityProcessor") }
     }
+    impl nullherz_traits::MidiHandler for IdentityProcessor {}
+    impl nullherz_traits::CommandHandler for IdentityProcessor {}
+    impl nullherz_traits::TopologyHandler for IdentityProcessor {}
+    impl nullherz_traits::TelemetryProvider for IdentityProcessor {}
     impl AudioProcessor for IdentityProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }

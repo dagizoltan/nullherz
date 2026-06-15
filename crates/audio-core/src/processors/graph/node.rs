@@ -25,6 +25,10 @@ unsafe impl Sync for ProcessorNode {}
 
 #[derive(Debug)]
 pub struct DummyProcessor;
+impl nullherz_traits::MidiHandler for DummyProcessor {}
+impl nullherz_traits::CommandHandler for DummyProcessor {}
+impl nullherz_traits::TopologyHandler for DummyProcessor {}
+impl nullherz_traits::TelemetryProvider for DummyProcessor {}
 impl AudioProcessor for DummyProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }

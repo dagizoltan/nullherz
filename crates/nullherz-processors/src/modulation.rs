@@ -22,6 +22,10 @@ impl ModulationProcessor {
     }
 }
 
+impl nullherz_traits::MidiHandler for ModulationProcessor {}
+impl nullherz_traits::CommandHandler for ModulationProcessor {}
+impl nullherz_traits::TopologyHandler for ModulationProcessor {}
+impl nullherz_traits::TelemetryProvider for ModulationProcessor {}
 impl AudioProcessor for ModulationProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }

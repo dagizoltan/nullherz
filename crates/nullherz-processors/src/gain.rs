@@ -1,4 +1,4 @@
-use nullherz_traits::AudioProcessor;
+use nullherz_traits::{AudioProcessor, MidiHandler, CommandHandler, TopologyHandler, TelemetryProvider};
 
 pub struct GainProcessor {
     gains: [audio_dsp::Gain; crate::MAX_CHANNELS],
@@ -14,6 +14,32 @@ impl GainProcessor {
 
 impl nullherz_traits::RtSafe for GainProcessor {}
 
+impl MidiHandler for GainProcessor {}
+
+impl CommandHandler for GainProcessor {
+    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+        match *command {
+            nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
+                if target_id == self.id =>
+            {
+                self.set_parameter(param_id, value, ramp_duration_samples);
+            }
+            _ => {}
+        }
+    }
+
+    fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
+        use audio_dsp::DspKernel;
+        for g in self.gains.iter_mut() {
+            g.set_parameter(param_id, value, ramp_duration_samples);
+        }
+    }
+}
+
+impl TopologyHandler for GainProcessor {}
+
+impl TelemetryProvider for GainProcessor {}
+
 impl AudioProcessor for GainProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
@@ -26,30 +52,11 @@ impl AudioProcessor for GainProcessor {
             gain.process(&inputs[i..i+1], &mut outputs[i..i+1]);
         }
     }
-    fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
-        use audio_dsp::DspKernel;
-        for g in self.gains.iter_mut() {
-            g.set_parameter(param_id, value, ramp_duration_samples);
-        }
-    }
 
     fn reset(&mut self) {
-        // audio_dsp::Gain doesn't have internal state like delay lines,
-        // but we can reset current_gain to target_gain if we want bit-exact reset during ramps.
         for g in self.gains.iter_mut() {
             g.current_gain = g.target_gain;
             g.ramp_remaining = 0;
-        }
-    }
-
-    fn apply_command(&mut self, command: &control_plane::Command) {
-        match *command {
-            control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
-                if target_id == self.id =>
-            {
-                self.set_parameter(param_id, value, ramp_duration_samples);
-            }
-            _ => {}
         }
     }
 }

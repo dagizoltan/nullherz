@@ -1,4 +1,4 @@
-use nullherz_traits::AudioProcessor;
+use nullherz_traits::{AudioProcessor, MidiHandler, CommandHandler, TopologyHandler, TelemetryProvider};
 
 pub struct BiquadProcessor {
     filters: [audio_dsp::BiquadFilter; crate::MAX_CHANNELS],
@@ -14,17 +14,19 @@ impl BiquadProcessor {
 
 impl nullherz_traits::RtSafe for BiquadProcessor {}
 
-impl AudioProcessor for BiquadProcessor {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+impl MidiHandler for BiquadProcessor {}
+impl TopologyHandler for BiquadProcessor {}
+impl TelemetryProvider for BiquadProcessor {}
 
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
-        use audio_dsp::DspKernel;
-        if inputs.is_empty() || outputs.is_empty() { return; }
-        let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
-
-        for (ch, filter) in self.filters.iter_mut().enumerate().take(num_channels) {
-            filter.process(&inputs[ch..ch+1], &mut outputs[ch..ch+1]);
+impl CommandHandler for BiquadProcessor {
+    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+        match *command {
+            nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
+                if target_id == self.id =>
+            {
+                self.set_parameter(param_id, value, ramp_duration_samples);
+            }
+            _ => {}
         }
     }
 
@@ -42,22 +44,26 @@ impl AudioProcessor for BiquadProcessor {
             f.set_coeffs_ramped(coeffs, ramp_duration_samples);
         }
     }
+}
+
+impl AudioProcessor for BiquadProcessor {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
+        use audio_dsp::DspKernel;
+        if inputs.is_empty() || outputs.is_empty() { return; }
+        let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
+
+        for (ch, filter) in self.filters.iter_mut().enumerate().take(num_channels) {
+            filter.process(&inputs[ch..ch+1], &mut outputs[ch..ch+1]);
+        }
+    }
 
     fn reset(&mut self) {
         use audio_dsp::DspKernel;
         for f in self.filters.iter_mut() {
             f.reset();
-        }
-    }
-
-    fn apply_command(&mut self, command: &control_plane::Command) {
-        match *command {
-            control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
-                if target_id == self.id =>
-            {
-                self.set_parameter(param_id, value, ramp_duration_samples);
-            }
-            _ => {}
         }
     }
 }
@@ -70,6 +76,36 @@ pub struct SimdBiquadProcessor {
 impl SimdBiquadProcessor {
     pub fn new(id: u64, coeffs: audio_dsp::BiquadCoefficients) -> Self {
         Self { inner: audio_dsp::SimdBiquad::new(coeffs), id }
+    }
+}
+
+impl MidiHandler for SimdBiquadProcessor {}
+impl TopologyHandler for SimdBiquadProcessor {}
+impl TelemetryProvider for SimdBiquadProcessor {}
+
+impl CommandHandler for SimdBiquadProcessor {
+    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+        match *command {
+            nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
+                if target_id == self.id =>
+            {
+                self.set_parameter(param_id, value, ramp_duration_samples);
+            }
+            _ => {}
+        }
+    }
+
+    fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
+        let mut coeffs = self.inner.coeffs;
+        match param_id {
+            0 => coeffs.b0 = value,
+            1 => coeffs.b1 = value,
+            2 => coeffs.b2 = value,
+            3 => coeffs.a1 = value,
+            4 => coeffs.a2 = value,
+            _ => return,
+        }
+        self.inner.coeffs = coeffs;
     }
 }
 
@@ -106,33 +142,8 @@ impl AudioProcessor for SimdBiquadProcessor {
         }
     }
 
-    fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
-        let mut coeffs = self.inner.coeffs;
-        match param_id {
-            0 => coeffs.b0 = value,
-            1 => coeffs.b1 = value,
-            2 => coeffs.b2 = value,
-            3 => coeffs.a1 = value,
-            4 => coeffs.a2 = value,
-            _ => return,
-        }
-        self.inner.coeffs = coeffs;
-    }
-
     fn reset(&mut self) {
         self.inner.z1.fill(0.0);
         self.inner.z2.fill(0.0);
     }
-
-    fn apply_command(&mut self, command: &control_plane::Command) {
-        match *command {
-            control_plane::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
-                if target_id == self.id =>
-            {
-                self.set_parameter(param_id, value, ramp_duration_samples);
-            }
-            _ => {}
-        }
-    }
-
 }

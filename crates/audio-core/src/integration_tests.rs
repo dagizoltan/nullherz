@@ -1,15 +1,15 @@
 #[cfg(feature = "test-utils")]
 mod integration_tests {
     use crate::{AudioEngine, ProcessorGraph};
-    use nullherz_traits::{AudioProcessor, test_kit::{TestHost, MockProcessor}, ProcessorType, GarbageProducer};
+    use nullherz_traits::{AudioProcessor, CommandHandler, test_kit::{TestHost, MockProcessor}};
     use nullherz_processors::ProcessorRegistry;
     use ipc_layer::RingBuffer;
     use std::sync::Arc;
 
     #[test]
     fn test_complete_engine_cycle_with_registry() {
-        let registry = ProcessorRegistry::new();
-        let mut host = TestHost::new();
+        let _registry = ProcessorRegistry::new();
+        let _host = TestHost::new();
 
         // 1. Setup Engine components
         let cmd_buffer = Arc::new(ipc_layer::MpscRingBuffer::new(256));
