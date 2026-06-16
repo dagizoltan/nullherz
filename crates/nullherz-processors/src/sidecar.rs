@@ -5,9 +5,9 @@ use std::sync::Arc;
 pub const MAX_CHANNELS: usize = 16;
 
 pub struct SidecarProcessor {
-    command_producer_ptr: *const ShmRingBuffer<control_plane::Command>,
-    feedback_consumer_ptr: Option<*const ShmRingBuffer<control_plane::SidecarMetadata>>,
-    pub last_metadata: Option<control_plane::SidecarMetadata>,
+    command_producer_ptr: *const ShmRingBuffer<nullherz_traits::Command>,
+    feedback_consumer_ptr: Option<*const ShmRingBuffer<nullherz_traits::SidecarMetadata>>,
+    pub last_metadata: Option<nullherz_traits::SidecarMetadata>,
     input_shm: [*mut ShmRingBuffer<AudioBlock>; MAX_CHANNELS],
     output_shm: [*const ShmRingBuffer<AudioBlock>; MAX_CHANNELS],
     num_channels: usize,
@@ -29,8 +29,8 @@ impl SidecarProcessor {
     /// # Safety
     /// All pointers must be valid and point to pre-allocated shared memory structures.
     pub unsafe fn new(
-        command_ptr: *const ShmRingBuffer<control_plane::Command>,
-        feedback_ptr: Option<*const ShmRingBuffer<control_plane::SidecarMetadata>>,
+        command_ptr: *const ShmRingBuffer<nullherz_traits::Command>,
+        feedback_ptr: Option<*const ShmRingBuffer<nullherz_traits::SidecarMetadata>>,
         inputs: &[*mut ShmRingBuffer<AudioBlock>],
         outputs: &[*const ShmRingBuffer<AudioBlock>],
         signal: *const ShmSignal,
@@ -75,7 +75,7 @@ impl SidecarProcessor {
         self._shm_signal = Some(signal);
     }
 
-    pub fn poll_feedback(&self) -> Option<control_plane::SidecarMetadata> {
+    pub fn poll_feedback(&self) -> Option<nullherz_traits::SidecarMetadata> {
         self.feedback_consumer_ptr.and_then(|ptr| unsafe { (*ptr).pop() })
     }
 }
@@ -141,7 +141,7 @@ impl AudioProcessor for SidecarProcessor {
         unsafe { (*self.signal).notify(); }
         if let Some(efd) = &self.event_fd { efd.notify(); }
     }
-    fn apply_command(&mut self, command: &control_plane::Command) {
+    fn apply_command(&mut self, command: &nullherz_traits::Command) {
         unsafe {
             let _ = (*self.command_producer_ptr).push(*command);
             (*self.signal).notify();
@@ -164,7 +164,7 @@ mod tests {
         let out_shm = SharedMemory::create("nullherz_test_out", 4096).unwrap();
 
         unsafe {
-            let cmd_ptr = ShmRingBuffer::<control_plane::Command>::init(cmd_shm.ptr(), 16);
+            let cmd_ptr = ShmRingBuffer::<nullherz_traits::Command>::init(cmd_shm.ptr(), 16);
             let sig_ptr = sig_shm.ptr() as *mut ShmSignal;
             std::ptr::write(sig_ptr, ShmSignal::new());
             let in_ptr = ShmRingBuffer::<AudioBlock>::init(in_shm.ptr(), 16);

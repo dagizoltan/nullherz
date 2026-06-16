@@ -17,35 +17,131 @@ pub struct Transport {
     pub sample_rate: f32,
 }
 
-#[repr(u32)]
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum ProcessorType {
-    Biquad = 1,
-    Gain = 2,
-    Sampler = 10,
-    BiquadEQ = 11,
-    Crossfader = 20,
-    Summing = 30,
-    Spectral = 40,
-    Wavetable = 50,
+pub struct ProcessorTypeId(pub u32);
+
+impl ProcessorTypeId {
+    pub const BIQUAD: Self = Self(1);
+    pub const GAIN: Self = Self(2);
+    pub const SAMPLER: Self = Self(10);
+    pub const BIQUAD_EQ: Self = Self(11);
+    pub const CROSSFADER: Self = Self(20);
+    pub const SUMMING: Self = Self(30);
+    pub const SPECTRAL: Self = Self(40);
+    pub const WAVETABLE: Self = Self(50);
 }
 
-impl TryFrom<u32> for ProcessorType {
-    type Error = ();
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            1 => Ok(ProcessorType::Biquad),
-            2 => Ok(ProcessorType::Gain),
-            10 => Ok(ProcessorType::Sampler),
-            11 => Ok(ProcessorType::BiquadEQ),
-            20 => Ok(ProcessorType::Crossfader),
-            30 => Ok(ProcessorType::Summing),
-            40 => Ok(ProcessorType::Spectral),
-            50 => Ok(ProcessorType::Wavetable),
-            _ => Err(()),
-        }
+impl From<u32> for ProcessorTypeId {
+    fn from(value: u32) -> Self {
+        Self(value)
     }
+}
+
+impl From<ProcessorTypeId> for u32 {
+    fn from(id: ProcessorTypeId) -> Self {
+        id.0
+    }
+}
+
+/// Represents an action to be performed by the audio engine.
+/// Fixed-size strings are used to avoid heap allocations in the RT thread.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum Command {
+    SetParam {
+        /// Target ID (e.g. hash of a name or a fixed-size buffer)
+        target_id: u64,
+        param_id: u32,
+        value: f32,
+        ramp_duration_samples: u32,
+    },
+    Play,
+    Stop,
+    UpdateEdge {
+        node_idx: u32,
+        input_idx: u32,
+        new_buffer_idx: u32,
+    },
+    UpdateOutputEdge {
+        node_idx: u32,
+        output_idx: u32,
+        new_buffer_idx: u32,
+    },
+    UpdateEdgeCrossfaded {
+        node_idx: u32,
+        input_idx: u32,
+        new_buffer_idx: u32,
+        duration_samples: u32,
+    },
+    SwapProcessor {
+        node_idx: u32,
+        processor_type_id: ProcessorTypeId,
+    },
+    Bundle {
+        // Flat array of parameter updates: [node_id, param_id, value_bits, ...]
+        count: u32,
+        data: [u64; 12], // Supports up to 4 bundled SetParam commands
+    },
+    AddNode {
+        processor_type_id: ProcessorTypeId,
+        node_idx: u32,
+    },
+    CommitTopology,
+    SetSequencerStep {
+        track: u32,
+        step: u32,
+        value: bool,
+    },
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum TopologyCommand {
+    AddNode {
+        processor_type_id: ProcessorTypeId,
+        node_idx: u32,
+    },
+    UpdateEdge {
+        node_idx: u32,
+        input_idx: u32,
+        new_buffer_idx: u32,
+    },
+    UpdateOutputEdge {
+        node_idx: u32,
+        output_idx: u32,
+        new_buffer_idx: u32,
+    },
+    SwapProcessor {
+        node_idx: u32,
+        processor_type_id: ProcessorTypeId,
+    },
+}
+
+/// A command with an associated timestamp for deterministic execution.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TimestampedCommand {
+    pub timestamp_samples: u64,
+    pub command: Command,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ParameterMetadata {
+    pub id: u32,
+    pub name: [u8; 32],
+    pub min: f32,
+    pub max: f32,
+    pub default: f32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SidecarMetadata {
+    pub sidecar_id: u64,
+    pub num_parameters: u32,
+    pub parameters: [ParameterMetadata; 16],
 }
 
 pub enum TopologyMutation {
@@ -72,7 +168,7 @@ pub enum TopologyMutation {
 /// Interface for processors to interact with the engine host (e.g., scheduling commands).
 pub trait Host: Send + Sync + 'static {
     /// Pushes a command to be executed by the engine at a specific timestamp.
-    fn push_command(&self, timestamp_samples: u64, command: control_plane::Command);
+    fn push_command(&self, timestamp_samples: u64, command: Command);
 }
 
 /// Shared execution context passed to processors during the audio block cycle.
@@ -178,7 +274,7 @@ pub trait GarbageProducer: Send + dyn_clone::DynClone {
 dyn_clone::clone_trait_object!(GarbageProducer);
 
 /// Command interface for processors to decouple from the control plane.
-pub type ProcessorCommand = control_plane::Command;
+pub type ProcessorCommand = Command;
 
 /// Marker trait for real-time safe components.
 /// Types implementing this trait guarantee that their methods do not perform
@@ -221,7 +317,7 @@ pub trait AudioProcessor: Send {
     fn collect_telemetry(&self, _node_times: &mut [u64; MAX_NODES], _peak_levels: &mut [f32; MAX_NODES]) {}
 
     /// Returns metadata about the processor (parameters, name, etc.)
-    fn metadata(&self) -> Option<control_plane::SidecarMetadata> { None }
+    fn metadata(&self) -> Option<SidecarMetadata> { None }
 
     /// Configures the garbage producer used for real-time safe deallocation.
     fn set_garbage_producer(&mut self, _producer: Box<dyn GarbageProducer>) {}
@@ -232,4 +328,18 @@ pub trait AudioProcessor: Send {
     /// Allows safe downcasting to concrete processor types.
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+}
+
+pub trait CommandProducer: Send + Sync + dyn_clone::DynClone {
+    fn push_command(&self, command: TimestampedCommand) -> Result<(), Command>;
+}
+
+dyn_clone::clone_trait_object!(CommandProducer);
+
+pub trait CommandConsumer: Send {
+    fn pop_command(&mut self) -> Option<TimestampedCommand>;
+}
+
+pub trait TelemetryProducer: Send {
+    fn push_telemetry(&mut self, telemetry: crate::telemetry::Telemetry) -> Result<(), crate::telemetry::Telemetry>;
 }

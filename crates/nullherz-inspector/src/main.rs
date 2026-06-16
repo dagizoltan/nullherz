@@ -94,7 +94,7 @@ pub struct Track {
 pub struct InspectorApp {
     graph: GraphJson,
     last_telemetry: Arc<Mutex<Option<Telemetry>>>,
-    command_sender: mpsc::Sender<control_plane::Command>,
+    command_sender: mpsc::Sender<nullherz_traits::Command>,
     active_view: View,
 
     // UI State — all controls bound to persistent state
@@ -135,7 +135,7 @@ impl InspectorApp {
 
         let last_telemetry = Arc::new(Mutex::new(None));
         let tel_clone = last_telemetry.clone();
-        let (cmd_tx, cmd_rx) = mpsc::channel::<control_plane::Command>();
+        let (cmd_tx, cmd_rx) = mpsc::channel::<nullherz_traits::Command>();
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -146,7 +146,7 @@ impl InspectorApp {
 
                     let sender_task = tokio::spawn(async move {
                         while let Ok(cmd) = cmd_rx.recv() {
-                            let ts_cmd = control_plane::TimestampedCommand {
+                            let ts_cmd = nullherz_traits::TimestampedCommand {
                                 timestamp_samples: 0,
                                 command: cmd,
                             };
@@ -253,7 +253,7 @@ impl InspectorApp {
                         ui.horizontal(|ui| {
                             ui.add_space(20.0);
                             if ui.add(egui::Slider::new(&mut self.channel_gains[i], 0.0..=1.2).vertical().show_value(false)).changed() {
-                                let _ = self.command_sender.send(control_plane::Command::SetParam {
+                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                                     target_id: (i as u64 * 3 + 2),
                                     param_id: 0,
                                     value: self.channel_gains[i],
@@ -278,7 +278,7 @@ impl InspectorApp {
                     ui.add_space(30.0);
                     ui.strong("MASTER");
                     if ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).show_value(false)).changed() {
-                        let _ = self.command_sender.send(control_plane::Command::SetParam {
+                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                             target_id: 0,
                             param_id: 0,
                             value: self.master_gain,
@@ -379,7 +379,7 @@ impl InspectorApp {
                     ui.strong(format!("CH {}", i + 1));
                     let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*3 + 2].min(1.2));
                     if ui.add(egui::Slider::new(&mut self.channel_gains[i], 0.0..=1.2).vertical().show_value(false)).changed() {
-                        let _ = self.command_sender.send(control_plane::Command::SetParam {
+                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                             target_id: (i as u64 * 3 + 2),
                             param_id: 0,
                             value: self.channel_gains[i],

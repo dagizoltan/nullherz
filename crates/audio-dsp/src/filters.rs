@@ -12,6 +12,7 @@ pub struct BiquadCoefficients {
 }
 
 /// A Biquad Filter using Direct Form II Transposed.
+#[derive(Debug, Clone, Copy)]
 #[repr(C, align(64))]
 pub struct BiquadFilter {
     pub coeffs: BiquadCoefficients,

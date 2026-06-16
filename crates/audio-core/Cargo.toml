@@ -12,7 +12,6 @@ dyn-clone = "1.0"
 serde-big-array = "0.5"
 nullherz-traits = { path = "../nullherz-traits" }
 audio-dsp = { path = "../audio-dsp" }
-control-plane = { path = "../control-plane" }
 ipc-layer = { path = "../ipc-layer" }
 libc = "0.2"
 wide = "0.7.30"

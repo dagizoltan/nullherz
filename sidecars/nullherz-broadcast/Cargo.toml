@@ -7,9 +7,9 @@ edition = "2024"
 path = "src/lib.rs"
 
 [dependencies]
+nullherz-traits = { path = "../../crates/nullherz-traits" }
 ipc-layer = { path = "../../crates/ipc-layer" }
 sidecar-sdk = { path = "../../crates/sidecar-sdk" }
-control-plane = { path = "../../crates/control-plane" }
 audio-core = { path = "../../crates/audio-core" }
 tokio = { version = "1.36", features = ["full"] }
 tokio-tungstenite = "0.26"

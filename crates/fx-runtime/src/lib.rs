@@ -65,18 +65,18 @@ impl SidecarSupervisor {
     pub fn spawn_sidecar(&mut self, name: &str, binary_path: &str, num_channels: usize) -> Result<Box<dyn AudioProcessor>, String> {
         let num_channels = num_channels.min(MAX_CHANNELS);
 
-        let estimated_size = self.limiter.check_and_reserve(name, num_channels)?;
+        let _estimated_size = self.limiter.check_and_reserve(name, num_channels)?;
 
         // 1. Create SHM for commands
         let cmd_shm_name = format!("/nullherz_cmd_{}", name);
-        let (cmd_layout, _) = ShmRingBuffer::<control_plane::Command>::layout(64);
+        let (cmd_layout, _) = ShmRingBuffer::<nullherz_traits::Command>::layout(64);
         let shm_cmd = SharedMemory::create(&cmd_shm_name, cmd_layout.size()).map_err(|e| e.to_string())?;
         let cmd_rb_ptr = unsafe { ShmRingBuffer::init(shm_cmd.ptr(), 64) };
         let shm_cmd = Arc::new(shm_cmd);
 
         // 1b. Create SHM for feedback
         let fb_shm_name = format!("/nullherz_fb_{}", name);
-        let (fb_layout, _) = ShmRingBuffer::<control_plane::SidecarMetadata>::layout(8);
+        let (fb_layout, _) = ShmRingBuffer::<nullherz_traits::SidecarMetadata>::layout(8);
         let shm_feedback = SharedMemory::create(&fb_shm_name, fb_layout.size()).map_err(|e| e.to_string())?;
         let fb_rb_ptr = unsafe { ShmRingBuffer::init(shm_feedback.ptr(), 8) };
         let shm_feedback = Arc::new(shm_feedback);
@@ -136,7 +136,7 @@ impl SidecarSupervisor {
             cmd.arg("--output-shm").arg(format!("/nullherz_out_{}_{}", name, i));
         }
 
-        let mut child = cmd.spawn()
+        let child = cmd.spawn()
             .map_err(|e| e.to_string())?;
 
         // Perform Handshake

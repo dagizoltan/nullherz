@@ -60,10 +60,12 @@ pub struct ShmRingBuffer<T> {
     _marker: PhantomData<T>,
 }
 
+#[derive(Clone)]
 pub struct ShmProducer<T: Copy> {
     inner: *const ShmRingBuffer<T>,
 }
 unsafe impl<T: Copy + Send> Send for ShmProducer<T> {}
+unsafe impl<T: Copy + Send> Sync for ShmProducer<T> {}
 impl<T: Copy> ShmProducer<T> {
     pub fn new(inner: *const ShmRingBuffer<T>) -> Self { Self { inner } }
     pub fn push(&self, item: T) -> Result<(), T> {
@@ -131,6 +133,71 @@ impl<T: Copy> ShmRingBuffer<T> {
         };
         self.head.store((head + 1) % self.capacity, Ordering::Release);
         Some(val)
+    }
+}
+
+#[derive(Clone)]
+pub struct IpcCommandProducer<T: Copy + Send + Into<nullherz_traits::TimestampedCommand> + From<nullherz_traits::TimestampedCommand>> {
+    pub producer: ShmProducer<T>,
+}
+
+impl<T: Copy + Send + Into<nullherz_traits::TimestampedCommand> + From<nullherz_traits::TimestampedCommand>> nullherz_traits::CommandProducer for IpcCommandProducer<T> {
+    fn push_command(&self, command: nullherz_traits::TimestampedCommand) -> Result<(), nullherz_traits::Command> {
+        let item: T = command.into();
+        self.producer.push(item).map_err(|_| command.command)
+    }
+}
+
+pub struct IpcCommandConsumer<T: Copy + Send + Into<nullherz_traits::TimestampedCommand>> {
+    pub buffer: Arc<SharedMemory>,
+    pub rb: *const ShmRingBuffer<T>,
+}
+
+unsafe impl<T: Copy + Send + Into<nullherz_traits::TimestampedCommand>> Send for IpcCommandConsumer<T> {}
+
+impl<T: Copy + Send + Into<nullherz_traits::TimestampedCommand>> nullherz_traits::CommandConsumer for IpcCommandConsumer<T> {
+    fn pop_command(&mut self) -> Option<nullherz_traits::TimestampedCommand> {
+        unsafe { (*self.rb).pop().map(|item| item.into()) }
+    }
+}
+
+#[derive(Clone)]
+pub struct LocalMpscCommandProducer(pub Arc<MpscRingBuffer<nullherz_traits::TimestampedCommand>>);
+impl nullherz_traits::CommandProducer for LocalMpscCommandProducer {
+    fn push_command(&self, command: nullherz_traits::TimestampedCommand) -> Result<(), nullherz_traits::Command> {
+        let cmd = command.command;
+        self.0.push(command).map_err(|_| cmd)
+    }
+}
+
+pub struct LocalMpscCommandConsumer(pub Arc<MpscRingBuffer<nullherz_traits::TimestampedCommand>>);
+impl nullherz_traits::CommandConsumer for LocalMpscCommandConsumer {
+    fn pop_command(&mut self) -> Option<nullherz_traits::TimestampedCommand> {
+        self.0.pop()
+    }
+}
+
+impl nullherz_traits::CommandProducer for Producer<nullherz_traits::TimestampedCommand> {
+    fn push_command(&self, command: nullherz_traits::TimestampedCommand) -> Result<(), nullherz_traits::Command> {
+        let cmd = command.command;
+        // Producer usually needs &mut for push, but ours is an Arc to a RingBuffer which might allow &self.
+        // Looking at Producer::push, it takes &mut self.
+        // We'll need to wrap it or change the trait.
+        // Actually, Producer is just a wrapper around Arc<RingBuffer>.
+        let mut cloned = self.clone();
+        cloned.push(command).map_err(|_| cmd)
+    }
+}
+
+impl nullherz_traits::CommandConsumer for Consumer<nullherz_traits::TimestampedCommand> {
+    fn pop_command(&mut self) -> Option<nullherz_traits::TimestampedCommand> {
+        self.pop()
+    }
+}
+
+impl nullherz_traits::TelemetryProducer for Producer<nullherz_traits::telemetry::Telemetry> {
+    fn push_telemetry(&mut self, telemetry: nullherz_traits::telemetry::Telemetry) -> Result<(), nullherz_traits::telemetry::Telemetry> {
+        Producer::push(self, telemetry)
     }
 }
 
@@ -295,6 +362,7 @@ unsafe impl<T: Send> Sync for RingBuffer<T> {}
 pub enum NonRtProducerInner<T> {
     Spsc(tokio::sync::Mutex<Producer<T>>),
     Mpsc(Arc<MpscRingBuffer<T>>),
+    Boxed(tokio::sync::Mutex<Box<dyn nullherz_traits::CommandProducer>>),
 }
 
 pub struct NonRtProducer<T> {
@@ -310,6 +378,10 @@ impl<T> NonRtProducer<T> {
         Self { inner: Arc::new(NonRtProducerInner::Mpsc(buffer)) }
     }
 
+    pub fn from_boxed(producer: Box<dyn nullherz_traits::CommandProducer>) -> Self {
+        Self { inner: Arc::new(NonRtProducerInner::Boxed(tokio::sync::Mutex::new(producer))) }
+    }
+
     pub async fn push(&self, item: T) -> Result<(), T> {
         match self.inner.as_ref() {
             NonRtProducerInner::Spsc(m) => {
@@ -318,6 +390,27 @@ impl<T> NonRtProducer<T> {
             }
             NonRtProducerInner::Mpsc(b) => {
                 b.push(item)
+            }
+            NonRtProducerInner::Boxed(_) => {
+                Err(item)
+            }
+        }
+    }
+}
+
+impl NonRtProducer<nullherz_traits::TimestampedCommand> {
+    pub async fn push_command(&self, item: nullherz_traits::TimestampedCommand) -> Result<(), nullherz_traits::Command> {
+        match self.inner.as_ref() {
+            NonRtProducerInner::Spsc(m) => {
+                let mut producer = m.lock().await;
+                producer.push(item).map_err(|c| c.command)
+            }
+            NonRtProducerInner::Mpsc(b) => {
+                b.push(item).map_err(|c| c.command)
+            }
+            NonRtProducerInner::Boxed(m) => {
+                let producer = m.lock().await;
+                producer.push_command(item)
             }
         }
     }

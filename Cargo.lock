@@ -443,7 +443,6 @@ name = "audio-core"
 version = "0.1.0"
 dependencies = [
  "audio-dsp",
- "control-plane",
  "dyn-clone",
  "ipc-layer",
  "libc",
@@ -816,6 +815,7 @@ dependencies = [
 name = "control-plane"
 version = "0.1.0"
 dependencies = [
+ "nullherz-traits",
  "serde",
 ]
 
@@ -1369,7 +1369,6 @@ version = "0.1.0"
 dependencies = [
  "audio-core",
  "audio-dsp",
- "control-plane",
  "ipc-layer",
  "libc",
  "nullherz-processors",
@@ -2183,12 +2182,12 @@ version = "0.1.0"
 dependencies = [
  "audio-core",
  "audio-dsp",
- "control-plane",
  "fx-runtime",
  "ipc-layer",
  "nullherz-backends",
  "nullherz-conductor",
  "nullherz-mixer",
+ "nullherz-traits",
 ]
 
 [[package]]
@@ -2196,9 +2195,9 @@ name = "nullherz-broadcast"
 version = "0.1.0"
 dependencies = [
  "audio-core",
- "control-plane",
  "futures-util",
  "ipc-layer",
+ "nullherz-traits",
  "sidecar-sdk",
  "tokio",
  "tokio-tungstenite",
@@ -2209,7 +2208,6 @@ name = "nullherz-conductor"
 version = "0.1.0"
 dependencies = [
  "audio-core",
- "control-plane",
  "fx-runtime",
  "ipc-layer",
  "nullherz-backends",
@@ -2226,7 +2224,7 @@ name = "nullherz-dummy"
 version = "0.1.0"
 dependencies = [
  "audio-core",
- "control-plane",
+ "nullherz-traits",
  "sidecar-sdk",
 ]
 
@@ -2235,7 +2233,6 @@ name = "nullherz-gateway"
 version = "0.1.0"
 dependencies = [
  "audio-core",
- "control-plane",
  "futures-util",
  "ipc-layer",
  "nullherz-traits",
@@ -2250,10 +2247,10 @@ name = "nullherz-inspector"
 version = "0.1.0"
 dependencies = [
  "audio-core",
- "control-plane",
  "eframe",
  "egui",
  "futures-util",
+ "nullherz-traits",
  "serde",
  "serde_json",
  "tokio",
@@ -2269,7 +2266,6 @@ name = "nullherz-mixer"
 version = "0.1.0"
 dependencies = [
  "audio-core",
- "control-plane",
  "nullherz-traits",
  "proptest",
 ]
@@ -2279,7 +2275,6 @@ name = "nullherz-processors"
 version = "0.1.0"
 dependencies = [
  "audio-dsp",
- "control-plane",
  "ipc-layer",
  "nullherz-traits",
  "serde",
@@ -2291,7 +2286,7 @@ name = "nullherz-sampler"
 version = "0.1.0"
 dependencies = [
  "audio-core",
- "control-plane",
+ "nullherz-traits",
  "sidecar-sdk",
 ]
 
@@ -2299,7 +2294,6 @@ dependencies = [
 name = "nullherz-traits"
 version = "0.1.0"
 dependencies = [
- "control-plane",
  "dyn-clone",
  "libc",
  "serde",
@@ -3103,7 +3097,6 @@ name = "sidecar-sdk"
 version = "0.1.0"
 dependencies = [
  "audio-core",
- "control-plane",
  "ipc-layer",
  "nullherz-traits",
 ]

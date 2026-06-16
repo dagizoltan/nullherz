@@ -39,19 +39,21 @@ impl TopologyCoordinator {
     pub fn prepare_commit(&mut self) {
         let active = self.active_idx();
         let inactive = (active + 1) % 2;
-        GraphCompiler::calculate_stages(&mut self.topologies[inactive]);
+        if let Ok(plan) = GraphCompiler::compile(&self.topologies[inactive]) {
+            self.topologies[inactive].plan = plan;
+        }
     }
 
     pub fn commit(&mut self) -> Result<(), String> {
         let active = self.active_idx();
         let inactive = (active + 1) % 2;
 
-        if self.topologies[inactive].num_stages == 0 && self.topologies[inactive].node_count > 0 {
-            return Err("Cannot commit empty topology with nodes".into());
-        }
-
-        if let Err(msg) = GraphCompiler::verify_no_hazards(&self.topologies[inactive]) {
-            return Err(format!("Hazard detected: {}", msg));
+        if self.topologies[inactive].plan.num_stages == 0 && self.topologies[inactive].node_count > 0 {
+            // Re-run compilation to be sure
+            match GraphCompiler::compile(&self.topologies[inactive]) {
+                Ok(plan) => self.topologies[inactive].plan = plan,
+                Err(e) => return Err(format!("Compilation failed: {}", e)),
+            }
         }
 
         self.active_idx.store(inactive, Ordering::Release);

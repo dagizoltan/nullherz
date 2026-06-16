@@ -1,14 +1,13 @@
 use std::sync::Arc;
 use ipc_layer::{RingBuffer, MpscRingBuffer, Producer, Consumer};
-use control_plane::TimestampedCommand;
 use nullherz_traits::{AudioProcessor, TopologyMutation, MidiEvent, telemetry::Telemetry};
 use crate::engine::AudioEngine;
 use crate::processors::ProcessorGraph;
 
 pub struct EngineHandle {
-    pub command_producer: Arc<MpscRingBuffer<TimestampedCommand>>,
+    pub command_producer: Box<dyn nullherz_traits::CommandProducer>,
     pub midi_producer: Producer<MidiEvent>,
-    pub bundle_producer: Producer<Vec<control_plane::Command>>,
+    pub bundle_producer: Producer<Vec<nullherz_traits::Command>>,
     pub topology_producer: Producer<TopologyMutation>,
     pub telemetry_consumer: Consumer<Telemetry>,
     pub garbage_consumer: Consumer<Box<dyn AudioProcessor>>,
@@ -56,7 +55,8 @@ impl EngineBuilder {
 
     pub fn build(self) -> (AudioEngine, EngineHandle) {
         let cmd_buffer = Arc::new(MpscRingBuffer::new(self.command_buffer_size));
-        let cmd_cons = cmd_buffer.clone();
+        let cmd_cons = ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone());
+        let cmd_prod = ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone());
 
         let (midi_prod, midi_cons) = RingBuffer::new(self.midi_buffer_size).split();
         let (bundle_prod, bundle_cons) = RingBuffer::new(self.bundle_buffer_size).split();
@@ -72,7 +72,8 @@ impl EngineBuilder {
         let initial_graph = self.initial_graph.unwrap_or_else(|| Box::new(ProcessorGraph::new()));
 
         let engine = AudioEngine::new(
-            cmd_cons,
+            Box::new(cmd_cons),
+            Box::new(cmd_prod.clone()),
             Some(midi_cons),
             Some(bundle_cons),
             Some(topo_cons),
@@ -80,12 +81,12 @@ impl EngineBuilder {
             Some(garbage_overflow_prod),
             Some(bundle_garbage_prod),
             Some(bundle_overflow_prod),
-            tel_prod,
+            Box::new(tel_prod),
             initial_graph
         );
 
         let handle = EngineHandle {
-            command_producer: cmd_buffer,
+            command_producer: Box::new(cmd_prod),
             midi_producer: midi_prod,
             bundle_producer: bundle_prod,
             topology_producer: topo_prod,

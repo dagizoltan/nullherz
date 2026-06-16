@@ -26,7 +26,7 @@ impl SidecarMockHost {
 
     pub fn create_processor(&self) -> SidecarProcessor {
         unsafe {
-            let cmd_ptr = ShmRingBuffer::<control_plane::Command>::init(self.cmd_shm.ptr(), 16);
+            let cmd_ptr = ShmRingBuffer::<nullherz_traits::Command>::init(self.cmd_shm.ptr(), 16);
             let sig_ptr = self.sig_shm.ptr() as *mut ShmSignal;
             std::ptr::write(sig_ptr, ShmSignal::new());
 

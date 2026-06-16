@@ -8,6 +8,7 @@ pub mod crossfader;
 pub mod summing;
 pub mod wavetable;
 pub mod spectral;
+pub mod dsp_kernel_processor;
 pub mod modulation;
 pub mod sequencer;
 #[cfg(feature = "test-utils")]

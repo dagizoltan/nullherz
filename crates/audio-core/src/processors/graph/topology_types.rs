@@ -16,13 +16,13 @@ pub struct NodeRouting {
     pub output_count: usize,
 }
 
+use crate::processors::graph::compiler::CompiledGraphPlan;
+
 #[derive(Clone, Copy)]
 pub struct GraphTopology {
     pub routing: [NodeRouting; crate::MAX_NODES],
     pub virtual_to_physical: [usize; crate::MAX_NODES],
-    pub stages: [[usize; crate::MAX_NODES]; crate::MAX_NODES],
-    pub stage_counts: [usize; crate::MAX_NODES],
-    pub num_stages: usize,
+    pub plan: CompiledGraphPlan,
     pub crossfades: [Option<CrossfadeState>; 8],
     pub node_count: usize,
 }

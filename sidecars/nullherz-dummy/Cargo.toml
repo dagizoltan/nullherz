@@ -8,6 +8,6 @@ name = "nullherz-sidecar-dummy"
 path = "src/main.rs"
 
 [dependencies]
+nullherz-traits = { path = "../../crates/nullherz-traits" }
 sidecar-sdk = { path = "../../crates/sidecar-sdk" }
 audio-core = { path = "../../crates/audio-core" }
-control-plane = { path = "../../crates/control-plane" }

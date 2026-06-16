@@ -1,8 +1,6 @@
-use std::sync::Arc;
 use audio_core::engine::builder::EngineBuilder;
 use nullherz_processors::ProcessorRegistry;
 use fx_runtime::SidecarManager;
-use ipc_layer::RingBuffer;
 use crate::timeline::Timeline;
 use crate::backend::BackendManager;
 
@@ -13,12 +11,12 @@ pub struct Conductor {
     pub backend_manager: BackendManager,
     garbage_consumer: Option<ipc_layer::Consumer<Box<dyn audio_core::AudioProcessor>>>,
     overflow_garbage_consumer: Option<ipc_layer::Consumer<Box<dyn audio_core::AudioProcessor>>>,
-    pub bundle_producer: Option<ipc_layer::Producer<Vec<control_plane::Command>>>,
-    bundle_garbage_consumer: Option<ipc_layer::Consumer<Vec<control_plane::Command>>>,
-    bundle_overflow_consumer: Option<ipc_layer::Consumer<Vec<control_plane::Command>>>,
+    pub bundle_producer: Option<ipc_layer::Producer<Vec<nullherz_traits::Command>>>,
+    bundle_garbage_consumer: Option<ipc_layer::Consumer<Vec<nullherz_traits::Command>>>,
+    bundle_overflow_consumer: Option<ipc_layer::Consumer<Vec<nullherz_traits::Command>>>,
     pub topo_producer: Option<ipc_layer::NonRtProducer<audio_core::processors::TopologyMutation>>,
     pub health_signal: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    pub command_producer: Option<Arc<ipc_layer::MpscRingBuffer<control_plane::TimestampedCommand>>>,
+    pub command_producer: Option<Box<dyn nullherz_traits::CommandProducer>>,
 }
 
 impl Default for Conductor {
@@ -45,7 +43,7 @@ impl Conductor {
         }
     }
 
-    pub fn setup_engine(&mut self) -> (Arc<ipc_layer::MpscRingBuffer<control_plane::TimestampedCommand>>, ipc_layer::Consumer<audio_core::Telemetry>) {
+    pub fn setup_engine(&mut self) -> (Box<dyn nullherz_traits::CommandProducer>, ipc_layer::Consumer<audio_core::Telemetry>) {
         ipc_layer::SharedMemory::cleanup_stale_segments();
 
         let (engine, handle) = EngineBuilder::new()
@@ -93,7 +91,7 @@ impl Conductor {
         self.timeline.update(telemetry);
     }
 
-    pub fn apply_mixer_commands(&mut self, commands: Vec<control_plane::Command>) {
+    pub fn apply_mixer_commands(&mut self, commands: Vec<nullherz_traits::Command>) {
         let mut bundle = Vec::with_capacity(commands.len());
 
         for cmd in commands {
@@ -138,27 +136,27 @@ impl Conductor {
         self.drain_garbage();
     }
 
-    fn handle_topology_command(&mut self, cmd: &control_plane::Command) -> bool {
+    fn handle_topology_command(&mut self, cmd: &nullherz_traits::Command) -> bool {
         let Some(ref mut prod) = self.topo_producer else { return false; };
 
         match *cmd {
-            control_plane::Command::AddNode { processor_type_id, node_idx } => {
-                if let Some(processor) = self.registry.create_by_id(processor_type_id, node_idx, 44100.0) {
+            nullherz_traits::Command::AddNode { processor_type_id, node_idx } => {
+                if let Some(processor) = self.registry.create_by_id(processor_type_id.0, node_idx, 44100.0) {
                     let _ = prod.push(nullherz_traits::TopologyMutation::AddNode { node_idx, processor });
                     return true;
                 }
             }
-            control_plane::Command::SwapProcessor { node_idx, processor_type_id } => {
-                if let Some(processor) = self.registry.create_by_id(processor_type_id, node_idx, 44100.0) {
+            nullherz_traits::Command::SwapProcessor { node_idx, processor_type_id } => {
+                if let Some(processor) = self.registry.create_by_id(processor_type_id.0, node_idx, 44100.0) {
                     let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor { node_idx, processor });
                     return true;
                 }
             }
-            control_plane::Command::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
+            nullherz_traits::Command::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
                 let _ = prod.push(nullherz_traits::TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx });
                 return true;
             }
-            control_plane::Command::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
+            nullherz_traits::Command::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
                 let _ = prod.push(nullherz_traits::TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx });
                 return true;
             }

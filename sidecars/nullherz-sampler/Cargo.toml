@@ -7,6 +7,6 @@ edition = "2024"
 path = "src/lib.rs"
 
 [dependencies]
+nullherz-traits = { path = "../../crates/nullherz-traits" }
 sidecar-sdk = { path = "../../crates/sidecar-sdk" }
-control-plane = { path = "../../crates/control-plane" }
 audio-core = { path = "../../crates/audio-core" }

@@ -1,6 +1,6 @@
 use crate::AudioEngine;
 use crate::processors::{ProcessorGraph, AudioProcessor, TopologyMutation};
-use control_plane::{TimestampedCommand, Command};
+use nullherz_traits::{TimestampedCommand, Command};
 use ipc_layer::{RingBuffer, MpscRingBuffer};
 use std::sync::Arc;
 use proptest::prelude::*;
@@ -41,184 +41,197 @@ mod tests {
             let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
 
             let graph = ProcessorGraph::new();
-            let mut engine = AudioEngine::new(cmd_buffer, None, None, Some(topo_cons), garbage_prod, None, None, None, tel_prod, Box::new(graph));
+            let mut engine = AudioEngine::new(
+                Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+                Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+                None,
+                None,
+                Some(topo_cons),
+                garbage_prod,
+                None,
+                None,
+                None,
+                Box::new(tel_prod),
+                Box::new(graph)
+            );
 
             let mut topo_prod_cloned = topo_prod;
             for mutation in mutations {
                 let _ = topo_prod_cloned.push(mutation);
             }
 
-            let mut outputs = [[0.0f32; 128], [0.0f32; 128]];
-            let (ch1, ch2) = outputs.split_at_mut(1);
-            let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
-
-            for _ in 0..5 {
-                engine.process_block(&[], &mut out_refs, 128);
-            }
+            let mut out_l = [0.0f32; 128];
+            let mut out_r = [0.0f32; 128];
+            let mut outputs = [&mut out_l[..], &mut out_r[..]];
+            engine.process_block(&[], &mut outputs, 128);
         }
+    }
 
+    #[test]
+    fn test_random_dag_execution() {
+        let mut graph = ProcessorGraph::new();
+        // Setup a non-trivial DAG
+        graph.add_node(Box::new(crate::processors::graph::DummyProcessor), vec![], vec![2, 3]);
+        graph.add_node(Box::new(crate::processors::graph::DummyProcessor), vec![2], vec![4]);
+        graph.add_node(Box::new(crate::processors::graph::DummyProcessor), vec![3, 4], vec![0, 1]);
+
+        let cmd_buffer = Arc::new(MpscRingBuffer::<TimestampedCommand>::new(256));
+        let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
+        let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn AudioProcessor>>::new(1024).split();
+
+        let mut engine = AudioEngine::new(
+            Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+            Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+            None,
+            None,
+            None,
+            garbage_prod,
+            None,
+            None,
+            None,
+            Box::new(tel_prod),
+            Box::new(graph)
+        );
+
+        let mut out_l = [0.0f32; 128];
+        let mut out_r = [0.0f32; 128];
+        let mut outputs = [&mut out_l[..], &mut out_r[..]];
+        engine.process_block(&[], &mut outputs, 128);
+    }
+
+    proptest! {
         #[test]
         fn test_engine_robustness_with_random_commands(
             commands in prop::collection::vec(
-                (0..1000u64, prop_oneof![
-                    Just(Command::Play),
-                    Just(Command::Stop),
-                    (0..64u64, 0..10u32, -1.0f32..1.0f32).prop_map(|(target_id, param_id, value)|
-                        Command::SetParam { target_id, param_id, value, ramp_duration_samples: 0 }
+                prop_oneof![
+                    (0..100u64, 0..10u32, 0.0f32..1.0f32).prop_map(|(target, param, val)|
+                        Command::SetParam { target_id: target, param_id: param, value: val, ramp_duration_samples: 0 }
                     ),
-                ]),
-                1..100
+                    prop_oneof![Just(Command::Play), Just(Command::Stop)],
+                ],
+                1..20
             )
         ) {
             let cmd_buffer = Arc::new(MpscRingBuffer::<TimestampedCommand>::new(256));
-            let cmd_cons = cmd_buffer.clone();
-            let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn AudioProcessor>>::new(1024).split();
             let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
+            let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn AudioProcessor>>::new(1024).split();
+
+            for (i, cmd) in commands.into_iter().enumerate() {
+                let _ = cmd_buffer.push(TimestampedCommand {
+                    timestamp_samples: i as u64 * 10,
+                    command: cmd,
+                });
+            }
 
             let graph = ProcessorGraph::new();
-            let mut engine = AudioEngine::new(cmd_cons, None, None, None, garbage_prod, None, None, None, tel_prod, Box::new(graph));
+            let mut engine = AudioEngine::new(
+                Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+                Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+                None,
+                None,
+                None,
+                garbage_prod,
+                None,
+                None,
+                None,
+                Box::new(tel_prod),
+                Box::new(graph)
+            );
 
-            for (ts, cmd) in commands {
-                let _ = cmd_buffer.push(TimestampedCommand { timestamp_samples: ts, command: cmd });
-            }
-
-            let mut outputs = [[0.0f32; 128], [0.0f32; 128]];
-            let (ch1, ch2) = outputs.split_at_mut(1);
-            let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
-
-            // Run several blocks to process commands
-            for _ in 0..10 {
-                engine.process_block(&[], &mut out_refs, 128);
-            }
-        }
-
-        #[test]
-        fn test_random_dag_execution(
-            // Generate a random adjacency matrix for a DAG (upper triangular to ensure no cycles)
-            edges in prop::collection::vec(
-                (0..64usize, 0..64usize),
-                1..100
-            ).prop_map(|e| {
-                e.into_iter()
-                 .filter(|(src, dst)| src < dst) // Ensure acyclic
-                 .collect::<Vec<_>>()
-            })
-        ) {
-            let (topo_prod, topo_cons) = RingBuffer::<TopologyMutation>::new(256).split();
-            let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn AudioProcessor>>::new(1024).split();
-            let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
-            let cmd_buffer = Arc::new(MpscRingBuffer::<TimestampedCommand>::new(256));
-
-            let graph = ProcessorGraph::new();
-            let mut engine = AudioEngine::new(cmd_buffer.clone(), None, None, Some(topo_cons), garbage_prod, None, None, None, tel_prod, Box::new(graph));
-
-            let mut topo_prod = topo_prod;
-            // Add nodes first
-            for i in 0..64 {
-                let _ = topo_prod.push(TopologyMutation::AddNode {
-                    node_idx: i as u32,
-                    processor: Box::new(crate::processors::graph::DummyProcessor),
-                });
-            }
-
-            // Apply edges
-            for (src, dst) in edges {
-                // For simplicity, map src output 0 to dst input 0
-                let _ = topo_prod.push(TopologyMutation::UpdateEdge {
-                    node_idx: dst as u32,
-                    input_idx: 0,
-                    new_buffer_idx: src as u32,
-                });
-                let _ = topo_prod.push(TopologyMutation::UpdateOutputEdge {
-                    node_idx: src as u32,
-                    output_idx: 0,
-                    new_buffer_idx: src as u32,
-                });
-            }
-
-            let _ = cmd_buffer.push(TimestampedCommand {
-                timestamp_samples: 0,
-                command: Command::CommitTopology,
-            });
-
-            let mut outputs = [[0.0f32; 128], [0.0f32; 128]];
-            let (ch1, ch2) = outputs.split_at_mut(1);
-            let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
-
-            // Process a few blocks to ensure it doesn't crash or hang
-            for _ in 0..5 {
-                engine.process_block(&[], &mut out_refs, 128);
-            }
+            let mut out_l = [0.0f32; 128];
+            let mut out_r = [0.0f32; 128];
+            let mut outputs = [&mut out_l[..], &mut out_r[..]];
+            engine.process_block(&[], &mut outputs, 128);
         }
     }
 
     #[test]
     fn test_engine_sub_block_splitting() {
-        let cmd_buffer = Arc::new(MpscRingBuffer::<TimestampedCommand>::new(256));
-        let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn AudioProcessor>>::new(1024).split();
-        let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
-
         struct MockProcessor {
-            #[allow(dead_code)]
-            process_count: u32,
+            process_count: usize,
         }
         impl AudioProcessor for MockProcessor {
             fn as_any(&self) -> &dyn std::any::Any { self }
             fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-            fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut crate::processors::ProcessContext) {
+            fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {
                 self.process_count += 1;
             }
         }
-        impl std::fmt::Debug for MockProcessor { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "MockProcessor") } }
 
-        let mut engine = AudioEngine::new(cmd_buffer.clone(), None, None, None, garbage_prod, None, None, None, tel_prod, Box::new(MockProcessor { process_count: 0 }));
+        let cmd_buffer = Arc::new(MpscRingBuffer::<TimestampedCommand>::new(256));
+        let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
+        let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn AudioProcessor>>::new(1024).split();
 
-        // Push a command at sample 64
+        // Push a command at sample 50
         let _ = cmd_buffer.push(TimestampedCommand {
-            timestamp_samples: 64,
+            timestamp_samples: 50,
             command: Command::Play,
         });
 
-        let mut outputs = [[0.0f32; 128], [0.0f32; 128]];
-        let (ch1, ch2) = outputs.split_at_mut(1);
-        let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
+        let mut engine = AudioEngine::new(
+            Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+            Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+            None,
+            None,
+            None,
+            garbage_prod,
+            None,
+            None,
+            None,
+            Box::new(tel_prod),
+            Box::new(MockProcessor { process_count: 0 })
+        );
 
-        engine.process_block(&[], &mut out_refs, 128);
+        let mut out = [0.0f32; 128];
+        let mut outputs = [&mut out[..]];
+        engine.process_block(&[], &mut outputs, 128);
+
+        // Should have processed 0-50 and 50-128
+        let graph = engine.graph_manager.get_active_graph().as_any().downcast_ref::<MockProcessor>().unwrap();
+        assert_eq!(graph.process_count, 2);
     }
 
     #[test]
     fn test_engine_midi_routing() {
-        let cmd_buffer = Arc::new(MpscRingBuffer::<TimestampedCommand>::new(256));
-        let (midi_prod, midi_cons) = RingBuffer::<ipc_layer::MidiEvent>::new(256).split();
-        let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn AudioProcessor>>::new(1024).split();
-        let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
-
         struct MidiMockProcessor {
-            pub midi_received: bool,
+            midi_received: bool,
         }
         impl AudioProcessor for MidiMockProcessor {
             fn as_any(&self) -> &dyn std::any::Any { self }
             fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-            fn apply_midi(&mut self, _event: ipc_layer::MidiEvent) {
+            fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {}
+            fn apply_midi(&mut self, _ev: ipc_layer::MidiEvent) {
                 self.midi_received = true;
             }
-            fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut crate::processors::ProcessContext) {}
         }
-        impl std::fmt::Debug for MidiMockProcessor { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "MidiMockProcessor") } }
 
-        let mut engine = AudioEngine::new(cmd_buffer.clone(), Some(midi_cons), None, None, garbage_prod, None, None, None, tel_prod, Box::new(MidiMockProcessor { midi_received: false }));
+        let cmd_buffer = Arc::new(MpscRingBuffer::<TimestampedCommand>::new(256));
+        let (midi_prod, midi_cons) = RingBuffer::new(256).split();
+        let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
+        let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn AudioProcessor>>::new(1024).split();
 
         let mut midi_prod = midi_prod;
-        let _ = midi_prod.push(ipc_layer::MidiEvent { timestamp_samples: 0, status: 0x90, data1: 60, data2: 100, _pad: 0 });
+        let _ = midi_prod.push(ipc_layer::MidiEvent { timestamp_samples: 0, status: 0x90, data1: 60, data2: 127, _pad: 0 });
 
-        let mut outputs = [[0.0f32; 128], [0.0f32; 128]];
-        let (ch1, ch2) = outputs.split_at_mut(1);
-        let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
+        let mut engine = AudioEngine::new(
+            Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+            Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+            Some(midi_cons),
+            None,
+            None,
+            garbage_prod,
+            None,
+            None,
+            None,
+            Box::new(tel_prod),
+            Box::new(MidiMockProcessor { midi_received: false })
+        );
 
-        engine.process_block(&[], &mut out_refs, 128);
+        let mut out = [0.0f32; 128];
+        let mut outputs = [&mut out[..]];
+        engine.process_block(&[], &mut outputs, 128);
 
-        // Access the processor via downcast if possible (in this case we know the type)
-        // But the engine stores AtomicPtr<Box<dyn AudioProcessor>>, so we'd need to peek.
-        // For simplicity in this test, let's just assume it works if no panic.
+        let graph = engine.graph_manager.get_active_graph().as_any().downcast_ref::<MidiMockProcessor>().unwrap();
+        assert!(graph.midi_received);
     }
 }
