@@ -76,7 +76,7 @@ impl SidecarSupervisor {
 
         // 1b. Create SHM for feedback
         let fb_shm_name = format!("/nullherz_fb_{}", name);
-        let (fb_layout, _) = ShmRingBuffer::<nullherz_traits::SidecarMetadata>::layout(8);
+        let (fb_layout, _) = ShmRingBuffer::<nullherz_traits::ProcessorMetadata>::layout(8);
         let shm_feedback = SharedMemory::create(&fb_shm_name, fb_layout.size()).map_err(|e| e.to_string())?;
         let fb_rb_ptr = unsafe { ShmRingBuffer::init(shm_feedback.ptr(), 8) };
         let shm_feedback = Arc::new(shm_feedback);
@@ -263,8 +263,8 @@ impl SidecarSupervisor {
         procs
     }
 
-    pub fn update_heartbeat(&mut self, sidecar_idx: usize) {
-        if let Some(handle) = self.active_sidecars.get_mut(sidecar_idx) {
+    pub fn update_heartbeat(&mut self, processor_idx: usize) {
+        if let Some(handle) = self.active_sidecars.get_mut(processor_idx) {
             handle.last_heartbeat = std::time::Instant::now();
         }
     }

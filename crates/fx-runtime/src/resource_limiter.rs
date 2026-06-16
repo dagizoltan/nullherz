@@ -41,7 +41,7 @@ impl ResourceLimiter {
 
     pub fn estimate_sidecar_memory(&self, num_channels: usize) -> usize {
         let (cmd_layout, _) = ShmRingBuffer::<nullherz_traits::Command>::layout(64);
-        let (fb_layout, _) = ShmRingBuffer::<nullherz_traits::SidecarMetadata>::layout(8);
+        let (fb_layout, _) = ShmRingBuffer::<nullherz_traits::ProcessorMetadata>::layout(8);
         let (audio_layout, _) = ShmRingBuffer::<AudioBlock>::layout(16);
         let sig_size = std::mem::size_of::<ShmSignal>();
 

@@ -6,8 +6,8 @@ pub const MAX_CHANNELS: usize = 16;
 
 pub struct SidecarProcessor {
     command_producer_ptr: *const ShmRingBuffer<nullherz_traits::Command>,
-    feedback_consumer_ptr: Option<*const ShmRingBuffer<nullherz_traits::SidecarMetadata>>,
-    pub last_metadata: Option<nullherz_traits::SidecarMetadata>,
+    feedback_consumer_ptr: Option<*const ShmRingBuffer<nullherz_traits::ProcessorMetadata>>,
+    pub last_metadata: Option<nullherz_traits::ProcessorMetadata>,
     input_shm: [*mut ShmRingBuffer<AudioBlock>; MAX_CHANNELS],
     output_shm: [*const ShmRingBuffer<AudioBlock>; MAX_CHANNELS],
     num_channels: usize,
@@ -30,7 +30,7 @@ impl SidecarProcessor {
     /// All pointers must be valid and point to pre-allocated shared memory structures.
     pub unsafe fn new(
         command_ptr: *const ShmRingBuffer<nullherz_traits::Command>,
-        feedback_ptr: Option<*const ShmRingBuffer<nullherz_traits::SidecarMetadata>>,
+        feedback_ptr: Option<*const ShmRingBuffer<nullherz_traits::ProcessorMetadata>>,
         inputs: &[*mut ShmRingBuffer<AudioBlock>],
         outputs: &[*const ShmRingBuffer<AudioBlock>],
         signal: *const ShmSignal,
@@ -75,7 +75,7 @@ impl SidecarProcessor {
         self._shm_signal = Some(signal);
     }
 
-    pub fn poll_feedback(&self) -> Option<nullherz_traits::SidecarMetadata> {
+    pub fn poll_feedback(&self) -> Option<nullherz_traits::ProcessorMetadata> {
         self.feedback_consumer_ptr.and_then(|ptr| unsafe { (*ptr).pop() })
     }
 }

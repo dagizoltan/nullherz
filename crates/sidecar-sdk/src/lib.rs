@@ -61,7 +61,7 @@ pub struct SidecarContext<'a, P: AudioProcessor> {
     processor: P,
     command_buffer: &'a ShmRingBuffer<nullherz_traits::Command>,
     #[allow(dead_code)]
-    feedback_buffer: Option<&'a ShmRingBuffer<nullherz_traits::SidecarMetadata>>,
+    feedback_buffer: Option<&'a ShmRingBuffer<nullherz_traits::ProcessorMetadata>>,
     input_buffers: Vec<&'a ShmRingBuffer<AudioBlock>>,
     output_buffers: Vec<&'a ShmRingBuffer<AudioBlock>>,
     signal: &'a ShmSignal,
