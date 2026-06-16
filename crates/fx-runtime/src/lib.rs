@@ -65,7 +65,7 @@ impl SidecarSupervisor {
     pub fn spawn_sidecar(&mut self, name: &str, binary_path: &str, num_channels: usize) -> Result<Box<dyn AudioProcessor>, String> {
         let num_channels = num_channels.min(MAX_CHANNELS);
 
-        let estimated_size = self.limiter.check_and_reserve(name, num_channels)?;
+        let _estimated_size = self.limiter.check_and_reserve(name, num_channels)?;
 
         // 1. Create SHM for commands
         let cmd_shm_name = format!("/nullherz_cmd_{}", name);
@@ -136,7 +136,7 @@ impl SidecarSupervisor {
             cmd.arg("--output-shm").arg(format!("/nullherz_out_{}_{}", name, i));
         }
 
-        let mut child = cmd.spawn()
+        let child = cmd.spawn()
             .map_err(|e| e.to_string())?;
 
         // Perform Handshake

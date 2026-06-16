@@ -409,7 +409,7 @@ impl NonRtProducer<nullherz_traits::TimestampedCommand> {
                 b.push(item).map_err(|c| c.command)
             }
             NonRtProducerInner::Boxed(m) => {
-                let mut producer = m.lock().await;
+                let producer = m.lock().await;
                 producer.push_command(item)
             }
         }
