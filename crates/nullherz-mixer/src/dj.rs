@@ -1,6 +1,6 @@
 use nullherz_traits::Command;
 use crate::common::*;
-use nullherz_traits::ProcessorType;
+use nullherz_traits::ProcessorTypeId;
 
 pub fn create_dj_deck(
     next_node_id: &mut u32,
@@ -15,7 +15,7 @@ pub fn create_dj_deck(
 
     let resample_id = *next_node_id;
     *next_node_id += 1;
-    commands.push(Command::AddNode { node_idx: resample_id, processor_type_id: ProcessorType::Sampler as u32 });
+    commands.push(Command::AddNode { node_idx: resample_id, processor_type_id: ProcessorTypeId::SAMPLER });
 
     let mut prev_id = resample_id;
     for &fx_type in fx_ids {
@@ -24,7 +24,7 @@ pub fn create_dj_deck(
         let fx_buf = *next_buffer_id;
         *next_buffer_id += 1;
 
-        commands.push(Command::AddNode { node_idx: fx_id, processor_type_id: fx_type });
+        commands.push(Command::AddNode { node_idx: fx_id, processor_type_id: ProcessorTypeId(fx_type) });
         commands.push(Command::UpdateOutputEdge { node_idx: prev_id, output_idx: 0, new_buffer_idx: fx_buf });
         commands.push(Command::UpdateEdge { node_idx: fx_id, input_idx: 0, new_buffer_idx: fx_buf });
         prev_id = fx_id;
@@ -34,7 +34,7 @@ pub fn create_dj_deck(
     *next_node_id += 1;
     let eq_buf = *next_buffer_id;
     *next_buffer_id += 1;
-    commands.push(Command::AddNode { node_idx: eq_id, processor_type_id: ProcessorType::BiquadEQ as u32 });
+    commands.push(Command::AddNode { node_idx: eq_id, processor_type_id: ProcessorTypeId::BIQUAD_EQ });
     commands.push(Command::UpdateOutputEdge { node_idx: prev_id, output_idx: 0, new_buffer_idx: eq_buf });
     commands.push(Command::UpdateEdge { node_idx: eq_id, input_idx: 0, new_buffer_idx: eq_buf });
 

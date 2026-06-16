@@ -13,7 +13,8 @@ fn main() {
     conductor.apply_mixer_commands(commands);
 
     // Commit topology
-    let _ = cmd_buffer.push(TimestampedCommand {
+    let mut cmd_buffer = cmd_buffer;
+    let _ = cmd_buffer.push_command(TimestampedCommand {
         timestamp_samples: 0,
         command: nullherz_traits::Command::CommitTopology,
     });

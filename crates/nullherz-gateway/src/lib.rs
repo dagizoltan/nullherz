@@ -11,7 +11,7 @@ pub fn connect_to_engine() -> Result<(ipc_layer::NonRtProducer<TimestampedComman
     // In a real nullherz deployment, the Conductor spawns the Gateway
     // and passes these buffers via handle or SHM.
     let cmd_buffer = Arc::new(ipc_layer::MpscRingBuffer::new(1024));
-    let cmd_prod = ipc_layer::NonRtProducer::from_mpsc(cmd_buffer.clone());
+    let cmd_prod = ipc_layer::NonRtProducer::from_boxed(Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())));
 
     let (tel_prod, tel_cons) = RingBuffer::<Telemetry>::new(1024).split();
 
@@ -81,7 +81,7 @@ async fn handle_connection(
         match msg {
             Ok(Message::Text(text)) => {
                 if let Ok(cmd) = serde_json::from_str::<TimestampedCommand>(&text) {
-                    let _ = cmd_prod.push(cmd).await;
+                    let _ = cmd_prod.push_command(cmd).await;
                 }
             }
             Ok(Message::Close(_)) => break,

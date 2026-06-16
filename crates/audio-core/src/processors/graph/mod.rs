@@ -11,16 +11,16 @@ pub use node::{ProcessorNode, DummyProcessor};
 pub use pool::{TaskPool, Job};
 pub use telemetry::GraphTelemetry;
 pub use topology_types::{GraphTopology, NodeRouting, CrossfadeState};
-pub use compiler::GraphCompiler;
+pub use compiler::{GraphCompiler, CompiledGraphPlan};
 pub use executor::GraphExecutor;
 pub use topology_coordinator::TopologyCoordinator;
 pub use buffer_pool::GraphBufferPool;
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use ipc_layer::Producer;
 use crate::processors::{AudioProcessor, TopologyMutation};
 
+/// The ProcessorGraph acts as a lightweight VM that executes a compiled graph topology.
 pub struct ProcessorGraph {
     pub(crate) nodes: Box<[ProcessorNode; crate::MAX_NODES]>,
     pub(crate) node_count: usize,
@@ -38,9 +38,7 @@ impl ProcessorGraph {
         let topo = GraphTopology {
             routing: [NodeRouting { input_indices: [0; crate::MAX_CHANNELS], output_indices: [0; crate::MAX_CHANNELS], input_count: 0, output_count: 0 }; crate::MAX_NODES],
             virtual_to_physical: v2p,
-            stages: [[0; crate::MAX_NODES]; crate::MAX_NODES],
-            stage_counts: [0; crate::MAX_NODES],
-            num_stages: 0,
+            plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],
             node_count: 0,
         };
@@ -64,7 +62,12 @@ impl ProcessorGraph {
     }
 
     pub fn calculate_stages(&mut self) {
-        self.topology_coordinator.prepare_commit();
+        let active = self.topology_coordinator.active_idx();
+        let inactive = (active + 1) % 2;
+        let topo = &mut self.topology_coordinator.topologies[inactive];
+        if let Ok(plan) = GraphCompiler::compile(topo) {
+            topo.plan = plan;
+        }
     }
 
     pub fn commit_graph(&mut self) {
@@ -133,7 +136,7 @@ impl AudioProcessor for ProcessorGraph {
 
         let mut pool = executor;
 
-        let num_stages = self.topology_coordinator.topologies[active_idx].num_stages;
+        let num_stages = self.topology_coordinator.topologies[active_idx].plan.num_stages;
         let transport = context.transport;
         let host = context.host;
         for s_idx in 0..num_stages {
@@ -254,6 +257,15 @@ impl AudioProcessor for ProcessorGraph {
             peak_levels[i] = f32::from_bits(self.telemetry.peak_levels[i].load(Ordering::Relaxed));
         }
     }
+
+    fn reset(&mut self) {
+        for node in self.nodes.iter() {
+            unsafe { (*node.processor.get()).reset(); }
+        }
+        for buffer in self.buffer_pool.buffers.iter_mut() {
+            buffer.data.fill(0.0);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -333,14 +345,14 @@ mod tests {
         }
         let active_idx = graph.topology_coordinator.active_idx();
         let topo = &graph.topology_coordinator.topologies[active_idx];
-        if topo.node_count > 0 { assert!(topo.num_stages > 0); }
+        if topo.node_count > 0 { assert!(topo.plan.num_stages > 0); }
         let mut seen_nodes = std::collections::HashSet::new();
-        for s_idx in 0..topo.num_stages {
-            for n_idx in &topo.stages[s_idx][..topo.stage_counts[s_idx]] {
+        for s_idx in 0..topo.plan.num_stages {
+            for n_idx in &topo.plan.stages[s_idx][..topo.plan.stage_counts[s_idx]] {
                 assert!(seen_nodes.insert(*n_idx), "Node {} assigned to multiple stages", n_idx);
             }
         }
-        assert!(GraphCompiler::verify_no_hazards(&graph.topology_coordinator.topologies[active_idx]).is_ok());
+        assert!(GraphCompiler::verify_no_hazards(&graph.topology_coordinator.topologies[active_idx], &topo.plan).is_ok());
     }
 
     #[test]

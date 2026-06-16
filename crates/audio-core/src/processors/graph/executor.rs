@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 use ipc_layer::AudioBlock;
-use crate::processors::graph::{GraphTopology, TaskPool, Job, ProcessorNode};
+use crate::processors::graph::{GraphTopology, Job, ProcessorNode};
 
 pub struct GraphExecutor {}
 
@@ -56,7 +56,7 @@ impl GraphExecutor {
         is_last_sub_block: bool,
         telemetry_node_times_cycles: &[std::sync::atomic::AtomicU64; crate::MAX_NODES],
     ) {
-        let stage = &topo.stages[s_idx][..topo.stage_counts[s_idx]];
+        let stage = &topo.plan.stages[s_idx][..topo.plan.stage_counts[s_idx]];
         // SAFETY: buffers_ptr and x_buffers_ptr are used to reconstruct disjoint slices in worker threads.
         // The topological scheduler (GraphCompiler) guarantees that no two nodes in the same stage
         // read from or write to the same physical buffer in a way that creates hazards.

@@ -12,7 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     conductor.start_backend(nullherz_backends::AudioBackendType::Threaded)?;
     println!("Audio engine started.");
 
-    let cmd_prod_gateway = ipc_layer::NonRtProducer::from_mpsc(cmd_buffer.clone());
+    let cmd_prod_gateway = ipc_layer::NonRtProducer::from_boxed(cmd_buffer);
 
     let _gateway_task = tokio::spawn(async move {
         let _ = nullherz_gateway::run_gateway("127.0.0.1:9001", cmd_prod_gateway, tel_cons).await;

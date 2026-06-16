@@ -1,8 +1,6 @@
-use std::sync::Arc;
 use audio_core::engine::builder::EngineBuilder;
 use nullherz_processors::ProcessorRegistry;
 use fx_runtime::SidecarManager;
-use ipc_layer::RingBuffer;
 use crate::timeline::Timeline;
 use crate::backend::BackendManager;
 
@@ -18,7 +16,7 @@ pub struct Conductor {
     bundle_overflow_consumer: Option<ipc_layer::Consumer<Vec<nullherz_traits::Command>>>,
     pub topo_producer: Option<ipc_layer::NonRtProducer<audio_core::processors::TopologyMutation>>,
     pub health_signal: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    pub command_producer: Option<Arc<ipc_layer::MpscRingBuffer<nullherz_traits::TimestampedCommand>>>,
+    pub command_producer: Option<Box<dyn nullherz_traits::CommandProducer>>,
 }
 
 impl Default for Conductor {
@@ -45,7 +43,7 @@ impl Conductor {
         }
     }
 
-    pub fn setup_engine(&mut self) -> (Arc<ipc_layer::MpscRingBuffer<nullherz_traits::TimestampedCommand>>, ipc_layer::Consumer<audio_core::Telemetry>) {
+    pub fn setup_engine(&mut self) -> (Box<dyn nullherz_traits::CommandProducer>, ipc_layer::Consumer<audio_core::Telemetry>) {
         ipc_layer::SharedMemory::cleanup_stale_segments();
 
         let (engine, handle) = EngineBuilder::new()
@@ -143,13 +141,13 @@ impl Conductor {
 
         match *cmd {
             nullherz_traits::Command::AddNode { processor_type_id, node_idx } => {
-                if let Some(processor) = self.registry.create_by_id(processor_type_id, node_idx, 44100.0) {
+                if let Some(processor) = self.registry.create_by_id(processor_type_id.0, node_idx, 44100.0) {
                     let _ = prod.push(nullherz_traits::TopologyMutation::AddNode { node_idx, processor });
                     return true;
                 }
             }
             nullherz_traits::Command::SwapProcessor { node_idx, processor_type_id } => {
-                if let Some(processor) = self.registry.create_by_id(processor_type_id, node_idx, 44100.0) {
+                if let Some(processor) = self.registry.create_by_id(processor_type_id.0, node_idx, 44100.0) {
                     let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor { node_idx, processor });
                     return true;
                 }

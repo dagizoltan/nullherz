@@ -1,12 +1,30 @@
 use crate::processors::graph::{GraphTopology};
 use nullherz_traits::error::AudioError;
 
+#[derive(Debug, Clone, Copy)]
+pub struct CompiledGraphPlan {
+    pub stages: [[usize; crate::MAX_NODES]; crate::MAX_NODES],
+    pub stage_counts: [usize; crate::MAX_NODES],
+    pub num_stages: usize,
+}
+
+impl Default for CompiledGraphPlan {
+    fn default() -> Self {
+        Self {
+            stages: [[0; crate::MAX_NODES]; crate::MAX_NODES],
+            stage_counts: [0; crate::MAX_NODES],
+            num_stages: 0,
+        }
+    }
+}
+
 pub struct GraphCompiler {}
 
 impl GraphCompiler {
-    pub fn calculate_stages(topo: &mut GraphTopology) {
+    pub fn compile(topo: &GraphTopology) -> Result<CompiledGraphPlan, AudioError> {
+        let mut plan = CompiledGraphPlan::default();
         let n = topo.node_count;
-        if n == 0 { return; }
+        if n == 0 { return Ok(plan); }
 
         let mut in_degree = [0usize; crate::MAX_NODES];
         let mut adj = [[0usize; crate::MAX_NODES]; crate::MAX_NODES];
@@ -53,7 +71,7 @@ impl GraphCompiler {
         // 2. Kahn's algorithm with Write-After-Write (WAW) tracking
         let mut processed_count = 0;
         let mut is_processed = [false; crate::MAX_NODES];
-        topo.num_stages = 0;
+        plan.num_stages = 0;
 
         while processed_count < n {
             let mut stage_nodes = [0usize; crate::MAX_NODES];
@@ -106,12 +124,12 @@ impl GraphCompiler {
             if stage_count == 0 { break; } // Cycle detected or no more progress
 
             for (i, &node_idx) in stage_nodes.iter().enumerate().take(stage_count) {
-                topo.stages[topo.num_stages][i] = node_idx;
+                plan.stages[plan.num_stages][i] = node_idx;
                 is_processed[node_idx] = true;
                 processed_count += 1;
             }
-            topo.stage_counts[topo.num_stages] = stage_count;
-            topo.num_stages += 1;
+            plan.stage_counts[plan.num_stages] = stage_count;
+            plan.num_stages += 1;
 
             for &node_idx in stage_nodes.iter().take(stage_count) {
                 for &dependent in adj[node_idx].iter().take(adj_count[node_idx]) {
@@ -119,11 +137,19 @@ impl GraphCompiler {
                 }
             }
         }
+
+        if processed_count < n {
+            return Err(AudioError::Generic("Cycle detected in graph".into()));
+        }
+
+        Self::verify_no_hazards(topo, &plan)?;
+
+        Ok(plan)
     }
 
-    pub fn verify_no_hazards(topo: &GraphTopology) -> Result<(), AudioError> {
-        for s_idx in 0..topo.num_stages {
-            let stage = &topo.stages[s_idx][..topo.stage_counts[s_idx]];
+    pub fn verify_no_hazards(topo: &GraphTopology, plan: &CompiledGraphPlan) -> Result<(), AudioError> {
+        for s_idx in 0..plan.num_stages {
+            let stage = &plan.stages[s_idx][..plan.stage_counts[s_idx]];
             let mut physical_writes = [false; crate::MAX_NODES];
             let mut physical_reads = [false; crate::MAX_NODES];
 
@@ -187,15 +213,10 @@ mod tests {
             let mut topo = GraphTopology {
                 routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
                 virtual_to_physical: v2p_arr,
-                stages: [[0; 64]; 64],
-                stage_counts: [0; 64],
-                num_stages: 1,
+                plan: CompiledGraphPlan::default(),
                 crossfades: [None; 8],
                 node_count: 1,
             };
-
-            topo.stage_counts[0] = 1;
-            topo.stages[0][0] = 0;
 
             for (v_out, _) in writes {
                 if topo.routing[0].output_count < 16 {
@@ -211,11 +232,7 @@ mod tests {
                 }
             }
 
-            // A single node should never have a RAW/WAR/WAW hazard with ITSELF
-            // in the context of the compiler's stage verification (which checks for hazards BETWEEN nodes in a stage).
-            // Wait, actually the compiler checks if a node writes to a buffer that's already used.
-            // If a node appears once, it shouldn't trigger hazard unless there are multiple nodes.
-            let result = GraphCompiler::verify_no_hazards(&topo);
+            let result = GraphCompiler::compile(&topo);
             assert!(result.is_ok());
         }
     }
@@ -227,9 +244,7 @@ mod tests {
         let mut topo = GraphTopology {
             routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
             virtual_to_physical: v2p,
-            stages: [[0; 64]; 64],
-            stage_counts: [0; 64],
-            num_stages: 1,
+            plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],
             node_count: 2,
         };
@@ -242,13 +257,14 @@ mod tests {
         topo.routing[1].input_indices[0] = 10;
         topo.routing[1].input_count = 1;
 
-        // Put them in the same stage
-        topo.num_stages = 1;
-        topo.stage_counts[0] = 2;
-        topo.stages[0][0] = 0;
-        topo.stages[0][1] = 1;
+        // Force them into the same stage in a manually constructed plan
+        let mut plan = CompiledGraphPlan::default();
+        plan.num_stages = 1;
+        plan.stage_counts[0] = 2;
+        plan.stages[0][0] = 0;
+        plan.stages[0][1] = 1;
 
-        let result = GraphCompiler::verify_no_hazards(&topo);
+        let result = GraphCompiler::verify_no_hazards(&topo, &plan);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("RAW Hazard"));
     }
@@ -260,9 +276,7 @@ mod tests {
         let mut topo = GraphTopology {
             routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
             virtual_to_physical: v2p,
-            stages: [[0; 64]; 64],
-            stage_counts: [0; 64],
-            num_stages: 1,
+            plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],
             node_count: 2,
         };
@@ -275,13 +289,13 @@ mod tests {
         topo.routing[1].output_indices[0] = 10;
         topo.routing[1].output_count = 1;
 
-        // Same stage
-        topo.num_stages = 1;
-        topo.stage_counts[0] = 2;
-        topo.stages[0][0] = 0;
-        topo.stages[0][1] = 1;
+        let mut plan = CompiledGraphPlan::default();
+        plan.num_stages = 1;
+        plan.stage_counts[0] = 2;
+        plan.stages[0][0] = 0;
+        plan.stages[0][1] = 1;
 
-        let result = GraphCompiler::verify_no_hazards(&topo);
+        let result = GraphCompiler::verify_no_hazards(&topo, &plan);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("collides with physical buffer 10 already in use"));
     }
@@ -293,9 +307,7 @@ mod tests {
         let mut topo = GraphTopology {
             routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
             virtual_to_physical: v2p,
-            stages: [[0; 64]; 64],
-            stage_counts: [0; 64],
-            num_stages: 1,
+            plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],
             node_count: 2,
         };
@@ -306,13 +318,13 @@ mod tests {
         topo.routing[1].output_indices[0] = 10;
         topo.routing[1].output_count = 1;
 
-        // Same stage
-        topo.num_stages = 1;
-        topo.stage_counts[0] = 2;
-        topo.stages[0][0] = 0;
-        topo.stages[0][1] = 1;
+        let mut plan = CompiledGraphPlan::default();
+        plan.num_stages = 1;
+        plan.stage_counts[0] = 2;
+        plan.stages[0][0] = 0;
+        plan.stages[0][1] = 1;
 
-        let result = GraphCompiler::verify_no_hazards(&topo);
+        let result = GraphCompiler::verify_no_hazards(&topo, &plan);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("collides with physical buffer 10 already in use"));
     }

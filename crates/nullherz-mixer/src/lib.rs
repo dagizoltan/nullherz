@@ -2,7 +2,7 @@ pub mod common;
 pub mod studio;
 pub mod dj;
 
-use nullherz_traits::{Command, ProcessorType};
+use nullherz_traits::{Command, ProcessorTypeId};
 
 pub use common::*;
 
@@ -35,7 +35,7 @@ impl MixerManager {
         let cf_id = self.next_node_id;
         self.next_node_id += 1;
         println!("Creating Master Crossfader (Node {})", cf_id);
-        commands.push(Command::AddNode { node_idx: cf_id, processor_type_id: ProcessorType::Crossfader as u32 });
+        commands.push(Command::AddNode { node_idx: cf_id, processor_type_id: ProcessorTypeId::CROSSFADER });
         commands
     }
 
@@ -51,7 +51,7 @@ impl MixerManager {
 
         let sum_id = self.next_node_id;
         self.next_node_id += 1;
-        commands.push(Command::AddNode { node_idx: sum_id, processor_type_id: ProcessorType::Summing as u32 });
+        commands.push(Command::AddNode { node_idx: sum_id, processor_type_id: ProcessorTypeId::SUMMING });
 
         commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 0, new_buffer_idx: self.config.dj_a_l as u32 });
         commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 1, new_buffer_idx: self.config.dj_b_l as u32 });

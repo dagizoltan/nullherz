@@ -17,34 +17,30 @@ pub struct Transport {
     pub sample_rate: f32,
 }
 
-#[repr(u32)]
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum ProcessorType {
-    Biquad = 1,
-    Gain = 2,
-    Sampler = 10,
-    BiquadEQ = 11,
-    Crossfader = 20,
-    Summing = 30,
-    Spectral = 40,
-    Wavetable = 50,
+pub struct ProcessorTypeId(pub u32);
+
+impl ProcessorTypeId {
+    pub const BIQUAD: Self = Self(1);
+    pub const GAIN: Self = Self(2);
+    pub const SAMPLER: Self = Self(10);
+    pub const BIQUAD_EQ: Self = Self(11);
+    pub const CROSSFADER: Self = Self(20);
+    pub const SUMMING: Self = Self(30);
+    pub const SPECTRAL: Self = Self(40);
+    pub const WAVETABLE: Self = Self(50);
 }
 
-impl TryFrom<u32> for ProcessorType {
-    type Error = ();
+impl From<u32> for ProcessorTypeId {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
 
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            1 => Ok(ProcessorType::Biquad),
-            2 => Ok(ProcessorType::Gain),
-            10 => Ok(ProcessorType::Sampler),
-            11 => Ok(ProcessorType::BiquadEQ),
-            20 => Ok(ProcessorType::Crossfader),
-            30 => Ok(ProcessorType::Summing),
-            40 => Ok(ProcessorType::Spectral),
-            50 => Ok(ProcessorType::Wavetable),
-            _ => Err(()),
-        }
+impl From<ProcessorTypeId> for u32 {
+    fn from(id: ProcessorTypeId) -> Self {
+        id.0
     }
 }
 
@@ -80,9 +76,7 @@ pub enum Command {
     },
     SwapProcessor {
         node_idx: u32,
-        // In a real system, we'd pass a factory or ID for the new processor.
-        // For this prototype, we'll use a numeric ID.
-        processor_type_id: u32,
+        processor_type_id: ProcessorTypeId,
     },
     Bundle {
         // Flat array of parameter updates: [node_id, param_id, value_bits, ...]
@@ -90,7 +84,7 @@ pub enum Command {
         data: [u64; 12], // Supports up to 4 bundled SetParam commands
     },
     AddNode {
-        processor_type_id: u32,
+        processor_type_id: ProcessorTypeId,
         node_idx: u32,
     },
     CommitTopology,
@@ -105,7 +99,7 @@ pub enum Command {
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TopologyCommand {
     AddNode {
-        processor_type_id: u32,
+        processor_type_id: ProcessorTypeId,
         node_idx: u32,
     },
     UpdateEdge {
@@ -120,7 +114,7 @@ pub enum TopologyCommand {
     },
     SwapProcessor {
         node_idx: u32,
-        processor_type_id: u32,
+        processor_type_id: ProcessorTypeId,
     },
 }
 
@@ -334,4 +328,18 @@ pub trait AudioProcessor: Send {
     /// Allows safe downcasting to concrete processor types.
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+}
+
+pub trait CommandProducer: Send + Sync + dyn_clone::DynClone {
+    fn push_command(&self, command: TimestampedCommand) -> Result<(), Command>;
+}
+
+dyn_clone::clone_trait_object!(CommandProducer);
+
+pub trait CommandConsumer: Send {
+    fn pop_command(&mut self) -> Option<TimestampedCommand>;
+}
+
+pub trait TelemetryProducer: Send {
+    fn push_telemetry(&mut self, telemetry: crate::telemetry::Telemetry) -> Result<(), crate::telemetry::Telemetry>;
 }

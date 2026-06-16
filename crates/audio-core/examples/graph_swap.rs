@@ -1,27 +1,27 @@
-use audio_core::{AudioEngine, ProcessorGraph};
-use nullherz_backends::{ThreadedBackend, AudioBackend};
-use nullherz_traits::{TimestampedCommand};
+use std::sync::Arc;
 use ipc_layer::{RingBuffer, MpscRingBuffer};
-use std::sync::{Arc, Mutex};
-use std::thread;
+use nullherz_traits::{AudioProcessor};
+use audio_core::{AudioEngine, ProcessorGraph};
 
 fn main() {
-    let cmd_buffer = Arc::new(MpscRingBuffer::<TimestampedCommand>::new(1024));
-    let (garbage_prod, _garbage_cons) = RingBuffer::new(1024).split();
+    let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn AudioProcessor>>::new(1024).split();
     let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
+    let cmd_buffer = Arc::new(MpscRingBuffer::new(1024));
 
     let graph = ProcessorGraph::new();
-    let engine = AudioEngine::new(cmd_buffer.clone(), None, None, None, garbage_prod, None, None, None, tel_prod, Box::new(graph));
-    let engine_handle = Arc::new(Mutex::new(Some(engine)));
 
-    let mut backend = ThreadedBackend::new();
-    backend.start(engine_handle).unwrap();
+    let engine = AudioEngine::new(
+        Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+        Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+        None, None, None, garbage_prod, None, None, None,
+        Box::new(tel_prod),
+        Box::new(graph)
+    );
 
-    for i in 0..10 {
-        println!("Swapping graph iteration {}", i);
-        let _new_graph = Box::new(ProcessorGraph::new());
-        thread::sleep(std::time::Duration::from_millis(50));
-    }
+    println!("Engine created. Swapping graphs...");
 
-    backend.stop();
+    let new_graph = ProcessorGraph::new();
+    engine.set_pending_graph(Box::new(new_graph));
+
+    println!("Graph swap scheduled.");
 }

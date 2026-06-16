@@ -9,7 +9,7 @@ pub use oscillators::*;
 pub use spectral::*;
 pub use util::*;
 
-pub trait DspKernel: Send {
+pub trait DspKernel: Send + Clone {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]);
     fn reset(&mut self) {}
     fn set_parameter(&mut self, _id: u32, _value: f32, _ramp_samples: u32) {}
@@ -118,6 +118,7 @@ impl Crossfader {
 }
 
 /// A high-performance Gain processor with parameter smoothing.
+#[derive(Debug, Clone, Copy)]
 pub struct Gain {
     pub current_gain: f32,
     pub target_gain: f32,

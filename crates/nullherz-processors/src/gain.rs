@@ -1,14 +1,16 @@
-use nullherz_traits::AudioProcessor;
+use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorCommand};
+use crate::dsp_kernel_processor::MultiChannelDspProcessor;
 
 pub struct GainProcessor {
-    gains: [audio_dsp::Gain; crate::MAX_CHANNELS],
-    id: u64,
+    inner: MultiChannelDspProcessor<audio_dsp::Gain>,
 }
 
 impl GainProcessor {
     pub fn new(id: u64, initial_gain: f32) -> Self {
-        let gains = std::array::from_fn(|_| audio_dsp::Gain::new(initial_gain, 0.05));
-        Self { gains, id }
+        let gain = audio_dsp::Gain::new(initial_gain, 0.05);
+        Self {
+            inner: MultiChannelDspProcessor::new(id, gain, nullherz_traits::MAX_CHANNELS),
+        }
     }
 }
 
@@ -18,38 +20,18 @@ impl AudioProcessor for GainProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
-        use audio_dsp::DspKernel;
-        if inputs.is_empty() || outputs.is_empty() { return; }
-        let num_channels = inputs.len().min(outputs.len()).min(crate::MAX_CHANNELS);
-        for (i, gain) in self.gains.iter_mut().enumerate().take(num_channels) {
-            gain.process(&inputs[i..i+1], &mut outputs[i..i+1]);
-        }
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext) {
+        self.inner.process(inputs, outputs, context);
     }
     fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
-        use audio_dsp::DspKernel;
-        for g in self.gains.iter_mut() {
-            g.set_parameter(param_id, value, ramp_duration_samples);
-        }
+        self.inner.set_parameter(param_id, value, ramp_duration_samples);
     }
 
     fn reset(&mut self) {
-        // audio_dsp::Gain doesn't have internal state like delay lines,
-        // but we can reset current_gain to target_gain if we want bit-exact reset during ramps.
-        for g in self.gains.iter_mut() {
-            g.current_gain = g.target_gain;
-            g.ramp_remaining = 0;
-        }
+        self.inner.reset();
     }
 
-    fn apply_command(&mut self, command: &nullherz_traits::Command) {
-        match *command {
-            nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples }
-                if target_id == self.id =>
-            {
-                self.set_parameter(param_id, value, ramp_duration_samples);
-            }
-            _ => {}
-        }
+    fn apply_command(&mut self, command: &ProcessorCommand) {
+        self.inner.apply_command(command);
     }
 }
