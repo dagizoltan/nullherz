@@ -204,4 +204,55 @@ mod tests {
             assert_eq!(proc.missed_deadline_count, 3); // 3 total calls so far, all bypass/missed
         }
     }
+
+    #[test]
+    fn test_sidecar_recovery_from_stall() {
+        let cmd_shm = SharedMemory::create("nullherz_test_cmd_rec", 4096).unwrap();
+        let sig_shm = SharedMemory::create("nullherz_test_sig_rec", 4096).unwrap();
+        let in_shm = SharedMemory::create("nullherz_test_in_rec", 4096).unwrap();
+        let out_shm = SharedMemory::create("nullherz_test_out_rec", 4096).unwrap();
+
+        unsafe {
+            let cmd_ptr = ShmRingBuffer::<nullherz_traits::Command>::init(cmd_shm.ptr(), 16);
+            let sig_ptr = sig_shm.ptr() as *mut ShmSignal;
+            std::ptr::write(sig_ptr, ShmSignal::new());
+            let in_ptr = ShmRingBuffer::<AudioBlock>::init(in_shm.ptr(), 16);
+            let out_ptr = ShmRingBuffer::<AudioBlock>::init(out_shm.ptr(), 16);
+
+            let mut proc = SidecarProcessor::new(
+                cmd_ptr,
+                None,
+                &[in_ptr],
+                &[out_ptr as *const _],
+                sig_ptr,
+                None
+            );
+
+            let input = vec![1.0f32; 128];
+            let mut output = vec![0.0f32; 128];
+            let mut context = nullherz_traits::ProcessContext {
+                transport: None,
+                host: None,
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+
+            // 1. Simulate stall
+            proc.last_heartbeat = 100;
+            (*sig_ptr).heartbeat.store(100, Ordering::Relaxed);
+            proc.process(&[&input], &mut [&mut output], &mut context);
+            assert!(proc.missed_deadline_count > 0);
+
+            // 2. Simulate sidecar recovery: push a block and update heartbeat
+            let mut block = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 128 };
+            block.data[0] = 0.888; // Signature value
+            let _ = (*out_ptr).push(block);
+            (*sig_ptr).pulse_heartbeat();
+
+            // 3. Process again - should recover
+            proc.process(&[&input], &mut [&mut output], &mut context);
+            assert_eq!(output[0], 0.888);
+            assert_eq!(proc.missed_deadline_count, 0); // Count should be reset
+        }
+    }
 }
