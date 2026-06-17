@@ -138,8 +138,8 @@ pub struct ParameterMetadata {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct SidecarMetadata {
-    pub sidecar_id: u64,
+pub struct ProcessorMetadata {
+    pub processor_id: u64,
     pub num_parameters: u32,
     pub parameters: [ParameterMetadata; 16],
 }
@@ -317,7 +317,7 @@ pub trait AudioProcessor: Send {
     fn collect_telemetry(&self, _node_times: &mut [u64; MAX_NODES], _peak_levels: &mut [f32; MAX_NODES]) {}
 
     /// Returns metadata about the processor (parameters, name, etc.)
-    fn metadata(&self) -> Option<SidecarMetadata> { None }
+    fn metadata(&self) -> Option<ProcessorMetadata> { None }
 
     /// Configures the garbage producer used for real-time safe deallocation.
     fn set_garbage_producer(&mut self, _producer: Box<dyn GarbageProducer>) {}

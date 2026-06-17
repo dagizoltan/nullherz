@@ -18,7 +18,7 @@ fn main() {
     let cmd_rb_ptr = unsafe { ShmRingBuffer::init(shm_cmd.ptr(), 64) };
 
     let fb_shm_name = "/nullherz_fb_example";
-    let (fb_layout, _) = ShmRingBuffer::<nullherz_traits::SidecarMetadata>::layout(8);
+    let (fb_layout, _) = ShmRingBuffer::<nullherz_traits::ProcessorMetadata>::layout(8);
     let shm_fb = SharedMemory::create(fb_shm_name, fb_layout.size()).unwrap();
     let fb_rb_ptr = unsafe { ShmRingBuffer::init(shm_fb.ptr(), 8) };
 
