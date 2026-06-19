@@ -399,6 +399,67 @@ impl crate::DspKernel for BiquadFilter {
     }
 }
 
+/// A simple Envelope Follower using rectification and a one-pole low-pass filter.
+#[derive(Debug, Clone, Copy)]
+pub struct EnvelopeFollower {
+    pub sample_rate: f32,
+    pub attack_coeff: f32,
+    pub release_coeff: f32,
+    pub envelope: f32,
+}
+
+impl EnvelopeFollower {
+    pub fn new(sample_rate: f32, attack_ms: f32, release_ms: f32) -> Self {
+        Self {
+            sample_rate,
+            attack_coeff: (-1.0 / (sample_rate * attack_ms * 0.001)).exp(),
+            release_coeff: (-1.0 / (sample_rate * release_ms * 0.001)).exp(),
+            envelope: 0.0,
+        }
+    }
+
+    pub fn set_times(&mut self, attack_ms: f32, release_ms: f32) {
+        self.attack_coeff = (-1.0 / (self.sample_rate * attack_ms * 0.001)).exp();
+        self.release_coeff = (-1.0 / (self.sample_rate * release_ms * 0.001)).exp();
+    }
+
+    pub fn process_block(&mut self, input: &[f32], output: &mut [f32]) {
+        let mut env = self.envelope;
+        let attack = self.attack_coeff;
+        let release = self.release_coeff;
+
+        for i in 0..input.len() {
+            let rect = input[i].abs();
+            if rect > env {
+                env = rect + attack * (env - rect);
+            } else {
+                env = rect + release * (env - rect);
+            }
+            output[i] = env;
+        }
+        self.envelope = env;
+    }
+}
+
+impl crate::DspKernel for EnvelopeFollower {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        if inputs.is_empty() || outputs.is_empty() { return; }
+        self.process_block(inputs[0], outputs[0]);
+    }
+
+    fn reset(&mut self) {
+        self.envelope = 0.0;
+    }
+
+    fn set_parameter(&mut self, id: u32, value: f32, _ramp_samples: u32) {
+        if id == 0 {
+            self.attack_coeff = (-1.0 / (self.sample_rate * value.max(0.1) * 0.001)).exp();
+        } else if id == 1 {
+            self.release_coeff = (-1.0 / (self.sample_rate * value.max(0.1) * 0.001)).exp();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
