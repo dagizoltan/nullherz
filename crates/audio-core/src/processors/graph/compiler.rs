@@ -235,6 +235,46 @@ mod tests {
             let result = GraphCompiler::compile(&topo);
             assert!(result.is_ok());
         }
+
+        #[test]
+        fn test_random_graph_compilation(
+            num_nodes in 1..20usize,
+            edges in prop::collection::vec((0..20usize, 0..20usize), 0..40)
+        ) {
+            let mut v2p = [0usize; 64];
+            for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
+
+            let mut topo = GraphTopology {
+                routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
+                virtual_to_physical: v2p,
+                plan: CompiledGraphPlan::default(),
+                crossfades: [None; 8],
+                node_count: num_nodes,
+            };
+
+            for (src, dst) in edges {
+                let src = src % num_nodes;
+                let dst = dst % num_nodes;
+                if src == dst { continue; }
+
+                // Create an edge src -> dst using a virtual buffer
+                let v_buf = src + 10;
+                if topo.routing[src].output_count < 16 && topo.routing[dst].input_count < 16 {
+                    topo.routing[src].output_indices[topo.routing[src].output_count] = v_buf;
+                    topo.routing[src].output_count += 1;
+                    topo.routing[dst].input_indices[topo.routing[dst].input_count] = v_buf;
+                    topo.routing[dst].input_count += 1;
+                }
+            }
+
+            let result = GraphCompiler::compile(&topo);
+            // It's either Ok or Err(CycleDetected)
+            if let Err(e) = result {
+                assert!(e.to_string().contains("Cycle detected") || e.to_string().contains("Hazard"));
+            } else if let Ok(plan) = result {
+                GraphCompiler::verify_no_hazards(&topo, &plan).expect("Compiled plan has hazards");
+            }
+        }
     }
 
     #[test]

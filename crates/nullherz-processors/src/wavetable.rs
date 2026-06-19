@@ -23,8 +23,8 @@ impl AudioProcessor for WavetableProcessor {
         let len = if num_channels > 0 { outputs[0].len() } else { 0 };
         if len == 0 { return; }
 
-        let fm_storage = [0.0f32; 128];
-        let pm_storage = [0.0f32; 128];
+        let fm_storage = [0.0f32; nullherz_traits::MAX_BLOCK_SIZE];
+        let pm_storage = [0.0f32; nullherz_traits::MAX_BLOCK_SIZE];
 
         // Optimization: Use SIMD multi-channel path if exactly 8 channels are available
         if num_channels == 8 {

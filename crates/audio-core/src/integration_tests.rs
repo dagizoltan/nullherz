@@ -7,6 +7,65 @@ mod integration_tests {
     use std::sync::Arc;
 
     #[test]
+    fn test_dynamic_processor_registration_and_engine_instantiation() {
+        use nullherz_traits::ProcessorFactory;
+
+        // 1. Define a truly dynamic processor and its factory
+        struct DynamicProcessor;
+        impl AudioProcessor for DynamicProcessor {
+            fn as_any(&self) -> &dyn std::any::Any { self }
+            fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+            fn process(&mut self, _in: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {
+                for out in outputs {
+                    out.fill(0.123); // Unique signature
+                }
+            }
+        }
+
+        struct DynamicFactory;
+        impl ProcessorFactory for DynamicFactory {
+            fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+                Some(Box::new(DynamicProcessor))
+            }
+            fn name(&self) -> &'static str { "Dynamic" }
+        }
+
+        let mut registry = ProcessorRegistry::new();
+        let dynamic_id = 9999u32;
+        registry.register(dynamic_id, Box::new(DynamicFactory));
+
+        // 2. Setup Engine
+        let cmd_buffer = Arc::new(ipc_layer::MpscRingBuffer::new(256));
+        let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
+        let (garbage_prod, _garbage_cons) = RingBuffer::new(1024).split();
+
+        let mut graph = ProcessorGraph::new();
+        graph.set_garbage_producer(Box::new(garbage_prod));
+
+        let dynamic_proc = registry.create_by_id(dynamic_id, 0, 44100.0).expect("Failed to create dynamic processor");
+        graph.add_node(dynamic_proc, vec![], vec![0]);
+
+        let (garbage_prod_engine, _garbage_cons_engine) = RingBuffer::new(1024).split();
+        let mut engine = AudioEngine::new(
+            Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+            Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+            None, None, None,
+            garbage_prod_engine,
+            None, None, None,
+            Box::new(tel_prod),
+            Box::new(graph)
+        );
+
+        // 3. Process
+        let mut out = [0.0f32; 128];
+        let mut outputs = [&mut out[..]];
+        engine.process_block(&[], &mut outputs, 128);
+
+        // 4. Verify signature
+        assert_eq!(out[0], 0.123);
+    }
+
+    #[test]
     fn test_complete_engine_cycle_with_registry() {
         let registry = ProcessorRegistry::new();
         let _host = TestHost::new();

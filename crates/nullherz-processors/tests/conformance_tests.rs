@@ -32,6 +32,22 @@ fn test_all_processors_conformance() {
                 .unwrap();
         }
 
+        // SIMD alignment
+        {
+            let mut proc = registry.create_by_id(id, 0, sample_rate).expect("Failed to create processor");
+            ConformanceSuite::verify_simd_alignment(proc.as_mut())
+                .map_err(|e| format!("Processor {} (ID {}) failed SIMD alignment check: {}", name, id, e))
+                .unwrap();
+        }
+
+        // State persistence
+        {
+            let mut proc = registry.create_by_id(id, 0, sample_rate).expect("Failed to create processor");
+            ConformanceSuite::verify_state_persistence(proc.as_mut())
+                .map_err(|e| format!("Processor {} (ID {}) failed state persistence check: {}", name, id, e))
+                .unwrap();
+        }
+
         // Bypass conformance (only for processors that support it via param 999 convention, or skip if not supported)
         // For now, we skip it as not all processors have implemented the 999 convention.
     }

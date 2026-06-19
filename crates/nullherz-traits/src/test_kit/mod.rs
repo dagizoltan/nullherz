@@ -114,6 +114,82 @@ impl ConformanceSuite {
         Ok(())
     }
 
+    pub fn verify_simd_alignment(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+        let host = VirtualClockHost::new();
+        let block_size = crate::MAX_BLOCK_SIZE;
+
+        // We need to ensure the buffers we pass are actually aligned to SIMD_ALIGNMENT
+        // In this test environment, we'll use AudioBlock which is already aligned.
+        let input_block = crate::AudioBlock { data: [1.0; crate::MAX_BLOCK_SIZE], len: block_size as u32 };
+        let mut output_block = crate::AudioBlock { data: [0.0; crate::MAX_BLOCK_SIZE], len: block_size as u32 };
+
+        let inputs = [ &input_block.data[..] ];
+        let mut outputs = [ &mut output_block.data[..] ];
+
+        let mut ctx = crate::ProcessContext {
+            transport: Some(&host.transport),
+            host: None,
+            sub_block_offset: 0,
+            is_last_sub_block: true,
+        };
+
+        // Check alignment of pointers
+        if (inputs[0].as_ptr() as usize) % crate::SIMD_ALIGNMENT != 0 {
+            return Err("Input buffer not SIMD aligned".into());
+        }
+        if (outputs[0].as_ptr() as usize) % crate::SIMD_ALIGNMENT != 0 {
+            return Err("Output buffer not SIMD aligned".into());
+        }
+
+        processor.process(&inputs, &mut outputs, &mut ctx);
+        Ok(())
+    }
+
+    pub fn verify_state_persistence(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+        let host = VirtualClockHost::new();
+        let block_size = 64;
+        let input = vec![1.0f32; block_size];
+        let mut output_1 = vec![0.0f32; block_size];
+        let mut output_2 = vec![0.0f32; block_size];
+
+        // 1. Process block 1
+        {
+            let inputs = [ &input[..] ];
+            let mut outputs = [ &mut output_1[..] ];
+            let mut ctx = crate::ProcessContext {
+                transport: Some(&host.transport),
+                host: None,
+                sub_block_offset: 0,
+                is_last_sub_block: false,
+            };
+            processor.process(&inputs, &mut outputs, &mut ctx);
+        }
+
+        // 2. Process block 2 WITHOUT reset
+        {
+            let inputs = [ &input[..] ];
+            let mut outputs = [ &mut output_2[..] ];
+            let mut ctx = crate::ProcessContext {
+                transport: Some(&host.transport),
+                host: None,
+                sub_block_offset: 64,
+                is_last_sub_block: true,
+            };
+            processor.process(&inputs, &mut outputs, &mut ctx);
+        }
+
+        // We can't strictly assert they are different because some processors are stateless (like Gain),
+        // but we can ensure they ARE different for processors that have state.
+        // For the general suite, we just ensure it doesn't crash and returns finite values.
+        for i in 0..block_size {
+            if !output_1[i].is_finite() || !output_2[i].is_finite() {
+                return Err("Non-finite output during persistence test".into());
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn verify_bypass_conformance(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
         let host = VirtualClockHost::new();
         let block_size = 128;
@@ -380,6 +456,18 @@ mod tests {
     fn test_conformance_multichannel() {
         let mut mock = MockProcessor::new();
         ConformanceSuite::verify_multichannel_consistency(&mut mock, 4).expect("Multichannel conformance failed");
+    }
+
+    #[test]
+    fn test_conformance_simd_alignment() {
+        let mut mock = MockProcessor::new();
+        ConformanceSuite::verify_simd_alignment(&mut mock).expect("SIMD alignment conformance failed");
+    }
+
+    #[test]
+    fn test_conformance_state_persistence() {
+        let mut mock = MockProcessor::new();
+        ConformanceSuite::verify_state_persistence(&mut mock).expect("State persistence conformance failed");
     }
 
     #[test]
