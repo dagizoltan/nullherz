@@ -123,6 +123,12 @@ impl ProcessorGraph {
                     topo.node_count += 1;
                 }
             }
+            TopologyMutation::AddSource { node_idx, buffer } => {
+                let idx = node_idx as usize;
+                if idx < self.node_count {
+                    unsafe { (*self.nodes[idx].processor.get()).apply_topology_mutation(TopologyMutation::AddSource { node_idx, buffer }); }
+                }
+            }
         }
     }
 
@@ -250,8 +256,9 @@ impl AudioProcessor for ProcessorGraph {
 
                 // Drain pending mutations if crossfades finished
                 if !self.topology_coordinator.has_active_crossfades() {
-                    let mutations: Vec<_> = self.pending_mutations.drain(..).collect();
-                    for m in mutations { self.apply_mutation_internal(m); }
+                    while let Some(m) = self.pending_mutations.pop() {
+                        self.apply_mutation_internal(m);
+                    }
                 }
             }
             _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }

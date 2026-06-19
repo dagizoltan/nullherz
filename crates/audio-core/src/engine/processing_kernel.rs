@@ -1,11 +1,11 @@
 use nullherz_traits::{AudioProcessor, TimestampedCommand, SubBlockIterator, SubBlock, Transport, Host, ParallelExecutor};
 use crate::engine::command_dispatcher::CommandDispatcher;
 
-pub struct ProcessingKernel {}
+pub struct ProcessingKernel;
 
 impl ProcessingKernel {
     #[allow(clippy::too_many_arguments)]
-    pub fn execute_processing_kernel(
+    pub fn execute(
         graph: &mut dyn AudioProcessor,
         transport: &mut Transport,
         host: Option<&dyn Host>,
@@ -32,7 +32,11 @@ impl ProcessingKernel {
             if let Some(cmd) = cmd {
                 if cmd.timestamp_samples < block_end_sample {
                     commands_processed += 1;
-                    let cmd_offset = if cmd.timestamp_samples > block_start_sample { (cmd.timestamp_samples - block_start_sample) as usize } else { sub_block_iter.current_offset };
+                    let cmd_offset = if cmd.timestamp_samples > block_start_sample {
+                        (cmd.timestamp_samples - block_start_sample) as usize
+                    } else {
+                        sub_block_iter.current_offset
+                    };
 
                     while let Some(sb) = sub_block_iter.next_chunk_up_to(cmd_offset) {
                         Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
@@ -63,12 +67,8 @@ impl ProcessingKernel {
         sb: SubBlock,
     ) {
         Self::process_sub_block(graph, transport, host, pool, inputs, outputs, sb.offset, sb.len, sb.is_last);
-        Self::advance_transport(transport, sb.len);
-    }
-
-    fn advance_transport(transport: &mut Transport, num_samples: usize) {
         if transport.is_playing {
-            let beats = (num_samples as f64 / transport.sample_rate as f64) * (transport.bpm as f64 / 60.0);
+            let beats = (sb.len as f64 / transport.sample_rate as f64) * (transport.bpm as f64 / 60.0);
             transport.beat_position += beats;
         }
     }
@@ -86,7 +86,13 @@ impl ProcessingKernel {
         is_last_sub_block: bool,
     ) {
         if len == 0 { return; }
-        let mut context = nullherz_traits::ProcessContext { transport: Some(transport), host, sub_block_offset: offset, is_last_sub_block };
+        let mut context = nullherz_traits::ProcessContext {
+            transport: Some(transport),
+            host,
+            sub_block_offset: offset,
+            is_last_sub_block
+        };
+
         let mut sub_inputs_ptr = [ &[][..]; crate::MAX_CHANNELS ];
         let num_inputs = inputs.len().min(crate::MAX_CHANNELS);
         let empty_input = &[][..];
@@ -96,6 +102,7 @@ impl ProcessingKernel {
             let act = offset.min(input.len());
             *sub_input = &input[act..end];
         }
+
         let mut sub_outputs_reconstructed: [&mut [f32]; crate::MAX_CHANNELS] = std::array::from_fn(|_| &mut [][..]);
         let num_outputs = outputs.len().min(crate::MAX_CHANNELS);
         for (i, out) in outputs.iter_mut().take(num_outputs).enumerate() {
@@ -104,6 +111,11 @@ impl ProcessingKernel {
             if end > act { sub_outputs_reconstructed[i] = &mut out[act..end]; }
         }
 
-        graph.process_parallel(&sub_inputs_ptr[..num_inputs], &mut sub_outputs_reconstructed[..num_outputs], &mut context, pool.as_deref_mut());
+        graph.process_parallel(
+            &sub_inputs_ptr[..num_inputs],
+            &mut sub_outputs_reconstructed[..num_outputs],
+            &mut context,
+            pool.as_deref_mut()
+        );
     }
 }

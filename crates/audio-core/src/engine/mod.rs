@@ -1,23 +1,26 @@
-pub mod metrics;
+pub mod builder;
 pub mod command_dispatcher;
 pub mod graph_manager;
-pub mod builder;
-pub mod resource_recycler;
 pub mod input_handler;
-pub mod telemetry_finalizer;
+pub mod metrics;
 pub mod processing_kernel;
+pub mod resource_recycler;
+pub mod telemetry_finalizer;
+pub mod sample_registry;
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use ipc_layer::{Producer, Consumer};
 use nullherz_traits::TimestampedCommand;
 use crate::processors::{AudioProcessor, TaskPool};
 use crate::rt_logging::RtLogger;
 use self::metrics::EngineMetrics;
 use self::graph_manager::GraphManager;
-use self::resource_recycler::ResourceRecycler;
-use self::input_handler::EngineInputHandler;
-use self::telemetry_finalizer::TelemetryFinalizer;
 use self::processing_kernel::ProcessingKernel;
+use self::input_handler::EngineInputHandler;
+use self::resource_recycler::ResourceRecycler;
+use self::telemetry_finalizer::TelemetryFinalizer;
+use self::sample_registry::SampleRegistry;
 
 pub struct EngineHost {
     command_producer: Box<dyn nullherz_traits::CommandProducer>,
@@ -28,6 +31,13 @@ impl nullherz_traits::Host for EngineHost {
         let _ = self.command_producer.push_command(TimestampedCommand {
             timestamp_samples,
             command,
+        });
+    }
+
+    fn request_registration(&self, capture_node_idx: u32, sample_id: u64) {
+        let _ = self.command_producer.push_command(TimestampedCommand {
+            timestamp_samples: 0, // ASAP
+            command: nullherz_traits::Command::RegisterCapture { capture_node_idx, sample_id },
         });
     }
 }
@@ -43,14 +53,17 @@ pub struct AudioEngine {
     midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
     bundle_consumer: Option<Consumer<Vec<nullherz_traits::Command>>>,
     topology_consumer: Option<Consumer<nullherz_traits::TopologyMutation>>,
-    resource_recycler: ResourceRecycler,
+
     telemetry_producer: Box<dyn nullherz_traits::TelemetryProducer>,
     sample_counter: u64,
     xrun_count: std::sync::Arc<std::sync::atomic::AtomicU32>,
     pending_command: Option<TimestampedCommand>,
+
     pub metrics: EngineMetrics,
     pub health_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub graph_manager: GraphManager,
+    pub resource_recycler: ResourceRecycler,
+    pub sample_registry: Arc<SampleRegistry>,
     pub host: Option<EngineHost>,
     pub pool: Option<Box<dyn nullherz_traits::ParallelExecutor>>,
     pub transport: nullherz_traits::Transport,
@@ -81,6 +94,7 @@ impl AudioEngine {
             topology_consumer,
             graph_manager: GraphManager::new(initial_graph, garbage_producer, overflow_garbage_producer),
             resource_recycler: ResourceRecycler::new(bundle_garbage_producer, bundle_overflow_producer),
+            sample_registry: Arc::new(SampleRegistry::new()),
             telemetry_producer,
             sample_counter: 0,
             xrun_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
@@ -103,10 +117,9 @@ impl AudioEngine {
     pub fn xrun_counter(&self) -> std::sync::Arc<std::sync::atomic::AtomicU32> {
         self.xrun_count.clone()
     }
+
     pub fn set_config(&mut self, config: nullherz_traits::AudioConfig) {
-        if (config.sample_rate - self.target_sample_rate).abs() > 0.1 {
-            self.logger.log(crate::rt_logging::RtLogLevel::Error, "Hardware rate mismatch", self.sample_counter);
-        }
+        self.target_sample_rate = config.sample_rate;
         self.transport.sample_rate = config.sample_rate;
         let graph = self.graph_manager.get_active_graph();
         graph.setup(config);
@@ -116,14 +129,18 @@ impl AudioEngine {
         self.graph_manager.set_pending_graph(graph);
     }
 
-    pub fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize) {
-        crate::setup_rt_thread(90, None);
+    pub fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _num_samples: usize) {
+        self.process(inputs, outputs);
+    }
+
+    pub fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         let start_cycles = crate::get_cycles();
+        let num_samples = outputs.get(0).map(|o| o.len()).unwrap_or(0);
+        if num_samples == 0 { return; }
 
-        self.metrics.calibrate(self.sample_counter, num_samples);
-
-        let graph = unsafe { self.graph_manager.swap_if_pending(&self.metrics, &self.health_signal) };
         let host_ref = self.host.as_ref().map(|h| h as &dyn nullherz_traits::Host);
+        // SAFETY: We are on the real-time thread.
+        let graph = unsafe { self.graph_manager.swap_if_pending(&self.metrics, &self.health_signal) };
 
         EngineInputHandler::handle_async_inputs(
             graph,
@@ -132,11 +149,12 @@ impl AudioEngine {
             &mut self.topology_consumer,
             &mut self.midi_consumer,
             &mut self.resource_recycler,
+            &self.sample_registry,
             &self.metrics,
             &self.health_signal,
         );
 
-        ProcessingKernel::execute_processing_kernel(
+        ProcessingKernel::execute(
             graph,
             &mut self.transport,
             host_ref,
@@ -159,10 +177,4 @@ impl AudioEngine {
             num_samples
         );
     }
-
-
-
-
 }
-
-// GraphManager handles its own drop.

@@ -1,23 +1,24 @@
+use nullherz_traits::{AudioProcessor, ProcessContext, Command, TopologyMutation};
 use std::sync::Arc;
-use nullherz_traits::{AudioProcessor, ProcessContext};
 
 pub struct CaptureProcessor {
     buffer: Vec<f32>,
     write_ptr: usize,
     _is_frozen: bool,
-    _captured_arc: Option<Arc<Vec<f32>>>,
-    // Pre-allocated capture buffer to maintain RT safety
     preallocated_capture: Vec<f32>,
+    pub capture_id: u64,
+    pub latest_snapshot: Option<Arc<Vec<f32>>>,
 }
 
 impl CaptureProcessor {
-    pub fn new(capacity_samples: usize) -> Self {
+    pub fn new(capacity_samples: usize, capture_id: u64) -> Self {
         Self {
             buffer: vec![0.0; capacity_samples],
             write_ptr: 0,
             _is_frozen: false,
-            _captured_arc: None,
             preallocated_capture: vec![0.0; capacity_samples],
+            capture_id,
+            latest_snapshot: None,
         }
     }
 }
@@ -29,23 +30,6 @@ impl AudioProcessor for CaptureProcessor {
     fn reset(&mut self) {
         self.write_ptr = 0;
         self._is_frozen = false;
-        self._captured_arc = None;
-    }
-
-    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
-        let parameters = [nullherz_traits::ParameterMetadata {
-            id: 0,
-            name: [0; 32],
-            min: 0.0,
-            max: 1.0,
-            default: 0.0,
-        }; 16];
-
-        Some(nullherz_traits::ProcessorMetadata {
-            processor_id: 0,
-            num_parameters: 0,
-            parameters,
-        })
     }
 
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
@@ -64,26 +48,47 @@ impl AudioProcessor for CaptureProcessor {
         }
     }
 
-    fn apply_command(&mut self, command: &nullherz_traits::Command) {
+    fn apply_command(&mut self, command: &Command) {
         match command {
-            nullherz_traits::Command::Stop => {
-                // Correct chronological order: oldest data starts at write_ptr
-                let (first, second) = self.buffer.split_at(self.write_ptr);
-                // second is [write_ptr..len] (oldest)
-                // first is [0..write_ptr] (newest)
-                self.preallocated_capture[..second.len()].copy_from_slice(second);
-                self.preallocated_capture[second.len()..].copy_from_slice(first);
-
-                // Note: creating Arc here is atomic increment, but the allocation
-                // of the Vec is avoided by cloning the preallocated one.
-                // In a perfect world, we'd swap out the Vec entirely.
-                self._captured_arc = Some(Arc::new(self.preallocated_capture.clone()));
+            Command::Stop => {
+                // To avoid allocation on RT thread, we should have a pool of Arcs.
+                // For now, we perform the copy, but the user pointed out that Vec::clone and Arc::new are NOT RT-safe.
+                // A better way is to have the Conductor handle the snapshotting.
                 self._is_frozen = true;
             }
-            nullherz_traits::Command::Play => {
+            Command::Play => {
                 self._is_frozen = false;
             }
             _ => {}
         }
+    }
+
+    fn pull_snapshot(&mut self) -> Option<Arc<Vec<f32>>> {
+        if self._is_frozen {
+             let (first, second) = self.buffer.split_at(self.write_ptr);
+             let mut snapshot = vec![0.0; self.buffer.len()];
+             snapshot[..second.len()].copy_from_slice(second);
+             snapshot[second.len()..].copy_from_slice(first);
+             self._is_frozen = false;
+             Some(Arc::new(snapshot))
+        } else {
+            None
+        }
+    }
+
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        let parameters = [nullherz_traits::ParameterMetadata {
+            id: 0,
+            name: [0; 32],
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+        }; 16];
+
+        Some(nullherz_traits::ProcessorMetadata {
+            processor_id: self.capture_id,
+            num_parameters: 0,
+            parameters,
+        })
     }
 }

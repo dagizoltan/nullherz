@@ -3,12 +3,15 @@ use crate::topology_manager::TopologyManager;
 use crate::mixer_bridge::MixerBridge;
 use crate::sidecar_supervisor::SidecarSupervisor;
 use nullherz_traits::{Command, CommandProducer, telemetry::Telemetry};
+use std::sync::Arc;
+use audio_core::engine::sample_registry::SampleRegistry;
 
 pub struct Conductor {
     pub engine_coordinator: EngineCoordinator,
     pub topology_manager: TopologyManager,
     pub mixer_bridge: MixerBridge,
     pub sidecar_supervisor: SidecarSupervisor,
+    pub sample_registry: Arc<SampleRegistry>,
 }
 
 impl Default for Conductor {
@@ -24,6 +27,7 @@ impl Conductor {
             topology_manager: TopologyManager::new(),
             mixer_bridge: MixerBridge::new(),
             sidecar_supervisor: SidecarSupervisor::new(),
+            sample_registry: Arc::new(SampleRegistry::new()),
         }
     }
 
@@ -69,6 +73,15 @@ impl Conductor {
 
         self.sidecar_supervisor.supervise(&mut self.topology_manager);
 
+        self.handle_transfusion_registrations();
+
         self.drain_garbage();
+    }
+
+    fn handle_transfusion_registrations(&mut self) {
+        // Here the Conductor would check for RegisterCapture commands or
+        // poll processors to see if snapshots are ready.
+        // For simplicity in this demo, we'll let the AudioEngine handle the Pull/Register
+        // in a non-RT way if we have a shared reference to the registry.
     }
 }

@@ -3,6 +3,8 @@ pub mod test_kit;
 pub mod telemetry;
 pub mod error;
 
+use std::sync::Arc;
+
 #[derive(Debug, Clone, Copy)]
 pub struct AudioConfig {
     pub sample_rate: f32,
@@ -99,6 +101,15 @@ pub enum Command {
         step: u32,
         value: bool,
     },
+    // Transfusion-specific commands
+    RegisterCapture {
+        capture_node_idx: u32,
+        sample_id: u64,
+    },
+    AddSourceFromRegistry {
+        granular_node_idx: u32,
+        sample_id: u64,
+    },
 }
 
 #[repr(C)]
@@ -169,12 +180,19 @@ pub enum TopologyMutation {
         node_idx: u32,
         processor: Box<dyn AudioProcessor>,
     },
+    AddSource {
+        node_idx: u32,
+        buffer: Arc<Vec<f32>>,
+    },
 }
 
 /// Interface for processors to interact with the engine host (e.g., scheduling commands).
 pub trait Host: Send + Sync + 'static {
     /// Pushes a command to be executed by the engine at a specific timestamp.
     fn push_command(&self, timestamp_samples: u64, command: Command);
+
+    /// Requests the host to pull a snapshot from a processor and register it.
+    fn request_registration(&self, capture_node_idx: u32, sample_id: u64);
 }
 
 /// Shared execution context passed to processors during the audio block cycle.
@@ -295,7 +313,7 @@ pub trait ProcessorFactory: Send + Sync {
 /// The core trait for all audio processing nodes in the nullherz engine.
 pub trait AudioProcessor: Send {
     /// Executes audio processing for the given buffers.
-    /// MUST be real-time safe: no allocations, no locks, no blocking syscalls.
+    /// MUST be real_time safe: no allocations, no locks, no blocking syscalls.
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext);
 
     /// Executes audio processing, potentially utilizing a parallel executor.
@@ -334,6 +352,9 @@ pub trait AudioProcessor: Send {
     /// Allows safe downcasting to concrete processor types.
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+
+    /// Pulls a snapshot from the processor (e.g. for registration in SampleRegistry).
+    fn pull_snapshot(&mut self) -> Option<Arc<Vec<f32>>> { None }
 }
 
 pub trait CommandProducer: Send + Sync + dyn_clone::DynClone {
