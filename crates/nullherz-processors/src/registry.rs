@@ -32,6 +32,12 @@ impl ProcessorRegistry {
         self.register_with_type(ProcessorTypeId::SUMMING, Box::new(SummingFactory));
         self.register_with_type(ProcessorTypeId::SPECTRAL, Box::new(SpectralFactory));
         self.register_with_type(ProcessorTypeId::WAVETABLE, Box::new(WavetableFactory));
+        self.register_with_type(ProcessorTypeId::MODULATION, Box::new(ModulationFactory));
+        self.register_with_type(ProcessorTypeId::SEQUENCER, Box::new(SequencerFactory));
+        self.register_with_type(ProcessorTypeId::ENVELOPE_FOLLOWER, Box::new(EnvelopeFollowerFactory));
+        self.register_with_type(ProcessorTypeId::GRANULAR, Box::new(GranularFactory));
+        self.register_with_type(ProcessorTypeId::SPECTRAL_MORPH, Box::new(SpectralMorphFactory));
+        self.register_with_type(ProcessorTypeId::CAPTURE, Box::new(CaptureFactory));
     }
 
     pub fn register(&mut self, id: u32, factory: Box<dyn ProcessorFactory>) {

@@ -30,6 +30,12 @@ impl ProcessorTypeId {
     pub const SUMMING: Self = Self(30);
     pub const SPECTRAL: Self = Self(40);
     pub const WAVETABLE: Self = Self(50);
+    pub const MODULATION: Self = Self(60);
+    pub const SEQUENCER: Self = Self(70);
+    pub const ENVELOPE_FOLLOWER: Self = Self(80);
+    pub const GRANULAR: Self = Self(90);
+    pub const SPECTRAL_MORPH: Self = Self(100);
+    pub const CAPTURE: Self = Self(110);
 }
 
 impl From<u32> for ProcessorTypeId {

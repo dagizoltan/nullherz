@@ -15,7 +15,7 @@ impl TelemetryProvider for MockTelemetryProvider {
 #[tokio::test]
 async fn test_gateway_connection_handling() {
     let provider = Arc::new(MockTelemetryProvider { call_count: AtomicUsize::new(0) });
-    let (cmd_prod, _, _, _) = connect_to_engine().unwrap();
+    let (_cmd_prod, _, _, _) = connect_to_engine().unwrap();
 
     // We can't easily test handle_connection because it requires a TcpStream
     // and tokio_tungstenite handshake.

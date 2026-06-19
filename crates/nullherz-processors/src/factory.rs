@@ -6,6 +6,9 @@ use crate::summing::*;
 use crate::wavetable::*;
 use crate::spectral::*;
 use crate::sampler::*;
+use crate::modulation::*;
+use crate::sequencer::*;
+use crate::transfusion::*;
 
 pub struct GainFactory;
 impl ProcessorFactory for GainFactory {
@@ -64,4 +67,52 @@ impl ProcessorFactory for WavetableFactory {
         Some(Box::new(WavetableProcessor::new(sample_rate)))
     }
     fn name(&self) -> &'static str { "Wavetable" }
+}
+
+pub struct ModulationFactory;
+impl ProcessorFactory for ModulationFactory {
+    fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(ModulationProcessor::new(0, 0, 1.0, 0.0)))
+    }
+    fn name(&self) -> &'static str { "Modulation" }
+}
+
+pub struct SequencerFactory;
+impl ProcessorFactory for SequencerFactory {
+    fn create_processor(&self, _node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(SequencerProcessor::new(sample_rate, 120.0)))
+    }
+    fn name(&self) -> &'static str { "Sequencer" }
+}
+
+pub struct EnvelopeFollowerFactory;
+impl ProcessorFactory for EnvelopeFollowerFactory {
+    fn create_processor(&self, _node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(EnvelopeFollowerProcessor::new(sample_rate)))
+    }
+    fn name(&self) -> &'static str { "EnvelopeFollower" }
+}
+
+pub struct GranularFactory;
+impl ProcessorFactory for GranularFactory {
+    fn create_processor(&self, _node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(GranularProcessor::new(sample_rate)))
+    }
+    fn name(&self) -> &'static str { "Granular" }
+}
+
+pub struct SpectralMorphFactory;
+impl ProcessorFactory for SpectralMorphFactory {
+    fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(SpectralMorphProcessor::new(1024)))
+    }
+    fn name(&self) -> &'static str { "SpectralMorph" }
+}
+
+pub struct CaptureFactory;
+impl ProcessorFactory for CaptureFactory {
+    fn create_processor(&self, _node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(CaptureProcessor::new(sample_rate as usize * 2))) // 2 seconds
+    }
+    fn name(&self) -> &'static str { "Capture" }
 }

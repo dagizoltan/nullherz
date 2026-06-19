@@ -6,7 +6,7 @@ pub mod simd_vec;
 
 pub use filters::*;
 pub use oscillators::*;
-pub use spectral::*;
+pub use spectral::{SpectralPipeline, SpectralProcessor};
 pub use util::*;
 
 pub trait DspKernel: Send + Clone {
