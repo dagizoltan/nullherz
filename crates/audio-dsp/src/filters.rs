@@ -447,7 +447,7 @@ mod tests {
             inputs[0].as_ptr(), inputs[1].as_ptr(), inputs[2].as_ptr(), inputs[3].as_ptr(),
             inputs[4].as_ptr(), inputs[5].as_ptr(), inputs[6].as_ptr(), inputs[7].as_ptr(),
         ];
-        let mut out_ptrs: [*mut f32; 8] = [
+        let out_ptrs: [*mut f32; 8] = [
             outputs_simd[0].as_mut_ptr(), outputs_simd[1].as_mut_ptr(), outputs_simd[2].as_mut_ptr(), outputs_simd[3].as_mut_ptr(),
             outputs_simd[4].as_mut_ptr(), outputs_simd[5].as_mut_ptr(), outputs_simd[6].as_mut_ptr(), outputs_simd[7].as_mut_ptr(),
         ];

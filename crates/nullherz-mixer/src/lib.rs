@@ -138,7 +138,7 @@ mod tests {
 
         for cmd in &commands {
             match cmd {
-                Command::AddNode { node_idx, .. } => {
+                Command::AddNode { node_idx: _, .. } => {
                     // All nodes should eventually have inputs/outputs or be sources
                 }
                 Command::UpdateEdge { node_idx, .. } => {

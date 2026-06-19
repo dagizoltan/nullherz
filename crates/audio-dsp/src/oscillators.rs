@@ -221,7 +221,7 @@ mod tests {
         let fm_ptrs: [*const f32; 8] = [fm_data.as_ptr(); 8];
         let pm_ptrs: [*const f32; 8] = [pm_data.as_ptr(); 8];
         let mut outputs_simd = vec![vec![0.0f32; len]; 8];
-        let mut out_ptrs: [*mut f32; 8] = [
+        let out_ptrs: [*mut f32; 8] = [
             outputs_simd[0].as_mut_ptr(), outputs_simd[1].as_mut_ptr(), outputs_simd[2].as_mut_ptr(), outputs_simd[3].as_mut_ptr(),
             outputs_simd[4].as_mut_ptr(), outputs_simd[5].as_mut_ptr(), outputs_simd[6].as_mut_ptr(), outputs_simd[7].as_mut_ptr(),
         ];

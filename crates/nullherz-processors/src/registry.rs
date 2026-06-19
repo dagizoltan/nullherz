@@ -32,6 +32,8 @@ impl ProcessorRegistry {
         self.register_with_type(ProcessorTypeId::SUMMING, Box::new(SummingFactory));
         self.register_with_type(ProcessorTypeId::SPECTRAL, Box::new(SpectralFactory));
         self.register_with_type(ProcessorTypeId::WAVETABLE, Box::new(WavetableFactory));
+        self.register_with_type(ProcessorTypeId::MODULATION, Box::new(ModulationFactory));
+        self.register_with_type(ProcessorTypeId::SEQUENCER, Box::new(SequencerFactory));
     }
 
     pub fn register(&mut self, id: u32, factory: Box<dyn ProcessorFactory>) {

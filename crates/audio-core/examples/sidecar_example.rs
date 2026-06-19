@@ -11,7 +11,7 @@ fn main() {
     let graph = ProcessorGraph::new();
 
     // 1. Setup SHM for sidecar simulation
-    let name = "example";
+    let _name = "example";
     let cmd_shm_name = "/nullherz_cmd_example";
     let (cmd_layout, _) = ShmRingBuffer::<Command>::layout(64);
     let shm_cmd = SharedMemory::create(cmd_shm_name, cmd_layout.size()).unwrap();
