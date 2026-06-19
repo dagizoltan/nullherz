@@ -44,7 +44,7 @@ impl AudioProcessor for SpectralMorphProcessor {
         let mut dummy_out = [0.0; 256];
         let dummy_out_slice = &mut dummy_out[..modulator.len().min(256)];
 
-        self.modulator_pipeline.process(modulator, dummy_out_slice, |re: &mut [f32], im: &mut [f32], _n, _window, _fft| {
+        self.modulator_pipeline.process(modulator, dummy_out_slice, |re, im, _n, _window, _fft| {
             unsafe {
                 std::ptr::copy_nonoverlapping(re.as_ptr(), modulator_re_ptr, n);
                 std::ptr::copy_nonoverlapping(im.as_ptr(), modulator_im_ptr, n);

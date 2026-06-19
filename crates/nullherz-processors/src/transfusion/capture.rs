@@ -49,7 +49,10 @@ impl AudioProcessor for CaptureProcessor {
         match command {
             nullherz_traits::Command::Stop => {
                 let mut captured = vec![0.0; self.buffer.len()];
+                // Correct chronological order: oldest data starts at write_ptr
                 let (first, second) = self.buffer.split_at(self.write_ptr);
+                // second is [write_ptr..len] (oldest)
+                // first is [0..write_ptr] (newest)
                 captured[..second.len()].copy_from_slice(second);
                 captured[second.len()..].copy_from_slice(first);
                 self._captured_arc = Some(Arc::new(captured));

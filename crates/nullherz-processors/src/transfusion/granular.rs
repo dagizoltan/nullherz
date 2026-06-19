@@ -35,7 +35,7 @@ impl GranularProcessor {
         (self.rng_state >> 32) as f32 / 4294967296.0
     }
 
-    pub fn _add_source(&mut self, source: Arc<Vec<f32>>) {
+    pub fn add_source(&mut self, source: Arc<Vec<f32>>) {
         self.source_pool.push(source);
     }
 }

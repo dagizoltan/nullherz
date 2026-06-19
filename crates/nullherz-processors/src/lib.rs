@@ -11,10 +11,7 @@ pub mod spectral;
 pub mod dsp_kernel_processor;
 pub mod modulation;
 pub mod sequencer;
-pub mod envelope_follower;
-pub mod granular;
-pub mod spectral_morph;
-pub mod capture;
+pub mod transfusion;
 #[cfg(feature = "test-utils")]
 pub mod test_kit;
 
@@ -30,8 +27,5 @@ pub use wavetable::WavetableProcessor;
 pub use spectral::SpectralProcessor;
 pub use modulation::ModulationProcessor;
 pub use sequencer::SequencerProcessor;
-pub use envelope_follower::EnvelopeFollowerProcessor;
-pub use granular::GranularProcessor;
-pub use spectral_morph::SpectralMorphProcessor;
-pub use capture::CaptureProcessor;
+pub use transfusion::*;
 pub use registry::ProcessorRegistry;

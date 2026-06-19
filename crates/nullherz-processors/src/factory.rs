@@ -8,10 +8,7 @@ use crate::spectral::*;
 use crate::sampler::*;
 use crate::modulation::*;
 use crate::sequencer::*;
-use crate::envelope_follower::*;
-use crate::granular::*;
-use crate::spectral_morph::*;
-use crate::capture::*;
+use crate::transfusion::*;
 
 pub struct GainFactory;
 impl ProcessorFactory for GainFactory {

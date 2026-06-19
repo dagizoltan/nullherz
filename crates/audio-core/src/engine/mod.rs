@@ -2,6 +2,7 @@ pub mod metrics;
 pub mod command_dispatcher;
 pub mod graph_manager;
 pub mod builder;
+pub mod resource_recycler;
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -13,6 +14,7 @@ use crate::rt_logging::RtLogger;
 use self::metrics::EngineMetrics;
 use self::command_dispatcher::CommandDispatcher;
 use self::graph_manager::GraphManager;
+use self::resource_recycler::ResourceRecycler;
 
 pub struct EngineHost {
     command_producer: Box<dyn nullherz_traits::CommandProducer>,
@@ -38,8 +40,7 @@ pub struct AudioEngine {
     midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
     bundle_consumer: Option<Consumer<Vec<nullherz_traits::Command>>>,
     topology_consumer: Option<Consumer<nullherz_traits::TopologyMutation>>,
-    bundle_garbage_producer: Option<Producer<Vec<nullherz_traits::Command>>>,
-    bundle_overflow_producer: Option<Producer<Vec<nullherz_traits::Command>>>,
+    resource_recycler: ResourceRecycler,
     telemetry_producer: Box<dyn nullherz_traits::TelemetryProducer>,
     sample_counter: u64,
     xrun_count: std::sync::Arc<std::sync::atomic::AtomicU32>,
@@ -76,8 +77,7 @@ impl AudioEngine {
             bundle_consumer,
             topology_consumer,
             graph_manager: GraphManager::new(initial_graph, garbage_producer, overflow_garbage_producer),
-            bundle_garbage_producer,
-            bundle_overflow_producer,
+            resource_recycler: ResourceRecycler::new(bundle_garbage_producer, bundle_overflow_producer),
             telemetry_producer,
             sample_counter: 0,
             xrun_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
@@ -128,8 +128,7 @@ impl AudioEngine {
             &mut self.bundle_consumer,
             &mut self.topology_consumer,
             &mut self.midi_consumer,
-            &mut self.bundle_garbage_producer,
-            &mut self.bundle_overflow_producer,
+            &mut self.resource_recycler,
             &self.metrics,
             &self.health_signal,
         );
@@ -166,8 +165,7 @@ impl AudioEngine {
         bundle_consumer: &mut Option<Consumer<Vec<nullherz_traits::Command>>>,
         topology_consumer: &mut Option<Consumer<nullherz_traits::TopologyMutation>>,
         midi_consumer: &mut Option<Consumer<ipc_layer::MidiEvent>>,
-        bundle_garbage_producer: &mut Option<Producer<Vec<nullherz_traits::Command>>>,
-        bundle_overflow_producer: &mut Option<Producer<Vec<nullherz_traits::Command>>>,
+        resource_recycler: &mut ResourceRecycler,
         metrics: &EngineMetrics,
         health_signal: &Arc<std::sync::atomic::AtomicBool>,
     ) {
@@ -176,13 +174,7 @@ impl AudioEngine {
                 for cmd in &bundle {
                     CommandDispatcher::handle_single_command(transport, graph, cmd);
                 }
-                Self::recycle_bundle_static(
-                    bundle,
-                    bundle_garbage_producer,
-                    bundle_overflow_producer,
-                    metrics,
-                    health_signal,
-                );
+                resource_recycler.recycle_bundle(bundle, metrics, health_signal);
             }
         }
 
@@ -200,35 +192,6 @@ impl AudioEngine {
         }
     }
 
-    fn recycle_bundle_static(
-        bundle: Vec<nullherz_traits::Command>,
-        garbage_producer: &mut Option<Producer<Vec<nullherz_traits::Command>>>,
-        overflow_producer: &mut Option<Producer<Vec<nullherz_traits::Command>>>,
-        metrics: &EngineMetrics,
-        health_signal: &Arc<std::sync::atomic::AtomicBool>,
-    ) {
-        if let Some(prod) = garbage_producer {
-            if let Err(b) = prod.push(bundle) {
-                if let Some(overflow) = overflow_producer {
-                    if let Err(leak) = overflow.push(b) {
-                        metrics.report_resource_leak(health_signal);
-                        std::mem::forget(leak);
-                    }
-                } else {
-                    metrics.report_resource_leak(health_signal);
-                    std::mem::forget(b);
-                }
-            }
-        } else if let Some(overflow) = overflow_producer {
-            if let Err(b) = overflow.push(bundle) {
-                metrics.report_resource_leak(health_signal);
-                std::mem::forget(b);
-            }
-        } else {
-            metrics.report_resource_leak(health_signal);
-            std::mem::forget(bundle);
-        }
-    }
 
     #[allow(clippy::too_many_arguments)]
     fn execute_processing_kernel_static(
@@ -326,8 +289,12 @@ impl AudioEngine {
         sb: nullherz_traits::SubBlock,
     ) {
         Self::process_sub_block_static(graph, transport, host, pool, inputs, outputs, sb.offset, sb.len, sb.is_last);
+        Self::advance_transport_static(transport, sb.len);
+    }
+
+    fn advance_transport_static(transport: &mut nullherz_traits::Transport, num_samples: usize) {
         if transport.is_playing {
-            let beats = (sb.len as f64 / transport.sample_rate as f64) * (transport.bpm as f64 / 60.0);
+            let beats = (num_samples as f64 / transport.sample_rate as f64) * (transport.bpm as f64 / 60.0);
             transport.beat_position += beats;
         }
     }
