@@ -110,4 +110,31 @@ impl AudioProcessor for GranularProcessor {
             _ => {}
         }
     }
+
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        let mut parameters = [nullherz_traits::ParameterMetadata {
+            id: 0,
+            name: [0; 32],
+            min: 0.1,
+            max: 100.0,
+            default: 10.0,
+        }; 16];
+
+        let name_density = b"Density";
+        parameters[0].id = 0;
+        parameters[0].name[..name_density.len()].copy_from_slice(name_density);
+
+        let name_duration = b"Duration";
+        parameters[1].id = 1;
+        parameters[1].name[..name_duration.len()].copy_from_slice(name_duration);
+        parameters[1].min = 1.0;
+        parameters[1].max = 1000.0;
+        parameters[1].default = 100.0;
+
+        Some(nullherz_traits::ProcessorMetadata {
+            processor_id: 0,
+            num_parameters: 2,
+            parameters,
+        })
+    }
 }

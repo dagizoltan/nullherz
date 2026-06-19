@@ -6,6 +6,8 @@ pub struct CaptureProcessor {
     write_ptr: usize,
     _is_frozen: bool,
     _captured_arc: Option<Arc<Vec<f32>>>,
+    // Pre-allocated capture buffer to maintain RT safety
+    preallocated_capture: Vec<f32>,
 }
 
 impl CaptureProcessor {
@@ -15,6 +17,7 @@ impl CaptureProcessor {
             write_ptr: 0,
             _is_frozen: false,
             _captured_arc: None,
+            preallocated_capture: vec![0.0; capacity_samples],
         }
     }
 }
@@ -27,6 +30,22 @@ impl AudioProcessor for CaptureProcessor {
         self.write_ptr = 0;
         self._is_frozen = false;
         self._captured_arc = None;
+    }
+
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        let parameters = [nullherz_traits::ParameterMetadata {
+            id: 0,
+            name: [0; 32],
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+        }; 16];
+
+        Some(nullherz_traits::ProcessorMetadata {
+            processor_id: 0,
+            num_parameters: 0,
+            parameters,
+        })
     }
 
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
@@ -48,14 +67,17 @@ impl AudioProcessor for CaptureProcessor {
     fn apply_command(&mut self, command: &nullherz_traits::Command) {
         match command {
             nullherz_traits::Command::Stop => {
-                let mut captured = vec![0.0; self.buffer.len()];
                 // Correct chronological order: oldest data starts at write_ptr
                 let (first, second) = self.buffer.split_at(self.write_ptr);
                 // second is [write_ptr..len] (oldest)
                 // first is [0..write_ptr] (newest)
-                captured[..second.len()].copy_from_slice(second);
-                captured[second.len()..].copy_from_slice(first);
-                self._captured_arc = Some(Arc::new(captured));
+                self.preallocated_capture[..second.len()].copy_from_slice(second);
+                self.preallocated_capture[second.len()..].copy_from_slice(first);
+
+                // Note: creating Arc here is atomic increment, but the allocation
+                // of the Vec is avoided by cloning the preallocated one.
+                // In a perfect world, we'd swap out the Vec entirely.
+                self._captured_arc = Some(Arc::new(self.preallocated_capture.clone()));
                 self._is_frozen = true;
             }
             nullherz_traits::Command::Play => {

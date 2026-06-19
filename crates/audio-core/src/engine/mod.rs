@@ -3,18 +3,20 @@ pub mod command_dispatcher;
 pub mod graph_manager;
 pub mod builder;
 pub mod resource_recycler;
+pub mod input_handler;
+pub mod telemetry_finalizer;
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use ipc_layer::{Producer, Consumer};
 use nullherz_traits::TimestampedCommand;
 use crate::processors::{AudioProcessor, TaskPool, ProcessContext};
-use nullherz_traits::telemetry::Telemetry;
 use crate::rt_logging::RtLogger;
 use self::metrics::EngineMetrics;
 use self::command_dispatcher::CommandDispatcher;
 use self::graph_manager::GraphManager;
 use self::resource_recycler::ResourceRecycler;
+use self::input_handler::EngineInputHandler;
+use self::telemetry_finalizer::TelemetryFinalizer;
 
 pub struct EngineHost {
     command_producer: Box<dyn nullherz_traits::CommandProducer>,
@@ -122,7 +124,7 @@ impl AudioEngine {
         let graph = unsafe { self.graph_manager.swap_if_pending(&self.metrics, &self.health_signal) };
         let host_ref = self.host.as_ref().map(|h| h as &dyn nullherz_traits::Host);
 
-        Self::handle_async_inputs_static(
+        EngineInputHandler::handle_async_inputs(
             graph,
             &mut self.transport,
             &mut self.bundle_consumer,
@@ -147,7 +149,7 @@ impl AudioEngine {
             num_samples
         );
 
-        Self::finalize_block_telemetry_static(
+        TelemetryFinalizer::finalize_block_telemetry(
             graph,
             &self.metrics,
             &mut self.telemetry_producer,
@@ -156,40 +158,6 @@ impl AudioEngine {
             start_cycles,
             num_samples
         );
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn handle_async_inputs_static(
-        graph: &mut dyn AudioProcessor,
-        transport: &mut nullherz_traits::Transport,
-        bundle_consumer: &mut Option<Consumer<Vec<nullherz_traits::Command>>>,
-        topology_consumer: &mut Option<Consumer<nullherz_traits::TopologyMutation>>,
-        midi_consumer: &mut Option<Consumer<ipc_layer::MidiEvent>>,
-        resource_recycler: &mut ResourceRecycler,
-        metrics: &EngineMetrics,
-        health_signal: &Arc<std::sync::atomic::AtomicBool>,
-    ) {
-        if let Some(cons) = bundle_consumer {
-            while let Some(bundle) = cons.pop() {
-                for cmd in &bundle {
-                    CommandDispatcher::handle_single_command(transport, graph, cmd);
-                }
-                resource_recycler.recycle_bundle(bundle, metrics, health_signal);
-            }
-        }
-
-        if let Some(cons) = topology_consumer {
-            let mut topo_processed = 0;
-            while let Some(topo_mut) = cons.pop() {
-                graph.apply_topology_mutation(topo_mut);
-                topo_processed += 1;
-                if topo_processed >= 16 { break; }
-            }
-        }
-
-        if let Some(cons) = midi_consumer {
-            while let Some(event) = cons.pop() { graph.apply_midi(event); }
-        }
     }
 
 
@@ -243,41 +211,6 @@ impl AudioEngine {
         }
     }
 
-    fn finalize_block_telemetry_static(
-        graph: &mut dyn AudioProcessor,
-        metrics: &EngineMetrics,
-        telemetry_producer: &mut Box<dyn nullherz_traits::TelemetryProducer>,
-        xrun_count_atomic: &Arc<std::sync::atomic::AtomicU32>,
-        sample_counter: &mut u64,
-        start_cycles: u64,
-        num_samples: usize,
-    ) {
-        let mut node_times = [0u64; 64];
-        let mut peak_levels = [0.0f32; 64];
-        let mut node_times_cycles = [0u64; 64];
-
-        graph.collect_telemetry(&mut node_times_cycles, &mut peak_levels);
-
-        let ns_per_cycle = f64::from_bits(metrics.ns_per_cycle.load(Ordering::Relaxed));
-        nullherz_traits::telemetry::TelemetryProcessor::collect_node_times(
-            unsafe { std::mem::transmute(&node_times_cycles) },
-            ns_per_cycle,
-            &mut node_times
-        );
-
-        let elapsed_cycles = crate::get_cycles().wrapping_sub(start_cycles);
-        let current_ns = (elapsed_cycles as f64 * ns_per_cycle) as u64;
-        let peak = metrics.update_peak(current_ns, *sample_counter, num_samples);
-
-        let block_end_sample = *sample_counter + num_samples as u64;
-        *sample_counter = block_end_sample;
-
-        let _ = telemetry_producer.push_telemetry(Telemetry {
-            process_time_ns: current_ns, peak_process_time_ns: peak, sample_counter: *sample_counter,
-            xrun_count: xrun_count_atomic.load(Ordering::Relaxed), resource_leaks: metrics.resource_leaks.load(Ordering::Relaxed),
-            node_times_ns: node_times, peak_levels,
-        });
-    }
 
     fn process_sub_block_and_advance_transport(
         graph: &mut dyn AudioProcessor,

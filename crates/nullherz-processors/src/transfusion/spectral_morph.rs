@@ -28,6 +28,22 @@ impl AudioProcessor for SpectralMorphProcessor {
     fn reset(&mut self) {
     }
 
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        let parameters = [nullherz_traits::ParameterMetadata {
+            id: 0,
+            name: [0; 32],
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+        }; 16];
+
+        Some(nullherz_traits::ProcessorMetadata {
+            processor_id: 0,
+            num_parameters: 0,
+            parameters,
+        })
+    }
+
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         if inputs.len() < 2 || outputs.is_empty() { return; }
 
@@ -41,8 +57,8 @@ impl AudioProcessor for SpectralMorphProcessor {
         let n = self.pipeline.fft.size;
 
         // Modulator Analysis
-        let mut dummy_out = [0.0; 256];
-        let dummy_out_slice = &mut dummy_out[..modulator.len().min(256)];
+        let mut dummy_out = [0.0; ipc_layer::MAX_BLOCK_SIZE];
+        let dummy_out_slice = &mut dummy_out[..modulator.len().min(ipc_layer::MAX_BLOCK_SIZE)];
 
         self.modulator_pipeline.process(modulator, dummy_out_slice, |re, im, _n, _window, _fft| {
             unsafe {
