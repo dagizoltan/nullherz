@@ -62,40 +62,40 @@ impl AudioProcessor for GranularProcessor {
             return;
         }
 
+        self.render_buffer[..num_samples].fill(0.0);
+        let render_slice = &mut self.render_buffer[..num_samples];
+
+        let mut trigger_offsets = [num_samples; MAX_GRAINS];
         let mut samples_processed = 0;
+
         while samples_processed < num_samples {
             if self.next_grain_samples <= 0.0 {
-                let r1 = self.next_rand();
-                let r2 = self.next_rand();
-                let r3 = self.next_rand();
-
-                // Trigger new grain
-                if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
+                if let Some((idx, voice)) = self.voices.iter_mut().enumerate().find(|(_, v)| !v.is_active) {
+                    let r1 = self.next_rand();
+                    let r2 = self.next_rand();
+                    let r3 = self.next_rand();
                     let source_idx = (r1 * self.source_pool.len() as f32) as usize % self.source_pool.len();
                     let source = self.source_pool[source_idx].clone();
-
-                    let source_len = source.len() as f32;
-                    let start_pos = r2 * (source_len - self.sample_rate * 0.5).max(0.0);
-                    let playback_rate = 0.5 + r3; // 0.5 to 1.5
-
-                    voice.trigger(source, playback_rate, 1.0);
+                    let start_pos = r2 * (source.len() as f32 - self.sample_rate * 0.5).max(0.0);
+                    voice.trigger(source, 0.5 + r3, 1.0);
                     voice.play_head = start_pos;
+                    trigger_offsets[idx] = samples_processed;
                 }
-
-                let interval_sec = 1.0 / self.density.max(0.1);
-                self.next_grain_samples = interval_sec * self.sample_rate;
+                self.next_grain_samples = (1.0 / self.density.max(0.1)) * self.sample_rate;
             }
-
             let chunk = (num_samples - samples_processed).min(self.next_grain_samples.ceil() as usize);
             self.next_grain_samples -= chunk as f32;
             samples_processed += chunk;
         }
 
-        self.render_buffer[..num_samples].fill(0.0);
-        let render_slice = &mut self.render_buffer[..num_samples];
-
-        for voice in self.voices.iter_mut() {
-            voice.process_block(render_slice);
+        for (idx, voice) in self.voices.iter_mut().enumerate() {
+            if !voice.is_active { continue; }
+            let offset = trigger_offsets[idx];
+            if offset < num_samples {
+                voice.process_block(&mut render_slice[offset..]);
+            } else {
+                voice.process_block(render_slice);
+            }
         }
 
         for output in outputs.iter_mut() {

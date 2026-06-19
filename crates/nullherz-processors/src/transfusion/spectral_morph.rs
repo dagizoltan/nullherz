@@ -7,6 +7,7 @@ pub struct SpectralMorphProcessor {
     modulator_re: AlignedBuffer,
     modulator_im: AlignedBuffer,
     has_modulator_spectrum: bool,
+    dummy_out: [f32; ipc_layer::MAX_BLOCK_SIZE],
 }
 
 impl SpectralMorphProcessor {
@@ -17,6 +18,7 @@ impl SpectralMorphProcessor {
             modulator_re: AlignedBuffer::new(fft_size),
             modulator_im: AlignedBuffer::new(fft_size),
             has_modulator_spectrum: false,
+            dummy_out: [0.0; ipc_layer::MAX_BLOCK_SIZE],
         }
     }
 }
@@ -57,8 +59,7 @@ impl AudioProcessor for SpectralMorphProcessor {
         let n = self.pipeline.fft.size;
 
         // Modulator Analysis
-        let mut dummy_out = [0.0; ipc_layer::MAX_BLOCK_SIZE];
-        let dummy_out_slice = &mut dummy_out[..modulator.len().min(ipc_layer::MAX_BLOCK_SIZE)];
+        let dummy_out_slice = &mut self.dummy_out[..modulator.len().min(ipc_layer::MAX_BLOCK_SIZE)];
 
         self.modulator_pipeline.process(modulator, dummy_out_slice, |re, im, _n, _window, _fft| {
             unsafe {
