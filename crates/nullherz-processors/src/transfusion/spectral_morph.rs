@@ -92,37 +92,32 @@ impl AudioProcessor for SpectralMorphProcessor {
         let modulator = inputs[1];
         let output = &mut outputs[0];
 
-        let _n = self.pipeline.fft.size;
-
-        // Extract modulator envelope
-        let dummy_out_slice = &mut self.dummy_out[..modulator.len().min(ipc_layer::MAX_BLOCK_SIZE)];
-
         let mut has_spectrum = false;
         let smoothness = self.smoothness;
 
         {
             let env = &mut self.modulator_env;
-            self.modulator_pipeline.process(modulator, dummy_out_slice, |re, im, n, _window, _fft| {
-                // Simple Moving Average spectral envelope
+            self.modulator_pipeline.process(modulator, &mut self.dummy_out[..modulator.len().min(ipc_layer::MAX_BLOCK_SIZE)], |re, im, n, _window, _fft| {
+                // Optimized sliding window average for spectral envelope
                 let window_size = (smoothness * (n as f32 / 8.0)) as usize;
                 let window_size = window_size.max(1);
+
                 for i in 0..n {
-                    let mut sum = 0.0;
-                    let mut count = 0;
                     let start = i.saturating_sub(window_size);
                     let end = (i + window_size).min(n);
+                    let count = end - start;
+
+                    let mut local_sum = 0.0;
                     for j in start..end {
-                        sum += (re[j] * re[j] + im[j] * im[j]).sqrt();
-                        count += 1;
+                        local_sum += (re[j] * re[j] + im[j] * im[j]).sqrt();
                     }
-                    env[i] = sum / count as f32;
+                    env[i] = local_sum / count as f32;
                 }
                 has_spectrum = true;
             });
         }
         self.has_modulator_spectrum = has_spectrum;
 
-        // Carrier Processing
         let env_ref = &self.modulator_env;
         let has_mod = self.has_modulator_spectrum;
         let morph = self.morph_amount;

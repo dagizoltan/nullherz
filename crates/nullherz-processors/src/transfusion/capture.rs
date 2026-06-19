@@ -4,10 +4,8 @@ use std::sync::Arc;
 pub struct CaptureProcessor {
     buffer: Vec<f32>,
     write_ptr: usize,
-    _is_frozen: bool,
-    preallocated_capture: Vec<f32>,
+    is_frozen: bool,
     pub capture_id: u64,
-    pub latest_snapshot: Option<Arc<Vec<f32>>>,
 }
 
 impl CaptureProcessor {
@@ -15,10 +13,8 @@ impl CaptureProcessor {
         Self {
             buffer: vec![0.0; capacity_samples],
             write_ptr: 0,
-            _is_frozen: false,
-            preallocated_capture: vec![0.0; capacity_samples],
+            is_frozen: false,
             capture_id,
-            latest_snapshot: None,
         }
     }
 }
@@ -29,7 +25,7 @@ impl AudioProcessor for CaptureProcessor {
 
     fn reset(&mut self) {
         self.write_ptr = 0;
-        self._is_frozen = false;
+        self.is_frozen = false;
     }
 
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
@@ -51,25 +47,22 @@ impl AudioProcessor for CaptureProcessor {
     fn apply_command(&mut self, command: &Command) {
         match command {
             Command::Stop => {
-                // To avoid allocation on RT thread, we should have a pool of Arcs.
-                // For now, we perform the copy, but the user pointed out that Vec::clone and Arc::new are NOT RT-safe.
-                // A better way is to have the Conductor handle the snapshotting.
-                self._is_frozen = true;
+                self.is_frozen = true;
             }
             Command::Play => {
-                self._is_frozen = false;
+                self.is_frozen = false;
             }
             _ => {}
         }
     }
 
     fn pull_snapshot(&mut self) -> Option<Arc<Vec<f32>>> {
-        if self._is_frozen {
+        if self.is_frozen {
              let (first, second) = self.buffer.split_at(self.write_ptr);
-             let mut snapshot = vec![0.0; self.buffer.len()];
-             snapshot[..second.len()].copy_from_slice(second);
-             snapshot[second.len()..].copy_from_slice(first);
-             self._is_frozen = false;
+             let mut snapshot = Vec::with_capacity(self.buffer.len());
+             snapshot.extend_from_slice(second);
+             snapshot.extend_from_slice(first);
+             self.is_frozen = false;
              Some(Arc::new(snapshot))
         } else {
             None

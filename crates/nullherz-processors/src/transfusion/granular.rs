@@ -1,8 +1,9 @@
 use std::sync::Arc;
-use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata};
-use audio_dsp::SamplerVoice;
+use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata, TopologyMutation};
+use audio_dsp::{SamplerVoice, InterpolationType};
 
 const MAX_GRAINS: usize = 32;
+const MAX_SOURCES: usize = 16;
 const WINDOW_LUT_SIZE: usize = 1024;
 
 #[repr(u32)]
@@ -17,7 +18,8 @@ pub struct GranularProcessor {
     voices: Vec<SamplerVoice>,
     voice_ages: [u32; MAX_GRAINS],
     voice_durations: [u32; MAX_GRAINS],
-    pub source_pool: Vec<Arc<Vec<f32>>>,
+    pub source_pool: [Option<Arc<Vec<f32>>>; MAX_SOURCES],
+    pub source_count: usize,
     render_buffer: [f32; ipc_layer::MAX_BLOCK_SIZE],
     grain_buffer: [f32; ipc_layer::MAX_BLOCK_SIZE],
 
@@ -27,6 +29,7 @@ pub struct GranularProcessor {
     pos_jitter: f32,
     pitch_jitter: f32,
     window_shape: WindowShape,
+    interpolation: InterpolationType,
 
     next_grain_samples: f32,
     sample_rate: f32,
@@ -47,7 +50,8 @@ impl GranularProcessor {
             voices,
             voice_ages: [0; MAX_GRAINS],
             voice_durations: [0; MAX_GRAINS],
-            source_pool: Vec::new(),
+            source_pool: std::array::from_fn(|_| None),
+            source_count: 0,
             render_buffer: [0.0; ipc_layer::MAX_BLOCK_SIZE],
             grain_buffer: [0.0; ipc_layer::MAX_BLOCK_SIZE],
             density: 20.0,
@@ -55,6 +59,7 @@ impl GranularProcessor {
             pos_jitter: 0.1,
             pitch_jitter: 0.05,
             window_shape: WindowShape::Hann,
+            interpolation: InterpolationType::Lagrange,
             next_grain_samples: 0.0,
             sample_rate,
             rng_state: 12345,
@@ -68,7 +73,15 @@ impl GranularProcessor {
     }
 
     pub fn add_source(&mut self, source: Arc<Vec<f32>>) {
-        self.source_pool.push(source);
+        if self.source_count < MAX_SOURCES {
+            self.source_pool[self.source_count] = Some(source);
+            self.source_count += 1;
+        } else {
+            // FIFO replacement if full? Or just ignore.
+            // For Transfusion, we'll shift and replace the oldest.
+            self.source_pool.rotate_left(1);
+            self.source_pool[MAX_SOURCES - 1] = Some(source);
+        }
     }
 
     fn get_window(&self, phase: f32) -> f32 {
@@ -101,7 +114,7 @@ impl AudioProcessor for GranularProcessor {
         let num_samples = outputs[0].len();
         let num_samples = num_samples.min(ipc_layer::MAX_BLOCK_SIZE);
 
-        if self.source_pool.is_empty() {
+        if self.source_count == 0 {
             for output in outputs.iter_mut() {
                 output.fill(0.0);
             }
@@ -120,8 +133,8 @@ impl AudioProcessor for GranularProcessor {
                     let r_pos = self.next_rand();
                     let r_pitch = self.next_rand();
 
-                    let source_idx = (r_src * self.source_pool.len() as f32) as usize % self.source_pool.len();
-                    let source = self.source_pool[source_idx].clone();
+                    let source_idx = (r_src * self.source_count as f32) as usize % self.source_count;
+                    let source = self.source_pool[source_idx].as_ref().unwrap().clone();
 
                     let base_pos = r_pos * (source.len() as f32);
                     let pos_jitter_offset = (self.next_rand() * 2.0 - 1.0) * self.pos_jitter * self.sample_rate;
@@ -134,6 +147,7 @@ impl AudioProcessor for GranularProcessor {
 
                     self.voices[idx].trigger(source, playback_rate, 1.0);
                     self.voices[idx].play_head = start_pos;
+                    self.voices[idx].interpolation = self.interpolation;
                     self.voice_ages[idx] = 0;
                     self.voice_durations[idx] = duration_samples;
                 }
@@ -190,6 +204,13 @@ impl AudioProcessor for GranularProcessor {
                     _ => WindowShape::Hann,
                 };
             }
+            5 => {
+                self.interpolation = match value as u32 {
+                    0 => InterpolationType::Linear,
+                    1 => InterpolationType::Lagrange,
+                    _ => InterpolationType::Lagrange,
+                };
+            }
             _ => {}
         }
     }
@@ -215,6 +236,7 @@ impl AudioProcessor for GranularProcessor {
             (2, "Pos Jitter", 0.0, 1.0, 0.1),
             (3, "Pitch Jitter", 0.0, 1.0, 0.05),
             (4, "Window", 0.0, 2.0, 0.0),
+            (5, "Quality", 0.0, 1.0, 1.0),
         ];
 
         for (i, (id, name, min, max, default)) in names.iter().enumerate() {

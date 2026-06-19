@@ -238,7 +238,13 @@ mod tests {
     }
 }
 
-/// A high-performance sampler voice with Lagrange interpolation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InterpolationType {
+    Linear = 0,
+    Lagrange = 1,
+}
+
+/// A high-performance sampler voice with selectable interpolation.
 /// Shared ownership of the sample buffer is managed via Arc to prevent dangling pointers.
 #[derive(Debug, Clone)]
 pub struct SamplerVoice {
@@ -247,6 +253,7 @@ pub struct SamplerVoice {
     pub playback_rate: f32,
     pub is_active: bool,
     pub velocity: f32,
+    pub interpolation: InterpolationType,
 }
 
 impl Default for SamplerVoice {
@@ -263,6 +270,7 @@ impl SamplerVoice {
             playback_rate: 1.0,
             is_active: false,
             velocity: 0.0,
+            interpolation: InterpolationType::Lagrange,
         }
     }
 
@@ -284,21 +292,32 @@ impl SamplerVoice {
             return 0.0;
         }
 
-        // 4-point Lagrange interpolation
-        let x = self.play_head - idx as f32;
-        let p0 = *buffer.get(idx.saturating_sub(1)).unwrap_or(&0.0);
-        let p1 = buffer[idx];
-        let p2 = buffer[idx + 1];
-        let p3 = buffer[idx + 2];
+        let sample = match self.interpolation {
+            InterpolationType::Linear => {
+                let x = self.play_head - idx as f32;
+                let p1 = buffer[idx];
+                let p2 = buffer[idx + 1];
+                p1 + (p2 - p1) * x
+            }
+            InterpolationType::Lagrange => {
+                // 4-point Lagrange interpolation
+                let x = self.play_head - idx as f32;
+                let p0 = *buffer.get(idx.saturating_sub(1)).unwrap_or(&0.0);
+                let p1 = buffer[idx];
+                let p2 = buffer[idx + 1];
+                let p3 = buffer[idx + 2];
 
-        let c1 = p1;
-        let c2 = -0.5 * p0 + 0.5 * p2;
-        let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
-        let c4 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+                let c1 = p1;
+                let c2 = -0.5 * p0 + 0.5 * p2;
+                let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+                let c4 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
 
-        let sample = (((c4 * x + c3) * x + c2) * x + c1) * self.velocity;
+                ((c4 * x + c3) * x + c2) * x + c1
+            }
+        };
+
         self.play_head += self.playback_rate;
-        sample
+        sample * self.velocity
     }
 
     pub fn process_block(&mut self, output: &mut [f32]) {
@@ -312,18 +331,30 @@ impl SamplerVoice {
                 break;
             }
 
-            let x = self.play_head - idx as f32;
-            let p0 = *buffer.get(idx.saturating_sub(1)).unwrap_or(&0.0);
-            let p1 = buffer[idx];
-            let p2 = buffer[idx + 1];
-            let p3 = buffer[idx + 2];
+            let sample = match self.interpolation {
+                InterpolationType::Linear => {
+                    let x = self.play_head - idx as f32;
+                    let p1 = buffer[idx];
+                    let p2 = buffer[idx + 1];
+                    p1 + (p2 - p1) * x
+                }
+                InterpolationType::Lagrange => {
+                    let x = self.play_head - idx as f32;
+                    let p0 = *buffer.get(idx.saturating_sub(1)).unwrap_or(&0.0);
+                    let p1 = buffer[idx];
+                    let p2 = buffer[idx + 1];
+                    let p3 = buffer[idx + 2];
 
-            let c1 = p1;
-            let c2 = -0.5 * p0 + 0.5 * p2;
-            let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
-            let c4 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+                    let c1 = p1;
+                    let c2 = -0.5 * p0 + 0.5 * p2;
+                    let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+                    let c4 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
 
-            *sample_out += (((c4 * x + c3) * x + c2) * x + c1) * self.velocity;
+                    ((c4 * x + c3) * x + c2) * x + c1
+                }
+            };
+
+            *sample_out += sample * self.velocity;
             self.play_head += self.playback_rate;
         }
     }

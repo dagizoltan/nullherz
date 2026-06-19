@@ -22,8 +22,8 @@ use crate::processors::{AudioProcessor, TopologyMutation};
 
 /// The ProcessorGraph acts as a lightweight VM that executes a compiled graph topology.
 pub struct ProcessorGraph {
-    pub(crate) nodes: Box<[ProcessorNode; crate::MAX_NODES]>,
-    pub(crate) node_count: usize,
+    pub nodes: Box<[ProcessorNode; crate::MAX_NODES]>,
+    pub node_count: usize,
     pub(crate) buffer_pool: GraphBufferPool,
     pub(crate) topology_coordinator: TopologyCoordinator,
 

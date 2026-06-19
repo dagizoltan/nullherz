@@ -2,16 +2,18 @@ use crate::engine_coordinator::EngineCoordinator;
 use crate::topology_manager::TopologyManager;
 use crate::mixer_bridge::MixerBridge;
 use crate::sidecar_supervisor::SidecarSupervisor;
-use nullherz_traits::{Command, CommandProducer, telemetry::Telemetry};
+use nullherz_traits::{Command, CommandProducer, AudioProcessor, telemetry::Telemetry};
 use std::sync::Arc;
 use audio_core::engine::sample_registry::SampleRegistry;
+use audio_core::processors::ProcessorGraph;
+use nullherz_processors::transfusion::capture::CaptureProcessor;
 
 pub struct Conductor {
     pub engine_coordinator: EngineCoordinator,
     pub topology_manager: TopologyManager,
     pub mixer_bridge: MixerBridge,
-    pub sidecar_supervisor: SidecarSupervisor,
     pub sample_registry: Arc<SampleRegistry>,
+    pub sidecar_supervisor: SidecarSupervisor,
 }
 
 impl Default for Conductor {
@@ -26,8 +28,8 @@ impl Conductor {
             engine_coordinator: EngineCoordinator::new(),
             topology_manager: TopologyManager::new(),
             mixer_bridge: MixerBridge::new(),
-            sidecar_supervisor: SidecarSupervisor::new(),
             sample_registry: Arc::new(SampleRegistry::new()),
+            sidecar_supervisor: SidecarSupervisor::new(),
         }
     }
 
@@ -79,9 +81,22 @@ impl Conductor {
     }
 
     fn handle_transfusion_registrations(&mut self) {
-        // Here the Conductor would check for RegisterCapture commands or
-        // poll processors to see if snapshots are ready.
-        // For simplicity in this demo, we'll let the AudioEngine handle the Pull/Register
-        // in a non-RT way if we have a shared reference to the registry.
+        let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+        if let Some(ref engine) = *engine_lock {
+            let mut graph_ptr = engine.graph_manager.get_active_graph();
+            if let Some(processor_graph) = graph_ptr.as_any_mut().downcast_mut::<ProcessorGraph>() {
+                for i in 0..processor_graph.node_count {
+                    let node = &processor_graph.nodes[i];
+                    let processor_any = unsafe { (*node.processor.get()).as_any_mut() };
+                    if let Some(capture) = processor_any.downcast_mut::<CaptureProcessor>() {
+                        if let Some(snapshot) = capture.pull_snapshot() {
+                            let sample_id = capture.capture_id;
+                            self.sample_registry.register(sample_id, snapshot);
+                            eprintln!("Registered new transfusion source: ID={}", sample_id);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
