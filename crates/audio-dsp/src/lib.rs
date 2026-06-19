@@ -6,7 +6,7 @@ pub mod simd_vec;
 
 pub use filters::*;
 pub use oscillators::*;
-pub use spectral::{SpectralPipeline, SpectralProcessor};
+pub use spectral::{SpectralPipeline, SpectralProcessor, SpectralWindowShape};
 pub use util::*;
 
 pub trait DspKernel: Send + Clone {
@@ -16,6 +16,7 @@ pub trait DspKernel: Send + Clone {
 }
 
 /// A SIMD Summing Node that mixes up to 16 input buffers into one output.
+#[derive(Debug, Clone, Copy)]
 pub struct SummingNode {
     pub gain: f32,
 }
@@ -28,6 +29,10 @@ impl Default for SummingNode {
 
 impl SummingNode {
     pub fn new() -> Self { Self { gain: 1.0 } }
+
+    pub fn set_gain(&mut self, gain: f32) {
+        self.gain = gain;
+    }
 
     pub fn process_16_to_1(&self, inputs: &[&[f32]], output: &mut [f32]) {
         let len = output.len();
@@ -70,8 +75,9 @@ impl SummingNode {
 }
 
 /// A SIMD-optimized Crossfader.
+#[derive(Debug, Clone, Copy)]
 pub struct Crossfader {
-    position: f32, // 0.0 (A) to 1.0 (B)
+    pub position: f32, // 0.0 (A) to 1.0 (B)
 }
 
 impl Default for Crossfader {
@@ -113,6 +119,19 @@ impl Crossfader {
         while i < len {
             output[i] = input_a[i] * gain_a + input_b[i] * gain_b;
             i += 1;
+        }
+    }
+}
+
+impl DspKernel for Crossfader {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        if inputs.len() < 2 || outputs.is_empty() { return; }
+        self.process_block_simd(inputs[0], inputs[1], outputs[0]);
+    }
+
+    fn set_parameter(&mut self, id: u32, value: f32, _ramp_samples: u32) {
+        if id == 0 {
+            self.set_position(value);
         }
     }
 }

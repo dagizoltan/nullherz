@@ -447,6 +447,7 @@ dependencies = [
  "ipc-layer",
  "libc",
  "nullherz-backends",
+ "nullherz-dna",
  "nullherz-processors",
  "nullherz-traits",
  "proptest",
@@ -2211,6 +2212,7 @@ dependencies = [
  "fx-runtime",
  "ipc-layer",
  "nullherz-backends",
+ "nullherz-dna",
  "nullherz-gateway",
  "nullherz-mixer",
  "nullherz-processors",
@@ -2218,6 +2220,10 @@ dependencies = [
  "serde_json",
  "tokio",
 ]
+
+[[package]]
+name = "nullherz-dna"
+version = "0.1.0"
 
 [[package]]
 name = "nullherz-dummy"

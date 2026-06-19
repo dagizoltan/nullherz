@@ -1,12 +1,16 @@
-use nullherz_traits::{AudioProcessor, ProcessContext};
-use audio_dsp::{SpectralPipeline, AlignedBuffer};
+use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata};
+use audio_dsp::{SpectralPipeline, AlignedBuffer, SpectralWindowShape};
 
 pub struct SpectralMorphProcessor {
     pipeline: SpectralPipeline,
     modulator_pipeline: SpectralPipeline,
-    modulator_re: AlignedBuffer,
-    modulator_im: AlignedBuffer,
+    modulator_env: AlignedBuffer,
     has_modulator_spectrum: bool,
+    dummy_out: [f32; ipc_layer::MAX_BLOCK_SIZE],
+
+    // Parameters
+    morph_amount: f32,
+    smoothness: f32,
 }
 
 impl SpectralMorphProcessor {
@@ -14,9 +18,11 @@ impl SpectralMorphProcessor {
         Self {
             pipeline: SpectralPipeline::new(fft_size),
             modulator_pipeline: SpectralPipeline::new(fft_size),
-            modulator_re: AlignedBuffer::new(fft_size),
-            modulator_im: AlignedBuffer::new(fft_size),
+            modulator_env: AlignedBuffer::new(fft_size),
             has_modulator_spectrum: false,
+            dummy_out: [0.0; ipc_layer::MAX_BLOCK_SIZE],
+            morph_amount: 1.0,
+            smoothness: 0.5,
         }
     }
 }
@@ -26,6 +32,57 @@ impl AudioProcessor for SpectralMorphProcessor {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
     fn reset(&mut self) {
+        self.has_modulator_spectrum = false;
+    }
+
+    fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
+        match param_id {
+            0 => self.morph_amount = value.clamp(0.0, 1.0),
+            1 => self.smoothness = value.clamp(0.0, 1.0),
+            2 => {
+                let shape = match value as u32 {
+                    0 => SpectralWindowShape::Hann,
+                    1 => SpectralWindowShape::Hamming,
+                    2 => SpectralWindowShape::Blackman,
+                    3 => SpectralWindowShape::Rectangular,
+                    _ => SpectralWindowShape::Hann,
+                };
+                self.pipeline.update_window(shape);
+                self.modulator_pipeline.update_window(shape);
+            }
+            _ => {}
+        }
+    }
+
+    fn metadata(&self) -> Option<ProcessorMetadata> {
+        let mut parameters = [ParameterMetadata {
+            id: 0,
+            name: [0; 32],
+            min: 0.0,
+            max: 1.0,
+            default: 1.0,
+        }; 16];
+
+        let names = [
+            (0, "Morph", 0.0, 1.0, 1.0),
+            (1, "Smoothness", 0.0, 1.0, 0.5),
+            (2, "Window", 0.0, 3.0, 0.0),
+        ];
+
+        for (i, (id, name, min, max, default)) in names.iter().enumerate() {
+            parameters[i].id = *id;
+            parameters[i].min = *min;
+            parameters[i].max = *max;
+            parameters[i].default = *default;
+            let name_bytes = name.as_bytes();
+            parameters[i].name[..name_bytes.len()].copy_from_slice(name_bytes);
+        }
+
+        Some(ProcessorMetadata {
+            processor_id: 0,
+            num_parameters: names.len() as u32,
+            parameters,
+        })
     }
 
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
@@ -35,35 +92,43 @@ impl AudioProcessor for SpectralMorphProcessor {
         let modulator = inputs[1];
         let output = &mut outputs[0];
 
-        let modulator_re_ptr = self.modulator_re.as_mut_ptr();
-        let modulator_im_ptr = self.modulator_im.as_mut_ptr();
-        let has_mod_ptr = &mut self.has_modulator_spectrum as *mut bool;
-        let n = self.pipeline.fft.size;
+        let mut has_spectrum = false;
+        let smoothness = self.smoothness;
 
-        // Modulator Analysis
-        let mut dummy_out = [0.0; 256];
-        let dummy_out_slice = &mut dummy_out[..modulator.len().min(256)];
+        {
+            let env = &mut self.modulator_env;
+            self.modulator_pipeline.process(modulator, &mut self.dummy_out[..modulator.len().min(ipc_layer::MAX_BLOCK_SIZE)], |re, im, n, _window, _fft| {
+                // Optimized sliding window average for spectral envelope
+                let window_size = (smoothness * (n as f32 / 8.0)) as usize;
+                let window_size = window_size.max(1);
 
-        self.modulator_pipeline.process(modulator, dummy_out_slice, |re, im, _n, _window, _fft| {
-            unsafe {
-                std::ptr::copy_nonoverlapping(re.as_ptr(), modulator_re_ptr, n);
-                std::ptr::copy_nonoverlapping(im.as_ptr(), modulator_im_ptr, n);
-                *has_mod_ptr = true;
-            }
-        });
+                for i in 0..n {
+                    let start = i.saturating_sub(window_size);
+                    let end = (i + window_size).min(n);
+                    let count = end - start;
 
-        // Carrier Processing
-        let modulator_re_ref = &self.modulator_re;
-        let modulator_im_ref = &self.modulator_im;
-        let has_mod_ref = &self.has_modulator_spectrum;
+                    let mut local_sum = 0.0;
+                    for j in start..end {
+                        local_sum += (re[j] * re[j] + im[j] * im[j]).sqrt();
+                    }
+                    env[i] = local_sum / count as f32;
+                }
+                has_spectrum = true;
+            });
+        }
+        self.has_modulator_spectrum = has_spectrum;
+
+        let env_ref = &self.modulator_env;
+        let has_mod = self.has_modulator_spectrum;
+        let morph = self.morph_amount;
 
         self.pipeline.process(carrier, output, |re, im, n, _window, _fft| {
-            if *has_mod_ref {
-                // Magnitude cross-multiply (classic vocoder)
+            if has_mod {
                 for i in 0..n {
-                    let m_mag = (modulator_re_ref[i] * modulator_re_ref[i] + modulator_im_ref[i] * modulator_im_ref[i]).sqrt();
-                    re[i] *= m_mag;
-                    im[i] *= m_mag;
+                    let m_mag = env_ref[i];
+                    let scale = 1.0 + (m_mag - 1.0) * morph;
+                    re[i] *= scale;
+                    im[i] *= scale;
                 }
             }
         });

@@ -1,6 +1,10 @@
 pub mod timeline;
 pub mod backend;
 pub mod orchestrator;
+pub mod engine_coordinator;
+pub mod topology_manager;
+pub mod mixer_bridge;
+pub mod sidecar_supervisor;
 
 pub use orchestrator::Conductor;
 pub use timeline::Timeline;
@@ -21,7 +25,7 @@ mod tests {
 
         conductor.apply_mixer_commands(commands);
 
-        let mut engine_lock = conductor.backend_manager.engine_handle.lock().unwrap();
+        let mut engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
         let engine = engine_lock.as_mut().unwrap();
 
         let mut outputs = [[0.0f32; 128], [0.0f32; 128]];

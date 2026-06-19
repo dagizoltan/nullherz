@@ -28,4 +28,29 @@ impl AudioProcessor for EnvelopeFollowerProcessor {
     fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
         self.kernel.set_parameter(param_id, value, ramp_duration_samples);
     }
+
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        let mut parameters = [nullherz_traits::ParameterMetadata {
+            id: 0,
+            name: [0; 32],
+            min: 0.1,
+            max: 1000.0,
+            default: 10.0,
+        }; 16];
+
+        let name_attack = b"Attack";
+        parameters[0].id = 0;
+        parameters[0].name[..name_attack.len()].copy_from_slice(name_attack);
+
+        let name_release = b"Release";
+        parameters[1].id = 1;
+        parameters[1].name[..name_release.len()].copy_from_slice(name_release);
+        parameters[1].default = 100.0;
+
+        Some(nullherz_traits::ProcessorMetadata {
+            processor_id: 0, // Should be passed in constructor if we want global tracking
+            num_parameters: 2,
+            parameters,
+        })
+    }
 }

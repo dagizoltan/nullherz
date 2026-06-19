@@ -34,4 +34,23 @@ impl AudioProcessor for GainProcessor {
     fn apply_command(&mut self, command: &ProcessorCommand) {
         self.inner.apply_command(command);
     }
+
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        let mut parameters = [nullherz_traits::ParameterMetadata {
+            id: 0,
+            name: [0; 32],
+            min: 0.0,
+            max: 2.0,
+            default: 1.0,
+        }; 16];
+
+        let name = b"Gain";
+        parameters[0].name[..name.len()].copy_from_slice(name);
+
+        Some(nullherz_traits::ProcessorMetadata {
+            processor_id: self.inner.id,
+            num_parameters: 1,
+            parameters,
+        })
+    }
 }

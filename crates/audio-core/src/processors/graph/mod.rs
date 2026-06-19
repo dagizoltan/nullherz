@@ -22,13 +22,14 @@ use crate::processors::{AudioProcessor, TopologyMutation};
 
 /// The ProcessorGraph acts as a lightweight VM that executes a compiled graph topology.
 pub struct ProcessorGraph {
-    pub(crate) nodes: Box<[ProcessorNode; crate::MAX_NODES]>,
-    pub(crate) node_count: usize,
+    pub nodes: Box<[ProcessorNode; crate::MAX_NODES]>,
+    pub node_count: usize,
     pub(crate) buffer_pool: GraphBufferPool,
     pub(crate) topology_coordinator: TopologyCoordinator,
 
     pub(crate) telemetry: Arc<GraphTelemetry>,
     pub(crate) garbage_producer: Option<Box<dyn nullherz_traits::GarbageProducer>>,
+    pub(crate) pending_mutations: Vec<TopologyMutation>,
 }
 
 impl ProcessorGraph {
@@ -54,6 +55,7 @@ impl ProcessorGraph {
             topology_coordinator: TopologyCoordinator::new(topo),
             telemetry: Arc::new(GraphTelemetry::default()),
             garbage_producer: None,
+            pending_mutations: Vec::with_capacity(16),
         }
     }
 
@@ -73,6 +75,60 @@ impl ProcessorGraph {
     pub fn commit_graph(&mut self) {
         if let Err(msg) = self.topology_coordinator.commit() {
             eprintln!("CRITICAL: Refusing to commit hazardous topology: {}", msg);
+        }
+    }
+
+    fn apply_mutation_internal(&mut self, mutation: TopologyMutation) {
+        match mutation {
+            TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
+                let n_idx = node_idx as usize;
+                let i_idx = input_idx as usize;
+                if n_idx < self.node_count && i_idx < 16 {
+                    let topo = self.inactive_topology_mut();
+                    if i_idx < topo.routing[n_idx].input_count {
+                        topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
+                    }
+                }
+            }
+            TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
+                let n_idx = node_idx as usize;
+                let o_idx = output_idx as usize;
+                if n_idx < self.node_count && o_idx < 16 {
+                    let topo = self.inactive_topology_mut();
+                    if o_idx < topo.routing[n_idx].output_count {
+                        topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
+                    }
+                }
+            }
+            TopologyMutation::SwapProcessor { node_idx, mut processor } => {
+                let n_idx = node_idx as usize;
+                if n_idx < self.node_count {
+                    let node = &self.nodes[n_idx];
+                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
+                    let old_proc = unsafe { std::ptr::replace(node.processor.get(), processor) };
+                    if let Some(ref mut prod) = self.garbage_producer {
+                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
+                    } else { std::mem::forget(old_proc); }
+                }
+            }
+            TopologyMutation::AddNode { node_idx: _, mut processor } => {
+                if self.node_count < crate::MAX_NODES {
+                    let idx = self.node_count;
+                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
+                    unsafe { *self.nodes[idx].processor.get() = processor; }
+                    self.node_count += 1;
+                    let topo = self.inactive_topology_mut();
+                    topo.routing[idx].input_count = 0;
+                    topo.routing[idx].output_count = 0;
+                    topo.node_count += 1;
+                }
+            }
+            TopologyMutation::AddSource { node_idx, buffer } => {
+                let idx = node_idx as usize;
+                if idx < self.node_count {
+                    unsafe { (*self.nodes[idx].processor.get()).apply_topology_mutation(TopologyMutation::AddSource { node_idx, buffer }); }
+                }
+            }
         }
     }
 
@@ -184,62 +240,27 @@ impl AudioProcessor for ProcessorGraph {
 
     fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
         if self.topology_coordinator.has_active_crossfades() {
-             // Defer structural mutations if crossfades are active to avoid signal discontinuity
-             // In a full implementation, we might queue these. For now, we drop with a log.
-             eprintln!("WARN: Dropping topology mutation during active crossfade");
+             self.pending_mutations.push(mutation);
              return;
         }
 
-        match mutation {
-            TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
-                let n_idx = node_idx as usize;
-                let i_idx = input_idx as usize;
-                if n_idx < self.node_count && i_idx < 16 {
-                    let topo = self.inactive_topology_mut();
-                    if i_idx < topo.routing[n_idx].input_count {
-                        topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
-                    }
-                }
-            }
-            TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
-                let n_idx = node_idx as usize;
-                let o_idx = output_idx as usize;
-                if n_idx < self.node_count && o_idx < 16 {
-                    let topo = self.inactive_topology_mut();
-                    if o_idx < topo.routing[n_idx].output_count {
-                        topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
-                    }
-                }
-            }
-            TopologyMutation::SwapProcessor { node_idx, mut processor } => {
-                let n_idx = node_idx as usize;
-                if n_idx < self.node_count {
-                    let node = &self.nodes[n_idx];
-                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
-                    let old_proc = unsafe { std::ptr::replace(node.processor.get(), processor) };
-                    if let Some(ref mut prod) = self.garbage_producer {
-                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
-                    } else { std::mem::forget(old_proc); }
-                }
-            }
-            TopologyMutation::AddNode { node_idx: _, mut processor } => {
-                if self.node_count < crate::MAX_NODES {
-                    let idx = self.node_count;
-                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
-                    unsafe { *self.nodes[idx].processor.get() = processor; }
-                    self.node_count += 1;
-                    let topo = self.inactive_topology_mut();
-                    topo.routing[idx].input_count = 0;
-                    topo.routing[idx].output_count = 0;
-                    topo.node_count += 1;
-                }
-            }
-        }
+        self.apply_mutation_internal(mutation);
     }
+
 
     fn apply_command(&mut self, command: &nullherz_traits::Command) {
         match command {
-            nullherz_traits::Command::CommitTopology => { self.calculate_stages(); self.commit_graph(); }
+            nullherz_traits::Command::CommitTopology => {
+                self.calculate_stages();
+                self.commit_graph();
+
+                // Drain pending mutations if crossfades finished
+                if !self.topology_coordinator.has_active_crossfades() {
+                    while let Some(m) = self.pending_mutations.pop() {
+                        self.apply_mutation_internal(m);
+                    }
+                }
+            }
             _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }
         }
     }

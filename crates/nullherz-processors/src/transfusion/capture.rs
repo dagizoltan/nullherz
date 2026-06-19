@@ -1,20 +1,20 @@
+use nullherz_traits::{AudioProcessor, ProcessContext, Command, TopologyMutation};
 use std::sync::Arc;
-use nullherz_traits::{AudioProcessor, ProcessContext};
 
 pub struct CaptureProcessor {
     buffer: Vec<f32>,
     write_ptr: usize,
-    _is_frozen: bool,
-    _captured_arc: Option<Arc<Vec<f32>>>,
+    is_frozen: bool,
+    pub capture_id: u64,
 }
 
 impl CaptureProcessor {
-    pub fn new(capacity_samples: usize) -> Self {
+    pub fn new(capacity_samples: usize, capture_id: u64) -> Self {
         Self {
             buffer: vec![0.0; capacity_samples],
             write_ptr: 0,
-            _is_frozen: false,
-            _captured_arc: None,
+            is_frozen: false,
+            capture_id,
         }
     }
 }
@@ -25,8 +25,7 @@ impl AudioProcessor for CaptureProcessor {
 
     fn reset(&mut self) {
         self.write_ptr = 0;
-        self._is_frozen = false;
-        self._captured_arc = None;
+        self.is_frozen = false;
     }
 
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
@@ -45,23 +44,44 @@ impl AudioProcessor for CaptureProcessor {
         }
     }
 
-    fn apply_command(&mut self, command: &nullherz_traits::Command) {
+    fn apply_command(&mut self, command: &Command) {
         match command {
-            nullherz_traits::Command::Stop => {
-                let mut captured = vec![0.0; self.buffer.len()];
-                // Correct chronological order: oldest data starts at write_ptr
-                let (first, second) = self.buffer.split_at(self.write_ptr);
-                // second is [write_ptr..len] (oldest)
-                // first is [0..write_ptr] (newest)
-                captured[..second.len()].copy_from_slice(second);
-                captured[second.len()..].copy_from_slice(first);
-                self._captured_arc = Some(Arc::new(captured));
-                self._is_frozen = true;
+            Command::Stop => {
+                self.is_frozen = true;
             }
-            nullherz_traits::Command::Play => {
-                self._is_frozen = false;
+            Command::Play => {
+                self.is_frozen = false;
             }
             _ => {}
         }
+    }
+
+    fn pull_snapshot(&mut self) -> Option<Arc<Vec<f32>>> {
+        if self.is_frozen {
+             let (first, second) = self.buffer.split_at(self.write_ptr);
+             let mut snapshot = Vec::with_capacity(self.buffer.len());
+             snapshot.extend_from_slice(second);
+             snapshot.extend_from_slice(first);
+             self.is_frozen = false;
+             Some(Arc::new(snapshot))
+        } else {
+            None
+        }
+    }
+
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        let parameters = [nullherz_traits::ParameterMetadata {
+            id: 0,
+            name: [0; 32],
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+        }; 16];
+
+        Some(nullherz_traits::ProcessorMetadata {
+            processor_id: self.capture_id,
+            num_parameters: 0,
+            parameters,
+        })
     }
 }

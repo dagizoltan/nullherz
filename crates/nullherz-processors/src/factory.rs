@@ -111,8 +111,8 @@ impl ProcessorFactory for SpectralMorphFactory {
 
 pub struct CaptureFactory;
 impl ProcessorFactory for CaptureFactory {
-    fn create_processor(&self, _node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        Some(Box::new(CaptureProcessor::new(sample_rate as usize * 2))) // 2 seconds
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(CaptureProcessor::new(sample_rate as usize * 2, node_idx as u64))) // 2 seconds
     }
     fn name(&self) -> &'static str { "Capture" }
 }

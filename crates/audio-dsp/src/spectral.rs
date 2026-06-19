@@ -1,6 +1,15 @@
 use crate::util::AlignedBuffer;
 use crate::SimdFft;
 
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SpectralWindowShape {
+    Hann = 0,
+    Hamming = 1,
+    Blackman = 2,
+    Rectangular = 3,
+}
+
 /// A reusable Spectral Pipeline handling FFT, Windowing, and Overlap-Add.
 pub struct SpectralPipeline {
     pub fft: SimdFft,
@@ -13,28 +22,52 @@ pub struct SpectralPipeline {
     pub(crate) in_ptr: usize,
     pub(crate) out_ptr: usize,
     pub(crate) out_mask: usize,
+    pub(crate) window_shape: SpectralWindowShape,
 }
 
 impl SpectralPipeline {
     pub fn new(fft_size: usize) -> Self {
         assert!(fft_size.is_power_of_two());
-        let mut window = AlignedBuffer::new(fft_size);
-        for i in 0..fft_size {
-            window[i] = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (fft_size - 1) as f32).cos());
-        }
-        let hop_size = fft_size / 2;
-        let out_buffer_size = (fft_size + hop_size).next_power_of_two();
-        Self {
+        let mut pipeline = Self {
             fft: SimdFft::new(fft_size),
             in_buffer: AlignedBuffer::new(fft_size),
-            out_buffer: AlignedBuffer::new(out_buffer_size),
+            out_buffer: AlignedBuffer::new((fft_size + fft_size / 2).next_power_of_two()),
             scratch_re: AlignedBuffer::new(fft_size),
             scratch_im: AlignedBuffer::new(fft_size),
-            window,
-            hop_size,
+            window: AlignedBuffer::new(fft_size),
+            hop_size: fft_size / 2,
             in_ptr: 0,
             out_ptr: 0,
-            out_mask: out_buffer_size - 1,
+            out_mask: (fft_size + fft_size / 2).next_power_of_two() - 1,
+            window_shape: SpectralWindowShape::Hann,
+        };
+        pipeline.update_window(SpectralWindowShape::Hann);
+        pipeline
+    }
+
+    pub fn update_window(&mut self, shape: SpectralWindowShape) {
+        self.window_shape = shape;
+        let n = self.fft.size;
+        match shape {
+            SpectralWindowShape::Hann => {
+                for i in 0..n {
+                    self.window[i] = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (n - 1) as f32).cos());
+                }
+            }
+            SpectralWindowShape::Hamming => {
+                for i in 0..n {
+                    self.window[i] = 0.54 - 0.46 * (2.0 * std::f32::consts::PI * i as f32 / (n - 1) as f32).cos();
+                }
+            }
+            SpectralWindowShape::Blackman => {
+                for i in 0..n {
+                    self.window[i] = 0.42 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / (n - 1) as f32).cos()
+                        + 0.08 * (4.0 * std::f32::consts::PI * i as f32 / (n - 1) as f32).cos();
+                }
+            }
+            SpectralWindowShape::Rectangular => {
+                self.window.fill(1.0);
+            }
         }
     }
 
