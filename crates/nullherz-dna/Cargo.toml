@@ -1,0 +1,7 @@
+[package]
+name = "nullherz-dna"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# No heavy dependencies needed for the registry core

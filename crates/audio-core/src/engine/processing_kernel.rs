@@ -1,16 +1,17 @@
-use nullherz_traits::{AudioProcessor, TimestampedCommand, SubBlockIterator, SubBlock, Transport, Host, ParallelExecutor};
+use nullherz_traits::{AudioProcessor, TimestampedCommand, SubBlockIterator, SubBlock, Transport, Host, ParallelExecutor, ProcessingKernel, CommandConsumer};
 use crate::engine::command_dispatcher::CommandDispatcher;
 
-pub struct ProcessingKernel;
+pub struct StandardKernel;
 
-impl ProcessingKernel {
+impl ProcessingKernel for StandardKernel {
     #[allow(clippy::too_many_arguments)]
-    pub fn execute(
+    fn execute(
+        &mut self,
         graph: &mut dyn AudioProcessor,
         transport: &mut Transport,
         host: Option<&dyn Host>,
         pool: &mut Option<Box<dyn ParallelExecutor>>,
-        command_consumer: &mut Box<dyn nullherz_traits::CommandConsumer>,
+        command_consumer: &mut Box<dyn CommandConsumer>,
         pending_command: &mut Option<TimestampedCommand>,
         sample_counter: u64,
         inputs: &[&[f32]],
@@ -56,7 +57,9 @@ impl ProcessingKernel {
             }
         }
     }
+}
 
+impl StandardKernel {
     fn process_sub_block_and_advance_transport(
         graph: &mut dyn AudioProcessor,
         transport: &mut Transport,

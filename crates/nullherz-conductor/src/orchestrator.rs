@@ -4,7 +4,7 @@ use crate::mixer_bridge::MixerBridge;
 use crate::sidecar_supervisor::SidecarSupervisor;
 use nullherz_traits::{Command, CommandProducer, AudioProcessor, telemetry::Telemetry};
 use std::sync::Arc;
-use audio_core::engine::sample_registry::SampleRegistry;
+use nullherz_dna::SampleRegistry;
 use audio_core::processors::ProcessorGraph;
 use nullherz_processors::transfusion::capture::CaptureProcessor;
 

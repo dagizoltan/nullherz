@@ -4,7 +4,7 @@ use nullherz_traits::{Command, TopologyMutation, AudioProcessor};
 use crate::engine::command_dispatcher::CommandDispatcher;
 use crate::engine::resource_recycler::ResourceRecycler;
 use crate::engine::metrics::EngineMetrics;
-use crate::engine::sample_registry::SampleRegistry;
+use nullherz_dna::SampleRegistry;
 use std::sync::atomic::AtomicBool;
 
 pub struct EngineInputHandler {}
@@ -55,12 +55,9 @@ impl EngineInputHandler {
     ) {
         match cmd {
             Command::RegisterCapture { .. } => {
-                // Registration is now led by Conductor polling.
-                // We forward the command to the graph to set the 'is_frozen' flag.
                 graph.apply_command(cmd);
             }
             Command::AddSourceFromRegistry { granular_node_idx, sample_id } => {
-                // RT-safe Read from registry
                 if let Some(sample) = sample_registry.get(*sample_id) {
                     graph.apply_topology_mutation(TopologyMutation::AddSource {
                         node_idx: *granular_node_idx,

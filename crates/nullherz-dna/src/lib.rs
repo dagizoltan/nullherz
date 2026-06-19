@@ -38,7 +38,6 @@ impl SampleRegistry {
 
     /// Retrieves a sample buffer by ID.
     /// Real-time safe if no writer is active.
-    /// For true RT-safety, we'd use a triple-buffered map or a lock-free map.
     pub fn get(&self, id: u64) -> Option<SampleBuffer> {
         if let Ok(samples) = self.samples.read() {
             samples.get(&id).cloned()

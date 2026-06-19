@@ -313,7 +313,7 @@ pub trait ProcessorFactory: Send + Sync {
 /// The core trait for all audio processing nodes in the nullherz engine.
 pub trait AudioProcessor: Send {
     /// Executes audio processing for the given buffers.
-    /// MUST be real_time safe: no allocations, no locks, no blocking syscalls.
+    /// MUST be real-time safe: no allocations, no locks, no blocking syscalls.
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext);
 
     /// Executes audio processing, potentially utilizing a parallel executor.
@@ -369,4 +369,21 @@ pub trait CommandConsumer: Send {
 
 pub trait TelemetryProducer: Send {
     fn push_telemetry(&mut self, telemetry: crate::telemetry::Telemetry) -> Result<(), crate::telemetry::Telemetry>;
+}
+
+pub trait ProcessingKernel: Send {
+    #[allow(clippy::too_many_arguments)]
+    fn execute(
+        &mut self,
+        graph: &mut dyn AudioProcessor,
+        transport: &mut Transport,
+        host: Option<&dyn Host>,
+        pool: &mut Option<Box<dyn ParallelExecutor>>,
+        command_consumer: &mut Box<dyn CommandConsumer>,
+        pending_command: &mut Option<TimestampedCommand>,
+        sample_counter: u64,
+        inputs: &[&[f32]],
+        outputs: &mut [&mut [f32]],
+        num_samples: usize,
+    );
 }

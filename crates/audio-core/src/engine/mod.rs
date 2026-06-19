@@ -6,21 +6,19 @@ pub mod metrics;
 pub mod processing_kernel;
 pub mod resource_recycler;
 pub mod telemetry_finalizer;
-pub mod sample_registry;
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use ipc_layer::{Producer, Consumer};
-use nullherz_traits::TimestampedCommand;
+use nullherz_traits::{TimestampedCommand, ProcessingKernel};
 use crate::processors::{AudioProcessor, TaskPool};
 use crate::rt_logging::RtLogger;
 use self::metrics::EngineMetrics;
 use self::graph_manager::GraphManager;
-use self::processing_kernel::ProcessingKernel;
+use self::processing_kernel::StandardKernel;
 use self::input_handler::EngineInputHandler;
 use self::resource_recycler::ResourceRecycler;
 use self::telemetry_finalizer::TelemetryFinalizer;
-use self::sample_registry::SampleRegistry;
+use nullherz_dna::SampleRegistry;
 
 pub struct EngineHost {
     command_producer: Box<dyn nullherz_traits::CommandProducer>,
@@ -64,6 +62,7 @@ pub struct AudioEngine {
     pub graph_manager: GraphManager,
     pub resource_recycler: ResourceRecycler,
     pub sample_registry: Arc<SampleRegistry>,
+    pub kernel: Box<dyn ProcessingKernel>,
     pub host: Option<EngineHost>,
     pub pool: Option<Box<dyn nullherz_traits::ParallelExecutor>>,
     pub transport: nullherz_traits::Transport,
@@ -95,6 +94,7 @@ impl AudioEngine {
             graph_manager: GraphManager::new(initial_graph, garbage_producer, overflow_garbage_producer),
             resource_recycler: ResourceRecycler::new(bundle_garbage_producer, bundle_overflow_producer),
             sample_registry: Arc::new(SampleRegistry::new()),
+            kernel: Box::new(StandardKernel),
             telemetry_producer,
             sample_counter: 0,
             xrun_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
@@ -154,7 +154,7 @@ impl AudioEngine {
             &self.health_signal,
         );
 
-        ProcessingKernel::execute(
+        self.kernel.execute(
             graph,
             &mut self.transport,
             host_ref,
