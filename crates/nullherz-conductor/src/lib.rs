@@ -3,6 +3,7 @@ pub mod backend;
 pub mod orchestrator;
 pub mod engine_coordinator;
 pub mod topology_manager;
+pub mod transfusion_manager;
 pub mod mixer_bridge;
 pub mod sidecar_supervisor;
 

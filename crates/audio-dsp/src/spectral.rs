@@ -158,6 +158,15 @@ impl SpectralPipeline {
             }
         }
     }
+
+    pub fn reset(&mut self) {
+        self.in_buffer.fill(0.0);
+        self.out_buffer.fill(0.0);
+        self.scratch_re.fill(0.0);
+        self.scratch_im.fill(0.0);
+        self.in_ptr = 0;
+        self.out_ptr = 0;
+    }
 }
 
 /// A Spectral Processor for partitioned convolution.

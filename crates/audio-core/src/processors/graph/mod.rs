@@ -307,6 +307,26 @@ impl AudioProcessor for ProcessorGraph {
         }
     }
 
+    fn latency_samples(&self) -> usize {
+        // For a DAG, the total latency is the maximum latency along any path from input to output.
+        // For simplicity in this iteration, we'll sum the latency of nodes in the longest stage path.
+        // A more accurate version would traverse the graph edges.
+        let active_idx = self.topology_coordinator.active_idx();
+        let topo = &self.topology_coordinator.topologies[active_idx];
+        let mut total_latency = 0;
+
+        for s_idx in 0..topo.plan.num_stages {
+            let mut stage_max = 0;
+            for n_idx in &topo.plan.stages[s_idx][..topo.plan.stage_counts[s_idx]] {
+                let node = &self.nodes[*n_idx];
+                let lat = unsafe { (*node.processor.get()).latency_samples() };
+                if lat > stage_max { stage_max = lat; }
+            }
+            total_latency += stage_max;
+        }
+        total_latency
+    }
+
     fn pull_all_snapshots(&mut self, target: &mut Vec<(u64, Arc<Vec<f32>>)>) {
         for i in 0..self.node_count {
             let node = &self.nodes[i];

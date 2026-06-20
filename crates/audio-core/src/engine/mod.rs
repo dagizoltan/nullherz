@@ -45,6 +45,19 @@ impl nullherz_traits::Host for EngineHost {
 unsafe impl Send for AudioEngine {}
 unsafe impl Sync for AudioEngine {}
 
+pub struct EngineResources {
+    pub command_consumer: Box<dyn nullherz_traits::CommandConsumer>,
+    pub command_producer: Box<dyn nullherz_traits::CommandProducer>,
+    pub midi_consumer: Option<Box<dyn MidiConsumer>>,
+    pub bundle_consumer: Option<Box<dyn CommandBundleConsumer>>,
+    pub topology_consumer: Option<Box<dyn TopologyMutationConsumer>>,
+    pub garbage_producer: Producer<Box<dyn AudioProcessor>>,
+    pub overflow_garbage_producer: Option<Producer<Box<dyn AudioProcessor>>>,
+    pub bundle_garbage_producer: Option<Producer<Vec<nullherz_traits::Command>>>,
+    pub bundle_overflow_producer: Option<Producer<Vec<nullherz_traits::Command>>>,
+    pub telemetry_producer: Box<dyn nullherz_traits::TelemetryProducer>,
+}
+
 pub struct AudioEngine {
     command_consumer: Box<dyn nullherz_traits::CommandConsumer>,
     #[allow(dead_code)]
@@ -91,32 +104,31 @@ impl nullherz_traits::RenderingEngine for AudioEngine {
 }
 
 impl AudioEngine {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        command_consumer: Box<dyn nullherz_traits::CommandConsumer>,
-        command_producer: Box<dyn nullherz_traits::CommandProducer>,
-        midi_consumer: Option<Box<dyn MidiConsumer>>,
-        bundle_consumer: Option<Box<dyn CommandBundleConsumer>>,
-        topology_consumer: Option<Box<dyn TopologyMutationConsumer>>,
-        garbage_producer: Producer<Box<dyn AudioProcessor>>,
-        overflow_garbage_producer: Option<Producer<Box<dyn AudioProcessor>>>,
-        bundle_garbage_producer: Option<Producer<Vec<nullherz_traits::Command>>>,
-        bundle_overflow_producer: Option<Producer<Vec<nullherz_traits::Command>>>,
-        telemetry_producer: Box<dyn nullherz_traits::TelemetryProducer>,
+        resources: EngineResources,
         initial_graph: Box<dyn AudioProcessor>,
         logger: Arc<RtLogger>,
     ) -> Self {
+        let command_producer = dyn_clone::clone_box(&*resources.command_producer);
         Self {
-            command_consumer,
             command_producer: dyn_clone::clone_box(&*command_producer),
-            midi_consumer,
-            bundle_consumer,
-            topology_consumer,
-            graph_manager: GraphManager::new(initial_graph, garbage_producer, overflow_garbage_producer, logger.clone()),
-            resource_recycler: ResourceRecycler::new(bundle_garbage_producer, bundle_overflow_producer),
+            command_consumer: resources.command_consumer,
+            midi_consumer: resources.midi_consumer,
+            bundle_consumer: resources.bundle_consumer,
+            topology_consumer: resources.topology_consumer,
+            graph_manager: GraphManager::new(
+                initial_graph,
+                resources.garbage_producer,
+                resources.overflow_garbage_producer,
+                logger.clone()
+            ),
+            resource_recycler: ResourceRecycler::new(
+                resources.bundle_garbage_producer,
+                resources.bundle_overflow_producer
+            ),
             sample_registry: Arc::new(SampleRegistry::new()),
             kernel: Box::new(StandardKernel),
-            telemetry_producer,
+            telemetry_producer: resources.telemetry_producer,
             sample_counter: 0,
             xrun_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             pending_command: None,

@@ -1,5 +1,6 @@
 use crate::engine_coordinator::EngineCoordinator;
 use crate::topology_manager::TopologyManager;
+use crate::transfusion_manager::TransfusionManager;
 use crate::mixer_bridge::MixerBridge;
 use crate::sidecar_supervisor::SidecarSupervisor;
 use nullherz_traits::{Command, CommandProducer, telemetry::Telemetry};
@@ -9,8 +10,8 @@ use nullherz_dna::SampleRegistry;
 pub struct Conductor {
     pub engine_coordinator: EngineCoordinator,
     pub topology_manager: TopologyManager,
+    pub transfusion_manager: TransfusionManager,
     pub mixer_bridge: MixerBridge,
-    pub sample_registry: Arc<SampleRegistry>,
     pub sidecar_supervisor: SidecarSupervisor,
 }
 
@@ -22,11 +23,12 @@ impl Default for Conductor {
 
 impl Conductor {
     pub fn new() -> Self {
+        let sample_registry = Arc::new(SampleRegistry::new());
         Self {
             engine_coordinator: EngineCoordinator::new(),
             topology_manager: TopologyManager::new(),
+            transfusion_manager: TransfusionManager::new(sample_registry),
             mixer_bridge: MixerBridge::new(),
-            sample_registry: Arc::new(SampleRegistry::new()),
             sidecar_supervisor: SidecarSupervisor::new(),
         }
     }
@@ -81,13 +83,7 @@ impl Conductor {
     fn handle_transfusion_registrations(&mut self) {
         let mut engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
         if let Some(ref mut engine) = *engine_lock {
-            let mut snapshots = Vec::new();
-            engine.pull_all_snapshots(&mut snapshots);
-
-            for (sample_id, snapshot) in snapshots {
-                self.sample_registry.register(sample_id, snapshot);
-                eprintln!("Registered new transfusion source: ID={}", sample_id);
-            }
+            self.transfusion_manager.poll_snapshots(engine.as_mut());
         }
     }
 }

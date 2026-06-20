@@ -356,6 +356,9 @@ pub trait AudioProcessor: Send {
     /// Pulls a snapshot from the processor (e.g. for registration in SampleRegistry).
     fn pull_snapshot(&mut self) -> Option<Arc<Vec<f32>>> { None }
 
+    /// Returns the processing latency of this node in samples.
+    fn latency_samples(&self) -> usize { 0 }
+
     /// Returns a list of available snapshots from this processor and its children.
     /// Used by the conductor to pull snapshots without knowing internal topology.
     fn pull_all_snapshots(&mut self, _target: &mut Vec<(u64, Arc<Vec<f32>>)>) {}

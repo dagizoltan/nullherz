@@ -384,6 +384,51 @@ impl ConformanceSuite {
         Ok(())
     }
 
+    pub fn verify_latency_reporting(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+        let reported = processor.latency_samples();
+        let measured = Self::measure_latency_samples(processor);
+
+        // Measured latency might be slightly higher due to sub-block framing,
+        // but should never be less than reported.
+        if measured < reported {
+            return Err(format!("Processor reported {} samples latency, but measured only {}.", reported, measured));
+        }
+
+        Ok(())
+    }
+
+    pub fn verify_silence_after_reset(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+        let host = VirtualClockHost::new();
+        let block_size = 128;
+        let input = vec![1.0f32; block_size];
+        let mut output = vec![0.0f32; block_size];
+
+        // 1. Prime with signal
+        {
+            let mut ctx = crate::ProcessContext { transport: Some(&host.transport), host: None, sub_block_offset: 0, is_last_sub_block: true };
+            processor.process(&[&input], &mut [&mut output], &mut ctx);
+        }
+
+        // 2. Reset
+        processor.reset();
+
+        // 3. Process silence
+        let silence = vec![0.0f32; block_size];
+        {
+            let mut ctx = crate::ProcessContext { transport: Some(&host.transport), host: None, sub_block_offset: 0, is_last_sub_block: true };
+            processor.process(&[&silence], &mut [&mut output], &mut ctx);
+        }
+
+        // 4. Verify silence
+        for i in 0..block_size {
+            if output[i].abs() > 1e-6 {
+                return Err(format!("Non-silent output after reset at sample {}: {}", i, output[i]));
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn verify_snapshot_safety(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
         let host = VirtualClockHost::new();
         let block_size = 64;

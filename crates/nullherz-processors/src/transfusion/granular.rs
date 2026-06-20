@@ -215,6 +215,12 @@ impl AudioProcessor for GranularProcessor {
         }
     }
 
+    fn latency_samples(&self) -> usize {
+        // Granular doesn't have inherent block latency like spectral,
+        // but it might have sub-block scheduling latency.
+        0
+    }
+
     fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutation) {
         if let nullherz_traits::TopologyMutation::AddSource { node_idx: _, buffer } = mutation {
             self.add_source(buffer);

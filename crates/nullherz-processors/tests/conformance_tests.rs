@@ -48,6 +48,22 @@ fn test_all_processors_conformance() {
                 .unwrap();
         }
 
+        // Latency reporting
+        {
+            let mut proc = registry.create_by_id(id, 0, sample_rate).expect("Failed to create processor");
+            ConformanceSuite::verify_latency_reporting(proc.as_mut())
+                .map_err(|e| format!("Processor {} (ID {}) failed latency reporting check: {}", name, id, e))
+                .unwrap();
+        }
+
+        // Silence after reset
+        {
+            let mut proc = registry.create_by_id(id, 0, sample_rate).expect("Failed to create processor");
+            ConformanceSuite::verify_silence_after_reset(proc.as_mut())
+                .map_err(|e| format!("Processor {} (ID {}) failed silence after reset check: {}", name, id, e))
+                .unwrap();
+        }
+
         // Bypass conformance (only for processors that support it via param 999 convention, or skip if not supported)
         // For now, we skip it as not all processors have implemented the 999 convention.
     }

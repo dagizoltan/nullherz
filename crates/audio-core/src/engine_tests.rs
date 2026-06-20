@@ -41,18 +41,22 @@ mod tests {
             let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
 
             let graph = ProcessorGraph::new();
+            let resources = crate::engine::EngineResources {
+                command_consumer: Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+                command_producer: Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+                midi_consumer: None,
+                bundle_consumer: None,
+                topology_consumer: Some(Box::new(topo_cons)),
+                garbage_producer: garbage_prod,
+                overflow_garbage_producer: None,
+                bundle_garbage_producer: None,
+                bundle_overflow_producer: None,
+                telemetry_producer: Box::new(tel_prod),
+            };
             let mut engine = AudioEngine::new(
-                Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
-                Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
-                None,
-                None,
-                Some(Box::new(topo_cons)),
-                garbage_prod,
-                None,
-                None,
-                None,
-                Box::new(tel_prod),
-                Box::new(graph), Arc::new(crate::rt_logging::RtLogger::new(256))
+                resources,
+                Box::new(graph),
+                Arc::new(crate::rt_logging::RtLogger::new(256))
             );
 
             let mut topo_prod_cloned = topo_prod;
@@ -79,18 +83,22 @@ mod tests {
         let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
         let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn AudioProcessor>>::new(1024).split();
 
+        let resources = crate::engine::EngineResources {
+            command_consumer: Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+            command_producer: Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+            midi_consumer: None,
+            bundle_consumer: None,
+            topology_consumer: None,
+            garbage_producer: garbage_prod,
+            overflow_garbage_producer: None,
+            bundle_garbage_producer: None,
+            bundle_overflow_producer: None,
+            telemetry_producer: Box::new(tel_prod),
+        };
         let mut engine = AudioEngine::new(
-            Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
-            Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
-            None,
-            None,
-            None,
-            garbage_prod,
-            None,
-            None,
-            None,
-            Box::new(tel_prod),
-            Box::new(graph), Arc::new(crate::rt_logging::RtLogger::new(256))
+            resources,
+            Box::new(graph),
+            Arc::new(crate::rt_logging::RtLogger::new(256))
         );
 
         let mut out_l = [0.0f32; 128];
@@ -124,18 +132,22 @@ mod tests {
             }
 
             let graph = ProcessorGraph::new();
+            let resources = crate::engine::EngineResources {
+                command_consumer: Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+                command_producer: Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+                midi_consumer: None,
+                bundle_consumer: None,
+                topology_consumer: None,
+                garbage_producer: garbage_prod,
+                overflow_garbage_producer: None,
+                bundle_garbage_producer: None,
+                bundle_overflow_producer: None,
+                telemetry_producer: Box::new(tel_prod),
+            };
             let mut engine = AudioEngine::new(
-                Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
-                Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
-                None,
-                None,
-                None,
-                garbage_prod,
-                None,
-                None,
-                None,
-                Box::new(tel_prod),
-                Box::new(graph), Arc::new(crate::rt_logging::RtLogger::new(256))
+                resources,
+                Box::new(graph),
+                Arc::new(crate::rt_logging::RtLogger::new(256))
             );
 
             let mut out_l = [0.0f32; 128];
@@ -168,18 +180,22 @@ mod tests {
             command: Command::Play,
         });
 
+        let resources = crate::engine::EngineResources {
+            command_consumer: Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+            command_producer: Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+            midi_consumer: None,
+            bundle_consumer: None,
+            topology_consumer: None,
+            garbage_producer: garbage_prod,
+            overflow_garbage_producer: None,
+            bundle_garbage_producer: None,
+            bundle_overflow_producer: None,
+            telemetry_producer: Box::new(tel_prod),
+        };
         let mut engine = AudioEngine::new(
-            Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
-            Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
-            None,
-            None,
-            None,
-            garbage_prod,
-            None,
-            None,
-            None,
-            Box::new(tel_prod),
-            Box::new(MockProcessor { process_count: 0 }), Arc::new(crate::rt_logging::RtLogger::new(256))
+            resources,
+            Box::new(MockProcessor { process_count: 0 }),
+            Arc::new(crate::rt_logging::RtLogger::new(256))
         );
 
         let mut out = [0.0f32; 128];
@@ -213,18 +229,22 @@ mod tests {
         let mut midi_prod = midi_prod;
         let _ = midi_prod.push(ipc_layer::MidiEvent { timestamp_samples: 0, status: 0x90, data1: 60, data2: 127, _pad: 0 });
 
+        let resources = crate::engine::EngineResources {
+            command_consumer: Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+            command_producer: Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+            midi_consumer: Some(Box::new(midi_cons)),
+            bundle_consumer: None,
+            topology_consumer: None,
+            garbage_producer: garbage_prod,
+            overflow_garbage_producer: None,
+            bundle_garbage_producer: None,
+            bundle_overflow_producer: None,
+            telemetry_producer: Box::new(tel_prod),
+        };
         let mut engine = AudioEngine::new(
-            Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
-            Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
-            Some(Box::new(midi_cons)),
-            None,
-            None,
-            garbage_prod,
-            None,
-            None,
-            None,
-            Box::new(tel_prod),
-            Box::new(MidiMockProcessor { midi_received: false }), Arc::new(crate::rt_logging::RtLogger::new(256))
+            resources,
+            Box::new(MidiMockProcessor { midi_received: false }),
+            Arc::new(crate::rt_logging::RtLogger::new(256))
         );
 
         let mut out = [0.0f32; 128];

@@ -2296,6 +2296,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nullherz-topology"
+version = "0.1.0"
+dependencies = [
+ "nullherz-traits",
+ "serde",
+ "serde-big-array",
+]
+
+[[package]]
 name = "nullherz-traits"
 version = "0.1.0"
 dependencies = [

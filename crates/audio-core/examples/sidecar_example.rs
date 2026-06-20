@@ -56,12 +56,23 @@ fn main() {
 
     let cmd_buffer = Arc::new(MpscRingBuffer::new(1024));
 
+    let resources = audio_core::engine::EngineResources {
+        command_consumer: Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+        command_producer: Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+        midi_consumer: None,
+        bundle_consumer: None,
+        topology_consumer: None,
+        garbage_producer: garbage_prod,
+        overflow_garbage_producer: None,
+        bundle_garbage_producer: None,
+        bundle_overflow_producer: None,
+        telemetry_producer: Box::new(tel_prod),
+    };
+
     let _engine = AudioEngine::new(
-        Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
-        Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
-        None, None, None, garbage_prod, None, None, None,
-        Box::new(tel_prod),
-        Box::new(graph), Arc::new(audio_core::rt_logging::RtLogger::new(256))
+        resources,
+        Box::new(graph),
+        Arc::new(audio_core::rt_logging::RtLogger::new(256))
     );
 
     println!("Engine with decoupled traits initialized successfully.");
