@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata, TopologyMutation};
+use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata};
 use audio_dsp::{SamplerVoice, InterpolationType};
 
 const MAX_GRAINS: usize = 32;
@@ -213,6 +213,12 @@ impl AudioProcessor for GranularProcessor {
             }
             _ => {}
         }
+    }
+
+    fn latency_samples(&self) -> usize {
+        // Granular doesn't have inherent block latency like spectral,
+        // but it might have sub-block scheduling latency.
+        0
     }
 
     fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutation) {

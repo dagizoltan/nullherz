@@ -46,14 +46,24 @@ mod integration_tests {
         graph.add_node(dynamic_proc, vec![], vec![0]);
 
         let (garbage_prod_engine, _garbage_cons_engine) = RingBuffer::new(1024).split();
+
+        let resources = crate::engine::EngineResources {
+            command_consumer: Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+            command_producer: Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+            midi_consumer: None,
+            bundle_consumer: None,
+            topology_consumer: None,
+            garbage_producer: garbage_prod_engine,
+            overflow_garbage_producer: None,
+            bundle_garbage_producer: None,
+            bundle_overflow_producer: None,
+            telemetry_producer: Box::new(tel_prod),
+        };
+
         let mut engine = AudioEngine::new(
-            Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
-            Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
-            None, None, None,
-            garbage_prod_engine,
-            None, None, None,
-            Box::new(tel_prod),
-            Box::new(graph)
+            resources,
+            Box::new(graph),
+            Arc::new(crate::rt_logging::RtLogger::new(256))
         );
 
         // 3. Process
@@ -85,18 +95,24 @@ mod integration_tests {
         graph.add_node(mock, vec![], vec![0, 1]);
 
         let (garbage_prod_engine, _garbage_cons_engine) = RingBuffer::new(1024).split();
+
+        let resources = crate::engine::EngineResources {
+            command_consumer: Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+            command_producer: Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+            midi_consumer: None,
+            bundle_consumer: None,
+            topology_consumer: None,
+            garbage_producer: garbage_prod_engine,
+            overflow_garbage_producer: None,
+            bundle_garbage_producer: None,
+            bundle_overflow_producer: None,
+            telemetry_producer: Box::new(tel_prod),
+        };
+
         let mut engine = AudioEngine::new(
-            Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
-            Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
-            None,
-            None,
-            None,
-            garbage_prod_engine,
-            None,
-            None,
-            None,
-            Box::new(tel_prod),
-            Box::new(graph)
+            resources,
+            Box::new(graph),
+            Arc::new(crate::rt_logging::RtLogger::new(256))
         );
 
         // 3. Run a block

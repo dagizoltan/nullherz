@@ -355,6 +355,13 @@ pub trait AudioProcessor: Send {
 
     /// Pulls a snapshot from the processor (e.g. for registration in SampleRegistry).
     fn pull_snapshot(&mut self) -> Option<Arc<Vec<f32>>> { None }
+
+    /// Returns the processing latency of this node in samples.
+    fn latency_samples(&self) -> usize { 0 }
+
+    /// Returns a list of available snapshots from this processor and its children.
+    /// Used by the conductor to pull snapshots without knowing internal topology.
+    fn pull_all_snapshots(&mut self, _target: &mut Vec<(u64, Arc<Vec<f32>>)>) {}
 }
 
 pub trait CommandProducer: Send + Sync + dyn_clone::DynClone {
@@ -369,6 +376,18 @@ pub trait CommandConsumer: Send {
 
 pub trait TelemetryProducer: Send {
     fn push_telemetry(&mut self, telemetry: crate::telemetry::Telemetry) -> Result<(), crate::telemetry::Telemetry>;
+}
+
+pub trait MidiConsumer: Send {
+    fn pop(&mut self) -> Option<MidiEvent>;
+}
+
+pub trait TopologyMutationConsumer: Send {
+    fn pop(&mut self) -> Option<TopologyMutation>;
+}
+
+pub trait CommandBundleConsumer: Send {
+    fn pop(&mut self) -> Option<Vec<Command>>;
 }
 
 pub trait ProcessingKernel: Send {
@@ -386,4 +405,13 @@ pub trait ProcessingKernel: Send {
         outputs: &mut [&mut [f32]],
         num_samples: usize,
     );
+}
+
+/// Abstract interface for the audio rendering engine.
+/// This allows backends to be decoupled from the concrete AudioEngine implementation.
+pub trait RenderingEngine: Send + Sync {
+    fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize);
+    fn set_config(&mut self, config: AudioConfig);
+    fn target_sample_rate(&self) -> f32;
+    fn pull_all_snapshots(&mut self, target: &mut Vec<(u64, Arc<Vec<f32>>)>);
 }

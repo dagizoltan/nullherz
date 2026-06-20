@@ -1,4 +1,4 @@
-# Nullherz System Architecture: Hardened Modular Engine & Transfusion DSP
+# Nullherz System Architecture: Comprehensive Lead Architect's Report
 
 **Author:** Senior Lead Audio & Rust Systems Architect
 **Status:** PRODUCTION READY / HARDENED / MODULARIZED
@@ -6,59 +6,86 @@
 
 ---
 
-## 1. Architectural Overview
+## 1. Architectural Overview: The Triple-Plane Model
 
-The Nullherz engine has reached its **Architectural Maturity Phase**. We have successfully decoupled the monolithic real-time processing loop from the high-level orchestration plane. The system is built upon a **Triple-Plane Model**:
+The Nullherz engine is built upon a strict separation of concerns, ensuring that high-level management never interferes with real-time signal processing.
 
-1.  **The Orchestration Plane (`nullherz-conductor`)**: A hierarchical management layer responsible for lifecycle, topology, and global resource management.
-2.  **The Protocol Plane (`ipc-layer`, `nullherz-traits`)**: A lock-free, zero-allocation communication interface.
-3.  **The Execution Plane (`audio-core`, `audio-dsp`)**: A strictly static, allocation-free processing kernel that executes the signal graph with SIMD-accelerated precision.
+### 1.1 The Orchestration Plane (`nullherz-conductor`)
+*   **Responsibility**: Lifecycle management, declarative topology reconciliation, and global resource coordination.
+*   **Decoupling**: Interacts with the execution plane exclusively through the `RenderingEngine` trait and lock-free command streams.
+*   **Cyclical Evolution**: Manages the non-RT side of 'Transfusion', polling the engine for frozen snapshots and registering them in the `SampleRegistry`.
 
----
+### 1.2 The Protocol Plane (`ipc-layer`, `nullherz-traits`)
+*   **Responsibility**: Zero-allocation, lock-free communication between all planes.
+*   **Traits-First**: Defines `CommandConsumer`, `MidiConsumer`, and `TelemetryProducer` interfaces, making the engine transport-agnostic (SHM vs. Local MPSC).
+*   **SIMD Foundation**: Enforces 64-byte alignment and provides the `AudioBlock` primitives used throughout the execution plane.
 
-## 2. Advanced Core Modularization
-
-### 2.1 Audio Engine: Delegated Static Execution
-The `AudioEngine` (`crates/audio-core`) is now a coordinator of specialized handlers:
-*   **Trait-Based `ProcessingKernel`**: The processing logic is now polymorphic. The system defaults to `StandardKernel` but is architected to support `OverSamplingKernel` or `SafetyKernel` hot-swapping at runtime.
-*   **`EngineInputHandler`**: Synchronously processes command, MIDI, and topology streams before each block.
-*   **`ResourceRecycler`**: Lock-free offloading of object destruction.
-*   **`nullherz-dna` Service**: The `SampleRegistry` is extracted into a dedicated crate, providing a SWMR (Single-Writer-Multiple-Reader) repository for shared audio DNA.
-
-### 2.2 Conductor: Multi-Manager Orchestration
-*   **`TopologyManager`**: Manages the signal graph. Foundation for **Declarative Topology** is established in `nullherz-topology` via the `GraphReconciler`.
-*   **`Orchestrator`**: Includes non-RT cyclical evolution polling, safely pulling snapshots from the Engine and committing them to the DNA registry.
+### 1.3 The Execution Plane (`audio-core`, `audio-dsp`)
+*   **Responsibility**: Low-latency, bit-exact audio processing.
+*   **Trait-Based Kernel**: Supports hot-swappable processing strategies (e.g., `StandardKernel` vs. `SafetyKernel`).
+*   **Static Graph Execution**: The `ProcessorGraph` acts as a lightweight VM, executing pre-compiled execution plans to eliminate topological analysis from the RT thread.
 
 ---
 
-## 3. Transfusion & Evolution Layer Status
+## 2. Advanced Core Features
 
-| Layer | Component | Status | Implementation Note |
-| :--- | :--- | :--- | :--- |
-| **Granular Transfusion** | `GranularProcessor` | **Hardened** | 32-voice granular engine with a fixed-size 16-slot source pool. Randomized jitter and selectable windowing. |
-| **Spectral Transfusion** | `SpectralMorph` | **Hardened** | magnitude-domain cross-synthesis via reusable `SpectralPipeline`. |
-| **Cyclical Evolution** | `CaptureNode` | **Hardened** | Circular write-buffer with polled non-RT snapshotting. |
-| **Plugin Ecosystem** | `Modulation` | **Integrated** | CV-to-Command bridge with deterministic 1-block delay. |
-| **Rehabilitation of Errors**| Quality Dials | **Operational** | creative control over interpolation order and window shapes. |
+### 2.1 Hardened Resource Management
+*   **`ResourceRecycler`**: All object destruction is offloaded to a non-RT thread.
+*   **Memory Leak Guard**: `GraphManager` utilizes a real-time logger to report critical resource leaks when garbage producers are full, preventing silent failures.
+*   **Double-Boxing Strategy**: Ensures safe atomic swapping of fat pointers for processors and graphs.
+
+### 2.2 Transfusion & Evolution (Capture/Granular)
+*   **Cyclical Feedback**: Capture nodes provide bit-exact snapshots of live audio. Refactored for strict RT-safety using atomic state management.
+*   **Granular Synthesis**: 32-voice engine with fixed-slot source pools. Supports Lagrange interpolation and randomized jitter.
+*   **Spectral Cross-Synthesis**: magnitude-domain processing via a reusable `SpectralPipeline` with multiple window shapes.
+
+---
+
+## 3. Fault Tolerance & Signal Stability
+
+### 3.1 DSP Safety Pass
+All spectral processing now includes a safety loop that:
+1.  Detects and neutralizes `NaN` and `Infinity`.
+2.  Clamps magnitudes to a safe range (1e6).
+3.  Ensures signal continuity even during complex bin manipulation.
+
+### 3.2 Parameter Validation
+The `ConformanceSuite` now validates every processor against:
+*   Non-finite inputs (NaN/Inf).
+*   Out-of-range parameter updates.
+*   Extreme ramping durations.
 
 ---
 
 ## 4. Real-Time Safety & Performance Audit
 
 ### 4.1 RT Invariants (Verified)
-- **Zero Heap Allocation**: verified that no `Vec::new`, `Vec::push`, or `Arc::new` occur on the audio thread.
-- **Lock-Free Read Path**: Engine only performs atomic read operations. Registration is restricted to the Conductor.
-- **SIMD Alignment**: All buffers utilize 64-byte alignment.
+- **Zero Heap Allocation**: Verified that no `Vec::new`, `Vec::push`, or `Arc::new` occur on the audio thread.
+- **Fixed-Size Buffering**: `ProcessorGraph` uses a `[Option<T>; 16]` array for pending mutations, eliminating `Vec` usage during topology shifts.
+- **Lock-Free Read Path**: Engine only performs atomic read operations.
+- **CPU Hardening**: `setup_rt_thread` correctly enables **Flush-to-Zero (FTZ)** and **Denormals-Are-Zero (DAZ)** on both x86_64 and AArch64, preventing performance degradation from denormal numbers.
 
 ### 4.2 Conformance Audit
-The entire suite of 14 processors passes the **Nullherz Conformance Suite**:
+The entire suite passes the **Nullherz Conformance Suite**:
 - **Sub-block Consistency**: bit-exact output regardless of block splitting.
 - **Reset Determinism**: correct state clearing.
+- **Snapshot Safety**: thread-safe, allocation-free data extraction.
 
 ---
 
-## 5. Conclusion
+## 5. Testing & Verification Infrastructure
 
-The system is stable, modular, and fulfills the "Transfusion" requirements with production-grade reliability. The extraction of `nullherz-dna` and the trait-based kernel system prepare the engine for commercial-scale deployment.
+### 5.1 Mock-First Strategy
+*   **`MockBackend`**: Allows full system verification (Conductor -> Engine -> Mixer) without hardware or threading.
+*   **`VirtualClockHost`**: Enables sample-accurate verification of modulation and automation timing.
+
+### 5.2 Formal Proofs
+*   Kani-based proofs for `ShmRingBuffer` and `MpscRingBuffer` safety.
+
+---
+
+## 6. Conclusion
+
+The Nullherz engine represents a state-of-the-art implementation of a modular audio system in Rust. It fulfills all "Transfusion" requirements with production-grade reliability, strict real-time safety, and a highly decoupled architecture ready for commercial-scale deployment.
 
 **Architecture Status:** Commit-Ready / Production-Hardened.

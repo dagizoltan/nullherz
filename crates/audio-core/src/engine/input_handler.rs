@@ -1,6 +1,5 @@
 use std::sync::Arc;
-use ipc_layer::{Consumer, MidiEvent};
-use nullherz_traits::{Command, TopologyMutation, AudioProcessor};
+use nullherz_traits::{Command, TopologyMutation, AudioProcessor, MidiConsumer, CommandBundleConsumer, TopologyMutationConsumer};
 use crate::engine::command_dispatcher::CommandDispatcher;
 use crate::engine::resource_recycler::ResourceRecycler;
 use crate::engine::metrics::EngineMetrics;
@@ -14,9 +13,9 @@ impl EngineInputHandler {
     pub fn handle_async_inputs(
         graph: &mut dyn AudioProcessor,
         transport: &mut nullherz_traits::Transport,
-        bundle_consumer: &mut Option<Consumer<Vec<Command>>>,
-        topology_consumer: &mut Option<Consumer<TopologyMutation>>,
-        midi_consumer: &mut Option<Consumer<MidiEvent>>,
+        bundle_consumer: &mut Option<Box<dyn CommandBundleConsumer>>,
+        topology_consumer: &mut Option<Box<dyn TopologyMutationConsumer>>,
+        midi_consumer: &mut Option<Box<dyn MidiConsumer>>,
         resource_recycler: &mut ResourceRecycler,
         sample_registry: &SampleRegistry,
         metrics: &EngineMetrics,

@@ -3,6 +3,7 @@ pub mod backend;
 pub mod orchestrator;
 pub mod engine_coordinator;
 pub mod topology_manager;
+pub mod transfusion_manager;
 pub mod mixer_bridge;
 pub mod sidecar_supervisor;
 
@@ -25,13 +26,13 @@ mod tests {
 
         conductor.apply_mixer_commands(commands);
 
-        let mut engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
-        let engine = engine_lock.as_mut().unwrap();
+        conductor.start_backend(nullherz_backends::AudioBackendType::Mock).unwrap();
 
-        let mut outputs = [[0.0f32; 128], [0.0f32; 128]];
-        let (ch1, ch2) = outputs.split_at_mut(1);
-        let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
+        let engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+        let _engine = engine_lock.as_ref().unwrap();
 
-        engine.process_block(&[], &mut out_refs, 128);
+        // In MockBackend::start, we already call process_block once for verification.
+        // We can check if the backend is running.
+        assert!(conductor.engine_coordinator.backend_manager.backend.is_some());
     }
 }

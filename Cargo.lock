@@ -2171,7 +2171,6 @@ checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 name = "nullherz-backends"
 version = "0.1.0"
 dependencies = [
- "audio-core",
  "ipc-layer",
  "libc",
  "nullherz-traits",
@@ -2294,6 +2293,15 @@ dependencies = [
  "audio-core",
  "nullherz-traits",
  "sidecar-sdk",
+]
+
+[[package]]
+name = "nullherz-topology"
+version = "0.1.0"
+dependencies = [
+ "nullherz-traits",
+ "serde",
+ "serde-big-array",
 ]
 
 [[package]]

@@ -75,3 +75,57 @@ impl LagrangeResampler {
         c3*fraction*fraction*fraction + c2*fraction*fraction + c1*fraction + c0
     }
 }
+
+/// Calculates a sliding window magnitude average for spectral envelope extraction.
+/// Optimized with SIMD where possible.
+pub fn extract_spectral_envelope(re: &[f32], im: &[f32], env: &mut [f32], window_size: usize) {
+    let n = re.len();
+    let window_size = window_size.max(1).min(n / 2);
+
+    // First, calculate raw magnitudes
+    let mut magnitudes = AlignedBuffer::new(n);
+    {
+        use crate::simd_vec::*;
+        let mut i = 0;
+        while i + 8 <= n {
+            let v_re = load_f32x8(re, i);
+            let v_im = load_f32x8(im, i);
+            let v_mag = (v_re * v_re + v_im * v_im).sqrt();
+            store_f32x8(&mut magnitudes, i, v_mag);
+            i += 8;
+        }
+        while i < n {
+            magnitudes[i] = (re[i] * re[i] + im[i] * im[i]).sqrt();
+            i += 1;
+        }
+    }
+
+    // Then, sliding window average
+    // A simple O(N) approach using a running sum
+    let mut current_sum = 0.0;
+    let mut count = 0;
+
+    // Initial window
+    for i in 0..window_size.min(n) {
+        current_sum += magnitudes[i];
+        count += 1;
+    }
+
+    for i in 0..n {
+        // Add new element to window if possible
+        let add_idx = i + window_size;
+        if add_idx < n {
+            current_sum += magnitudes[add_idx];
+            count += 1;
+        }
+
+        // Remove old element from window if possible
+        if i > window_size {
+            let rem_idx = i - window_size - 1;
+            current_sum -= magnitudes[rem_idx];
+            count -= 1;
+        }
+
+        env[i] = current_sum / count as f32;
+    }
+}

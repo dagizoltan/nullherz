@@ -37,7 +37,7 @@ impl EngineCoordinator {
 
         self.health_signal = Some(handle.health_signal.clone());
         self.command_producer = Some(handle.command_producer.clone());
-        *self.backend_manager.engine_handle.lock().unwrap() = Some(engine);
+        *self.backend_manager.engine_handle.lock().unwrap() = Some(Box::new(engine));
 
         handle
     }

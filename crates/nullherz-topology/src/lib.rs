@@ -1,4 +1,5 @@
 use nullherz_traits::{ProcessorTypeId, MAX_NODES, MAX_CHANNELS};
+use serde_big_array::BigArray;
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DesiredNode {
@@ -11,6 +12,7 @@ pub struct DesiredNode {
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct DesiredGraphState {
+    #[serde(with = "BigArray")]
     pub nodes: [Option<DesiredNode>; MAX_NODES],
 }
 
@@ -56,5 +58,34 @@ impl GraphReconciler {
         }
 
         commands
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nullherz_traits::ProcessorTypeId;
+
+    #[test]
+    fn test_reconciliation_minimal_mutations() {
+        let mut current = DesiredGraphState { nodes: [None; MAX_NODES] };
+        let mut target = DesiredGraphState { nodes: [None; MAX_NODES] };
+
+        let node_a = DesiredNode {
+            type_id: ProcessorTypeId::GAIN,
+            input_buffers: [0; MAX_CHANNELS],
+            output_buffers: [0; MAX_CHANNELS],
+            input_count: 1,
+            output_count: 1,
+        };
+
+        target.nodes[0] = Some(node_a);
+
+        let commands = GraphReconciler::reconcile(&current, &target);
+        assert_eq!(commands.len(), 3); // AddNode + UpdateEdge + UpdateOutputEdge
+
+        current.nodes[0] = Some(node_a);
+        let commands2 = GraphReconciler::reconcile(&current, &target);
+        assert_eq!(commands2.len(), 0); // No changes needed
     }
 }

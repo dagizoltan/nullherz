@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
-use audio_core::AudioEngine;
+use nullherz_traits::RenderingEngine;
 use crate::AudioBackend;
 
 struct PwLib {
@@ -71,7 +71,7 @@ pub struct PipewireBackendInner {
     thread_loop: *mut std::ffi::c_void,
     context: *mut std::ffi::c_void,
     stream: *mut std::ffi::c_void,
-    engine_handle: Option<Arc<Mutex<Option<AudioEngine>>>>,
+    engine_handle: Option<Arc<Mutex<Option<Box<dyn RenderingEngine>>>>>,
     lib: Option<PwLib>,
     events: Option<Box<PwStreamEvents>>,
     listener: [u64; 8],
@@ -267,7 +267,7 @@ unsafe extern "C" fn pw_param_changed(_data: *mut std::ffi::c_void, id: u32, _pa
 }
 
 impl AudioBackend for PipewireBackend {
-    fn start(&mut self, engine_handle: Arc<Mutex<Option<AudioEngine>>>) -> Result<(), String> {
+    fn start(&mut self, engine_handle: Arc<Mutex<Option<Box<dyn RenderingEngine>>>>) -> Result<(), String> {
         unsafe {
             let inner = &mut *self.inner;
             if inner.lib.is_none() { inner.lib = Some(PwLib::load()?); }
@@ -275,7 +275,7 @@ impl AudioBackend for PipewireBackend {
             let mut target_rate = 44100u32;
             {
                 if let Some(ref mut engine) = *engine_handle.lock().unwrap() {
-                    target_rate = engine.target_sample_rate as u32;
+                    target_rate = engine.target_sample_rate() as u32;
                     engine.set_config(nullherz_traits::AudioConfig { sample_rate: target_rate as f32, block_size: 128 });
                 }
             }

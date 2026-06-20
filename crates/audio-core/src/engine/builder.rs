@@ -71,18 +71,23 @@ impl EngineBuilder {
 
         let initial_graph = self.initial_graph.unwrap_or_else(|| Box::new(ProcessorGraph::new()));
 
+        let resources = crate::engine::EngineResources {
+            command_consumer: Box::new(cmd_cons),
+            command_producer: Box::new(cmd_prod.clone()),
+            midi_consumer: Some(Box::new(midi_cons)),
+            bundle_consumer: Some(Box::new(bundle_cons)),
+            topology_consumer: Some(Box::new(topo_cons)),
+            garbage_producer: garbage_prod,
+            overflow_garbage_producer: Some(garbage_overflow_prod),
+            bundle_garbage_producer: Some(bundle_garbage_prod),
+            bundle_overflow_producer: Some(bundle_overflow_prod),
+            telemetry_producer: Box::new(tel_prod),
+        };
+
         let engine = AudioEngine::new(
-            Box::new(cmd_cons),
-            Box::new(cmd_prod.clone()),
-            Some(midi_cons),
-            Some(bundle_cons),
-            Some(topo_cons),
-            garbage_prod,
-            Some(garbage_overflow_prod),
-            Some(bundle_garbage_prod),
-            Some(bundle_overflow_prod),
-            Box::new(tel_prod),
-            initial_graph
+            resources,
+            initial_graph,
+            Arc::new(crate::rt_logging::RtLogger::new(256))
         );
 
         let handle = EngineHandle {

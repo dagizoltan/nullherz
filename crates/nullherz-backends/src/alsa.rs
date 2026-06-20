@@ -2,7 +2,7 @@ use std::thread;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
-use audio_core::AudioEngine;
+use nullherz_traits::RenderingEngine;
 use crate::AudioBackend;
 
 struct AlsaLib {
@@ -74,13 +74,13 @@ impl AlsaBackend {
     pub fn new() -> Self { Self { running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), handle: None } }
 }
 impl AudioBackend for AlsaBackend {
-    fn start(&mut self, engine_handle: Arc<Mutex<Option<AudioEngine>>>) -> Result<(), String> {
+    fn start(&mut self, engine_handle: Arc<Mutex<Option<Box<dyn RenderingEngine>>>>) -> Result<(), String> {
         let alsa = AlsaLib::load()?;
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
 
         let handle = thread::spawn(move || {
-            audio_core::setup_rt_thread(90, Some(0)); // Pin main RT thread to core 0
+            ipc_layer::setup_rt_thread(90, Some(0)); // Pin main RT thread to core 0
 
             let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
             let name = std::ffi::CString::new("default").unwrap();
@@ -111,7 +111,7 @@ impl AudioBackend for AlsaBackend {
                 let mut target_rate = 44100u32;
                 {
                     if let Some(ref engine) = *engine_handle.lock().unwrap() {
-                        target_rate = engine.target_sample_rate as u32;
+                        target_rate = engine.target_sample_rate() as u32;
                     }
                 }
 

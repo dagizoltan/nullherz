@@ -1,18 +1,17 @@
 use crate::engine_coordinator::EngineCoordinator;
 use crate::topology_manager::TopologyManager;
+use crate::transfusion_manager::TransfusionManager;
 use crate::mixer_bridge::MixerBridge;
 use crate::sidecar_supervisor::SidecarSupervisor;
-use nullherz_traits::{Command, CommandProducer, AudioProcessor, telemetry::Telemetry};
+use nullherz_traits::{Command, CommandProducer, telemetry::Telemetry};
 use std::sync::Arc;
 use nullherz_dna::SampleRegistry;
-use audio_core::processors::ProcessorGraph;
-use nullherz_processors::transfusion::capture::CaptureProcessor;
 
 pub struct Conductor {
     pub engine_coordinator: EngineCoordinator,
     pub topology_manager: TopologyManager,
+    pub transfusion_manager: TransfusionManager,
     pub mixer_bridge: MixerBridge,
-    pub sample_registry: Arc<SampleRegistry>,
     pub sidecar_supervisor: SidecarSupervisor,
 }
 
@@ -24,11 +23,12 @@ impl Default for Conductor {
 
 impl Conductor {
     pub fn new() -> Self {
+        let sample_registry = Arc::new(SampleRegistry::new());
         Self {
             engine_coordinator: EngineCoordinator::new(),
             topology_manager: TopologyManager::new(),
+            transfusion_manager: TransfusionManager::new(sample_registry),
             mixer_bridge: MixerBridge::new(),
-            sample_registry: Arc::new(SampleRegistry::new()),
             sidecar_supervisor: SidecarSupervisor::new(),
         }
     }
@@ -81,22 +81,9 @@ impl Conductor {
     }
 
     fn handle_transfusion_registrations(&mut self) {
-        let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
-        if let Some(ref engine) = *engine_lock {
-            let mut graph_ptr = engine.graph_manager.get_active_graph();
-            if let Some(processor_graph) = graph_ptr.as_any_mut().downcast_mut::<ProcessorGraph>() {
-                for i in 0..processor_graph.node_count {
-                    let node = &processor_graph.nodes[i];
-                    let processor_any = unsafe { (*node.processor.get()).as_any_mut() };
-                    if let Some(capture) = processor_any.downcast_mut::<CaptureProcessor>() {
-                        if let Some(snapshot) = capture.pull_snapshot() {
-                            let sample_id = capture.capture_id;
-                            self.sample_registry.register(sample_id, snapshot);
-                            eprintln!("Registered new transfusion source: ID={}", sample_id);
-                        }
-                    }
-                }
-            }
+        let mut engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+        if let Some(ref mut engine) = *engine_lock {
+            self.transfusion_manager.poll_snapshots(engine.as_mut());
         }
     }
 }

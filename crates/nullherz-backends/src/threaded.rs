@@ -1,4 +1,4 @@
-use audio_core::AudioEngine;
+use nullherz_traits::RenderingEngine;
 use crate::AudioBackend;
 use std::thread;
 use std::sync::{Arc, Mutex};
@@ -25,11 +25,11 @@ impl ThreadedBackend {
 }
 
 impl AudioBackend for ThreadedBackend {
-    fn start(&mut self, engine_handle: Arc<Mutex<Option<AudioEngine>>>) -> Result<(), String> {
+    fn start(&mut self, engine_handle: Arc<Mutex<Option<Box<dyn RenderingEngine>>>>) -> Result<(), String> {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let handle = thread::spawn(move || {
-            audio_core::setup_rt_thread(90, Some(0));
+            ipc_layer::setup_rt_thread(90, Some(0));
             {
                 if let Some(ref mut engine) = *engine_handle.lock().unwrap() {
                     engine.set_config(nullherz_traits::AudioConfig {

@@ -5,6 +5,5 @@ edition = "2024"
 
 [dependencies]
 nullherz-traits = { path = "../nullherz-traits" }
-audio-core = { path = "../audio-core" }
 ipc-layer = { path = "../ipc-layer" }
 libc = "0.2"

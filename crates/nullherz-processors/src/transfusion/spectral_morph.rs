@@ -33,6 +33,9 @@ impl AudioProcessor for SpectralMorphProcessor {
 
     fn reset(&mut self) {
         self.has_modulator_spectrum = false;
+        self.pipeline.reset();
+        self.modulator_pipeline.reset();
+        self.modulator_env.fill(0.0);
     }
 
     fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
@@ -52,6 +55,10 @@ impl AudioProcessor for SpectralMorphProcessor {
             }
             _ => {}
         }
+    }
+
+    fn latency_samples(&self) -> usize {
+        self.pipeline.fft.size
     }
 
     fn metadata(&self) -> Option<ProcessorMetadata> {
@@ -98,21 +105,8 @@ impl AudioProcessor for SpectralMorphProcessor {
         {
             let env = &mut self.modulator_env;
             self.modulator_pipeline.process(modulator, &mut self.dummy_out[..modulator.len().min(ipc_layer::MAX_BLOCK_SIZE)], |re, im, n, _window, _fft| {
-                // Optimized sliding window average for spectral envelope
                 let window_size = (smoothness * (n as f32 / 8.0)) as usize;
-                let window_size = window_size.max(1);
-
-                for i in 0..n {
-                    let start = i.saturating_sub(window_size);
-                    let end = (i + window_size).min(n);
-                    let count = end - start;
-
-                    let mut local_sum = 0.0;
-                    for j in start..end {
-                        local_sum += (re[j] * re[j] + im[j] * im[j]).sqrt();
-                    }
-                    env[i] = local_sum / count as f32;
-                }
+                audio_dsp::util::extract_spectral_envelope(re, im, env, window_size);
                 has_spectrum = true;
             });
         }

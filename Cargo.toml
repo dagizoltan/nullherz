@@ -13,5 +13,6 @@ members = [
     "crates/nullherz-inspector", "crates/nullherz-mixer", "crates/nullherz-conductor", "sidecars/nullherz-sampler", "sidecars/nullherz-broadcast", "sidecars/nullherz-midi",
     "crates/nullherz-bench", "sidecars/nullherz-dummy",
     "crates/nullherz-gateway",
+    "crates/nullherz-topology",
 ]
 resolver = "2"

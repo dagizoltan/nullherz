@@ -59,6 +59,44 @@ impl StabilityTester {
 pub struct ConformanceSuite;
 
 impl ConformanceSuite {
+    pub fn verify_parameter_bounds(processor: &mut dyn crate::AudioProcessor, param_id: u32) -> Result<(), String> {
+        let host = VirtualClockHost::new();
+        let block_size = 64;
+        let input = vec![1.0f32; block_size];
+        let mut output = vec![0.0f32; block_size];
+
+        let values = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::MAX, f32::MIN, 1e20, -1e20];
+
+        for &val in &values {
+            processor.reset();
+            processor.set_parameter(param_id, val, 0);
+            processor.apply_command(&crate::ProcessorCommand::SetParam {
+                target_id: 0,
+                param_id,
+                value: val,
+                ramp_duration_samples: 0,
+            });
+
+            let inputs = [ &input[..] ];
+            let mut outputs = [ &mut output[..] ];
+            let mut ctx = crate::ProcessContext {
+                transport: Some(&host.transport),
+                host: None,
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+            processor.process(&inputs, &mut outputs, &mut ctx);
+
+            for (i, &sample) in output.iter().enumerate() {
+                if !sample.is_finite() {
+                    return Err(format!("Processor produced non-finite output at sample {} for parameter value {}", i, val));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn verify_sub_block_consistency(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
         processor.reset();
         let host = VirtualClockHost::new();
@@ -342,6 +380,83 @@ impl ConformanceSuite {
                 return Err("Non-finite output during ramping".into());
             }
         }
+
+        Ok(())
+    }
+
+    pub fn verify_latency_reporting(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+        let reported = processor.latency_samples();
+        let measured = Self::measure_latency_samples(processor);
+
+        // Measured latency might be slightly higher due to sub-block framing,
+        // but should never be less than reported.
+        if measured < reported {
+            return Err(format!("Processor reported {} samples latency, but measured only {}.", reported, measured));
+        }
+
+        Ok(())
+    }
+
+    pub fn verify_silence_after_reset(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+        let host = VirtualClockHost::new();
+        let block_size = 128;
+        let input = vec![1.0f32; block_size];
+        let mut output = vec![0.0f32; block_size];
+
+        // 1. Prime with signal
+        {
+            let mut ctx = crate::ProcessContext { transport: Some(&host.transport), host: None, sub_block_offset: 0, is_last_sub_block: true };
+            processor.process(&[&input], &mut [&mut output], &mut ctx);
+        }
+
+        // 2. Reset
+        processor.reset();
+
+        // 3. Process silence
+        let silence = vec![0.0f32; block_size];
+        {
+            let mut ctx = crate::ProcessContext { transport: Some(&host.transport), host: None, sub_block_offset: 0, is_last_sub_block: true };
+            processor.process(&[&silence], &mut [&mut output], &mut ctx);
+        }
+
+        // 4. Verify silence
+        for i in 0..block_size {
+            if output[i].abs() > 1e-6 {
+                return Err(format!("Non-silent output after reset at sample {}: {}", i, output[i]));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn verify_snapshot_safety(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+        let host = VirtualClockHost::new();
+        let block_size = 64;
+        let input = vec![1.0f32; block_size];
+        let mut output = vec![0.0f32; block_size];
+
+        // 1. Process one block
+        {
+            let inputs = [ &input[..] ];
+            let mut outputs = [ &mut output[..] ];
+            let mut ctx = crate::ProcessContext {
+                transport: Some(&host.transport),
+                host: None,
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+            processor.process(&inputs, &mut outputs, &mut ctx);
+        }
+
+        // 2. Try to pull snapshot
+        let _s1 = processor.pull_snapshot();
+        let mut s2_list = Vec::new();
+        processor.pull_all_snapshots(&mut s2_list);
+
+        // 3. Reset and pull again (should be None/empty)
+        processor.reset();
+        let s3 = processor.pull_snapshot();
+        if s3.is_some() { return Err("Snapshot should be None after reset".into()); }
 
         Ok(())
     }

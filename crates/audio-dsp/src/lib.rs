@@ -170,7 +170,9 @@ impl Gain {
         }
     }
 
-    pub fn set_gain(&mut self, gain: f32, ramp_samples: u32) {
+    pub fn set_gain(&mut self, mut gain: f32, ramp_samples: u32) {
+        if !gain.is_finite() { gain = 0.0; }
+        gain = gain.clamp(-1e6, 1e6);
         self.target_gain = gain;
         if ramp_samples > 0 {
             self.ramp_remaining = ramp_samples;

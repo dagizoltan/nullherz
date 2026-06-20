@@ -1,10 +1,11 @@
-use nullherz_traits::{AudioProcessor, ProcessContext, Command, TopologyMutation};
+use nullherz_traits::{AudioProcessor, ProcessContext, Command};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering, AtomicUsize};
 
 pub struct CaptureProcessor {
     buffer: Vec<f32>,
-    write_ptr: usize,
-    is_frozen: bool,
+    write_ptr: AtomicUsize,
+    is_frozen: AtomicBool,
     pub capture_id: u64,
 }
 
@@ -12,8 +13,8 @@ impl CaptureProcessor {
     pub fn new(capacity_samples: usize, capture_id: u64) -> Self {
         Self {
             buffer: vec![0.0; capacity_samples],
-            write_ptr: 0,
-            is_frozen: false,
+            write_ptr: AtomicUsize::new(0),
+            is_frozen: AtomicBool::new(false),
             capture_id,
         }
     }
@@ -24,18 +25,23 @@ impl AudioProcessor for CaptureProcessor {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
     fn reset(&mut self) {
-        self.write_ptr = 0;
-        self.is_frozen = false;
+        self.write_ptr.store(0, Ordering::Release);
+        self.is_frozen.store(false, Ordering::Release);
     }
 
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         if inputs.is_empty() { return; }
         let input = inputs[0];
 
-        // Circular write
-        for &sample in input {
-            self.buffer[self.write_ptr] = sample;
-            self.write_ptr = (self.write_ptr + 1) % self.buffer.len();
+        if !self.is_frozen.load(Ordering::Acquire) {
+            let mut ptr = self.write_ptr.load(Ordering::Relaxed);
+            let len = self.buffer.len();
+            // Circular write
+            for &sample in input {
+                unsafe { *self.buffer.get_unchecked_mut(ptr) = sample; }
+                ptr = (ptr + 1) % len;
+            }
+            self.write_ptr.store(ptr, Ordering::Release);
         }
 
         // Passthrough
@@ -47,23 +53,24 @@ impl AudioProcessor for CaptureProcessor {
     fn apply_command(&mut self, command: &Command) {
         match command {
             Command::Stop => {
-                self.is_frozen = true;
+                self.is_frozen.store(true, Ordering::Release);
             }
             Command::Play => {
-                self.is_frozen = false;
+                self.is_frozen.store(false, Ordering::Release);
             }
             _ => {}
         }
     }
 
     fn pull_snapshot(&mut self) -> Option<Arc<Vec<f32>>> {
-        if self.is_frozen {
-             let (first, second) = self.buffer.split_at(self.write_ptr);
-             let mut snapshot = Vec::with_capacity(self.buffer.len());
-             snapshot.extend_from_slice(second);
-             snapshot.extend_from_slice(first);
-             self.is_frozen = false;
-             Some(Arc::new(snapshot))
+        if self.is_frozen.load(Ordering::Acquire) {
+            let ptr = self.write_ptr.load(Ordering::Acquire);
+            let (first, second) = self.buffer.split_at(ptr);
+            let mut snapshot = Vec::with_capacity(self.buffer.len());
+            snapshot.extend_from_slice(second);
+            snapshot.extend_from_slice(first);
+            self.is_frozen.store(false, Ordering::Release);
+            Some(Arc::new(snapshot))
         } else {
             None
         }

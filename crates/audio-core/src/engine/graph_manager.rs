@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 use ipc_layer::Producer;
 use nullherz_traits::AudioProcessor;
 use crate::engine::metrics::EngineMetrics;
+use crate::rt_logging::RtLogger;
 
 /// Manages the active and pending audio graphs, handling atomic swaps and
 /// real-time safe deallocation of replaced graphs.
@@ -17,6 +18,7 @@ pub struct GraphManager {
     pending_graph: AtomicPtr<Box<dyn AudioProcessor>>,
     garbage_producer: Producer<Box<dyn AudioProcessor>>,
     overflow_garbage_producer: Option<Producer<Box<dyn AudioProcessor>>>,
+    logger: Arc<RtLogger>,
 }
 
 impl GraphManager {
@@ -24,12 +26,14 @@ impl GraphManager {
         initial_graph: Box<dyn AudioProcessor>,
         garbage_producer: Producer<Box<dyn AudioProcessor>>,
         overflow_garbage_producer: Option<Producer<Box<dyn AudioProcessor>>>,
+        logger: Arc<RtLogger>,
     ) -> Self {
         Self {
             active_graph: AtomicPtr::new(Box::into_raw(Box::new(initial_graph))),
             pending_graph: AtomicPtr::new(std::ptr::null_mut()),
             garbage_producer,
             overflow_garbage_producer,
+            logger,
         }
     }
 
@@ -41,14 +45,16 @@ impl GraphManager {
         if !pending.is_null() {
             let old = self.active_graph.swap(pending, Ordering::AcqRel);
             if !old.is_null() {
-                let old_graph = unsafe { Box::from_raw(old) };
-                if let Err(leaked) = self.garbage_producer.push(*old_graph) {
+                let old_graph = unsafe { *Box::from_raw(old) };
+                if let Err(leaked) = self.garbage_producer.push(old_graph) {
                     if let Some(ref mut overflow) = self.overflow_garbage_producer {
                         if let Err(leaked) = overflow.push(leaked) {
+                            self.logger.log(crate::rt_logging::RtLogLevel::Error, "CRITICAL: Resource leak - garbage producers full", 0);
                             metrics.report_resource_leak(health_signal);
                             std::mem::forget(leaked);
                         }
                     } else {
+                        self.logger.log(crate::rt_logging::RtLogLevel::Error, "CRITICAL: Resource leak - garbage producer full", 0);
                         metrics.report_resource_leak(health_signal);
                         std::mem::forget(leaked);
                     }

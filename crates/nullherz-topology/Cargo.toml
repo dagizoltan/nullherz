@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 nullherz-traits = { path = "../nullherz-traits" }
+serde = { version = "1.0", features = ["derive"] }
+serde-big-array = "0.5"

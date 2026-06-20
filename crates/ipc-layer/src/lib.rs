@@ -195,6 +195,24 @@ impl nullherz_traits::CommandConsumer for Consumer<nullherz_traits::TimestampedC
     }
 }
 
+impl nullherz_traits::MidiConsumer for Consumer<nullherz_traits::MidiEvent> {
+    fn pop(&mut self) -> Option<nullherz_traits::MidiEvent> {
+        self.pop()
+    }
+}
+
+impl nullherz_traits::TopologyMutationConsumer for Consumer<nullherz_traits::TopologyMutation> {
+    fn pop(&mut self) -> Option<nullherz_traits::TopologyMutation> {
+        self.pop()
+    }
+}
+
+impl nullherz_traits::CommandBundleConsumer for Consumer<Vec<nullherz_traits::Command>> {
+    fn pop(&mut self) -> Option<Vec<nullherz_traits::Command>> {
+        self.pop()
+    }
+}
+
 impl nullherz_traits::TelemetryProducer for Producer<nullherz_traits::telemetry::Telemetry> {
     fn push_telemetry(&mut self, telemetry: nullherz_traits::telemetry::Telemetry) -> Result<(), nullherz_traits::telemetry::Telemetry> {
         Producer::push(self, telemetry)
@@ -677,4 +695,45 @@ mod tests {
         assert_eq!(rb.pop(), Some(20));
         assert_eq!(rb.pop(), None);
     }
+}
+
+pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
+    thread_local! {
+        static INITIALIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    if INITIALIZED.with(|i| i.get()) && cpu_id.is_none() {
+        return;
+    }
+
+    let _ = crate::set_rt_priority(priority);
+
+    #[cfg(target_os = "linux")]
+    if let Some(id) = cpu_id {
+        unsafe {
+            let mut cpuset: libc::cpu_set_t = std::mem::zeroed();
+            libc::CPU_SET(id, &mut cpuset);
+            libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &cpuset);
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        let mut mxcsr: u32 = 0;
+        std::arch::asm!("stmxcsr [{}]", in(reg) &mut mxcsr);
+        // Enable Flush-to-Zero (bit 15) and Denormals-Are-Zero (bit 6)
+        mxcsr |= 0x8000 | 0x0040;
+        std::arch::asm!("ldmxcsr [{}]", in(reg) &mxcsr);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        let mut fpcr: u64;
+        std::arch::asm!("mrs {}, fpcr", out(reg) fpcr);
+        // Bit 24 is FZ (Flush-to-Zero)
+        fpcr |= 1 << 24;
+        std::arch::asm!("msr fpcr, {}", in(reg) fpcr);
+    }
+
+    INITIALIZED.with(|i| i.set(true));
 }
