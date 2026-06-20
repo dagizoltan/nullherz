@@ -45,6 +45,8 @@ impl nullherz_traits::Host for EngineHost {
 unsafe impl Send for AudioEngine {}
 unsafe impl Sync for AudioEngine {}
 
+/// Encapsulates all IPC resources required by the `AudioEngine`.
+/// This includes command streams, MIDI inputs, telemetry producers, and resource recycling channels.
 pub struct EngineResources {
     pub command_consumer: Box<dyn nullherz_traits::CommandConsumer>,
     pub command_producer: Box<dyn nullherz_traits::CommandProducer>,
@@ -100,6 +102,12 @@ impl nullherz_traits::RenderingEngine for AudioEngine {
     fn pull_all_snapshots(&mut self, target: &mut Vec<(u64, Arc<Vec<f32>>)>) {
         let graph = self.graph_manager.get_active_graph();
         graph.pull_all_snapshots(target);
+    }
+}
+
+impl nullherz_traits::RenderingController for AudioEngine {
+    fn set_pending_graph(&self, graph: Box<dyn AudioProcessor>) {
+        self.set_pending_graph(graph);
     }
 }
 
