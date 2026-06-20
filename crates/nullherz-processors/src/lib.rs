@@ -29,3 +29,15 @@ pub use modulation::ModulationProcessor;
 pub use sequencer::SequencerProcessor;
 pub use transfusion::*;
 pub use registry::ProcessorRegistry;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nullherz_traits::test_kit::ConformanceSuite;
+
+    #[test]
+    fn test_gain_parameter_bounds() {
+        let mut gain = GainProcessor::new(0, 1.0);
+        ConformanceSuite::verify_parameter_bounds(&mut gain, 0).expect("Gain failed parameter bounds check");
+    }
+}

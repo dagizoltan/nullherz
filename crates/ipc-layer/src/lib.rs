@@ -195,6 +195,24 @@ impl nullherz_traits::CommandConsumer for Consumer<nullherz_traits::TimestampedC
     }
 }
 
+impl nullherz_traits::MidiConsumer for Consumer<nullherz_traits::MidiEvent> {
+    fn pop(&mut self) -> Option<nullherz_traits::MidiEvent> {
+        self.pop()
+    }
+}
+
+impl nullherz_traits::TopologyMutationConsumer for Consumer<nullherz_traits::TopologyMutation> {
+    fn pop(&mut self) -> Option<nullherz_traits::TopologyMutation> {
+        self.pop()
+    }
+}
+
+impl nullherz_traits::CommandBundleConsumer for Consumer<Vec<nullherz_traits::Command>> {
+    fn pop(&mut self) -> Option<Vec<nullherz_traits::Command>> {
+        self.pop()
+    }
+}
+
 impl nullherz_traits::TelemetryProducer for Producer<nullherz_traits::telemetry::Telemetry> {
     fn push_telemetry(&mut self, telemetry: nullherz_traits::telemetry::Telemetry) -> Result<(), nullherz_traits::telemetry::Telemetry> {
         Producer::push(self, telemetry)

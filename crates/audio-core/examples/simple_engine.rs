@@ -32,7 +32,8 @@ fn main() {
         Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
         None, None, None, garbage_prod, None, None, None,
         Box::new(tel_prod),
-        initial_proc
+        initial_proc,
+        Arc::new(audio_core::rt_logging::RtLogger::new(256))
     );
 
     println!("Engine created. Peak ns: {}", engine.metrics.peak_ns.load(std::sync::atomic::Ordering::Relaxed));

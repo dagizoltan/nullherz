@@ -74,15 +74,16 @@ impl EngineBuilder {
         let engine = AudioEngine::new(
             Box::new(cmd_cons),
             Box::new(cmd_prod.clone()),
-            Some(midi_cons),
-            Some(bundle_cons),
-            Some(topo_cons),
+            Some(Box::new(midi_cons)),
+            Some(Box::new(bundle_cons)),
+            Some(Box::new(topo_cons)),
             garbage_prod,
             Some(garbage_overflow_prod),
             Some(bundle_garbage_prod),
             Some(bundle_overflow_prod),
             Box::new(tel_prod),
-            initial_graph
+            initial_graph,
+            Arc::new(crate::rt_logging::RtLogger::new(256))
         );
 
         let handle = EngineHandle {

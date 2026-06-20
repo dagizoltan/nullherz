@@ -59,6 +59,44 @@ impl StabilityTester {
 pub struct ConformanceSuite;
 
 impl ConformanceSuite {
+    pub fn verify_parameter_bounds(processor: &mut dyn crate::AudioProcessor, param_id: u32) -> Result<(), String> {
+        let host = VirtualClockHost::new();
+        let block_size = 64;
+        let input = vec![1.0f32; block_size];
+        let mut output = vec![0.0f32; block_size];
+
+        let values = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::MAX, f32::MIN, 1e20, -1e20];
+
+        for &val in &values {
+            processor.reset();
+            processor.set_parameter(param_id, val, 0);
+            processor.apply_command(&crate::ProcessorCommand::SetParam {
+                target_id: 0,
+                param_id,
+                value: val,
+                ramp_duration_samples: 0,
+            });
+
+            let inputs = [ &input[..] ];
+            let mut outputs = [ &mut output[..] ];
+            let mut ctx = crate::ProcessContext {
+                transport: Some(&host.transport),
+                host: None,
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+            processor.process(&inputs, &mut outputs, &mut ctx);
+
+            for (i, &sample) in output.iter().enumerate() {
+                if !sample.is_finite() {
+                    return Err(format!("Processor produced non-finite output at sample {} for parameter value {}", i, val));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn verify_sub_block_consistency(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
         processor.reset();
         let host = VirtualClockHost::new();

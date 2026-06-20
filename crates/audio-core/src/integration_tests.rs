@@ -53,7 +53,7 @@ mod integration_tests {
             garbage_prod_engine,
             None, None, None,
             Box::new(tel_prod),
-            Box::new(graph)
+            Box::new(graph), Arc::new(crate::rt_logging::RtLogger::new(256))
         );
 
         // 3. Process
@@ -96,7 +96,7 @@ mod integration_tests {
             None,
             None,
             Box::new(tel_prod),
-            Box::new(graph)
+            Box::new(graph), Arc::new(crate::rt_logging::RtLogger::new(256))
         );
 
         // 3. Run a block

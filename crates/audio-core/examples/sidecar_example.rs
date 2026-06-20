@@ -61,7 +61,7 @@ fn main() {
         Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
         None, None, None, garbage_prod, None, None, None,
         Box::new(tel_prod),
-        Box::new(graph)
+        Box::new(graph), Arc::new(audio_core::rt_logging::RtLogger::new(256))
     );
 
     println!("Engine with decoupled traits initialized successfully.");

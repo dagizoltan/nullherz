@@ -8,8 +8,8 @@ pub mod resource_recycler;
 pub mod telemetry_finalizer;
 
 use std::sync::Arc;
-use ipc_layer::{Producer, Consumer};
-use nullherz_traits::{TimestampedCommand, ProcessingKernel};
+use ipc_layer::Producer;
+use nullherz_traits::{TimestampedCommand, ProcessingKernel, MidiConsumer, TopologyMutationConsumer, CommandBundleConsumer};
 use crate::processors::{AudioProcessor, TaskPool};
 use crate::rt_logging::RtLogger;
 use self::metrics::EngineMetrics;
@@ -48,9 +48,9 @@ unsafe impl Sync for AudioEngine {}
 pub struct AudioEngine {
     command_consumer: Box<dyn nullherz_traits::CommandConsumer>,
     command_producer: Box<dyn nullherz_traits::CommandProducer>,
-    midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
-    bundle_consumer: Option<Consumer<Vec<nullherz_traits::Command>>>,
-    topology_consumer: Option<Consumer<nullherz_traits::TopologyMutation>>,
+    midi_consumer: Option<Box<dyn MidiConsumer>>,
+    bundle_consumer: Option<Box<dyn CommandBundleConsumer>>,
+    topology_consumer: Option<Box<dyn TopologyMutationConsumer>>,
 
     telemetry_producer: Box<dyn nullherz_traits::TelemetryProducer>,
     sample_counter: u64,
@@ -75,15 +75,16 @@ impl AudioEngine {
     pub fn new(
         command_consumer: Box<dyn nullherz_traits::CommandConsumer>,
         command_producer: Box<dyn nullherz_traits::CommandProducer>,
-        midi_consumer: Option<Consumer<ipc_layer::MidiEvent>>,
-        bundle_consumer: Option<Consumer<Vec<nullherz_traits::Command>>>,
-        topology_consumer: Option<Consumer<nullherz_traits::TopologyMutation>>,
+        midi_consumer: Option<Box<dyn MidiConsumer>>,
+        bundle_consumer: Option<Box<dyn CommandBundleConsumer>>,
+        topology_consumer: Option<Box<dyn TopologyMutationConsumer>>,
         garbage_producer: Producer<Box<dyn AudioProcessor>>,
         overflow_garbage_producer: Option<Producer<Box<dyn AudioProcessor>>>,
         bundle_garbage_producer: Option<Producer<Vec<nullherz_traits::Command>>>,
         bundle_overflow_producer: Option<Producer<Vec<nullherz_traits::Command>>>,
         telemetry_producer: Box<dyn nullherz_traits::TelemetryProducer>,
         initial_graph: Box<dyn AudioProcessor>,
+        logger: Arc<RtLogger>,
     ) -> Self {
         Self {
             command_consumer,
@@ -91,7 +92,7 @@ impl AudioEngine {
             midi_consumer,
             bundle_consumer,
             topology_consumer,
-            graph_manager: GraphManager::new(initial_graph, garbage_producer, overflow_garbage_producer),
+            graph_manager: GraphManager::new(initial_graph, garbage_producer, overflow_garbage_producer, logger.clone()),
             resource_recycler: ResourceRecycler::new(bundle_garbage_producer, bundle_overflow_producer),
             sample_registry: Arc::new(SampleRegistry::new()),
             kernel: Box::new(StandardKernel),
@@ -110,7 +111,7 @@ impl AudioEngine {
                 sample_rate: 44100.0,
             },
             target_sample_rate: 44100.0,
-            logger: Arc::new(RtLogger::new(256)),
+            logger,
         }
     }
 

@@ -371,6 +371,18 @@ pub trait TelemetryProducer: Send {
     fn push_telemetry(&mut self, telemetry: crate::telemetry::Telemetry) -> Result<(), crate::telemetry::Telemetry>;
 }
 
+pub trait MidiConsumer: Send {
+    fn pop(&mut self) -> Option<MidiEvent>;
+}
+
+pub trait TopologyMutationConsumer: Send {
+    fn pop(&mut self) -> Option<TopologyMutation>;
+}
+
+pub trait CommandBundleConsumer: Send {
+    fn pop(&mut self) -> Option<Vec<Command>>;
+}
+
 pub trait ProcessingKernel: Send {
     #[allow(clippy::too_many_arguments)]
     fn execute(

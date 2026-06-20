@@ -46,14 +46,16 @@ The `AudioEngine` (`crates/audio-core`) is now a coordinator of specialized hand
 ## 4. Real-Time Safety & Performance Audit
 
 ### 4.1 RT Invariants (Verified)
-- **Zero Heap Allocation**: verified that no `Vec::new`, `Vec::push`, or `Arc::new` occur on the audio thread.
+- **Zero Heap Allocation**: verified that no `Vec::new`, `Vec::push`, or `Arc::new` occur on the audio thread. `ProcessorGraph` uses fixed-size buffering for pending mutations.
 - **Lock-Free Read Path**: Engine only performs atomic read operations. Registration is restricted to the Conductor.
+- **Transport Agnostic**: `AudioEngine` is decoupled from concrete IPC types via `MidiConsumer`, `TopologyMutationConsumer`, and `CommandBundleConsumer` traits.
 - **SIMD Alignment**: All buffers utilize 64-byte alignment.
 
 ### 4.2 Conformance Audit
 The entire suite of 14 processors passes the **Nullherz Conformance Suite**:
 - **Sub-block Consistency**: bit-exact output regardless of block splitting.
 - **Reset Determinism**: correct state clearing.
+- **Parameter Stability**: verified resilience against NaN, Infinity, and extreme parameter values.
 
 ---
 

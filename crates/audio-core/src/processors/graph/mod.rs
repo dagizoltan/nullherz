@@ -29,7 +29,8 @@ pub struct ProcessorGraph {
 
     pub(crate) telemetry: Arc<GraphTelemetry>,
     pub(crate) garbage_producer: Option<Box<dyn nullherz_traits::GarbageProducer>>,
-    pub(crate) pending_mutations: Vec<TopologyMutation>,
+    pub(crate) pending_mutations: [Option<TopologyMutation>; 16],
+    pub(crate) pending_mutation_count: usize,
 }
 
 impl ProcessorGraph {
@@ -55,7 +56,8 @@ impl ProcessorGraph {
             topology_coordinator: TopologyCoordinator::new(topo),
             telemetry: Arc::new(GraphTelemetry::default()),
             garbage_producer: None,
-            pending_mutations: Vec::with_capacity(16),
+            pending_mutations: std::array::from_fn(|_| None),
+            pending_mutation_count: 0,
         }
     }
 
@@ -83,7 +85,7 @@ impl ProcessorGraph {
             TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
                 let n_idx = node_idx as usize;
                 let i_idx = input_idx as usize;
-                if n_idx < self.node_count && i_idx < 16 {
+                if n_idx < crate::MAX_NODES && i_idx < 16 {
                     let topo = self.inactive_topology_mut();
                     if i_idx < topo.routing[n_idx].input_count {
                         topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
@@ -93,7 +95,7 @@ impl ProcessorGraph {
             TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
                 let n_idx = node_idx as usize;
                 let o_idx = output_idx as usize;
-                if n_idx < self.node_count && o_idx < 16 {
+                if n_idx < crate::MAX_NODES && o_idx < 16 {
                     let topo = self.inactive_topology_mut();
                     if o_idx < topo.routing[n_idx].output_count {
                         topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
@@ -102,7 +104,7 @@ impl ProcessorGraph {
             }
             TopologyMutation::SwapProcessor { node_idx, mut processor } => {
                 let n_idx = node_idx as usize;
-                if n_idx < self.node_count {
+                if n_idx < crate::MAX_NODES {
                     let node = &self.nodes[n_idx];
                     if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
                     let old_proc = unsafe { std::ptr::replace(node.processor.get(), processor) };
@@ -111,16 +113,20 @@ impl ProcessorGraph {
                     } else { std::mem::forget(old_proc); }
                 }
             }
-            TopologyMutation::AddNode { node_idx: _, mut processor } => {
-                if self.node_count < crate::MAX_NODES {
-                    let idx = self.node_count;
+            TopologyMutation::AddNode { node_idx, mut processor } => {
+                let idx = node_idx as usize;
+                if idx < crate::MAX_NODES {
                     if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
-                    unsafe { *self.nodes[idx].processor.get() = processor; }
-                    self.node_count += 1;
+                    let old_proc = unsafe { std::ptr::replace(self.nodes[idx].processor.get(), processor) };
+                    if let Some(ref mut prod) = self.garbage_producer {
+                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
+                    } else { std::mem::forget(old_proc); }
+
+                    if idx >= self.node_count { self.node_count = idx + 1; }
                     let topo = self.inactive_topology_mut();
                     topo.routing[idx].input_count = 0;
                     topo.routing[idx].output_count = 0;
-                    topo.node_count += 1;
+                    if idx >= topo.node_count as usize { topo.node_count = idx + 1; }
                 }
             }
             TopologyMutation::AddSource { node_idx, buffer } => {
@@ -240,8 +246,18 @@ impl AudioProcessor for ProcessorGraph {
 
     fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
         if self.topology_coordinator.has_active_crossfades() {
-             self.pending_mutations.push(mutation);
-             return;
+            if self.pending_mutation_count < 16 {
+                self.pending_mutations[self.pending_mutation_count] = Some(mutation);
+                self.pending_mutation_count += 1;
+            } else {
+                // Drop if full.
+                if let TopologyMutation::AddNode { processor, .. } | TopologyMutation::SwapProcessor { processor, .. } = mutation {
+                     if let Some(ref mut prod) = self.garbage_producer {
+                         let _ = prod.push_processor(processor);
+                     }
+                }
+            }
+            return;
         }
 
         self.apply_mutation_internal(mutation);
@@ -256,9 +272,12 @@ impl AudioProcessor for ProcessorGraph {
 
                 // Drain pending mutations if crossfades finished
                 if !self.topology_coordinator.has_active_crossfades() {
-                    while let Some(m) = self.pending_mutations.pop() {
-                        self.apply_mutation_internal(m);
+                    for i in 0..self.pending_mutation_count {
+                        if let Some(m) = self.pending_mutations[i].take() {
+                            self.apply_mutation_internal(m);
+                        }
                     }
+                    self.pending_mutation_count = 0;
                 }
             }
             _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }

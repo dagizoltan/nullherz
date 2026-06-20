@@ -46,13 +46,13 @@ mod tests {
                 Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
                 None,
                 None,
-                Some(topo_cons),
+                Some(Box::new(topo_cons)),
                 garbage_prod,
                 None,
                 None,
                 None,
                 Box::new(tel_prod),
-                Box::new(graph)
+                Box::new(graph), Arc::new(crate::rt_logging::RtLogger::new(256))
             );
 
             let mut topo_prod_cloned = topo_prod;
@@ -90,7 +90,7 @@ mod tests {
             None,
             None,
             Box::new(tel_prod),
-            Box::new(graph)
+            Box::new(graph), Arc::new(crate::rt_logging::RtLogger::new(256))
         );
 
         let mut out_l = [0.0f32; 128];
@@ -135,7 +135,7 @@ mod tests {
                 None,
                 None,
                 Box::new(tel_prod),
-                Box::new(graph)
+                Box::new(graph), Arc::new(crate::rt_logging::RtLogger::new(256))
             );
 
             let mut out_l = [0.0f32; 128];
@@ -179,7 +179,7 @@ mod tests {
             None,
             None,
             Box::new(tel_prod),
-            Box::new(MockProcessor { process_count: 0 })
+            Box::new(MockProcessor { process_count: 0 }), Arc::new(crate::rt_logging::RtLogger::new(256))
         );
 
         let mut out = [0.0f32; 128];
@@ -216,7 +216,7 @@ mod tests {
         let mut engine = AudioEngine::new(
             Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
             Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
-            Some(midi_cons),
+            Some(Box::new(midi_cons)),
             None,
             None,
             garbage_prod,
@@ -224,7 +224,7 @@ mod tests {
             None,
             None,
             Box::new(tel_prod),
-            Box::new(MidiMockProcessor { midi_received: false })
+            Box::new(MidiMockProcessor { midi_received: false }), Arc::new(crate::rt_logging::RtLogger::new(256))
         );
 
         let mut out = [0.0f32; 128];

@@ -118,6 +118,15 @@ impl SpectralPipeline {
         // Run user operation
         spectral_op(&mut self.scratch_re, &mut self.scratch_im, n, &self.window, &self.fft);
 
+        // Safety pass: clamp and handle non-finite values
+        for i in 0..n {
+            if !self.scratch_re[i].is_finite() { self.scratch_re[i] = 0.0; }
+            else { self.scratch_re[i] = self.scratch_re[i].clamp(-1e6, 1e6); }
+
+            if !self.scratch_im[i].is_finite() { self.scratch_im[i] = 0.0; }
+            else { self.scratch_im[i] = self.scratch_im[i].clamp(-1e6, 1e6); }
+        }
+
         // IFFT
         for i in 0..n { self.scratch_im[i] = -self.scratch_im[i]; }
         self.fft.process(&mut self.scratch_re, &mut self.scratch_im);
