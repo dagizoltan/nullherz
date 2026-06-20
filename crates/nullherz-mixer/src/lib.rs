@@ -22,6 +22,13 @@ impl MixerManager {
         }
     }
 
+    pub fn validate_topology(&self) -> Result<(), String> {
+        if self.next_node_id >= nullherz_traits::MAX_NODES as u32 {
+            return Err(format!("Mixer topology exceeds MAX_NODES ({})", nullherz_traits::MAX_NODES));
+        }
+        Ok(())
+    }
+
     pub fn create_studio_strip(&mut self, name: &str, fx_ids: &[u32]) -> Vec<Command> {
         studio::create_studio_strip(&mut self.next_node_id, &mut self.next_buffer_id, name, fx_ids, &self.config)
     }

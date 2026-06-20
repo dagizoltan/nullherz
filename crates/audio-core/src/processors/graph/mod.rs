@@ -306,6 +306,19 @@ impl AudioProcessor for ProcessorGraph {
             buffer.data.fill(0.0);
         }
     }
+
+    fn pull_all_snapshots(&mut self, target: &mut Vec<(u64, Arc<Vec<f32>>)>) {
+        for i in 0..self.node_count {
+            let node = &self.nodes[i];
+            let processor = unsafe { &mut *node.processor.get() };
+            if let Some(snapshot) = processor.pull_snapshot() {
+                if let Some(meta) = processor.metadata() {
+                    target.push((meta.processor_id, snapshot));
+                }
+            }
+            processor.pull_all_snapshots(target);
+        }
+    }
 }
 
 #[cfg(test)]

@@ -47,6 +47,7 @@ unsafe impl Sync for AudioEngine {}
 
 pub struct AudioEngine {
     command_consumer: Box<dyn nullherz_traits::CommandConsumer>,
+    #[allow(dead_code)]
     command_producer: Box<dyn nullherz_traits::CommandProducer>,
     midi_consumer: Option<Box<dyn MidiConsumer>>,
     bundle_consumer: Option<Box<dyn CommandBundleConsumer>>,

@@ -384,6 +384,38 @@ impl ConformanceSuite {
         Ok(())
     }
 
+    pub fn verify_snapshot_safety(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+        let host = VirtualClockHost::new();
+        let block_size = 64;
+        let input = vec![1.0f32; block_size];
+        let mut output = vec![0.0f32; block_size];
+
+        // 1. Process one block
+        {
+            let inputs = [ &input[..] ];
+            let mut outputs = [ &mut output[..] ];
+            let mut ctx = crate::ProcessContext {
+                transport: Some(&host.transport),
+                host: None,
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+            processor.process(&inputs, &mut outputs, &mut ctx);
+        }
+
+        // 2. Try to pull snapshot
+        let _s1 = processor.pull_snapshot();
+        let mut s2_list = Vec::new();
+        processor.pull_all_snapshots(&mut s2_list);
+
+        // 3. Reset and pull again (should be None/empty)
+        processor.reset();
+        let s3 = processor.pull_snapshot();
+        if s3.is_some() { return Err("Snapshot should be None after reset".into()); }
+
+        Ok(())
+    }
+
     pub fn verify_multichannel_consistency(processor: &mut dyn crate::AudioProcessor, num_channels: usize) -> Result<(), String> {
         processor.reset();
         let host = VirtualClockHost::new();

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata, TopologyMutation};
+use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata};
 use audio_dsp::{SamplerVoice, InterpolationType};
 
 const MAX_GRAINS: usize = 32;
