@@ -71,6 +71,25 @@ pub struct AudioEngine {
     pub logger: Arc<RtLogger>,
 }
 
+impl nullherz_traits::RenderingEngine for AudioEngine {
+    fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize) {
+        self.process_block(inputs, outputs, num_samples);
+    }
+
+    fn set_config(&mut self, config: nullherz_traits::AudioConfig) {
+        self.set_config(config);
+    }
+
+    fn target_sample_rate(&self) -> f32 {
+        self.target_sample_rate
+    }
+
+    fn pull_all_snapshots(&mut self, target: &mut Vec<(u64, Arc<Vec<f32>>)>) {
+        let graph = self.graph_manager.get_active_graph();
+        graph.pull_all_snapshots(target);
+    }
+}
+
 impl AudioEngine {
     #[allow(clippy::too_many_arguments)]
     pub fn new(

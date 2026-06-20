@@ -403,3 +403,12 @@ pub trait ProcessingKernel: Send {
         num_samples: usize,
     );
 }
+
+/// Abstract interface for the audio rendering engine.
+/// This allows backends to be decoupled from the concrete AudioEngine implementation.
+pub trait RenderingEngine: Send + Sync {
+    fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize);
+    fn set_config(&mut self, config: AudioConfig);
+    fn target_sample_rate(&self) -> f32;
+    fn pull_all_snapshots(&mut self, target: &mut Vec<(u64, Arc<Vec<f32>>)>);
+}

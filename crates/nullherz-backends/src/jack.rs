@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::sync::Mutex;
-use audio_core::AudioEngine;
+use nullherz_traits::RenderingEngine;
 use crate::AudioBackend;
 
 pub struct JackBackend {
@@ -10,7 +10,7 @@ pub struct JackBackend {
 struct JackBackendInner {
     client: *mut std::ffi::c_void,
     ports: Vec<*mut std::ffi::c_void>,
-    engine_handle: Option<Arc<Mutex<Option<AudioEngine>>>>,
+    engine_handle: Option<Arc<Mutex<Option<Box<dyn RenderingEngine>>>>>,
     lib: Option<JackLib>,
 }
 
@@ -106,7 +106,7 @@ unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_
 }
 
 impl AudioBackend for JackBackend {
-    fn start(&mut self, engine_handle: Arc<Mutex<Option<AudioEngine>>>) -> Result<(), String> {
+    fn start(&mut self, engine_handle: Arc<Mutex<Option<Box<dyn RenderingEngine>>>>) -> Result<(), String> {
         unsafe {
             let inner = &mut *self.inner;
             if inner.lib.is_none() { inner.lib = Some(JackLib::load()?); }

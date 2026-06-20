@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
-use audio_core::AudioEngine;
-use nullherz_backends::{AudioBackend, AlsaBackend, ThreadedBackend, AudioBackendType};
+use nullherz_traits::RenderingEngine;
+use nullherz_backends::{AudioBackend, AudioBackendType};
 
 pub struct BackendManager {
     pub backend: Option<Box<dyn AudioBackend>>,
-    pub engine_handle: Arc<Mutex<Option<AudioEngine>>>,
+    pub engine_handle: Arc<Mutex<Option<Box<dyn RenderingEngine>>>>,
 }
 
 impl Default for BackendManager {
@@ -21,13 +21,7 @@ impl BackendManager {
         // Move current process to high-priority Cgroup
         let _ = ipc_layer::move_to_cgroup("nullherz", std::process::id() as i32);
 
-        let mut backend: Box<dyn AudioBackend> = match backend_type {
-            AudioBackendType::Alsa => Box::new(AlsaBackend::new()),
-            AudioBackendType::Pipewire => Box::new(nullherz_backends::PipewireBackend::new()),
-            AudioBackendType::Jack => Box::new(nullherz_backends::JackBackend::new()),
-            AudioBackendType::Threaded => Box::new(ThreadedBackend::new()),
-            AudioBackendType::Mock => Box::new(ThreadedBackend::new()), // Fallback for now
-        };
+        let mut backend = nullherz_backends::BackendFactory::create(backend_type);
 
         backend.start(self.engine_handle.clone())?;
         self.backend = Some(backend);

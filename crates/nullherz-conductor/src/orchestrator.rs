@@ -79,11 +79,10 @@ impl Conductor {
     }
 
     fn handle_transfusion_registrations(&mut self) {
-        let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
-        if let Some(ref engine) = *engine_lock {
-            let graph = engine.graph_manager.get_active_graph();
+        let mut engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+        if let Some(ref mut engine) = *engine_lock {
             let mut snapshots = Vec::new();
-            graph.pull_all_snapshots(&mut snapshots);
+            engine.pull_all_snapshots(&mut snapshots);
 
             for (sample_id, snapshot) in snapshots {
                 self.sample_registry.register(sample_id, snapshot);

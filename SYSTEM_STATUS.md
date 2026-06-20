@@ -50,6 +50,7 @@ The `AudioEngine` (`crates/audio-core`) is now a coordinator of specialized hand
 - **Lock-Free Read Path**: Engine only performs atomic read operations. Registration is restricted to the Conductor.
 - **Transport Agnostic**: `AudioEngine` is decoupled from concrete IPC types via `MidiConsumer`, `TopologyMutationConsumer`, and `CommandBundleConsumer` traits.
 - **Conductor Decoupling**: Orchestration is decoupled from processor internals via the `pull_all_snapshots` interface.
+- **Backend Abstraction**: Backends are decoupled from `audio-core` via the `RenderingEngine` trait and `BackendFactory`.
 - **SIMD Alignment**: All buffers utilize 64-byte alignment.
 
 ### 4.2 Conformance Audit
@@ -58,6 +59,7 @@ The entire suite of 14 processors passes the **Nullherz Conformance Suite**:
 - **Reset Determinism**: correct state clearing.
 - **Parameter Stability**: verified resilience against NaN, Infinity, and extreme parameter values.
 - **Snapshot Safety**: verified that `CaptureProcessor` and graph-wide snapshot pulling are thread-safe and RT-compliant.
+- **Backend Verification**: `MockBackend` integrated into Conductor tests for deterministic CI validation.
 
 ---
 
