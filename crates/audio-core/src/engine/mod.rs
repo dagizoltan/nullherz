@@ -105,6 +105,12 @@ impl nullherz_traits::RenderingEngine for AudioEngine {
     }
 }
 
+impl nullherz_traits::RenderingController for AudioEngine {
+    fn set_pending_graph(&self, graph: Box<dyn AudioProcessor>) {
+        self.set_pending_graph(graph);
+    }
+}
+
 impl AudioEngine {
     pub fn new(
         resources: EngineResources,
