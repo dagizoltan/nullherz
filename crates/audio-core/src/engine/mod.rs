@@ -45,6 +45,8 @@ impl nullherz_traits::Host for EngineHost {
 unsafe impl Send for AudioEngine {}
 unsafe impl Sync for AudioEngine {}
 
+/// Encapsulates all IPC resources required by the `AudioEngine`.
+/// This includes command streams, MIDI inputs, telemetry producers, and resource recycling channels.
 pub struct EngineResources {
     pub command_consumer: Box<dyn nullherz_traits::CommandConsumer>,
     pub command_producer: Box<dyn nullherz_traits::CommandProducer>,

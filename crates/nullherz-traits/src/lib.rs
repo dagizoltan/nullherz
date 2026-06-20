@@ -408,10 +408,14 @@ pub trait ProcessingKernel: Send {
 }
 
 /// Abstract interface for the audio rendering engine.
-/// This allows backends to be decoupled from the concrete AudioEngine implementation.
+/// This allows backends to be decoupled from the concrete `AudioEngine` implementation.
 pub trait RenderingEngine: Send + Sync {
+    /// Process a block of audio. This is the primary entry point for audio processing.
     fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize);
+    /// Update the engine configuration (sample rate, block size).
     fn set_config(&mut self, config: AudioConfig);
+    /// Returns the target sample rate configured for the engine.
     fn target_sample_rate(&self) -> f32;
+    /// Pulls all available snapshots from the signal graph for registration.
     fn pull_all_snapshots(&mut self, target: &mut Vec<(u64, Arc<Vec<f32>>)>);
 }
