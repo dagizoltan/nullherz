@@ -20,8 +20,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Main orchestration loop
+    let mut ticker = tokio::time::interval(Duration::from_millis(100));
     loop {
+        ticker.tick().await;
         conductor.tick();
-        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

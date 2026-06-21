@@ -17,7 +17,14 @@ pub fn create_dj_deck(
     *next_node_id += 1;
     commands.push(Command::AddNode { node_idx: resample_id, processor_type_id: ProcessorTypeId::SAMPLER });
 
-    let mut prev_id = resample_id;
+    let gain_id = *next_node_id;
+    *next_node_id += 1;
+    commands.push(Command::AddNode { node_idx: gain_id, processor_type_id: ProcessorTypeId::GAIN });
+    commands.push(Command::UpdateOutputEdge { node_idx: resample_id, output_idx: 0, new_buffer_idx: *next_buffer_id });
+    commands.push(Command::UpdateEdge { node_idx: gain_id, input_idx: 0, new_buffer_idx: *next_buffer_id });
+    *next_buffer_id += 1;
+
+    let mut prev_id = gain_id;
     for &fx_type in fx_ids {
         let fx_id = *next_node_id;
         *next_node_id += 1;

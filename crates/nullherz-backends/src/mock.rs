@@ -18,15 +18,18 @@ impl MockBackend {
 }
 
 impl AudioBackend for MockBackend {
-    fn start(&mut self, engine: Arc<Mutex<Option<Box<dyn RenderingEngine>>>>) -> Result<(), String> {
+    fn start(&mut self, engine: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>) -> Result<(), String> {
         self.is_running = true;
         let count = self.process_count.clone();
-        let mut engine_lock = engine.lock().unwrap();
-        if let Some(ref mut eng) = *engine_lock {
+        let engine_lock = engine.lock().unwrap();
+        if let Some(ref engine_arc) = *engine_lock {
             let inputs = [ &[][..]; 0 ];
             let mut out_data = [0.0f32; 128];
             let mut outputs = [ &mut out_data[..] ];
-            eng.process_block(&inputs, &mut outputs, 128);
+            let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
+            unsafe {
+                (*engine_ptr).process_block(&inputs, &mut outputs, 128);
+            }
             count.fetch_add(1, Ordering::SeqCst);
         }
         Ok(())

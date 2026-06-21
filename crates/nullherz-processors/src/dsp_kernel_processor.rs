@@ -37,6 +37,10 @@ impl<K: DspKernel + 'static> AudioProcessor for DspKernelProcessor<K> {
 
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn set_safe_mode(&mut self, enabled: bool) {
+        if enabled { self.reset(); }
+    }
 }
 
 /// A multi-channel version of `DspKernelProcessor` that applies a single kernel type to multiple channels.
@@ -84,4 +88,8 @@ impl<K: DspKernel + 'static> AudioProcessor for MultiChannelDspProcessor<K> {
 
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn set_safe_mode(&mut self, enabled: bool) {
+        if enabled { self.reset(); }
+    }
 }

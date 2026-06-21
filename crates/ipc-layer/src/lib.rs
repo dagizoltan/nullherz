@@ -343,6 +343,18 @@ pub fn move_to_cgroup(cgroup_name: &str, pid: i32) -> Result<(), IpcError> {
         .map_err(|e| IpcError::CgroupFailed(format!("Failed to write PID to {}: {}", procs_path, e)))
 }
 
+pub fn set_cgroup_memory_limit(cgroup_name: &str, limit_bytes: usize) -> Result<(), IpcError> {
+    let base_path = format!("/sys/fs/cgroup/{}", cgroup_name);
+    let limit_path = format!("{}/memory.max", base_path);
+
+    if !std::path::Path::new(&base_path).exists() {
+        std::fs::create_dir_all(&base_path).map_err(|e| IpcError::CgroupFailed(format!("Failed to create directory {}: {}", base_path, e)))?;
+    }
+
+    std::fs::write(&limit_path, limit_bytes.to_string())
+        .map_err(|e| IpcError::CgroupFailed(format!("Failed to set memory limit for {}: {}", cgroup_name, e)))
+}
+
 #[repr(C, align(64))]
 pub struct ShmSignal {
     pub(crate) flag: AtomicBool,

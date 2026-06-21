@@ -1,22 +1,5 @@
-use crate::processors::graph::{GraphTopology};
+pub use nullherz_traits::{CompiledGraphPlan, GraphTopology};
 use nullherz_traits::error::AudioError;
-
-#[derive(Debug, Clone, Copy)]
-pub struct CompiledGraphPlan {
-    pub stages: [[usize; crate::MAX_NODES]; crate::MAX_NODES],
-    pub stage_counts: [usize; crate::MAX_NODES],
-    pub num_stages: usize,
-}
-
-impl Default for CompiledGraphPlan {
-    fn default() -> Self {
-        Self {
-            stages: [[0; crate::MAX_NODES]; crate::MAX_NODES],
-            stage_counts: [0; crate::MAX_NODES],
-            num_stages: 0,
-        }
-    }
-}
 
 pub struct GraphCompiler {}
 

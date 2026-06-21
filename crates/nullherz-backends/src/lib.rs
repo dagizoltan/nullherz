@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use nullherz_traits::RenderingEngine;
 
 pub trait AudioBackend: Send {
-    fn start(&mut self, engine: Arc<Mutex<Option<Box<dyn RenderingEngine>>>>) -> Result<(), String>;
+    fn start(&mut self, engine: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>) -> Result<(), String>;
     fn stop(&mut self);
 }
 

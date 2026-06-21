@@ -21,6 +21,13 @@ impl AudioProcessor for BiquadProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
+    fn set_safe_mode(&mut self, enabled: bool) {
+        if enabled {
+            // Neutral coefficients (allpass/bypass) in safe mode
+            self.inner.set_parameter(0, 1.0, 0); // b0=1.0 is default in our impl
+        }
+    }
+
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext) {
         self.inner.process(inputs, outputs, context);
     }
@@ -85,6 +92,12 @@ impl SimdBiquadProcessor {
 impl AudioProcessor for SimdBiquadProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn set_safe_mode(&mut self, enabled: bool) {
+        if enabled {
+            self.inner.coeffs = audio_dsp::BiquadCoefficients::default();
+        }
+    }
 
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }

@@ -1,12 +1,16 @@
 use nullherz_traits::AudioProcessor;
 
 pub struct WavetableProcessor {
+    pub id: u64,
     inner: audio_dsp::WavetableOscillator,
 }
 
 impl WavetableProcessor {
-    pub fn new(sample_rate: f32) -> Self {
-        Self { inner: audio_dsp::WavetableOscillator::new(sample_rate) }
+    pub fn new(id: u64, sample_rate: f32) -> Self {
+        Self {
+            id,
+            inner: audio_dsp::WavetableOscillator::new(sample_rate),
+        }
     }
 }
 
@@ -17,6 +21,22 @@ impl AudioProcessor for WavetableProcessor {
 
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
+        if param_id == 0 {
+            for ch in 0..crate::MAX_CHANNELS {
+                self.inner.set_frequency(ch, value);
+            }
+        }
+    }
+
+    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
+            if target_id == self.id {
+                self.set_parameter(param_id, value, ramp_duration_samples);
+            }
+        }
+    }
 
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         let num_channels = outputs.len().min(crate::MAX_CHANNELS);

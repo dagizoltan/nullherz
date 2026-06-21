@@ -51,7 +51,30 @@ impl GraphReconciler {
                             processor_type_id: node.type_id,
                         });
                     }
-                    // Reconcile edges...
+
+                    // Reconcile edges
+                    for j in 0..node.input_count as usize {
+                        if j >= curr.input_count as usize || curr.input_buffers[j] != node.input_buffers[j] {
+                            commands.push(nullherz_traits::TopologyCommand::UpdateEdge {
+                                node_idx: i as u32,
+                                input_idx: j as u32,
+                                new_buffer_idx: node.input_buffers[j],
+                            });
+                        }
+                    }
+                    for j in 0..node.output_count as usize {
+                        if j >= curr.output_count as usize || curr.output_buffers[j] != node.output_buffers[j] {
+                            commands.push(nullherz_traits::TopologyCommand::UpdateOutputEdge {
+                                node_idx: i as u32,
+                                output_idx: j as u32,
+                                new_buffer_idx: node.output_buffers[j],
+                            });
+                        }
+                    }
+                }
+                (Some(_curr), None) => {
+                    // Node removal is currently handled by swapping to Dummy/Nothing or just unlinking.
+                    // For now, we don't have a specific RemoveNode command, but we could add one.
                 }
                 _ => {}
             }

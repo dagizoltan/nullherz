@@ -2,12 +2,14 @@ use nullherz_traits::{AudioProcessor, ProcessContext};
 use audio_dsp::{DspKernel, EnvelopeFollower};
 
 pub struct EnvelopeFollowerProcessor {
+    pub id: u64,
     kernel: EnvelopeFollower,
 }
 
 impl EnvelopeFollowerProcessor {
-    pub fn new(sample_rate: f32) -> Self {
+    pub fn new(id: u64, sample_rate: f32) -> Self {
         Self {
+            id,
             kernel: EnvelopeFollower::new(sample_rate, 10.0, 100.0),
         }
     }
@@ -16,6 +18,14 @@ impl EnvelopeFollowerProcessor {
 impl AudioProcessor for EnvelopeFollowerProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
+            if target_id == self.id {
+                self.set_parameter(param_id, value, ramp_duration_samples);
+            }
+        }
+    }
 
     fn reset(&mut self) {
         self.kernel.reset();

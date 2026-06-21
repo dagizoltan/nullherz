@@ -3,7 +3,7 @@ use crate::topology_manager::TopologyManager;
 use crate::transfusion_manager::TransfusionManager;
 use crate::mixer_bridge::MixerBridge;
 use crate::sidecar_supervisor::SidecarSupervisor;
-use nullherz_traits::{Command, CommandProducer, telemetry::Telemetry};
+use nullherz_traits::{Command, CommandProducer, RenderingEngine, telemetry::Telemetry};
 use std::sync::Arc;
 use nullherz_dna::SampleRegistry;
 
@@ -52,7 +52,9 @@ impl Conductor {
     }
 
     pub fn switch_backend(&mut self, backend_type: nullherz_backends::AudioBackendType) -> Result<(), String> {
-        self.engine_coordinator.backend_manager.switch(backend_type)
+        self.stop_backend();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        self.start_backend(backend_type)
     }
 
     pub fn drain_garbage(&mut self) {
@@ -70,10 +72,26 @@ impl Conductor {
     pub fn tick(&mut self) {
         if self.engine_coordinator.check_health() {
             eprintln!("CRITICAL: Engine health crisis detected. Prioritizing resource recovery...");
-            for _ in 0..100 { self.drain_garbage(); }
+            self.drain_garbage();
         }
 
-        self.sidecar_supervisor.supervise(&mut self.topology_manager);
+        let (mut new_processors, enter_safe_mode) = self.sidecar_supervisor.manager.supervise();
+        if enter_safe_mode {
+            eprintln!("Sidecar failure triggered Safe Mode!");
+            if let Some(ref prod) = self.engine_coordinator.command_producer {
+                let _ = prod.push_command(nullherz_traits::TimestampedCommand {
+                    timestamp_samples: 0,
+                    command: nullherz_traits::Command::SetSafeMode(true),
+                });
+            }
+        }
+
+        for (node_idx, processor) in new_processors.drain(..) {
+             eprintln!("Recovered sidecar process for node {}. Re-inserting into audio graph...", node_idx);
+            if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor { node_idx, processor });
+            }
+        }
 
         self.handle_transfusion_registrations();
 
@@ -83,7 +101,13 @@ impl Conductor {
     fn handle_transfusion_registrations(&mut self) {
         let mut engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
         if let Some(ref mut engine) = *engine_lock {
-            self.transfusion_manager.poll_snapshots(engine.as_mut());
+            // RenderingEngine::pull_all_snapshots needs &mut.
+            // We'll use the same raw pointer hack as in backends for now,
+            // as this is a non-RT call from the conductor.
+            let engine_ptr = Arc::as_ptr(engine) as *mut dyn RenderingEngine;
+            unsafe {
+                self.transfusion_manager.poll_snapshots(&mut *engine_ptr);
+            }
         }
     }
 }

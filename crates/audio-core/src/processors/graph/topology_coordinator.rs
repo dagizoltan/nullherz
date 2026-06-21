@@ -49,7 +49,8 @@ impl TopologyCoordinator {
         let inactive = (active + 1) % 2;
 
         if self.topologies[inactive].plan.num_stages == 0 && self.topologies[inactive].node_count > 0 {
-            // Re-run compilation to be sure
+            // Re-run compilation to be sure.
+            // In a production system, we'd have pre-compiled this off-thread.
             match GraphCompiler::compile(&self.topologies[inactive]) {
                 Ok(plan) => self.topologies[inactive].plan = plan,
                 Err(e) => return Err(format!("Compilation failed: {}", e)),

@@ -2,6 +2,7 @@ use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, Paramet
 use audio_dsp::{SpectralPipeline, AlignedBuffer, SpectralWindowShape};
 
 pub struct SpectralMorphProcessor {
+    pub id: u64,
     pipeline: SpectralPipeline,
     modulator_pipeline: SpectralPipeline,
     modulator_env: AlignedBuffer,
@@ -14,8 +15,9 @@ pub struct SpectralMorphProcessor {
 }
 
 impl SpectralMorphProcessor {
-    pub fn new(fft_size: usize) -> Self {
+    pub fn new(id: u64, fft_size: usize) -> Self {
         Self {
+            id,
             pipeline: SpectralPipeline::new(fft_size),
             modulator_pipeline: SpectralPipeline::new(fft_size),
             modulator_env: AlignedBuffer::new(fft_size),
@@ -30,6 +32,14 @@ impl SpectralMorphProcessor {
 impl AudioProcessor for SpectralMorphProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
+            if target_id == self.id {
+                self.set_parameter(param_id, value, ramp_duration_samples);
+            }
+        }
+    }
 
     fn reset(&mut self) {
         self.has_modulator_spectrum = false;

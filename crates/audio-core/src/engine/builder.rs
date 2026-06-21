@@ -6,6 +6,7 @@ use crate::processors::ProcessorGraph;
 
 pub struct EngineHandle {
     pub command_producer: Box<dyn nullherz_traits::CommandProducer>,
+    pub controller: Arc<dyn nullherz_traits::RenderingController>,
     pub midi_producer: Producer<MidiEvent>,
     pub bundle_producer: Producer<Vec<nullherz_traits::Command>>,
     pub topology_producer: Producer<TopologyMutation>,
@@ -53,7 +54,7 @@ impl EngineBuilder {
         self
     }
 
-    pub fn build(self) -> (AudioEngine, EngineHandle) {
+    pub fn build(self) -> (Arc<AudioEngine>, EngineHandle) {
         let cmd_buffer = Arc::new(MpscRingBuffer::new(self.command_buffer_size));
         let cmd_cons = ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone());
         let cmd_prod = ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone());
@@ -90,8 +91,11 @@ impl EngineBuilder {
             Arc::new(crate::rt_logging::RtLogger::new(256))
         );
 
+        let engine = Arc::new(engine);
+
         let handle = EngineHandle {
             command_producer: Box::new(cmd_prod),
+            controller: engine.clone(),
             midi_producer: midi_prod,
             bundle_producer: bundle_prod,
             topology_producer: topo_prod,

@@ -20,6 +20,12 @@ impl AudioProcessor for GainProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
+    fn set_safe_mode(&mut self, enabled: bool) {
+        if enabled {
+            self.inner.set_parameter(0, 1.0, 0); // Neutral gain in safe mode
+        }
+    }
+
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext) {
         self.inner.process(inputs, outputs, context);
     }

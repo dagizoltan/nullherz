@@ -28,6 +28,12 @@ pub struct BiquadFilter {
     pub(crate) z2: f32,
 }
 
+impl Default for BiquadCoefficients {
+    fn default() -> Self {
+        Self { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 }
+    }
+}
+
 impl BiquadFilter {
     pub fn new(coeffs: BiquadCoefficients) -> Self {
         Self {
@@ -177,11 +183,43 @@ impl Filter for BiquadFilter {
 }
 
 /// A Biquad Filter that processes 8 or 16 channels in parallel using AVX2/AVX-512.
+#[derive(Clone)]
 #[repr(C, align(64))]
 pub struct SimdBiquad {
     pub coeffs: BiquadCoefficients,
     pub z1: [f32; 16],
     pub z2: [f32; 16],
+}
+
+impl crate::DspKernel for SimdBiquad {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        let num_ch = inputs.len().min(outputs.len()).min(8);
+        if num_ch == 8 {
+            let mut in_ptrs = [std::ptr::null(); 8];
+            let mut out_ptrs = [std::ptr::null_mut(); 8];
+            for i in 0..8 {
+                in_ptrs[i] = inputs[i].as_ptr();
+                out_ptrs[i] = outputs[i].as_mut_ptr();
+            }
+            self.process_8_channels(in_ptrs, out_ptrs, inputs[0].len());
+        } else {
+            for i in 0..num_ch {
+                self.process_scalar(i, inputs[i], outputs[i]);
+            }
+        }
+    }
+
+    fn set_parameter(&mut self, id: u32, value: f32, _ramp_samples: u32) {
+        // Simple implementation for now
+        match id {
+            0 => self.coeffs.b0 = value,
+            1 => self.coeffs.b1 = value,
+            2 => self.coeffs.b2 = value,
+            3 => self.coeffs.a1 = value,
+            4 => self.coeffs.a2 = value,
+            _ => {}
+        }
+    }
 }
 
 impl SimdBiquad {
@@ -292,7 +330,27 @@ impl SimdBiquad {
     }
 }
 
+impl crate::DspKernel for DjIsolator {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        if inputs.is_empty() || outputs.is_empty() { return; }
+        self.process_block(inputs[0], outputs[0]);
+    }
+
+    fn reset(&mut self) {
+        self.low.reset();
+        self.mid.reset();
+        self.high.reset();
+    }
+
+    fn set_parameter(&mut self, id: u32, value: f32, _ramp_samples: u32) {
+        if id < 3 {
+            self.gains[id as usize] = value;
+        }
+    }
+}
+
 /// A 3-band DJ Isolator (Kill EQ) using high-order SIMD filters.
+#[derive(Clone)]
 pub struct DjIsolator {
     pub low: BiquadFilter,
     pub mid: BiquadFilter,
@@ -394,6 +452,13 @@ impl crate::DspKernel for BiquadFilter {
     }
 
     fn reset(&mut self) {
+        self.z1 = 0.0;
+        self.z2 = 0.0;
+    }
+}
+
+impl BiquadFilter {
+    pub fn reset(&mut self) {
         self.z1 = 0.0;
         self.z2 = 0.0;
     }

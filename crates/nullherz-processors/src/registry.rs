@@ -38,6 +38,8 @@ impl ProcessorRegistry {
         self.register_with_type(ProcessorTypeId::GRANULAR, Box::new(GranularFactory));
         self.register_with_type(ProcessorTypeId::SPECTRAL_MORPH, Box::new(SpectralMorphFactory));
         self.register_with_type(ProcessorTypeId::CAPTURE, Box::new(CaptureFactory));
+        self.register_with_type(ProcessorTypeId::DJ_ISOLATOR, Box::new(DjIsolatorFactory));
+        self.register_with_type(ProcessorTypeId::SIMD_BIQUAD, Box::new(SimdBiquadFactory));
     }
 
     pub fn register(&mut self, id: u32, factory: Box<dyn ProcessorFactory>) {
