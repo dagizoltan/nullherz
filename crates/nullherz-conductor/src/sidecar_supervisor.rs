@@ -15,11 +15,10 @@ impl SidecarSupervisor {
 
     pub fn supervise(&mut self, topology_manager: &mut TopologyManager) {
         let new_processors = self.manager.reap_zombies();
-        for processor in new_processors {
-            eprintln!("Recovered sidecar process. Re-inserting into audio graph...");
+        for (node_idx, processor) in new_processors {
+            eprintln!("Recovered sidecar process for node {}. Re-inserting into audio graph...", node_idx);
             if let Some(ref mut prod) = topology_manager.topo_producer {
-                // Automated recovery into node 0 (standard for current Conductor pattern)
-                let _ = prod.push(TopologyMutation::SwapProcessor { node_idx: 0, processor });
+                let _ = prod.push(TopologyMutation::SwapProcessor { node_idx, processor });
             }
         }
     }

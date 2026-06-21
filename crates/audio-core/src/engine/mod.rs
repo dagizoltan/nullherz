@@ -103,6 +103,11 @@ impl nullherz_traits::RenderingEngine for AudioEngine {
         let graph = self.graph_manager.get_active_graph();
         graph.pull_all_snapshots(target);
     }
+
+    fn list_children(&self) -> Vec<&dyn AudioProcessor> {
+        let graph = self.graph_manager.get_active_graph();
+        graph.list_children()
+    }
 }
 
 impl nullherz_traits::RenderingController for AudioEngine {

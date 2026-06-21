@@ -253,15 +253,16 @@ impl InspectorApp {
                         ui.horizontal(|ui| {
                             ui.add_space(20.0);
                             if ui.add(egui::Slider::new(&mut self.channel_gains[i], 0.0..=1.2).vertical().show_value(false)).changed() {
+                                // PD-2: Corrected target_id for GainProcessor in new 4-node-per-deck mixer
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                                    target_id: (i as u64 * 3 + 2),
+                                    target_id: (i as u64 * 4 + 1),
                                     param_id: 0,
                                     value: self.channel_gains[i],
                                     ramp_duration_samples: 128,
                                 });
                             }
 
-                            let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*3 + 2].min(1.2));
+                            let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1].min(1.2));
                             let (m_rect, _) = ui.allocate_exact_size(egui::vec2(6.0, 130.0), egui::Sense::hover());
                             ui.painter().rect_filled(m_rect, 0.0, egui::Color32::from_gray(20));
                             let m_h = (peak * 130.0).min(130.0);
@@ -278,15 +279,16 @@ impl InspectorApp {
                     ui.add_space(30.0);
                     ui.strong("MASTER");
                     if ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).show_value(false)).changed() {
+                        // PD-2: Corrected target_id for SummingProcessor (Master Gain)
                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                            target_id: 0,
+                            target_id: 16,
                             param_id: 0,
                             value: self.master_gain,
                             ramp_duration_samples: 128,
                         });
                     }
 
-                    let m_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[12].min(1.2));
+                    let m_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[16].min(1.2));
                     let (mtr_rect, _) = ui.allocate_exact_size(egui::vec2(250.0, 10.0), egui::Sense::hover());
                     ui.painter().rect_filled(mtr_rect, 1.0, egui::Color32::from_gray(25));
                     let m_w_val = (m_peak * 250.0).min(250.0);

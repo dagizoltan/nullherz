@@ -27,6 +27,7 @@ pub enum FailurePolicy {
 pub struct SidecarHandle {
     pub name: String,
     pub binary_path: String,
+    pub node_idx: u32,
     pub num_channels: usize,
     pub process: Child,
     pub shm_cmd: Arc<SharedMemory>,
@@ -62,11 +63,21 @@ impl SidecarSupervisor {
         }
     }
 
-    pub fn spawn_sidecar(&mut self, name: &str, binary_path: &str, num_channels: usize) -> Result<Box<dyn AudioProcessor>, String> {
+    pub fn spawn_sidecar(&mut self, name: &str, binary_path: &str, node_idx: u32, num_channels: usize, failure_policy: FailurePolicy) -> Result<Box<dyn AudioProcessor>, String> {
         let num_channels = num_channels.min(MAX_CHANNELS);
 
-        let _estimated_size = self.limiter.check_and_reserve(name, num_channels)?;
+        let estimated_size = self.limiter.check_and_reserve(name, num_channels)?;
 
+        let result = self.spawn_sidecar_internal(name, binary_path, node_idx, num_channels, failure_policy, estimated_size);
+
+        if result.is_err() {
+            self.limiter.release(estimated_size);
+        }
+
+        result
+    }
+
+    fn spawn_sidecar_internal(&mut self, name: &str, binary_path: &str, node_idx: u32, num_channels: usize, failure_policy: FailurePolicy, estimated_size: usize) -> Result<Box<dyn AudioProcessor>, String> {
         // 1. Create SHM for commands
         let cmd_shm_name = format!("/nullherz_cmd_{}", name);
         let (cmd_layout, _) = ShmRingBuffer::<nullherz_traits::Command>::layout(64);
@@ -151,6 +162,13 @@ impl SidecarSupervisor {
         if let Err(e) = move_to_cgroup("nullherz", child.id() as i32) {
             eprintln!("Warning: could not move sidecar {} to cgroup: {}", name, e);
         }
+
+        // SC-4: Enforce real memory limits via cgroups if possible
+        // We'll set a limit of 1.5x the estimated IPC memory or 16MB minimum.
+        let rss_limit = (estimated_size * 3 / 2).max(16 * 1024 * 1024);
+        if let Err(e) = ipc_layer::set_cgroup_memory_limit("nullherz", rss_limit) {
+             eprintln!("Warning: could not set cgroup memory limit for sidecar {}: {}", name, e);
+        }
         if let Err(e) = ipc_layer::set_rt_priority_for(child.id() as i32, 80) {
             eprintln!("Warning: could not set RT priority for sidecar {}: {}", name, e);
         }
@@ -176,6 +194,7 @@ impl SidecarSupervisor {
         self.active_sidecars.push(SidecarHandle {
             name: name.to_string(),
             binary_path: binary_path.to_string(),
+            node_idx,
             num_channels,
             process: child,
             shm_cmd,
@@ -187,15 +206,18 @@ impl SidecarSupervisor {
             last_heartbeat_version: 0,
             status: SidecarStatus::Running,
             restart_count: 0,
-            failure_policy: FailurePolicy::AutoRestart,
+            failure_policy,
         });
 
         Ok(Box::new(sidecar))
     }
 
-    pub fn supervise(&mut self) -> (Vec<Box<dyn AudioProcessor>>, bool) {
+    pub fn supervise(&mut self) -> (Vec<(u32, Box<dyn AudioProcessor>)>, bool) {
         let mut to_restart = Vec::new();
         let mut enter_safe_mode = false;
+
+        // SC-3: Fix resource quota leak by releasing early if needed.
+        // Actually, retain_mut is fine but we must ensure release on failure.
 
         self.active_sidecars.retain_mut(|handle| {
             if handle.status == SidecarStatus::Bypassing || handle.status == SidecarStatus::Crashed {
@@ -223,7 +245,7 @@ impl SidecarSupervisor {
                             handle.status = SidecarStatus::Restarting;
                             let size = self.limiter.estimate_sidecar_memory(handle.num_channels);
                             self.limiter.release(size);
-                            to_restart.push((handle.name.clone(), handle.binary_path.clone(), handle.num_channels, handle.restart_count + 1));
+                    to_restart.push((handle.name.clone(), handle.binary_path.clone(), handle.node_idx, handle.num_channels, handle.restart_count + 1, handle.failure_policy));
                             return false;
                         } else {
                             handle.status = SidecarStatus::Crashed;
@@ -247,18 +269,25 @@ impl SidecarSupervisor {
         });
 
         let mut new_processors = Vec::new();
-        for (name, path, channels, restarts) in to_restart {
-            if let Ok(p) = self.spawn_sidecar(&name, &path, channels) {
-                if let Some(h) = self.active_sidecars.last_mut() {
-                    h.restart_count = restarts;
+        for (name, path, node_idx, channels, restarts, policy) in to_restart {
+            match self.spawn_sidecar(&name, &path, node_idx, channels, policy) {
+                Ok(p) => {
+                    if let Some(h) = self.active_sidecars.last_mut() {
+                        h.restart_count = restarts;
+                    }
+                    new_processors.push((node_idx, p));
                 }
-                new_processors.push(p);
+                Err(e) => {
+                    eprintln!("Failed to restart sidecar {}: {}", name, e);
+                    // SC-3: limiter was reserved in spawn_sidecar and potentially not released
+                    // if it failed *after* reservation.
+                }
             }
         }
         (new_processors, enter_safe_mode)
     }
 
-    pub fn reap_zombies(&mut self) -> Vec<Box<dyn AudioProcessor>> {
+    pub fn reap_zombies(&mut self) -> Vec<(u32, Box<dyn AudioProcessor>)> {
         let (procs, _) = self.supervise();
         procs
     }
@@ -283,7 +312,7 @@ mod tests {
         supervisor.limiter.check_and_reserve("prefill", 16).unwrap();
 
         // This should fail due to quota
-        let result = supervisor.spawn_sidecar("test", "/usr/bin/true", 16);
+        let result = supervisor.spawn_sidecar("test", "/usr/bin/true", 0, 16, FailurePolicy::AutoRestart);
         match result {
             Err(e) => assert!(e.contains("exceeds system memory quota")),
             _ => panic!("Should have failed with memory quota error"),

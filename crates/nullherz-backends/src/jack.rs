@@ -10,7 +10,7 @@ pub struct JackBackend {
 struct JackBackendInner {
     client: *mut std::ffi::c_void,
     ports: Vec<*mut std::ffi::c_void>,
-    engine_handle: Option<Arc<Mutex<Option<Box<dyn RenderingEngine>>>>>,
+    engine_handle: Option<Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>>,
     lib: Option<JackLib>,
 }
 
@@ -91,7 +91,7 @@ unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_
 
     if let Some(ref handle) = backend.engine_handle {
         #[allow(clippy::collapsible_if)]
-        if let Some(ref mut engine) = *handle.lock().unwrap() {
+        if let Some(ref engine_arc) = *handle.lock().unwrap() {
             let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|i| {
                 if i < num_ports {
                     unsafe { std::slice::from_raw_parts_mut(out_ptrs[i], nframes as usize) }
@@ -99,14 +99,17 @@ unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_
                     &mut []
                 }
             });
-            engine.process_block(&[], &mut out_refs_storage[..num_ports], nframes as usize);
+            let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
+            unsafe {
+                (*engine_ptr).process_block(&[], &mut out_refs_storage[..num_ports], nframes as usize);
+            }
         }
     }
     0
 }
 
 impl AudioBackend for JackBackend {
-    fn start(&mut self, engine_handle: Arc<Mutex<Option<Box<dyn RenderingEngine>>>>) -> Result<(), String> {
+    fn start(&mut self, engine_handle: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>) -> Result<(), String> {
         unsafe {
             let inner = &mut *self.inner;
             if inner.lib.is_none() { inner.lib = Some(JackLib::load()?); }

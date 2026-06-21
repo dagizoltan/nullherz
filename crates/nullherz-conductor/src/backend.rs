@@ -4,7 +4,7 @@ use nullherz_backends::{AudioBackend, AudioBackendType};
 
 pub struct BackendManager {
     pub backend: Option<Box<dyn AudioBackend>>,
-    pub engine_handle: Arc<Mutex<Option<Box<dyn RenderingEngine>>>>,
+    pub engine_handle: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>,
 }
 
 impl Default for BackendManager {

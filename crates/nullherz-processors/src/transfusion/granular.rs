@@ -15,6 +15,7 @@ pub enum WindowShape {
 }
 
 pub struct GranularProcessor {
+    pub id: u64,
     voices: Vec<SamplerVoice>,
     voice_ages: [u32; MAX_GRAINS],
     voice_durations: [u32; MAX_GRAINS],
@@ -38,7 +39,7 @@ pub struct GranularProcessor {
 }
 
 impl GranularProcessor {
-    pub fn new(sample_rate: f32) -> Self {
+    pub fn new(id: u64, sample_rate: f32) -> Self {
         let voices = (0..MAX_GRAINS).map(|_| SamplerVoice::new()).collect();
 
         let mut hann_lut = [0.0f32; WINDOW_LUT_SIZE];
@@ -47,6 +48,7 @@ impl GranularProcessor {
         }
 
         Self {
+            id,
             voices,
             voice_ages: [0; MAX_GRAINS],
             voice_durations: [0; MAX_GRAINS],
@@ -101,6 +103,14 @@ impl GranularProcessor {
 impl AudioProcessor for GranularProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
+            if target_id == self.id {
+                self.set_parameter(param_id, value, ramp_duration_samples);
+            }
+        }
+    }
 
     fn reset(&mut self) {
         for v in self.voices.iter_mut() {

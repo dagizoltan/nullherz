@@ -7,6 +7,7 @@ use nullherz_traits::{Command, CommandProducer};
 
 pub struct EngineCoordinator {
     pub backend_manager: BackendManager,
+    pub controller: Option<Arc<dyn nullherz_traits::RenderingController>>,
     pub garbage_consumer: Option<ipc_layer::Consumer<Box<dyn AudioProcessor>>>,
     pub overflow_garbage_consumer: Option<ipc_layer::Consumer<Box<dyn AudioProcessor>>>,
     pub bundle_garbage_consumer: Option<ipc_layer::Consumer<Vec<Command>>>,
@@ -19,6 +20,7 @@ impl EngineCoordinator {
     pub fn new() -> Self {
         Self {
             backend_manager: BackendManager::default(),
+            controller: None,
             garbage_consumer: None,
             overflow_garbage_consumer: None,
             bundle_garbage_consumer: None,
@@ -37,7 +39,8 @@ impl EngineCoordinator {
 
         self.health_signal = Some(handle.health_signal.clone());
         self.command_producer = Some(handle.command_producer.clone());
-        *self.backend_manager.engine_handle.lock().unwrap() = Some(Box::new(engine));
+        self.controller = Some(handle.controller.clone());
+        *self.backend_manager.engine_handle.lock().unwrap() = Some(engine);
 
         handle
     }

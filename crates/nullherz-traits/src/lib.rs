@@ -38,6 +38,8 @@ impl ProcessorTypeId {
     pub const GRANULAR: Self = Self(90);
     pub const SPECTRAL_MORPH: Self = Self(100);
     pub const CAPTURE: Self = Self(110);
+    pub const DJ_ISOLATOR: Self = Self(120);
+    pub const SIMD_BIQUAD: Self = Self(130);
 }
 
 impl From<u32> for ProcessorTypeId {
@@ -96,6 +98,7 @@ pub enum Command {
         node_idx: u32,
     },
     CommitTopology,
+    SetSafeMode(bool),
     RequestSnapshots,
     SetSequencerStep {
         track: u32,
@@ -162,6 +165,50 @@ pub struct ProcessorMetadata {
     pub parameters: [ParameterMetadata; 16],
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct CompiledGraphPlan {
+    pub stages: [[usize; MAX_NODES]; MAX_NODES],
+    pub stage_counts: [usize; MAX_NODES],
+    pub num_stages: usize,
+}
+
+impl Default for CompiledGraphPlan {
+    fn default() -> Self {
+        Self {
+            stages: [[0; MAX_NODES]; MAX_NODES],
+            stage_counts: [0; MAX_NODES],
+            num_stages: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NodeRouting {
+    pub input_indices: [usize; MAX_CHANNELS],
+    pub output_indices: [usize; MAX_CHANNELS],
+    pub input_count: usize,
+    pub output_count: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CrossfadeState {
+    pub node_idx: usize,
+    pub input_idx: usize,
+    pub old_buffer_idx: usize,
+    pub new_buffer_idx: usize,
+    pub remaining_samples: u32,
+    pub total_samples: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GraphTopology {
+    pub routing: [NodeRouting; MAX_NODES],
+    pub virtual_to_physical: [usize; MAX_NODES],
+    pub plan: CompiledGraphPlan,
+    pub crossfades: [Option<CrossfadeState>; 8],
+    pub node_count: usize,
+}
+
 pub enum TopologyMutation {
     UpdateEdge {
         node_idx: u32,
@@ -185,6 +232,7 @@ pub enum TopologyMutation {
         node_idx: u32,
         buffer: Arc<Vec<f32>>,
     },
+    SetTopology(Arc<GraphTopology>),
 }
 
 /// Interface for processors to interact with the engine host (e.g., scheduling commands).
@@ -332,6 +380,9 @@ pub trait AudioProcessor: Send {
     /// Sets a processor parameter with optional ramping.
     fn set_parameter(&mut self, _param_id: u32, _value: f32, _ramp_duration_samples: u32) {}
 
+    /// Sets the processor to safe mode (bypass or minimum processing).
+    fn set_safe_mode(&mut self, _enabled: bool) {}
+
     /// Applies structural graph mutations to the processor (routing, swapping).
     fn apply_topology_mutation(&mut self, _mutation: TopologyMutation) {}
 
@@ -363,6 +414,9 @@ pub trait AudioProcessor: Send {
     /// Returns a list of available snapshots from this processor and its children.
     /// Used by the conductor to pull snapshots without knowing internal topology.
     fn pull_all_snapshots(&mut self, _target: &mut Vec<(u64, Arc<Vec<f32>>)>) {}
+
+    /// Returns a list of all currently active child processors.
+    fn list_children(&self) -> Vec<&dyn AudioProcessor> { Vec::new() }
 }
 
 pub trait CommandProducer: Send + Sync + dyn_clone::DynClone {
@@ -410,7 +464,7 @@ pub trait ProcessingKernel: Send {
 
 /// Abstract interface for the audio rendering engine.
 /// This allows backends to be decoupled from the concrete `AudioEngine` implementation.
-pub trait RenderingEngine: Send {
+pub trait RenderingEngine: Send + Sync {
     /// Process a block of audio. This is the primary entry point for audio processing.
     fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize);
     /// Update the engine configuration (sample rate, block size).
@@ -419,6 +473,8 @@ pub trait RenderingEngine: Send {
     fn target_sample_rate(&self) -> f32;
     /// Pulls all available snapshots from the signal graph for registration.
     fn pull_all_snapshots(&mut self, target: &mut Vec<(u64, Arc<Vec<f32>>)>);
+    /// Returns a list of all currently active child processors.
+    fn list_children(&self) -> Vec<&dyn AudioProcessor>;
 }
 
 /// Interface for controlling the audio engine from a non-RT thread.

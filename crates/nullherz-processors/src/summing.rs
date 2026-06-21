@@ -1,22 +1,30 @@
 use nullherz_traits::AudioProcessor;
 
 pub struct SummingProcessor {
+    pub id: u64,
     inner: audio_dsp::SummingNode,
 }
 
-impl Default for SummingProcessor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl SummingProcessor {
-    pub fn new() -> Self { Self { inner: audio_dsp::SummingNode::new() } }
+    pub fn new(id: u64) -> Self {
+        Self {
+            id,
+            inner: audio_dsp::SummingNode::new(),
+        }
+    }
 }
 
 impl AudioProcessor for SummingProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
+            if target_id == self.id {
+                self.set_parameter(param_id, value, ramp_duration_samples);
+            }
+        }
+    }
 
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if outputs.is_empty() { return; }

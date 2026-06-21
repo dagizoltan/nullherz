@@ -19,12 +19,16 @@ pub fn connect_to_engine() -> Result<(ipc_layer::NonRtProducer<TimestampedComman
 }
 
 pub trait TelemetryProvider: Send + Sync {
-    fn pop_telemetry(&self) -> Option<Telemetry>;
+    fn get_telemetry(&self) -> Option<Telemetry>;
 }
 
-impl TelemetryProvider for Mutex<Consumer<Telemetry>> {
-    fn pop_telemetry(&self) -> Option<Telemetry> {
-        self.lock().unwrap().pop()
+pub struct TelemetryBroadcaster {
+    pub current: Mutex<Option<Telemetry>>,
+}
+
+impl TelemetryProvider for TelemetryBroadcaster {
+    fn get_telemetry(&self) -> Option<Telemetry> {
+        *self.current.lock().unwrap()
     }
 }
 
@@ -34,17 +38,28 @@ mod tests;
 pub async fn run_gateway(
     addr: &str,
     cmd_prod: ipc_layer::NonRtProducer<TimestampedCommand>,
-    tel_cons: Consumer<Telemetry>
+    mut tel_cons: Consumer<Telemetry>
 ) -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(addr).await?;
     println!("nullherz-gateway listening on: {}", addr);
 
-    let tel_cons = Arc::new(Mutex::new(tel_cons));
+    let broadcaster = Arc::new(TelemetryBroadcaster { current: Mutex::new(None) });
+    let broadcaster_clone = broadcaster.clone();
+
+    // Spawn a task to update the broadcaster from the consumer
+    tokio::spawn(async move {
+        loop {
+            while let Some(tel) = tel_cons.pop() {
+                *broadcaster_clone.current.lock().unwrap() = Some(tel);
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+        }
+    });
 
     while let Ok((stream, _)) = listener.accept().await {
         let cmd_prod_clone = cmd_prod.clone();
-        let tel_cons_clone = Arc::clone(&tel_cons);
-        tokio::spawn(handle_connection(stream, cmd_prod_clone, tel_cons_clone));
+        let tel_provider = Arc::clone(&broadcaster) as Arc<dyn TelemetryProvider>;
+        tokio::spawn(handle_connection(stream, cmd_prod_clone, tel_provider));
     }
 
     Ok(())
@@ -63,13 +78,19 @@ async fn handle_connection(
 
     // Spawn a task to broadcast telemetry
     let tel_task = tokio::spawn(async move {
+        let mut last_sample_counter = 0;
         loop {
-            let tel = tel_provider.pop_telemetry();
+            let tel = tel_provider.get_telemetry();
 
-            if let Some(json) = tel.and_then(|t| serde_json::to_string(&t).ok()) {
-                let msg = Message::Text(json.into());
-                if write.send(msg).await.is_err() {
-                    break;
+            if let Some(t) = tel {
+                if t.sample_counter != last_sample_counter {
+                    if let Ok(json) = serde_json::to_string(&t) {
+                        let msg = Message::Text(json.into());
+                        if write.send(msg).await.is_err() {
+                            break;
+                        }
+                    }
+                    last_sample_counter = t.sample_counter;
                 }
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(16)).await; // ~60fps

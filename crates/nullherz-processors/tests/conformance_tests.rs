@@ -64,6 +64,32 @@ fn test_all_processors_conformance() {
                 .unwrap();
         }
 
+        // Snapshot safety
+        {
+            let mut proc = registry.create_by_id(id, 0, sample_rate).expect("Failed to create processor");
+            ConformanceSuite::verify_snapshot_safety(proc.as_mut())
+                .map_err(|e| format!("Processor {} (ID {}) failed snapshot safety check: {}", name, id, e))
+                .unwrap();
+        }
+
+        // Parameter bounds (check first 3 parameters for stability)
+        {
+            for p_id in 0..3 {
+                let mut proc = registry.create_by_id(id, 0, sample_rate).expect("Failed to create processor");
+                if let Err(e) = ConformanceSuite::verify_parameter_bounds(proc.as_mut(), p_id) {
+                     println!("INFO: Processor {} (ID {}) parameter {} bounds check: {} (might not have 3 params)", name, id, p_id, e);
+                }
+            }
+        }
+
+        // Multichannel consistency
+        {
+            let mut proc = registry.create_by_id(id, 0, sample_rate).expect("Failed to create processor");
+            ConformanceSuite::verify_multichannel_consistency(proc.as_mut(), 2)
+                .map_err(|e| format!("Processor {} (ID {}) failed multichannel consistency: {}", name, id, e))
+                .unwrap();
+        }
+
         // Bypass conformance (only for processors that support it via param 999 convention, or skip if not supported)
         // For now, we skip it as not all processors have implemented the 999 convention.
     }

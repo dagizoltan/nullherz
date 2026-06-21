@@ -21,12 +21,12 @@ pub struct TelemetryProcessor;
 
 impl TelemetryProcessor {
     pub fn collect_node_times(
-        node_times_cycles: &[AtomicU64; MAX_NODES],
+        node_times_cycles: &[u64; MAX_NODES],
         ns_per_cycle: f64,
         node_times_ns: &mut [u64; MAX_NODES]
     ) {
         for (i, node_time) in node_times_ns.iter_mut().enumerate() {
-            *node_time = (node_times_cycles[i].load(Ordering::Relaxed) as f64 * ns_per_cycle) as u64;
+            *node_time = (node_times_cycles[i] as f64 * ns_per_cycle) as u64;
         }
     }
 

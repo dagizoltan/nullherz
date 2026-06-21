@@ -23,7 +23,7 @@ impl TelemetryFinalizer {
 
         let ns_per_cycle = f64::from_bits(metrics.ns_per_cycle.load(Ordering::Relaxed));
         nullherz_traits::telemetry::TelemetryProcessor::collect_node_times(
-            unsafe { std::mem::transmute(&node_times_cycles) },
+            &node_times_cycles,
             ns_per_cycle,
             &mut node_times
         );

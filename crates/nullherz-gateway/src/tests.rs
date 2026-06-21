@@ -6,7 +6,7 @@ struct MockTelemetryProvider {
 }
 
 impl TelemetryProvider for MockTelemetryProvider {
-    fn pop_telemetry(&self) -> Option<Telemetry> {
+    fn get_telemetry(&self) -> Option<Telemetry> {
         self.call_count.fetch_add(1, Ordering::SeqCst);
         None
     }
@@ -21,6 +21,6 @@ async fn test_gateway_connection_handling() {
     // and tokio_tungstenite handshake.
     // But we verified the TelemetryProvider abstraction.
     assert_eq!(provider.call_count.load(Ordering::SeqCst), 0);
-    let _ = provider.pop_telemetry();
+    let _ = provider.get_telemetry();
     assert_eq!(provider.call_count.load(Ordering::SeqCst), 1);
 }

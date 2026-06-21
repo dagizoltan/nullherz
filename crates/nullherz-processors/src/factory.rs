@@ -39,16 +39,16 @@ impl ProcessorFactory for SamplerFactory {
 
 pub struct CrossfaderFactory;
 impl ProcessorFactory for CrossfaderFactory {
-    fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        Some(Box::new(CrossfaderProcessor::new()))
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(CrossfaderProcessor::new(node_idx as u64)))
     }
     fn name(&self) -> &'static str { "Crossfader" }
 }
 
 pub struct SummingFactory;
 impl ProcessorFactory for SummingFactory {
-    fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        Some(Box::new(SummingProcessor::new()))
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(SummingProcessor::new(node_idx as u64)))
     }
     fn name(&self) -> &'static str { "Summing" }
 }
@@ -63,8 +63,8 @@ impl ProcessorFactory for SpectralFactory {
 
 pub struct WavetableFactory;
 impl ProcessorFactory for WavetableFactory {
-    fn create_processor(&self, _node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        Some(Box::new(WavetableProcessor::new(sample_rate)))
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(WavetableProcessor::new(node_idx as u64, sample_rate)))
     }
     fn name(&self) -> &'static str { "Wavetable" }
 }
@@ -87,24 +87,24 @@ impl ProcessorFactory for SequencerFactory {
 
 pub struct EnvelopeFollowerFactory;
 impl ProcessorFactory for EnvelopeFollowerFactory {
-    fn create_processor(&self, _node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        Some(Box::new(EnvelopeFollowerProcessor::new(sample_rate)))
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(EnvelopeFollowerProcessor::new(node_idx as u64, sample_rate)))
     }
     fn name(&self) -> &'static str { "EnvelopeFollower" }
 }
 
 pub struct GranularFactory;
 impl ProcessorFactory for GranularFactory {
-    fn create_processor(&self, _node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        Some(Box::new(GranularProcessor::new(sample_rate)))
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(GranularProcessor::new(node_idx as u64, sample_rate)))
     }
     fn name(&self) -> &'static str { "Granular" }
 }
 
 pub struct SpectralMorphFactory;
 impl ProcessorFactory for SpectralMorphFactory {
-    fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        Some(Box::new(SpectralMorphProcessor::new(1024)))
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(SpectralMorphProcessor::new(node_idx as u64, 1024)))
     }
     fn name(&self) -> &'static str { "SpectralMorph" }
 }
@@ -115,4 +115,21 @@ impl ProcessorFactory for CaptureFactory {
         Some(Box::new(CaptureProcessor::new(sample_rate as usize * 2, node_idx as u64))) // 2 seconds
     }
     fn name(&self) -> &'static str { "Capture" }
+}
+
+pub struct DjIsolatorFactory;
+impl ProcessorFactory for DjIsolatorFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(crate::dsp_kernel_processor::DspKernelProcessor::new(node_idx as u64, audio_dsp::DjIsolator::new())))
+    }
+    fn name(&self) -> &'static str { "DjIsolator" }
+}
+
+pub struct SimdBiquadFactory;
+impl ProcessorFactory for SimdBiquadFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        let coeffs = audio_dsp::BiquadCoefficients::default();
+        Some(Box::new(crate::dsp_kernel_processor::MultiChannelDspProcessor::new(node_idx as u64, audio_dsp::SimdBiquad::new(coeffs), 8)))
+    }
+    fn name(&self) -> &'static str { "SimdBiquad" }
 }
