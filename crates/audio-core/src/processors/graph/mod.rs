@@ -295,6 +295,11 @@ impl AudioProcessor for ProcessorGraph {
                 self.calculate_stages();
                 self.commit_graph();
             }
+            nullherz_traits::Command::Bundle { .. } => {
+                // BUG-07: ProcessorGraph must not broadcast the Bundle itself,
+                // because CommandDispatcher already expanded it into individual SetParam calls.
+                // We do nothing here to avoid double-application.
+            }
             _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }
         }
     }

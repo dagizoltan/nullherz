@@ -45,12 +45,16 @@ impl GraphManager {
         if !pending.is_null() {
             let old = self.active_graph.swap(pending, Ordering::AcqRel);
             if !old.is_null() {
-                let old_graph = unsafe { *Box::from_raw(old) };
+                // Reconstruct the Box<Box<dyn AudioProcessor>> from the raw pointer.
+                let old_graph_box = unsafe { Box::from_raw(old) };
+                // Dereference once to get the inner Box<dyn AudioProcessor>.
+                let old_graph = *old_graph_box;
                 if let Err(leaked) = self.garbage_producer.push(old_graph) {
                     if let Some(ref mut overflow) = self.overflow_garbage_producer {
                         if let Err(leaked) = overflow.push(leaked) {
                             self.logger.log(crate::rt_logging::RtLogLevel::Error, "CRITICAL: Resource leak - garbage producers full", 0);
                             metrics.report_resource_leak(health_signal);
+                            // leaked is Box<dyn AudioProcessor>. forget it to avoid dropping on RT thread.
                             std::mem::forget(leaked);
                         }
                     } else {
@@ -65,7 +69,9 @@ impl GraphManager {
         unsafe { &mut **graph_ptr }
     }
 
-    pub fn get_active_graph(&self) -> &mut dyn AudioProcessor {
+    /// Provides a mutable reference to the active graph.
+    /// SAFETY: The caller must ensure exclusive access, typically by being on the RT thread.
+    pub unsafe fn get_active_graph_mut(&self) -> &mut dyn AudioProcessor {
         let graph_ptr = self.active_graph.load(Ordering::Acquire);
         unsafe { &mut **graph_ptr }
     }
