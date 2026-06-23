@@ -203,7 +203,7 @@ mod tests {
         engine.process_block(&[], &mut outputs, 128);
 
         // Should have processed 0-50 and 50-128
-        let graph = engine.graph_manager.get_active_graph().as_any().downcast_ref::<MockProcessor>().unwrap();
+        let graph = unsafe { engine.graph_manager.get_active_graph_mut().as_any().downcast_ref::<MockProcessor>().unwrap() };
         assert_eq!(graph.process_count, 2);
     }
 
@@ -251,7 +251,73 @@ mod tests {
         let mut outputs = [&mut out[..]];
         engine.process_block(&[], &mut outputs, 128);
 
-        let graph = engine.graph_manager.get_active_graph().as_any().downcast_ref::<MidiMockProcessor>().unwrap();
+        let graph = unsafe { engine.graph_manager.get_active_graph_mut().as_any().downcast_ref::<MidiMockProcessor>().unwrap() };
         assert!(graph.midi_received);
+    }
+
+    #[test]
+    fn test_engine_bundle_command_application() {
+        struct ParamMockProcessor {
+            param_value: f32,
+            apply_count: usize,
+            id: u64,
+        }
+        impl AudioProcessor for ParamMockProcessor {
+            fn as_any(&self) -> &dyn std::any::Any { self }
+            fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+            fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {}
+            fn apply_command(&mut self, cmd: &Command) {
+                if let Command::SetParam { target_id, value, .. } = cmd {
+                    if *target_id == self.id {
+                        self.param_value = *value;
+                        self.apply_count += 1;
+                    }
+                }
+            }
+        }
+
+        let proc_id = 12345u64;
+        let cmd_buffer = Arc::new(MpscRingBuffer::<TimestampedCommand>::new(256));
+        let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
+        let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn AudioProcessor>>::new(1024).split();
+
+        // Create a bundle with one command
+        let mut bundle_data = [0u64; 12];
+        bundle_data[0] = proc_id;
+        bundle_data[1] = 0; // param_id
+        bundle_data[2] = 0.5f32.to_bits() as u64;
+
+        let _ = cmd_buffer.push(TimestampedCommand {
+            timestamp_samples: 0,
+            command: Command::Bundle { count: 1, data: bundle_data },
+        });
+
+        let resources = crate::engine::EngineResources {
+            command_consumer: Box::new(ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone())),
+            command_producer: Box::new(ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone())),
+            midi_consumer: None,
+            bundle_consumer: None,
+            topology_consumer: None,
+            garbage_producer: garbage_prod,
+            overflow_garbage_producer: None,
+            bundle_garbage_producer: None,
+            bundle_overflow_producer: None,
+            telemetry_producer: Box::new(tel_prod),
+        };
+
+        let mut engine = AudioEngine::new(
+            resources,
+            Box::new(ParamMockProcessor { param_value: 0.0, apply_count: 0, id: proc_id }),
+            Arc::new(crate::rt_logging::RtLogger::new(256))
+        );
+
+        let mut out = [0.0f32; 128];
+        let mut outputs = [&mut out[..]];
+        engine.process_block(&[], &mut outputs, 128);
+
+        let graph = unsafe { engine.graph_manager.get_active_graph_mut().as_any().downcast_ref::<ParamMockProcessor>().unwrap() };
+        assert_eq!(graph.param_value, 0.5);
+        // BUG-07 check: should only be applied once
+        assert_eq!(graph.apply_count, 1);
     }
 }

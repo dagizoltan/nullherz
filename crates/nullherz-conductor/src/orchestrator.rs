@@ -38,7 +38,6 @@ impl Conductor {
 
         self.mixer_bridge.bundle_producer = Some(handle.bundle_producer);
         self.topology_manager.topo_producer = Some(ipc_layer::NonRtProducer::new(handle.topology_producer));
-        self.engine_coordinator.garbage_consumer = Some(handle.garbage_consumer);
 
         (handle.command_producer, handle.telemetry_consumer)
     }

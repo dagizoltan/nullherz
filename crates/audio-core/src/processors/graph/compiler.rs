@@ -9,13 +9,14 @@ impl GraphCompiler {
         let n = topo.node_count;
         if n == 0 { return Ok(plan); }
 
-        let mut in_degree = [0usize; crate::MAX_NODES];
-        let mut adj = [[0usize; crate::MAX_NODES]; crate::MAX_NODES];
-        let mut adj_count = [0usize; crate::MAX_NODES];
+        // PERF-08: Use Boxed arrays to avoid massive stack pressure (~96KB previously)
+        let mut in_degree = Box::new([0usize; crate::MAX_NODES]);
+        let mut adj = Box::new([[0usize; crate::MAX_NODES]; crate::MAX_NODES]);
+        let mut adj_count = Box::new([0usize; crate::MAX_NODES]);
 
         // 1. Build adjacency list and in-degrees efficiently
-        let mut v_to_producers = [[0usize; crate::MAX_NODES]; crate::MAX_NODES];
-        let mut v_producer_counts = [0usize; crate::MAX_NODES];
+        let mut v_to_producers = Box::new([[0usize; crate::MAX_NODES]; crate::MAX_NODES]);
+        let mut v_producer_counts = Box::new([0usize; crate::MAX_NODES]);
         for j in 0..n {
             let routing_j = &topo.routing[j];
             for k in 0..routing_j.output_count {
@@ -53,7 +54,7 @@ impl GraphCompiler {
 
         // 2. Kahn's algorithm with Write-After-Write (WAW) tracking
         let mut processed_count = 0;
-        let mut is_processed = [false; crate::MAX_NODES];
+        let mut is_processed = Box::new([false; crate::MAX_NODES]);
         plan.num_stages = 0;
 
         while processed_count < n {

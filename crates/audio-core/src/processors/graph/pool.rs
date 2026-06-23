@@ -85,29 +85,29 @@ impl TaskPool {
                         let num_samples = job.num_samples;
                         let buffers_ptr = job.buffers_ptr;
 
-                        let mut node_inputs_storage = [ &[][..]; 16 ];
-                        let input_count = job.input_count.min(16);
+                        let mut node_inputs_storage = [ &[][..]; crate::MAX_CHANNELS ];
+                        let input_count = job.input_count.min(crate::MAX_CHANNELS);
                         let offset = job.sub_block_offset;
 
                         for (i, input_storage) in node_inputs_storage.iter_mut().enumerate().take(input_count) {
                             let p_idx = *job.input_indices.get(i).unwrap_or(&0);
-                            if p_idx >= 64 {
-                                let x_idx = p_idx - 64;
-                                if x_idx < 8 {
-                                    // SAFETY: x_buffers_ptr is valid for 8 AudioBlocks as pre-allocated by ProcessorGraph.
+                            if p_idx >= crate::MAX_NODES {
+                                let x_idx = p_idx - crate::MAX_NODES;
+                                if x_idx < crate::MAX_CROSSFADE_BUFFERS {
+                                    // SAFETY: x_buffers_ptr is valid for MAX_CROSSFADE_BUFFERS AudioBlocks as pre-allocated by ProcessorGraph.
                                     unsafe { *input_storage = &(&(*job.x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
                                 }
-                            } else if p_idx < 64 {
+                            } else if p_idx < crate::MAX_NODES {
                                 // SAFETY: buffers_ptr is valid for MAX_NODES AudioBlocks as pre-allocated by ProcessorGraph.
                                 unsafe { *input_storage = &(&(*buffers_ptr.add(p_idx)).data)[offset..offset + num_samples]; }
                             }
                         }
 
-                        let mut node_outputs_reconstructed: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
-                        let output_count = job.output_count.min(16);
+                        let mut node_outputs_reconstructed: [&mut [f32]; crate::MAX_CHANNELS] = std::array::from_fn(|_| &mut [][..]);
+                        let output_count = job.output_count.min(crate::MAX_CHANNELS);
                         for (i, output_storage) in node_outputs_reconstructed.iter_mut().enumerate().take(output_count) {
                             let p_idx = *job.output_indices.get(i).unwrap_or(&0);
-                            if p_idx < 64 {
+                            if p_idx < crate::MAX_NODES {
                                 // SAFETY: buffers_ptr is valid and unique for each index in the current stage.
                                 unsafe {
                                     *output_storage = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr().add(offset), num_samples);

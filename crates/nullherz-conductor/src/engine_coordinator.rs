@@ -40,6 +40,12 @@ impl EngineCoordinator {
         self.health_signal = Some(handle.health_signal.clone());
         self.command_producer = Some(handle.command_producer.clone());
         self.controller = Some(handle.controller.clone());
+
+        self.garbage_consumer = handle.garbage_consumer.clone();
+        self.overflow_garbage_consumer = handle.garbage_overflow_consumer.clone();
+        self.bundle_garbage_consumer = handle.bundle_garbage_consumer.clone();
+        self.bundle_overflow_consumer = handle.bundle_overflow_consumer.clone();
+
         *self.backend_manager.engine_handle.lock().unwrap() = Some(engine);
 
         handle

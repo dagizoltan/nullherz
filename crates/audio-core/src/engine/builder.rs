@@ -11,7 +11,10 @@ pub struct EngineHandle {
     pub bundle_producer: Producer<Vec<nullherz_traits::Command>>,
     pub topology_producer: Producer<TopologyMutation>,
     pub telemetry_consumer: Consumer<Telemetry>,
-    pub garbage_consumer: Consumer<Box<dyn AudioProcessor>>,
+    pub garbage_consumer: Option<Consumer<Box<dyn AudioProcessor>>>,
+    pub garbage_overflow_consumer: Option<Consumer<Box<dyn AudioProcessor>>>,
+    pub bundle_garbage_consumer: Option<Consumer<Vec<nullherz_traits::Command>>>,
+    pub bundle_overflow_consumer: Option<Consumer<Vec<nullherz_traits::Command>>>,
     pub health_signal: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -66,9 +69,9 @@ impl EngineBuilder {
         let (garbage_prod, garbage_cons) = RingBuffer::new(self.garbage_buffer_size).split();
 
         // Optional overflow and deallocation cues
-        let (bundle_garbage_prod, _bundle_garbage_cons) = RingBuffer::new(32).split();
-        let (bundle_overflow_prod, _bundle_overflow_cons) = RingBuffer::new(32).split();
-        let (garbage_overflow_prod, _garbage_overflow_cons) = RingBuffer::new(32).split();
+        let (bundle_garbage_prod, bundle_garbage_cons) = RingBuffer::new(32).split();
+        let (bundle_overflow_prod, bundle_overflow_cons) = RingBuffer::new(32).split();
+        let (garbage_overflow_prod, garbage_overflow_cons) = RingBuffer::new(32).split();
 
         let initial_graph = self.initial_graph.unwrap_or_else(|| Box::new(ProcessorGraph::new()));
 
@@ -100,7 +103,10 @@ impl EngineBuilder {
             bundle_producer: bundle_prod,
             topology_producer: topo_prod,
             telemetry_consumer: tel_cons,
-            garbage_consumer: garbage_cons,
+            garbage_consumer: Some(garbage_cons),
+            garbage_overflow_consumer: Some(garbage_overflow_cons),
+            bundle_garbage_consumer: Some(bundle_garbage_cons),
+            bundle_overflow_consumer: Some(bundle_overflow_cons),
             health_signal: engine.health_signal.clone(),
         };
 

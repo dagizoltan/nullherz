@@ -100,12 +100,15 @@ impl nullherz_traits::RenderingEngine for AudioEngine {
     }
 
     fn pull_all_snapshots(&mut self, target: &mut Vec<(u64, Arc<Vec<f32>>)>) {
-        let graph = self.graph_manager.get_active_graph();
+        // SAFETY: RenderingEngine methods are typically called from the RT thread or
+        // synchronized via other means.
+        let graph = unsafe { self.graph_manager.get_active_graph_mut() };
         graph.pull_all_snapshots(target);
     }
 
     fn list_children(&self) -> Vec<&dyn AudioProcessor> {
-        let graph = self.graph_manager.get_active_graph();
+        // SAFETY: Caller must ensure this does not race with RT processing.
+        let graph = unsafe { self.graph_manager.get_active_graph_mut() };
         graph.list_children()
     }
 }
@@ -148,7 +151,7 @@ impl AudioEngine {
             metrics: EngineMetrics::new(),
             health_signal: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             host: Some(EngineHost { command_producer }),
-            pool: Some(Box::new(TaskPool::new(4))),
+            pool: Some(Box::new(TaskPool::new(nullherz_traits::DEFAULT_WORKER_COUNT))),
             transport: nullherz_traits::Transport {
                 bpm: 120.0,
                 beat_position: 0.0,
@@ -167,7 +170,8 @@ impl AudioEngine {
     pub fn set_config(&mut self, config: nullherz_traits::AudioConfig) {
         self.target_sample_rate = config.sample_rate;
         self.transport.sample_rate = config.sample_rate;
-        let graph = self.graph_manager.get_active_graph();
+        // SAFETY: We have &mut self here.
+        let graph = unsafe { self.graph_manager.get_active_graph_mut() };
         graph.setup(config);
     }
 

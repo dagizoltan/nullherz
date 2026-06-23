@@ -2,7 +2,7 @@ use ipc_layer::AudioBlock;
 
 pub struct GraphBufferPool {
     pub(crate) buffers: Box<[AudioBlock; crate::MAX_NODES]>,
-    pub(crate) crossfade_buffers: [AudioBlock; 8],
+    pub(crate) crossfade_buffers: [AudioBlock; crate::MAX_CROSSFADE_BUFFERS],
     pub(crate) old_path_buffers: Box<[AudioBlock; crate::MAX_NODES]>,
 }
 
@@ -11,7 +11,7 @@ impl GraphBufferPool {
         let empty_block = AudioBlock { data: [0.0f32; ipc_layer::MAX_BLOCK_SIZE], len: 0 };
         Self {
             buffers: Box::new([empty_block; crate::MAX_NODES]),
-            crossfade_buffers: [empty_block; 8],
+            crossfade_buffers: [empty_block; crate::MAX_CROSSFADE_BUFFERS],
             old_path_buffers: Box::new([empty_block; crate::MAX_NODES]),
         }
     }

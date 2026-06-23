@@ -13,10 +13,10 @@ impl GraphExecutor {
         num_samples: usize,
         old_path_buffers: &[AudioBlock; crate::MAX_NODES],
         buffers: &[AudioBlock; crate::MAX_NODES],
-        crossfade_buffers: &mut [AudioBlock; 8],
+        crossfade_buffers: &mut [AudioBlock; crate::MAX_CROSSFADE_BUFFERS],
         block_x_map: &mut [[u8; crate::MAX_CHANNELS]; crate::MAX_NODES]
     ) {
-        for i in 0..8 {
+        for i in 0..crate::MAX_CROSSFADE_BUFFERS {
             let x_state_opt = &mut topologies[topo_idx].crossfades[i];
             if let Some(state) = x_state_opt {
                 let x_buf_idx = i;
@@ -31,8 +31,8 @@ impl GraphExecutor {
                     if state.remaining_samples > 0 { state.remaining_samples -= 1; }
                 }
 
-                if state.node_idx < 64 && state.input_idx < 16 {
-                    block_x_map[state.node_idx][state.input_idx] = (64 + x_buf_idx) as u8;
+                if state.node_idx < crate::MAX_NODES && state.input_idx < crate::MAX_CHANNELS {
+                    block_x_map[state.node_idx][state.input_idx] = (crate::MAX_NODES + x_buf_idx) as u8;
                 }
 
                 if state.remaining_samples == 0 { *x_state_opt = None; }
@@ -44,7 +44,7 @@ impl GraphExecutor {
     pub fn execute_stage(
         nodes: &[ProcessorNode; crate::MAX_NODES],
         buffers: &mut [AudioBlock; crate::MAX_NODES],
-        crossfade_buffers: &mut [AudioBlock; 8],
+        crossfade_buffers: &mut [AudioBlock; crate::MAX_CROSSFADE_BUFFERS],
         topo: &GraphTopology,
         s_idx: usize,
         num_samples: usize,
@@ -70,8 +70,8 @@ impl GraphExecutor {
             for (i, &n_idx) in stage.iter().enumerate() {
                 let worker_idx = i % pool.num_workers();
                 let routing = &topo.routing[n_idx];
-                let mut resolved_inputs = [0usize; 16];
-                let mut resolved_outputs = [0usize; 16];
+                let mut resolved_inputs = [0usize; crate::MAX_CHANNELS];
+                let mut resolved_outputs = [0usize; crate::MAX_CHANNELS];
 
                 for j in 0..routing.input_count.min(crate::MAX_CHANNELS) {
                     let v_idx = *routing.input_indices.get(j).unwrap_or(&0) % crate::MAX_NODES;
@@ -119,12 +119,12 @@ impl GraphExecutor {
                     let p_override = block_x_map[n_idx][i];
                     if p_override != 0 { p_idx = p_override as usize; }
 
-                    if p_idx >= 64 {
-                        let x_idx = p_idx - 64;
-                        if x_idx < 8 {
+                    if p_idx >= crate::MAX_NODES {
+                        let x_idx = p_idx - crate::MAX_NODES;
+                        if x_idx < crate::MAX_CROSSFADE_BUFFERS {
                             unsafe { node_inputs_storage[i] = &(&(*x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
                         }
-                    } else if p_idx < 64 {
+                    } else if p_idx < crate::MAX_NODES {
                         unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[offset..offset + num_samples]; }
                     }
                 }
