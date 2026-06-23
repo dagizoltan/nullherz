@@ -489,6 +489,11 @@ impl<T> Producer<T> {
 }
 
 pub struct Consumer<T> { inner: std::sync::Arc<RingBuffer<T>> }
+impl<T> Clone for Consumer<T> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
+}
 impl<T> Consumer<T> {
     pub fn pop(&mut self) -> Option<T> {
         let head = self.inner.head.load(Ordering::Relaxed);

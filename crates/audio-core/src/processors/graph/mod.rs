@@ -29,7 +29,7 @@ pub struct ProcessorGraph {
 
     pub(crate) telemetry: Arc<GraphTelemetry>,
     pub(crate) garbage_producer: Option<Box<dyn nullherz_traits::GarbageProducer>>,
-    pub(crate) pending_mutations: [Option<TopologyMutation>; 16],
+    pub(crate) pending_mutations: [Option<TopologyMutation>; crate::MAX_MUTATIONS],
     pub(crate) pending_mutation_count: usize,
 }
 
@@ -41,7 +41,7 @@ impl ProcessorGraph {
             routing: [NodeRouting { input_indices: [0; crate::MAX_CHANNELS], output_indices: [0; crate::MAX_CHANNELS], input_count: 0, output_count: 0 }; crate::MAX_NODES],
             virtual_to_physical: v2p,
             plan: CompiledGraphPlan::default(),
-            crossfades: [None; 8],
+            crossfades: [None; crate::MAX_CROSSFADE_BUFFERS],
             node_count: 0,
         };
 
@@ -95,7 +95,7 @@ impl ProcessorGraph {
             TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
                 let n_idx = node_idx as usize;
                 let i_idx = input_idx as usize;
-                if n_idx < crate::MAX_NODES && i_idx < 16 {
+                if n_idx < crate::MAX_NODES && i_idx < crate::MAX_CHANNELS {
                     let topo = self.inactive_topology_mut();
                     topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
                     if i_idx >= topo.routing[n_idx].input_count {
@@ -106,7 +106,7 @@ impl ProcessorGraph {
             TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
                 let n_idx = node_idx as usize;
                 let o_idx = output_idx as usize;
-                if n_idx < crate::MAX_NODES && o_idx < 16 {
+                if n_idx < crate::MAX_NODES && o_idx < crate::MAX_CHANNELS {
                     let topo = self.inactive_topology_mut();
                     topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
                     if o_idx >= topo.routing[n_idx].output_count {
@@ -262,7 +262,7 @@ impl AudioProcessor for ProcessorGraph {
 
     fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
         // Buffer everything until CommitTopology to ensure atomic structural shifts.
-        if self.pending_mutation_count < 16 {
+        if self.pending_mutation_count < crate::MAX_MUTATIONS {
             self.pending_mutations[self.pending_mutation_count] = Some(mutation);
             self.pending_mutation_count += 1;
         } else {

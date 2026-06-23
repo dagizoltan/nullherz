@@ -146,21 +146,25 @@ impl WavetableOscillator {
 
             let b_idx: [i32; 8] = b_idx_f.round_int().into();
 
-            let mut out_v = [0.0f32; 8];
+            let mut v1_arr = [0.0f32; 8];
+            let mut v2_arr = [0.0f32; 8];
             for ch in 0..8 {
                 let idx = (b_idx[ch] & 2047) as usize;
                 let next_idx = (idx + 1) & 2047;
-                let frac = b_frac.as_array_ref()[ch];
                 // Safety: idx and next_idx are masked to [0, 2047], self.table is size 2048.
                 unsafe {
-                    let v1 = *self.table.get_unchecked(idx);
-                    let v2 = *self.table.get_unchecked(next_idx);
-                    out_v[ch] = v1 * (1.0 - frac) + v2 * frac;
+                    v1_arr[ch] = *self.table.get_unchecked(idx);
+                    v2_arr[ch] = *self.table.get_unchecked(next_idx);
                 }
             }
 
+            let b_v1 = f32x8::new(v1_arr);
+            let b_v2 = f32x8::new(v2_arr);
+            let b_out = b_v1 * (b_1 - b_frac) + b_v2 * b_frac;
+
+            let out_arr: [f32; 8] = b_out.into();
             for ch in 0..8 {
-                unsafe { *outputs[ch].add(i) = out_v[ch] };
+                unsafe { *outputs[ch].add(i) = out_arr[ch] };
             }
 
             b_phases += b_mod_inc;

@@ -26,7 +26,7 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
 
-    let (gui_mode, path) = if args[1] == "--gui" {
+    let (gui_mode, path) = if args.len() > 1 && args[1] == "--gui" {
         if args.len() < 3 {
             eprintln!("Error: --gui requires a <graph.json> path.");
             eprintln!("Usage: nullherz-inspector [--gui] <graph.json>");

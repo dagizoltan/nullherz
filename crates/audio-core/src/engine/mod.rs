@@ -151,7 +151,7 @@ impl AudioEngine {
             metrics: EngineMetrics::new(),
             health_signal: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             host: Some(EngineHost { command_producer }),
-            pool: Some(Box::new(TaskPool::new(4))),
+            pool: Some(Box::new(TaskPool::new(nullherz_traits::DEFAULT_WORKER_COUNT))),
             transport: nullherz_traits::Transport {
                 bpm: 120.0,
                 beat_position: 0.0,

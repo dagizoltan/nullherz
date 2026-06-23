@@ -21,13 +21,12 @@ impl ProcessingKernel for StandardKernel {
         let block_start_sample = sample_counter;
         let block_end_sample = block_start_sample + num_samples as u64;
         let mut commands_processed = 0;
-        const MAX_COMMANDS_PER_BLOCK: usize = 256;
 
         let mut sub_block_iter = SubBlockIterator::new(num_samples, ipc_layer::MAX_BLOCK_SIZE);
 
         while sub_block_iter.current_offset < num_samples {
             let cmd = if let Some(pending) = pending_command.take() { Some(pending) } else {
-                if commands_processed < MAX_COMMANDS_PER_BLOCK { command_consumer.pop_command() } else { None }
+                if commands_processed < nullherz_traits::MAX_COMMANDS_PER_BLOCK { command_consumer.pop_command() } else { None }
             };
 
             if let Some(cmd) = cmd {
