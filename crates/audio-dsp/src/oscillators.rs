@@ -267,6 +267,7 @@ pub struct SamplerVoice {
     pub time_stretch_ratio: f32,
     pub grain_duration_samples: u32,
     pub overlap_count: u32,
+    pub window_lut: [f32; 1024],
 }
 
 impl Default for SamplerVoice {
@@ -293,6 +294,13 @@ impl SamplerVoice {
             time_stretch_ratio: 1.0,
             grain_duration_samples: 1024,
             overlap_count: 2,
+            window_lut: {
+                let mut lut = [0.0f32; 1024];
+                for i in 0..1024 {
+                    lut[i] = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / 1023.0).cos());
+                }
+                lut
+            },
         }
     }
 
@@ -368,7 +376,8 @@ impl SamplerVoice {
 
                 for o in 0..self.overlap_count {
                     let phase = (self.grain_pos + (o as f32 * self.grain_duration_samples as f32 / self.overlap_count as f32)) % self.grain_duration_samples as f32;
-                    let window = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * phase / (self.grain_duration_samples as f32 - 1.0)).cos());
+                    let lut_idx = (phase * 1023.0 / (self.grain_duration_samples as f32 - 1.0)) as usize;
+                    let window = self.window_lut[lut_idx.min(1023)];
 
                     let grain_offset = self.play_head + phase;
                     let idx = grain_offset.floor() as usize;

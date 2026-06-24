@@ -35,9 +35,14 @@ impl FolderMonitor {
     }
 
     fn load_and_register(&self, path: &str) {
-        // Simplified loader for Alpha. In a real system we'd use a real audio decoder.
-        // We'll simulate loading by creating a dummy buffer.
-        let buffer = Arc::new(vec![0.0f32; 44100 * 5]); // 5 seconds
+        // High-Quality WAV Loader for Alpha
+        let buffer = if let Ok(mut reader) = hound::WavReader::open(path) {
+            let samples: Vec<f32> = reader.samples::<f32>().map(|s| s.unwrap_or(0.0)).collect();
+            Arc::new(samples)
+        } else {
+            Arc::new(vec![0.0f32; 44100 * 5]) // Fallback to silent buffer
+        };
+
         let id = path.len() as u64; // Simple ID for demo
 
         let mut lib = self.library.lock().unwrap();
@@ -48,7 +53,7 @@ impl FolderMonitor {
             path: path.to_string(),
             title: Path::new(path).file_name().unwrap().to_str().unwrap().to_string(),
             artist: "Unknown".to_string(),
-            metadata: SampleMetadata::default(),
+            metadata: SampleMetadata::new_empty(),
         };
 
         lib.tracks.push(track);

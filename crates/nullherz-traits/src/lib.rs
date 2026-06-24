@@ -248,6 +248,11 @@ pub enum TopologyMutation {
         node_idx: u32,
         buffer: Arc<Vec<f32>>,
         sample_id: u64,
+        metadata: Option<Arc<nullherz_dna::SampleMetadata>>,
+    },
+    UpdateMetadata {
+        node_idx: u32,
+        metadata: Arc<nullherz_dna::SampleMetadata>,
     },
     SetTopology(Arc<GraphTopology>),
 }

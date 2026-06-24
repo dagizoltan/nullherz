@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 
 pub type SampleBuffer = Arc<Vec<f32>>;
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SampleMetadata {
     pub bpm: f32,
     #[serde(skip)]
@@ -16,6 +16,20 @@ pub struct SampleMetadata {
     pub beat_grid_offset: u64,
     #[serde(skip)]
     pub peaks: Arc<Vec<f32>>,
+}
+
+impl SampleMetadata {
+    pub fn new_empty() -> Self {
+        Self {
+            bpm: 0.0,
+            transients: Arc::new(Vec::new()),
+            root_key: None,
+            hot_cues: [None; 8],
+            loop_points: None,
+            beat_grid_offset: 0,
+            peaks: Arc::new(Vec::new()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -90,7 +104,7 @@ impl SampleRegistry {
     /// Registers a new sample buffer.
     /// MUST NOT be called from the real-time audio thread.
     pub fn register(&self, id: u64, buffer: SampleBuffer) {
-        self.register_with_metadata(id, buffer, SampleMetadata::default());
+        self.register_with_metadata(id, buffer, SampleMetadata::new_empty());
     }
 
     pub fn register_with_metadata(&self, id: u64, buffer: SampleBuffer, metadata: SampleMetadata) {
