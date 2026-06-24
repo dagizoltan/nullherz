@@ -131,6 +131,16 @@ pub struct InspectorApp {
 }
 
 impl InspectorApp {
+    fn deck_color(i: usize) -> egui::Color32 {
+        match i {
+            0 => egui::Color32::from_rgb(0, 255, 200),   // Neon Mint (A)
+            1 => egui::Color32::from_rgb(0, 180, 255),   // Electric Blue (B)
+            2 => egui::Color32::from_rgb(255, 150, 0),   // Vibrant Orange (C)
+            3 => egui::Color32::from_rgb(255, 50, 150),  // Hot Pink (D)
+            _ => egui::Color32::WHITE,
+        }
+    }
+
     fn render_knob(ui: &mut egui::Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, label: &str) -> egui::Response {
         let size = egui::vec2(32.0, 32.0);
         let (rect, mut response) = ui.allocate_exact_size(size, egui::Sense::drag());
@@ -164,7 +174,7 @@ impl InspectorApp {
             let pointer_end = center + egui::vec2(sin, -cos) * (radius * 0.9);
 
             let color = if (normalized - 0.5).abs() < 0.01 { egui::Color32::from_rgb(0, 255, 200) } else { visuals.fg_stroke.color };
-            ui.painter().line_segment([pointer_start, pointer_end], egui::Stroke::new(2.5, color));
+            ui.painter().line_segment([pointer_start, pointer_end], egui::Stroke::new(3.0, color));
 
             // Small indicator dot for center
             ui.painter().circle_filled(center, 2.0, egui::Color32::from_gray(60));
@@ -291,14 +301,7 @@ impl InspectorApp {
 
         // Aggregate All-Deck Visualization
         for i in 0..4 {
-            let color = match i {
-                0 => egui::Color32::from_rgba_unmultiplied(0, 255, 200, 100),
-                1 => egui::Color32::from_rgba_unmultiplied(0, 180, 255, 100),
-                2 => egui::Color32::from_rgba_unmultiplied(255, 100, 0, 100),
-                3 => egui::Color32::from_rgba_unmultiplied(255, 0, 255, 100),
-                _ => egui::Color32::WHITE,
-            };
-
+            let color = Self::deck_color(i).linear_multiply(0.4);
             let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1]);
             let speed = 4.0 + (i as f32 * 2.0);
             let offset = i as f32 * 0.5;
@@ -374,6 +377,7 @@ impl InspectorApp {
                             ui.label(egui::RichText::new(format!("{:.0}", bpm)).color(egui::Color32::from_gray(80)).size(10.0));
                         });
                     });
+                    ui.painter().hline(rect.x_range(), rect.max.y, egui::Stroke::new(1.0, egui::Color32::from_gray(20)));
                 }
             });
         });
@@ -495,16 +499,11 @@ impl InspectorApp {
     }
 
     fn render_deck(&mut self, ui: &mut egui::Ui, i: usize, telemetry: &Option<Telemetry>) {
-        let deck_name = match i {
-            0 => "DECK A",
-            1 => "DECK B",
-            2 => "DECK C",
-            3 => "DECK D",
-            _ => "DECK ?",
-        };
+        let deck_name = format!("DECK {}", (b'A' + i as u8) as char);
+        let color = Self::deck_color(i);
 
         let is_selected = self.selected_deck == i;
-        let stroke_color = if is_selected { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(30) };
+        let stroke_color = if is_selected { color } else { egui::Color32::from_gray(30) };
 
         let rect = ui.allocate_exact_size(egui::vec2(ui.available_width(), 300.0), egui::Sense::click()).0;
         if ui.rect_contains_pointer(rect) && ui.input(|i| i.pointer.any_click()) {
@@ -518,7 +517,7 @@ impl InspectorApp {
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 ui.add_space(10.0);
-                ui.label(egui::RichText::new(deck_name).color(if is_selected { egui::Color32::WHITE } else { egui::Color32::from_gray(180) }).strong());
+                ui.label(egui::RichText::new(deck_name).color(if is_selected { color } else { egui::Color32::from_gray(180) }).strong());
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
@@ -528,11 +527,14 @@ impl InspectorApp {
                 });
             });
 
-            if let Some(ref title) = self.now_playing[i] {
-                ui.label(egui::RichText::new(title).color(egui::Color32::from_rgb(0, 255, 200)).size(10.0).strong());
-            } else {
-                ui.label(egui::RichText::new("EMPTY").color(egui::Color32::from_gray(60)).size(10.0));
-            }
+            egui::Frame::none().fill(egui::Color32::from_rgb(5, 5, 6)).inner_margin(4.0).rounding(2.0).show(ui, |ui| {
+                ui.set_width(ui.available_width() - 20.0);
+                if let Some(ref title) = self.now_playing[i] {
+                    ui.label(egui::RichText::new(title).color(color).size(11.0).strong());
+                } else {
+                    ui.label(egui::RichText::new("EMPTY").color(egui::Color32::from_gray(40)).size(11.0));
+                }
+            });
 
             // WAVEFORM
             ui.add_space(10.0);
@@ -542,18 +544,20 @@ impl InspectorApp {
             let time = ui.input(|i| i.time);
             let w_width = w_rect.width();
 
-            // Multi-band Waveform Simulation
-            for (band, color, speed, scale) in [
-                (0, egui::Color32::from_rgba_unmultiplied(255, 50, 50, 180), 8.0, 15.0),  // Low (Red)
-                (1, egui::Color32::from_rgba_unmultiplied(50, 255, 50, 160), 12.0, 10.0), // Mid (Green)
-                (2, egui::Color32::from_rgba_unmultiplied(50, 100, 255, 140), 20.0, 5.0), // High (Blue)
-            ] {
+            // Multi-band Waveform Simulation (Colored by Deck)
+            for (band, speed, scale) in [ (0, 8.0, 15.0), (1, 12.0, 10.0), (2, 20.0, 5.0) ] {
                 let points: Vec<egui::Pos2> = (0..w_width as i32).step_by(2).map(|x| {
                     let phase = x as f32 * 0.05 * (band as f32 + 1.0) + (time * speed) as f32;
                     let amp = scale * ((phase * 0.01).cos().abs() + 0.2);
                     egui::pos2(w_rect.min.x + x as f32, w_rect.center().y + (phase.sin() * amp))
                 }).collect();
-                ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.2, color)));
+                ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.2, color.linear_multiply(0.8 - band as f32 * 0.2))));
+            }
+
+            // High-Visibility Beat Markers
+            for b in 0..8 {
+                let bx = w_rect.min.x + (w_width * (b as f32 / 8.0));
+                ui.painter().vline(bx, w_rect.y_range(), egui::Stroke::new(0.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30)));
             }
 
             // Transient Metadata Overlay
@@ -563,13 +567,13 @@ impl InspectorApp {
                     for &pos in sample.metadata.transients.iter() {
                         let x_off = (pos as f32 / total_samples).fract(); // Simple wrap for simulation
                         let tx = w_rect.min.x + (x_off * w_width);
-                        ui.painter().vline(tx, w_rect.y_range(), egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80)));
+                        ui.painter().vline(tx, w_rect.y_range(), egui::Stroke::new(1.5, color.linear_multiply(0.5)));
                     }
                 }
             }
 
-            // Central Beat Line
-            ui.painter().vline(w_rect.center().x, w_rect.y_range(), egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 120)));
+            // Central Playhead
+            ui.painter().vline(w_rect.center().x, w_rect.y_range(), egui::Stroke::new(2.5, egui::Color32::from_rgb(255, 255, 255)));
 
             ui.add_space(20.0);
 
@@ -580,7 +584,7 @@ impl InspectorApp {
                 ui.painter().circle_stroke(jog_rect.center(), 40.0, egui::Stroke::new(2.0, egui::Color32::from_gray(40)));
                 let angle = (time * 2.0) as f32;
                 let needle = jog_rect.center() + egui::vec2(angle.cos() * 35.0, angle.sin() * 35.0);
-                ui.painter().line_segment([jog_rect.center(), needle], egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 200)));
+                ui.painter().line_segment([jog_rect.center(), needle], egui::Stroke::new(2.0, color));
 
                 ui.add_space(20.0);
 
@@ -611,7 +615,7 @@ impl InspectorApp {
     }
 
     fn render_master_panel(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
-        egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(12.0).show(ui, |ui| {
+        egui::Frame::none().fill(egui::Color32::from_rgb(25, 25, 30)).rounding(4.0).stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(40))).inner_margin(12.0).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.set_width(70.0);
@@ -633,11 +637,19 @@ impl InspectorApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
                     for _ in 0..2 {
-                        let (mtr_rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 100.0), egui::Sense::hover());
-                        ui.painter().rect_filled(mtr_rect, 1.0, egui::Color32::from_rgb(10, 10, 12));
+                        let (m_rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 100.0), egui::Sense::hover());
+                        ui.painter().rect_filled(m_rect, 1.0, egui::Color32::from_rgb(10, 10, 12));
+
+                            // Tick marks
+                            for db in [-48, -24, -12, -6, 0] {
+                                let val = 10.0f32.powf(db as f32 / 20.0);
+                                let ty = m_rect.max.y - (val * 100.0).min(100.0);
+                                ui.painter().hline(m_rect.x_range(), ty, egui::Stroke::new(0.5, egui::Color32::from_gray(60)));
+                            }
+
                         let m_h = (peak * 100.0).min(100.0);
-                        let m_p_rect = egui::Rect::from_min_size(mtr_rect.max - egui::vec2(8.0, m_h), egui::vec2(8.0, m_h));
-                        let color = if peak > 1.0 { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_rgb(0, 180, 255) };
+                            let m_p_rect = egui::Rect::from_min_size(m_rect.max - egui::vec2(10.0, m_h), egui::vec2(10.0, m_h));
+                            let color = if peak > 1.0 { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_rgb(0, 255, 180) };
                         ui.painter().rect_filled(m_p_rect, 0.0, color);
                     }
                 });
@@ -729,6 +741,13 @@ impl InspectorApp {
                             let (m_rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 100.0), egui::Sense::hover());
                             ui.painter().rect_filled(m_rect, 1.0, egui::Color32::from_rgb(10, 10, 12));
 
+                            // Tick marks
+                            for db in [-24, -12, -6, 0] {
+                                let val = 10.0f32.powf(db as f32 / 20.0);
+                                let ty = m_rect.max.y - (val * 120.0).min(120.0);
+                                ui.painter().hline(m_rect.x_range(), ty, egui::Stroke::new(0.5, egui::Color32::from_gray(60)));
+                            }
+
                             let m_h = (peak * 100.0).min(100.0);
                             let m_p_rect = egui::Rect::from_min_size(m_rect.max - egui::vec2(8.0, m_h), egui::vec2(8.0, m_h));
                             let meter_color = if peak > 1.0 { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_rgb(0, 255, 180) };
@@ -737,7 +756,7 @@ impl InspectorApp {
                             // Peak hold line
                             let ph_h = (self.channel_peak_hold[i] * 100.0).min(100.0);
                             let ph_y = m_rect.max.y - ph_h;
-                            ui.painter().hline(m_rect.x_range(), ph_y, egui::Stroke::new(1.0, egui::Color32::WHITE));
+                            ui.painter().hline(m_rect.x_range(), ph_y, egui::Stroke::new(1.0, Self::deck_color(i)));
                         });
                     });
                 }
