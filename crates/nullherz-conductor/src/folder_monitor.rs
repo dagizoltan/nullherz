@@ -35,6 +35,9 @@ impl FolderMonitor {
     }
 
     fn load_and_register(&self, path: &str) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
         // High-Quality WAV Loader for Alpha
         let buffer = if let Ok(mut reader) = hound::WavReader::open(path) {
             let samples: Vec<f32> = reader.samples::<f32>().map(|s| s.unwrap_or(0.0)).collect();
@@ -43,10 +46,12 @@ impl FolderMonitor {
             Arc::new(vec![0.0f32; 44100 * 5]) // Fallback to silent buffer
         };
 
-        let id = path.len() as u64; // Simple ID for demo
+        let mut hasher = DefaultHasher::new();
+        path.hash(&mut hasher);
+        let id = hasher.finish();
 
-        let mut lib = self.library.lock().unwrap();
-        if lib.tracks.iter().any(|t| t.path == path) { return; }
+        let lib = self.library.lock().unwrap();
+        if let Ok(Some(_)) = lib.get_track(id) { return; }
 
         let track = LibraryTrack {
             id,
@@ -56,7 +61,7 @@ impl FolderMonitor {
             metadata: SampleMetadata::new_empty(),
         };
 
-        lib.tracks.push(track);
+        let _ = lib.save_track(&track);
         self.sample_registry.register(id, buffer);
         println!("FolderMonitor: Registered {}", path);
     }

@@ -109,6 +109,28 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
         }
     }
 
+    fn get_parameter(&self, param_id: u32) -> f32 {
+        match param_id {
+            0 => self.active_pattern as f32,
+            1 => self.patterns[self.active_pattern].len as f32,
+            _ => 0.0
+        }
+    }
+
+    fn serialize_state(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.push(self.active_pattern as u8);
+        for p in &self.patterns {
+            data.push(p.len as u8);
+            for track in 0..16 {
+                for step in 0..16 {
+                    data.push(if p.grid[track][step] { 1 } else { 0 });
+                }
+            }
+        }
+        data
+    }
+
 fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 }

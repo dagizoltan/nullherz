@@ -5,6 +5,7 @@ use std::time::Duration;
 
 pub struct AnalysisWorker {
     sample_registry: Arc<SampleRegistry>,
+    library: Option<Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>>,
     processed_ids: std::collections::HashSet<u64>,
 }
 
@@ -12,8 +13,14 @@ impl AnalysisWorker {
     pub fn new(sample_registry: Arc<SampleRegistry>) -> Self {
         Self {
             sample_registry,
+            library: None,
             processed_ids: std::collections::HashSet::new(),
         }
+    }
+
+    pub fn with_library(mut self, library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>) -> Self {
+        self.library = Some(library);
+        self
     }
 
     pub fn start(mut self) {
@@ -40,7 +47,17 @@ impl AnalysisWorker {
                 metadata.peaks = Arc::new(self.calculate_peaks(&sample.buffer, 1024));
 
                 // Update registry with enriched metadata
-                self.sample_registry.register_with_metadata(id, sample.buffer.clone(), metadata);
+                self.sample_registry.register_with_metadata(id, sample.buffer.clone(), metadata.clone());
+
+                // Update Library Database (redb)
+                if let Some(ref lib_mutex) = self.library {
+                    let lib = lib_mutex.lock().unwrap();
+                    if let Ok(Some(mut track)) = lib.get_track(id) {
+                        track.metadata = metadata;
+                        let _ = lib.save_track(&track);
+                    }
+                }
+
                 self.processed_ids.insert(id);
                 println!("AnalysisWorker: Enriched metadata for ID={}", id);
             }

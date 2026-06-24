@@ -9,6 +9,7 @@ pub struct TopologyManager {
     pub topo_producer: Option<ipc_layer::NonRtProducer<TopologyMutation>>,
     pub current_sample_rate: f32,
     pub current_topology: GraphTopology,
+    pub active_node_types: std::collections::HashMap<u32, u32>,
 }
 
 impl TopologyManager {
@@ -20,6 +21,7 @@ impl TopologyManager {
             registry: ProcessorRegistry::new(),
             topo_producer: None,
             current_sample_rate: 44100.0,
+            active_node_types: std::collections::HashMap::new(),
             current_topology: GraphTopology {
                 routing: [NodeRouting {
                     input_indices: [0; nullherz_traits::MAX_CHANNELS],
@@ -42,6 +44,7 @@ impl TopologyManager {
         match *cmd {
             Command::AddNode { processor_type_id, node_idx } => {
                 if let Some(processor) = self.registry.create_by_id(processor_type_id.0, node_idx, sr) {
+                    self.active_node_types.insert(node_idx, processor_type_id.0);
                     let idx = node_idx as usize;
                     if idx < nullherz_traits::MAX_NODES {
                         self.current_topology.routing[idx].input_count = 0;
@@ -56,6 +59,7 @@ impl TopologyManager {
             }
             Command::SwapProcessor { node_idx, processor_type_id } => {
                 if let Some(processor) = self.registry.create_by_id(processor_type_id.0, node_idx, sr) {
+                    self.active_node_types.insert(node_idx, processor_type_id.0);
                     let _ = prod.push(TopologyMutation::SwapProcessor { node_idx, processor });
                     return true;
                 }

@@ -16,7 +16,6 @@ pub struct Conductor {
     pub analysis_worker: Option<crate::analysis_worker::AnalysisWorker>,
     pub folder_monitor: Option<crate::folder_monitor::FolderMonitor>,
     pub library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>,
-    save_counter: u32,
 }
 
 impl Default for Conductor {
@@ -28,17 +27,16 @@ impl Default for Conductor {
 impl Conductor {
     pub fn new() -> Self {
         let sample_registry = Arc::new(SampleRegistry::new());
-        let library = Arc::new(std::sync::Mutex::new(nullherz_dna::LibraryDatabase::load("library.json")));
+        let library = Arc::new(std::sync::Mutex::new(nullherz_dna::LibraryDatabase::load("library.redb").unwrap()));
         Self {
             engine_coordinator: EngineCoordinator::new(),
             topology_manager: TopologyManager::new(),
             transfusion_manager: TransfusionManager::new(sample_registry.clone()),
             mixer_bridge: MixerBridge::new(),
             sidecar_supervisor: SidecarSupervisor::new(),
-            analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone())),
+            analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
             folder_monitor: Some(crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())),
             library,
-            save_counter: 0,
         }
     }
 
@@ -78,12 +76,6 @@ impl Conductor {
     }
 
     pub fn tick(&mut self) {
-        self.save_counter += 1;
-        if self.save_counter >= 100 {
-            self.library.lock().unwrap().save("library.json");
-            self.save_counter = 0;
-        }
-
         if self.engine_coordinator.check_health() {
             eprintln!("CRITICAL: Engine health crisis detected. Prioritizing resource recovery...");
             self.drain_garbage();
@@ -147,5 +139,199 @@ impl Conductor {
                 }
             }
         }
+    }
+
+    pub fn save_project(&self, path: &str) -> std::io::Result<()> {
+        let mut state = crate::persistence::ProjectState::empty();
+
+        // 1. Collect Topology and Parameters
+        let topo = &self.topology_manager.current_topology;
+        let mut engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+
+        if let Some(ref mut engine) = *engine_lock {
+            for child in engine.list_children() {
+                let metadata = child.metadata();
+                let node_idx = if let Some(m) = metadata { m.processor_id as u32 } else { continue; };
+
+                if let Some(&type_id) = self.topology_manager.active_node_types.get(&node_idx) {
+                    let mut params = Vec::new();
+                    for p_id in 0..16 {
+                        params.push((p_id, child.get_parameter(p_id)));
+                    }
+
+                    state.nodes.push(crate::persistence::NodeState {
+                        id: node_idx,
+                        type_id,
+                        params,
+                    });
+
+                    // Collect Sequencer Data if applicable
+                    if type_id == nullherz_traits::ProcessorTypeId::SEQUENCER.0 {
+                        let bytes = child.serialize_state();
+                        if bytes.len() >= 1 + 8 * (1 + 16 * 16) {
+                            let mut patterns = Vec::new();
+                            let active_pattern = bytes[0] as usize;
+                            let mut cursor = 1;
+                            for _ in 0..8 {
+                                let len = bytes[cursor] as u32;
+                                cursor += 1;
+                                let mut grid = [[false; 16]; 16];
+                                for track in 0..16 {
+                                    for step in 0..16 {
+                                        grid[track][step] = bytes[cursor] == 1;
+                                        cursor += 1;
+                                    }
+                                }
+                                patterns.push(crate::persistence::SequencerPatternState { grid, len });
+                            }
+                            state.sequencers.push(crate::persistence::SequencerNodeState {
+                                node_idx,
+                                patterns,
+                                active_pattern,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Collect Edges
+        for n_idx in 0..topo.node_count {
+            let routing = &topo.routing[n_idx];
+            for i in 0..routing.input_count {
+                state.edges.push(crate::persistence::EdgeState {
+                    node_idx: n_idx as u32,
+                    input_idx: i as u32,
+                    buffer_idx: routing.input_indices[i] as u32,
+                });
+            }
+            for i in 0..routing.output_count {
+                state.output_edges.push(crate::persistence::OutputEdgeState {
+                    node_idx: n_idx as u32,
+                    output_idx: i as u32,
+                    buffer_idx: routing.output_indices[i] as u32,
+                });
+            }
+        }
+
+        // 3. Transport State
+        state.bpm = self.mixer_bridge.timeline.bpm;
+        state.transport_playing = true; // For now assume playing if state is saved, logic for is_playing pending in timeline
+
+        state.save_to_file(path)
+    }
+
+    pub fn load_project(&mut self, path: &str) -> std::io::Result<()> {
+        let state = crate::persistence::ProjectState::load_from_file(path)?;
+
+        // 1. Reconstruct Nodes
+        for node in &state.nodes {
+            let cmd = nullherz_traits::Command::AddNode {
+                processor_type_id: node.type_id.into(),
+                node_idx: node.id,
+            };
+            self.topology_manager.handle_topology_command(&cmd);
+
+            // Apply parameters
+            if let Some(ref mut prod) = self.engine_coordinator.command_producer {
+                for (param_id, value) in &node.params {
+                    let _ = prod.push_command(nullherz_traits::TimestampedCommand {
+                        timestamp_samples: 0,
+                        command: nullherz_traits::Command::SetParam {
+                            target_id: node.id as u64,
+                            param_id: *param_id,
+                            value: *value,
+                            ramp_duration_samples: 0,
+                        },
+                    });
+                }
+            }
+        }
+
+        // 2. Reconstruct Edges
+        for edge in &state.edges {
+            let cmd = nullherz_traits::Command::UpdateEdge {
+                node_idx: edge.node_idx,
+                input_idx: edge.input_idx,
+                new_buffer_idx: edge.buffer_idx,
+            };
+            self.topology_manager.handle_topology_command(&cmd);
+        }
+
+        for edge in &state.output_edges {
+            let cmd = nullherz_traits::Command::UpdateOutputEdge {
+                node_idx: edge.node_idx,
+                output_idx: edge.output_idx,
+                new_buffer_idx: edge.buffer_idx,
+            };
+            self.topology_manager.handle_topology_command(&cmd);
+        }
+
+        // 3. Reconstruct Sequencer Patterns
+        for seq in &state.sequencers {
+            if let Some(ref mut prod) = self.engine_coordinator.command_producer {
+                for (p_idx, pat) in seq.patterns.iter().enumerate() {
+                    // Set active pattern temporarily to write steps
+                    let _ = prod.push_command(nullherz_traits::TimestampedCommand {
+                        timestamp_samples: 0,
+                        command: nullherz_traits::Command::SetParam {
+                            target_id: seq.node_idx as u64,
+                            param_id: 0, // Active Pattern
+                            value: p_idx as f32,
+                            ramp_duration_samples: 0,
+                        },
+                    });
+
+                    // Set length
+                    let _ = prod.push_command(nullherz_traits::TimestampedCommand {
+                        timestamp_samples: 0,
+                        command: nullherz_traits::Command::SetParam {
+                            target_id: seq.node_idx as u64,
+                            param_id: 1, // Pattern Length
+                            value: pat.len as f32,
+                            ramp_duration_samples: 0,
+                        },
+                    });
+
+                    for track in 0..16 {
+                        for step in 0..16 {
+                            let _ = prod.push_command(nullherz_traits::TimestampedCommand {
+                                timestamp_samples: 0,
+                                command: nullherz_traits::Command::SetSequencerStep {
+                                    track,
+                                    step,
+                                    value: pat.grid[track as usize][step as usize],
+                                },
+                            });
+                        }
+                    }
+                }
+
+                // Restore active pattern
+                let _ = prod.push_command(nullherz_traits::TimestampedCommand {
+                    timestamp_samples: 0,
+                    command: nullherz_traits::Command::SetParam {
+                        target_id: seq.node_idx as u64,
+                        param_id: 0,
+                        value: seq.active_pattern as f32,
+                        ramp_duration_samples: 0,
+                    },
+                });
+            }
+        }
+
+        // 4. Transport State
+        if let Some(ref mut prod) = self.engine_coordinator.command_producer {
+            let _ = prod.push_command(nullherz_traits::TimestampedCommand {
+                timestamp_samples: 0,
+                command: if state.transport_playing { nullherz_traits::Command::Play } else { nullherz_traits::Command::Stop },
+            });
+            // BPM is handled via MixerBridge timeline updates, but we should ensure the UI/Gateway is updated.
+        }
+
+        // 5. Commit Topology
+        self.topology_manager.handle_topology_command(&nullherz_traits::Command::CommitTopology);
+
+        Ok(())
     }
 }

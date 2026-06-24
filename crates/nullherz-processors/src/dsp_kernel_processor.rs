@@ -34,6 +34,9 @@ impl <K: DspKernel + 'static> AudioProcessor for DspKernelProcessor<K> {
 fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
         self.kernel.set_parameter(param_id, value, ramp_duration_samples);
     }
+    fn get_parameter(&self, param_id: u32) -> f32 {
+        self.kernel.get_parameter(param_id)
+    }
 fn apply_command(&mut self, command: &ProcessorCommand) {
         if let Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
             if target_id == self.id {
@@ -86,6 +89,9 @@ fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u3
         for k in &mut self.kernels {
             k.set_parameter(param_id, value, ramp_duration_samples);
         }
+    }
+    fn get_parameter(&self, param_id: u32) -> f32 {
+        if !self.kernels.is_empty() { self.kernels[0].get_parameter(param_id) } else { 0.0 }
     }
 fn apply_command(&mut self, command: &ProcessorCommand) {
         if let Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {

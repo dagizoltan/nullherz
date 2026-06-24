@@ -10,6 +10,7 @@ pub struct SamplerProcessor {
     sample_id: Option<u64>,
     metadata: Option<nullherz_dna::SampleMetadata>,
     quantize_enabled: bool,
+    playback_rate: f32,
 }
 
 impl SamplerProcessor {
@@ -23,6 +24,7 @@ impl SamplerProcessor {
             sample_id: None,
             metadata: None,
             quantize_enabled: true,
+            playback_rate: 1.0,
         }
     }
 
@@ -33,6 +35,7 @@ impl SamplerProcessor {
     pub fn set_parameter(&mut self, param_id: u32, value: f32) {
         match param_id {
             1 => {
+                self.playback_rate = value;
                 for voice in self.voices.iter_mut() {
                     voice.playback_rate = value;
                 }
@@ -65,7 +68,7 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
         if self.quantize_enabled {
             if let (Some(transport), Some(meta)) = (context.transport, &self.metadata) {
                 if meta.bpm > 10.0 {
-                    let sync_rate = transport.bpm / meta.bpm;
+                    let sync_rate = (transport.bpm / meta.bpm) * self.playback_rate;
                     for voice in self.voices.iter_mut() {
                         voice.playback_rate = sync_rate;
 
@@ -114,7 +117,7 @@ impl nullherz_traits::MidiResponder for SamplerProcessor {
         if status == 0x90 && event.data2 > 0 {
             if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
                 let freq = 440.0 * 2.0f32.powf((event.data1 as f32 - 69.0) / 12.0);
-                let playback_rate = freq / 440.0;
+                let playback_rate = (freq / 440.0) * self.playback_rate;
                 let velocity = event.data2 as f32 / 127.0;
                 voice.trigger(self.sample_buffer.clone(), playback_rate, velocity);
             }
@@ -130,6 +133,14 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
 fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
     self.set_parameter(param_id, value);
+}
+
+fn get_parameter(&self, param_id: u32) -> f32 {
+    match param_id {
+        1 => self.playback_rate,
+        2 => if self.quantize_enabled { 1.0 } else { 0.0 },
+        _ => 0.0,
+    }
 }
 
 fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutation) {

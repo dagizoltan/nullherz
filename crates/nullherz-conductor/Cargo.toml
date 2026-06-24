@@ -16,5 +16,6 @@ ipc-layer = { path = "../ipc-layer" }
 tokio = { version = "1.0", features = ["full"] }
 nullherz-mixer = { path = "../nullherz-mixer" }
 serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 nullherz-gateway = { path = "../nullherz-gateway" }
 audio-dsp = { path = "../audio-dsp" }

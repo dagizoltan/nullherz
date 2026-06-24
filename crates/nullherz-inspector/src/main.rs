@@ -275,7 +275,7 @@ impl InspectorApp {
             quantize_enabled: true,
             master_gain: 1.0,
             crossfader_pos: 0.5,
-            library_db: nullherz_dna::LibraryDatabase::load("library.json"),
+            library_db: nullherz_dna::LibraryDatabase::load("library.redb").expect("Failed to load library"),
             search_query: String::new(),
             is_streaming: false,
             library_visible: true,
@@ -337,7 +337,9 @@ impl InspectorApp {
                 ui.label(egui::RichText::new("LIBRARY").color(egui::Color32::from_gray(150)).small().strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("REFRESH").clicked() {
-                        self.library_db = nullherz_dna::LibraryDatabase::load("library.json");
+                        if let Ok(db) = nullherz_dna::LibraryDatabase::load("library.redb") {
+                            self.library_db = db;
+                        }
                     }
                 });
             });
@@ -346,7 +348,7 @@ impl InspectorApp {
             ui.add_space(15.0);
 
             egui::ScrollArea::vertical().show(ui, |ui| {
-                let mut tracks = self.library_db.tracks.clone();
+                let mut tracks = self.library_db.list_tracks().unwrap_or_default();
                 tracks.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
 
                 for track in &tracks {
@@ -931,7 +933,9 @@ impl InspectorApp {
         ui.columns(2, |cols| {
             cols[0].group(|ui| {
                 ui.strong("SAMPLE BANK");
-                for track in &self.library_db.tracks { ui.label(&track.title); }
+                if let Ok(tracks) = self.library_db.list_tracks() {
+                    for track in tracks { ui.label(&track.title); }
+                }
             });
             cols[1].group(|ui| {
                 ui.strong("GRID SEQUENCER");
