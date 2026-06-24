@@ -110,7 +110,7 @@ pub struct InspectorApp {
     quantize_enabled: bool,
     master_gain: f32,
     crossfader_pos: f32,
-    sample_pool: Vec<String>,
+    library_db: nullherz_dna::LibraryDatabase,
     search_query: String,
     is_streaming: bool,
     library_visible: bool,
@@ -271,7 +271,7 @@ impl InspectorApp {
             quantize_enabled: true,
             master_gain: 1.0,
             crossfader_pos: 0.5,
-            sample_pool: vec!["kick.wav".into(), "snare.wav".into(), "hihat.wav".into()],
+            library_db: nullherz_dna::LibraryDatabase::load("library.json"),
             search_query: String::new(),
             is_streaming: false,
             library_visible: true,
@@ -329,21 +329,24 @@ impl InspectorApp {
 
     fn render_library(&mut self, ui: &mut egui::Ui) {
         egui::Frame::none().fill(egui::Color32::from_rgb(12, 12, 14)).inner_margin(12.0).show(ui, |ui| {
-            ui.label(egui::RichText::new("LIBRARY").color(egui::Color32::from_gray(150)).small().strong());
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("LIBRARY").color(egui::Color32::from_gray(150)).small().strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("REFRESH").clicked() {
+                        self.library_db = nullherz_dna::LibraryDatabase::load("library.json");
+                    }
+                });
+            });
             ui.add_space(10.0);
             ui.text_edit_singleline(&mut self.search_query);
             ui.add_space(15.0);
 
             egui::ScrollArea::vertical().show(ui, |ui| {
-                let tracks = [
-                    ("Deep Techno", "nullherz", 126.0),
-                    ("Ambient Flow", "dsp_king", 90.0),
-                    ("Glitch Hop", "rust_ace", 140.0),
-                    ("Acid Bass", "tb_303", 128.0),
-                    ("Minimal House", "logic_error", 124.0),
-                    ("Rust Vibes", "ferris", 132.0),
-                ];
-                for (title, artist, bpm) in tracks {
+                for track in &self.library_db.tracks {
+                    let title = &track.title;
+                    let artist = &track.artist;
+                    let bpm = track.metadata.bpm;
+
                     if !self.search_query.is_empty() {
                         let q = self.search_query.to_lowercase();
                         if !title.to_lowercase().contains(&q) && !artist.to_lowercase().contains(&q) {
@@ -358,9 +361,9 @@ impl InspectorApp {
                     res.context_menu(|ui| {
                         for deck_idx in 0..4 {
                             if ui.button(format!("Load to Deck {}", (b'A' + deck_idx as u8) as char)).clicked() {
-                                let _ = self.command_sender.send(nullherz_traits::Command::RegisterCapture {
-                                    capture_node_idx: (deck_idx as u32 * 4),
-                                    sample_id: (title.len() as u64),
+                                let _ = self.command_sender.send(nullherz_traits::Command::AddSourceFromRegistry {
+                                    granular_node_idx: (deck_idx as u32 * 4),
+                                    sample_id: track.id,
                                 });
                                         self.now_playing[deck_idx] = Some(title.to_string());
                                 ui.close_menu();
@@ -369,12 +372,11 @@ impl InspectorApp {
                     });
 
                     if res.clicked() {
-                        let _ = self.command_sender.send(nullherz_traits::Command::RegisterCapture {
-                            capture_node_idx: (self.selected_deck as u32 * 4),
-                            sample_id: (title.len() as u64),
+                        let _ = self.command_sender.send(nullherz_traits::Command::AddSourceFromRegistry {
+                            granular_node_idx: (self.selected_deck as u32 * 4),
+                            sample_id: track.id,
                         });
                                 self.now_playing[self.selected_deck] = Some(title.to_string());
-                        println!("Loading track '{}' to Deck {}", title, (b'A' + self.selected_deck as u8) as char);
                     }
 
                     ui.child_ui(rect, egui::Layout::left_to_right(egui::Align::Center)).horizontal(|ui| {
@@ -880,7 +882,7 @@ impl InspectorApp {
         ui.columns(2, |cols| {
             cols[0].group(|ui| {
                 ui.strong("SAMPLE BANK");
-                for s in &self.sample_pool { ui.label(s); }
+                for track in &self.library_db.tracks { ui.label(&track.title); }
             });
             cols[1].group(|ui| {
                 ui.strong("GRID SEQUENCER");

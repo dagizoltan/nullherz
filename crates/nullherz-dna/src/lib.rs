@@ -5,15 +5,47 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 
 pub type SampleBuffer = Arc<Vec<f32>>;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct SampleMetadata {
     pub bpm: f32,
+    #[serde(skip)]
     pub transients: Arc<Vec<u64>>, // Use Arc for RT-safe cloning
     pub root_key: Option<f32>,
     pub hot_cues: [Option<u64>; 8],
     pub loop_points: Option<(u64, u64)>,
     pub beat_grid_offset: u64,
+    #[serde(skip)]
     pub peaks: Arc<Vec<f32>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LibraryTrack {
+    pub id: u64,
+    pub path: String,
+    pub title: String,
+    pub artist: String,
+    pub metadata: SampleMetadata,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct LibraryDatabase {
+    pub tracks: Vec<LibraryTrack>,
+}
+
+impl LibraryDatabase {
+    pub fn load(path: &str) -> Self {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            serde_json::from_str(&content).unwrap_or_default()
+        } else {
+            Self::default()
+        }
+    }
+
+    pub fn save(&self, path: &str) {
+        if let Ok(json) = serde_json::to_string_pretty(self) {
+            let _ = std::fs::write(path, json);
+        }
+    }
 }
 
 #[derive(Clone)]
