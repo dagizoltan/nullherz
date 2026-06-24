@@ -127,6 +127,45 @@ pub struct InspectorApp {
 }
 
 impl InspectorApp {
+    fn render_knob(ui: &mut egui::Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, label: &str) -> egui::Response {
+        let size = egui::vec2(32.0, 32.0);
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::drag());
+
+        if response.dragged() {
+            let delta = response.drag_delta().y * -0.01;
+            *value = (*value + delta).clamp(*range.start(), *range.end());
+        }
+
+        if ui.is_rect_visible(rect) {
+            let visuals = ui.style().interact(&response);
+            let center = rect.center();
+            let radius = rect.width() / 2.0;
+
+            // Outer Circle
+            ui.painter().circle_filled(center, radius, egui::Color32::from_gray(20));
+            ui.painter().circle_stroke(center, radius, egui::Stroke::new(1.0, egui::Color32::from_gray(40)));
+
+            // Pointer line
+            let angle = egui::lerp(
+                (-135.0f32).to_radians()..=(135.0f32).to_radians(),
+                (*value - *range.start()) / (*range.end() - *range.start()),
+            );
+            let (sin, cos) = angle.sin_cos();
+            let pointer_start = center + egui::vec2(sin, -cos) * (radius * 0.4);
+            let pointer_end = center + egui::vec2(sin, -cos) * (radius * 0.9);
+            ui.painter().line_segment([pointer_start, pointer_end], egui::Stroke::new(2.5, visuals.fg_stroke.color));
+
+            // Small indicator dot for center
+            ui.painter().circle_filled(center, 2.0, egui::Color32::from_gray(60));
+
+            if !label.is_empty() {
+                ui.painter().text(rect.center_bottom() + egui::vec2(0.0, 5.0), egui::Align2::CENTER_TOP, label, egui::FontId::proportional(8.0), egui::Color32::from_gray(100));
+            }
+        }
+
+        response
+    }
+
     pub fn new(graph: GraphJson, cc: &eframe::CreationContext<'_>) -> Self {
         let mut visuals = egui::Visuals::dark();
         visuals.window_rounding = 0.0.into();
@@ -220,6 +259,48 @@ impl InspectorApp {
         }
     }
 
+    fn render_oscillator_monitor(&self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 160.0), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(5, 5, 6));
+        ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(20)));
+
+        let time = ui.input(|i| i.time);
+        let w = rect.width();
+        let h = rect.height();
+
+        // High-density background grid
+        for i in 0..16 {
+            let x = rect.min.x + (i as f32 * (w / 16.0));
+            ui.painter().vline(x, rect.y_range(), egui::Stroke::new(0.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5)));
+        }
+
+        // Aggregate All-Deck Visualization
+        for i in 0..4 {
+            let color = match i {
+                0 => egui::Color32::from_rgba_unmultiplied(0, 255, 200, 100),
+                1 => egui::Color32::from_rgba_unmultiplied(0, 180, 255, 100),
+                2 => egui::Color32::from_rgba_unmultiplied(255, 100, 0, 100),
+                3 => egui::Color32::from_rgba_unmultiplied(255, 0, 255, 100),
+                _ => egui::Color32::WHITE,
+            };
+
+            let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1]);
+            let speed = 4.0 + (i as f32 * 2.0);
+            let offset = i as f32 * 0.5;
+
+            let points: Vec<egui::Pos2> = (0..w as i32).step_by(3).map(|x| {
+                let px = x as f32 / w;
+                let wave = (px * 20.0 + time as f32 * speed + offset).sin() * (px * 10.0 + time as f32).cos();
+                let amp = (h * 0.3) * wave * peak.min(1.0);
+                egui::pos2(rect.min.x + x as f32, rect.center().y + amp)
+            }).collect();
+
+            ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.5, color)));
+        }
+
+        ui.painter().text(rect.min + egui::vec2(10.0, 10.0), egui::Align2::LEFT_TOP, "WIDESCREEN OSCILLATOR MONITOR", egui::FontId::proportional(10.0), egui::Color32::from_gray(80));
+    }
+
     fn render_dj_studio(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
         let total_w = ui.available_width();
         let main_w = total_w * 0.75;
@@ -231,6 +312,10 @@ impl InspectorApp {
             // --- MAIN MIXING AREA ---
             ui.vertical(|ui| {
                 ui.set_width(main_w);
+
+                // FULLSCREEN WIDE OSCILLATOR MONITOR
+                self.render_oscillator_monitor(ui, telemetry);
+                ui.add_space(10.0);
 
                 ui.horizontal(|ui| {
                     // LEFT DECKS (A & C)
@@ -573,8 +658,7 @@ impl InspectorApp {
                             ui.set_width(45.0);
 
                             // GAIN / TRIM
-                            ui.label(egui::RichText::new("TRIM").size(8.0).color(egui::Color32::from_gray(100)));
-                            if ui.add(egui::Slider::new(&mut self.channel_gains[i], 0.0..=1.2).show_value(false).handle_shape(egui::style::HandleShape::Circle)).changed() {
+                            if Self::render_knob(ui, &mut self.channel_gains[i], 0.0..=1.5, "TRIM").changed() {
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                                     target_id: (i as u64 * 4 + 1),
                                     param_id: 0,
@@ -587,8 +671,7 @@ impl InspectorApp {
 
                             // HI / MID / LOW
                             for (label, param_idx, state_val) in [("HI", 2, &mut self.channel_eq_high[i]), ("MID", 1, &mut self.channel_eq_mid[i]), ("LOW", 0, &mut self.channel_eq_low[i])] {
-                                ui.label(egui::RichText::new(label).size(8.0).color(egui::Color32::from_gray(100)));
-                                if ui.add(egui::Slider::new(state_val, 0.0..=1.2).show_value(false).handle_shape(egui::style::HandleShape::Circle)).changed() {
+                                if Self::render_knob(ui, state_val, 0.0..=1.5, label).changed() {
                                     let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                                         target_id: (i as u64 * 4 + 3),
                                         param_id: param_idx,
@@ -596,7 +679,7 @@ impl InspectorApp {
                                         ramp_duration_samples: 0,
                                     });
                                 }
-                                ui.add_space(4.0);
+                                ui.add_space(8.0);
                             }
 
                             ui.add_space(15.0);
