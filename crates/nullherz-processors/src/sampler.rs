@@ -73,7 +73,7 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
                         if voice.is_active {
                             let samples_per_beat = (transport.sample_rate * 60.0 / meta.bpm) as f64;
                             let expected_pos_beats = transport.beat_position;
-                            let expected_pos_samples = (expected_pos_beats * samples_per_beat) % meta.peaks.len().max(1) as f64;
+                            let expected_pos_samples = (expected_pos_beats * samples_per_beat) % self.sample_buffer.len().max(1) as f64;
 
                             // Gently nudge playhead towards locked phase
                             let diff = expected_pos_samples as f32 - voice.play_head;
@@ -134,9 +134,13 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
 
 fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutation) {
         match mutation {
-            nullherz_traits::TopologyMutation::AddSource { node_idx: _, buffer, sample_id } => {
+            nullherz_traits::TopologyMutation::AddSource { node_idx: _, buffer, sample_id, metadata } => {
                 self.set_sample((*buffer).clone());
                 self.sample_id = Some(sample_id);
+                self.metadata = metadata.map(|m| (*m).clone());
+            }
+            nullherz_traits::TopologyMutation::UpdateMetadata { node_idx: _, metadata } => {
+                self.metadata = Some((*metadata).clone());
             }
             _ => {}
         }

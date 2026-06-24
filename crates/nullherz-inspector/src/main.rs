@@ -163,9 +163,12 @@ impl InspectorApp {
             let center = rect.center();
             let radius = rect.width() / 2.0;
 
-            // Outer Circle
-            ui.painter().circle_filled(center, radius, egui::Color32::from_gray(20));
-            ui.painter().circle_stroke(center, radius, egui::Stroke::new(1.0, egui::Color32::from_gray(40)));
+            // Outer Circle (Tactile Aluminum)
+            ui.painter().circle_filled(center, radius, egui::Color32::from_gray(30));
+            ui.painter().circle_stroke(center, radius, egui::Stroke::new(1.0, egui::Color32::from_gray(60)));
+
+            // Subtle shadow
+            ui.painter().circle_stroke(center, radius + 1.0, egui::Stroke::new(1.0, egui::Color32::from_black_alpha(50)));
 
             // Pointer line
             let normalized = (*value - *range.start()) / (*range.end() - *range.start());
@@ -174,17 +177,18 @@ impl InspectorApp {
                 normalized,
             );
             let (sin, cos) = angle.sin_cos();
-            let pointer_start = center + egui::vec2(sin, -cos) * (radius * 0.4);
-            let pointer_end = center + egui::vec2(sin, -cos) * (radius * 0.9);
+            let pointer_start = center + egui::vec2(sin, -cos) * (radius * 0.2);
+            let pointer_end = center + egui::vec2(sin, -cos) * (radius * 0.95);
 
             let color = if (normalized - 0.5).abs() < 0.01 { egui::Color32::from_rgb(0, 255, 200) } else { visuals.fg_stroke.color };
-            ui.painter().line_segment([pointer_start, pointer_end], egui::Stroke::new(3.0, color));
+            ui.painter().line_segment([pointer_start, pointer_end], egui::Stroke::new(4.0, egui::Color32::BLACK));
+            ui.painter().line_segment([pointer_start, pointer_end], egui::Stroke::new(2.0, color));
 
             // Small indicator dot for center
-            ui.painter().circle_filled(center, 2.0, egui::Color32::from_gray(60));
+            ui.painter().circle_filled(center, 2.5, egui::Color32::from_gray(80));
 
             if !label.is_empty() {
-                ui.painter().text(rect.center_bottom() + egui::vec2(0.0, 5.0), egui::Align2::CENTER_TOP, label, egui::FontId::proportional(8.0), egui::Color32::from_gray(100));
+                ui.painter().text(rect.center_bottom() + egui::vec2(0.0, 5.0), egui::Align2::CENTER_TOP, label, egui::FontId::proportional(8.0), egui::Color32::from_gray(120));
             }
         }
 
@@ -211,9 +215,9 @@ impl InspectorApp {
 
         // Adjust spacing for high-density "Pro" layout
         let mut style = (*cc.egui_ctx.style()).clone();
-        style.spacing.item_spacing = egui::vec2(10.0, 10.0);
-        style.spacing.button_padding = egui::vec2(12.0, 8.0);
-        style.visuals.window_rounding = 4.0.into();
+        style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+        style.spacing.button_padding = egui::vec2(8.0, 4.0);
+        style.visuals.window_rounding = 2.0.into();
         cc.egui_ctx.set_style(style);
 
         let last_telemetry = Arc::new(Mutex::new(None));
@@ -342,7 +346,10 @@ impl InspectorApp {
             ui.add_space(15.0);
 
             egui::ScrollArea::vertical().show(ui, |ui| {
-                for track in &self.library_db.tracks {
+                let mut tracks = self.library_db.tracks.clone();
+                tracks.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+
+                for track in &tracks {
                     let title = &track.title;
                     let artist = &track.artist;
                     let bpm = track.metadata.bpm;
@@ -381,7 +388,10 @@ impl InspectorApp {
 
                     ui.child_ui(rect, egui::Layout::left_to_right(egui::Align::Center)).horizontal(|ui| {
                         ui.add_space(5.0);
-                        ui.label(egui::RichText::new(format!("{} - {}", title, artist)).size(11.0));
+                        let is_loaded = self.now_playing.iter().any(|np| np.as_deref() == Some(title));
+                        let t_color = if is_loaded { egui::Color32::from_rgb(0, 255, 150) } else { egui::Color32::WHITE };
+
+                        ui.label(egui::RichText::new(format!("{} - {}", title, artist)).size(11.0).color(t_color));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_space(5.0);
                             ui.label(egui::RichText::new(format!("{:.0}", bpm)).color(egui::Color32::from_gray(80)).size(10.0));
@@ -536,6 +546,10 @@ impl InspectorApp {
                     if is_master { self.master_deck = None; } else { self.master_deck = Some(i); }
                 }
 
+                if let Some(sample) = self.sample_registry.get(i as u64 * 4) {
+                    ui.label(egui::RichText::new(format!("{:.1} BPM", sample.metadata.bpm)).small().color(egui::Color32::from_gray(100)));
+                }
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
                     let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1]);
@@ -588,6 +602,29 @@ impl InspectorApp {
                         points.push(egui::pos2(w_rect.min.x + x as f32, w_rect.center().y + y_off));
                     }
                     ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.0, color)));
+
+                    // DETAIL SCROLLING WAVEFORM
+                    ui.add_space(5.0);
+                    let (d_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 20.0, 40.0), egui::Sense::hover());
+                    ui.painter().rect_filled(d_rect, 2.0, egui::Color32::from_rgb(5, 5, 6));
+
+                    let dw = d_rect.width();
+                    let dh = d_rect.height();
+                    let play_head_norm = (time as f32 % 30.0) / 30.0; // Simulated playhead
+                    let view_range = 0.05; // 5% of track
+
+                    let mut d_points = Vec::new();
+                    for x in 0..dw as usize {
+                        let rel_x = x as f32 / dw;
+                        let track_norm = (play_head_norm - view_range/2.0 + rel_x * view_range).clamp(0.0, 1.0);
+                        let p_idx = (track_norm * peaks.len() as f32) as usize;
+                        let val = peaks[p_idx.min(peaks.len() - 1)];
+                        let y_off = val * (dh / 2.0);
+                        d_points.push(egui::pos2(d_rect.min.x + x as f32, d_rect.center().y - y_off));
+                        d_points.push(egui::pos2(d_rect.min.x + x as f32, d_rect.center().y + y_off));
+                    }
+                    ui.painter().add(egui::Shape::line(d_points, egui::Stroke::new(1.5, color.additive())));
+                    ui.painter().vline(d_rect.center().x, d_rect.y_range(), egui::Stroke::new(2.0, egui::Color32::WHITE));
                 }
             } else {
                 // FALLBACK Simulation if no real data
@@ -692,6 +729,18 @@ impl InspectorApp {
                     ui.label(egui::RichText::new(format!("{:+.1}%", pct)).size(10.0).monospace().color(color));
                 });
             });
+
+            // PHASE METER
+            ui.add_space(5.0);
+            let (p_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 30.0, 12.0), egui::Sense::hover());
+            ui.painter().rect_filled(p_rect, 1.0, egui::Color32::from_rgb(5, 5, 6));
+            ui.painter().vline(p_rect.center().x, p_rect.y_range(), egui::Stroke::new(1.0, egui::Color32::from_gray(60)));
+
+            if self.channel_sync[i] {
+                let phase_diff = (time.sin() * 0.5) as f32; // Simulated phase diff
+                let px = p_rect.center().x + (phase_diff * p_rect.width() * 0.4);
+                ui.painter().circle_filled(egui::pos2(px, p_rect.center().y), 4.0, color);
+            }
         });
     }
 

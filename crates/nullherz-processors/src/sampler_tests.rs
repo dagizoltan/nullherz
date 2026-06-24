@@ -25,6 +25,7 @@ fn test_sampler_sync_logic() {
         node_idx: 0,
         buffer: buffer.clone(),
         sample_id: 123,
+        metadata: Some(Arc::new(metadata)),
     });
 
     // We can't easily inject metadata into SamplerProcessor from here because it's not exposed via traits

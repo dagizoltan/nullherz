@@ -233,7 +233,7 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
         }
     }
 fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutation) {
-        if let nullherz_traits::TopologyMutation::AddSource { node_idx: _, buffer, sample_id: _ } = mutation {
+        if let nullherz_traits::TopologyMutation::AddSource { node_idx: _, buffer, sample_id: _, metadata: _ } = mutation {
             self.add_source(buffer);
         }
     }

@@ -16,6 +16,7 @@ pub struct Conductor {
     pub analysis_worker: Option<crate::analysis_worker::AnalysisWorker>,
     pub folder_monitor: Option<crate::folder_monitor::FolderMonitor>,
     pub library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>,
+    save_counter: u32,
 }
 
 impl Default for Conductor {
@@ -37,6 +38,7 @@ impl Conductor {
             analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone())),
             folder_monitor: Some(crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())),
             library,
+            save_counter: 0,
         }
     }
 
@@ -76,6 +78,12 @@ impl Conductor {
     }
 
     pub fn tick(&mut self) {
+        self.save_counter += 1;
+        if self.save_counter >= 100 {
+            self.library.lock().unwrap().save("library.json");
+            self.save_counter = 0;
+        }
+
         if self.engine_coordinator.check_health() {
             eprintln!("CRITICAL: Engine health crisis detected. Prioritizing resource recovery...");
             self.drain_garbage();
@@ -103,16 +111,6 @@ impl Conductor {
 
         self.sync_sampler_metadata();
 
-        // Periodic library save
-        static mut SAVE_COUNTER: u32 = 0;
-        unsafe {
-            SAVE_COUNTER += 1;
-            if SAVE_COUNTER >= 100 {
-                self.library.lock().unwrap().save("library.json");
-                SAVE_COUNTER = 0;
-            }
-        }
-
         self.transfusion_manager.sample_registry.drain_garbage();
 
         self.drain_garbage();
@@ -135,12 +133,18 @@ impl Conductor {
         let mut engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
         if let Some(ref mut engine) = *engine_lock {
             for child in engine.list_children() {
-                // Since child is &dyn AudioProcessor, and we want to downcast to a concrete type,
-                // we'd typically use child.as_any().downcast_ref::<T>().
-                // However, RenderingEngine::list_children() returns Vec<&dyn AudioProcessor>.
-                // We'll skip the concrete sync for now to avoid complex downcasting across crate boundaries
-                // in this phase, as the primary goal of establishing the metadata path is done.
-                let _ = child;
+                if let Some(sampler) = child.as_any().downcast_ref::<nullherz_processors::SamplerProcessor>() {
+                    if let Some(id) = sampler.id_getter() {
+                        if let Some(sample) = self.transfusion_manager.sample_registry.get(id) {
+                             if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                                 let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
+                                     node_idx: sampler.id as u32,
+                                     metadata: Arc::new(sample.metadata),
+                                 });
+                             }
+                        }
+                    }
+                }
             }
         }
     }

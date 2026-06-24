@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 nullherz-backends = { path = "../nullherz-backends" }
 audio-core = { path = "../audio-core" }
+hound = "3.5"
 nullherz-processors = { path = "../nullherz-processors" }
 nullherz-traits = { path = "../nullherz-traits" }
 nullherz-dna = { path = "../nullherz-dna" }
