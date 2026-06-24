@@ -63,7 +63,7 @@ While the Nullherz engine is architecturally hardened, the transition to a "Valu
 ### 4.1 DJ Performance Readiness [~85%]
 *   **Current State**: Atomic deck swaps, zero-latency mixer control, and SIMD-optimized summing are operational.
 *   **Alpha Requirement**: Implement an off-thread **Transient & BPM Analyzer**. This will populate the `SampleRegistry` with metadata (beat-grids, root keys), allowing for seamless "Sync" and "Snap" during live performance.
-*   **Alpha Requirement**: Establish a persistent **Library Database** to manage multi-gigabyte track collections without impacting the RT engine's memory footprint.
+*   **Alpha Requirement**: Establish a persistent **Library Database** (using a Rust-native engine like `redb`) to manage multi-gigabyte track collections with ACID safety and zero-copy performance, without impacting the RT engine's memory footprint.
 
 ### 4.2 Song Builder Readiness [~60%]
 *   **Current State**: Sample-accurate parameter automation and a modular "Transfusion" layer (Granular/Spectral) are operational.
