@@ -14,6 +14,8 @@ pub struct Conductor {
     pub mixer_bridge: MixerBridge,
     pub sidecar_supervisor: SidecarSupervisor,
     pub analysis_worker: Option<crate::analysis_worker::AnalysisWorker>,
+    pub folder_monitor: Option<crate::folder_monitor::FolderMonitor>,
+    pub library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>,
 }
 
 impl Default for Conductor {
@@ -25,13 +27,16 @@ impl Default for Conductor {
 impl Conductor {
     pub fn new() -> Self {
         let sample_registry = Arc::new(SampleRegistry::new());
+        let library = Arc::new(std::sync::Mutex::new(nullherz_dna::LibraryDatabase::load("library.json")));
         Self {
             engine_coordinator: EngineCoordinator::new(),
             topology_manager: TopologyManager::new(),
             transfusion_manager: TransfusionManager::new(sample_registry.clone()),
             mixer_bridge: MixerBridge::new(),
             sidecar_supervisor: SidecarSupervisor::new(),
-            analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry)),
+            analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone())),
+            folder_monitor: Some(crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())),
+            library,
         }
     }
 
@@ -97,6 +102,16 @@ impl Conductor {
         self.handle_transfusion_registrations();
 
         self.sync_sampler_metadata();
+
+        // Periodic library save
+        static mut SAVE_COUNTER: u32 = 0;
+        unsafe {
+            SAVE_COUNTER += 1;
+            if SAVE_COUNTER >= 100 {
+                self.library.lock().unwrap().save("library.json");
+                SAVE_COUNTER = 0;
+            }
+        }
 
         self.transfusion_manager.sample_registry.drain_garbage();
 
