@@ -94,6 +94,8 @@ impl Conductor {
 
         self.handle_transfusion_registrations();
 
+        self.transfusion_manager.sample_registry.drain_garbage();
+
         self.drain_garbage();
     }
 

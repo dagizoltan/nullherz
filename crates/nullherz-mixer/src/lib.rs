@@ -53,13 +53,30 @@ impl MixerManager {
             commands.extend(self.create_dj_deck(deck, &[1], bus));
         }
 
+        // --- MASTER CROSSFADER (Stereo) ---
+        let xf_l_id = self.id_allocator.allocate_node_id();
+        let xf_r_id = self.id_allocator.allocate_node_id();
+        let xf_out_l = self.id_allocator.allocate_buffer_id(1);
+        let xf_out_r = self.id_allocator.allocate_buffer_id(1);
+
+        // Left Path
+        commands.push(Command::AddNode { node_idx: xf_l_id, processor_type_id: ProcessorTypeId::CROSSFADER });
+        commands.push(Command::UpdateEdge { node_idx: xf_l_id, input_idx: 0, new_buffer_idx: self.config.dj_a_l as u32 });
+        commands.push(Command::UpdateEdge { node_idx: xf_l_id, input_idx: 1, new_buffer_idx: self.config.dj_b_l as u32 });
+        commands.push(Command::UpdateOutputEdge { node_idx: xf_l_id, output_idx: 0, new_buffer_idx: xf_out_l });
+
+        // Right Path
+        commands.push(Command::AddNode { node_idx: xf_r_id, processor_type_id: ProcessorTypeId::CROSSFADER });
+        commands.push(Command::UpdateEdge { node_idx: xf_r_id, input_idx: 0, new_buffer_idx: self.config.dj_a_r as u32 });
+        commands.push(Command::UpdateEdge { node_idx: xf_r_id, input_idx: 1, new_buffer_idx: self.config.dj_b_r as u32 });
+        commands.push(Command::UpdateOutputEdge { node_idx: xf_r_id, output_idx: 0, new_buffer_idx: xf_out_r });
+
+        // Summing to Master
         let sum_id = self.id_allocator.allocate_node_id();
         commands.push(Command::AddNode { node_idx: sum_id, processor_type_id: ProcessorTypeId::SUMMING });
 
-        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 0, new_buffer_idx: self.config.dj_a_l as u32 });
-        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 1, new_buffer_idx: self.config.dj_b_l as u32 });
-        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 2, new_buffer_idx: self.config.dj_a_r as u32 });
-        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 3, new_buffer_idx: self.config.dj_b_r as u32 });
+        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 0, new_buffer_idx: xf_out_l });
+        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 1, new_buffer_idx: xf_out_r });
 
         commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 0, new_buffer_idx: self.config.master_l as u32 });
         commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 1, new_buffer_idx: self.config.master_r as u32 });

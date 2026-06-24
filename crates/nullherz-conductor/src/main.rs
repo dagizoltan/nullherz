@@ -19,6 +19,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Gateway bridge closed.");
     });
 
+    // --- DJ PLATFORM BOOTSTRAP ---
+    println!("Bootstrapping 4-Channel DJ Mixer...");
+    let mut mixer = nullherz_mixer::MixerManager::new();
+    let bootstrap_commands = mixer.create_4channel_mixer();
+    conductor.apply_mixer_commands(bootstrap_commands);
+
     // Main orchestration loop
     let mut ticker = tokio::time::interval(Duration::from_millis(100));
     loop {

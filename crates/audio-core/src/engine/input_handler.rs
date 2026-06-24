@@ -60,7 +60,7 @@ impl EngineInputHandler {
                 if let Some(sample) = sample_registry.get(*sample_id) {
                     graph.apply_topology_mutation(TopologyMutation::AddSource {
                         node_idx: *granular_node_idx,
-                        buffer: sample,
+                        buffer: sample.buffer,
                     });
                 }
             }

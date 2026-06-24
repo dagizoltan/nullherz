@@ -94,6 +94,7 @@ pub struct Track {
 pub struct InspectorApp {
     graph: GraphJson,
     last_telemetry: Arc<Mutex<Option<Telemetry>>>,
+    sample_registry: Arc<nullherz_dna::SampleRegistry>,
     command_sender: mpsc::Sender<nullherz_traits::Command>,
     active_view: View,
 
@@ -104,6 +105,7 @@ pub struct InspectorApp {
     channel_eq_low: [f32; 4],
     channel_cue: [bool; 4],
     master_gain: f32,
+    crossfader_pos: f32,
     sample_pool: Vec<String>,
     search_query: String,
     is_streaming: bool,
@@ -135,6 +137,7 @@ impl InspectorApp {
 
         let last_telemetry = Arc::new(Mutex::new(None));
         let tel_clone = last_telemetry.clone();
+        let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
         let (cmd_tx, cmd_rx) = mpsc::channel::<nullherz_traits::Command>();
 
         std::thread::spawn(move || {
@@ -173,6 +176,7 @@ impl InspectorApp {
         Self {
             graph,
             last_telemetry,
+            sample_registry,
             command_sender: cmd_tx,
             active_view: View::Studio,
             channel_gains: [0.8; 4],
@@ -181,6 +185,7 @@ impl InspectorApp {
             channel_eq_low: [0.0; 4],
             channel_cue: [false; 4],
             master_gain: 1.0,
+            crossfader_pos: 0.5,
             sample_pool: vec!["kick.wav".into(), "snare.wav".into(), "hihat.wav".into()],
             search_query: String::new(),
             is_streaming: false,
@@ -236,24 +241,67 @@ impl InspectorApp {
                         ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 200, 255))));
                         ui.painter().hline(w_rect.x_range(), w_rect.center().y, egui::Stroke::new(0.5, egui::Color32::from_rgba_unmultiplied(0, 200, 255, 40)));
 
+                        // --- PRECISION DJ OVERLAY ---
+                        // Transient Markers from Registry (Node i*4 is the Sampler)
+                        if let Some(sample) = self.sample_registry.get(i as u64 * 4) {
+                            let total_samples = sample.buffer.len() as f32;
+                            for &pos in sample.metadata.transients.iter() {
+                                let x_off = pos as f32 / total_samples;
+                                let tx = w_rect.min.x + (x_off * w_width);
+                                ui.painter().vline(tx, w_rect.y_range(), egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(255, 50, 50, 180)));
+                            }
+                        } else {
+                            // Fallback simulated markers
+                            for x_off in [0.25, 0.5, 0.75] {
+                                let tx = w_rect.min.x + (x_off * w_width);
+                                ui.painter().vline(tx, w_rect.y_range(), egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(255, 50, 50, 180)));
+                            }
+                        }
+                        // BPM Indicator
+                        ui.painter().text(w_rect.min + egui::vec2(10.0, 15.0), egui::Align2::LEFT_TOP, "126.0 BPM", egui::FontId::proportional(11.0), egui::Color32::from_gray(200));
+
                         ui.add_space(20.0);
 
                         // EQ & Gain — now bound to persistent state
                         ui.vertical_centered(|ui| {
                             ui.set_width(40.0);
                             ui.label(egui::RichText::new("H").size(9.0).color(egui::Color32::from_gray(80)));
-                            ui.add(egui::Slider::new(&mut self.channel_eq_high[i], -24.0..=6.0).show_value(false).vertical());
+                            if ui.add(egui::Slider::new(&mut self.channel_eq_high[i], 0.0..=1.2).show_value(false).vertical()).changed() {
+                                // DJ Platform: Isolator is Node (i*4 + 2)
+                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                                    target_id: (i as u64 * 4 + 2),
+                                    param_id: 2,
+                                    value: self.channel_eq_high[i],
+                                    ramp_duration_samples: 0,
+                                });
+                            }
                             ui.label(egui::RichText::new("M").size(9.0).color(egui::Color32::from_gray(80)));
-                            ui.add(egui::Slider::new(&mut self.channel_eq_mid[i], -24.0..=6.0).show_value(false).vertical());
+                            if ui.add(egui::Slider::new(&mut self.channel_eq_mid[i], 0.0..=1.2).show_value(false).vertical()).changed() {
+                                // Isolator Mid (Param 1)
+                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                                    target_id: (i as u64 * 4 + 2),
+                                    param_id: 1,
+                                    value: self.channel_eq_mid[i],
+                                    ramp_duration_samples: 0,
+                                });
+                            }
                             ui.label(egui::RichText::new("L").size(9.0).color(egui::Color32::from_gray(80)));
-                            ui.add(egui::Slider::new(&mut self.channel_eq_low[i], -24.0..=6.0).show_value(false).vertical());
+                            if ui.add(egui::Slider::new(&mut self.channel_eq_low[i], 0.0..=1.2).show_value(false).vertical()).changed() {
+                                // Isolator Low (Param 0)
+                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                                    target_id: (i as u64 * 4 + 2),
+                                    param_id: 0,
+                                    value: self.channel_eq_low[i],
+                                    ramp_duration_samples: 0,
+                                });
+                            }
                         });
 
                         // Fader & Meter
                         ui.horizontal(|ui| {
                             ui.add_space(20.0);
                             if ui.add(egui::Slider::new(&mut self.channel_gains[i], 0.0..=1.2).vertical().show_value(false)).changed() {
-                                // PD-2: Corrected target_id for GainProcessor in new 4-node-per-deck mixer
+                                // DJ Platform: Deck Gain is Node (i*4 + 1)
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                                     target_id: (i as u64 * 4 + 1),
                                     param_id: 0,
@@ -272,6 +320,27 @@ impl InspectorApp {
                     });
                 }
 
+                // Crossfader Section
+                ui.add_space(20.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(main_w * 0.2);
+                    ui.label("A");
+                    ui.set_min_width(main_w * 0.5);
+                    if ui.add(egui::Slider::new(&mut self.crossfader_pos, 0.0..=1.0).show_value(false)).changed() {
+                        // DJ Platform: Dual Crossfaders (L:16, R:17)
+                        for target_id in [16, 17] {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                                target_id,
+                                param_id: 0,
+                                value: self.crossfader_pos,
+                                ramp_duration_samples: 0,
+                            });
+                        }
+                    }
+                    ui.label("B");
+                });
+                ui.add_space(20.0);
+
                 // Elegant Master Dashboard
                 let m_rect = ui.allocate_exact_size(egui::vec2(main_w, 60.0), egui::Sense::hover()).0;
                 ui.painter().rect_filled(m_rect, 0.0, egui::Color32::from_rgb(15, 15, 18));
@@ -279,16 +348,16 @@ impl InspectorApp {
                     ui.add_space(30.0);
                     ui.strong("MASTER");
                     if ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).show_value(false)).changed() {
-                        // PD-2: Corrected target_id for SummingProcessor (Master Gain)
+                        // DJ Platform: Master Gain is Node 18 (Summing)
                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                            target_id: 16,
+                            target_id: 18,
                             param_id: 0,
                             value: self.master_gain,
                             ramp_duration_samples: 128,
                         });
                     }
 
-                    let m_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[16].min(1.2));
+                    let m_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[18].min(1.2));
                     let (mtr_rect, _) = ui.allocate_exact_size(egui::vec2(250.0, 10.0), egui::Sense::hover());
                     ui.painter().rect_filled(mtr_rect, 1.0, egui::Color32::from_gray(25));
                     let m_w_val = (m_peak * 250.0).min(250.0);
