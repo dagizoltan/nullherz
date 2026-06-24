@@ -408,6 +408,8 @@ pub trait SnapshotProvider: Send {
 pub trait AudioProcessor: SignalProcessor + MidiResponder + SnapshotProvider + Send {
     fn apply_command(&mut self, _command: &ProcessorCommand) {}
     fn set_parameter(&mut self, _param_id: u32, _value: f32, _ramp_duration_samples: u32) {}
+    fn get_parameter(&self, _param_id: u32) -> f32 { 0.0 }
+    fn serialize_state(&self) -> Vec<u8> { Vec::new() }
     fn apply_topology_mutation(&mut self, _mutation: TopologyMutation) {}
     fn collect_telemetry(&self, _node_times: &mut [u64; MAX_NODES], _peak_levels: &mut [f32; MAX_NODES]) {}
     fn metadata(&self) -> Option<ProcessorMetadata> { None }

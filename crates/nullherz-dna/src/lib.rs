@@ -2,14 +2,15 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicPtr, Ordering};
+use redb::{Database, TableDefinition, ReadableTable, TableError};
 
 pub type SampleBuffer = Arc<Vec<f32>>;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct SampleMetadata {
     pub bpm: f32,
     #[serde(skip)]
-    pub transients: Arc<Vec<u64>>, // Use Arc for RT-safe cloning
+    pub transients: Arc<Vec<u64>>,
     pub root_key: Option<f32>,
     pub hot_cues: [Option<u64>; 8],
     pub loop_points: Option<(u64, u64)>,
@@ -32,7 +33,7 @@ impl SampleMetadata {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct LibraryTrack {
     pub id: u64,
     pub path: String,
@@ -41,26 +42,7 @@ pub struct LibraryTrack {
     pub metadata: SampleMetadata,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct LibraryDatabase {
-    pub tracks: Vec<LibraryTrack>,
-}
-
-impl LibraryDatabase {
-    pub fn load(path: &str) -> Self {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            serde_json::from_str(&content).unwrap_or_default()
-        } else {
-            Self::default()
-        }
-    }
-
-    pub fn save(&self, path: &str) {
-        if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = std::fs::write(path, json);
-        }
-    }
-}
+const TRACKS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("tracks");
 
 #[derive(Clone)]
 pub struct RegisteredSample {
@@ -68,16 +50,69 @@ pub struct RegisteredSample {
     pub metadata: SampleMetadata,
 }
 
-/// A thread-safe registry for managing shared audio buffers.
-/// This allows processors like CaptureProcessor to register live takes
-/// that can then be used as sources for GranularProcessor.
-///
-/// Uses an atomic-swap pattern for RT-safe, lock-free reads.
+pub struct LibraryDatabase {
+    db: Database,
+}
+
+impl LibraryDatabase {
+    pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let db = Database::create(path)?;
+        // Ensure table exists
+        let write_txn = db.begin_write()?;
+        {
+            let _ = write_txn.open_table(TRACKS_TABLE)?;
+        }
+        write_txn.commit()?;
+        Ok(Self { db })
+    }
+
+    pub fn save_track(&self, track: &LibraryTrack) -> Result<(), Box<dyn std::error::Error>> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TRACKS_TABLE)?;
+            let serialized = serde_json::to_vec(track)?;
+            table.insert(track.id, serialized.as_slice())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn get_track(&self, id: u64) -> Result<Option<LibraryTrack>, Box<dyn std::error::Error>> {
+        let read_txn = self.db.begin_read()?;
+        let table = match read_txn.open_table(TRACKS_TABLE) {
+            Ok(t) => t,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        let result = table.get(id)?;
+        if let Some(guard) = result {
+            let track: LibraryTrack = serde_json::from_slice(guard.value())?;
+            return Ok(Some(track));
+        }
+        Ok(None)
+    }
+
+    pub fn list_tracks(&self) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
+        let read_txn = self.db.begin_read()?;
+        let table = match read_txn.open_table(TRACKS_TABLE) {
+            Ok(t) => t,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+        let mut tracks = Vec::new();
+        for res in table.iter()? {
+            let (_id, val) = res?;
+            let track: LibraryTrack = serde_json::from_slice(val.value())?;
+            tracks.push(track);
+        }
+        Ok(tracks)
+    }
+}
+
 pub struct SampleRegistry {
     inner: AtomicPtr<HashMap<u64, RegisteredSample>>,
     write_lock: Mutex<()>,
     garbage: Mutex<Vec<*mut HashMap<u64, RegisteredSample>>>,
-    // simple reader count to prevent freeing during iteration
     readers: std::sync::atomic::AtomicUsize,
 }
 
@@ -101,8 +136,6 @@ impl SampleRegistry {
         }
     }
 
-    /// Registers a new sample buffer.
-    /// MUST NOT be called from the real-time audio thread.
     pub fn register(&self, id: u64, buffer: SampleBuffer) {
         self.register_with_metadata(id, buffer, SampleMetadata::new_empty());
     }
@@ -116,49 +149,23 @@ impl SampleRegistry {
 
         let new_ptr = Box::into_raw(Box::new(new_map));
         self.inner.store(new_ptr, Ordering::Release);
-
-        // Defer reclamation to the non-RT side to prevent Use-After-Free
-        // for mid-block reads on the audio thread.
         self.garbage.lock().unwrap().push(old_ptr);
     }
 
-    /// Safely reclaims memory from old registry versions.
-    /// MUST be called periodically from a non-real-time maintenance thread.
     pub fn drain_garbage(&self) {
-        if self.readers.load(Ordering::SeqCst) > 0 {
-            return; // Try again later
-        }
+        if self.readers.load(Ordering::SeqCst) > 0 { return; }
         let mut g = self.garbage.lock().unwrap();
         for ptr in g.drain(..) {
-            unsafe {
-                drop(Box::from_raw(ptr));
-            }
+            unsafe { drop(Box::from_raw(ptr)); }
         }
     }
 
-    /// Retrieves a registered sample by ID.
-    /// Real-time safe and lock-free.
     pub fn get(&self, id: u64) -> Option<RegisteredSample> {
         self.readers.fetch_add(1, Ordering::SeqCst);
         let ptr = self.inner.load(Ordering::Acquire);
         let res = unsafe { (*ptr).get(&id).cloned() };
         self.readers.fetch_sub(1, Ordering::SeqCst);
         res
-    }
-
-    pub fn get_buffer(&self, id: u64) -> Option<SampleBuffer> {
-        self.get(id).map(|s| s.buffer)
-    }
-
-    pub fn remove(&self, id: u64) {
-        let _lock = self.write_lock.lock().unwrap();
-
-        let old_ptr = self.inner.load(Ordering::Acquire);
-        let mut new_map = unsafe { (*old_ptr).clone() };
-        new_map.remove(&id);
-
-        let new_ptr = Box::into_raw(Box::new(new_map));
-        self.inner.store(new_ptr, Ordering::Release);
     }
 
     pub fn list_ids(&self) -> Vec<u64> {
@@ -173,9 +180,40 @@ impl SampleRegistry {
 impl Drop for SampleRegistry {
     fn drop(&mut self) {
         let ptr = self.inner.load(Ordering::Acquire);
-        unsafe {
-            drop(Box::from_raw(ptr));
-        }
+        unsafe { drop(Box::from_raw(ptr)); }
         self.drain_garbage();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_library_database_crud() {
+        let db_path = "test_library.redb";
+        let _ = fs::remove_file(db_path);
+
+        let db = LibraryDatabase::load(db_path).unwrap();
+
+        let track = LibraryTrack {
+            id: 1,
+            path: "/test/path.wav".to_string(),
+            title: "Test Track".to_string(),
+            artist: "Test Artist".to_string(),
+            metadata: SampleMetadata::new_empty(),
+        };
+
+        db.save_track(&track).unwrap();
+
+        let loaded = db.get_track(1).unwrap().unwrap();
+        assert_eq!(loaded, track);
+
+        let list = db.list_tracks().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0], track);
+
+        let _ = fs::remove_file(db_path);
     }
 }

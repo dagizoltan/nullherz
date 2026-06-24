@@ -8,6 +8,7 @@ pub mod mixer_bridge;
 pub mod sidecar_supervisor;
 pub mod analysis_worker;
 pub mod folder_monitor;
+pub mod persistence;
 
 pub use orchestrator::Conductor;
 pub use timeline::Timeline;

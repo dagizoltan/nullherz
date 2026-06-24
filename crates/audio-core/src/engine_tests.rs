@@ -7,7 +7,6 @@ use proptest::prelude::*;
 
 #[cfg(test)]
 mod tests {
-    use nullherz_traits::SignalProcessor;
     use super::*;
 
     proptest! {

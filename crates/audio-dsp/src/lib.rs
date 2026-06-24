@@ -13,6 +13,7 @@ pub trait DspKernel: Send + Clone {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]);
     fn reset(&mut self) {}
     fn set_parameter(&mut self, _id: u32, _value: f32, _ramp_samples: u32) {}
+    fn get_parameter(&self, _id: u32) -> f32 { 0.0 }
 }
 
 /// A SIMD Summing Node that mixes up to 16 input buffers into one output.
@@ -144,6 +145,10 @@ impl DspKernel for Crossfader {
             self.set_curve(value);
         }
     }
+
+    fn get_parameter(&self, id: u32) -> f32 {
+        if id == 0 { self.position } else if id == 1 { self.curve } else { 0.0 }
+    }
 }
 
 /// A high-performance Gain processor with parameter smoothing.
@@ -166,6 +171,10 @@ impl DspKernel for Gain {
         if id == 0 {
             self.set_gain(value, ramp_samples);
         }
+    }
+
+    fn get_parameter(&self, id: u32) -> f32 {
+        if id == 0 { self.target_gain } else { 0.0 }
     }
 }
 
