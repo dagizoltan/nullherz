@@ -545,7 +545,6 @@ impl TestHost {
 
 #[cfg(test)]
 mod tests {
-    use crate::SignalProcessor;
     use super::*;
     use crate::SubBlockIterator;
 

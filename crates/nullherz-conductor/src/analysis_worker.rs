@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use nullherz_dna::{SampleRegistry, SampleMetadata};
+use nullherz_dna::SampleRegistry;
 use audio_dsp::TransientDetector;
 use std::time::Duration;
 
