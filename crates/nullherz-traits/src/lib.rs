@@ -102,6 +102,7 @@ pub enum Command {
     SetSafeMode(bool),
     RequestSnapshots,
     SetSequencerStep {
+        node_idx: u32,
         track: u32,
         step: u32,
         value: bool,

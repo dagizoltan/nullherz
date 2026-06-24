@@ -2,32 +2,34 @@ use nullherz_traits::AudioProcessor;
 
 #[derive(Clone, Copy)]
 struct Pattern {
-    grid: [[bool; 16]; 16], // 16 tracks, 16 steps
+    grid: [[bool; 64]; 16], // 16 tracks, 64 steps
     len: u32,
 }
 
 impl Default for Pattern {
     fn default() -> Self {
         Self {
-            grid: [[false; 16]; 16],
+            grid: [[false; 64]; 16],
             len: 16,
         }
     }
 }
 
 pub struct SequencerProcessor {
+    pub id: u32,
     sample_rate: f32,
     current_sample: u64,
-    patterns: [Pattern; 8], // 8 patterns in memory
+    patterns: [Pattern; 16], // 16 patterns in memory
     active_pattern: usize,
 }
 
 impl SequencerProcessor {
-    pub fn new(sample_rate: f32, _bpm: f32) -> Self {
+    pub fn new(id: u32, sample_rate: f32, _bpm: f32) -> Self {
         Self {
+            id,
             sample_rate,
             current_sample: 0,
-            patterns: [Pattern::default(); 8],
+            patterns: [Pattern::default(); 16],
             active_pattern: 0,
         }
     }
@@ -86,8 +88,8 @@ impl nullherz_traits::SnapshotProvider for SequencerProcessor { }
 impl AudioProcessor for SequencerProcessor {
 fn apply_command(&mut self, command: &nullherz_traits::Command) {
         #[allow(clippy::collapsible_if)]
-        if let nullherz_traits::Command::SetSequencerStep { track, step, value } = command {
-            if *track < 16 && *step < 16 {
+        if let nullherz_traits::Command::SetSequencerStep { node_idx, track, step, value } = command {
+            if *node_idx == self.id && *track < 16 && *step < 64 {
                 self.patterns[self.active_pattern].grid[*track as usize][*step as usize] = *value;
             }
         }
@@ -97,11 +99,11 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
         match param_id {
             0 => { // Active Pattern
                 let p = value.round() as usize;
-                if p < 8 { self.active_pattern = p; }
+                if p < 16 { self.active_pattern = p; }
             }
             1 => { // Pattern Length
                 let l = value.round() as u32;
-                if (1..=16).contains(&l) {
+                if (1..=64).contains(&l) {
                     self.patterns[self.active_pattern].len = l;
                 }
             }
@@ -123,7 +125,7 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
         for p in &self.patterns {
             data.push(p.len as u8);
             for track in 0..16 {
-                for step in 0..16 {
+                for step in 0..64 {
                     data.push(if p.grid[track][step] { 1 } else { 0 });
                 }
             }

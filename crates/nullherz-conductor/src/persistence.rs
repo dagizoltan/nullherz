@@ -1,4 +1,5 @@
 use serde::{Serialize, Deserialize};
+use serde_with::serde_as;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeState {
@@ -21,9 +22,11 @@ pub struct OutputEdgeState {
     pub buffer_idx: u32,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SequencerPatternState {
-    pub grid: [[bool; 16]; 16],
+    #[serde_as(as = "[[_; 64]; 16]")]
+    pub grid: [[bool; 64]; 16],
     pub len: u32,
 }
 
@@ -40,6 +43,7 @@ pub struct ProjectState {
     pub edges: Vec<EdgeState>,
     pub output_edges: Vec<OutputEdgeState>,
     pub sequencers: Vec<SequencerNodeState>,
+    pub arrangement: crate::pattern_manager::SongArrangement,
     pub bpm: f32,
     pub transport_playing: bool,
 }
@@ -51,6 +55,7 @@ impl ProjectState {
             edges: Vec::new(),
             output_edges: Vec::new(),
             sequencers: Vec::new(),
+            arrangement: crate::pattern_manager::SongArrangement::default(),
             bpm: 120.0,
             transport_playing: false,
         }

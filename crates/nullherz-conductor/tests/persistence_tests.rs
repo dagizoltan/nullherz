@@ -17,7 +17,7 @@ fn test_project_persistence_roundtrip() {
     });
     state.sequencers.push(SequencerNodeState {
         node_idx: 1,
-        patterns: vec![SequencerPatternState { grid: [[true; 16]; 16], len: 16 }; 8],
+        patterns: vec![SequencerPatternState { grid: [[true; 64]; 16], len: 16 }; 16],
         active_pattern: 0,
     });
 
