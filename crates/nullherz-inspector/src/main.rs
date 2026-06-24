@@ -130,7 +130,7 @@ pub struct InspectorApp {
 impl InspectorApp {
     fn render_knob(ui: &mut egui::Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, label: &str) -> egui::Response {
         let size = egui::vec2(32.0, 32.0);
-        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::drag());
+        let (rect, mut response) = ui.allocate_exact_size(size, egui::Sense::drag());
 
         if response.dragged() {
             let old_value = *value;
