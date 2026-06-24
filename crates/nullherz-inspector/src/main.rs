@@ -384,10 +384,12 @@ impl InspectorApp {
     }
 
     fn render_dj_studio(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
-        let main_w = ui.available_width();
+        let total_w = ui.available_width();
+        let mixer_w = 320.0;
+        let deck_w = (total_w - mixer_w - 48.0) / 4.0;
 
         ui.vertical(|ui| {
-            ui.set_width(main_w);
+            ui.set_width(total_w);
             ui.add_space(5.0);
 
             // TOP: FULLSCREEN WIDE OSCILLATOR MONITOR
@@ -397,30 +399,29 @@ impl InspectorApp {
             // PERFORMANCE ROW: A, B, MIXER, C, D
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);
-                let col_w = (main_w - 48.0) / 6.0; // 4 decks + 2-wide mixer
 
                 // DECK A
-                ui.vertical(|ui| { ui.set_width(col_w); self.render_deck(ui, 0, telemetry); });
+                ui.vertical(|ui| { ui.set_width(deck_w); self.render_deck(ui, 0, telemetry); });
                 // DECK B
-                ui.vertical(|ui| { ui.set_width(col_w); self.render_deck(ui, 1, telemetry); });
+                ui.vertical(|ui| { ui.set_width(deck_w); self.render_deck(ui, 1, telemetry); });
 
-                // COMPACT CENTRAL MIXER (Occupies 2 column widths)
+                // ULTRA-COMPACT CENTRAL MIXER
                 ui.vertical(|ui| {
-                    ui.set_width(col_w * 2.0);
-                    self.render_central_mixer(ui, telemetry, col_w * 2.0);
+                    ui.set_width(mixer_w);
+                    self.render_central_mixer(ui, telemetry, mixer_w);
                 });
 
                 // DECK C
-                ui.vertical(|ui| { ui.set_width(col_w); self.render_deck(ui, 2, telemetry); });
+                ui.vertical(|ui| { ui.set_width(deck_w); self.render_deck(ui, 2, telemetry); });
                 // DECK D
-                ui.vertical(|ui| { ui.set_width(col_w); self.render_deck(ui, 3, telemetry); });
+                ui.vertical(|ui| { ui.set_width(deck_w); self.render_deck(ui, 3, telemetry); });
             });
 
             ui.add_space(20.0);
 
             // INTEGRATED MASTER & STATUS DASHBOARD
             ui.horizontal(|ui| {
-                let dash_w = main_w * 0.4;
+                let dash_w = total_w * 0.4;
                 let (d_rect, _) = ui.allocate_exact_size(egui::vec2(dash_w, 60.0), egui::Sense::hover());
                 ui.painter().rect_filled(d_rect, 2.0, egui::Color32::from_rgb(8, 8, 10));
 
@@ -670,12 +671,12 @@ impl InspectorApp {
         ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(30)));
 
         ui.child_ui(rect, egui::Layout::top_down(egui::Align::Center)).vertical(|ui| {
-            ui.add_space(10.0);
+            ui.add_space(5.0);
 
             // CHANNEL STRIPS
             ui.horizontal(|ui| {
-                ui.add_space(20.0);
-                ui.spacing_mut().item_spacing = egui::vec2(30.0, 0.0);
+                ui.add_space(10.0);
+                ui.spacing_mut().item_spacing = egui::vec2(15.0, 0.0);
                 for i in 0..4 {
                     ui.vertical(|ui| {
                         ui.set_width(60.0);
@@ -764,13 +765,16 @@ impl InspectorApp {
 
             ui.add_space(20.0);
 
+            ui.add_space(15.0);
+
             // GLOBAL CROSSFADER (Centered below faders)
             ui.vertical_centered(|ui| {
-                ui.set_width(main_w * 0.8);
+                ui.set_width(main_w);
                 ui.label(egui::RichText::new("X-FADE").small().strong().color(egui::Color32::from_gray(100)));
                 ui.horizontal(|ui| {
-                    ui.add_space(main_w * 0.1);
+                    ui.add_space(10.0);
                     ui.label(egui::RichText::new("A").color(egui::Color32::from_rgb(0, 200, 255)));
+                    ui.spacing_mut().slider_width = main_w - 60.0;
                     let x_slider = ui.add(egui::Slider::new(&mut self.crossfader_pos, 0.0..=1.0).show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 0.5 }));
                     if x_slider.changed() {
                         for target_id in [16, 17] {
