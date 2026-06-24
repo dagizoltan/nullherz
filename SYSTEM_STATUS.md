@@ -56,7 +56,24 @@ The entire suite of registered processors (including `DjIsolator` and `SimdBiqua
 
 ---
 
-## 4. Conclusion
+## 4. DJ & Song Builder Roadmap: From Engine to Instrument
+
+While the Nullherz engine is architecturally hardened, the transition to a "Valuable Instrument" requires bridging the gap between raw DSP and user-centric orchestration.
+
+### 4.1 DJ Performance Readiness [~85%]
+*   **Current State**: Atomic deck swaps, zero-latency mixer control, and SIMD-optimized summing are operational.
+*   **Alpha Requirement**: Implement an off-thread **Transient & BPM Analyzer**. This will populate the `SampleRegistry` with metadata (beat-grids, root keys), allowing for seamless "Sync" and "Snap" during live performance.
+*   **Alpha Requirement**: Establish a persistent **Library Database** to manage multi-gigabyte track collections without impacting the RT engine's memory footprint.
+
+### 4.2 Song Builder Readiness [~60%]
+*   **Current State**: Sample-accurate parameter automation and a modular "Transfusion" layer (Granular/Spectral) are operational.
+*   **Alpha Requirement**: **Project Persistence**. Implement a serialized `ProjectState` that captures the entire topology, sequence grid, and parameter set, allowing for session save/load cycles.
+*   **Alpha Requirement**: **Pattern Orchestration**. Move beyond the 16-step `SequencerProcessor` toward a "Pattern Manager" that can schedule complex arrangements on the `Timeline`.
+*   **Alpha Requirement**: **Macro Modulation**. Introduce a "Modulation Matrix" that allows high-level controls (Macro Knobs) to broadcast commands to multiple downstream DSP nodes simultaneously.
+
+---
+
+## 5. Conclusion
 
 The Nullherz engine is now fully decoupled and real-time hardened. It achieves total isolation between hardware backends and processing logic, while ensuring that control-plane complexity never leaks into the high-priority signal path.
 
