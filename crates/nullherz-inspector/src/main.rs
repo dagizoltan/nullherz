@@ -691,30 +691,51 @@ impl InspectorApp {
                     }
                 });
 
-                ui.add_space(30.0);
+                ui.add_space(20.0);
                 ui.separator();
-                ui.add_space(30.0);
+                ui.add_space(20.0);
 
                 // MASTER CONTROL SECTION
+                egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(8.0).show(ui, |ui| {
                 ui.vertical(|ui| {
-                    ui.set_width(main_w * 0.2);
+                    ui.set_width(main_w * 0.25);
                     ui.add_space(10.0);
-                    ui.label(egui::RichText::new("MASTER").small().strong().color(egui::Color32::from_gray(100)));
+                    ui.label(egui::RichText::new("MASTER OUTPUT").small().strong().color(egui::Color32::from_gray(140)));
                     ui.add_space(10.0);
-
-                    // MASTER VU (Vertical)
-                    let m_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
-                    if m_peak > self.master_peak_hold { self.master_peak_hold = m_peak; }
-                    else { self.master_peak_hold *= 0.99; }
 
                     ui.horizontal(|ui| {
-                        let (mtr_rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 160.0), egui::Sense::hover());
-                        ui.painter().rect_filled(mtr_rect, 1.0, egui::Color32::from_rgb(10, 10, 12));
-                        let m_h_val = (m_peak * 160.0).min(160.0);
-                        let m_meter_color = if m_peak > 1.0 { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_rgb(0, 180, 255) };
-                        ui.painter().rect_filled(egui::Rect::from_min_size(mtr_rect.max - egui::vec2(12.0, m_h_val), egui::vec2(12.0, m_h_val)), 0.0, m_meter_color);
+                        // MASTER DYNAMICS (Knobs)
+                        ui.vertical(|ui| {
+                            ui.set_width(70.0);
+                            if Self::render_knob(ui, &mut self.mastering_limiter_gain, 0.0..=2.0, "CEIL").changed() {
+                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.mastering_limiter_gain, ramp_duration_samples: 128 });
+                            }
+                            ui.add_space(15.0);
+                            if Self::render_knob(ui, &mut self.mastering_comp_threshold, 0.0..=1.0, "THR").changed() {
+                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 20, param_id: 0, value: self.mastering_comp_threshold, ramp_duration_samples: 128 });
+                            }
+                        });
 
-                        ui.add_space(10.0);
+                        ui.add_space(15.0);
+
+                        // MASTER VU (Stereo-style vertical bars)
+                        let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
+                        if peak > self.master_peak_hold { self.master_peak_hold = peak; }
+                        else { self.master_peak_hold *= 0.98; }
+
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
+                            for _ in 0..2 {
+                                let (mtr_rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 180.0), egui::Sense::hover());
+                                ui.painter().rect_filled(mtr_rect, 1.0, egui::Color32::from_rgb(10, 10, 12));
+                                let m_h = (peak * 180.0).min(180.0);
+                                let m_p_rect = egui::Rect::from_min_size(mtr_rect.max - egui::vec2(8.0, m_h), egui::vec2(8.0, m_h));
+                                let color = if peak > 1.0 { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_rgb(0, 180, 255) };
+                                ui.painter().rect_filled(m_p_rect, 0.0, color);
+                            }
+                        });
+
+                        ui.add_space(15.0);
 
                         // MASTER FADER
                         let m_fader = ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).vertical().show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 4.0 }));
@@ -722,6 +743,7 @@ impl InspectorApp {
                             let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.master_gain, ramp_duration_samples: 128 });
                         }
                     });
+                });
                 });
             });
 
