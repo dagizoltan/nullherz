@@ -3,35 +3,29 @@ use crate::common::*;
 use nullherz_traits::ProcessorTypeId;
 
 pub fn create_studio_strip(
-    next_node_id: &mut u32,
-    next_buffer_id: &mut u32,
+    id_allocator: &nullherz_traits::IdAllocator,
     name: &str,
     fx_ids: &[u32],
     config: &MixerConfig,
 ) -> Vec<Command> {
     let mut commands = Vec::new();
-    let input_buf = *next_buffer_id;
-    *next_buffer_id += 2;
+    let input_buf = id_allocator.allocate_buffer_id(2);
 
     println!("Creating Studio Strip: {} (Input: {}-{})", name, input_buf, input_buf + 1);
 
-    let gain_id = *next_node_id;
-    *next_node_id += 1;
+    let gain_id = id_allocator.allocate_node_id();
     commands.push(Command::AddNode { node_idx: gain_id, processor_type_id: ProcessorTypeId::GAIN });
     commands.push(Command::UpdateEdge { node_idx: gain_id, input_idx: 0, new_buffer_idx: input_buf });
 
     let mut prev_node = gain_id;
-    let mut prev_buf_l = *next_buffer_id;
-    let prev_buf_r = *next_buffer_id + 1;
-    *next_buffer_id += 2;
+    let mut prev_buf_l = id_allocator.allocate_buffer_id(2);
+    let prev_buf_r = prev_buf_l + 1;
 
     commands.push(Command::UpdateOutputEdge { node_idx: gain_id, output_idx: 0, new_buffer_idx: prev_buf_l });
 
     for &fx_type in fx_ids {
-        let fx_id = *next_node_id;
-        *next_node_id += 1;
-        let fx_buf = *next_buffer_id;
-        *next_buffer_id += 1;
+        let fx_id = id_allocator.allocate_node_id();
+        let fx_buf = id_allocator.allocate_buffer_id(1);
 
         commands.push(Command::AddNode { node_idx: fx_id, processor_type_id: ProcessorTypeId(fx_type) });
         commands.push(Command::UpdateOutputEdge { node_idx: prev_node, output_idx: 0, new_buffer_idx: fx_buf });
@@ -40,8 +34,7 @@ pub fn create_studio_strip(
         prev_buf_l = fx_buf;
     }
 
-    let fader_id = *next_node_id;
-    *next_node_id += 1;
+    let fader_id = id_allocator.allocate_node_id();
     commands.push(Command::AddNode { node_idx: fader_id, processor_type_id: ProcessorTypeId::GAIN });
 
     commands.push(Command::UpdateEdge { node_idx: fader_id, input_idx: 0, new_buffer_idx: prev_buf_l });

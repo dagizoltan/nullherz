@@ -47,11 +47,8 @@ impl BroadcastSidecar {
     }
 }
 
-impl AudioProcessor for BroadcastSidecar {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn process(&mut self, inputs: &[&[f32]], _out: &mut [&mut [f32]], _context: &mut audio_core::processors::ProcessContext) {
+impl nullherz_traits::SignalProcessor for BroadcastSidecar {
+fn process(&mut self, inputs: &[&[f32]], _out: &mut [&mut [f32]], _context: &mut audio_core::processors::ProcessContext) {
         if !self.is_active || inputs.len() < 2 { return; }
 
         let left = inputs[0];
@@ -75,8 +72,16 @@ impl AudioProcessor for BroadcastSidecar {
             let _ = tx.try_send(block);
         }
     }
+}
 
-    fn apply_command(&mut self, cmd: &nullherz_traits::Command) {
+impl nullherz_traits::MidiResponder for BroadcastSidecar { }
+
+impl nullherz_traits::SnapshotProvider for BroadcastSidecar { }
+
+impl AudioProcessor for BroadcastSidecar {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+fn apply_command(&mut self, cmd: &nullherz_traits::Command) {
         match cmd {
             nullherz_traits::Command::Play => self.is_active = true,
             nullherz_traits::Command::Stop => self.is_active = false,

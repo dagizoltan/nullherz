@@ -23,18 +23,14 @@ impl SamplerProcessor {
     }
 }
 
-impl AudioProcessor for SamplerProcessor {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn reset(&mut self) {
+impl nullherz_traits::SignalProcessor for SamplerProcessor {
+fn reset(&mut self) {
         for v in self.voices.iter_mut() {
             v.is_active = false;
             v.play_head = 0.0;
         }
     }
-
-    fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
+fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if outputs.is_empty() { return; }
         let num_samples = outputs[0].len();
         if num_samples == 0 { return; }
@@ -55,10 +51,11 @@ impl AudioProcessor for SamplerProcessor {
             output.copy_from_slice(render_slice);
         }
     }
+}
 
+impl nullherz_traits::MidiResponder for SamplerProcessor {
     fn apply_midi(&mut self, event: ipc_layer::MidiEvent) {
         let status = event.status & 0xF0;
-        #[allow(clippy::collapsible_if)]
         if status == 0x90 && event.data2 > 0 {
             if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
                 let freq = 440.0 * 2.0f32.powf((event.data1 as f32 - 69.0) / 12.0);
@@ -68,4 +65,11 @@ impl AudioProcessor for SamplerProcessor {
             }
         }
     }
+}
+
+impl nullherz_traits::SnapshotProvider for SamplerProcessor { }
+
+impl AudioProcessor for SamplerProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 }

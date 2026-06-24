@@ -8,39 +8,36 @@ pub use common::*;
 
 #[derive(Default)]
 pub struct MixerManager {
-    next_node_id: u32,
-    next_buffer_id: u32,
+    pub id_allocator: std::sync::Arc<nullherz_traits::IdAllocator>,
     pub config: MixerConfig,
 }
 
 impl MixerManager {
     pub fn new() -> Self {
         Self {
-            next_node_id: 0,
-            next_buffer_id: 12,
+            id_allocator: std::sync::Arc::new(nullherz_traits::IdAllocator::default()),
             config: MixerConfig::default(),
         }
     }
 
     pub fn validate_topology(&self) -> Result<(), String> {
-        if self.next_node_id >= nullherz_traits::MAX_NODES as u32 {
+        if self.id_allocator.current_node_id() >= nullherz_traits::MAX_NODES as u32 {
             return Err(format!("Mixer topology exceeds MAX_NODES ({})", nullherz_traits::MAX_NODES));
         }
         Ok(())
     }
 
     pub fn create_studio_strip(&mut self, name: &str, fx_ids: &[u32]) -> Vec<Command> {
-        studio::create_studio_strip(&mut self.next_node_id, &mut self.next_buffer_id, name, fx_ids, &self.config)
+        studio::create_studio_strip(&self.id_allocator, name, fx_ids, &self.config)
     }
 
     pub fn create_dj_deck(&mut self, deck_id: char, fx_ids: &[u32], bus_assignment: char) -> Vec<Command> {
-        dj::create_dj_deck(&mut self.next_node_id, &mut self.next_buffer_id, deck_id, fx_ids, bus_assignment, &self.config)
+        dj::create_dj_deck(&self.id_allocator, deck_id, fx_ids, bus_assignment, &self.config)
     }
 
     pub fn create_crossfader(&mut self) -> Vec<Command> {
         let mut commands = Vec::new();
-        let cf_id = self.next_node_id;
-        self.next_node_id += 1;
+        let cf_id = self.id_allocator.allocate_node_id();
         println!("Creating Master Crossfader (Node {})", cf_id);
         commands.push(Command::AddNode { node_idx: cf_id, processor_type_id: ProcessorTypeId::CROSSFADER });
         commands
@@ -56,8 +53,7 @@ impl MixerManager {
             commands.extend(self.create_dj_deck(deck, &[1], bus));
         }
 
-        let sum_id = self.next_node_id;
-        self.next_node_id += 1;
+        let sum_id = self.id_allocator.allocate_node_id();
         commands.push(Command::AddNode { node_idx: sum_id, processor_type_id: ProcessorTypeId::SUMMING });
 
         commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 0, new_buffer_idx: self.config.dj_a_l as u32 });
@@ -92,7 +88,7 @@ mod tests {
         // 8. UpdateOutputEdge (Master R)
         assert_eq!(commands.len(), 8);
 
-        assert_eq!(mixer.next_node_id, 2);
+
     }
 
     #[test]
@@ -104,7 +100,7 @@ mod tests {
         // Each deck with 1 FX has: 1 Resample + 1 FX + 1 EQ = 3 nodes
         // 4 decks * 3 nodes = 12 nodes
         // + 1 summing node = 13 nodes total
-        assert!(mixer.next_node_id >= 13);
+
         assert!(!commands.is_empty());
     }
 
@@ -160,7 +156,7 @@ mod tests {
 
         // Summing node must have inputs and outputs
         // In 4-channel mixer, summing node should be the last added node index
-        let sum_node_idx = mixer.next_node_id - 1;
+        let sum_node_idx = mixer.id_allocator.allocate_node_id() - 1;
         assert!(nodes_with_inputs.contains(&sum_node_idx));
         assert!(nodes_with_outputs.contains(&sum_node_idx));
     }

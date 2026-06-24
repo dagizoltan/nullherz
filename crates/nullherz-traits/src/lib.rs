@@ -363,63 +363,35 @@ pub trait ProcessorFactory: Send + Sync {
     fn name(&self) -> &'static str;
 }
 
-/// The core trait for all audio processing nodes in the nullherz engine.
-pub trait AudioProcessor: Send {
-    /// Executes audio processing for the given buffers.
-    /// MUST be real-time safe: no allocations, no locks, no blocking syscalls.
+pub trait SignalProcessor: Send {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext);
-
-    /// Executes audio processing, potentially utilizing a parallel executor.
-    /// Defaults to calling `process` if no specialized parallel logic is implemented.
     fn process_parallel(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext, _executor: Option<&mut (dyn ParallelExecutor + '_)>) {
         self.process(inputs, outputs, context);
     }
-
-    /// Called when audio configuration (sample rate, block size) changes.
     fn setup(&mut self, _config: AudioConfig) {}
-
-    /// Applies high-level control plane commands (parameters, play/stop).
-    fn apply_command(&mut self, _command: &ProcessorCommand) {}
-
-    /// Sets a processor parameter with optional ramping.
-    fn set_parameter(&mut self, _param_id: u32, _value: f32, _ramp_duration_samples: u32) {}
-
-    /// Sets the processor to safe mode (bypass or minimum processing).
     fn set_safe_mode(&mut self, _enabled: bool) {}
-
-    /// Applies structural graph mutations to the processor (routing, swapping).
-    fn apply_topology_mutation(&mut self, _mutation: TopologyMutation) {}
-
-    /// Applies real-time MIDI events to the processor.
-    fn apply_midi(&mut self, _event: MidiEvent) {}
-
-    /// Gathers performance and signal telemetry from the processor.
-    fn collect_telemetry(&self, _node_times: &mut [u64; MAX_NODES], _peak_levels: &mut [f32; MAX_NODES]) {}
-
-    /// Returns metadata about the processor (parameters, name, etc.)
-    fn metadata(&self) -> Option<ProcessorMetadata> { None }
-
-    /// Configures the garbage producer used for real-time safe deallocation.
-    fn set_garbage_producer(&mut self, _producer: Box<dyn GarbageProducer>) {}
-
-    /// Resets the internal state of the processor (e.g., filter delays, oscillator phase).
     fn reset(&mut self) {}
+    fn latency_samples(&self) -> usize { 0 }
+}
 
-    /// Allows safe downcasting to concrete processor types.
+pub trait MidiResponder: Send {
+    fn apply_midi(&mut self, _event: MidiEvent) {}
+}
+
+pub trait SnapshotProvider: Send {
+    fn pull_snapshot(&mut self) -> Option<Arc<Vec<f32>>> { None }
+    fn pull_all_snapshots(&mut self, _target: &mut Vec<(u64, Arc<Vec<f32>>)>) {}
+}
+
+pub trait AudioProcessor: SignalProcessor + MidiResponder + SnapshotProvider + Send {
+    fn apply_command(&mut self, _command: &ProcessorCommand) {}
+    fn set_parameter(&mut self, _param_id: u32, _value: f32, _ramp_duration_samples: u32) {}
+    fn apply_topology_mutation(&mut self, _mutation: TopologyMutation) {}
+    fn collect_telemetry(&self, _node_times: &mut [u64; MAX_NODES], _peak_levels: &mut [f32; MAX_NODES]) {}
+    fn metadata(&self) -> Option<ProcessorMetadata> { None }
+    fn set_garbage_producer(&mut self, _producer: Box<dyn GarbageProducer>) {}
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-
-    /// Pulls a snapshot from the processor (e.g. for registration in SampleRegistry).
-    fn pull_snapshot(&mut self) -> Option<Arc<Vec<f32>>> { None }
-
-    /// Returns the processing latency of this node in samples.
-    fn latency_samples(&self) -> usize { 0 }
-
-    /// Returns a list of available snapshots from this processor and its children.
-    /// Used by the conductor to pull snapshots without knowing internal topology.
-    fn pull_all_snapshots(&mut self, _target: &mut Vec<(u64, Arc<Vec<f32>>)>) {}
-
-    /// Returns a list of all currently active child processors.
     fn list_children(&self) -> Vec<&dyn AudioProcessor> { Vec::new() }
 }
 
@@ -486,3 +458,30 @@ pub trait RenderingController: Send + Sync {
     /// Schedules a new signal graph to be swapped in at the next block boundary.
     fn set_pending_graph(&self, graph: Box<dyn AudioProcessor>);
 }
+
+impl Command {
+    pub fn unpack_bundle(count: u32, data: [u64; 12]) -> Vec<Command> {
+        let mut commands = Vec::with_capacity((count as usize).min(4));
+        for i in 0..(count as usize).min(4) {
+            let target_id = data[i * 3];
+            let param_id = data[i * 3 + 1] as u32;
+            let value = f32::from_bits(data[i * 3 + 2] as u32);
+            commands.push(Command::SetParam { target_id, param_id, value, ramp_duration_samples: 0 });
+        }
+        commands
+    }
+}
+pub struct IdAllocator {
+    next_node_id: std::sync::atomic::AtomicU32,
+    next_buffer_id: std::sync::atomic::AtomicU32,
+}
+impl IdAllocator {
+    pub fn new(start_node_id: u32, start_buffer_id: u32) -> Self {
+        Self { next_node_id: std::sync::atomic::AtomicU32::new(start_node_id), next_buffer_id: std::sync::atomic::AtomicU32::new(start_buffer_id) }
+    }
+    pub fn allocate_node_id(&self) -> u32 { self.next_node_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed) }
+    pub fn allocate_buffer_id(&self, count: u32) -> u32 { self.next_buffer_id.fetch_add(count, std::sync::atomic::Ordering::Relaxed) }
+    pub fn current_node_id(&self) -> u32 { self.next_node_id.load(std::sync::atomic::Ordering::Relaxed) }
+    pub fn current_buffer_id(&self) -> u32 { self.next_buffer_id.load(std::sync::atomic::Ordering::Relaxed) }
+}
+impl Default for IdAllocator { fn default() -> Self { Self::new(0, 12) } }

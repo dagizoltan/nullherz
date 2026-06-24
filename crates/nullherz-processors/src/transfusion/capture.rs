@@ -1,5 +1,4 @@
 use nullherz_traits::{AudioProcessor, ProcessContext, Command};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering, AtomicUsize};
 
 pub struct CaptureProcessor {
@@ -20,16 +19,12 @@ impl CaptureProcessor {
     }
 }
 
-impl AudioProcessor for CaptureProcessor {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn reset(&mut self) {
+impl nullherz_traits::SignalProcessor for CaptureProcessor {
+fn reset(&mut self) {
         self.write_ptr.store(0, Ordering::Release);
         self.is_frozen.store(false, Ordering::Release);
     }
-
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
+fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         if inputs.is_empty() { return; }
         let input = inputs[0];
 
@@ -49,8 +44,28 @@ impl AudioProcessor for CaptureProcessor {
             outputs[0].copy_from_slice(input);
         }
     }
+}
 
-    fn apply_command(&mut self, command: &Command) {
+impl nullherz_traits::MidiResponder for CaptureProcessor { }
+
+impl nullherz_traits::SnapshotProvider for CaptureProcessor {
+    fn pull_snapshot(&mut self) -> Option<std::sync::Arc<Vec<f32>>> {
+        if self.is_frozen.load(std::sync::atomic::Ordering::Acquire) {
+            let ptr = self.write_ptr.load(std::sync::atomic::Ordering::Acquire);
+            let (first, second) = self.buffer.split_at(ptr);
+            let mut snapshot = Vec::with_capacity(self.buffer.len());
+            snapshot.extend_from_slice(second);
+            snapshot.extend_from_slice(first);
+            self.is_frozen.store(false, std::sync::atomic::Ordering::Release);
+            Some(std::sync::Arc::new(snapshot))
+        } else { None }
+    }
+}
+
+impl AudioProcessor for CaptureProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+fn apply_command(&mut self, command: &Command) {
         match command {
             Command::Stop => {
                 self.is_frozen.store(true, Ordering::Release);
@@ -61,22 +76,7 @@ impl AudioProcessor for CaptureProcessor {
             _ => {}
         }
     }
-
-    fn pull_snapshot(&mut self) -> Option<Arc<Vec<f32>>> {
-        if self.is_frozen.load(Ordering::Acquire) {
-            let ptr = self.write_ptr.load(Ordering::Acquire);
-            let (first, second) = self.buffer.split_at(ptr);
-            let mut snapshot = Vec::with_capacity(self.buffer.len());
-            snapshot.extend_from_slice(second);
-            snapshot.extend_from_slice(first);
-            self.is_frozen.store(false, Ordering::Release);
-            Some(Arc::new(snapshot))
-        } else {
-            None
-        }
-    }
-
-    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
         let parameters = [nullherz_traits::ParameterMetadata {
             id: 0,
             name: [0; 32],

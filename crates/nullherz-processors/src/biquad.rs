@@ -17,22 +17,29 @@ impl BiquadProcessor {
 
 impl nullherz_traits::RtSafe for BiquadProcessor {}
 
-impl AudioProcessor for BiquadProcessor {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn set_safe_mode(&mut self, enabled: bool) {
+impl nullherz_traits::SignalProcessor for BiquadProcessor {
+fn set_safe_mode(&mut self, enabled: bool) {
         if enabled {
             // Neutral coefficients (allpass/bypass) in safe mode
             self.inner.set_parameter(0, 1.0, 0); // b0=1.0 is default in our impl
         }
     }
-
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext) {
+fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext) {
         self.inner.process(inputs, outputs, context);
     }
+fn reset(&mut self) {
+        self.inner.reset();
+    }
+}
 
-    fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
+impl nullherz_traits::MidiResponder for BiquadProcessor { }
+
+impl nullherz_traits::SnapshotProvider for BiquadProcessor { }
+
+impl AudioProcessor for BiquadProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
         let mut coeffs = self.inner.kernels[0].target_coeffs;
         match param_id {
             0 => coeffs.b0 = value,
@@ -46,16 +53,10 @@ impl AudioProcessor for BiquadProcessor {
             f.set_coeffs_ramped(coeffs, ramp_duration_samples);
         }
     }
-
-    fn reset(&mut self) {
-        self.inner.reset();
-    }
-
-    fn apply_command(&mut self, command: &ProcessorCommand) {
+fn apply_command(&mut self, command: &ProcessorCommand) {
         self.inner.apply_command(command);
     }
-
-    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
         let mut parameters = [nullherz_traits::ParameterMetadata {
             id: 0,
             name: [0; 32],
@@ -89,17 +90,13 @@ impl SimdBiquadProcessor {
     }
 }
 
-impl AudioProcessor for SimdBiquadProcessor {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn set_safe_mode(&mut self, enabled: bool) {
+impl nullherz_traits::SignalProcessor for SimdBiquadProcessor {
+fn set_safe_mode(&mut self, enabled: bool) {
         if enabled {
             self.inner.coeffs = audio_dsp::BiquadCoefficients::default();
         }
     }
-
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
+fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
         let len = inputs[0].len();
         let num_channels = inputs.len().min(outputs.len()).min(nullherz_traits::MAX_CHANNELS);
@@ -127,8 +124,20 @@ impl AudioProcessor for SimdBiquadProcessor {
             }
         }
     }
+fn reset(&mut self) {
+        self.inner.z1.fill(0.0);
+        self.inner.z2.fill(0.0);
+    }
+}
 
-    fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
+impl nullherz_traits::MidiResponder for SimdBiquadProcessor { }
+
+impl nullherz_traits::SnapshotProvider for SimdBiquadProcessor { }
+
+impl AudioProcessor for SimdBiquadProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
         let mut coeffs = self.inner.coeffs;
         match param_id {
             0 => coeffs.b0 = value,
@@ -140,13 +149,7 @@ impl AudioProcessor for SimdBiquadProcessor {
         }
         self.inner.coeffs = coeffs;
     }
-
-    fn reset(&mut self) {
-        self.inner.z1.fill(0.0);
-        self.inner.z2.fill(0.0);
-    }
-
-    fn apply_command(&mut self, command: &ProcessorCommand) {
+fn apply_command(&mut self, command: &ProcessorCommand) {
         if let Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
             if target_id == self.id {
                 self.set_parameter(param_id, value, ramp_duration_samples);

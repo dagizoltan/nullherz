@@ -7,10 +7,8 @@ struct GainProcessor {
     gain: f32,
 }
 
-impl AudioProcessor for GainProcessor {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
+impl nullherz_traits::SignalProcessor for GainProcessor {
+fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         for (i, input) in inputs.iter().enumerate() {
             if i < outputs.len() {
                 for (j, sample) in input.iter().enumerate() {
@@ -19,6 +17,15 @@ impl AudioProcessor for GainProcessor {
             }
         }
     }
+}
+
+impl nullherz_traits::MidiResponder for GainProcessor { }
+
+impl nullherz_traits::SnapshotProvider for GainProcessor { }
+
+impl AudioProcessor for GainProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 }
 
 fn main() {

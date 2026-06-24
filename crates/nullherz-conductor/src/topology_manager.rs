@@ -1,6 +1,7 @@
+use nullherz_topology::GraphCompiler;
 use std::sync::Arc;
 use nullherz_processors::ProcessorRegistry;
-use audio_core::processors::{TopologyMutation, GraphTopology, NodeRouting, GraphCompiler};
+use audio_core::processors::{TopologyMutation, GraphTopology, NodeRouting};
 use nullherz_traits::Command;
 
 pub struct TopologyManager {

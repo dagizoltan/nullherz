@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{Ordering, AtomicUsize};
 use crate::processors::graph::topology_types::GraphTopology;
-use crate::processors::graph::compiler::GraphCompiler;
+use nullherz_topology::GraphCompiler;
 
 pub struct TopologyCoordinator {
     pub(crate) topologies: Box<[GraphTopology; 2]>,

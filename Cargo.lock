@@ -449,6 +449,7 @@ dependencies = [
  "nullherz-backends",
  "nullherz-dna",
  "nullherz-processors",
+ "nullherz-topology",
  "nullherz-traits",
  "proptest",
  "serde",
@@ -2215,6 +2216,7 @@ dependencies = [
  "nullherz-gateway",
  "nullherz-mixer",
  "nullherz-processors",
+ "nullherz-topology",
  "nullherz-traits",
  "serde_json",
  "tokio",
@@ -2300,6 +2302,7 @@ name = "nullherz-topology"
 version = "0.1.0"
 dependencies = [
  "nullherz-traits",
+ "proptest",
  "serde",
  "serde-big-array",
 ]

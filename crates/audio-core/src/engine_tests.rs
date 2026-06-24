@@ -7,6 +7,7 @@ use proptest::prelude::*;
 
 #[cfg(test)]
 mod tests {
+    use nullherz_traits::SignalProcessor;
     use super::*;
 
     proptest! {
@@ -162,13 +163,20 @@ mod tests {
         struct MockProcessor {
             process_count: usize,
         }
-        impl AudioProcessor for MockProcessor {
-            fn as_any(&self) -> &dyn std::any::Any { self }
-            fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-            fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {
+        impl nullherz_traits::SignalProcessor for MockProcessor {
+fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {
                 self.process_count += 1;
             }
-        }
+}
+
+impl nullherz_traits::MidiResponder for MockProcessor { }
+
+impl nullherz_traits::SnapshotProvider for MockProcessor { }
+
+impl AudioProcessor for MockProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
 
         let cmd_buffer = Arc::new(MpscRingBuffer::<TimestampedCommand>::new(256));
         let (tel_prod, _tel_cons) = RingBuffer::new(1024).split();
@@ -212,14 +220,18 @@ mod tests {
         struct MidiMockProcessor {
             midi_received: bool,
         }
-        impl AudioProcessor for MidiMockProcessor {
-            fn as_any(&self) -> &dyn std::any::Any { self }
-            fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-            fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {}
-            fn apply_midi(&mut self, _ev: ipc_layer::MidiEvent) {
-                self.midi_received = true;
-            }
-        }
+        impl nullherz_traits::SignalProcessor for MidiMockProcessor {
+fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {}
+}
+
+impl nullherz_traits::MidiResponder for MidiMockProcessor { fn apply_midi(&mut self, _event: ipc_layer::MidiEvent) { self.midi_received = true; } }
+
+impl nullherz_traits::SnapshotProvider for MidiMockProcessor { }
+
+impl AudioProcessor for MidiMockProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
 
         let cmd_buffer = Arc::new(MpscRingBuffer::<TimestampedCommand>::new(256));
         let (midi_prod, midi_cons) = RingBuffer::new(256).split();
@@ -262,11 +274,18 @@ mod tests {
             apply_count: usize,
             id: u64,
         }
-        impl AudioProcessor for ParamMockProcessor {
-            fn as_any(&self) -> &dyn std::any::Any { self }
-            fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-            fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {}
-            fn apply_command(&mut self, cmd: &Command) {
+        impl nullherz_traits::SignalProcessor for ParamMockProcessor {
+fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {}
+}
+
+impl nullherz_traits::MidiResponder for ParamMockProcessor { }
+
+impl nullherz_traits::SnapshotProvider for ParamMockProcessor { }
+
+impl AudioProcessor for ParamMockProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+fn apply_command(&mut self, cmd: &Command) {
                 if let Command::SetParam { target_id, value, .. } = cmd {
                     if *target_id == self.id {
                         self.param_value = *value;
@@ -274,7 +293,7 @@ mod tests {
                     }
                 }
             }
-        }
+}
 
         let proc_id = 12345u64;
         let cmd_buffer = Arc::new(MpscRingBuffer::<TimestampedCommand>::new(256));

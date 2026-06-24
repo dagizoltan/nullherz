@@ -14,30 +14,33 @@ impl SummingProcessor {
     }
 }
 
-impl AudioProcessor for SummingProcessor {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+impl nullherz_traits::SignalProcessor for SummingProcessor {
+fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
+        if outputs.is_empty() { return; }
+        self.inner.process_16_to_1_simd(inputs, outputs[0]);
+    }
+}
 
-    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+impl nullherz_traits::MidiResponder for SummingProcessor { }
+
+impl nullherz_traits::SnapshotProvider for SummingProcessor { }
+
+impl AudioProcessor for SummingProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
         if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
             if target_id == self.id {
                 self.set_parameter(param_id, value, ramp_duration_samples);
             }
         }
     }
-
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
-        if outputs.is_empty() { return; }
-        self.inner.process_16_to_1_simd(inputs, outputs[0]);
-    }
-
-    fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
+fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
         if param_id == 0 {
             self.inner.set_gain(value);
         }
     }
-
-    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
         let mut parameters = [nullherz_traits::ParameterMetadata {
             id: 0,
             name: [0; 32],

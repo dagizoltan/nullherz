@@ -492,29 +492,33 @@ impl ConformanceSuite {
     }
 }
 
-impl AudioProcessor for MockProcessor {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn process(&mut self, _inputs: &[&[f32]], _outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
+impl crate::SignalProcessor for MockProcessor {
+fn process(&mut self, _inputs: &[&[f32]], _outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         self.process_called_count += 1;
     }
-
-    fn reset(&mut self) {
+fn reset(&mut self) {
         self.reset_called_count += 1;
     }
+}
 
-    fn apply_command(&mut self, command: &crate::ProcessorCommand) {
+impl crate::MidiResponder for MockProcessor { }
+
+impl crate::SnapshotProvider for MockProcessor { }
+
+impl AudioProcessor for MockProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+fn apply_command(&mut self, command: &crate::ProcessorCommand) {
         if let crate::ProcessorCommand::SetParam { param_id, value, .. } = command {
             self.last_param_id = *param_id;
             self.last_param_value = *value;
         }
     }
-
-    fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration: u32) {
+fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration: u32) {
         self.last_param_id = param_id;
         self.last_param_value = value;
     }
+
 }
 
 pub struct TestHost {
@@ -541,6 +545,7 @@ impl TestHost {
 
 #[cfg(test)]
 mod tests {
+    use crate::SignalProcessor;
     use super::*;
     use crate::SubBlockIterator;
 

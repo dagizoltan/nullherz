@@ -15,31 +15,33 @@ impl EnvelopeFollowerProcessor {
     }
 }
 
-impl AudioProcessor for EnvelopeFollowerProcessor {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+impl nullherz_traits::SignalProcessor for EnvelopeFollowerProcessor {
+fn reset(&mut self) {
+        self.kernel.reset();
+    }
+fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
+        self.kernel.process(inputs, outputs);
+    }
+}
 
-    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+impl nullherz_traits::MidiResponder for EnvelopeFollowerProcessor { }
+
+impl nullherz_traits::SnapshotProvider for EnvelopeFollowerProcessor { }
+
+impl AudioProcessor for EnvelopeFollowerProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
         if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
             if target_id == self.id {
                 self.set_parameter(param_id, value, ramp_duration_samples);
             }
         }
     }
-
-    fn reset(&mut self) {
-        self.kernel.reset();
-    }
-
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
-        self.kernel.process(inputs, outputs);
-    }
-
-    fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
+fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
         self.kernel.set_parameter(param_id, value, ramp_duration_samples);
     }
-
-    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
         let mut parameters = [nullherz_traits::ParameterMetadata {
             id: 0,
             name: [0; 32],

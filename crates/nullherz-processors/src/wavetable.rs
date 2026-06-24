@@ -14,31 +14,11 @@ impl WavetableProcessor {
     }
 }
 
-impl AudioProcessor for WavetableProcessor {
-    fn setup(&mut self, config: nullherz_traits::AudioConfig) {
+impl nullherz_traits::SignalProcessor for WavetableProcessor {
+fn setup(&mut self, config: nullherz_traits::AudioConfig) {
         self.inner.set_sample_rate(config.sample_rate);
     }
-
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
-        if param_id == 0 {
-            for ch in 0..crate::MAX_CHANNELS {
-                self.inner.set_frequency(ch, value);
-            }
-        }
-    }
-
-    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
-        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
-            if target_id == self.id {
-                self.set_parameter(param_id, value, ramp_duration_samples);
-            }
-        }
-    }
-
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
+fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         let num_channels = outputs.len().min(crate::MAX_CHANNELS);
         let len = if num_channels > 0 { outputs[0].len() } else { 0 };
         if len == 0 { return; }
@@ -69,6 +49,29 @@ impl AudioProcessor for WavetableProcessor {
             let fm = if !inputs.is_empty() { inputs[0] } else { &fm_storage[..len] };
             let pm = if inputs.len() > 1 { inputs[1] } else { &pm_storage[..len] };
             self.inner.process_scalar(ch, fm, pm, output);
+        }
+    }
+}
+
+impl nullherz_traits::MidiResponder for WavetableProcessor { }
+
+impl nullherz_traits::SnapshotProvider for WavetableProcessor { }
+
+impl AudioProcessor for WavetableProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
+        if param_id == 0 {
+            for ch in 0..crate::MAX_CHANNELS {
+                self.inner.set_frequency(ch, value);
+            }
+        }
+    }
+fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
+            if target_id == self.id {
+                self.set_parameter(param_id, value, ramp_duration_samples);
+            }
         }
     }
 }

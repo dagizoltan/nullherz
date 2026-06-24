@@ -22,15 +22,11 @@ impl ModulationProcessor {
     }
 }
 
-impl AudioProcessor for ModulationProcessor {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn reset(&mut self) {
+impl nullherz_traits::SignalProcessor for ModulationProcessor {
+fn reset(&mut self) {
         self.last_sent_value = f32::NAN;
     }
-
-    fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext) {
+fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext) {
         if inputs.is_empty() { return; }
         let cv = inputs[0];
         if cv.is_empty() { return; }
@@ -52,4 +48,13 @@ impl AudioProcessor for ModulationProcessor {
             }
         }
     }
+}
+
+impl nullherz_traits::MidiResponder for ModulationProcessor { }
+
+impl nullherz_traits::SnapshotProvider for ModulationProcessor { }
+
+impl AudioProcessor for ModulationProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 }
