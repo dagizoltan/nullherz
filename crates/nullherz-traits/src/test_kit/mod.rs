@@ -656,6 +656,7 @@ impl VirtualClockHost {
                 beat_position: 0.0,
                 is_playing: true,
                 sample_rate: 44100.0,
+                absolute_samples: 0,
             },
             sample_counter: 0,
         }

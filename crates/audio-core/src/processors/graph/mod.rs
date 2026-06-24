@@ -232,13 +232,9 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
         }
 
         let topo = &self.topology_coordinator.topologies[active_idx];
-        if !external_outputs.is_empty() {
-            let p0 = topo.virtual_to_physical[0];
-            external_outputs[0].copy_from_slice(&self.buffer_pool.buffers[p0].data[offset..offset + num_samples]);
-        }
-        if external_outputs.len() >= 2 {
-            let p1 = topo.virtual_to_physical[1];
-            external_outputs[1].copy_from_slice(&self.buffer_pool.buffers[p1].data[offset..offset + num_samples]);
+        for i in 0..external_outputs.len().min(4) {
+            let p_idx = topo.virtual_to_physical[i];
+            external_outputs[i].copy_from_slice(&self.buffer_pool.buffers[p_idx].data[offset..offset + num_samples]);
         }
 
         if is_last_sub_block {

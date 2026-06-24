@@ -157,6 +157,7 @@ impl AudioEngine {
                 beat_position: 0.0,
                 is_playing: false,
                 sample_rate: 44100.0,
+                absolute_samples: 0,
             },
             target_sample_rate: 44100.0,
             logger,

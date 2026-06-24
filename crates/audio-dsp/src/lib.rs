@@ -78,6 +78,7 @@ impl SummingNode {
 #[derive(Debug, Clone, Copy)]
 pub struct Crossfader {
     pub position: f32, // 0.0 (A) to 1.0 (B)
+    pub curve: f32,    // 0.0 = Linear, 1.0 = Power
 }
 
 impl Default for Crossfader {
@@ -87,12 +88,16 @@ impl Default for Crossfader {
 }
 
 impl Crossfader {
-    pub fn new() -> Self { Self { position: 0.5 } }
+    pub fn new() -> Self { Self { position: 0.5, curve: 0.5 } }
     pub fn set_position(&mut self, pos: f32) { self.position = pos.clamp(0.0, 1.0); }
+    pub fn set_curve(&mut self, curve: f32) { self.curve = curve.clamp(0.0, 1.0); }
 
     pub fn process_block(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
-        let gain_b = self.position.sqrt();
-        let gain_a = (1.0 - self.position).sqrt();
+        let (gain_a, gain_b) = if self.curve > 0.5 {
+            ( (1.0 - self.position).sqrt(), self.position.sqrt() )
+        } else {
+            ( 1.0 - self.position, self.position )
+        };
 
         for i in 0..output.len() {
             output[i] = input_a[i] * gain_a + input_b[i] * gain_b;
@@ -103,8 +108,11 @@ impl Crossfader {
         use wide::*;
         use crate::simd_vec::*;
         let len = output.len();
-        let gain_b = self.position.sqrt();
-        let gain_a = (1.0 - self.position).sqrt();
+        let (gain_a, gain_b) = if self.curve > 0.5 {
+            ( (1.0 - self.position).sqrt(), self.position.sqrt() )
+        } else {
+            ( 1.0 - self.position, self.position )
+        };
         let b_gain_b = f32x8::from(gain_b);
         let b_gain_a = f32x8::from(gain_a);
 
@@ -132,6 +140,8 @@ impl DspKernel for Crossfader {
     fn set_parameter(&mut self, id: u32, value: f32, _ramp_samples: u32) {
         if id == 0 {
             self.set_position(value);
+        } else if id == 1 {
+            self.set_curve(value);
         }
     }
 }

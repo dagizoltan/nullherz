@@ -37,12 +37,13 @@ impl TransfusionManager {
             }
 
             let metadata = SampleMetadata {
-                bpm: 0.0,
+                bpm: 128.0, // Default for testing sync
                 transients: Arc::new(transients),
                 root_key: None,
                 hot_cues: [None; 8],
                 loop_points: None,
                 beat_grid_offset: 0,
+                peaks: Arc::new(Vec::new()),
             };
 
             self.sample_registry.register_with_metadata(sample_id, snapshot, metadata);

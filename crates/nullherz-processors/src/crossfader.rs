@@ -39,6 +39,8 @@ fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
 fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
         if param_id == 0 {
             self.inner.set_position(value);
+        } else if param_id == 1 {
+            self.inner.set_curve(value);
         }
     }
 fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
@@ -50,12 +52,17 @@ fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
             default: 0.5,
         }; 16];
 
-        let name = b"Position";
-        parameters[0].name[..name.len()].copy_from_slice(name);
+        let name0 = b"Position";
+        parameters[0].id = 0;
+        parameters[0].name[..name0.len()].copy_from_slice(name0);
+
+        let name1 = b"Curve";
+        parameters[1].id = 1;
+        parameters[1].name[..name1.len()].copy_from_slice(name1);
 
         Some(nullherz_traits::ProcessorMetadata {
             processor_id: 0,
-            num_parameters: 1,
+            num_parameters: 2,
             parameters,
         })
     }

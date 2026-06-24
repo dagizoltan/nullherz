@@ -17,6 +17,7 @@ pub struct Transport {
     pub beat_position: f64,
     pub is_playing: bool,
     pub sample_rate: f32,
+    pub absolute_samples: u64,
 }
 
 #[repr(transparent)]
@@ -124,6 +125,10 @@ pub enum Command {
         enabled: bool,
         start_samples: u64,
         end_samples: u64,
+    },
+    SetSlipMode {
+        node_idx: u32,
+        enabled: bool,
     },
 }
 

@@ -42,11 +42,18 @@ impl AudioBackend for ThreadedBackend {
                 }
             }
 
-            let mut outputs_raw = [[0.0f32; 128]; 2];
+            let mut outputs_raw = [[0.0f32; 128]; 4];
             while running.load(Ordering::SeqCst) {
                 if let Some(ref engine_arc) = *engine_handle.lock().unwrap() {
-                    let (ch1, ch2) = outputs_raw.split_at_mut(1);
-                    let mut out_refs = [&mut ch1[0][..], &mut ch2[0][..]];
+                    let (out0, rest) = outputs_raw.split_at_mut(1);
+                    let (out1, rest) = rest.split_at_mut(1);
+                    let (out2, out3) = rest.split_at_mut(1);
+                    let mut out_refs: [&mut [f32]; 4] = [
+                        &mut out0[0][..],
+                        &mut out1[0][..],
+                        &mut out2[0][..],
+                        &mut out3[0][..],
+                    ];
                     let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
                     unsafe {
                         (*engine_ptr).process_block(&[], &mut out_refs, 128);
