@@ -6,6 +6,7 @@ pub mod topology_manager;
 pub mod transfusion_manager;
 pub mod mixer_bridge;
 pub mod sidecar_supervisor;
+pub mod analysis_worker;
 
 pub use orchestrator::Conductor;
 pub use timeline::Timeline;

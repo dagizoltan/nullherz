@@ -40,10 +40,18 @@ impl TransfusionManager {
                 bpm: 0.0,
                 transients: Arc::new(transients),
                 root_key: None,
+                hot_cues: [None; 8],
+                loop_points: None,
+                beat_grid_offset: 0,
             };
 
             self.sample_registry.register_with_metadata(sample_id, snapshot, metadata);
             eprintln!("Registered new transfusion source with metadata: ID={}", sample_id);
+
+            // Also notify the topology manager to update the processor if it's currently active.
+            // This is a bit of a hack for now, as we'd ideally want a more structured way to update sources.
+            // We'll use AddSource for now, which is handled by Granular and Sampler.
+            // We don't know the node_idx here easily, so we skip for now or broadcast.
         }
     }
 }

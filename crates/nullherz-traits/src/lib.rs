@@ -114,6 +114,17 @@ pub enum Command {
         granular_node_idx: u32,
         sample_id: u64,
     },
+    // DJ specific performance commands
+    JumpToHotCue {
+        node_idx: u32,
+        cue_idx: u32,
+    },
+    SetLoop {
+        node_idx: u32,
+        enabled: bool,
+        start_samples: u64,
+        end_samples: u64,
+    },
 }
 
 #[repr(C)]
@@ -231,6 +242,7 @@ pub enum TopologyMutation {
     AddSource {
         node_idx: u32,
         buffer: Arc<Vec<f32>>,
+        sample_id: u64,
     },
     SetTopology(Arc<GraphTopology>),
 }

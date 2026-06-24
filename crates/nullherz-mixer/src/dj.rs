@@ -44,5 +44,17 @@ pub fn create_dj_deck(
     commands.push(Command::UpdateOutputEdge { node_idx: eq_id, output_idx: 0, new_buffer_idx: target_l as u32 });
     commands.push(Command::UpdateOutputEdge { node_idx: eq_id, output_idx: 1, new_buffer_idx: target_r as u32 });
 
+    // CUE BUS ROUTING
+    // Parallel send from EQ output to Global CUE bus (Stereo)
+    let cue_gain_l_id = id_allocator.allocate_node_id();
+    let cue_gain_r_id = id_allocator.allocate_node_id();
+    commands.push(Command::AddNode { node_idx: cue_gain_l_id, processor_type_id: ProcessorTypeId::GAIN });
+    commands.push(Command::UpdateEdge { node_idx: cue_gain_l_id, input_idx: 0, new_buffer_idx: target_l as u32 });
+    commands.push(Command::UpdateOutputEdge { node_idx: cue_gain_l_id, output_idx: 0, new_buffer_idx: config.cue_l as u32 });
+
+    commands.push(Command::AddNode { node_idx: cue_gain_r_id, processor_type_id: ProcessorTypeId::GAIN });
+    commands.push(Command::UpdateEdge { node_idx: cue_gain_r_id, input_idx: 0, new_buffer_idx: target_r as u32 });
+    commands.push(Command::UpdateOutputEdge { node_idx: cue_gain_r_id, output_idx: 0, new_buffer_idx: config.cue_r as u32 });
+
     commands
 }

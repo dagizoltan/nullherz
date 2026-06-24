@@ -2285,6 +2285,7 @@ version = "0.1.0"
 dependencies = [
  "audio-dsp",
  "ipc-layer",
+ "nullherz-dna",
  "nullherz-traits",
  "serde",
  "wide",
