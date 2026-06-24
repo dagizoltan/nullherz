@@ -79,8 +79,8 @@ impl ProcessorFactory for ModulationFactory {
 
 pub struct SequencerFactory;
 impl ProcessorFactory for SequencerFactory {
-    fn create_processor(&self, _node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        Some(Box::new(SequencerProcessor::new(sample_rate, 120.0)))
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(SequencerProcessor::new(node_idx, sample_rate, 120.0)))
     }
     fn name(&self) -> &'static str { "Sequencer" }
 }

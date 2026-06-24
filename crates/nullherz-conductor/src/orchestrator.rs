@@ -3,6 +3,7 @@ use crate::topology_manager::TopologyManager;
 use crate::transfusion_manager::TransfusionManager;
 use crate::mixer_bridge::MixerBridge;
 use crate::sidecar_supervisor::SidecarSupervisor;
+use crate::pattern_manager::PatternManager;
 use nullherz_traits::{Command, CommandProducer, RenderingEngine, telemetry::Telemetry};
 use std::sync::Arc;
 use nullherz_dna::SampleRegistry;
@@ -13,6 +14,7 @@ pub struct Conductor {
     pub transfusion_manager: TransfusionManager,
     pub mixer_bridge: MixerBridge,
     pub sidecar_supervisor: SidecarSupervisor,
+    pub pattern_manager: PatternManager,
     pub analysis_worker: Option<crate::analysis_worker::AnalysisWorker>,
     pub folder_monitor: Option<crate::folder_monitor::FolderMonitor>,
     pub library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>,
@@ -34,6 +36,7 @@ impl Conductor {
             transfusion_manager: TransfusionManager::new(sample_registry.clone()),
             mixer_bridge: MixerBridge::new(),
             sidecar_supervisor: SidecarSupervisor::new(),
+            pattern_manager: PatternManager::new(),
             analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
             folder_monitor: Some(crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())),
             library,
@@ -76,6 +79,9 @@ impl Conductor {
     }
 
     pub fn tick(&mut self) {
+        // Update Pattern Orchestration
+        self.pattern_manager.tick(self.mixer_bridge.timeline.current_beat, &self.engine_coordinator.command_producer);
+
         if self.engine_coordinator.check_health() {
             eprintln!("CRITICAL: Engine health crisis detected. Prioritizing resource recovery...");
             self.drain_garbage();
@@ -168,16 +174,17 @@ impl Conductor {
                     // Collect Sequencer Data if applicable
                     if type_id == nullherz_traits::ProcessorTypeId::SEQUENCER.0 {
                         let bytes = child.serialize_state();
-                        if bytes.len() >= 1 + 8 * (1 + 16 * 16) {
+                        // 1 byte (active_pattern) + 16 * (1 byte len + 16 * 64 steps)
+                        if bytes.len() >= 1 + 16 * (1 + 16 * 64) {
                             let mut patterns = Vec::new();
                             let active_pattern = bytes[0] as usize;
                             let mut cursor = 1;
-                            for _ in 0..8 {
+                            for _ in 0..16 {
                                 let len = bytes[cursor] as u32;
                                 cursor += 1;
-                                let mut grid = [[false; 16]; 16];
+                                let mut grid = [[false; 64]; 16];
                                 for track in 0..16 {
-                                    for step in 0..16 {
+                                    for step in 0..64 {
                                         grid[track][step] = bytes[cursor] == 1;
                                         cursor += 1;
                                     }
@@ -214,7 +221,10 @@ impl Conductor {
             }
         }
 
-        // 3. Transport State
+        // 3. Arrangement State
+        state.arrangement = self.pattern_manager.arrangement.clone();
+
+        // 4. Transport State
         state.bpm = self.mixer_bridge.timeline.bpm;
         state.transport_playing = true; // For now assume playing if state is saved, logic for is_playing pending in timeline
 
@@ -294,10 +304,11 @@ impl Conductor {
                     });
 
                     for track in 0..16 {
-                        for step in 0..16 {
+                        for step in 0..64 {
                             let _ = prod.push_command(nullherz_traits::TimestampedCommand {
                                 timestamp_samples: 0,
                                 command: nullherz_traits::Command::SetSequencerStep {
+                                    node_idx: seq.node_idx,
                                     track,
                                     step,
                                     value: pat.grid[track as usize][step as usize],
@@ -320,7 +331,10 @@ impl Conductor {
             }
         }
 
-        // 4. Transport State
+        // 4. Reconstruct Arrangement
+        self.pattern_manager.set_arrangement(state.arrangement);
+
+        // 5. Transport State
         if let Some(ref mut prod) = self.engine_coordinator.command_producer {
             let _ = prod.push_command(nullherz_traits::TimestampedCommand {
                 timestamp_samples: 0,
