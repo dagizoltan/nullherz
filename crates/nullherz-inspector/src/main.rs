@@ -384,71 +384,26 @@ impl InspectorApp {
             self.render_oscillator_monitor(ui, telemetry);
             ui.add_space(15.0);
 
-            // MID: DECKS IN HORIZONTAL ROW
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
-                let deck_w = (main_w - 30.0) / 4.0;
-                for i in 0..4 {
-                    ui.vertical(|ui| {
-                        ui.set_width(deck_w);
-                        self.render_deck(ui, i, telemetry);
-                    });
-                }
-            });
+            // PERFORMANCE ROW: A, B, MIXER, C, D
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);
+                let col_w = (main_w - 48.0) / 7.0; // 4 decks + 3-wide mixer
 
-            ui.add_space(20.0);
+                // DECK A
+                ui.vertical(|ui| { ui.set_width(col_w); self.render_deck(ui, 0, telemetry); });
+                // DECK B
+                ui.vertical(|ui| { ui.set_width(col_w); self.render_deck(ui, 1, telemetry); });
 
-            // BOTTOM: 4-CHANNEL MIXER STRIP
-            self.render_central_mixer(ui, telemetry, main_w);
-
-            // --- MASTER PERFORMANCE SECTION ---
-            ui.add_space(30.0);
-            let mast_rect = ui.allocate_exact_size(egui::vec2(main_w, 120.0), egui::Sense::hover()).0;
-            ui.painter().rect_filled(mast_rect, 4.0, egui::Color32::from_rgb(12, 12, 14));
-            ui.painter().rect_stroke(mast_rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(30)));
-
-            ui.child_ui(mast_rect, egui::Layout::left_to_right(egui::Align::Center)).horizontal(|ui| {
-                ui.add_space(40.0);
-
-                // Crossfader
-                ui.vertical_centered(|ui| {
-                    ui.set_width(main_w * 0.6);
-                    ui.label(egui::RichText::new("X-FADE").small().strong().color(egui::Color32::from_gray(100)));
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("A").strong().color(egui::Color32::from_rgb(0, 200, 255)));
-                        ui.spacing_mut().slider_width = main_w * 0.5;
-                        let x_slider = ui.add(egui::Slider::new(&mut self.crossfader_pos, 0.0..=1.0).show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 0.5 }));
-                        if x_slider.changed() {
-                            for target_id in [16, 17] {
-                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id, param_id: 0, value: self.crossfader_pos, ramp_duration_samples: 0 });
-                            }
-                        }
-                        ui.label(egui::RichText::new("B").strong().color(egui::Color32::from_rgb(0, 255, 150)));
-                    });
+                // CENTRAL MIXER (Occupies roughly 3 column widths)
+                ui.vertical(|ui| {
+                    ui.set_width(col_w * 3.0);
+                    self.render_central_mixer(ui, telemetry, col_w * 3.0);
                 });
 
-                ui.separator();
-
-                // Master Out
-                ui.vertical_centered(|ui| {
-                    ui.set_width(120.0);
-                    ui.label(egui::RichText::new("MASTER").small().strong().color(egui::Color32::from_gray(100)));
-                    ui.spacing_mut().slider_width = 80.0;
-                    let m_fader = ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).vertical().show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 4.0 }));
-                    if m_fader.changed() {
-                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.master_gain, ramp_duration_samples: 128 });
-                    }
-                });
-
-                // Global Quantize
-                ui.vertical_centered(|ui| {
-                    ui.set_width(80.0);
-                    let q_color = if self.quantize_enabled { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_gray(40) };
-                    if ui.add(egui::Button::new(egui::RichText::new("Q").strong().size(20.0).color(q_color)).min_size(egui::vec2(40.0, 40.0))).clicked() {
-                        self.quantize_enabled = !self.quantize_enabled;
-                    }
-                    ui.label(egui::RichText::new("QUANTIZE").size(9.0).strong().color(egui::Color32::from_gray(80)));
-                });
+                // DECK C
+                ui.vertical(|ui| { ui.set_width(col_w); self.render_deck(ui, 2, telemetry); });
+                // DECK D
+                ui.vertical(|ui| { ui.set_width(col_w); self.render_deck(ui, 3, telemetry); });
             });
 
             ui.add_space(20.0);
@@ -458,33 +413,22 @@ impl InspectorApp {
             ui.painter().rect_filled(m_rect, 2.0, egui::Color32::from_rgb(8, 8, 10));
             ui.child_ui(m_rect, egui::Layout::left_to_right(egui::Align::Center)).horizontal(|ui| {
                 ui.add_space(30.0);
-                let m_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
-                if m_peak > self.master_peak_hold { self.master_peak_hold = m_peak; }
-                else { self.master_peak_hold *= 0.99; }
-
-                let (mtr_rect, _) = ui.allocate_exact_size(egui::vec2(250.0, 10.0), egui::Sense::hover());
-                ui.painter().rect_filled(mtr_rect, 1.0, egui::Color32::from_gray(25));
-                let m_w_val = (m_peak * 250.0).min(250.0);
-                let m_meter_color = if m_peak > 1.0 { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_rgb(0, 180, 255) };
-                ui.painter().rect_filled(egui::Rect::from_min_size(mtr_rect.min, egui::vec2(m_w_val, 10.0)), 1.0, m_meter_color);
-
-                // Master peak hold
-                let mph_x = mtr_rect.min.x + (self.master_peak_hold * 250.0).min(250.0);
-                ui.painter().vline(mph_x, mtr_rect.y_range(), egui::Stroke::new(1.0, egui::Color32::WHITE));
+                let cpu_pct = telemetry.as_ref().map_or(0.0, |t| {
+                    let budget_ns = (128.0 / 44100.0) * 1e9;
+                    (t.process_time_ns as f64 / budget_ns * 100.0).min(100.0)
+                });
+                ui.label(egui::RichText::new(format!("CPU {:.0}%", cpu_pct)).small().color(egui::Color32::from_gray(80)));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(30.0);
                     ui.label(egui::RichText::new("128.0 BPM").strong().color(egui::Color32::from_gray(120)));
                     ui.separator();
-                    let cpu_pct = telemetry.as_ref().map_or(0.0, |t| {
-                        // Assume 3.0 GHz CPU for rough estimate
-                        let budget_ns = (128.0 / 44100.0) * 1e9;
-                        (t.process_time_ns as f64 / budget_ns * 100.0).min(100.0)
-                    });
-                    ui.label(egui::RichText::new(format!("CPU {:.0}%", cpu_pct)).small().color(egui::Color32::from_gray(80)));
+                    let q_color = if self.quantize_enabled { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_gray(40) };
+                    if ui.add(egui::Button::new(egui::RichText::new("QUANTIZE").small().strong().color(q_color)).frame(false)).clicked() {
+                        self.quantize_enabled = !self.quantize_enabled;
+                    }
                 });
             });
-
         });
     }
 
@@ -640,7 +584,7 @@ impl InspectorApp {
     }
 
     fn render_central_mixer(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>, main_w: f32) {
-        let rect = ui.allocate_exact_size(egui::vec2(main_w, 360.0), egui::Sense::hover()).0;
+        let rect = ui.allocate_exact_size(egui::vec2(main_w, 420.0), egui::Sense::hover()).0;
         ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(15, 15, 18));
         ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(30)));
 
@@ -736,32 +680,33 @@ impl InspectorApp {
 
             // MASTER CONTROL SECTION
             ui.vertical(|ui| {
-                ui.set_width(main_w * 0.3);
-                ui.add_space(20.0);
+                ui.set_width(main_w * 0.25);
+                ui.add_space(10.0);
+                ui.label(egui::RichText::new("MASTER").small().strong().color(egui::Color32::from_gray(100)));
+                ui.add_space(10.0);
 
-                // MASTER VU
+                // MASTER VU (Vertical)
                 let m_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
                 if m_peak > self.master_peak_hold { self.master_peak_hold = m_peak; }
                 else { self.master_peak_hold *= 0.99; }
 
-                let (mtr_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 40.0, 12.0), egui::Sense::hover());
-                ui.painter().rect_filled(mtr_rect, 1.0, egui::Color32::from_gray(25));
-                let m_w_val = (m_peak * mtr_rect.width()).min(mtr_rect.width());
-                let m_meter_color = if m_peak > 1.0 { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_rgb(0, 180, 255) };
-                ui.painter().rect_filled(egui::Rect::from_min_size(mtr_rect.min, egui::vec2(m_w_val, 12.0)), 1.0, m_meter_color);
-
-                ui.add_space(30.0);
-
-                // MASTER FADER
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("MASTER").strong());
-                    let m_fader = ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 0.5 }));
+                    let (mtr_rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 160.0), egui::Sense::hover());
+                    ui.painter().rect_filled(mtr_rect, 1.0, egui::Color32::from_rgb(10, 10, 12));
+                    let m_h_val = (m_peak * 160.0).min(160.0);
+                    let m_meter_color = if m_peak > 1.0 { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_rgb(0, 180, 255) };
+                    ui.painter().rect_filled(egui::Rect::from_min_size(mtr_rect.max - egui::vec2(12.0, m_h_val), egui::vec2(12.0, m_h_val)), 0.0, m_meter_color);
+
+                    ui.add_space(10.0);
+
+                    // MASTER FADER
+                    let m_fader = ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).vertical().show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 4.0 }));
                     if m_fader.changed() {
                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.master_gain, ramp_duration_samples: 128 });
                     }
                 });
 
-                ui.add_space(40.0);
+                ui.add_space(30.0);
 
                 // CROSSFADER
                 ui.vertical_centered(|ui| {
