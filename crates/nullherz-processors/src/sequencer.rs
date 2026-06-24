@@ -1,9 +1,25 @@
 use nullherz_traits::AudioProcessor;
 
+#[derive(Clone, Copy)]
+struct Pattern {
+    grid: [[bool; 16]; 16], // 16 tracks, 16 steps
+    len: u32,
+}
+
+impl Default for Pattern {
+    fn default() -> Self {
+        Self {
+            grid: [[false; 16]; 16],
+            len: 16,
+        }
+    }
+}
+
 pub struct SequencerProcessor {
     sample_rate: f32,
     current_sample: u64,
-    grid: [[bool; crate::MAX_CHANNELS]; 8], // 8 tracks, steps limited by MAX_CHANNELS for consistency
+    patterns: [Pattern; 8], // 8 patterns in memory
+    active_pattern: usize,
 }
 
 impl SequencerProcessor {
@@ -11,7 +27,8 @@ impl SequencerProcessor {
         Self {
             sample_rate,
             current_sample: 0,
-            grid: [[false; crate::MAX_CHANNELS]; 8],
+            patterns: [Pattern::default(); 8],
+            active_pattern: 0,
         }
     }
 }
@@ -41,12 +58,13 @@ fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &
             let next_step_sample = (next_step_idx as f64 * samples_per_step).round() as u64;
 
             if next_step_sample < block_end_sample {
-                let step_idx = (next_step_idx % crate::MAX_CHANNELS as u64) as usize;
+                let pattern = &self.patterns[self.active_pattern];
+                let step_idx = (next_step_idx % pattern.len as u64) as usize;
                 let sample_offset = next_step_sample.saturating_sub(block_start_sample);
 
                 if let Some(host) = context.host {
-                    for track in 0..8 {
-                        if self.grid[track][step_idx] {
+                    for track in 0..16 {
+                        if pattern.grid[track][step_idx] {
                             host.push_command(
                                 self.current_sample + sample_offset.min(block_len - 1),
                                 nullherz_traits::Command::Play,
@@ -69,11 +87,28 @@ impl AudioProcessor for SequencerProcessor {
 fn apply_command(&mut self, command: &nullherz_traits::Command) {
         #[allow(clippy::collapsible_if)]
         if let nullherz_traits::Command::SetSequencerStep { track, step, value } = command {
-            if *track < 8 && *step < crate::MAX_CHANNELS as u32 {
-                self.grid[*track as usize][*step as usize] = *value;
+            if *track < 16 && *step < 16 {
+                self.patterns[self.active_pattern].grid[*track as usize][*step as usize] = *value;
             }
         }
     }
+
+fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
+        match param_id {
+            0 => { // Active Pattern
+                let p = value.round() as usize;
+                if p < 8 { self.active_pattern = p; }
+            }
+            1 => { // Pattern Length
+                let l = value.round() as u32;
+                if (1..=16).contains(&l) {
+                    self.patterns[self.active_pattern].len = l;
+                }
+            }
+            _ => {}
+        }
+    }
+
 fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 }

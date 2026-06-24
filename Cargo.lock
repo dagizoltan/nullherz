@@ -2209,6 +2209,7 @@ name = "nullherz-conductor"
 version = "0.1.0"
 dependencies = [
  "audio-core",
+ "audio-dsp",
  "fx-runtime",
  "ipc-layer",
  "nullherz-backends",
@@ -2257,6 +2258,7 @@ dependencies = [
  "eframe",
  "egui",
  "futures-util",
+ "nullherz-dna",
  "nullherz-traits",
  "serde",
  "serde_json",

@@ -129,3 +129,41 @@ pub fn extract_spectral_envelope(re: &[f32], im: &[f32], env: &mut [f32], window
         env[i] = current_sum / count as f32;
     }
 }
+
+/// A spectral flux based transient detector for onset analysis.
+pub struct TransientDetector {
+    prev_magnitudes: Vec<f32>,
+    threshold: f32,
+}
+
+impl TransientDetector {
+    pub fn new(size: usize, threshold: f32) -> Self {
+        Self {
+            prev_magnitudes: vec![0.0; size],
+            threshold,
+        }
+    }
+
+    /// Calculates the spectral flux between the current and previous spectral frames.
+    /// Returns a value indicating the intensity of the onset.
+    pub fn detect_onset(&mut self, re: &[f32], im: &[f32]) -> f32 {
+        let n = re.len().min(self.prev_magnitudes.len());
+        let mut flux = 0.0;
+
+        for i in 0..n {
+            let mag = (re[i] * re[i] + im[i] * im[i]).sqrt();
+            let diff = mag - self.prev_magnitudes[i];
+            // Only accumulate positive changes (onsets)
+            if diff > 0.0 {
+                flux += diff;
+            }
+            self.prev_magnitudes[i] = mag;
+        }
+
+        flux / n as f32
+    }
+
+    pub fn is_transient(&mut self, re: &[f32], im: &[f32]) -> bool {
+        self.detect_onset(re, im) > self.threshold
+    }
+}

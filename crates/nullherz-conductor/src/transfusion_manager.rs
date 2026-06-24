@@ -1,17 +1,22 @@
 use std::sync::Arc;
-use nullherz_dna::SampleRegistry;
+use nullherz_dna::{SampleRegistry, SampleMetadata};
 use nullherz_traits::RenderingEngine;
+use audio_dsp::TransientDetector;
 
 /// Manages the registration and lifecycle of audio DNA (samples) captured by the engine.
 /// This component acts as the non-RT side of the 'Transfusion' synthesis layer.
 pub struct TransfusionManager {
     /// The global registry where captured samples are stored for use by other processors.
     pub sample_registry: Arc<SampleRegistry>,
+    transient_detector: TransientDetector,
 }
 
 impl TransfusionManager {
     pub fn new(sample_registry: Arc<SampleRegistry>) -> Self {
-        Self { sample_registry }
+        Self {
+            sample_registry,
+            transient_detector: TransientDetector::new(1024, 0.5),
+        }
     }
 
     /// Polls the engine for new snapshots and registers them in the `SampleRegistry`.
@@ -20,8 +25,25 @@ impl TransfusionManager {
         engine.pull_all_snapshots(&mut snapshots);
 
         for (sample_id, snapshot) in snapshots {
-            self.sample_registry.register(sample_id, snapshot);
-            eprintln!("Registered new transfusion source: ID={}", sample_id);
+            // Basic Transient Analysis: Check for onsets in the capture
+            // We use the first 1024 samples for a quick look if enough data is present.
+            let mut transients = Vec::new();
+            if snapshot.len() >= 1024 {
+                let re = &snapshot[0..1024];
+                let im = vec![0.0; 1024]; // Assuming time-domain capture for analysis
+                if self.transient_detector.is_transient(re, &im) {
+                    transients.push(0);
+                }
+            }
+
+            let metadata = SampleMetadata {
+                bpm: 0.0,
+                transients: Arc::new(transients),
+                root_key: None,
+            };
+
+            self.sample_registry.register_with_metadata(sample_id, snapshot, metadata);
+            eprintln!("Registered new transfusion source with metadata: ID={}", sample_id);
         }
     }
 }

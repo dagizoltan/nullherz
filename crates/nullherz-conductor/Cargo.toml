@@ -16,3 +16,4 @@ tokio = { version = "1.0", features = ["full"] }
 nullherz-mixer = { path = "../nullherz-mixer" }
 serde_json = "1.0"
 nullherz-gateway = { path = "../nullherz-gateway" }
+audio-dsp = { path = "../audio-dsp" }

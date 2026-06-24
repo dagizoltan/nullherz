@@ -34,7 +34,7 @@ pub fn create_dj_deck(
 
     let eq_id = id_allocator.allocate_node_id();
     let eq_buf = id_allocator.allocate_buffer_id(1);
-    commands.push(Command::AddNode { node_idx: eq_id, processor_type_id: ProcessorTypeId::BIQUAD_EQ });
+    commands.push(Command::AddNode { node_idx: eq_id, processor_type_id: ProcessorTypeId::DJ_ISOLATOR });
     commands.push(Command::UpdateOutputEdge { node_idx: prev_id, output_idx: 0, new_buffer_idx: eq_buf });
     commands.push(Command::UpdateEdge { node_idx: eq_id, input_idx: 0, new_buffer_idx: eq_buf });
 
