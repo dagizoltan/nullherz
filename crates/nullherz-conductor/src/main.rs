@@ -25,6 +25,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bootstrap_commands = mixer.create_4channel_mixer();
     conductor.apply_mixer_commands(bootstrap_commands);
 
+    if let Some(worker) = conductor.analysis_worker.take() {
+        worker.start();
+    }
+
     // Main orchestration loop
     let mut ticker = tokio::time::interval(Duration::from_millis(100));
     loop {

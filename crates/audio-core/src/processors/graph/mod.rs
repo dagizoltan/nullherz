@@ -145,10 +145,10 @@ impl ProcessorGraph {
                 self.topology_coordinator.topologies[inactive] = *topo;
                 self.topology_coordinator.needs_commit = true;
             }
-            TopologyMutation::AddSource { node_idx, buffer } => {
+            TopologyMutation::AddSource { node_idx, buffer, sample_id } => {
                 let idx = node_idx as usize;
                 if idx < self.node_count {
-                    unsafe { (*self.nodes[idx].processor.get()).apply_topology_mutation(TopologyMutation::AddSource { node_idx, buffer }); }
+                    unsafe { (*self.nodes[idx].processor.get()).apply_topology_mutation(TopologyMutation::AddSource { node_idx, buffer, sample_id }); }
                 }
             }
         }

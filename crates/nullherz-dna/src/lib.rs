@@ -10,6 +10,9 @@ pub struct SampleMetadata {
     pub bpm: f32,
     pub transients: Arc<Vec<u64>>, // Use Arc for RT-safe cloning
     pub root_key: Option<f32>,
+    pub hot_cues: [Option<u64>; 8],
+    pub loop_points: Option<(u64, u64)>,
+    pub beat_grid_offset: u64,
 }
 
 #[derive(Clone)]
@@ -28,6 +31,9 @@ pub struct SampleRegistry {
     write_lock: Mutex<()>,
     garbage: Mutex<Vec<*mut HashMap<u64, RegisteredSample>>>,
 }
+
+unsafe impl Send for SampleRegistry {}
+unsafe impl Sync for SampleRegistry {}
 
 impl Default for SampleRegistry {
     fn default() -> Self {
@@ -97,6 +103,11 @@ impl SampleRegistry {
 
         let new_ptr = Box::into_raw(Box::new(new_map));
         self.inner.store(new_ptr, Ordering::Release);
+    }
+
+    pub fn list_ids(&self) -> Vec<u64> {
+        let ptr = self.inner.load(Ordering::Acquire);
+        unsafe { (*ptr).keys().cloned().collect() }
     }
 }
 

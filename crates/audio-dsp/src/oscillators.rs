@@ -258,6 +258,9 @@ pub struct SamplerVoice {
     pub is_active: bool,
     pub velocity: f32,
     pub interpolation: InterpolationType,
+    pub loop_enabled: bool,
+    pub loop_start: u64,
+    pub loop_end: u64,
 }
 
 impl Default for SamplerVoice {
@@ -275,6 +278,9 @@ impl SamplerVoice {
             is_active: false,
             velocity: 0.0,
             interpolation: InterpolationType::Lagrange,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         }
     }
 
@@ -360,6 +366,10 @@ impl SamplerVoice {
 
             *sample_out += sample * self.velocity;
             self.play_head += self.playback_rate;
+
+            if self.loop_enabled && self.play_head >= self.loop_end as f32 {
+                self.play_head = self.loop_start as f32 + (self.play_head - self.loop_end as f32);
+            }
         }
     }
 }

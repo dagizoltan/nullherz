@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 nullherz-traits = { path = "../nullherz-traits" }
 audio-dsp = { path = "../audio-dsp" }
+nullherz-dna = { path = "../nullherz-dna" }
 ipc-layer = { path = "../ipc-layer" }
 wide = "0.7.30"
 serde = { version = "1.0", features = ["derive"] }

@@ -61,6 +61,7 @@ impl EngineInputHandler {
                     graph.apply_topology_mutation(TopologyMutation::AddSource {
                         node_idx: *granular_node_idx,
                         buffer: sample.buffer,
+                        sample_id: *sample_id,
                     });
                 }
             }
