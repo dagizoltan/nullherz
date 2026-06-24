@@ -261,6 +261,12 @@ pub struct SamplerVoice {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+    pub slip_enabled: bool,
+    pub background_playhead: f32,
+    pub grain_pos: f32,
+    pub time_stretch_ratio: f32,
+    pub grain_duration_samples: u32,
+    pub overlap_count: u32,
 }
 
 impl Default for SamplerVoice {
@@ -281,6 +287,12 @@ impl SamplerVoice {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            slip_enabled: false,
+            background_playhead: 0.0,
+            grain_pos: 0.0,
+            time_stretch_ratio: 1.0,
+            grain_duration_samples: 1024,
+            overlap_count: 2,
         }
     }
 
@@ -334,41 +346,72 @@ impl SamplerVoice {
         if !self.is_active { return; }
         let Some(buffer) = &self.buffer else { return; };
 
-        for sample_out in output.iter_mut() {
-            let idx = self.play_head.floor() as usize;
-            if idx + 4 >= buffer.len() {
-                self.is_active = false;
-                break;
+        if (self.time_stretch_ratio - 1.0).abs() < 0.001 {
+            // NORMAL MODE
+            for sample_out in output.iter_mut() {
+                let idx = self.play_head.floor() as usize;
+                if idx + 4 >= buffer.len() { self.is_active = false; break; }
+
+                let sample = self.interpolate_sample(buffer, self.play_head, idx);
+                *sample_out += sample * self.velocity;
+                self.play_head += self.playback_rate;
+                self.background_playhead += self.playback_rate;
+
+                if self.loop_enabled && self.play_head >= self.loop_end as f32 {
+                    self.play_head = self.loop_start as f32 + (self.play_head - self.loop_end as f32);
+                }
             }
+        } else {
+            // GRANULAR TIME-STRETCH (Simple Overlap-Add)
+            for sample_out in output.iter_mut() {
+                let mut sum = 0.0;
 
-            let sample = match self.interpolation {
-                InterpolationType::Linear => {
-                    let x = self.play_head - idx as f32;
-                    let p1 = buffer[idx];
-                    let p2 = buffer[idx + 1];
-                    p1 + (p2 - p1) * x
+                for o in 0..self.overlap_count {
+                    let phase = (self.grain_pos + (o as f32 * self.grain_duration_samples as f32 / self.overlap_count as f32)) % self.grain_duration_samples as f32;
+                    let window = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * phase / (self.grain_duration_samples as f32 - 1.0)).cos());
+
+                    let grain_offset = self.play_head + phase;
+                    let idx = grain_offset.floor() as usize;
+
+                    if idx + 4 < buffer.len() {
+                        sum += self.interpolate_sample(buffer, grain_offset, idx) * window;
+                    }
                 }
-                InterpolationType::Lagrange => {
-                    let x = self.play_head - idx as f32;
-                    let p0 = *buffer.get(idx.saturating_sub(1)).unwrap_or(&0.0);
-                    let p1 = buffer[idx];
-                    let p2 = buffer[idx + 1];
-                    let p3 = buffer[idx + 2];
 
-                    let c1 = p1;
-                    let c2 = -0.5 * p0 + 0.5 * p2;
-                    let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
-                    let c4 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+                *sample_out += sum * self.velocity;
 
-                    ((c4 * x + c3) * x + c2) * x + c1
+                // Advance grain position and playhead separately
+                self.grain_pos += self.playback_rate;
+                if self.grain_pos >= (self.grain_duration_samples as f32 / self.overlap_count as f32) {
+                    self.grain_pos -= self.grain_duration_samples as f32 / self.overlap_count as f32;
+                    self.play_head += (self.grain_duration_samples as f32 / self.overlap_count as f32) * self.time_stretch_ratio;
                 }
-            };
 
-            *sample_out += sample * self.velocity;
-            self.play_head += self.playback_rate;
+                self.background_playhead += self.playback_rate;
+                if self.play_head >= buffer.len() as f32 { self.is_active = false; break; }
+            }
+        }
+    }
 
-            if self.loop_enabled && self.play_head >= self.loop_end as f32 {
-                self.play_head = self.loop_start as f32 + (self.play_head - self.loop_end as f32);
+    fn interpolate_sample(&self, buffer: &[f32], play_head: f32, idx: usize) -> f32 {
+        match self.interpolation {
+            InterpolationType::Linear => {
+                let x = play_head - idx as f32;
+                let p1 = buffer[idx];
+                let p2 = buffer[idx + 1];
+                p1 + (p2 - p1) * x
+            }
+            InterpolationType::Lagrange => {
+                let x = play_head - idx as f32;
+                let p0 = *buffer.get(idx.saturating_sub(1)).unwrap_or(&0.0);
+                let p1 = buffer[idx];
+                let p2 = buffer[idx + 1];
+                let p3 = buffer[idx + 2];
+                let c1 = p1;
+                let c2 = -0.5 * p0 + 0.5 * p2;
+                let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+                let c4 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+                ((c4 * x + c3) * x + c2) * x + c1
             }
         }
     }

@@ -73,6 +73,7 @@ impl StandardKernel {
             let beats = (sb.len as f64 / transport.sample_rate as f64) * (transport.bpm as f64 / 60.0);
             transport.beat_position += beats;
         }
+        transport.absolute_samples += sb.len as u64;
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -9,6 +9,7 @@ pub struct SamplerProcessor {
     render_buffer: [f32; ipc_layer::MAX_BLOCK_SIZE],
     sample_id: Option<u64>,
     metadata: Option<nullherz_dna::SampleMetadata>,
+    quantize_enabled: bool,
 }
 
 impl SamplerProcessor {
@@ -21,11 +22,26 @@ impl SamplerProcessor {
             render_buffer: [0.0; ipc_layer::MAX_BLOCK_SIZE],
             sample_id: None,
             metadata: None,
+            quantize_enabled: true,
         }
     }
 
     pub fn set_sample(&mut self, buffer: Vec<f32>) {
         self.sample_buffer = std::sync::Arc::new(buffer);
+    }
+
+    pub fn set_parameter(&mut self, param_id: u32, value: f32) {
+        match param_id {
+            1 => {
+                for voice in self.voices.iter_mut() {
+                    voice.playback_rate = value;
+                }
+            }
+            2 => {
+                self.quantize_enabled = value > 0.5;
+            }
+            _ => {}
+        }
     }
 
     pub fn id_getter(&self) -> Option<u64> {
@@ -40,7 +56,36 @@ fn reset(&mut self) {
             v.play_head = 0.0;
         }
     }
-fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
+fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext) {
+        self.process_parallel(inputs, outputs, context, None);
+    }
+
+fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext, _executor: Option<&mut (dyn nullherz_traits::ParallelExecutor + '_)>) {
+        // SYNC LOGIC
+        if self.quantize_enabled {
+            if let (Some(transport), Some(meta)) = (context.transport, &self.metadata) {
+                if meta.bpm > 10.0 {
+                    let sync_rate = transport.bpm / meta.bpm;
+                    for voice in self.voices.iter_mut() {
+                        voice.playback_rate = sync_rate;
+
+                        // PHASE LOCK
+                        if voice.is_active {
+                            let samples_per_beat = (transport.sample_rate * 60.0 / meta.bpm) as f64;
+                            let expected_pos_beats = transport.beat_position;
+                            let expected_pos_samples = (expected_pos_beats * samples_per_beat) % meta.peaks.len().max(1) as f64;
+
+                            // Gently nudge playhead towards locked phase
+                            let diff = expected_pos_samples as f32 - voice.play_head;
+                            if diff.abs() > 0.001 {
+                                voice.play_head += diff * 0.01; // Smooth convergence
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if outputs.is_empty() { return; }
         let num_samples = outputs[0].len();
         if num_samples == 0 { return; }
@@ -83,6 +128,10 @@ impl AudioProcessor for SamplerProcessor {
 fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
+fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
+    self.set_parameter(param_id, value);
+}
+
 fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutation) {
         match mutation {
             nullherz_traits::TopologyMutation::AddSource { node_idx: _, buffer, sample_id } => {
@@ -94,6 +143,12 @@ fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutatio
     }
 
 fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+        self.apply_command_with_context(command, None);
+    }
+}
+
+impl SamplerProcessor {
+    fn apply_command_with_context(&mut self, command: &nullherz_traits::ProcessorCommand, context: Option<&nullherz_traits::ProcessContext>) {
         match *command {
             nullherz_traits::Command::JumpToHotCue { node_idx: _, cue_idx } => {
                 let offset = if let Some(ref metadata) = self.metadata {
@@ -102,6 +157,29 @@ fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
                 } else {
                     (cue_idx as f32 * 0.1 * self.sample_buffer.len() as f32) as u64
                 };
+
+                let mut offset = offset;
+
+                // QUANTIZATION LOGIC
+                if self.quantize_enabled {
+                    if let (Some(ctx), Some(meta)) = (context, &self.metadata) {
+                        if let Some(transport) = ctx.transport {
+                            if meta.bpm > 0.0 {
+                                let samples_per_beat = (transport.sample_rate * 60.0 / meta.bpm) as f64;
+                                let current_beat = transport.beat_position;
+                                let next_beat = current_beat.ceil();
+                                let beats_to_wait = next_beat - current_beat;
+                                let _samples_to_wait = (beats_to_wait * samples_per_beat) as u64;
+
+                                // Shift offset to align with grid if we were to jump NOW
+                                // Actually, for DJ sync, we usually want to delay the jump until the next beat
+                                // but for simplicity in this kernel, we'll align the target offset.
+                                let grid_pos = (offset as f64 / samples_per_beat).round() * samples_per_beat;
+                                offset = grid_pos as u64;
+                            }
+                        }
+                    }
+                }
 
                 for voice in self.voices.iter_mut() {
                     if voice.is_active {
@@ -114,6 +192,16 @@ fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
                     voice.loop_enabled = enabled;
                     voice.loop_start = start_samples;
                     voice.loop_end = end_samples;
+                }
+            }
+            nullherz_traits::Command::SetSlipMode { node_idx: _, enabled } => {
+                for voice in self.voices.iter_mut() {
+                    voice.slip_enabled = enabled;
+                    if !enabled {
+                        voice.play_head = voice.background_playhead;
+                    } else {
+                        voice.background_playhead = voice.play_head;
+                    }
                 }
             }
             _ => {}

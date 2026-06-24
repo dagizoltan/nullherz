@@ -115,6 +115,9 @@ pub struct InspectorApp {
     is_streaming: bool,
     library_visible: bool,
     selected_deck: usize,
+    master_deck: Option<usize>,
+    pitch_range: [f32; 4], // 0.08, 0.16, 1.0
+    crossfader_curve: f32, // 0.0 = linear, 1.0 = power
     now_playing: [Option<String>; 4],
     global_bpm: f32,
     pitch_bend: [f32; 4],
@@ -273,6 +276,9 @@ impl InspectorApp {
             is_streaming: false,
             library_visible: true,
             selected_deck: 0,
+            master_deck: Some(0),
+            pitch_range: [0.08; 4],
+            crossfader_curve: 0.5,
             now_playing: [None, None, None, None],
             global_bpm: 128.0,
             pitch_bend: [1.0; 4],
@@ -522,6 +528,12 @@ impl InspectorApp {
                 ui.add_space(10.0);
                 ui.label(egui::RichText::new(deck_name).color(if is_selected { color } else { egui::Color32::from_gray(180) }).strong());
 
+                let is_master = self.master_deck == Some(i);
+                let master_color = if is_master { color } else { egui::Color32::from_gray(40) };
+                if ui.add(egui::Button::new(egui::RichText::new("MASTER").small().strong().color(master_color)).frame(true)).clicked() {
+                    if is_master { self.master_deck = None; } else { self.master_deck = Some(i); }
+                }
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
                     let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1]);
@@ -558,17 +570,34 @@ impl InspectorApp {
             let (w_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 20.0, 120.0), egui::Sense::hover());
             ui.painter().rect_filled(w_rect, 2.0, egui::Color32::from_rgb(5, 5, 6));
 
-            let time = ui.input(|i| i.time);
             let w_width = w_rect.width();
+            let w_height = w_rect.height();
 
-            // Multi-band Waveform Simulation (Colored by Deck)
-            for (band, speed, scale) in [ (0, 8.0, 15.0), (1, 12.0, 10.0), (2, 20.0, 5.0) ] {
-                let points: Vec<egui::Pos2> = (0..w_width as i32).step_by(2).map(|x| {
-                    let phase = x as f32 * 0.05 * (band as f32 + 1.0) + (time * speed) as f32;
-                    let amp = scale * ((phase * 0.01).cos().abs() + 0.2);
-                    egui::pos2(w_rect.min.x + x as f32, w_rect.center().y + (phase.sin() * amp))
-                }).collect();
-                ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.2, color.linear_multiply(0.8 - band as f32 * 0.2))));
+            let time = ui.input(|i| i.time);
+            if let Some(sample) = self.sample_registry.get(i as u64 * 4) {
+                let peaks = &sample.metadata.peaks;
+                if !peaks.is_empty() {
+                    let mut points = Vec::new();
+                    for x in 0..w_width as usize {
+                        let p_idx = (x * peaks.len()) / w_width as usize;
+                        let val = peaks[p_idx.min(peaks.len() - 1)];
+                        let y_off = val * (w_height / 2.0);
+                        points.push(egui::pos2(w_rect.min.x + x as f32, w_rect.center().y - y_off));
+                        points.push(egui::pos2(w_rect.min.x + x as f32, w_rect.center().y + y_off));
+                    }
+                    ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.0, color)));
+                }
+            } else {
+                // FALLBACK Simulation if no real data
+                let time = ui.input(|i| i.time);
+                for (band, speed, scale) in [ (0, 8.0, 15.0), (1, 12.0, 10.0), (2, 20.0, 5.0) ] {
+                    let points: Vec<egui::Pos2> = (0..w_width as i32).step_by(2).map(|x| {
+                        let phase = x as f32 * 0.05 * (band as f32 + 1.0) + (time * speed) as f32;
+                        let amp = scale * ((phase * 0.01).cos().abs() + 0.2);
+                        egui::pos2(w_rect.min.x + x as f32, w_rect.center().y + (phase.sin() * amp))
+                    }).collect();
+                    ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.2, color.linear_multiply(0.8 - band as f32 * 0.2))));
+                }
             }
 
             // High-Visibility Beat Markers
@@ -619,10 +648,36 @@ impl InspectorApp {
 
                 ui.add_space(15.0);
 
+                ui.vertical(|ui| {
+                    let s_color = if self.channel_sync[i] { color } else { egui::Color32::from_gray(40) };
+                    if ui.add(egui::Button::new(egui::RichText::new("SYNC").color(s_color).strong()).min_size(egui::vec2(60.0, 45.0))).clicked() {
+                        self.channel_sync[i] = !self.channel_sync[i];
+                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                            target_id: (i as u64 * 4),
+                            param_id: 2, // Sync/Quantize toggle
+                            value: if self.channel_sync[i] { 1.0 } else { 0.0 },
+                            ramp_duration_samples: 0,
+                        });
+                    }
+                });
+
+                ui.add_space(15.0);
+
                 // PITCH FADER
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new("PITCH").size(9.0).strong().color(egui::Color32::from_gray(100)));
-                    let p_res = ui.add(egui::Slider::new(&mut self.pitch_bend[i], 0.9..=1.1).vertical().show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 4.0 }));
+
+                    egui::ComboBox::from_id_source(format!("pitch_range_{}", i))
+                        .selected_text(format!("{:.0}%", self.pitch_range[i] * 100.0))
+                        .width(40.0)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.pitch_range[i], 0.08, "8%");
+                            ui.selectable_value(&mut self.pitch_range[i], 0.16, "16%");
+                            ui.selectable_value(&mut self.pitch_range[i], 1.0, "WIDE");
+                        });
+
+                    let range = (1.0 - self.pitch_range[i])..=(1.0 + self.pitch_range[i]);
+                    let p_res = ui.add(egui::Slider::new(&mut self.pitch_bend[i], range).vertical().show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 4.0 }));
                     if p_res.changed() {
                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                             target_id: (i as u64 * 4), // Targeting Sampler node
@@ -793,7 +848,16 @@ impl InspectorApp {
             // GLOBAL CROSSFADER (Centered below faders)
             ui.vertical_centered(|ui| {
                 ui.set_width(main_w);
-                ui.label(egui::RichText::new("X-FADE").small().strong().color(egui::Color32::from_gray(100)));
+                ui.horizontal(|ui| {
+                    ui.add_space(main_w / 2.0 - 40.0);
+                    ui.label(egui::RichText::new("X-FADE").small().strong().color(egui::Color32::from_gray(100)));
+                    if ui.add(egui::Button::new(if self.crossfader_curve > 0.5 { "POWER" } else { "LIN" }).small()).clicked() {
+                        self.crossfader_curve = if self.crossfader_curve > 0.5 { 0.0 } else { 1.0 };
+                        for target_id in [16, 17] {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id, param_id: 1, value: self.crossfader_curve, ramp_duration_samples: 0 });
+                        }
+                    }
+                });
                 ui.horizontal(|ui| {
                     ui.add_space(10.0);
                     ui.label(egui::RichText::new("A").color(egui::Color32::from_rgb(0, 200, 255)));

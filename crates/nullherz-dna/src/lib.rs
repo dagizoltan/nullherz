@@ -13,6 +13,7 @@ pub struct SampleMetadata {
     pub hot_cues: [Option<u64>; 8],
     pub loop_points: Option<(u64, u64)>,
     pub beat_grid_offset: u64,
+    pub peaks: Arc<Vec<f32>>,
 }
 
 #[derive(Clone)]
@@ -30,6 +31,8 @@ pub struct SampleRegistry {
     inner: AtomicPtr<HashMap<u64, RegisteredSample>>,
     write_lock: Mutex<()>,
     garbage: Mutex<Vec<*mut HashMap<u64, RegisteredSample>>>,
+    // simple reader count to prevent freeing during iteration
+    readers: std::sync::atomic::AtomicUsize,
 }
 
 unsafe impl Send for SampleRegistry {}
@@ -48,6 +51,7 @@ impl SampleRegistry {
             inner: AtomicPtr::new(Box::into_raw(initial_map)),
             write_lock: Mutex::new(()),
             garbage: Mutex::new(Vec::new()),
+            readers: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -75,6 +79,9 @@ impl SampleRegistry {
     /// Safely reclaims memory from old registry versions.
     /// MUST be called periodically from a non-real-time maintenance thread.
     pub fn drain_garbage(&self) {
+        if self.readers.load(Ordering::SeqCst) > 0 {
+            return; // Try again later
+        }
         let mut g = self.garbage.lock().unwrap();
         for ptr in g.drain(..) {
             unsafe {
@@ -86,8 +93,11 @@ impl SampleRegistry {
     /// Retrieves a registered sample by ID.
     /// Real-time safe and lock-free.
     pub fn get(&self, id: u64) -> Option<RegisteredSample> {
+        self.readers.fetch_add(1, Ordering::SeqCst);
         let ptr = self.inner.load(Ordering::Acquire);
-        unsafe { (*ptr).get(&id).cloned() }
+        let res = unsafe { (*ptr).get(&id).cloned() };
+        self.readers.fetch_sub(1, Ordering::SeqCst);
+        res
     }
 
     pub fn get_buffer(&self, id: u64) -> Option<SampleBuffer> {
@@ -106,8 +116,11 @@ impl SampleRegistry {
     }
 
     pub fn list_ids(&self) -> Vec<u64> {
+        self.readers.fetch_add(1, Ordering::SeqCst);
         let ptr = self.inner.load(Ordering::Acquire);
-        unsafe { (*ptr).keys().cloned().collect() }
+        let res = unsafe { (*ptr).keys().cloned().collect() };
+        self.readers.fetch_sub(1, Ordering::SeqCst);
+        res
     }
 }
 

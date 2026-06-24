@@ -12,6 +12,8 @@ pub mod dsp_kernel_processor;
 pub mod modulation;
 pub mod sequencer;
 pub mod transfusion;
+#[cfg(test)]
+mod sampler_tests;
 #[cfg(feature = "test-utils")]
 pub mod test_kit;
 
