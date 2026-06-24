@@ -77,7 +77,7 @@ impl TaskPool {
             let completion_fd_worker = ipc_layer::EventFd::from_raw(completion_fd.fd());
 
             let handle = thread::spawn(move || {
-                crate::setup_rt_thread(85, Some(i + 1)); // Pin workers to cores 1..N
+                ipc_layer::setup_rt_thread(85, Some(i + 1)); // Pin workers to cores 1..N
                 while running_worker.load(Ordering::Relaxed) {
                     if let Some(job) = cons.pop() {
                         // SAFETY: job.node_ptr is guaranteed to be valid for the duration of the job execution.

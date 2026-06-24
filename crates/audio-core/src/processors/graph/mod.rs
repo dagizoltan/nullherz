@@ -2,7 +2,7 @@ mod node;
 mod pool;
 mod telemetry;
 mod topology_types;
-mod compiler;
+
 mod executor;
 mod topology_coordinator;
 mod buffer_pool;
@@ -11,13 +11,13 @@ pub use node::{ProcessorNode, DummyProcessor};
 pub use pool::{TaskPool, Job};
 pub use telemetry::GraphTelemetry;
 pub use topology_types::{GraphTopology, NodeRouting, CrossfadeState};
-pub use compiler::{GraphCompiler, CompiledGraphPlan};
+pub use nullherz_topology::GraphCompiler;
+pub use nullherz_traits::CompiledGraphPlan;
 pub use executor::GraphExecutor;
 pub use topology_coordinator::TopologyCoordinator;
 pub use buffer_pool::GraphBufferPool;
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use crate::processors::{AudioProcessor, TopologyMutation};
 
 /// The ProcessorGraph acts as a lightweight VM that executes a compiled graph topology.
@@ -184,15 +184,11 @@ impl Default for ProcessorGraph {
     }
 }
 
-impl AudioProcessor for ProcessorGraph {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn process(&mut self, external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext) {
+impl nullherz_traits::SignalProcessor for ProcessorGraph {
+fn process(&mut self, external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext) {
         self.process_parallel(external_inputs, external_outputs, context, None);
     }
-
-    fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext, executor: Option<&mut (dyn nullherz_traits::ParallelExecutor + '_)>) {
+fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext, executor: Option<&mut (dyn nullherz_traits::ParallelExecutor + '_)>) {
         let is_last_sub_block = context.is_last_sub_block;
         let num_samples = if !external_outputs.is_empty() { external_outputs[0].len() } else { 0 };
         if num_samples == 0 { return; }
@@ -253,14 +249,61 @@ impl AudioProcessor for ProcessorGraph {
 
         self.telemetry.update_peak_levels(topo, &self.buffer_pool.buffers, offset, num_samples);
     }
-
-    fn setup(&mut self, config: nullherz_traits::AudioConfig) {
+fn setup(&mut self, config: nullherz_traits::AudioConfig) {
         for node in self.nodes.iter() {
             unsafe { (*node.processor.get()).setup(config); }
         }
     }
+fn reset(&mut self) {
+        for node in self.nodes.iter() {
+            unsafe { (*node.processor.get()).reset(); }
+        }
+        for buffer in self.buffer_pool.buffers.iter_mut() {
+            buffer.data.fill(0.0);
+        }
+    }
+fn latency_samples(&self) -> usize {
+        // For a DAG, the total latency is the maximum latency along any path from input to output.
+        // For simplicity in this iteration, we'll sum the latency of nodes in the longest stage path.
+        // A more accurate version would traverse the graph edges.
+        let active_idx = self.topology_coordinator.active_idx();
+        let topo = &self.topology_coordinator.topologies[active_idx];
+        let mut total_latency = 0;
 
-    fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
+        for s_idx in 0..topo.plan.num_stages {
+            let mut stage_max = 0;
+            for n_idx in &topo.plan.stages[s_idx][..topo.plan.stage_counts[s_idx]] {
+                let node = &self.nodes[*n_idx];
+                let lat = unsafe { (*node.processor.get()).latency_samples() };
+                if lat > stage_max { stage_max = lat; }
+            }
+            total_latency += stage_max;
+        }
+        total_latency
+    }
+}
+
+impl nullherz_traits::MidiResponder for ProcessorGraph { }
+
+impl nullherz_traits::SnapshotProvider for ProcessorGraph {
+    fn pull_all_snapshots(&mut self, target: &mut Vec<(u64, std::sync::Arc<Vec<f32>>)>) {
+        for i in 0..self.node_count {
+            let node = &self.nodes[i];
+            let processor = unsafe { &mut *node.processor.get() };
+            if let Some(snapshot) = processor.pull_snapshot() {
+                if let Some(meta) = processor.metadata() {
+                    target.push((meta.processor_id, snapshot));
+                }
+            }
+            processor.pull_all_snapshots(target);
+        }
+    }
+}
+
+impl AudioProcessor for ProcessorGraph {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
         // Buffer everything until CommitTopology to ensure atomic structural shifts.
         if self.pending_mutation_count < crate::MAX_MUTATIONS {
             self.pending_mutations[self.pending_mutation_count] = Some(mutation);
@@ -274,9 +317,7 @@ impl AudioProcessor for ProcessorGraph {
             }
         }
     }
-
-
-    fn apply_command(&mut self, command: &nullherz_traits::Command) {
+fn apply_command(&mut self, command: &nullherz_traits::Command) {
         match command {
             nullherz_traits::Command::SetSafeMode(enabled) => {
                 for node in self.nodes.iter() {
@@ -303,64 +344,16 @@ impl AudioProcessor for ProcessorGraph {
             _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }
         }
     }
-
-    fn apply_midi(&mut self, event: ipc_layer::MidiEvent) {
-        for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_midi(event); } }
-    }
-
-    fn set_garbage_producer(&mut self, producer: Box<dyn nullherz_traits::GarbageProducer>) {
+fn set_garbage_producer(&mut self, producer: Box<dyn nullherz_traits::GarbageProducer>) {
         self.garbage_producer = Some(producer);
     }
-    fn collect_telemetry(&self, node_times: &mut [u64; crate::MAX_NODES], peak_levels: &mut [f32; crate::MAX_NODES]) {
+fn collect_telemetry(&self, node_times: &mut [u64; crate::MAX_NODES], peak_levels: &mut [f32; crate::MAX_NODES]) {
         for i in 0..crate::MAX_NODES {
-            node_times[i] = self.telemetry.node_times_cycles[i].load(Ordering::Relaxed);
-            peak_levels[i] = f32::from_bits(self.telemetry.peak_levels[i].load(Ordering::Relaxed));
+            node_times[i] = self.telemetry.node_times_cycles[i].load(std::sync::atomic::Ordering::Relaxed);
+            peak_levels[i] = f32::from_bits(self.telemetry.peak_levels[i].load(std::sync::atomic::Ordering::Relaxed));
         }
     }
-
-    fn reset(&mut self) {
-        for node in self.nodes.iter() {
-            unsafe { (*node.processor.get()).reset(); }
-        }
-        for buffer in self.buffer_pool.buffers.iter_mut() {
-            buffer.data.fill(0.0);
-        }
-    }
-
-    fn latency_samples(&self) -> usize {
-        // For a DAG, the total latency is the maximum latency along any path from input to output.
-        // For simplicity in this iteration, we'll sum the latency of nodes in the longest stage path.
-        // A more accurate version would traverse the graph edges.
-        let active_idx = self.topology_coordinator.active_idx();
-        let topo = &self.topology_coordinator.topologies[active_idx];
-        let mut total_latency = 0;
-
-        for s_idx in 0..topo.plan.num_stages {
-            let mut stage_max = 0;
-            for n_idx in &topo.plan.stages[s_idx][..topo.plan.stage_counts[s_idx]] {
-                let node = &self.nodes[*n_idx];
-                let lat = unsafe { (*node.processor.get()).latency_samples() };
-                if lat > stage_max { stage_max = lat; }
-            }
-            total_latency += stage_max;
-        }
-        total_latency
-    }
-
-    fn pull_all_snapshots(&mut self, target: &mut Vec<(u64, Arc<Vec<f32>>)>) {
-        for i in 0..self.node_count {
-            let node = &self.nodes[i];
-            let processor = unsafe { &mut *node.processor.get() };
-            if let Some(snapshot) = processor.pull_snapshot() {
-                if let Some(meta) = processor.metadata() {
-                    target.push((meta.processor_id, snapshot));
-                }
-            }
-            processor.pull_all_snapshots(target);
-        }
-    }
-
-    fn list_children(&self) -> Vec<&dyn AudioProcessor> {
+fn list_children(&self) -> Vec<&dyn AudioProcessor> {
         let mut children = Vec::new();
         for i in 0..self.node_count {
             children.push(unsafe { &**self.nodes[i].processor.get() });
@@ -371,22 +364,30 @@ impl AudioProcessor for ProcessorGraph {
 
 #[cfg(test)]
 mod tests {
+    use nullherz_traits::SignalProcessor;
     use super::*;
     use nullherz_traits::ProcessContext;
     use std::sync::atomic::AtomicU64;
 
+    use std::sync::atomic::Ordering;
     struct IdentityProcessor;
     impl std::fmt::Debug for IdentityProcessor {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "IdentityProcessor") }
     }
-    impl AudioProcessor for IdentityProcessor {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-        fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
+    impl nullherz_traits::SignalProcessor for IdentityProcessor {
+fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
             for i in 0..inputs.len().min(outputs.len()) { outputs[i].copy_from_slice(inputs[i]); }
         }
-    }
+}
+
+impl nullherz_traits::MidiResponder for IdentityProcessor { }
+
+impl nullherz_traits::SnapshotProvider for IdentityProcessor { }
+
+impl AudioProcessor for IdentityProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
 
     #[test]
     fn test_graph_sub_block_routing() {

@@ -1,3 +1,5 @@
+pub mod compiler;
+pub use compiler::GraphCompiler;
 use nullherz_traits::{ProcessorTypeId, MAX_NODES, MAX_CHANNELS};
 use serde_big_array::BigArray;
 

@@ -29,11 +29,8 @@ impl SamplerSidecar {
     }
 }
 
-impl AudioProcessor for SamplerSidecar {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn process(&mut self, _in: &[&[f32]], out: &mut [&mut [f32]], _context: &mut audio_core::processors::ProcessContext) {
+impl nullherz_traits::SignalProcessor for SamplerSidecar {
+fn process(&mut self, _in: &[&[f32]], out: &mut [&mut [f32]], _context: &mut audio_core::processors::ProcessContext) {
         for ch in 0..out.len().min(16) {
             if let Some(mut idx) = self.play_index[ch] {
                 if self.samples.is_empty() {
@@ -58,8 +55,16 @@ impl AudioProcessor for SamplerSidecar {
             }
         }
     }
+}
 
-    fn apply_command(&mut self, cmd: &nullherz_traits::Command) {
+impl nullherz_traits::MidiResponder for SamplerSidecar { }
+
+impl nullherz_traits::SnapshotProvider for SamplerSidecar { }
+
+impl AudioProcessor for SamplerSidecar {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+fn apply_command(&mut self, cmd: &nullherz_traits::Command) {
         if let nullherz_traits::Command::Play = cmd {
             self.trigger(0, 0);
         }

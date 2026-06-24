@@ -12,15 +12,22 @@ mod integration_tests {
 
         // 1. Define a truly dynamic processor and its factory
         struct DynamicProcessor;
-        impl AudioProcessor for DynamicProcessor {
-            fn as_any(&self) -> &dyn std::any::Any { self }
-            fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-            fn process(&mut self, _in: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {
+        impl nullherz_traits::SignalProcessor for DynamicProcessor {
+fn process(&mut self, _in: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {
                 for out in outputs {
                     out.fill(0.123); // Unique signature
                 }
             }
-        }
+}
+
+impl nullherz_traits::MidiResponder for DynamicProcessor { }
+
+impl nullherz_traits::SnapshotProvider for DynamicProcessor { }
+
+impl AudioProcessor for DynamicProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
 
         struct DynamicFactory;
         impl ProcessorFactory for DynamicFactory {

@@ -1,3 +1,4 @@
+use nullherz_traits::MAX_NODES;
 pub use nullherz_traits::{CompiledGraphPlan, GraphTopology};
 use nullherz_traits::error::AudioError;
 
@@ -10,18 +11,18 @@ impl GraphCompiler {
         if n == 0 { return Ok(plan); }
 
         // PERF-08: Use Boxed arrays to avoid massive stack pressure (~96KB previously)
-        let mut in_degree = Box::new([0usize; crate::MAX_NODES]);
-        let mut adj = Box::new([[0usize; crate::MAX_NODES]; crate::MAX_NODES]);
-        let mut adj_count = Box::new([0usize; crate::MAX_NODES]);
+        let mut in_degree = Box::new([0usize; MAX_NODES]);
+        let mut adj = Box::new([[0usize; MAX_NODES]; MAX_NODES]);
+        let mut adj_count = Box::new([0usize; MAX_NODES]);
 
         // 1. Build adjacency list and in-degrees efficiently
-        let mut v_to_producers = Box::new([[0usize; crate::MAX_NODES]; crate::MAX_NODES]);
-        let mut v_producer_counts = Box::new([0usize; crate::MAX_NODES]);
+        let mut v_to_producers = Box::new([[0usize; MAX_NODES]; MAX_NODES]);
+        let mut v_producer_counts = Box::new([0usize; MAX_NODES]);
         for j in 0..n {
             let routing_j = &topo.routing[j];
             for k in 0..routing_j.output_count {
                 let v_out = routing_j.output_indices[k];
-                if v_out < crate::MAX_NODES {
+                if v_out < MAX_NODES {
                     v_to_producers[v_out][v_producer_counts[v_out]] = j;
                     v_producer_counts[v_out] += 1;
                 }
@@ -32,7 +33,7 @@ impl GraphCompiler {
             let routing_i = &topo.routing[i];
             for l in 0..routing_i.input_count {
                 let v_in = routing_i.input_indices[l];
-                if v_in < crate::MAX_NODES {
+                if v_in < MAX_NODES {
                     for &j in v_to_producers[v_in].iter().take(v_producer_counts[v_in]) {
                         if i == j { continue; }
                         let mut exists = false;
@@ -54,14 +55,14 @@ impl GraphCompiler {
 
         // 2. Kahn's algorithm with Write-After-Write (WAW) tracking
         let mut processed_count = 0;
-        let mut is_processed = Box::new([false; crate::MAX_NODES]);
+        let mut is_processed = Box::new([false; MAX_NODES]);
         plan.num_stages = 0;
 
         while processed_count < n {
-            let mut stage_nodes = [0usize; crate::MAX_NODES];
+            let mut stage_nodes = [0usize; MAX_NODES];
             let mut stage_count = 0;
-            let mut physical_writes_in_stage = [false; crate::MAX_NODES];
-            let mut physical_reads_in_stage = [false; crate::MAX_NODES];
+            let mut physical_writes_in_stage = [false; MAX_NODES];
+            let mut physical_reads_in_stage = [false; MAX_NODES];
 
             for i in 0..n {
                 if !is_processed[i] && in_degree[i] == 0 {
@@ -134,8 +135,8 @@ impl GraphCompiler {
     pub fn verify_no_hazards(topo: &GraphTopology, plan: &CompiledGraphPlan) -> Result<(), AudioError> {
         for s_idx in 0..plan.num_stages {
             let stage = &plan.stages[s_idx][..plan.stage_counts[s_idx]];
-            let mut physical_writes = [false; crate::MAX_NODES];
-            let mut physical_reads = [false; crate::MAX_NODES];
+            let mut physical_writes = [false; MAX_NODES];
+            let mut physical_reads = [false; MAX_NODES];
 
             for &n_idx in stage {
                 let routing = &topo.routing[n_idx];
@@ -144,8 +145,8 @@ impl GraphCompiler {
                 // Intra-node reuse is permitted for in-place processing.
 
                 for k in 0..routing.output_count {
-                    let v_out = *routing.output_indices.get(k).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
-                    let p_out = *topo.virtual_to_physical.get(v_out).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
+                    let v_out = *routing.output_indices.get(k).unwrap_or(&0).min(&(MAX_NODES - 1));
+                    let p_out = *topo.virtual_to_physical.get(v_out).unwrap_or(&0).min(&(MAX_NODES - 1));
 
                     if physical_writes[p_out] || physical_reads[p_out] {
                         return Err(AudioError::IpcError(format!("Hazard at stage {}. Node {} output collides with physical buffer {} already in use.", s_idx, n_idx, p_out)));
@@ -153,8 +154,8 @@ impl GraphCompiler {
                 }
 
                 for k in 0..routing.input_count {
-                    let v_in = *routing.input_indices.get(k).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
-                    let p_in = *topo.virtual_to_physical.get(v_in).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
+                    let v_in = *routing.input_indices.get(k).unwrap_or(&0).min(&(MAX_NODES - 1));
+                    let p_in = *topo.virtual_to_physical.get(v_in).unwrap_or(&0).min(&(MAX_NODES - 1));
 
                     if physical_writes[p_in] {
                         return Err(AudioError::IpcError(format!("RAW Hazard at stage {}. Node {} input collides with physical buffer {} being written to.", s_idx, n_idx, p_in)));
@@ -163,13 +164,13 @@ impl GraphCompiler {
 
                 // After checking, MARK them as used by this node for the rest of the stage
                 for k in 0..routing.output_count {
-                    let v_out = *routing.output_indices.get(k).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
-                    let p_out = *topo.virtual_to_physical.get(v_out).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
+                    let v_out = *routing.output_indices.get(k).unwrap_or(&0).min(&(MAX_NODES - 1));
+                    let p_out = *topo.virtual_to_physical.get(v_out).unwrap_or(&0).min(&(MAX_NODES - 1));
                     physical_writes[p_out] = true;
                 }
                 for k in 0..routing.input_count {
-                    let v_in = *routing.input_indices.get(k).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
-                    let p_in = *topo.virtual_to_physical.get(v_in).unwrap_or(&0).min(&(crate::MAX_NODES - 1));
+                    let v_in = *routing.input_indices.get(k).unwrap_or(&0).min(&(MAX_NODES - 1));
+                    let p_in = *topo.virtual_to_physical.get(v_in).unwrap_or(&0).min(&(MAX_NODES - 1));
                     physical_reads[p_in] = true;
                 }
             }
@@ -181,7 +182,7 @@ impl GraphCompiler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::processors::graph::{GraphTopology, NodeRouting};
+    use nullherz_traits::{GraphTopology, NodeRouting};
     use proptest::prelude::*;
 
     proptest! {

@@ -80,16 +80,12 @@ impl SidecarProcessor {
     }
 }
 
-impl AudioProcessor for SidecarProcessor {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn reset(&mut self) {
+impl nullherz_traits::SignalProcessor for SidecarProcessor {
+fn reset(&mut self) {
         self.last_heartbeat = 0;
         self.missed_deadline_count = 0;
     }
-
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
+fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         let current_heartbeat = unsafe { (*self.signal).get_heartbeat() };
         // Use wrapping subtraction to detect progress robustly across u64 wrap.
         // We detect stall if heartbeat hasn't changed since last block AND we've initialized (last_heartbeat != 0).
@@ -141,7 +137,16 @@ impl AudioProcessor for SidecarProcessor {
         unsafe { (*self.signal).notify(); }
         if let Some(efd) = &self.event_fd { efd.notify(); }
     }
-    fn apply_command(&mut self, command: &nullherz_traits::Command) {
+}
+
+impl nullherz_traits::MidiResponder for SidecarProcessor { }
+
+impl nullherz_traits::SnapshotProvider for SidecarProcessor { }
+
+impl AudioProcessor for SidecarProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+fn apply_command(&mut self, command: &nullherz_traits::Command) {
         unsafe {
             let _ = (*self.command_producer_ptr).push(*command);
             (*self.signal).notify();
@@ -152,6 +157,7 @@ impl AudioProcessor for SidecarProcessor {
 
 #[cfg(test)]
 mod tests {
+    use nullherz_traits::SignalProcessor;
     use super::*;
     use ipc_layer::AudioBlock;
     use std::sync::atomic::Ordering;

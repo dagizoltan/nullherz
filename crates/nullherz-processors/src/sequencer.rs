@@ -16,28 +16,14 @@ impl SequencerProcessor {
     }
 }
 
-impl AudioProcessor for SequencerProcessor {
-    fn setup(&mut self, config: nullherz_traits::AudioConfig) {
+impl nullherz_traits::SignalProcessor for SequencerProcessor {
+fn setup(&mut self, config: nullherz_traits::AudioConfig) {
         self.sample_rate = config.sample_rate;
     }
-
-    fn apply_command(&mut self, command: &nullherz_traits::Command) {
-        #[allow(clippy::collapsible_if)]
-        if let nullherz_traits::Command::SetSequencerStep { track, step, value } = command {
-            if *track < 8 && *step < crate::MAX_CHANNELS as u32 {
-                self.grid[*track as usize][*step as usize] = *value;
-            }
-        }
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn reset(&mut self) {
+fn reset(&mut self) {
         self.current_sample = 0;
     }
-
-    fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext) {
+fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext) {
         let block_len = if !outputs.is_empty() { outputs[0].len() as u64 } else { 0 };
         if block_len == 0 { return; }
 
@@ -73,4 +59,21 @@ impl AudioProcessor for SequencerProcessor {
 
         self.current_sample += block_len;
     }
+}
+
+impl nullherz_traits::MidiResponder for SequencerProcessor { }
+
+impl nullherz_traits::SnapshotProvider for SequencerProcessor { }
+
+impl AudioProcessor for SequencerProcessor {
+fn apply_command(&mut self, command: &nullherz_traits::Command) {
+        #[allow(clippy::collapsible_if)]
+        if let nullherz_traits::Command::SetSequencerStep { track, step, value } = command {
+            if *track < 8 && *step < crate::MAX_CHANNELS as u32 {
+                self.grid[*track as usize][*step as usize] = *value;
+            }
+        }
+    }
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 }

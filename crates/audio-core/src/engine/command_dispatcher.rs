@@ -61,19 +61,8 @@ impl CommandDispatcher {
     }
 
     fn handle_bundle_command(graph: &mut dyn AudioProcessor, count: u32, data: [u64; 12]) {
-        for i in 0..(count as usize).min(4) {
-            let node_id = data[i * 3];
-            let param_id = data[i * 3 + 1] as u32;
-            let value = f32::from_bits(data[i * 3 + 2] as u32);
-
-            // Apply each bundled command as a single SetParam command.
-            // BUG-07: We ensure we don't recursively call apply_command(Bundle) again.
-            graph.apply_command(&nullherz_traits::Command::SetParam {
-                target_id: node_id,
-                param_id,
-                value,
-                ramp_duration_samples: 0,
-            });
+        for cmd in nullherz_traits::Command::unpack_bundle(count, data) {
+            graph.apply_command(&cmd);
         }
     }
 }

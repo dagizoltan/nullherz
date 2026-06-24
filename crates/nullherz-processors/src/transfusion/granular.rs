@@ -100,26 +100,14 @@ impl GranularProcessor {
     }
 }
 
-impl AudioProcessor for GranularProcessor {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
-        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
-            if target_id == self.id {
-                self.set_parameter(param_id, value, ramp_duration_samples);
-            }
-        }
-    }
-
-    fn reset(&mut self) {
+impl nullherz_traits::SignalProcessor for GranularProcessor {
+fn reset(&mut self) {
         for v in self.voices.iter_mut() {
             v.is_active = false;
         }
         self.voice_ages.fill(0);
     }
-
-    fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
+fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         if outputs.is_empty() { return; }
         let num_samples = outputs[0].len();
         let num_samples = num_samples.min(ipc_layer::MAX_BLOCK_SIZE);
@@ -199,8 +187,28 @@ impl AudioProcessor for GranularProcessor {
             output.copy_from_slice(&self.render_buffer[..num_samples]);
         }
     }
+fn latency_samples(&self) -> usize {
+        // Granular doesn't have inherent block latency like spectral,
+        // but it might have sub-block scheduling latency.
+        0
+    }
+}
 
-    fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
+impl nullherz_traits::MidiResponder for GranularProcessor { }
+
+impl nullherz_traits::SnapshotProvider for GranularProcessor { }
+
+impl AudioProcessor for GranularProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
+            if target_id == self.id {
+                self.set_parameter(param_id, value, ramp_duration_samples);
+            }
+        }
+    }
+fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
         match param_id {
             0 => self.density = value.clamp(0.1, 500.0),
             1 => self.grain_duration_ms = value.clamp(1.0, 2000.0),
@@ -224,20 +232,12 @@ impl AudioProcessor for GranularProcessor {
             _ => {}
         }
     }
-
-    fn latency_samples(&self) -> usize {
-        // Granular doesn't have inherent block latency like spectral,
-        // but it might have sub-block scheduling latency.
-        0
-    }
-
-    fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutation) {
+fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutation) {
         if let nullherz_traits::TopologyMutation::AddSource { node_idx: _, buffer } = mutation {
             self.add_source(buffer);
         }
     }
-
-    fn metadata(&self) -> Option<ProcessorMetadata> {
+fn metadata(&self) -> Option<ProcessorMetadata> {
         let mut parameters = [ParameterMetadata {
             id: 0,
             name: [0; 32],

@@ -29,80 +29,17 @@ impl SpectralMorphProcessor {
     }
 }
 
-impl AudioProcessor for SpectralMorphProcessor {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
-        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
-            if target_id == self.id {
-                self.set_parameter(param_id, value, ramp_duration_samples);
-            }
-        }
-    }
-
-    fn reset(&mut self) {
+impl nullherz_traits::SignalProcessor for SpectralMorphProcessor {
+fn reset(&mut self) {
         self.has_modulator_spectrum = false;
         self.pipeline.reset();
         self.modulator_pipeline.reset();
         self.modulator_env.fill(0.0);
     }
-
-    fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
-        match param_id {
-            0 => self.morph_amount = value.clamp(0.0, 1.0),
-            1 => self.smoothness = value.clamp(0.0, 1.0),
-            2 => {
-                let shape = match value as u32 {
-                    0 => SpectralWindowShape::Hann,
-                    1 => SpectralWindowShape::Hamming,
-                    2 => SpectralWindowShape::Blackman,
-                    3 => SpectralWindowShape::Rectangular,
-                    _ => SpectralWindowShape::Hann,
-                };
-                self.pipeline.update_window(shape);
-                self.modulator_pipeline.update_window(shape);
-            }
-            _ => {}
-        }
-    }
-
-    fn latency_samples(&self) -> usize {
+fn latency_samples(&self) -> usize {
         self.pipeline.fft.size
     }
-
-    fn metadata(&self) -> Option<ProcessorMetadata> {
-        let mut parameters = [ParameterMetadata {
-            id: 0,
-            name: [0; 32],
-            min: 0.0,
-            max: 1.0,
-            default: 1.0,
-        }; 16];
-
-        let names = [
-            (0, "Morph", 0.0, 1.0, 1.0),
-            (1, "Smoothness", 0.0, 1.0, 0.5),
-            (2, "Window", 0.0, 3.0, 0.0),
-        ];
-
-        for (i, (id, name, min, max, default)) in names.iter().enumerate() {
-            parameters[i].id = *id;
-            parameters[i].min = *min;
-            parameters[i].max = *max;
-            parameters[i].default = *default;
-            let name_bytes = name.as_bytes();
-            parameters[i].name[..name_bytes.len()].copy_from_slice(name_bytes);
-        }
-
-        Some(ProcessorMetadata {
-            processor_id: 0,
-            num_parameters: names.len() as u32,
-            parameters,
-        })
-    }
-
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
+fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         if inputs.len() < 2 || outputs.is_empty() { return; }
 
         let carrier = inputs[0];
@@ -136,5 +73,69 @@ impl AudioProcessor for SpectralMorphProcessor {
                 }
             }
         });
+    }
+}
+
+impl nullherz_traits::MidiResponder for SpectralMorphProcessor { }
+
+impl nullherz_traits::SnapshotProvider for SpectralMorphProcessor { }
+
+impl AudioProcessor for SpectralMorphProcessor {
+fn as_any(&self) -> &dyn std::any::Any { self }
+fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
+            if target_id == self.id {
+                self.set_parameter(param_id, value, ramp_duration_samples);
+            }
+        }
+    }
+fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
+        match param_id {
+            0 => self.morph_amount = value.clamp(0.0, 1.0),
+            1 => self.smoothness = value.clamp(0.0, 1.0),
+            2 => {
+                let shape = match value as u32 {
+                    0 => SpectralWindowShape::Hann,
+                    1 => SpectralWindowShape::Hamming,
+                    2 => SpectralWindowShape::Blackman,
+                    3 => SpectralWindowShape::Rectangular,
+                    _ => SpectralWindowShape::Hann,
+                };
+                self.pipeline.update_window(shape);
+                self.modulator_pipeline.update_window(shape);
+            }
+            _ => {}
+        }
+    }
+fn metadata(&self) -> Option<ProcessorMetadata> {
+        let mut parameters = [ParameterMetadata {
+            id: 0,
+            name: [0; 32],
+            min: 0.0,
+            max: 1.0,
+            default: 1.0,
+        }; 16];
+
+        let names = [
+            (0, "Morph", 0.0, 1.0, 1.0),
+            (1, "Smoothness", 0.0, 1.0, 0.5),
+            (2, "Window", 0.0, 3.0, 0.0),
+        ];
+
+        for (i, (id, name, min, max, default)) in names.iter().enumerate() {
+            parameters[i].id = *id;
+            parameters[i].min = *min;
+            parameters[i].max = *max;
+            parameters[i].default = *default;
+            let name_bytes = name.as_bytes();
+            parameters[i].name[..name_bytes.len()].copy_from_slice(name_bytes);
+        }
+
+        Some(ProcessorMetadata {
+            processor_id: 0,
+            num_parameters: names.len() as u32,
+            parameters,
+        })
     }
 }
