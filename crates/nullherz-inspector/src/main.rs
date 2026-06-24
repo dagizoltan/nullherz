@@ -103,6 +103,7 @@ pub struct InspectorApp {
     channel_eq_high: [f32; 4],
     channel_eq_mid: [f32; 4],
     channel_eq_low: [f32; 4],
+    channel_fx_enabled: [bool; 4],
     channel_cue: [bool; 4],
     master_gain: f32,
     crossfader_pos: f32,
@@ -114,6 +115,8 @@ pub struct InspectorApp {
     mastering_eq_enabled: bool,
     mastering_comp_enabled: bool,
     mastering_limiter_enabled: bool,
+    mastering_limiter_gain: f32,
+    mastering_comp_threshold: f32,
 }
 
 impl InspectorApp {
@@ -183,6 +186,7 @@ impl InspectorApp {
             channel_eq_high: [0.0; 4],
             channel_eq_mid: [0.0; 4],
             channel_eq_low: [0.0; 4],
+            channel_fx_enabled: [false; 4],
             channel_cue: [false; 4],
             master_gain: 1.0,
             crossfader_pos: 0.5,
@@ -192,6 +196,8 @@ impl InspectorApp {
             mastering_eq_enabled: true,
             mastering_comp_enabled: true,
             mastering_limiter_enabled: false,
+            mastering_limiter_gain: 1.0,
+            mastering_comp_threshold: 0.5,
         }
     }
 
@@ -224,6 +230,22 @@ impl InspectorApp {
                             };
                             if ui.add(egui::Button::new(egui::RichText::new("CUE").color(cue_color).size(11.0))).clicked() {
                                 self.channel_cue[i] = !self.channel_cue[i];
+                            }
+                            ui.add_space(5.0);
+                            let fx_color = if self.channel_fx_enabled[i] {
+                                egui::Color32::from_rgb(0, 255, 150)
+                            } else {
+                                egui::Color32::from_gray(80)
+                            };
+                            if ui.add(egui::Button::new(egui::RichText::new("FX").color(fx_color).size(11.0))).clicked() {
+                                self.channel_fx_enabled[i] = !self.channel_fx_enabled[i];
+                                // DJ Platform: Per-Deck FX (Biquad) is Node (i*4 + 2)
+                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                                    target_id: (i as u64 * 4 + 2),
+                                    param_id: 999,
+                                    value: if self.channel_fx_enabled[i] { 1.0 } else { 0.0 },
+                                    ramp_duration_samples: 0,
+                                });
                             }
                         });
 
@@ -267,9 +289,9 @@ impl InspectorApp {
                             ui.set_width(40.0);
                             ui.label(egui::RichText::new("H").size(9.0).color(egui::Color32::from_gray(80)));
                             if ui.add(egui::Slider::new(&mut self.channel_eq_high[i], 0.0..=1.2).show_value(false).vertical()).changed() {
-                                // DJ Platform: Isolator is Node (i*4 + 2)
+                                // DJ Platform: Isolator is Node (i*4 + 3)
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                                    target_id: (i as u64 * 4 + 2),
+                                    target_id: (i as u64 * 4 + 3),
                                     param_id: 2,
                                     value: self.channel_eq_high[i],
                                     ramp_duration_samples: 0,
@@ -279,7 +301,7 @@ impl InspectorApp {
                             if ui.add(egui::Slider::new(&mut self.channel_eq_mid[i], 0.0..=1.2).show_value(false).vertical()).changed() {
                                 // Isolator Mid (Param 1)
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                                    target_id: (i as u64 * 4 + 2),
+                                    target_id: (i as u64 * 4 + 3),
                                     param_id: 1,
                                     value: self.channel_eq_mid[i],
                                     ramp_duration_samples: 0,
@@ -289,7 +311,7 @@ impl InspectorApp {
                             if ui.add(egui::Slider::new(&mut self.channel_eq_low[i], 0.0..=1.2).show_value(false).vertical()).changed() {
                                 // Isolator Low (Param 0)
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                                    target_id: (i as u64 * 4 + 2),
+                                    target_id: (i as u64 * 4 + 3),
                                     param_id: 0,
                                     value: self.channel_eq_low[i],
                                     ramp_duration_samples: 0,
@@ -408,6 +430,15 @@ impl InspectorApp {
                             let how_h = ui.ctx().animate_bool(res.id, res.hovered());
                             if how_h > 0.0 { ui.painter().rect_filled(rect, 0.0, egui::Color32::from_gray((how_h * 20.0) as u8)); }
 
+                            if res.clicked() {
+                                // Simulate loading into Deck 1 (Node 0)
+                                let _ = self.command_sender.send(nullherz_traits::Command::RegisterCapture {
+                                    capture_node_idx: 0,
+                                    sample_id: (title.len() as u64), // Simple dummy ID derivation
+                                });
+                                println!("Loading track '{}' to Deck 1", title);
+                            }
+
                             ui.child_ui(rect, egui::Layout::left_to_right(egui::Align::Center)).horizontal(|ui| {
                                 ui.add_space(5.0);
                                 ui.label(egui::RichText::new(format!("{} - {}", title, artist)).size(11.0));
@@ -482,10 +513,61 @@ impl InspectorApp {
     fn render_mastering(&mut self, ui: &mut egui::Ui) {
         ui.heading("Mastering Chain");
         ui.add_space(20.0);
-        ui.group(|ui| {
-            ui.checkbox(&mut self.mastering_eq_enabled, "LINEAR EQ");
-            ui.checkbox(&mut self.mastering_comp_enabled, "DYNAMIC COMP");
-            ui.checkbox(&mut self.mastering_limiter_enabled, "LIMITER");
+        ui.vertical(|ui| {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    if ui.checkbox(&mut self.mastering_eq_enabled, "MASTER EQ").changed() {
+                        // Bypass logic: 1.0 = active, 0.0 = bypass
+                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                            target_id: 19, param_id: 999, value: if self.mastering_eq_enabled { 1.0 } else { 0.0 }, ramp_duration_samples: 0
+                        });
+                    }
+                });
+                ui.add_space(5.0);
+                ui.label("Simulated 3-band response");
+            });
+
+            ui.add_space(10.0);
+
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    if ui.checkbox(&mut self.mastering_comp_enabled, "DYNAMIC COMP").changed() {
+                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                            target_id: 20, param_id: 999, value: if self.mastering_comp_enabled { 1.0 } else { 0.0 }, ramp_duration_samples: 0
+                        });
+                    }
+                });
+                ui.add_space(5.0);
+                ui.horizontal(|ui| {
+                    ui.label("Threshold");
+                    if ui.add(egui::Slider::new(&mut self.mastering_comp_threshold, 0.0..=1.0)).changed() {
+                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                            target_id: 20, param_id: 0, value: self.mastering_comp_threshold, ramp_duration_samples: 128
+                        });
+                    }
+                });
+            });
+
+            ui.add_space(10.0);
+
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    if ui.checkbox(&mut self.mastering_limiter_enabled, "BRICKWALL LIMITER").changed() {
+                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                            target_id: 21, param_id: 999, value: if self.mastering_limiter_enabled { 1.0 } else { 0.0 }, ramp_duration_samples: 0
+                        });
+                    }
+                });
+                ui.add_space(5.0);
+                ui.horizontal(|ui| {
+                    ui.label("Ceiling (dB)");
+                    if ui.add(egui::Slider::new(&mut self.mastering_limiter_gain, 0.0..=1.5)).changed() {
+                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                            target_id: 21, param_id: 0, value: self.mastering_limiter_gain, ramp_duration_samples: 128
+                        });
+                    }
+                });
+            });
         });
     }
 

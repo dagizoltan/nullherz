@@ -71,15 +71,40 @@ impl MixerManager {
         commands.push(Command::UpdateEdge { node_idx: xf_r_id, input_idx: 1, new_buffer_idx: self.config.dj_b_r as u32 });
         commands.push(Command::UpdateOutputEdge { node_idx: xf_r_id, output_idx: 0, new_buffer_idx: xf_out_r });
 
-        // Summing to Master
+        // Summing to FX Chain
         let sum_id = self.id_allocator.allocate_node_id();
-        commands.push(Command::AddNode { node_idx: sum_id, processor_type_id: ProcessorTypeId::SUMMING });
+        let sum_out_l = self.id_allocator.allocate_buffer_id(1);
+        let sum_out_r = self.id_allocator.allocate_buffer_id(1);
 
+        commands.push(Command::AddNode { node_idx: sum_id, processor_type_id: ProcessorTypeId::SUMMING });
         commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 0, new_buffer_idx: xf_out_l });
         commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 1, new_buffer_idx: xf_out_r });
+        commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 0, new_buffer_idx: sum_out_l });
+        commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 1, new_buffer_idx: sum_out_r });
 
-        commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 0, new_buffer_idx: self.config.master_l as u32 });
-        commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 1, new_buffer_idx: self.config.master_r as u32 });
+        // --- MASTER FX CHAIN ---
+
+        // 1. Master EQ (Biquad)
+        let eq_id = self.id_allocator.allocate_node_id();
+        let eq_out_l = self.id_allocator.allocate_buffer_id(1);
+        commands.push(Command::AddNode { node_idx: eq_id, processor_type_id: ProcessorTypeId::BIQUAD });
+        commands.push(Command::UpdateEdge { node_idx: eq_id, input_idx: 0, new_buffer_idx: sum_out_l });
+        commands.push(Command::UpdateOutputEdge { node_idx: eq_id, output_idx: 0, new_buffer_idx: eq_out_l });
+
+        // 2. Master Compressor (Envelope Follower)
+        let comp_id = self.id_allocator.allocate_node_id();
+        let comp_out_l = self.id_allocator.allocate_buffer_id(1);
+        commands.push(Command::AddNode { node_idx: comp_id, processor_type_id: ProcessorTypeId::ENVELOPE_FOLLOWER });
+        commands.push(Command::UpdateEdge { node_idx: comp_id, input_idx: 0, new_buffer_idx: eq_out_l });
+        commands.push(Command::UpdateOutputEdge { node_idx: comp_id, output_idx: 0, new_buffer_idx: comp_out_l });
+
+        // 3. Master Limiter/Gain
+        let lim_id = self.id_allocator.allocate_node_id();
+        commands.push(Command::AddNode { node_idx: lim_id, processor_type_id: ProcessorTypeId::GAIN });
+        commands.push(Command::UpdateEdge { node_idx: lim_id, input_idx: 0, new_buffer_idx: comp_out_l });
+
+        commands.push(Command::UpdateOutputEdge { node_idx: lim_id, output_idx: 0, new_buffer_idx: self.config.master_l as u32 });
+        commands.push(Command::UpdateOutputEdge { node_idx: lim_id, output_idx: 1, new_buffer_idx: self.config.master_r as u32 });
 
         commands
     }
