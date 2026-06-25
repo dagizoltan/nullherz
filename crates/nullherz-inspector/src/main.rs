@@ -440,8 +440,16 @@ impl InspectorApp {
             ui.set_width(total_w);
             ui.add_space(5.0);
 
-            // TOP: FULLSCREEN WIDE OSCILLATOR MONITOR
-            self.render_oscillator_monitor(ui, telemetry);
+            // TOP: OSCILLATOR & MASTER
+            ui.horizontal(|ui| {
+                let oscillator_w = ui.available_width() - 360.0;
+                ui.vertical(|ui| {
+                    ui.set_width(oscillator_w);
+                    self.render_oscillator_monitor(ui, telemetry);
+                });
+                ui.add_space(10.0);
+                self.render_master_panel(ui, telemetry);
+            });
             ui.add_space(10.0);
 
             // MACRO ROW (Hidden)
@@ -534,9 +542,9 @@ impl InspectorApp {
 
             ui.add_space(20.0);
 
-            // INTEGRATED MASTER & STATUS DASHBOARD
+            // INTEGRATED STATUS DASHBOARD
             ui.horizontal(|ui| {
-                let dash_w = 400.0;
+                let dash_w = ui.available_width() - 20.0;
                 let (d_rect, _) = ui.allocate_exact_size(egui::vec2(dash_w, 80.0), egui::Sense::hover());
 
                 // Dashboard Background (Vented Rack Look)
@@ -550,7 +558,7 @@ impl InspectorApp {
                 }
 
                 ui.child_ui(d_rect, egui::Layout::left_to_right(egui::Align::Center)).horizontal(|ui| {
-                    ui.add_space(15.0);
+                    ui.add_space(20.0);
 
                     // ENGINE TELEMETRY
                     ui.vertical(|ui| {
@@ -563,7 +571,7 @@ impl InspectorApp {
                         ui.label(egui::RichText::new(format!("{:.1}%", cpu_pct)).monospace().size(18.0).color(if cpu_pct > 80.0 { egui::Color32::RED } else { egui::Color32::from_rgb(0, 255, 200) }));
                     });
 
-                    ui.add_space(30.0);
+                    ui.add_space(40.0);
 
                     // GLOBAL CLOCK
                     ui.vertical(|ui| {
@@ -582,7 +590,7 @@ impl InspectorApp {
                         }
                     });
 
-                    ui.add_space(30.0);
+                    ui.add_space(40.0);
 
                     // X-RUNS / STABILITY
                     ui.vertical(|ui| {
@@ -592,9 +600,6 @@ impl InspectorApp {
                         ui.label(egui::RichText::new(format!("{:03}", xruns)).monospace().size(18.0).color(if xruns > 0 { egui::Color32::from_rgb(255, 150, 0) } else { egui::Color32::from_gray(50) }));
                     });
                 });
-
-                ui.add_space(ui.available_width() - 635.0); // Calibrated offset for master panel
-                self.render_master_panel(ui, telemetry);
             });
         });
     }
@@ -1061,7 +1066,8 @@ impl InspectorApp {
                     ui.set_width(main_w - 20.0);
                     ui.vertical_centered(|ui| {
                         ui.horizontal(|ui| {
-                            ui.add_space(main_w / 2.0 - 55.0);
+                            let total_w = ui.available_width();
+                            ui.add_space(total_w / 2.0 - 35.0);
                             ui.label(egui::RichText::new("X-FADE").small().strong().color(egui::Color32::from_gray(100)));
                             if ui.add(egui::Button::new(if self.crossfader_curve > 0.5 { "POWER" } else { "LIN" }).small()).clicked() {
                                 self.crossfader_curve = if self.crossfader_curve > 0.5 { 0.0 } else { 1.0 };
@@ -1073,7 +1079,8 @@ impl InspectorApp {
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new("A").color(egui::Color32::from_rgb(0, 200, 255)));
-                            let x_res = widgets::render_horizontal_fader(ui, &mut self.crossfader_pos, 0.0..=1.0, egui::Color32::WHITE, ui.available_width() - 25.0, 30.0);
+                            let total_w = ui.available_width();
+                            let x_res = widgets::render_horizontal_fader(ui, &mut self.crossfader_pos, 0.0..=1.0, egui::Color32::WHITE, total_w - 25.0, 30.0);
                             if x_res.changed() {
                                 for target_id in [16, 17] {
                                     let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id, param_id: 0, value: self.crossfader_pos, ramp_duration_samples: 0 });
