@@ -41,10 +41,11 @@ impl AnalysisWorker {
                 println!("AnalysisWorker: Analyzing sample ID={}", id);
                 let mut metadata = sample.metadata.clone();
 
-                // Perform BPM and Transient Analysis
+                // Perform BPM, Transient and Key Analysis
                 metadata.bpm = self.detect_bpm(&sample.buffer);
                 metadata.transients = Arc::new(self.detect_transients(&sample.buffer));
                 metadata.peaks = Arc::new(self.calculate_peaks(&sample.buffer, 1024));
+                metadata.root_key = self.detect_root_key(&sample.buffer);
 
                 // Update registry with enriched metadata
                 self.sample_registry.register_with_metadata(id, sample.buffer.clone(), metadata.clone());
@@ -118,6 +119,54 @@ impl AnalysisWorker {
         while final_bpm > 180.0 { final_bpm /= 2.0; }
 
         final_bpm
+    }
+
+    fn detect_root_key(&self, buffer: &[f32]) -> Option<f32> {
+        if buffer.is_empty() { return None; }
+
+        let fft_size = 4096; // Higher resolution for key detection
+        let fft = SimdFft::new(fft_size);
+        let mut re = AlignedBuffer::new(fft_size);
+        let mut im = AlignedBuffer::new(fft_size);
+
+        let mut chromagram = [0.0f32; 12];
+        let sample_rate = 44100.0;
+
+        // Analyze up to 2 seconds or buffer length
+        let max_samples = buffer.len().min(sample_rate as usize * 2);
+        let num_windows = max_samples / fft_size;
+
+        if num_windows == 0 { return None; }
+
+        for w in 0..num_windows {
+            let offset = w * fft_size;
+            for j in 0..fft_size {
+                re[j] = buffer[offset + j];
+                im[j] = 0.0;
+            }
+
+            fft.process(&mut re, &mut im);
+
+            // Map bins to semitones
+            // freq = bin * SR / fft_size
+            // semitone = 12 * log2(freq / 440) + 69
+            for bin in 1..fft_size/2 {
+                let freq = (bin as f32 * sample_rate) / fft_size as f32;
+                if freq < 20.0 || freq > 2000.0 { continue; } // Focus on fundamental range
+
+                let mag = (re[bin]*re[bin] + im[bin]*im[bin]).sqrt();
+                let semitone = 12.0 * (freq / 440.0).log2() + 69.0;
+                let pitch_class = (semitone.round() as i32 % 12 + 12) % 12;
+                chromagram[pitch_class as usize] += mag;
+            }
+        }
+
+        let (best_note, &max_mag) = chromagram.iter().enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())?;
+
+        if max_mag < 0.1 { return None; }
+
+        Some(best_note as f32)
     }
 
     fn detect_transients(&self, buffer: &[f32]) -> Vec<u64> {

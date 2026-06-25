@@ -30,8 +30,8 @@ impl MixerBridge {
                     let expanded = modulation_matrix.expand_macro(macro_id, value);
                     bundle.extend(expanded);
                 }
-                Command::AddModMapping { macro_id, target_id, param_id, scaling } => {
-                    modulation_matrix.add_mapping(macro_id, target_id, param_id, scaling);
+                Command::AddModMapping { macro_id, target_id, param_id, scaling, ramp_duration_samples } => {
+                    modulation_matrix.add_mapping(macro_id, target_id, param_id, scaling, ramp_duration_samples);
                 }
                 Command::RemoveModMapping { macro_id, target_id, param_id } => {
                     modulation_matrix.remove_mapping(macro_id, target_id, param_id);

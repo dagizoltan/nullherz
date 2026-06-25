@@ -7,6 +7,7 @@ pub struct ModulationMapping {
     pub target_id: u64,
     pub param_id: u32,
     pub scaling: f32,
+    pub ramp_duration_samples: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19,11 +20,12 @@ impl ModulationMatrix {
         Self::default()
     }
 
-    pub fn add_mapping(&mut self, macro_id: u32, target_id: u64, param_id: u32, scaling: f32) {
+    pub fn add_mapping(&mut self, macro_id: u32, target_id: u64, param_id: u32, scaling: f32, ramp_duration_samples: u32) {
         let mapping = ModulationMapping {
             target_id,
             param_id,
             scaling,
+            ramp_duration_samples,
         };
         let mappings = self.mappings.entry(macro_id).or_default();
         // Avoid duplicate mappings for same target/param
@@ -45,7 +47,7 @@ impl ModulationMatrix {
                     target_id: mapping.target_id,
                     param_id: mapping.param_id,
                     value: value * mapping.scaling,
-                    ramp_duration_samples: 0,
+                    ramp_duration_samples: mapping.ramp_duration_samples,
                 });
             }
         }
