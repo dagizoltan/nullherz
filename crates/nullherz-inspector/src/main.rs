@@ -679,45 +679,60 @@ impl InspectorApp {
             .inner_margin(8.0)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(15.0, 0.0);
+                    ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
                     let vu_h = 45.0;
+                    let group_w = (ui.available_width() - 20.0) / 3.0;
 
                     // BOOTH CONTROL
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
-                        if widgets::render_knob(ui, &mut self.booth_gain, 0.0..=1.5, "BOOTH", egui::Color32::from_rgb(0, 180, 255)).changed() {
-                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 22, param_id: 0, value: self.booth_gain, ramp_duration_samples: 128 });
-                        }
-                        let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.booth_gain;
-                        if peak > self.booth_peak_hold { self.booth_peak_hold = peak; } else { self.booth_peak_hold *= 0.98; }
-                        widgets::render_vu_meter(ui, peak, self.booth_peak_hold, egui::Color32::from_rgb(0, 180, 255), vu_h);
+                    ui.allocate_ui(egui::vec2(group_w, vu_h + 20.0), |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
+                            if widgets::render_knob(ui, &mut self.booth_gain, 0.0..=1.5, "BOOTH", egui::Color32::from_rgb(0, 180, 255)).changed() {
+                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 22, param_id: 0, value: self.booth_gain, ramp_duration_samples: 128 });
+                            }
+                            let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.booth_gain;
+                            if peak > self.booth_peak_hold { self.booth_peak_hold = peak; } else { self.booth_peak_hold *= 0.98; }
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
+                                widgets::render_vu_meter(ui, peak * 0.95, self.booth_peak_hold * 0.95, egui::Color32::from_rgb(0, 180, 255), vu_h);
+                                widgets::render_vu_meter(ui, peak, self.booth_peak_hold, egui::Color32::from_rgb(0, 180, 255), vu_h);
+                            });
+                        });
                     });
 
                     // REC CONTROL
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
-                        if widgets::render_knob(ui, &mut self.rec_gain, 0.0..=1.5, "REC", egui::Color32::from_rgb(255, 50, 150)).changed() {
-                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 23, param_id: 0, value: self.rec_gain, ramp_duration_samples: 128 });
-                        }
-                        let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.rec_gain;
-                        if peak > self.rec_peak_hold { self.rec_peak_hold = peak; } else { self.rec_peak_hold *= 0.98; }
-                        widgets::render_vu_meter(ui, peak, self.rec_peak_hold, egui::Color32::from_rgb(255, 50, 150), vu_h);
+                    ui.allocate_ui(egui::vec2(group_w, vu_h + 20.0), |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
+                            if widgets::render_knob(ui, &mut self.rec_gain, 0.0..=1.5, "REC", egui::Color32::from_rgb(255, 50, 150)).changed() {
+                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 23, param_id: 0, value: self.rec_gain, ramp_duration_samples: 128 });
+                            }
+                            let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.rec_gain;
+                            if peak > self.rec_peak_hold { self.rec_peak_hold = peak; } else { self.rec_peak_hold *= 0.98; }
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
+                                widgets::render_vu_meter(ui, peak * 0.95, self.rec_peak_hold * 0.95, egui::Color32::from_rgb(255, 50, 150), vu_h);
+                                widgets::render_vu_meter(ui, peak, self.rec_peak_hold, egui::Color32::from_rgb(255, 50, 150), vu_h);
+                            });
+                        });
                     });
 
                     // MASTER CONTROL
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
-                        if widgets::render_knob(ui, &mut self.master_gain, 0.0..=1.5, "MASTER", egui::Color32::from_rgb(0, 255, 180)).changed() {
-                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.master_gain, ramp_duration_samples: 128 });
-                        }
-                        let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
-                        if peak > self.master_peak_hold { self.master_peak_hold = peak; }
-                        else { self.master_peak_hold *= 0.98; }
-
+                    ui.allocate_ui(egui::vec2(group_w, vu_h + 20.0), |ui| {
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
-                            widgets::render_vu_meter(ui, peak * 0.95, self.master_peak_hold * 0.95, egui::Color32::from_rgb(0, 255, 180), vu_h);
-                            widgets::render_vu_meter(ui, peak, self.master_peak_hold, egui::Color32::from_rgb(0, 255, 180), vu_h);
+                            ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
+                            if widgets::render_knob(ui, &mut self.master_gain, 0.0..=1.5, "MASTER", egui::Color32::from_rgb(0, 255, 180)).changed() {
+                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.master_gain, ramp_duration_samples: 128 });
+                            }
+                            let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
+                            if peak > self.master_peak_hold { self.master_peak_hold = peak; }
+                            else { self.master_peak_hold *= 0.98; }
+
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
+                                widgets::render_vu_meter(ui, peak * 0.95, self.master_peak_hold * 0.95, egui::Color32::from_rgb(0, 255, 180), vu_h);
+                                widgets::render_vu_meter(ui, peak, self.master_peak_hold, egui::Color32::from_rgb(0, 255, 180), vu_h);
+                            });
                         });
                     });
                 });
