@@ -460,7 +460,7 @@ impl InspectorApp {
             ui.add_space(10.0);
 
             // FX RACK ROW
-            ui.horizontal(|ui| {
+            ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
                 for i in 0..4 {
                     if i == 2 {
@@ -887,7 +887,14 @@ impl InspectorApp {
                 ui.vertical(|ui| {
                     ui.set_width(40.0);
                     ui.label(egui::RichText::new("BOOTH").size(7.0).color(egui::Color32::from_gray(100)));
-                    widgets::render_knob(ui, &mut self.booth_gain, 0.0..=1.5, "", egui::Color32::from_rgb(0, 255, 200));
+                    if widgets::render_knob(ui, &mut self.booth_gain, 0.0..=1.5, "", egui::Color32::from_rgb(0, 255, 200)).changed() {
+                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                            target_id: 22, // Speculative ID for Booth Gain
+                            param_id: 0,
+                            value: self.booth_gain,
+                            ramp_duration_samples: 128,
+                        });
+                    }
                     ui.add_space(5.0);
                     let booth_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.booth_gain;
                     widgets::render_vu_meter(ui, booth_peak, booth_peak, egui::Color32::from_rgb(0, 180, 255), 40.0);
@@ -898,7 +905,14 @@ impl InspectorApp {
                 ui.vertical(|ui| {
                     ui.set_width(40.0);
                     ui.label(egui::RichText::new("REC").size(7.0).color(egui::Color32::from_gray(100)));
-                    widgets::render_knob(ui, &mut self.rec_gain, 0.0..=1.5, "", egui::Color32::from_rgb(0, 255, 200));
+                    if widgets::render_knob(ui, &mut self.rec_gain, 0.0..=1.5, "", egui::Color32::from_rgb(0, 255, 200)).changed() {
+                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                            target_id: 23, // Speculative ID for Rec Gain
+                            param_id: 0,
+                            value: self.rec_gain,
+                            ramp_duration_samples: 128,
+                        });
+                    }
                     ui.add_space(5.0);
                     let rec_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.rec_gain;
                     widgets::render_vu_meter(ui, rec_peak, rec_peak, egui::Color32::from_rgb(255, 50, 150), 40.0);
@@ -935,11 +949,10 @@ impl InspectorApp {
             ui.add_space(10.0);
 
             // CHANNEL STRIPS
-            ui.horizontal_centered(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);
+            ui.columns(4, |cols| {
                 for i in 0..4 {
-                    ui.vertical_centered(|ui| {
-                        ui.set_width(60.0);
+                    cols[i].vertical_centered(|ui| {
+                        ui.set_width(main_w / 4.0 - 10.0);
 
                         // GAIN / TRIM
                         if widgets::render_knob(ui, &mut self.channel_trims[i], 0.0..=2.0, "TRIM", Self::deck_color(i)).changed() {
@@ -984,7 +997,7 @@ impl InspectorApp {
 
                         // FADER & VU
                         ui.horizontal_centered(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
+                            ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
                             if widgets::render_fader(ui, &mut self.channel_faders[i], 0.0..=1.0, Self::deck_color(i)).changed() {
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                                     target_id: (i as u64 * 4 + 1),
