@@ -78,20 +78,24 @@ fn render_ascii(graph: &GraphJson) {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 enum View {
-    Studio,
-    Performance,
-    Mixer,
-    Sampler,
-    Modulation,
+    Player,
+    Console,
+    Composer,
+    Tools,
     Mastering,
     Broadcast,
-    Settings,
     Topology,
-    Arranger,
 }
 
+#[derive(Clone, Default)]
+pub struct Playlist {
+    pub name: String,
+    pub tracks: Vec<Track>,
+}
+
+#[derive(Clone, Default)]
 pub struct Track {
     pub title: String,
     pub artist: String,
@@ -111,9 +115,7 @@ pub struct InspectorApp {
     channel_eq_high: [f32; 4],
     channel_eq_mid: [f32; 4],
     channel_eq_low: [f32; 4],
-    channel_fx_enabled: [bool; 4],
-    channel_fx_select: [usize; 4],
-    channel_fx_amt: [f32; 4],
+    channel_fx_slots: [Vec<FxSlot>; 4],
     channel_cue: [bool; 4],
     channel_sync: [bool; 4],
     quantize_enabled: bool,
@@ -124,7 +126,7 @@ pub struct InspectorApp {
     library_db: nullherz_dna::LibraryDatabase,
     search_query: String,
     is_streaming: bool,
-    library_visible: bool,
+    active_right_tab: Option<RightTab>,
     selected_deck: usize,
     master_deck: Option<usize>,
     pitch_range: [f32; 4], // 0.08, 0.16, 1.0
@@ -155,6 +157,26 @@ pub struct InspectorApp {
     // Sequencer state
     sequencer_grid: [[bool; 64]; 16],
     sequencer_active_step: usize,
+
+    // Player & Playlist state
+    playlists: Vec<Playlist>,
+    selected_playlist: Option<usize>,
+    player_queue: Vec<Track>,
+    player_is_playing: bool,
+}
+
+#[derive(Clone, Default)]
+pub struct FxSlot {
+    pub effect_type: usize,
+    pub amount: f32,
+    pub enabled: bool,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum RightTab {
+    Library,
+    Settings,
+    Account,
 }
 
 impl InspectorApp {
@@ -237,15 +259,18 @@ impl InspectorApp {
             last_telemetry,
             sample_registry,
             command_sender: cmd_tx,
-            active_view: View::Studio,
+            active_view: View::Console,
             channel_faders: [0.8; 4],
             channel_trims: [1.0; 4],
             channel_eq_high: [1.0; 4],
             channel_eq_mid: [1.0; 4],
             channel_eq_low: [1.0; 4],
-            channel_fx_enabled: [false; 4],
-            channel_fx_select: [0; 4],
-            channel_fx_amt: [0.5; 4],
+            channel_fx_slots: [
+                vec![FxSlot { effect_type: 0, amount: 0.5, enabled: false }, FxSlot { effect_type: 1, amount: 0.2, enabled: false }],
+                vec![FxSlot { effect_type: 0, amount: 0.5, enabled: false }, FxSlot { effect_type: 1, amount: 0.2, enabled: false }],
+                vec![FxSlot { effect_type: 0, amount: 0.5, enabled: false }, FxSlot { effect_type: 1, amount: 0.2, enabled: false }],
+                vec![FxSlot { effect_type: 0, amount: 0.5, enabled: false }, FxSlot { effect_type: 1, amount: 0.2, enabled: false }],
+            ],
             channel_cue: [false; 4],
             channel_sync: [false; 4],
             quantize_enabled: true,
@@ -256,7 +281,7 @@ impl InspectorApp {
             library_db: nullherz_dna::LibraryDatabase::load("library.redb").expect("Failed to load library"),
             search_query: String::new(),
             is_streaming: false,
-            library_visible: true,
+            active_right_tab: Some(RightTab::Library),
             selected_deck: 0,
             master_deck: Some(0),
             pitch_range: [0.08; 4],
@@ -284,6 +309,13 @@ impl InspectorApp {
             mastering_limiter_lookahead: 0.5,
             sequencer_grid: [[false; 64]; 16],
             sequencer_active_step: 0,
+            playlists: vec![
+                Playlist { name: "Peak Hour".into(), tracks: vec![] },
+                Playlist { name: "Deep Tech".into(), tracks: vec![] },
+            ],
+            selected_playlist: None,
+            player_queue: vec![],
+            player_is_playing: false,
         }
     }
 
@@ -462,52 +494,41 @@ impl InspectorApp {
             ui.add_space(10.0);
             */
 
-            // FX RACK ROW
+            // FX RACK ROW (Multi-slot, compact)
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
                 for i in 0..4 {
-                    if i == 2 {
-                        ui.add_space(mixer_w); // Skip mixer column
-                    }
+                    if i == 2 { ui.add_space(mixer_w + 10.0); }
                     ui.vertical(|ui| {
                         ui.set_width(deck_w);
-                        egui::Frame::none().fill(egui::Color32::from_rgb(25, 25, 30)).rounding(4.0).inner_margin(8.0).show(ui, |ui| {
-                            ui.set_width(deck_w - 16.0); // Fit frame
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new(format!("FX {}", (b'A' + i as u8) as char)).small().strong().color(Self::deck_color(i)));
-                                let fx_select_res = egui::ComboBox::from_id_source(format!("fx_select_{}", i))
-                                    .selected_text(match self.channel_fx_select[i] {
-                                        0 => "DELAY",
-                                        1 => "REVERB",
-                                        2 => "FLANGER",
-                                        _ => "NONE",
-                                    })
-                                    .width(deck_w * 0.4)
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(&mut self.channel_fx_select[i], 0, "DELAY");
-                                        ui.selectable_value(&mut self.channel_fx_select[i], 1, "REVERB");
-                                        ui.selectable_value(&mut self.channel_fx_select[i], 2, "FLANGER");
-                                    });
+                        egui::Frame::none().fill(egui::Color32::from_rgb(15, 15, 18)).rounding(4.0).inner_margin(4.0).show(ui, |ui| {
+                            ui.set_width(deck_w - 8.0);
+                            egui::ScrollArea::vertical().max_height(80.0).show(ui, |ui| {
+                                let slot_count = self.channel_fx_slots[i].len();
+                                for s_idx in 0..slot_count {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
+                                        let slot = &mut self.channel_fx_slots[i][s_idx];
 
-                                if fx_select_res.response.changed() {
-                                    let processor_type_id = match self.channel_fx_select[i] {
-                                        0 => nullherz_traits::ProcessorTypeId(40), // Speculative Spectral Delay
-                                        1 => nullherz_traits::ProcessorTypeId(1),  // Speculative Biquad Reverb
-                                        _ => nullherz_traits::ProcessorTypeId(130), // SIMD Biquad Flanger
-                                    };
-                                    let _ = self.command_sender.send(nullherz_traits::Command::SwapProcessor {
-                                        node_idx: (i as u32 * 4 + 2),
-                                        processor_type_id,
+                                        ui.checkbox(&mut slot.enabled, "");
+
+                                        egui::ComboBox::from_id_source(format!("fx_sel_{}_{}", i, s_idx))
+                                            .selected_text(match slot.effect_type { 0 => "DLY", 1 => "RVB", 2 => "FLG", _ => "OFF" })
+                                            .width(60.0)
+                                            .show_ui(ui, |ui| {
+                                                ui.selectable_value(&mut slot.effect_type, 0, "DLY");
+                                                ui.selectable_value(&mut slot.effect_type, 1, "RVB");
+                                                ui.selectable_value(&mut slot.effect_type, 2, "FLG");
+                                            });
+
+                                        widgets::render_knob(ui, &mut slot.amount, 0.0..=1.0, "", Self::deck_color(i));
+
+                                        if ui.button("🗑").clicked() { /* logic to remove */ }
                                     });
+                                    if s_idx < slot_count - 1 { ui.separator(); }
                                 }
-
-                                if widgets::render_knob(ui, &mut self.channel_fx_amt[i], 0.0..=1.0, "AMT", Self::deck_color(i)).changed() {
-                                    let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                                        target_id: (i as u64 * 4 + 2),
-                                        param_id: 0,
-                                        value: self.channel_fx_amt[i],
-                                        ramp_duration_samples: 128,
-                                    });
+                                if ui.button("+ ADD FX").clicked() {
+                                    self.channel_fx_slots[i].push(FxSlot::default());
                                 }
                             });
                         });
@@ -865,7 +886,7 @@ impl InspectorApp {
 
                     ui.add_space(4.0);
                     let range = (1.0 - self.pitch_range[i])..=(1.0 + self.pitch_range[i]);
-                    let p_res = ui.add(egui::Slider::new(&mut self.pitch_bend[i], range).vertical().show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 4.0 }));
+                    let p_res = ui.add(egui::Slider::new(&mut self.pitch_bend[i], range).vertical().show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 8.0 }));
                     if p_res.changed() {
                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                             target_id: (i as u64 * 4),
@@ -945,58 +966,56 @@ impl InspectorApp {
 
                 ui.add_space(15.0);
 
+                ui.add_space(15.0);
+
+                // BOOTH CONTROL
                 ui.vertical(|ui| {
-                    ui.set_width(40.0);
-                    ui.label(egui::RichText::new("BOOTH").size(7.0).color(egui::Color32::from_gray(100)));
-                    if widgets::render_knob(ui, &mut self.booth_gain, 0.0..=1.5, "", egui::Color32::from_rgb(0, 255, 200)).changed() {
-                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                            target_id: 22, // Speculative ID for Booth Gain
-                            param_id: 0,
-                            value: self.booth_gain,
-                            ramp_duration_samples: 128,
-                        });
-                    }
-                    ui.add_space(5.0);
-                    let booth_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.booth_gain;
-                    widgets::render_vu_meter(ui, booth_peak, booth_peak, egui::Color32::from_rgb(0, 180, 255), 40.0);
+                    ui.label(egui::RichText::new("BOOTH").size(7.0).color(egui::Color32::from_gray(140)));
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
+                        if widgets::render_fader(ui, &mut self.booth_gain, 0.0..=1.5, egui::Color32::from_rgb(0, 180, 255), 100.0, 15.0).changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 22, param_id: 0, value: self.booth_gain, ramp_duration_samples: 128 });
+                        }
+                        let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.booth_gain;
+                        widgets::render_vu_meter(ui, peak * 0.9, peak * 0.9, egui::Color32::from_rgb(0, 180, 255), 100.0);
+                        widgets::render_vu_meter(ui, peak, peak, egui::Color32::from_rgb(0, 180, 255), 100.0);
+                    });
                 });
 
                 ui.add_space(10.0);
 
+                // REC CONTROL
                 ui.vertical(|ui| {
-                    ui.set_width(40.0);
-                    ui.label(egui::RichText::new("REC").size(7.0).color(egui::Color32::from_gray(100)));
-                    if widgets::render_knob(ui, &mut self.rec_gain, 0.0..=1.5, "", egui::Color32::from_rgb(0, 255, 200)).changed() {
-                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                            target_id: 23, // Speculative ID for Rec Gain
-                            param_id: 0,
-                            value: self.rec_gain,
-                            ramp_duration_samples: 128,
-                        });
-                    }
-                    ui.add_space(5.0);
-                    let rec_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.rec_gain;
-                    widgets::render_vu_meter(ui, rec_peak, rec_peak, egui::Color32::from_rgb(255, 50, 150), 40.0);
+                    ui.label(egui::RichText::new("REC").size(7.0).color(egui::Color32::from_gray(140)));
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
+                        if widgets::render_fader(ui, &mut self.rec_gain, 0.0..=1.5, egui::Color32::from_rgb(255, 50, 150), 100.0, 15.0).changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 23, param_id: 0, value: self.rec_gain, ramp_duration_samples: 128 });
+                        }
+                        let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.rec_gain;
+                        widgets::render_vu_meter(ui, peak * 0.85, peak * 0.85, egui::Color32::from_rgb(255, 50, 150), 100.0);
+                        widgets::render_vu_meter(ui, peak, peak, egui::Color32::from_rgb(255, 50, 150), 100.0);
+                    });
                 });
 
                 ui.add_space(15.0);
 
-                let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
-                if peak > self.master_peak_hold { self.master_peak_hold = peak; }
-                else { self.master_peak_hold *= 0.98; }
+                // MASTER CONTROL
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("MASTER").size(7.0).color(egui::Color32::from_gray(140)));
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
+                        if widgets::render_fader(ui, &mut self.master_gain, 0.0..=1.5, egui::Color32::from_rgb(0, 255, 180), 100.0, 20.0).changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.master_gain, ramp_duration_samples: 128 });
+                        }
+                        let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
+                        if peak > self.master_peak_hold { self.master_peak_hold = peak; }
+                        else { self.master_peak_hold *= 0.98; }
 
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
-                    for _ in 0..2 {
+                        widgets::render_vu_meter(ui, peak * 0.95, self.master_peak_hold * 0.95, egui::Color32::from_rgb(0, 255, 180), 100.0);
                         widgets::render_vu_meter(ui, peak, self.master_peak_hold, egui::Color32::from_rgb(0, 255, 180), 100.0);
-                    }
+                    });
                 });
-
-                ui.add_space(10.0);
-
-                if widgets::render_fader(ui, &mut self.master_gain, 0.0..=1.5, egui::Color32::from_rgb(0, 255, 180)).changed() {
-                    let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.master_gain, ramp_duration_samples: 128 });
-                }
             });
         });
     }
@@ -1051,16 +1070,12 @@ impl InspectorApp {
 
                         ui.add_space(12.0);
 
-                        // FX BUTTON
-                        let fx_color = if self.channel_fx_enabled[i] { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(40) };
+                        // FX SUMMARY / MASTER
+                        let fx_enabled = self.channel_fx_slots[i].iter().any(|s| s.enabled);
+                        let fx_color = if fx_enabled { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(40) };
                         if ui.add(egui::Button::new(egui::RichText::new("FX").color(fx_color).small().strong()).min_size(egui::vec2(40.0, 24.0))).clicked() {
-                            self.channel_fx_enabled[i] = !self.channel_fx_enabled[i];
-                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                                target_id: (i as u64 * 4 + 2),
-                                param_id: 999,
-                                value: if self.channel_fx_enabled[i] { 1.0 } else { 0.0 },
-                                ramp_duration_samples: 0,
-                            });
+                            // Toggle first slot for convenience or all? Let's just toggle all for now
+                            for slot in &mut self.channel_fx_slots[i] { slot.enabled = !fx_enabled; }
                         }
 
                         ui.add_space(12.0);
@@ -1076,7 +1091,7 @@ impl InspectorApp {
                             let left_pad = (strip_w - fader_w) / 2.0;
                             ui.add_space(left_pad);
 
-                            if widgets::render_fader(ui, &mut self.channel_faders[i], 0.0..=1.0, Self::deck_color(i)).changed() {
+                            if widgets::render_fader(ui, &mut self.channel_faders[i], 0.0..=1.0, Self::deck_color(i), 120.0, 30.0).changed() {
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                                     target_id: (i as u64 * 4 + 1),
                                     param_id: 0,
@@ -1180,16 +1195,13 @@ impl eframe::App for InspectorApp {
                     ui.add_space(30.0);
 
                     for (view, label, icon) in [
-                        (View::Studio, "STUDIO", "🎧"),
-                        (View::Performance, "STAGE", "✨"),
-                        (View::Mixer, "MIXER", "🎚"),
-                        (View::Sampler, "SAMPLER", "🎹"),
-                        (View::Modulation, "MOD MATRIX", "🔄"),
-                        (View::Mastering, "MASTERING", "💎"),
-                        (View::Broadcast, "BROADCAST", "📡"),
-                        (View::Settings, "SETTINGS", "⚙"),
-                        (View::Arranger, "ARRANGER", "📊"),
-                        (View::Topology, "TOPOLOGY", "🕸"),
+                        (View::Player, "PLAYER", "🎵"),
+                        (View::Console, "CONSOLE", "🎚"),
+                        (View::Composer, "COMPOSER", "🎹"),
+                        (View::Tools, "TOOLS", "🔧"),
+                        (View::Mastering, "MASTER", "💎"),
+                        (View::Broadcast, "LIVE", "📡"),
+                        (View::Topology, "NODES", "🕸"),
                     ] {
                         let is_active = self.active_view == view;
                         let color = if is_active { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(100) };
@@ -1208,37 +1220,83 @@ impl eframe::App for InspectorApp {
                         ui.add_space(15.0);
                     }
 
-                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                        ui.add_space(10.0);
-                        if ui.add(egui::Button::new(egui::RichText::new(if self.library_visible { "📁" } else { "📂" }).size(20.0)).frame(false)).clicked() {
-                            self.library_visible = !self.library_visible;
-                        }
-                    });
                 });
             });
 
-        // COLLAPSIBLE LIBRARY SIDEBAR
-        if self.library_visible {
-            egui::SidePanel::right("library_panel")
-                .frame(egui::Frame::none().fill(egui::Color32::from_rgb(12, 12, 14)))
-                .width_range(250.0..=350.0)
+        // RIGHT-ALIGNED UTILITY NAVIGATION
+        egui::SidePanel::right("utility_panel")
+            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(8, 8, 10)).inner_margin(12.0))
+            .width_range(60.0..=60.0)
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(10.0);
+                    for (tab, label, icon) in [
+                        (RightTab::Library, "LIBRARY", "📁"),
+                        (RightTab::Settings, "SETTINGS", "⚙"),
+                        (RightTab::Account, "ACCOUNT", "👤"),
+                    ] {
+                        let is_active = self.active_right_tab == Some(tab);
+                        let color = if is_active { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(100) };
+                        let (rect, res) = ui.allocate_exact_size(egui::vec2(40.0, 40.0), egui::Sense::click());
+                        if res.clicked() {
+                            if is_active { self.active_right_tab = None; }
+                            else { self.active_right_tab = Some(tab); }
+                        }
+                        if is_active {
+                             ui.painter().rect_filled(rect.expand(2.0), 4.0, color.linear_multiply(0.05));
+                             ui.painter().vline(rect.max.x + 8.0, rect.y_range(), egui::Stroke::new(2.0, color));
+                        }
+                        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, icon, egui::FontId::proportional(20.0), color);
+                        res.on_hover_text(label);
+                        ui.add_space(15.0);
+                    }
+                });
+            });
+
+        if let Some(tab) = self.active_right_tab {
+            egui::SidePanel::right("right_sidebar")
+                .frame(egui::Frame::none().fill(egui::Color32::from_rgb(12, 12, 14)).inner_margin(12.0))
+                .width_range(280.0..=400.0)
                 .show(ctx, |ui| {
-                    views::library::render(self, ui);
+                    match tab {
+                        RightTab::Library => views::library::render(self, ui),
+                        RightTab::Settings => views::settings::render(self, ui),
+                        RightTab::Account => { ui.heading("Account"); ui.label("User Profile & Statistics"); },
+                    }
                 });
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             match self.active_view {
-                View::Studio => self.render_dj_studio(ui, &telemetry),
-                View::Performance => self.render_performance_mode(ui, &telemetry),
-                View::Mixer => views::mixer::render(self, ui, &telemetry),
-                View::Sampler => views::sampler::render(self, ui, &telemetry),
-                View::Modulation => views::modulation::render(self, ui, &telemetry),
-                View::Topology => views::topology::render(self, ui, &telemetry),
+                View::Player => { ui.heading("Player"); ui.label("Hi-Fi Music Player & Playlists"); },
+                View::Console => self.render_dj_studio(ui, &telemetry),
+                View::Composer => views::sampler::render(self, ui, &telemetry),
+                View::Tools => {
+                    ui.heading("Precision Audio Tools");
+                    ui.add_space(20.0);
+                    ui.columns(3, |cols| {
+                        cols[0].group(|ui| {
+                            ui.strong("Instrument Tuner");
+                            ui.label("Cents: +1.2");
+                            ui.label("Frequency: 441.2 Hz");
+                            ui.add(egui::ProgressBar::new(0.51).text("IN TUNE"));
+                        });
+                        cols[1].group(|ui| {
+                            ui.strong("Sample Editor");
+                            ui.label("Crop & Normalize");
+                            let _ = ui.button("✂ CROP");
+                            let _ = ui.button("🔊 NORMALIZE");
+                        });
+                        cols[2].group(|ui| {
+                            ui.strong("File Inspector");
+                            ui.label("WAV / 24-bit / 48kHz");
+                            let _ = ui.button("Metadata");
+                        });
+                    });
+                },
                 View::Mastering => views::mastering::render(self, ui, &telemetry),
                 View::Broadcast => views::broadcast::render(self, ui),
-                View::Settings => views::settings::render(self, ui),
-                View::Arranger => self.render_arranger(ui, &telemetry),
+                View::Topology => views::topology::render(self, ui, &telemetry),
             }
         });
 

@@ -107,8 +107,8 @@ pub fn render_vu_meter(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Col
     }
 }
 
-pub fn render_fader(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, accent_color: Color32) -> Response {
-    let desired_size = Vec2::new(24.0, 120.0);
+pub fn render_fader(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, accent_color: Color32, height: f32, handle_h: f32) -> Response {
+    let desired_size = Vec2::new(24.0, height);
     let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::drag());
 
     if response.dragged() {
@@ -126,14 +126,14 @@ pub fn render_fader(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusiv
         // Scale Ticks
         for i in 0..=10 {
             let y = rect.min.y + (i as f32 * rect.height() / 10.0);
-            let w = if i % 5 == 0 { 10.0 } else { 5.0 };
+            let w = if i % 5 == 0 { 8.0 } else { 4.0 };
             ui.painter().hline(rect.center().x - w..=rect.center().x + w, y, Stroke::new(0.5, Color32::from_gray(50)));
         }
 
         // Handle
         let normalized = (*value - *range.start()) / (*range.end() - *range.start());
         let handle_y = rect.max.y - (normalized * rect.height());
-        let handle_size = Vec2::new(20.0, 30.0);
+        let handle_size = Vec2::new(20.0, handle_h);
         let handle_rect = Rect::from_center_size(egui::pos2(rect.center().x, handle_y), handle_size);
 
         // Handle Body
@@ -144,8 +144,10 @@ pub fn render_fader(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusiv
         ui.painter().hline(handle_rect.x_range(), handle_rect.center().y, Stroke::new(2.0, accent_color));
 
         // Grip lines
-        for i in [-1.0, 1.0] {
-             ui.painter().hline(handle_rect.center().x - 4.0..=handle_rect.center().x + 4.0, handle_rect.center().y + i * 6.0, Stroke::new(1.0, Color32::from_gray(60)));
+        if handle_h > 15.0 {
+            for i in [-1.0, 1.0] {
+                 ui.painter().hline(handle_rect.center().x - 4.0..=handle_rect.center().x + 4.0, handle_rect.center().y + i * (handle_h / 4.0), Stroke::new(1.0, Color32::from_gray(60)));
+            }
         }
     }
 
