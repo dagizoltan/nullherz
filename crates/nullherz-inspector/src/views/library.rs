@@ -1,4 +1,4 @@
-use egui::{Color32, RichText, Ui, Frame, ScrollArea, Layout, Align, Stroke};
+use egui::{Color32, RichText, Ui, ScrollArea, Layout, Align, Stroke};
 use crate::InspectorApp;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
