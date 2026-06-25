@@ -1,8 +1,8 @@
 use egui::{Color32, Rect, Response, Sense, Stroke, Ui, Vec2, Align2, FontId, lerp};
 
 pub fn render_knob(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, label: &str, accent_color: Color32) -> Response {
-    let knob_size = 40.0;
-    let label_height = if label.is_empty() { 0.0 } else { 12.0 };
+    let knob_size = 42.0;
+    let label_height = if label.is_empty() { 0.0 } else { 18.0 };
     let size = Vec2::new(knob_size, knob_size + label_height);
     let (rect, mut response) = ui.allocate_exact_size(size, Sense::drag());
 
@@ -57,11 +57,11 @@ pub fn render_knob(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive
 
         if !label.is_empty() {
             ui.painter().text(
-                rect.center_bottom() - Vec2::new(0.0, 1.0),
-                Align2::CENTER_BOTTOM,
+                rect.center_bottom() + Vec2::new(0.0, 4.0),
+                Align2::CENTER_TOP,
                 label,
-                FontId::proportional(8.0),
-                Color32::from_gray(140)
+                FontId::proportional(9.0),
+                Color32::from_gray(200)
             );
         }
     }
