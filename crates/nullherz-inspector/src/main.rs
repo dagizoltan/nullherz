@@ -324,8 +324,8 @@ impl InspectorApp {
     }
 
 
-    fn render_oscillator_monitor(&self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 160.0), egui::Sense::hover());
+    fn render_oscillator_monitor(&self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>, width: f32) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 160.0), egui::Sense::hover());
         ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(5, 5, 6));
         ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(20)));
 
@@ -433,17 +433,17 @@ impl InspectorApp {
     fn render_dj_studio(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
         let total_w = ui.available_width();
         let mixer_w = 320.0;
-        let deck_w = (total_w - mixer_w - 48.0) / 4.0;
+        let deck_w = (total_w - mixer_w - 40.0) / 4.0;
         let widget_h = 600.0;
 
         ui.vertical(|ui| {
             ui.set_width(total_w);
             ui.add_space(5.0);
 
-            // TOP: OSCILLATOR
+            // TOP: WIDE OSCILLATOR
             ui.vertical(|ui| {
-                ui.set_width(ui.available_width());
-                self.render_oscillator_monitor(ui, telemetry);
+                ui.set_width(total_w);
+                self.render_oscillator_monitor(ui, telemetry, total_w);
             });
             ui.add_space(10.0);
 
@@ -513,10 +513,12 @@ impl InspectorApp {
         ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(if is_selected { 3.0 } else { 1.0 }, stroke_color));
         ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(10, 10, 12));
 
-        ui.child_ui(rect, egui::Layout::top_down(egui::Align::Center)).vertical(|ui| {
-            ui.add_space(10.0);
+        let inner_rect = rect.shrink2(egui::vec2(10.0, 40.0));
+        ui.allocate_ui_at_rect(inner_rect, |ui| {
+            ui.vertical(|ui| {
+                ui.add_space(4.0);
 
-            // DECK INFO HEADER FRAME
+                // DECK INFO HEADER FRAME
             egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(4.0).show(ui, |ui| {
                 ui.set_width(ui.available_width() - 16.0);
                 ui.vertical(|ui| {
@@ -675,7 +677,7 @@ impl InspectorApp {
             ui.columns(3, |cols| {
                 // COL 0: TRANSPORT
                 cols[0].with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    ui.add_space(10.0);
+                    ui.add_space(5.0);
                     let play_color = egui::Color32::from_rgb(0, 255, 100);
                     let play_btn = egui::Button::new(egui::RichText::new("PLAY").color(play_color).strong())
                         .min_size(egui::vec2(ui.available_width(), 40.0))
@@ -743,8 +745,12 @@ impl InspectorApp {
                     }
 
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                        ui.add_space(5.0);
+                        let pct = (self.pitch_bend[i] - 1.0) * 100.0;
+                        ui.label(egui::RichText::new(format!("{:+.1}%", pct)).size(9.0).monospace().strong().color(color));
+
                         let range = 0.92..=1.08; // Fixed +-8%
-                        let p_res = widgets::render_fader(ui, &mut self.pitch_bend[i], range, color, 180.0, 12.0);
+                        let p_res = widgets::render_fader(ui, &mut self.pitch_bend[i], range, color, 80.0, 12.0);
                         if p_res.changed() {
                             let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                                 target_id: (i as u64 * 4),
@@ -753,14 +759,11 @@ impl InspectorApp {
                                 ramp_duration_samples: 128,
                             });
                         }
-
-                        let pct = (self.pitch_bend[i] - 1.0) * 100.0;
-                        ui.label(egui::RichText::new(format!("{:+.1}%", pct)).size(9.0).monospace().strong().color(color));
-                        ui.add_space(10.0);
                     });
                 });
             });
         });
+    });
     }
 
 
@@ -859,120 +862,124 @@ impl InspectorApp {
         ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(15, 15, 18));
         ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(30)));
 
-        let inner_rect = rect.shrink2(egui::vec2(8.0, 12.0));
+        let inner_rect = rect.shrink2(egui::vec2(8.0, 40.0));
         ui.allocate_ui_at_rect(inner_rect, |ui| {
-            // CHANNEL STRIPS
-            ui.columns(4, |cols| {
-                let col_w = inner_rect.width() / 4.0;
-                for i in 0..4 {
-                    cols[i].vertical_centered(|ui| {
-                        ui.set_width(col_w);
-                        ui.add_space(4.0);
-
-                        // CHANNEL HEADER
-                        egui::Frame::none().fill(Self::deck_color(i).linear_multiply(0.2)).rounding(2.0).inner_margin(4.0).show(ui, |ui| {
-                            ui.set_width(col_w - 8.0);
-                            ui.label(egui::RichText::new(format!("CH {}", i + 1)).strong().color(Self::deck_color(i)));
-                        });
-                        ui.add_space(10.0);
-
-                        // GAIN / TRIM
-                        if widgets::render_knob(ui, &mut self.channel_trims[i], 0.0..=2.0, "TRIM", Self::deck_color(i)).changed() {
-                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                                target_id: (i as u64 * 4 + 1),
-                                param_id: 0,
-                                value: self.channel_trims[i] * self.channel_faders[i],
-                                ramp_duration_samples: 128,
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                // GLOBAL CROSSFADER (at bottom)
+                egui::Frame::none()
+                    .fill(egui::Color32::from_rgb(10, 10, 12))
+                    .rounding(4.0)
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(30)))
+                    .inner_margin(8.0)
+                    .show(ui, |ui| {
+                        ui.set_width(inner_rect.width() - 4.0);
+                        ui.vertical_centered(|ui| {
+                            ui.horizontal(|ui| {
+                                let total_w = ui.available_width();
+                                ui.add_space(total_w / 2.0 - 35.0);
+                                ui.label(egui::RichText::new("X-FADE").small().strong().color(egui::Color32::from_gray(100)));
+                                if ui.add(egui::Button::new(if self.crossfader_curve > 0.5 { "POWER" } else { "LIN" }).small()).clicked() {
+                                    self.crossfader_curve = if self.crossfader_curve > 0.5 { 0.0 } else { 1.0 };
+                                    for target_id in [16, 17] {
+                                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id, param_id: 1, value: self.crossfader_curve, ramp_duration_samples: 0 });
+                                    }
+                                }
                             });
-                        }
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("A").color(egui::Color32::from_rgb(0, 200, 255)));
+                                let total_w = ui.available_width();
+                                let x_res = widgets::render_horizontal_fader(ui, &mut self.crossfader_pos, 0.0..=1.0, egui::Color32::WHITE, total_w - 25.0, 30.0);
+                                if x_res.changed() {
+                                    for target_id in [16, 17] {
+                                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id, param_id: 0, value: self.crossfader_pos, ramp_duration_samples: 0 });
+                                    }
+                                }
+                                ui.label(egui::RichText::new("B").color(egui::Color32::from_rgb(0, 255, 150)));
+                            });
+                        });
+                    });
 
-                        ui.add_space(10.0);
+                ui.add_space(8.0);
 
-                        // HI / MID / LOW
-                        for (label, param_idx, state_val) in [("HI", 2, &mut self.channel_eq_high[i]), ("MID", 1, &mut self.channel_eq_mid[i]), ("LOW", 0, &mut self.channel_eq_low[i])] {
-                            if widgets::render_knob(ui, state_val, 0.0..=2.0, label, Self::deck_color(i)).changed() {
+                // CHANNEL STRIPS (filling top)
+                ui.columns(4, |cols| {
+                    let col_w = inner_rect.width() / 4.0;
+                    for i in 0..4 {
+                        cols[i].vertical_centered(|ui| {
+                            ui.set_width(col_w);
+                            ui.add_space(2.0);
+
+                            // CHANNEL HEADER
+                            egui::Frame::none().fill(Self::deck_color(i).linear_multiply(0.2)).rounding(2.0).inner_margin(4.0).show(ui, |ui| {
+                                ui.set_width(col_w - 8.0);
+                                ui.label(egui::RichText::new(format!("CH {}", i + 1)).strong().color(Self::deck_color(i)));
+                            });
+                            ui.add_space(6.0);
+
+                            // GAIN / TRIM
+                            if widgets::render_knob(ui, &mut self.channel_trims[i], 0.0..=2.0, "TRIM", Self::deck_color(i)).changed() {
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                                    target_id: (i as u64 * 4 + 3),
-                                    param_id: param_idx,
-                                    value: *state_val,
-                                    ramp_duration_samples: 0,
+                                    target_id: (i as u64 * 4 + 1),
+                                    param_id: 0,
+                                    value: self.channel_trims[i] * self.channel_faders[i],
+                                    ramp_duration_samples: 128,
                                 });
                             }
-                            ui.add_space(10.0);
-                        }
 
-                        ui.add_space(10.0);
+                            ui.add_space(6.0);
 
-                        // FX SUMMARY / MASTER
-                        let fx_enabled = self.channel_fx_slots[i].iter().any(|s| s.enabled);
-                        let fx_color = if fx_enabled { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(40) };
-                        if ui.add(egui::Button::new(egui::RichText::new("FX").color(fx_color).small().strong()).min_size(egui::vec2(40.0, 20.0))).clicked() {
-                            for slot in &mut self.channel_fx_slots[i] { slot.enabled = !fx_enabled; }
-                        }
-
-                        // FADER & VU at the bottom
-                        ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                            ui.add_space(5.0);
-                            ui.horizontal(|ui| {
-                                let fader_w = 24.0;
-                                let spacing = 8.0;
-                                let left_pad = (col_w - fader_w - 16.0 - spacing) / 2.0;
-                                ui.add_space(left_pad.max(0.0));
-
-                                if widgets::render_fader(ui, &mut self.channel_faders[i], 0.0..=1.0, Self::deck_color(i), 220.0, 30.0).changed() {
+                            // HI / MID / LOW
+                            for (label, param_idx, state_val) in [("HI", 2, &mut self.channel_eq_high[i]), ("MID", 1, &mut self.channel_eq_mid[i]), ("LOW", 0, &mut self.channel_eq_low[i])] {
+                                if widgets::render_knob(ui, state_val, 0.0..=2.0, label, Self::deck_color(i)).changed() {
                                     let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                                        target_id: (i as u64 * 4 + 1),
-                                        param_id: 0,
-                                        value: self.channel_trims[i] * self.channel_faders[i],
-                                        ramp_duration_samples: 128,
+                                        target_id: (i as u64 * 4 + 3),
+                                        param_id: param_idx,
+                                        value: *state_val,
+                                        ramp_duration_samples: 0,
                                     });
                                 }
+                                ui.add_space(6.0);
+                            }
 
-                                ui.add_space(spacing);
-                                let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1].min(1.2));
-                                if peak > self.channel_peak_hold[i] { self.channel_peak_hold[i] = peak; }
-                                else { self.channel_peak_hold[i] *= 0.98; }
-                                widgets::render_vu_meter(ui, peak, self.channel_peak_hold[i], egui::Color32::from_rgb(0, 255, 180), 220.0);
+                            ui.add_space(6.0);
+
+                            // FX SUMMARY / MASTER
+                            let fx_enabled = self.channel_fx_slots[i].iter().any(|s| s.enabled);
+                            let fx_color = if fx_enabled { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(40) };
+                            if ui.add(egui::Button::new(egui::RichText::new("FX").color(fx_color).small().strong()).min_size(egui::vec2(40.0, 18.0))).clicked() {
+                                for slot in &mut self.channel_fx_slots[i] { slot.enabled = !fx_enabled; }
+                            }
+
+                            // FADER & VU at the bottom of the strip
+                            ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                                ui.add_space(2.0);
+                                ui.horizontal(|ui| {
+                                    let fader_w = 24.0;
+                                    let spacing = 8.0;
+                                    let left_pad = (col_w - fader_w - 16.0 - spacing) / 2.0;
+                                    ui.add_space(left_pad.max(0.0));
+
+                                    if widgets::render_fader(ui, &mut self.channel_faders[i], 0.0..=1.0, Self::deck_color(i), 80.0, 30.0).changed() {
+                                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                                            target_id: (i as u64 * 4 + 1),
+                                            param_id: 0,
+                                            value: self.channel_trims[i] * self.channel_faders[i],
+                                            ramp_duration_samples: 128,
+                                        });
+                                    }
+
+                                    ui.add_space(spacing);
+                                    let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1].min(1.2));
+                                    if peak > self.channel_peak_hold[i] { self.channel_peak_hold[i] = peak; }
+                                    else { self.channel_peak_hold[i] *= 0.98; }
+                                    widgets::render_vu_meter(ui, peak, self.channel_peak_hold[i], egui::Color32::from_rgb(0, 255, 180), 80.0);
+                                });
                             });
                         });
-                    });
-                }
-            });
-
-            // GLOBAL CROSSFADER
-            egui::Frame::none()
-                .fill(egui::Color32::from_rgb(10, 10, 12))
-                .rounding(4.0)
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(30)))
-                .inner_margin(8.0)
-                .show(ui, |ui| {
-                    ui.set_width(main_w - 20.0);
-                    ui.vertical_centered(|ui| {
-                        ui.horizontal(|ui| {
-                            let total_w = ui.available_width();
-                            ui.add_space(total_w / 2.0 - 35.0);
-                            ui.label(egui::RichText::new("X-FADE").small().strong().color(egui::Color32::from_gray(100)));
-                            if ui.add(egui::Button::new(if self.crossfader_curve > 0.5 { "POWER" } else { "LIN" }).small()).clicked() {
-                                self.crossfader_curve = if self.crossfader_curve > 0.5 { 0.0 } else { 1.0 };
-                                for target_id in [16, 17] {
-                                    let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id, param_id: 1, value: self.crossfader_curve, ramp_duration_samples: 0 });
-                                }
-                            }
-                        });
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("A").color(egui::Color32::from_rgb(0, 200, 255)));
-                            let total_w = ui.available_width();
-                            let x_res = widgets::render_horizontal_fader(ui, &mut self.crossfader_pos, 0.0..=1.0, egui::Color32::WHITE, total_w - 25.0, 30.0);
-                            if x_res.changed() {
-                                for target_id in [16, 17] {
-                                    let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id, param_id: 0, value: self.crossfader_pos, ramp_duration_samples: 0 });
-                                }
-                            }
-                            ui.label(egui::RichText::new("B").color(egui::Color32::from_rgb(0, 255, 150)));
-                        });
-                    });
+                    }
                 });
+            });
         });
     }
 
