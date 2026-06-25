@@ -121,6 +121,8 @@ pub struct InspectorApp {
     now_playing: [Option<String>; 4],
     global_bpm: f32,
     pitch_bend: [f32; 4],
+    macros: [f32; 8],
+    macro_names: [String; 8],
 
     // Peak hold
     channel_peak_hold: [f32; 4],
@@ -286,6 +288,11 @@ impl InspectorApp {
             now_playing: [None, None, None, None],
             global_bpm: 128.0,
             pitch_bend: [1.0; 4],
+            macros: [0.0; 8],
+            macro_names: [
+                "MACRO 1".to_string(), "MACRO 2".to_string(), "MACRO 3".to_string(), "MACRO 4".to_string(),
+                "MACRO 5".to_string(), "MACRO 6".to_string(), "MACRO 7".to_string(), "MACRO 8".to_string(),
+            ],
             channel_peak_hold: [0.0; 4],
             master_peak_hold: 0.0,
             mastering_eq_enabled: true,
@@ -416,7 +423,28 @@ impl InspectorApp {
 
             // TOP: FULLSCREEN WIDE OSCILLATOR MONITOR
             self.render_oscillator_monitor(ui, telemetry);
-            ui.add_space(15.0);
+            ui.add_space(10.0);
+
+            // MACRO ROW
+            ui.horizontal(|ui| {
+                ui.add_space(10.0);
+                ui.label(egui::RichText::new("MACROS").small().strong().color(egui::Color32::from_gray(120)));
+                ui.add_space(20.0);
+                for i in 0..8 {
+                    ui.vertical(|ui| {
+                        ui.set_width(60.0);
+                        if Self::render_knob(ui, &mut self.macros[i], 0.0..=1.0, "").changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetMacro {
+                                macro_id: i as u32,
+                                value: self.macros[i],
+                            });
+                        }
+                        ui.label(egui::RichText::new(&self.macro_names[i]).size(7.0).color(egui::Color32::from_gray(100)));
+                    });
+                    ui.add_space(10.0);
+                }
+            });
+            ui.add_space(10.0);
 
             // PERFORMANCE ROW: A, B, MIXER, C, D
             ui.horizontal_top(|ui| {

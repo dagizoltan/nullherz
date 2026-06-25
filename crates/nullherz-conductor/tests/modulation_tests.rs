@@ -15,12 +15,14 @@ fn test_macro_modulation_expansion() {
             target_id: 10,
             param_id: 1,
             scaling: 2.0,
+            ramp_duration_samples: 128,
         },
         Command::AddModMapping {
             macro_id: 0,
             target_id: 20,
             param_id: 3,
             scaling: 0.5,
+            ramp_duration_samples: 0,
         },
     ];
     conductor.apply_mixer_commands(commands);
@@ -67,7 +69,7 @@ fn test_macro_modulation_expansion() {
 #[test]
 fn test_modulation_matrix_persistence() {
     let mut conductor = Conductor::with_library_path("test_lib_2.redb");
-    conductor.modulation_matrix.add_mapping(1, 100, 5, 1.5);
+    conductor.modulation_matrix.add_mapping(1, 100, 5, 1.5, 256);
 
     let test_path = "test_mod_project.json";
     conductor.save_project(test_path).unwrap();

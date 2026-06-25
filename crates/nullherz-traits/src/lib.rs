@@ -141,6 +141,7 @@ pub enum Command {
         target_id: u64,
         param_id: u32,
         scaling: f32,
+        ramp_duration_samples: u32,
     },
     RemoveModMapping {
         macro_id: u32,

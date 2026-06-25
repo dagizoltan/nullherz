@@ -70,3 +70,41 @@ async fn test_analysis_pipeline() {
 
     let _ = std::fs::remove_file(db_path);
 }
+
+#[tokio::test]
+async fn test_root_key_detection() {
+    let sample_registry = Arc::new(SampleRegistry::new());
+
+    // Generate a 440Hz Sine Wave (Note A)
+    let sample_rate = 44100;
+    let freq = 440.0;
+    let mut buffer = vec![0.0f32; sample_rate * 2]; // 2 seconds
+    for i in 0..buffer.len() {
+        buffer[i] = (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate as f32).sin();
+    }
+
+    let sample_id = 999;
+    sample_registry.register(sample_id, Arc::new(buffer));
+
+    let worker = nullherz_conductor::analysis_worker::AnalysisWorker::new(sample_registry.clone());
+
+    // Use the internal detect_root_key via a registry update and wait for background thread if we used start(),
+    // but for unit test we can just call the logic via a hack or by making it public.
+    // Given the current structure, we'll wait for the background analysis.
+    worker.start();
+
+    let mut detected_key = None;
+    for _ in 0..20 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if let Some(sample) = sample_registry.get(sample_id) {
+            if let Some(key) = sample.metadata.root_key {
+                detected_key = Some(key);
+                break;
+            }
+        }
+    }
+
+    assert!(detected_key.is_some(), "Root key should be detected");
+    // 440Hz is A. Pitch class for A is 9 (0=C, 1=C#, 2=D, 3=D#, 4=E, 5=F, 6=F#, 7=G, 8=G#, 9=A, 10=A#, 11=B)
+    assert_eq!(detected_key.unwrap() as i32, 9);
+}
