@@ -132,10 +132,20 @@ pub struct InspectorApp {
 
     // Mastering chain state
     mastering_eq_enabled: bool,
+    mastering_eq_low: f32,
+    mastering_eq_mid: f32,
+    mastering_eq_high: f32,
     mastering_comp_enabled: bool,
+    mastering_comp_threshold: f32,
+    mastering_comp_ratio: f32,
+    mastering_comp_attack: f32,
     mastering_limiter_enabled: bool,
     mastering_limiter_gain: f32,
-    mastering_comp_threshold: f32,
+    mastering_limiter_lookahead: f32,
+
+    // Sequencer state
+    sequencer_grid: [[bool; 64]; 16],
+    sequencer_active_step: usize,
 }
 
 impl InspectorApp {
@@ -249,10 +259,18 @@ impl InspectorApp {
             channel_peak_hold: [0.0; 4],
             master_peak_hold: 0.0,
             mastering_eq_enabled: true,
+            mastering_eq_low: 1.0,
+            mastering_eq_mid: 1.0,
+            mastering_eq_high: 1.0,
             mastering_comp_enabled: true,
+            mastering_comp_threshold: 0.5,
+            mastering_comp_ratio: 0.5,
+            mastering_comp_attack: 0.2,
             mastering_limiter_enabled: false,
             mastering_limiter_gain: 1.0,
-            mastering_comp_threshold: 0.5,
+            mastering_limiter_lookahead: 0.5,
+            sequencer_grid: [[false; 64]; 16],
+            sequencer_active_step: 0,
         }
     }
 
@@ -488,19 +506,68 @@ impl InspectorApp {
     }
 
     fn render_topology(&self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
-        ui.heading("Engine Topology");
+        ui.heading("Engine Topology & Performance Heatmap");
         ui.add_space(10.0);
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::hover());
-        let painter = ui.painter();
+
+        // PERFORMANCE HEATMAP RULER
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 2.0, egui::Color32::from_rgb(10, 10, 12));
+
         let cell_w = rect.width() / 64.0;
         for i in 0..64 {
-            let load = telemetry.as_ref().map_or(0.0, |t| (t.node_times_ns[i] as f32 / 500000.0).min(1.0));
-            painter.rect_filled(egui::Rect::from_min_size(rect.min + egui::vec2(i as f32 * cell_w, 0.0), egui::vec2(cell_w, 24.0)), 0.0, egui::Color32::from_rgb((load * 255.0) as u8, (255.0 * (1.0 - load)) as u8, 100));
+            let load = telemetry.as_ref().map_or(0.0, |t| (t.node_times_ns[i] as f32 / 1_000_000.0).min(1.0)); // 1ms scale
+            let color = if load > 0.8 {
+                egui::Color32::from_rgb(255, 50, 50)
+            } else if load > 0.4 {
+                egui::Color32::from_rgb(255, 150, 0)
+            } else if load > 0.01 {
+                egui::Color32::from_rgb(0, 255, 150)
+            } else {
+                egui::Color32::from_gray(20)
+            };
+
+            let cell_rect = egui::Rect::from_min_size(rect.min + egui::vec2(i as f32 * cell_w, 0.0), egui::vec2(cell_w - 1.0, 32.0));
+            ui.painter().rect_filled(cell_rect, 1.0, color);
+
+            if ui.rect_contains_pointer(cell_rect) {
+                egui::show_tooltip(ui.ctx(), egui::Id::new("node_tooltip"), |ui| {
+                    ui.label(format!("Node {}: {:.3} ms", i, load));
+                });
+            }
         }
         ui.add_space(20.0);
+
         egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+
             for (i, node) in self.graph.nodes.iter().enumerate() {
-                ui.label(format!("Node {:02}: In {:?} Out {:?}", i, node.inputs, node.outputs));
+                let load = telemetry.as_ref().map_or(0.0, |t| t.node_times_ns[i] as f32 / 1_000_000.0);
+                let color = if load > 0.8 { egui::Color32::RED } else { egui::Color32::from_gray(150) };
+
+                egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).rounding(2.0).inner_margin(8.0).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(egui::RichText::new(format!("NODE {:02}", i)).strong().color(color));
+                        ui.add_space(20.0);
+
+                        ui.label(egui::RichText::new("INPUTS").small().color(egui::Color32::from_gray(80)));
+                        ui.label(format!("{:?}", node.inputs));
+
+                        ui.label(egui::RichText::new("OUTPUTS").small().color(egui::Color32::from_gray(80)));
+                        ui.label(format!("{:?}", node.outputs));
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new(format!("{:.3} ms", load)).monospace().color(color));
+
+                            // Load bar
+                            let (bar_rect, _) = ui.allocate_exact_size(egui::vec2(100.0, 8.0), egui::Sense::hover());
+                            ui.painter().rect_filled(bar_rect, 4.0, egui::Color32::from_gray(30));
+                            let fill_w = load.min(1.0) * 100.0;
+                            ui.painter().rect_filled(egui::Rect::from_min_size(bar_rect.min, egui::vec2(fill_w, 8.0)), 4.0, color);
+                        });
+                    });
+                });
+                ui.add_space(4.0);
             }
         });
     }
@@ -956,80 +1023,186 @@ impl InspectorApp {
         });
     }
 
-    fn render_sampler(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Production Sampler");
+    fn render_sampler(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
+        ui.horizontal(|ui| {
+            ui.heading("Production Sampler");
+            ui.add_space(20.0);
+            ui.label(egui::RichText::new("GRID SEQUENCER (16x64)").color(egui::Color32::from_gray(100)));
+        });
         ui.add_space(10.0);
-        ui.columns(2, |cols| {
-            cols[0].group(|ui| {
-                ui.strong("SAMPLE BANK");
-                if let Ok(tracks) = self.library_db.list_tracks() {
-                    for track in tracks { ui.label(&track.title); }
-                }
+
+        if let Some(t) = telemetry {
+            // Assume 44100 Hz, 120 BPM (0.5s per beat), 1/16th note = 0.125s = 5512.5 samples
+            // For a more robust solution, we'd use global_bpm, but let's approximate:
+            let samples_per_step = (44100.0 * 60.0 / self.global_bpm / 4.0) as u64;
+            self.sequencer_active_step = (t.sample_counter / samples_per_step.max(1)) as usize % 64;
+        } else {
+             let time = ui.input(|i| i.time);
+             self.sequencer_active_step = (time * 8.0) as usize % 64;
+        }
+
+        egui::Frame::none().fill(egui::Color32::from_rgb(10, 10, 12)).rounding(4.0).inner_margin(12.0).show(ui, |ui| {
+            egui::ScrollArea::both().show(ui, |ui| {
+                ui.vertical(|ui| {
+                    for row in 0..16 {
+                        ui.horizontal(|ui| {
+                            ui.set_height(20.0);
+                            let track_color = if row % 4 == 0 { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(60) };
+                            ui.label(egui::RichText::new(format!("TRK {:02}", row+1)).color(track_color).size(10.0).monospace());
+                            ui.add_space(10.0);
+
+                            for step in 0..64 {
+                                let (rect, res) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::click());
+                                if res.clicked() {
+                                    self.sequencer_grid[row][step] = !self.sequencer_grid[row][step];
+                                    let _ = self.command_sender.send(nullherz_traits::Command::SetSequencerStep {
+                                        node_idx: 100, // Target default sequencer node
+                                        track: row as u32,
+                                        step: step as u32,
+                                        value: self.sequencer_grid[row][step],
+                                    });
+                                }
+
+                                let is_active = self.sequencer_grid[row][step];
+                                let is_current = self.sequencer_active_step == step;
+
+                                let mut bg_color = if is_active { track_color } else { egui::Color32::from_gray(25) };
+                                if is_current { bg_color = bg_color.additive(); }
+
+                                let stroke = if is_current {
+                                    egui::Stroke::new(2.0, egui::Color32::WHITE)
+                                } else if step % 4 == 0 {
+                                    egui::Stroke::new(1.0, egui::Color32::from_gray(40))
+                                } else {
+                                    egui::Stroke::new(0.5, egui::Color32::from_gray(30))
+                                };
+
+                                ui.painter().rect_filled(rect, 1.0, bg_color);
+                                ui.painter().rect_stroke(rect, 1.0, stroke);
+
+                                if is_current {
+                                    ui.painter().rect_filled(rect.expand(1.0), 1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40));
+                                }
+                            }
+                        });
+                        ui.add_space(2.0);
+                    }
+                });
             });
-            cols[1].group(|ui| {
-                ui.strong("GRID SEQUENCER");
-                ui.label("Beat Step Active");
+        });
+
+        ui.add_space(20.0);
+        ui.group(|ui| {
+            ui.strong("SEQUENCER SETTINGS");
+            ui.horizontal(|ui| {
+                ui.label("Steps: 64");
+                ui.add_space(20.0);
+                ui.label("Resolution: 1/16");
+                ui.add_space(20.0);
+                if ui.button("CLEAR ALL").clicked() {
+                    self.sequencer_grid = [[false; 64]; 16];
+                }
             });
         });
     }
 
-    fn render_mastering(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Mastering Chain");
+    fn render_mastering(&mut self, ui: &mut egui::Ui, _telemetry: &Option<Telemetry>) {
+        ui.heading("Precision Mastering Console");
         ui.add_space(20.0);
-        ui.vertical(|ui| {
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    if ui.checkbox(&mut self.mastering_eq_enabled, "MASTER EQ").changed() {
-                        // Bypass logic: 1.0 = active, 0.0 = bypass
-                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                            target_id: 19, param_id: 999, value: if self.mastering_eq_enabled { 1.0 } else { 0.0 }, ramp_duration_samples: 0
-                        });
-                    }
-                });
-                ui.add_space(5.0);
-                ui.label("Simulated 3-band response");
-            });
 
-            ui.add_space(10.0);
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(20.0, 0.0);
 
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    if ui.checkbox(&mut self.mastering_comp_enabled, "DYNAMIC COMP").changed() {
-                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                            target_id: 20, param_id: 999, value: if self.mastering_comp_enabled { 1.0 } else { 0.0 }, ramp_duration_samples: 0
+            // EQ MODULE
+            egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(15.0).show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("LINEAR PHASE EQ").color(egui::Color32::from_rgb(0, 255, 200)).strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.checkbox(&mut self.mastering_eq_enabled, "");
                         });
-                    }
-                });
-                ui.add_space(5.0);
-                ui.horizontal(|ui| {
-                    ui.label("Threshold");
-                    if widgets::render_knob(ui, &mut self.mastering_comp_threshold, 0.0..=1.0, "", egui::Color32::from_rgb(0, 255, 200)).changed() {
-                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                            target_id: 20, param_id: 0, value: self.mastering_comp_threshold, ramp_duration_samples: 128
-                        });
-                    }
+                    });
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if widgets::render_knob(ui, &mut self.mastering_eq_low, 0.0..=2.0, "LOW", egui::Color32::from_rgb(0, 255, 200)).changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 19, param_id: 0, value: self.mastering_eq_low, ramp_duration_samples: 128 });
+                        }
+                        if widgets::render_knob(ui, &mut self.mastering_eq_mid, 0.0..=2.0, "MID", egui::Color32::from_rgb(0, 255, 200)).changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 19, param_id: 1, value: self.mastering_eq_mid, ramp_duration_samples: 128 });
+                        }
+                        if widgets::render_knob(ui, &mut self.mastering_eq_high, 0.0..=2.0, "HIGH", egui::Color32::from_rgb(0, 255, 200)).changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 19, param_id: 2, value: self.mastering_eq_high, ramp_duration_samples: 128 });
+                        }
+                    });
                 });
             });
 
+            // COMPRESSOR MODULE
+            egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(15.0).show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("BUS COMPRESSOR").color(egui::Color32::from_rgb(255, 180, 0)).strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.checkbox(&mut self.mastering_comp_enabled, "");
+                        });
+                    });
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if widgets::render_knob(ui, &mut self.mastering_comp_threshold, 0.0..=1.0, "THR", egui::Color32::from_rgb(255, 180, 0)).changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 20, param_id: 0, value: self.mastering_comp_threshold, ramp_duration_samples: 128 });
+                        }
+                        if widgets::render_knob(ui, &mut self.mastering_comp_ratio, 0.0..=1.0, "RATIO", egui::Color32::from_rgb(255, 180, 0)).changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 20, param_id: 1, value: self.mastering_comp_ratio, ramp_duration_samples: 128 });
+                        }
+                        if widgets::render_knob(ui, &mut self.mastering_comp_attack, 0.0..=1.0, "ATTACK", egui::Color32::from_rgb(255, 180, 0)).changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 20, param_id: 2, value: self.mastering_comp_attack, ramp_duration_samples: 128 });
+                        }
+
+                        ui.add_space(10.0);
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("GR").size(8.0).color(egui::Color32::from_gray(100)));
+                            let gr = if self.mastering_comp_enabled { (self.mastering_comp_threshold * 0.5).sin().abs() } else { 0.0 };
+                            widgets::render_vu_meter(ui, gr, gr, egui::Color32::RED, 60.0);
+                        });
+                    });
+                });
+            });
+
+            // LIMITER MODULE
+            egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(15.0).show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("BRICKWALL LIMITER").color(egui::Color32::from_rgb(255, 50, 50)).strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.checkbox(&mut self.mastering_limiter_enabled, "");
+                        });
+                    });
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if widgets::render_knob(ui, &mut self.mastering_limiter_gain, 0.0..=1.5, "CEIL", egui::Color32::from_rgb(255, 50, 50)).changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.mastering_limiter_gain, ramp_duration_samples: 128 });
+                        }
+                        if widgets::render_knob(ui, &mut self.mastering_limiter_lookahead, 0.0..=1.0, "LOOK", egui::Color32::from_rgb(255, 50, 50)).changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 1, value: self.mastering_limiter_lookahead, ramp_duration_samples: 128 });
+                        }
+                    });
+                });
+            });
+        });
+
+        ui.add_space(30.0);
+        egui::Frame::none().fill(egui::Color32::from_rgb(10, 10, 12)).inner_margin(20.0).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(egui::RichText::new("MASTER SIGNAL FLOW").color(egui::Color32::from_gray(80)).size(10.0));
             ui.add_space(10.0);
 
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    if ui.checkbox(&mut self.mastering_limiter_enabled, "BRICKWALL LIMITER").changed() {
-                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                            target_id: 21, param_id: 999, value: if self.mastering_limiter_enabled { 1.0 } else { 0.0 }, ramp_duration_samples: 0
-                        });
+            ui.horizontal(|ui| {
+                for (name, color) in [("IN", egui::Color32::WHITE), ("EQ", egui::Color32::from_rgb(0, 255, 200)), ("COMP", egui::Color32::from_rgb(255, 180, 0)), ("LIMIT", egui::Color32::from_rgb(255, 50, 50)), ("OUT", egui::Color32::WHITE)] {
+                    ui.label(egui::RichText::new(name).color(color).strong());
+                    if name != "OUT" {
+                        ui.label(egui::RichText::new(" ➔ ").color(egui::Color32::from_gray(40)));
                     }
-                });
-                ui.add_space(5.0);
-                ui.horizontal(|ui| {
-                    ui.label("Ceiling");
-                    if widgets::render_knob(ui, &mut self.mastering_limiter_gain, 0.0..=1.5, "", egui::Color32::from_rgb(0, 255, 200)).changed() {
-                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                            target_id: 21, param_id: 0, value: self.mastering_limiter_gain, ramp_duration_samples: 128
-                        });
-                    }
-                });
+                }
             });
         });
     }
@@ -1103,9 +1276,9 @@ impl eframe::App for InspectorApp {
             match self.active_view {
                 View::Studio => self.render_dj_studio(ui, &telemetry),
                 View::Mixer => self.render_mixer(ui, &telemetry),
-                View::Sampler => self.render_sampler(ui),
+                View::Sampler => self.render_sampler(ui, &telemetry),
                 View::Topology => self.render_topology(ui, &telemetry),
-                View::Mastering => self.render_mastering(ui),
+                View::Mastering => self.render_mastering(ui, &telemetry),
                 View::Broadcast => self.render_broadcast(ui),
             }
         });
