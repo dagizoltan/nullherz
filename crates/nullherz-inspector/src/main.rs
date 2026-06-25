@@ -841,31 +841,30 @@ impl InspectorApp {
                 // COL 2: PITCH & SYNC
                 cols[2].vertical_centered(|ui| {
                     ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        let total_w = ui.available_width();
-                        let s_color = if self.channel_sync[i] { color } else { egui::Color32::from_gray(40) };
-                        let sync_btn = egui::Button::new(egui::RichText::new("SYNC").color(s_color).strong())
-                            .min_size(egui::vec2(total_w * 0.4, 24.0))
-                            .rounding(4.0);
-                        if ui.add(sync_btn).clicked() {
-                            self.channel_sync[i] = !self.channel_sync[i];
-                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                                target_id: (i as u64 * 4),
-                                param_id: 2,
-                                value: if self.channel_sync[i] { 1.0 } else { 0.0 },
-                                ramp_duration_samples: 0,
-                            });
-                        }
+                    let total_w = ui.available_width();
+                    let s_color = if self.channel_sync[i] { color } else { egui::Color32::from_gray(40) };
+                    let sync_btn = egui::Button::new(egui::RichText::new("SYNC").color(s_color).strong())
+                        .min_size(egui::vec2(total_w, 24.0))
+                        .rounding(4.0);
+                    if ui.add(sync_btn).clicked() {
+                        self.channel_sync[i] = !self.channel_sync[i];
+                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                            target_id: (i as u64 * 4),
+                            param_id: 2,
+                            value: if self.channel_sync[i] { 1.0 } else { 0.0 },
+                            ramp_duration_samples: 0,
+                        });
+                    }
 
-                        egui::ComboBox::from_id_source(format!("pitch_range_{}", i))
-                            .selected_text(format!("{:.0}%", self.pitch_range[i] * 100.0))
-                            .width(total_w * 0.5)
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.pitch_range[i], 0.08, "8%");
-                                ui.selectable_value(&mut self.pitch_range[i], 0.16, "16%");
-                                ui.selectable_value(&mut self.pitch_range[i], 1.0, "WIDE");
-                            });
-                    });
+                    ui.add_space(4.0);
+                    egui::ComboBox::from_id_source(format!("pitch_range_{}", i))
+                        .selected_text(format!("{:.0}%", self.pitch_range[i] * 100.0))
+                        .width(total_w)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.pitch_range[i], 0.08, "8%");
+                            ui.selectable_value(&mut self.pitch_range[i], 0.16, "16%");
+                            ui.selectable_value(&mut self.pitch_range[i], 1.0, "WIDE");
+                        });
 
                     ui.add_space(8.0);
                     let range = (1.0 - self.pitch_range[i])..=(1.0 + self.pitch_range[i]);
@@ -907,7 +906,8 @@ impl InspectorApp {
 
         let inner_rect = rect.shrink(12.0);
         ui.child_ui(inner_rect, egui::Layout::left_to_right(egui::Align::Center)).horizontal(|ui| {
-            let inner_h = inner_rect.height() - 20.0;
+            ui.spacing_mut().item_spacing.y = 2.0;
+            let inner_h = inner_rect.height() - 32.0;
 
             // BOOTH CONTROL
             ui.vertical(|ui| {
