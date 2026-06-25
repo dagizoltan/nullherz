@@ -83,6 +83,7 @@ enum View {
     Mastering,
     Broadcast,
     Topology,
+    Arranger,
 }
 
 pub struct Track {
@@ -577,7 +578,13 @@ impl InspectorApp {
                 }
 
                 if let Some(sample) = self.sample_registry.get(i as u64 * 4) {
-                    ui.label(egui::RichText::new(format!("{:.1} BPM", sample.metadata.bpm)).small().color(egui::Color32::from_gray(100)));
+                    let key_text = if let Some(key) = sample.metadata.root_key {
+                        let notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+                        format!("Key: {}", notes[(key.round() as usize) % 12])
+                    } else {
+                        "Key: -".to_string()
+                    };
+                    ui.label(egui::RichText::new(format!("{} | {:.1} BPM", key_text, sample.metadata.bpm)).small().color(egui::Color32::from_gray(100)));
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1039,6 +1046,39 @@ impl InspectorApp {
         if ui.button(if self.is_streaming { "🛑 STOP STREAM" } else { "🚀 GO LIVE" }).clicked() { self.is_streaming = !self.is_streaming; }
         ui.label(format!("Status: {}", if self.is_streaming { "ONLINE" } else { "OFFLINE" }));
     }
+
+    fn render_arranger(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
+        ui.heading("Song Arranger");
+        ui.add_space(10.0);
+
+        let current_beat = telemetry.as_ref().map_or(0.0, |t| t.sample_counter as f64 / (44100.0 * 60.0 / self.global_bpm as f64));
+        ui.label(format!("Current Beat: {:.2}", current_beat));
+
+        ui.add_space(20.0);
+        ui.label("Timeline (Mockup)");
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 200.0), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 2.0, egui::Color32::from_rgb(15, 15, 18));
+
+        // Draw grid
+        for i in 0..32 {
+            let x = rect.min.x + (i as f32 * (rect.width() / 32.0));
+            let color = if i % 4 == 0 { egui::Color32::from_gray(60) } else { egui::Color32::from_gray(30) };
+            ui.painter().vline(x, rect.y_range(), egui::Stroke::new(1.0, color));
+        }
+
+        // Playhead
+        let ph_x = rect.min.x + (current_beat.fract() as f32 * rect.width());
+        ui.painter().vline(ph_x, rect.y_range(), egui::Stroke::new(2.0, egui::Color32::RED));
+
+        ui.add_space(20.0);
+        ui.group(|ui| {
+            ui.label("Add Arrangement Event");
+            ui.horizontal(|ui| {
+                ui.button("Trigger Pattern A on Deck 1 at Beat 16");
+                ui.button("Set Macro 1 to 0.8 at Beat 32");
+            });
+        });
+    }
 }
 
 impl eframe::App for InspectorApp {
@@ -1060,6 +1100,7 @@ impl eframe::App for InspectorApp {
                         (View::Sampler, "SAMPLER", "🎹"),
                         (View::Mastering, "MASTERING", "💎"),
                         (View::Broadcast, "BROADCAST", "📡"),
+                        (View::Arranger, "ARRANGER", "📊"),
                         (View::Topology, "TOPOLOGY", "🕸"),
                     ] {
                         let is_active = self.active_view == view;
@@ -1100,6 +1141,7 @@ impl eframe::App for InspectorApp {
                 View::Topology => self.render_topology(ui, &telemetry),
                 View::Mastering => self.render_mastering(ui),
                 View::Broadcast => self.render_broadcast(ui),
+                View::Arranger => self.render_arranger(ui, &telemetry),
             }
         });
 

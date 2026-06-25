@@ -87,7 +87,10 @@ impl Conductor {
 
     pub fn tick(&mut self) {
         // Update Pattern Orchestration
-        self.pattern_manager.tick(self.mixer_bridge.timeline.current_beat, &self.engine_coordinator.command_producer);
+        let arrangement_commands = self.pattern_manager.tick(self.mixer_bridge.timeline.current_beat);
+        if !arrangement_commands.is_empty() {
+            self.apply_mixer_commands(arrangement_commands);
+        }
 
         if self.engine_coordinator.check_health() {
             eprintln!("CRITICAL: Engine health crisis detected. Prioritizing resource recovery...");
