@@ -434,20 +434,16 @@ impl InspectorApp {
         let total_w = ui.available_width();
         let mixer_w = 320.0;
         let deck_w = (total_w - mixer_w - 48.0) / 4.0;
-        let widget_h = 500.0;
+        let widget_h = 600.0;
 
         ui.vertical(|ui| {
             ui.set_width(total_w);
             ui.add_space(5.0);
 
-            // TOP: OSCILLATOR & MASTER
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                self.render_master_panel(ui, telemetry, 160.0);
-                ui.add_space(10.0);
-                ui.vertical(|ui| {
-                    ui.set_width(ui.available_width());
-                    self.render_oscillator_monitor(ui, telemetry);
-                });
+            // TOP: OSCILLATOR
+            ui.vertical(|ui| {
+                ui.set_width(ui.available_width());
+                self.render_oscillator_monitor(ui, telemetry);
             });
             ui.add_space(10.0);
 
@@ -678,15 +674,7 @@ impl InspectorApp {
 
             ui.columns(3, |cols| {
                 // COL 0: TRANSPORT
-                cols[0].vertical_centered(|ui| {
-                    ui.add_space(20.0);
-                    let cue_color = if self.channel_cue[i] { egui::Color32::from_rgb(255, 150, 0) } else { egui::Color32::from_gray(40) };
-                    let cue_btn = egui::Button::new(egui::RichText::new("CUE").color(cue_color).strong())
-                        .min_size(egui::vec2(ui.available_width(), 40.0))
-                        .rounding(6.0);
-                    if ui.add(cue_btn).clicked() {
-                        self.channel_cue[i] = !self.channel_cue[i];
-                    }
+                cols[0].with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
                     let play_color = egui::Color32::from_rgb(0, 255, 100);
                     let play_btn = egui::Button::new(egui::RichText::new("PLAY").color(play_color).strong())
@@ -694,6 +682,14 @@ impl InspectorApp {
                         .rounding(6.0);
                     if ui.add(play_btn).clicked() {
                         // Play logic
+                    }
+                    ui.add_space(8.0);
+                    let cue_color = if self.channel_cue[i] { egui::Color32::from_rgb(255, 150, 0) } else { egui::Color32::from_gray(40) };
+                    let cue_btn = egui::Button::new(egui::RichText::new("CUE").color(cue_color).strong())
+                        .min_size(egui::vec2(ui.available_width(), 40.0))
+                        .rounding(6.0);
+                    if ui.add(cue_btn).clicked() {
+                        self.channel_cue[i] = !self.channel_cue[i];
                     }
                 });
 
@@ -731,11 +727,10 @@ impl InspectorApp {
 
                 // COL 2: PITCH & SYNC
                 cols[2].vertical_centered(|ui| {
-                    ui.add_space(10.0);
-                    let total_w = ui.available_width();
+                    ui.add_space(4.0);
                     let s_color = if self.channel_sync[i] { color } else { egui::Color32::from_gray(40) };
-                    let sync_btn = egui::Button::new(egui::RichText::new("SYNC").color(s_color).strong())
-                        .min_size(egui::vec2(total_w, 24.0))
+                    let sync_btn = egui::Button::new(egui::RichText::new("SYNC").color(s_color).strong().size(10.0))
+                        .min_size(egui::vec2(ui.available_width() * 0.8, 20.0))
                         .rounding(4.0);
                     if ui.add(sync_btn).clicked() {
                         self.channel_sync[i] = !self.channel_sync[i];
@@ -747,43 +742,24 @@ impl InspectorApp {
                         });
                     }
 
-                    ui.add_space(4.0);
-                    egui::ComboBox::from_id_source(format!("pitch_range_{}", i))
-                        .selected_text(format!("{:.0}%", self.pitch_range[i] * 100.0))
-                        .width(total_w)
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.pitch_range[i], 0.08, "8%");
-                            ui.selectable_value(&mut self.pitch_range[i], 0.16, "16%");
-                            ui.selectable_value(&mut self.pitch_range[i], 1.0, "WIDE");
-                        });
+                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                        let range = 0.92..=1.08; // Fixed +-8%
+                        let p_res = widgets::render_fader(ui, &mut self.pitch_bend[i], range, color, 180.0, 12.0);
+                        if p_res.changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                                target_id: (i as u64 * 4),
+                                param_id: 1,
+                                value: self.pitch_bend[i],
+                                ramp_duration_samples: 128,
+                            });
+                        }
 
-                    ui.add_space(8.0);
-                    let range = (1.0 - self.pitch_range[i])..=(1.0 + self.pitch_range[i]);
-                    let p_res = widgets::render_fader(ui, &mut self.pitch_bend[i], range, color, 160.0, 12.0);
-                    if p_res.changed() {
-                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                            target_id: (i as u64 * 4),
-                            param_id: 1,
-                            value: self.pitch_bend[i],
-                            ramp_duration_samples: 128,
-                        });
-                    }
-                    let pct = (self.pitch_bend[i] - 1.0) * 100.0;
-                    ui.label(egui::RichText::new(format!("{:+.1}%", pct)).size(9.0).monospace().strong().color(color));
+                        let pct = (self.pitch_bend[i] - 1.0) * 100.0;
+                        ui.label(egui::RichText::new(format!("{:+.1}%", pct)).size(9.0).monospace().strong().color(color));
+                        ui.add_space(10.0);
+                    });
                 });
             });
-
-            // PHASE METER
-            ui.add_space(5.0);
-            let (p_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 30.0, 12.0), egui::Sense::hover());
-            ui.painter().rect_filled(p_rect, 1.0, egui::Color32::from_rgb(5, 5, 6));
-            ui.painter().vline(p_rect.center().x, p_rect.y_range(), egui::Stroke::new(1.0, egui::Color32::from_gray(60)));
-
-            if self.channel_sync[i] {
-                let phase_diff = (time.sin() * 0.5) as f32; // Simulated phase diff
-                let px = p_rect.center().x + (phase_diff * p_rect.width() * 0.4);
-                ui.painter().circle_filled(egui::pos2(px, p_rect.center().y), 4.0, color);
-            }
         });
     }
 
@@ -883,23 +859,22 @@ impl InspectorApp {
         ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(15, 15, 18));
         ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(30)));
 
-        ui.child_ui(rect, egui::Layout::top_down(egui::Align::Center)).vertical_centered(|ui| {
-            ui.add_space(10.0);
-
+        let inner_rect = rect.shrink2(egui::vec2(8.0, 12.0));
+        ui.allocate_ui_at_rect(inner_rect, |ui| {
             // CHANNEL STRIPS
             ui.columns(4, |cols| {
-                let col_w = main_w / 4.0;
+                let col_w = inner_rect.width() / 4.0;
                 for i in 0..4 {
                     cols[i].vertical_centered(|ui| {
                         ui.set_width(col_w);
-                        ui.add_space(5.0);
+                        ui.add_space(4.0);
 
                         // CHANNEL HEADER
                         egui::Frame::none().fill(Self::deck_color(i).linear_multiply(0.2)).rounding(2.0).inner_margin(4.0).show(ui, |ui| {
                             ui.set_width(col_w - 8.0);
                             ui.label(egui::RichText::new(format!("CH {}", i + 1)).strong().color(Self::deck_color(i)));
                         });
-                        ui.add_space(8.0);
+                        ui.add_space(10.0);
 
                         // GAIN / TRIM
                         if widgets::render_knob(ui, &mut self.channel_trims[i], 0.0..=2.0, "TRIM", Self::deck_color(i)).changed() {
@@ -911,7 +886,7 @@ impl InspectorApp {
                             });
                         }
 
-                        ui.add_space(12.0);
+                        ui.add_space(10.0);
 
                         // HI / MID / LOW
                         for (label, param_idx, state_val) in [("HI", 2, &mut self.channel_eq_high[i]), ("MID", 1, &mut self.channel_eq_mid[i]), ("LOW", 0, &mut self.channel_eq_low[i])] {
@@ -923,60 +898,48 @@ impl InspectorApp {
                                     ramp_duration_samples: 0,
                                 });
                             }
-                            ui.add_space(12.0);
+                            ui.add_space(10.0);
                         }
 
-                        ui.add_space(12.0);
+                        ui.add_space(10.0);
 
                         // FX SUMMARY / MASTER
                         let fx_enabled = self.channel_fx_slots[i].iter().any(|s| s.enabled);
                         let fx_color = if fx_enabled { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(40) };
-                        if ui.add(egui::Button::new(egui::RichText::new("FX").color(fx_color).small().strong()).min_size(egui::vec2(40.0, 24.0))).clicked() {
-                            // Toggle first slot for convenience or all? Let's just toggle all for now
+                        if ui.add(egui::Button::new(egui::RichText::new("FX").color(fx_color).small().strong()).min_size(egui::vec2(40.0, 20.0))).clicked() {
                             for slot in &mut self.channel_fx_slots[i] { slot.enabled = !fx_enabled; }
                         }
 
-                        ui.add_space(12.0);
+                        // FADER & VU at the bottom
+                        ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                            ui.add_space(5.0);
+                            ui.horizontal(|ui| {
+                                let fader_w = 24.0;
+                                let spacing = 8.0;
+                                let left_pad = (col_w - fader_w - 16.0 - spacing) / 2.0;
+                                ui.add_space(left_pad.max(0.0));
 
-                        // FADER & VU (Precisely Aligned to Center Axis)
-                        ui.add_space(10.0);
-                        ui.horizontal(|ui| {
-                            let strip_w = col_w;
-                            let fader_w = 24.0;
-                            let spacing = 8.0;
+                                if widgets::render_fader(ui, &mut self.channel_faders[i], 0.0..=1.0, Self::deck_color(i), 220.0, 30.0).changed() {
+                                    let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                                        target_id: (i as u64 * 4 + 1),
+                                        param_id: 0,
+                                        value: self.channel_trims[i] * self.channel_faders[i],
+                                        ramp_duration_samples: 128,
+                                    });
+                                }
 
-                            // Exact centering math for fader relative to strip
-                            let left_pad = (strip_w - fader_w) / 2.0;
-                            ui.add_space(left_pad);
-
-                            if widgets::render_fader(ui, &mut self.channel_faders[i], 0.0..=1.0, Self::deck_color(i), 120.0, 30.0).changed() {
-                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                                    target_id: (i as u64 * 4 + 1),
-                                    param_id: 0,
-                                    value: self.channel_trims[i] * self.channel_faders[i],
-                                    ramp_duration_samples: 128,
-                                });
-                            }
-
-                            ui.add_space(spacing);
-
-                            // VU METER (To the right of fader)
-                            let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1].min(1.2));
-                            if peak > self.channel_peak_hold[i] { self.channel_peak_hold[i] = peak; }
-                            else { self.channel_peak_hold[i] *= 0.98; }
-
-                            widgets::render_vu_meter(ui, peak, self.channel_peak_hold[i], egui::Color32::from_rgb(0, 255, 180), 120.0);
+                                ui.add_space(spacing);
+                                let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1].min(1.2));
+                                if peak > self.channel_peak_hold[i] { self.channel_peak_hold[i] = peak; }
+                                else { self.channel_peak_hold[i] *= 0.98; }
+                                widgets::render_vu_meter(ui, peak, self.channel_peak_hold[i], egui::Color32::from_rgb(0, 255, 180), 220.0);
+                            });
                         });
                     });
                 }
             });
 
-            ui.add_space(20.0);
-
-            ui.add_space(15.0);
-
             // GLOBAL CROSSFADER
-            ui.add_space(10.0);
             egui::Frame::none()
                 .fill(egui::Color32::from_rgb(10, 10, 12))
                 .rounding(4.0)
