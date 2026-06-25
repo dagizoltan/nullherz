@@ -324,44 +324,51 @@ impl InspectorApp {
     }
 
 
-    fn render_oscillator_monitor(&self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>, width: f32) {
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 160.0), egui::Sense::hover());
-        ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(5, 5, 6));
-        ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(20)));
+    fn render_signal_monitor(&self, ui: &mut egui::Ui, peak: f32, peak_hold: f32, color: egui::Color32, height: f32, label: &str) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 2.0, egui::Color32::from_rgb(5, 5, 6));
 
         let time = ui.input(|i| i.time);
         let w = rect.width();
         let h = rect.height();
+        let drive = peak_hold.max(peak);
 
         // High-density background grid
-        for i in 0..32 {
-            let x = rect.min.x + (i as f32 * (w / 32.0));
+        for i in 0..16 {
+            let x = rect.min.x + (i as f32 * (w / 16.0));
             ui.painter().vline(x, rect.y_range(), egui::Stroke::new(0.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 5)));
         }
 
-        // Master Output Visualization
-        let color = egui::Color32::from_rgb(0, 255, 200);
-        let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)); // MASTER target_id: 21
-        let drive = self.master_peak_hold.max(peak);
-
-        // Sub-layers for "Glow" effect
+        // Signal Visualization (Triple-layered technical draw)
         for (idx, glow_color, thickness) in [
-            (0, color.linear_multiply(0.15), 6.0),
-            (1, color.linear_multiply(0.4), 2.5),
-            (2, egui::Color32::WHITE, 1.2),
+            (0, color.linear_multiply(0.1), 3.0),
+            (1, color.linear_multiply(0.3), 1.2),
+            (2, egui::Color32::WHITE.linear_multiply(0.8), 0.6),
         ] {
-            let points: Vec<egui::Pos2> = (0..w as i32).step_by(1).map(|x| {
+            let points: Vec<egui::Pos2> = (0..w as i32).step_by(2).map(|x| {
                 let px = x as f32 / w;
-                let wave1 = (px * 35.0 + time as f32 * 14.0 + (idx as f32 * 0.1)).sin();
-                let wave2 = (px * 70.0 - time as f32 * 10.0).cos();
-                let wave3 = (px * 120.0 + time as f32 * 25.0).sin() * 0.3;
-                let amp = (h * 0.4) * (wave1 * 0.5 + wave2 * 0.3 + wave3 * 0.2) * (0.2 + drive * 0.8);
+                let wave1 = (px * 40.0 + time as f32 * 18.0 + (idx as f32 * 0.05)).sin();
+                let wave2 = (px * 80.0 - time as f32 * 14.0).cos();
+                let amp = (h * 0.42) * (wave1 * 0.7 + wave2 * 0.3) * (0.15 + drive * 0.85);
                 egui::pos2(rect.min.x + x as f32, rect.center().y + amp)
             }).collect();
             ui.painter().add(egui::Shape::line(points, egui::Stroke::new(thickness, glow_color)));
         }
 
-        ui.painter().text(rect.min + egui::vec2(10.0, 10.0), egui::Align2::LEFT_TOP, "PRECISION MASTER MIX OSCILLOSCOPE", egui::FontId::proportional(11.0), egui::Color32::from_gray(120));
+        ui.painter().vline(rect.center().x, rect.y_range(), egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30)));
+        if !label.is_empty() {
+            ui.painter().text(rect.min + egui::vec2(6.0, 4.0), egui::Align2::LEFT_TOP, label, egui::FontId::proportional(8.0), color.linear_multiply(0.6));
+        }
+    }
+
+    fn render_oscillator_monitor(&self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>, width: f32) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 140.0), egui::Sense::hover());
+        ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(30)));
+
+        let mix_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
+        ui.allocate_ui_at_rect(rect, |ui| {
+            self.render_signal_monitor(ui, mix_peak, self.master_peak_hold, egui::Color32::from_rgb(0, 255, 200), 140.0, "PRECISION MASTER MIX MONITOR");
+        });
     }
 
 
@@ -544,54 +551,12 @@ impl InspectorApp {
 
                     // DUAL SIGNAL ALIGNMENT MONITORS
                     ui.add_space(5.0);
-                    let mon_w = ui.available_width() - 20.0;
-
-                    // A. CHANNEL MONITOR (Local Track)
-                    let (c_rect, _) = ui.allocate_exact_size(egui::vec2(mon_w, 36.0), egui::Sense::hover());
-                    ui.painter().rect_filled(c_rect, 2.0, egui::Color32::from_rgb(5, 5, 6));
                     let ch_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1].min(1.2));
-
-                    for (idx, glow_color, thickness) in [
-                        (0, color.linear_multiply(0.15), 4.0),
-                        (1, color.linear_multiply(0.4), 1.5),
-                        (2, egui::Color32::WHITE, 0.8),
-                    ] {
-                        let points: Vec<egui::Pos2> = (0..mon_w as i32).step_by(2).map(|x| {
-                            let px = x as f32 / mon_w;
-                            let wave1 = (px * 30.0 + time as f32 * 15.0 + (idx as f32 * 0.1)).sin();
-                            let wave2 = (px * 60.0 - time as f32 * 12.0).cos();
-                            let amp = (36.0 * 0.4) * (wave1 * 0.6 + wave2 * 0.4) * (0.2 + ch_peak * 0.8);
-                            egui::pos2(c_rect.min.x + x as f32, c_rect.center().y + amp)
-                        }).collect();
-                        ui.painter().add(egui::Shape::line(points, egui::Stroke::new(thickness, glow_color)));
-                    }
-                    ui.painter().vline(c_rect.center().x, c_rect.y_range(), egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40)));
-                    ui.painter().text(c_rect.min + egui::vec2(5.0, 5.0), egui::Align2::LEFT_TOP, "CHANNEL", egui::FontId::proportional(7.0), color.linear_multiply(0.5));
-
-                    // B. MASTER MIX MONITOR (CDJ Style)
-                    ui.add_space(4.0);
-                    let (m_rect, _) = ui.allocate_exact_size(egui::vec2(mon_w, 24.0), egui::Sense::hover());
-                    ui.painter().rect_filled(m_rect, 2.0, egui::Color32::from_rgb(5, 5, 6));
-
                     let mix_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
-                    let mix_color = egui::Color32::from_rgb(0, 255, 200);
 
-                    for (idx, glow_color, thickness) in [
-                        (0, mix_color.linear_multiply(0.15), 3.0),
-                        (1, mix_color.linear_multiply(0.4), 1.2),
-                        (2, egui::Color32::WHITE, 0.6),
-                    ] {
-                        let points: Vec<egui::Pos2> = (0..mon_w as i32).step_by(2).map(|x| {
-                            let px = x as f32 / mon_w;
-                            let wave1 = (px * 30.0 + time as f32 * 15.0 + (idx as f32 * 0.1)).sin();
-                            let wave2 = (px * 60.0 - time as f32 * 12.0).cos();
-                            let amp = (24.0 * 0.4) * (wave1 * 0.6 + wave2 * 0.4) * (0.2 + mix_peak * 0.8);
-                            egui::pos2(m_rect.min.x + x as f32, m_rect.center().y + amp)
-                        }).collect();
-                        ui.painter().add(egui::Shape::line(points, egui::Stroke::new(thickness, glow_color)));
-                    }
-                    ui.painter().vline(m_rect.center().x, m_rect.y_range(), egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40)));
-                    ui.painter().text(m_rect.min + egui::vec2(5.0, 3.0), egui::Align2::LEFT_TOP, "MIX", egui::FontId::proportional(7.0), mix_color.linear_multiply(0.5));
+                    self.render_signal_monitor(ui, ch_peak, self.channel_peak_hold[i], color, 36.0, "DECK");
+                    ui.add_space(4.0);
+                    self.render_signal_monitor(ui, mix_peak, self.master_peak_hold, egui::Color32::from_rgb(0, 255, 200), 24.0, "MIX");
                 }
             } else {
                 // FALLBACK Simulation if no real data
@@ -730,7 +695,7 @@ impl InspectorApp {
         let inner_rect = rect.shrink2(egui::vec2(6.0, 4.0));
         ui.allocate_ui_at_rect(inner_rect, |ui| {
             ui.vertical(|ui| {
-                // 1. MASTER CONTROLS STANDALONE ROW (Perfectly Aligned)
+                // 1. MASTER CONTROLS STANDALONE ROW (Perfectly Aligned Columnar Layout)
                 ui.add_space(4.0);
                 ui.columns(4, |cols| {
                     let labels = ["BOOTH", "REC", "MASTER"];
@@ -738,37 +703,34 @@ impl InspectorApp {
 
                     for i in 0..3 {
                         cols[i].vertical_centered(|ui| {
-                            ui.label(egui::RichText::new(labels[i]).size(8.0).strong().color(egui::Color32::from_gray(120)));
-                            ui.add_space(2.0);
+                            ui.label(egui::RichText::new(labels[i]).size(9.0).strong().color(egui::Color32::from_gray(140)));
+                            ui.add_space(6.0);
+
+                            let (gain, peak_hold, target_id) = match i {
+                                0 => (&mut self.booth_gain, &mut self.booth_peak_hold, 22),
+                                1 => (&mut self.rec_gain, &mut self.rec_peak_hold, 23),
+                                _ => (&mut self.master_gain, &mut self.master_peak_hold, 21),
+                            };
+
+                            if widgets::render_knob(ui, gain, 0.0..=1.5, "", colors[i]).changed() {
+                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id, param_id: 0, value: *gain, ramp_duration_samples: 128 });
+                            }
+
+                            ui.add_space(6.0);
+
+                            let peak = if i == 2 {
+                                telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2))
+                            } else {
+                                telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * (*gain)
+                            };
+                            if peak > *peak_hold { *peak_hold = peak; } else { *peak_hold *= 0.98; }
 
                             ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
+                                ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
                                 let avail_w = ui.available_width();
-                                // Knob is 36.0, stereo VU is 18.0 (2 * 8.0 + 2.0 spacing). Total = 54.0
-                                ui.add_space(((avail_w - 54.0) / 2.0).max(0.0));
-
-                                let (gain, peak_hold, target_id) = match i {
-                                    0 => (&mut self.booth_gain, &mut self.booth_peak_hold, 22),
-                                    1 => (&mut self.rec_gain, &mut self.rec_peak_hold, 23),
-                                    _ => (&mut self.master_gain, &mut self.master_peak_hold, 21),
-                                };
-
-                                if widgets::render_knob(ui, gain, 0.0..=1.5, "", colors[i]).changed() {
-                                    let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id, param_id: 0, value: *gain, ramp_duration_samples: 128 });
-                                }
-
-                                let peak = if i == 2 {
-                                    telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2))
-                                } else {
-                                    telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * (*gain)
-                                };
-                                if peak > *peak_hold { *peak_hold = peak; } else { *peak_hold *= 0.98; }
-
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
-                                    widgets::render_vu_meter(ui, peak * 0.95, *peak_hold * 0.95, colors[i], 36.0);
-                                    widgets::render_vu_meter(ui, peak, *peak_hold, colors[i], 36.0);
-                                });
+                                ui.add_space((avail_w - 18.0) / 2.0); // Center the stereo VU (18.0px total)
+                                widgets::render_vu_meter(ui, peak * 0.95, *peak_hold * 0.95, colors[i], 40.0);
+                                widgets::render_vu_meter(ui, peak, *peak_hold, colors[i], 40.0);
                             });
                         });
                     }
@@ -1103,7 +1065,7 @@ impl eframe::App for InspectorApp {
                 });
 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    ui.add_space(4.0);
+                    ui.add_space(10.0);
                     if self.render_nav_item(ui, "⚙", "SETTINGS", false, true).clicked() {
                         // Handle settings
                     }
@@ -1112,8 +1074,8 @@ impl eframe::App for InspectorApp {
 
         // RIGHT-ALIGNED VERTICAL NAVIGATION (Icon buttons only)
         egui::SidePanel::right("right_nav")
-            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(8, 8, 10)).inner_margin(egui::Margin { left: 8.0, right: 16.0, top: 8.0, bottom: 8.0 }))
-            .width_range(68.0..=68.0)
+            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(8, 8, 10)).inner_margin(egui::Margin { left: 8.0, right: 12.0, top: 8.0, bottom: 8.0 }))
+            .width_range(60.0..=60.0)
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 10.0);
 
