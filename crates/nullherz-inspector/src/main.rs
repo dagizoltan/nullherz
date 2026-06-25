@@ -366,321 +366,197 @@ impl InspectorApp {
 
 
 
-    fn render_dj_studio(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
-        let total_w = ui.available_width();
-        let widget_h = 620.0;
+    fn render_signal_stack(&mut self, ui: &mut egui::Ui, _telemetry: &Option<Telemetry>, width: f32) {
+        let total_h = 320.0;
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, total_h), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(5, 5, 6));
+        ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(20)));
 
-        ui.vertical(|ui| {
-            ui.add_space(5.0);
+        let time = ui.input(|i| i.time);
+        let deck_h = (total_h - 10.0) / 4.0;
+        let playhead_x = rect.center().x;
 
-            // ROW 1: FULL WIDTH MASTER OSCILLOSCOPE
-            self.render_oscillator_monitor(ui, telemetry, total_w);
-            ui.add_space(10.0);
+        for i in 0..4 {
+            let deck_color = Self::deck_color(i);
+            let deck_rect = egui::Rect::from_min_size(
+                rect.min + egui::vec2(5.0, 5.0 + i as f32 * deck_h),
+                egui::vec2(width - 10.0, deck_h - 2.0)
+            );
 
-            // ROW 2: PERFORMANCE ROW (2 Deck, Mixer, 2 Deck)
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
-                let column_w = (total_w - 32.0) / 5.0; // 4 gaps of 8.0px = 32.0
+            ui.painter().rect_filled(deck_rect, 2.0, egui::Color32::from_rgb(10, 10, 12));
 
-                // DECK A
-                ui.allocate_ui(egui::vec2(column_w, widget_h), |ui| { self.render_deck(ui, 0, telemetry, widget_h); });
-                // DECK B
-                ui.allocate_ui(egui::vec2(column_w, widget_h), |ui| { self.render_deck(ui, 1, telemetry, widget_h); });
+            // Shared playhead vertical line (visual only within deck)
+            ui.painter().vline(playhead_x, deck_rect.y_range(), egui::Stroke::new(1.0, egui::Color32::from_gray(30)));
 
-                // CENTRAL MIXER
-                ui.allocate_ui(egui::vec2(column_w, widget_h), |ui| { self.render_central_mixer(ui, telemetry, column_w, widget_h); });
+            if let Some(sample) = self.sample_registry.get(i as u64 * 4) {
+                let peaks = &sample.metadata.peaks;
+                let view_range = 0.05; // 5% of track
+                let play_head_norm = (time as f32 % 30.0) / 30.0; // Simulated playhead
 
-                // DECK C
-                ui.allocate_ui(egui::vec2(column_w, widget_h), |ui| { self.render_deck(ui, 2, telemetry, widget_h); });
-                // DECK D
-                ui.allocate_ui(egui::vec2(column_w, widget_h), |ui| { self.render_deck(ui, 3, telemetry, widget_h); });
-            });
-        });
+                // 1. Phrase Structure (Top 20% of deck height)
+                let phrase_h = deck_rect.height() * 0.2;
+                let phrase_rect = egui::Rect::from_min_size(deck_rect.min, egui::vec2(deck_rect.width(), phrase_h));
+                let block_w = deck_rect.width() / 16.0;
+                for b in 0..16 {
+                    let bx = phrase_rect.min.x + b as f32 * block_w;
+                    let b_rect = egui::Rect::from_min_size(egui::pos2(bx, phrase_rect.min.y), egui::vec2(block_w - 1.0, phrase_h - 1.0));
+                    let is_active = (b as f32 / 16.0) < play_head_norm;
+                    let fill = if is_active { deck_color.linear_multiply(0.3) } else { egui::Color32::from_gray(20) };
+                    ui.painter().rect_filled(b_rect, 1.0, fill);
+                }
+
+                // 2. Beat Grid (Middle 20%)
+                let grid_h = deck_rect.height() * 0.2;
+                let grid_rect = egui::Rect::from_min_size(deck_rect.min + egui::vec2(0.0, phrase_h), egui::vec2(deck_rect.width(), grid_h));
+                let total_samples = sample.buffer.len() as f32;
+                if total_samples > 0.0 {
+                    for &pos in sample.metadata.transients.iter() {
+                        let rel_pos = pos as f32 / total_samples;
+                        let x_dist = rel_pos - play_head_norm;
+                        if x_dist.abs() < view_range / 2.0 {
+                            let x_off = (x_dist / view_range) * deck_rect.width();
+                            let tx = playhead_x + x_off;
+                            if grid_rect.x_range().contains(tx) {
+                                ui.painter().circle_filled(egui::pos2(tx, grid_rect.center().y), 2.0, deck_color);
+                            }
+                        }
+                    }
+                }
+
+                // 3. Waveform Detail (Bottom 60%)
+                let wave_h = deck_rect.height() * 0.6;
+                let wave_rect = egui::Rect::from_min_size(deck_rect.min + egui::vec2(0.0, phrase_h + grid_h), egui::vec2(deck_rect.width(), wave_h));
+
+                if !peaks.is_empty() {
+                    let mut points = Vec::new();
+                    let dw = wave_rect.width();
+                    let dh = wave_rect.height();
+                    for x in 0..dw as usize {
+                        let rel_x = (x as f32 - dw / 2.0) / dw;
+                        let track_norm = (play_head_norm + rel_x * view_range).clamp(0.0, 1.0);
+                        let p_idx = (track_norm * peaks.len() as f32) as usize;
+                        let val = peaks[p_idx.min(peaks.len() - 1)];
+                        let y_off = val * (dh / 2.5);
+                        points.push(egui::pos2(wave_rect.min.x + x as f32, wave_rect.center().y - y_off));
+                        points.push(egui::pos2(wave_rect.min.x + x as f32, wave_rect.center().y + y_off));
+                    }
+                    ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.0, deck_color.additive())));
+
+                    // Restore Hot Cues
+                    for (cue_idx, cue) in sample.metadata.hot_cues.iter().enumerate() {
+                        if let Some(pos) = cue {
+                            let rel_pos = *pos as f32 / total_samples;
+                            let x_dist = rel_pos - play_head_norm;
+                            if x_dist.abs() < view_range / 2.0 {
+                                let x_off = (x_dist / view_range) * wave_rect.width();
+                                let tx = playhead_x + x_off;
+                                if wave_rect.x_range().contains(tx) {
+                                    ui.painter().vline(tx, wave_rect.y_range(), egui::Stroke::new(1.5, egui::Color32::YELLOW));
+                                    ui.painter().text(egui::pos2(tx, wave_rect.min.y + 2.0), egui::Align2::LEFT_TOP, format!("{}", cue_idx+1), egui::FontId::proportional(8.0), egui::Color32::WHITE);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Empty state label
+                ui.painter().text(deck_rect.center(), egui::Align2::CENTER_CENTER, "NO TRACK LOADED", egui::FontId::proportional(10.0), egui::Color32::from_gray(40));
+            }
+        }
+
+        // Global Playhead Line across all decks
+        ui.painter().vline(playhead_x, rect.y_range(), egui::Stroke::new(1.5, egui::Color32::WHITE.linear_multiply(0.5)));
+        ui.painter().text(rect.min + egui::vec2(10.0, 10.0), egui::Align2::LEFT_TOP, "GLOBAL ALIGNMENT TIMELINE", egui::FontId::proportional(11.0), egui::Color32::from_gray(120));
     }
 
-
-    fn render_deck(&mut self, ui: &mut egui::Ui, i: usize, telemetry: &Option<Telemetry>, height: f32) {
-        let deck_name = format!("DECK {}", (b'A' + i as u8) as char);
+    fn render_deck_controls_row(&mut self, ui: &mut egui::Ui, i: usize, telemetry: &Option<Telemetry>) {
         let color = Self::deck_color(i);
-
         let is_selected = self.selected_deck == i;
-        let stroke_color = if is_selected { color } else { egui::Color32::from_gray(30) };
 
-        let rect = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), egui::Sense::click()).0;
-        if ui.rect_contains_pointer(rect) && ui.input(|i| i.pointer.any_click()) {
-            self.selected_deck = i;
-        }
-
-        if is_selected {
-            ui.painter().rect_filled(rect.expand(2.0), 4.0, color.linear_multiply(0.05));
-        }
-        ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(if is_selected { 3.0 } else { 1.0 }, stroke_color));
-        ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(10, 10, 12));
-
-        let inner_rect = rect.shrink2(egui::vec2(10.0, 4.0));
-        ui.allocate_ui_at_rect(inner_rect, |ui| {
-            ui.vertical(|ui| {
-                ui.add_space(4.0);
-
-                // DECK INFO HEADER FRAME
-            egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(4.0).show(ui, |ui| {
-                ui.set_width(ui.available_width() - 16.0);
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(deck_name).color(if is_selected { color } else { egui::Color32::from_gray(180) }).strong());
+        egui::Frame::none()
+            .fill(if is_selected { color.linear_multiply(0.05) } else { egui::Color32::from_rgb(15, 15, 18) })
+            .rounding(4.0)
+            .stroke(egui::Stroke::new(if is_selected { 2.0 } else { 1.0 }, if is_selected { color } else { egui::Color32::from_gray(30) }))
+            .inner_margin(6.0)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    // 1. Deck Label & Selection & Master Toggle
+                    ui.vertical(|ui| {
+                        let (rect, res) = ui.allocate_exact_size(egui::vec2(40.0, 30.0), egui::Sense::click());
+                        ui.painter().rect_filled(rect, 2.0, if is_selected { color } else { egui::Color32::from_gray(25) });
+                        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, format!("{}", (b'A' + i as u8) as char), egui::FontId::proportional(16.0), if is_selected { egui::Color32::BLACK } else { color });
+                        if res.clicked() { self.selected_deck = i; }
 
                         let is_master = self.master_deck == Some(i);
-                        let master_color = if is_master { color } else { egui::Color32::from_gray(40) };
-                        if ui.add(egui::Button::new(egui::RichText::new("MASTER").small().strong().color(master_color)).frame(true)).clicked() {
-                            if is_master { self.master_deck = None; } else { self.master_deck = Some(i); }
+                        let m_color = if is_master { color } else { egui::Color32::from_gray(40) };
+                        if ui.add(egui::Button::new(egui::RichText::new("MST").small().strong().color(m_color)).frame(true)).clicked() {
+                             if is_master { self.master_deck = None; } else { self.master_deck = Some(i); }
                         }
-
-                        if let Some(sample) = self.sample_registry.get(i as u64 * 4) {
-                            let key_text = if let Some(key) = sample.metadata.root_key {
-                                let notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-                                format!("{}", notes[(key.round() as usize) % 12])
-                            } else {
-                                "-".to_string()
-                            };
-                            ui.add_space(5.0);
-                            egui::Frame::none().fill(color.linear_multiply(0.1)).rounding(2.0).inner_margin(2.0).show(ui, |ui| {
-                                ui.label(egui::RichText::new(format!(" {} ", key_text)).small().strong().color(color));
-                            });
-                            ui.label(egui::RichText::new(format!("{:.1} BPM", sample.metadata.bpm)).small().strong().color(color));
-                        }
-
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1]);
-                            let db = 20.0 * peak.log10().max(-60.0);
-                            ui.label(egui::RichText::new(format!("{:.1} dB", db)).small().color(if peak > 1.0 { egui::Color32::RED } else { egui::Color32::from_gray(100) }));
-                        });
                     });
 
-                    ui.add_space(2.0);
+                    ui.add_space(8.0);
 
-                    ui.horizontal(|ui| {
-                        egui::Frame::none().fill(egui::Color32::from_rgb(5, 5, 6)).inner_margin(6.0).rounding(2.0).show(ui, |ui| {
-                            ui.set_width(ui.available_width() - 100.0);
-                            if let Some(ref title) = self.now_playing[i] {
-                                ui.label(egui::RichText::new(title).color(color).size(13.0).strong());
-                            } else {
-                                ui.label(egui::RichText::new("READY TO LOAD").color(egui::Color32::from_gray(40)).size(11.0));
+                    // 2. Track Info & Time
+                    ui.vertical(|ui| {
+                        ui.set_width(200.0);
+                        if let Some(ref title) = self.now_playing[i] {
+                            ui.label(egui::RichText::new(title).color(color).strong());
+                        } else {
+                            ui.label(egui::RichText::new("EMPTY").color(egui::Color32::from_gray(60)).strong());
+                        }
+
+                        ui.horizontal(|ui| {
+                            if let Some(sample) = self.sample_registry.get(i as u64 * 4) {
+                                ui.label(egui::RichText::new(format!("{:.1} BPM", sample.metadata.bpm)).small().color(color));
+                                if let Some(key) = sample.metadata.root_key {
+                                    let notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+                                    ui.label(egui::RichText::new(format!("K:{}", notes[(key.round() as usize) % 12])).small().color(color));
+                                }
                             }
-                        });
 
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // Restore Track Timing
                             let total_sec = 324.0;
                             let elapsed = (ui.input(|i| i.time) % total_sec as f64) as f32;
                             let remaining = total_sec - elapsed;
                             let mins = (remaining / 60.0) as i32;
                             let secs = (remaining % 60.0) as i32;
-                            ui.label(egui::RichText::new(format!("-{:02}:{:02}", mins, secs)).color(color).monospace().size(18.0).strong());
+                            ui.label(egui::RichText::new(format!("-{:02}:{:02}", mins, secs)).color(color).monospace().size(11.0).strong());
                         });
                     });
-                });
-            });
 
-            // WAVEFORM
-            ui.add_space(10.0);
-            let (w_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 20.0, 120.0), egui::Sense::hover());
-            ui.painter().rect_filled(w_rect, 2.0, egui::Color32::from_rgb(5, 5, 6));
-
-            let w_width = w_rect.width();
-            let w_height = w_rect.height();
-
-            let time = ui.input(|i| i.time);
-            if let Some(sample) = self.sample_registry.get(i as u64 * 4) {
-                let peaks = &sample.metadata.peaks;
-                if !peaks.is_empty() {
-                    // Spectral Waveform Simulation: Layered Frequencies
-                    for (layer, scale, l_color) in [
-                        (0, 1.0, color),
-                        (1, 0.6, color.linear_multiply(0.5)),
-                        (2, 0.3, egui::Color32::WHITE.linear_multiply(0.2)),
-                    ] {
-                        let mut points = Vec::new();
-                        for x in 0..w_width as usize {
-                            let p_idx = (x * peaks.len()) / w_width as usize;
-                            let val = peaks[p_idx.min(peaks.len() - 1)] * scale;
-                            let y_off = val * (w_height / 2.0);
-                            points.push(egui::pos2(w_rect.min.x + x as f32, w_rect.center().y - y_off));
-                            points.push(egui::pos2(w_rect.min.x + x as f32, w_rect.center().y + y_off));
-                        }
-                        ui.painter().add(egui::Shape::line(points, egui::Stroke::new(if layer == 0 { 1.5 } else { 1.0 }, l_color)));
-                    }
-
-                    // Hot Cues
-                    for (idx, cue) in sample.metadata.hot_cues.iter().enumerate() {
-                        if let Some(pos) = cue {
-                             let x_off = (*pos as f32 / sample.buffer.len() as f32) * w_width;
-                             let tx = w_rect.min.x + x_off;
-                             ui.painter().vline(tx, w_rect.y_range(), egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 255, 0)));
-                             ui.painter().text(egui::pos2(tx, w_rect.min.y + 5.0), egui::Align2::LEFT_TOP, format!("{}", idx+1), egui::FontId::proportional(8.0), egui::Color32::WHITE);
-                        }
-                    }
-
-                    // DETAIL SCROLLING WAVEFORM
-                    ui.add_space(5.0);
-                    let (d_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 20.0, 40.0), egui::Sense::hover());
-                    ui.painter().rect_filled(d_rect, 2.0, egui::Color32::from_rgb(5, 5, 6));
-
-                    let dw = d_rect.width();
-                    let dh = d_rect.height();
-                    let play_head_norm = (time as f32 % 30.0) / 30.0; // Simulated playhead
-                    let view_range = 0.05; // 5% of track
-
-                    let mut d_points = Vec::new();
-                    for x in 0..dw as usize {
-                        let rel_x = x as f32 / dw;
-                        let track_norm = (play_head_norm - view_range/2.0 + rel_x * view_range).clamp(0.0, 1.0);
-                        let p_idx = (track_norm * peaks.len() as f32) as usize;
-                        let val = peaks[p_idx.min(peaks.len() - 1)];
-                        let y_off = val * (dh / 2.0);
-                        d_points.push(egui::pos2(d_rect.min.x + x as f32, d_rect.center().y - y_off));
-                        d_points.push(egui::pos2(d_rect.min.x + x as f32, d_rect.center().y + y_off));
-                    }
-                    ui.painter().add(egui::Shape::line(d_points, egui::Stroke::new(1.5, color.additive())));
-                    ui.painter().vline(d_rect.center().x, d_rect.y_range(), egui::Stroke::new(2.0, egui::Color32::WHITE));
-
-                    // MASTER MIX OSCILLOSCOPE (CDJ Style)
-                    ui.add_space(5.0);
-                    let (m_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 20.0, 32.0), egui::Sense::hover());
-                    ui.painter().rect_filled(m_rect, 2.0, egui::Color32::from_rgb(5, 5, 6));
-
-                    let m_width = m_rect.width();
-                    let m_height = m_rect.height();
-                    let mix_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
-                    let mix_color = egui::Color32::from_rgb(0, 255, 200);
-
-                    for (idx, glow_color, thickness) in [
-                        (0, mix_color.linear_multiply(0.15), 4.0),
-                        (1, mix_color.linear_multiply(0.4), 1.5),
-                        (2, egui::Color32::WHITE, 0.8),
-                    ] {
-                        let points: Vec<egui::Pos2> = (0..m_width as i32).step_by(2).map(|x| {
-                            let px = x as f32 / m_width;
-                            let wave1 = (px * 30.0 + time as f32 * 15.0 + (idx as f32 * 0.1)).sin();
-                            let wave2 = (px * 60.0 - time as f32 * 12.0).cos();
-                            let amp = (m_height * 0.4) * (wave1 * 0.6 + wave2 * 0.4) * (0.2 + mix_peak * 0.8);
-                            egui::pos2(m_rect.min.x + x as f32, m_rect.center().y + amp)
-                        }).collect();
-                        ui.painter().add(egui::Shape::line(points, egui::Stroke::new(thickness, glow_color)));
-                    }
-                    ui.painter().vline(m_rect.center().x, m_rect.y_range(), egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40)));
-                }
-            } else {
-                // FALLBACK Simulation if no real data
-                let time = ui.input(|i| i.time);
-                for (band, speed, scale) in [ (0, 8.0, 15.0), (1, 12.0, 10.0), (2, 20.0, 5.0) ] {
-                    let points: Vec<egui::Pos2> = (0..w_width as i32).step_by(2).map(|x| {
-                        let phase = x as f32 * 0.05 * (band as f32 + 1.0) + (time * speed) as f32;
-                        let amp = scale * ((phase * 0.01).cos().abs() + 0.2);
-                        egui::pos2(w_rect.min.x + x as f32, w_rect.center().y + (phase.sin() * amp))
-                    }).collect();
-                    ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.2, color.linear_multiply(0.8 - band as f32 * 0.2))));
-                }
-            }
-
-            // High-Visibility Beat Markers
-            for b in 0..8 {
-                let bx = w_rect.min.x + (w_width * (b as f32 / 8.0));
-                ui.painter().vline(bx, w_rect.y_range(), egui::Stroke::new(0.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30)));
-            }
-
-            // Transient Metadata Overlay
-            if let Some(sample) = self.sample_registry.get(i as u64 * 4) {
-                let total_samples = sample.buffer.len() as f32;
-                if total_samples > 0.0 {
-                    for &pos in sample.metadata.transients.iter() {
-                        let x_off = (pos as f32 / total_samples).fract(); // Simple wrap for simulation
-                        let tx = w_rect.min.x + (x_off * w_width);
-                        ui.painter().vline(tx, w_rect.y_range(), egui::Stroke::new(1.5, color.linear_multiply(0.5)));
-                    }
-                }
-            }
-
-            // Central Playhead (Less highlighted)
-            ui.painter().vline(w_rect.center().x, w_rect.y_range(), egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80)));
-
-            ui.add_space(10.0);
-
-            ui.columns(3, |cols| {
-                // COL 0: TRANSPORT
-                cols[0].with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    ui.add_space(5.0);
-                    let play_color = egui::Color32::from_rgb(0, 255, 100);
-                    let play_btn = egui::Button::new(egui::RichText::new("PLAY").color(play_color).strong())
-                        .min_size(egui::vec2(ui.available_width(), 40.0))
-                        .rounding(6.0);
-                    if ui.add(play_btn).clicked() {
-                        // Play logic
-                    }
-                    ui.add_space(8.0);
-                    let cue_color = if self.channel_cue[i] { egui::Color32::from_rgb(255, 150, 0) } else { egui::Color32::from_gray(40) };
-                    let cue_btn = egui::Button::new(egui::RichText::new("CUE").color(cue_color).strong())
-                        .min_size(egui::vec2(ui.available_width(), 40.0))
-                        .rounding(6.0);
-                    if ui.add(cue_btn).clicked() {
-                        self.channel_cue[i] = !self.channel_cue[i];
-                    }
-                });
-
-                // COL 1: JOG
-                cols[1].vertical_centered(|ui| {
                     ui.add_space(10.0);
-                    let jog_size = (ui.available_width() * 0.95).min(110.0);
-                    let (jog_rect, _) = ui.allocate_exact_size(egui::vec2(jog_size, jog_size), egui::Sense::hover());
-                    let center = jog_rect.center();
-                    let radius = jog_size / 2.0;
 
-                    // Main Platter
-                    ui.painter().circle_filled(center, radius, egui::Color32::from_rgb(10, 10, 12));
-                    ui.painter().circle_stroke(center, radius, egui::Stroke::new(2.0, egui::Color32::from_gray(40)));
+                    // 3. Transport
+                    ui.horizontal(|ui| {
+                        let cue_color = if self.channel_cue[i] { egui::Color32::from_rgb(255, 150, 0) } else { egui::Color32::from_gray(40) };
+                        if ui.add(egui::Button::new(egui::RichText::new("CUE").color(cue_color).strong()).min_size(egui::vec2(45.0, 28.0))).clicked() {
+                            self.channel_cue[i] = !self.channel_cue[i];
+                        }
 
-                    // Vinyl Grooves
-                    for r in [0.9, 0.8, 0.7, 0.6, 0.5] {
-                        ui.painter().circle_stroke(center, radius * r, egui::Stroke::new(0.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)));
-                    }
+                        let play_color = egui::Color32::from_rgb(0, 255, 100);
+                        if ui.add(egui::Button::new(egui::RichText::new("PLAY").color(play_color).strong()).min_size(egui::vec2(50.0, 28.0))).clicked() {
+                            // Play toggle
+                        }
 
-                    // Center Cap
-                    ui.painter().circle_filled(center, radius * 0.35, egui::Color32::from_rgb(25, 25, 30));
-                    ui.painter().circle_stroke(center, radius * 0.35, egui::Stroke::new(1.0, egui::Color32::from_gray(60)));
+                        let s_color = if self.channel_sync[i] { color } else { egui::Color32::from_gray(40) };
+                        if ui.add(egui::Button::new(egui::RichText::new("SYNC").color(s_color).strong().size(10.0)).min_size(egui::vec2(40.0, 28.0))).clicked() {
+                            self.channel_sync[i] = !self.channel_sync[i];
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
+                                target_id: (i as u64 * 4),
+                                param_id: 2,
+                                value: if self.channel_sync[i] { 1.0 } else { 0.0 },
+                                ramp_duration_samples: 0,
+                            });
+                        }
+                    });
 
-                    // Needle / Playhead (Rotating)
-                    let angle = (time * 2.0) as f32;
-                    let needle_start = center + egui::vec2(angle.cos() * (radius * 0.3), angle.sin() * (radius * 0.3));
-                    let needle_end = center + egui::vec2(angle.cos() * (radius * 0.98), angle.sin() * (radius * 0.98));
-                    ui.painter().line_segment([needle_start, needle_end], egui::Stroke::new(5.0, color));
+                    ui.add_space(15.0);
 
-                    // Directional Marker
-                    ui.painter().circle_filled(needle_end, 5.0, color);
-                    ui.painter().circle_stroke(needle_end, 5.0, egui::Stroke::new(1.0, egui::Color32::WHITE));
-                });
-
-                // COL 2: PITCH & SYNC
-                cols[2].vertical_centered(|ui| {
-                    ui.add_space(4.0);
-                    let s_color = if self.channel_sync[i] { color } else { egui::Color32::from_gray(40) };
-                    let sync_btn = egui::Button::new(egui::RichText::new("SYNC").color(s_color).strong().size(10.0))
-                        .min_size(egui::vec2(ui.available_width() * 0.8, 20.0))
-                        .rounding(4.0);
-                    if ui.add(sync_btn).clicked() {
-                        self.channel_sync[i] = !self.channel_sync[i];
-                        let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                            target_id: (i as u64 * 4),
-                            param_id: 2,
-                            value: if self.channel_sync[i] { 1.0 } else { 0.0 },
-                            ramp_duration_samples: 0,
-                        });
-                    }
-
-                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                        ui.add_space(5.0);
-                        let pct = (self.pitch_bend[i] - 1.0) * 100.0;
-                        ui.label(egui::RichText::new(format!("{:+.1}%", pct)).size(9.0).monospace().strong().color(color));
-
-                        let range = 0.92..=1.08; // Fixed +-8%
-                        let p_res = widgets::render_fader(ui, &mut self.pitch_bend[i], range, color, 80.0, 12.0);
+                    // 4. Pitch
+                    ui.horizontal(|ui| {
+                        ui.set_width(120.0);
+                        let range = 0.92..=1.08;
+                        let p_res = widgets::render_horizontal_fader(ui, &mut self.pitch_bend[i], range, color, 80.0, 16.0);
                         if p_res.changed() {
                             let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                                 target_id: (i as u64 * 4),
@@ -689,12 +565,52 @@ impl InspectorApp {
                                 ramp_duration_samples: 128,
                             });
                         }
+                        let pct = (self.pitch_bend[i] - 1.0) * 100.0;
+                        ui.label(egui::RichText::new(format!("{:+.1}%", pct)).size(9.0).monospace().color(color));
+                    });
+
+                    // 5. VU Mini
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1].min(1.2));
+                        widgets::render_vu_meter(ui, peak, peak, egui::Color32::from_rgb(0, 255, 180), 28.0);
                     });
                 });
             });
-        });
-    });
     }
+
+    fn render_deck_controls_stack(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(0.0, 4.0);
+            for i in 0..4 {
+                self.render_deck_controls_row(ui, i, telemetry);
+            }
+        });
+    }
+
+    fn render_dj_studio(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
+        let total_w = ui.available_width();
+
+        ui.vertical(|ui| {
+            ui.add_space(5.0);
+
+            // LAYER 1: MASTER MIX OSCILLOSCOPE (Now integrated at the top)
+            self.render_oscillator_monitor(ui, telemetry, total_w);
+            ui.add_space(10.0);
+
+            // LAYER 2: GLOBAL ALIGNMENT TIMELINE
+            self.render_signal_stack(ui, telemetry, total_w);
+            ui.add_space(10.0);
+
+            // LAYER 3: DECK CONTROLS
+            self.render_deck_controls_stack(ui, telemetry);
+            ui.add_space(15.0);
+
+            // LAYER 4: CENTRAL MIXER
+            self.render_central_mixer(ui, telemetry, total_w, 420.0);
+        });
+    }
+
+
 
 
     fn render_central_mixer(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>, main_w: f32, height: f32) {
