@@ -671,83 +671,53 @@ impl InspectorApp {
     }
 
 
-    fn render_master_panel(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>, height: f32) {
+    fn render_master_panel(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>, _height: f32) {
         egui::Frame::none()
-            .fill(egui::Color32::from_rgb(15, 15, 18))
-            .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(40)))
+            .fill(egui::Color32::from_rgb(20, 20, 24))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(30)))
             .rounding(4.0)
             .inner_margin(8.0)
             .show(ui, |ui| {
-                ui.set_height(height - 16.0);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
-                    let inner_h = 90.0;
-
-                    // GLOBAL CLOCK
-                    ui.vertical_centered(|ui| {
-                        ui.set_width(65.0);
-                        ui.label(egui::RichText::new("BPM").color(egui::Color32::from_gray(100)).size(8.0).strong());
-                        ui.add_space(4.0);
-                        ui.add(egui::DragValue::new(&mut self.global_bpm).speed(0.1).fixed_decimals(1).custom_formatter(|n, _| format!("{:.1}", n)));
-
-                        ui.add_space(8.0);
-                        let q_color = if self.quantize_enabled { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_gray(40) };
-                        if ui.add(egui::Button::new(egui::RichText::new("Q").small().strong().color(q_color)).frame(true).min_size(egui::vec2(30.0, 18.0))).clicked() {
-                            self.quantize_enabled = !self.quantize_enabled;
-                        }
-                    });
+                    ui.spacing_mut().item_spacing = egui::vec2(15.0, 0.0);
+                    let vu_h = 45.0;
 
                     // BOOTH CONTROL
-                    ui.vertical_centered(|ui| {
-                        ui.set_width(70.0);
-                        ui.label(egui::RichText::new("BOOTH").size(8.0).strong().color(egui::Color32::from_gray(160)));
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
-
-                            if widgets::render_fader(ui, &mut self.booth_gain, 0.0..=1.5, egui::Color32::from_rgb(0, 180, 255), inner_h, 12.0).changed() {
-                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 22, param_id: 0, value: self.booth_gain, ramp_duration_samples: 128 });
-                            }
-                            let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.booth_gain;
-                            if peak > self.booth_peak_hold { self.booth_peak_hold = peak; } else { self.booth_peak_hold *= 0.98; }
-                            widgets::render_vu_meter(ui, peak, self.booth_peak_hold, egui::Color32::from_rgb(0, 180, 255), inner_h);
-                        });
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
+                        if widgets::render_knob(ui, &mut self.booth_gain, 0.0..=1.5, "BOOTH", egui::Color32::from_rgb(0, 180, 255)).changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 22, param_id: 0, value: self.booth_gain, ramp_duration_samples: 128 });
+                        }
+                        let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.booth_gain;
+                        if peak > self.booth_peak_hold { self.booth_peak_hold = peak; } else { self.booth_peak_hold *= 0.98; }
+                        widgets::render_vu_meter(ui, peak, self.booth_peak_hold, egui::Color32::from_rgb(0, 180, 255), vu_h);
                     });
 
                     // REC CONTROL
-                    ui.vertical_centered(|ui| {
-                        ui.set_width(70.0);
-                        ui.label(egui::RichText::new("REC").size(8.0).strong().color(egui::Color32::from_gray(160)));
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
-
-                            if widgets::render_fader(ui, &mut self.rec_gain, 0.0..=1.5, egui::Color32::from_rgb(255, 50, 150), inner_h, 12.0).changed() {
-                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 23, param_id: 0, value: self.rec_gain, ramp_duration_samples: 128 });
-                            }
-                            let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.rec_gain;
-                            if peak > self.rec_peak_hold { self.rec_peak_hold = peak; } else { self.rec_peak_hold *= 0.98; }
-                            widgets::render_vu_meter(ui, peak, self.rec_peak_hold, egui::Color32::from_rgb(255, 50, 150), inner_h);
-                        });
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
+                        if widgets::render_knob(ui, &mut self.rec_gain, 0.0..=1.5, "REC", egui::Color32::from_rgb(255, 50, 150)).changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 23, param_id: 0, value: self.rec_gain, ramp_duration_samples: 128 });
+                        }
+                        let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.rec_gain;
+                        if peak > self.rec_peak_hold { self.rec_peak_hold = peak; } else { self.rec_peak_hold *= 0.98; }
+                        widgets::render_vu_meter(ui, peak, self.rec_peak_hold, egui::Color32::from_rgb(255, 50, 150), vu_h);
                     });
 
                     // MASTER CONTROL
-                    ui.vertical_centered(|ui| {
-                        ui.set_width(80.0);
-                        ui.label(egui::RichText::new("MASTER").size(8.0).strong().color(egui::Color32::from_gray(200)));
-                        ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
+                        if widgets::render_knob(ui, &mut self.master_gain, 0.0..=1.5, "MASTER", egui::Color32::from_rgb(0, 255, 180)).changed() {
+                            let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.master_gain, ramp_duration_samples: 128 });
+                        }
+                        let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
+                        if peak > self.master_peak_hold { self.master_peak_hold = peak; }
+                        else { self.master_peak_hold *= 0.98; }
+
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
-
-                            if widgets::render_fader(ui, &mut self.master_gain, 0.0..=1.5, egui::Color32::from_rgb(0, 255, 180), inner_h, 15.0).changed() {
-                                let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.master_gain, ramp_duration_samples: 128 });
-                            }
-                            let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
-                            if peak > self.master_peak_hold { self.master_peak_hold = peak; }
-                            else { self.master_peak_hold *= 0.98; }
-
-                            widgets::render_vu_meter(ui, peak * 0.95, self.master_peak_hold * 0.95, egui::Color32::from_rgb(0, 255, 180), inner_h);
-                            widgets::render_vu_meter(ui, peak, self.master_peak_hold, egui::Color32::from_rgb(0, 255, 180), inner_h);
+                            widgets::render_vu_meter(ui, peak * 0.95, self.master_peak_hold * 0.95, egui::Color32::from_rgb(0, 255, 180), vu_h);
+                            widgets::render_vu_meter(ui, peak, self.master_peak_hold, egui::Color32::from_rgb(0, 255, 180), vu_h);
                         });
                     });
                 });
@@ -762,8 +732,8 @@ impl InspectorApp {
         let inner_rect = rect.shrink2(egui::vec2(6.0, 10.0));
         ui.allocate_ui_at_rect(inner_rect, |ui| {
             ui.vertical(|ui| {
-                // 1. TOP: MASTER PANEL (BPM, Gains, Meters)
-                self.render_master_panel(ui, telemetry, 130.0);
+                // 1. TOP: COMPACT ROTARY MASTER PANEL
+                self.render_master_panel(ui, telemetry, 70.0);
                 ui.add_space(8.0);
 
                 // 2. MIDDLE: 4 CHANNEL STRIPS
