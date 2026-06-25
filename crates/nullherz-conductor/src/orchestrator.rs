@@ -4,6 +4,7 @@ use crate::transfusion_manager::TransfusionManager;
 use crate::mixer_bridge::MixerBridge;
 use crate::sidecar_supervisor::SidecarSupervisor;
 use crate::pattern_manager::PatternManager;
+use crate::modulation_matrix::ModulationMatrix;
 use nullherz_traits::{Command, CommandProducer, RenderingEngine, telemetry::Telemetry};
 use std::sync::Arc;
 use nullherz_dna::SampleRegistry;
@@ -15,6 +16,7 @@ pub struct Conductor {
     pub mixer_bridge: MixerBridge,
     pub sidecar_supervisor: SidecarSupervisor,
     pub pattern_manager: PatternManager,
+    pub modulation_matrix: ModulationMatrix,
     pub analysis_worker: Option<crate::analysis_worker::AnalysisWorker>,
     pub folder_monitor: Option<crate::folder_monitor::FolderMonitor>,
     pub library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>,
@@ -28,8 +30,12 @@ impl Default for Conductor {
 
 impl Conductor {
     pub fn new() -> Self {
+        Self::with_library_path("library.redb")
+    }
+
+    pub fn with_library_path(path: &str) -> Self {
         let sample_registry = Arc::new(SampleRegistry::new());
-        let library = Arc::new(std::sync::Mutex::new(nullherz_dna::LibraryDatabase::load("library.redb").unwrap()));
+        let library = Arc::new(std::sync::Mutex::new(nullherz_dna::LibraryDatabase::load(path).unwrap()));
         Self {
             engine_coordinator: EngineCoordinator::new(),
             topology_manager: TopologyManager::new(),
@@ -37,6 +43,7 @@ impl Conductor {
             mixer_bridge: MixerBridge::new(),
             sidecar_supervisor: SidecarSupervisor::new(),
             pattern_manager: PatternManager::new(),
+            modulation_matrix: ModulationMatrix::new(),
             analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
             folder_monitor: Some(crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())),
             library,
@@ -75,7 +82,7 @@ impl Conductor {
     }
 
     pub fn apply_mixer_commands(&mut self, commands: Vec<Command>) {
-        self.mixer_bridge.apply_mixer_commands(commands, &mut self.topology_manager);
+        self.mixer_bridge.apply_mixer_commands(commands, &mut self.topology_manager, &mut self.modulation_matrix);
     }
 
     pub fn tick(&mut self) {
@@ -221,10 +228,13 @@ impl Conductor {
             }
         }
 
-        // 3. Arrangement State
+        // 3. Modulation Matrix
+        state.modulation_matrix = self.modulation_matrix.clone();
+
+        // 4. Arrangement State
         state.arrangement = self.pattern_manager.arrangement.clone();
 
-        // 4. Transport State
+        // 5. Transport State
         state.bpm = self.mixer_bridge.timeline.bpm;
         state.transport_playing = true; // For now assume playing if state is saved, logic for is_playing pending in timeline
 
@@ -331,10 +341,13 @@ impl Conductor {
             }
         }
 
-        // 4. Reconstruct Arrangement
+        // 4. Reconstruct Modulation Matrix
+        self.modulation_matrix = state.modulation_matrix;
+
+        // 5. Reconstruct Arrangement
         self.pattern_manager.set_arrangement(state.arrangement);
 
-        // 5. Transport State
+        // 6. Transport State
         if let Some(ref mut prod) = self.engine_coordinator.command_producer {
             let _ = prod.push_command(nullherz_traits::TimestampedCommand {
                 timestamp_samples: 0,

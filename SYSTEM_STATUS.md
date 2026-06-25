@@ -65,11 +65,11 @@ While the Nullherz engine is architecturally hardened, the transition to a "Valu
 *   **Alpha Requirement**: Implement an off-thread **Transient & BPM Analyzer**. This will populate the `SampleRegistry` with metadata (beat-grids, root keys), allowing for seamless "Sync" and "Snap" during live performance.
 *   **Alpha Requirement**: Establish a persistent **Library Database** (using a Rust-native engine like `redb`) to manage multi-gigabyte track collections with ACID safety and zero-copy performance, without impacting the RT engine's memory footprint.
 
-### 4.2 Song Builder Readiness [~60%]
-*   **Current State**: Sample-accurate parameter automation and a modular "Transfusion" layer (Granular/Spectral) are operational.
-*   **Alpha Requirement**: **Project Persistence**. Implement a serialized `ProjectState` that captures the entire topology, sequence grid, and parameter set, allowing for session save/load cycles.
-*   **Alpha Requirement**: **Pattern Orchestration**. Move beyond the 16-step `SequencerProcessor` toward a "Pattern Manager" that can schedule complex arrangements on the `Timeline`.
-*   **Alpha Requirement**: **Macro Modulation**. Introduce a "Modulation Matrix" that allows high-level controls (Macro Knobs) to broadcast commands to multiple downstream DSP nodes simultaneously.
+### 4.2 Song Builder Readiness [~85%]
+*   **Current State**: Sample-accurate parameter automation, modular "Transfusion" layer, and a global Pattern Manager are operational.
+*   **Alpha Requirement**: [DONE] **Project Persistence**. Implement a serialized `ProjectState` that captures the entire topology, sequence grid, and parameter set, allowing for session save/load cycles.
+*   **Alpha Requirement**: [DONE] **Pattern Orchestration**. Move beyond the 16-step `SequencerProcessor` toward a "Pattern Manager" that can schedule complex arrangements on the `Timeline`.
+*   **Alpha Requirement**: [DONE] **Macro Modulation**. Introduce a "Modulation Matrix" that allows high-level controls (Macro Knobs) to broadcast commands to multiple downstream DSP nodes simultaneously.
 
 ---
 

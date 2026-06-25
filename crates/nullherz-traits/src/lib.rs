@@ -131,6 +131,22 @@ pub enum Command {
         node_idx: u32,
         enabled: bool,
     },
+    // Macro Modulation Commands
+    SetMacro {
+        macro_id: u32,
+        value: f32,
+    },
+    AddModMapping {
+        macro_id: u32,
+        target_id: u64,
+        param_id: u32,
+        scaling: f32,
+    },
+    RemoveModMapping {
+        macro_id: u32,
+        target_id: u64,
+        param_id: u32,
+    },
 }
 
 #[repr(C)]

@@ -10,6 +10,7 @@ pub mod analysis_worker;
 pub mod folder_monitor;
 pub mod persistence;
 pub mod pattern_manager;
+pub mod modulation_matrix;
 
 pub use orchestrator::Conductor;
 pub use timeline::Timeline;
