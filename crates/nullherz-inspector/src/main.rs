@@ -368,7 +368,7 @@ impl InspectorApp {
 
     fn render_dj_studio(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
         let total_w = ui.available_width();
-        let widget_h = 680.0;
+        let widget_h = 620.0;
 
         ui.vertical(|ui| {
             ui.add_space(5.0);
@@ -417,7 +417,7 @@ impl InspectorApp {
         ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(if is_selected { 3.0 } else { 1.0 }, stroke_color));
         ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(10, 10, 12));
 
-        let inner_rect = rect.shrink2(egui::vec2(10.0, 40.0));
+        let inner_rect = rect.shrink2(egui::vec2(10.0, 4.0));
         ui.allocate_ui_at_rect(inner_rect, |ui| {
             ui.vertical(|ui| {
                 ui.add_space(4.0);
@@ -573,8 +573,8 @@ impl InspectorApp {
                 }
             }
 
-            // Central Playhead
-            ui.painter().vline(w_rect.center().x, w_rect.y_range(), egui::Stroke::new(2.5, egui::Color32::from_rgb(255, 255, 255)));
+            // Central Playhead (Less highlighted)
+            ui.painter().vline(w_rect.center().x, w_rect.y_range(), egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80)));
 
             ui.add_space(10.0);
 
@@ -676,17 +676,15 @@ impl InspectorApp {
         ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(15, 15, 18));
         ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(30)));
 
-        let inner_rect = rect.shrink2(egui::vec2(6.0, 10.0));
+        let inner_rect = rect.shrink2(egui::vec2(6.0, 4.0));
         ui.allocate_ui_at_rect(inner_rect, |ui| {
             ui.vertical(|ui| {
-                // 1. MASTER CONTROLS STANDALONE ROW
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(15.0, 0.0);
-                    let vu_h = 42.0;
-                    let group_w = (inner_rect.width() - 30.0) / 3.0;
-
+                // 1. MASTER CONTROLS STANDALONE ROW (Perfectly Aligned)
+                let vu_h = 42.0;
+                ui.add_space(4.0);
+                ui.columns(3, |cols| {
                     // BOOTH
-                    ui.allocate_ui(egui::vec2(group_w, vu_h + 20.0), |ui| {
+                    cols[0].vertical_centered(|ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
                             if widgets::render_knob(ui, &mut self.booth_gain, 0.0..=1.5, "BOOTH", egui::Color32::from_rgb(0, 180, 255)).changed() {
@@ -703,7 +701,7 @@ impl InspectorApp {
                     });
 
                     // REC
-                    ui.allocate_ui(egui::vec2(group_w, vu_h + 20.0), |ui| {
+                    cols[1].vertical_centered(|ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
                             if widgets::render_knob(ui, &mut self.rec_gain, 0.0..=1.5, "REC", egui::Color32::from_rgb(255, 50, 150)).changed() {
@@ -720,7 +718,7 @@ impl InspectorApp {
                     });
 
                     // MASTER
-                    ui.allocate_ui(egui::vec2(group_w, vu_h + 20.0), |ui| {
+                    cols[2].vertical_centered(|ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
                             if widgets::render_knob(ui, &mut self.master_gain, 0.0..=1.5, "MASTER", egui::Color32::from_rgb(0, 255, 180)).changed() {
@@ -736,7 +734,7 @@ impl InspectorApp {
                         });
                     });
                 });
-                ui.add_space(10.0);
+                ui.add_space(8.0);
 
                 // 2. CHANNEL STRIPS
                 ui.horizontal_top(|ui| {
@@ -782,7 +780,7 @@ impl InspectorApp {
                                 // FADER & VU (Bottom of strip)
                                 ui.add_space(8.0);
                                 ui.horizontal(|ui| {
-                                    let fader_h = 180.0;
+                                    let fader_h = 140.0;
                                     let fader_w = 20.0;
                                     let spacing = 4.0;
                                     let left_pad = (col_w - fader_w - 8.0 - spacing) / 2.0;
@@ -1072,9 +1070,10 @@ impl eframe::App for InspectorApp {
             .width_range(60.0..=60.0)
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 10.0);
-                ui.vertical_centered(|ui| {
+
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new("⚙").color(egui::Color32::from_gray(100)).strong().size(20.0));
+                    ui.label(egui::RichText::new("NH").color(egui::Color32::from_gray(40)).strong().size(20.0));
                     ui.add_space(10.0);
 
                     for (tab, label, icon) in [
@@ -1086,6 +1085,20 @@ impl eframe::App for InspectorApp {
                         if self.render_nav_item(ui, icon, label, is_active, false).clicked() {
                             if is_active { self.active_right_tab = None; } else { self.active_right_tab = Some(tab); }
                         }
+                    }
+                });
+
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    ui.add_space(10.0);
+                    // Sidebar opener (toggle)
+                    let is_open = self.active_right_tab.is_some();
+                    if self.render_nav_item(ui, if is_open { "➡" } else { "⬅" }, "TOGGLE SIDEBAR", false, false).clicked() {
+                        if is_open { self.active_right_tab = None; } else { self.active_right_tab = Some(RightTab::Library); }
+                    }
+                    ui.add_space(10.0);
+                    // Settings at the bottom
+                    if self.render_nav_item(ui, "⚙", "SETTINGS", false, false).clicked() {
+                        // Handle settings
                     }
                 });
             });
