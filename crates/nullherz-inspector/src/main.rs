@@ -441,17 +441,13 @@ impl InspectorApp {
             ui.add_space(5.0);
 
             // TOP: OSCILLATOR & MASTER
-            ui.horizontal(|ui| {
-                let total_w = ui.available_width();
-                let master_w = 520.0;
-                let oscillator_w = total_w - master_w - 10.0;
-
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                self.render_master_panel(ui, telemetry, 160.0);
+                ui.add_space(10.0);
                 ui.vertical(|ui| {
-                    ui.set_width(oscillator_w);
+                    ui.set_width(ui.available_width());
                     self.render_oscillator_monitor(ui, telemetry);
                 });
-                ui.add_space(10.0);
-                self.render_master_panel(ui, telemetry, 160.0);
             });
             ui.add_space(10.0);
 
@@ -498,50 +494,6 @@ impl InspectorApp {
                 ui.vertical(|ui| { ui.set_width(deck_w); self.render_deck(ui, 2, telemetry, widget_h); });
                 // DECK D
                 ui.vertical(|ui| { ui.set_width(deck_w); self.render_deck(ui, 3, telemetry, widget_h); });
-            });
-
-            ui.add_space(20.0);
-
-            // INTEGRATED STATUS DASHBOARD
-            ui.horizontal(|ui| {
-                let dash_w = ui.available_width() - 20.0;
-                let (d_rect, _) = ui.allocate_exact_size(egui::vec2(dash_w, 80.0), egui::Sense::hover());
-
-                // Dashboard Background (Vented Rack Look)
-                ui.painter().rect_filled(d_rect, 2.0, egui::Color32::from_rgb(15, 15, 18));
-                ui.painter().rect_stroke(d_rect, 2.0, egui::Stroke::new(1.0, egui::Color32::from_gray(40)));
-
-                // Subtle vent lines
-                for i in 0..5 {
-                    let y = d_rect.min.y + 5.0 + i as f32 * 15.0;
-                    ui.painter().hline(d_rect.max.x - 60.0..=d_rect.max.x - 10.0, y, egui::Stroke::new(1.0, egui::Color32::from_gray(25)));
-                }
-
-                ui.child_ui(d_rect, egui::Layout::left_to_right(egui::Align::Center)).horizontal(|ui| {
-                    ui.add_space(20.0);
-
-                    // ENGINE TELEMETRY
-                    ui.vertical(|ui| {
-                        ui.add_space(15.0);
-                        let cpu_pct = telemetry.as_ref().map_or(0.0, |t| {
-                            let budget_ns = (128.0 / 44100.0) * 1e9;
-                            (t.process_time_ns as f64 / budget_ns * 100.0).min(100.0)
-                        });
-                        ui.label(egui::RichText::new("ENGINE LOAD").color(egui::Color32::from_gray(100)).size(9.0).strong());
-                        ui.label(egui::RichText::new(format!("{:.1}%", cpu_pct)).monospace().size(18.0).color(if cpu_pct > 80.0 { egui::Color32::RED } else { egui::Color32::from_rgb(0, 255, 200) }));
-                    });
-
-
-                    ui.add_space(40.0);
-
-                    // X-RUNS / STABILITY
-                    ui.vertical(|ui| {
-                        ui.add_space(15.0);
-                        let xruns = telemetry.as_ref().map_or(0, |t| t.xrun_count);
-                        ui.label(egui::RichText::new("X-RUNS").color(egui::Color32::from_gray(100)).size(9.0).strong());
-                        ui.label(egui::RichText::new(format!("{:03}", xruns)).monospace().size(18.0).color(if xruns > 0 { egui::Color32::from_rgb(255, 150, 0) } else { egui::Color32::from_gray(50) }));
-                    });
-                });
             });
         });
     }
@@ -837,27 +789,20 @@ impl InspectorApp {
 
 
     fn render_master_panel(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>, height: f32) {
-        let width = 520.0;
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-
-        ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(15, 15, 18));
-        ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(40)));
-
-        let inner_rect = rect.shrink(12.0);
-        ui.allocate_ui_at_rect(inner_rect, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space((inner_rect.height() - 110.0) / 2.0); // Manual vertical centering
+        egui::Frame::none()
+            .fill(egui::Color32::from_rgb(15, 15, 18))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(40)))
+            .rounding(4.0)
+            .inner_margin(12.0)
+            .show(ui, |ui| {
+                ui.set_height(height - 24.0);
                 ui.horizontal(|ui| {
-                    let total_item_w = 100.0 + 110.0 + 110.0 + 120.0 + 45.0; // sum of widths + spacing
-                    let left_pad = (ui.available_width() - total_item_w) / 2.0;
-                    ui.add_space(left_pad.max(0.0));
-
                     ui.spacing_mut().item_spacing = egui::vec2(15.0, 0.0);
                     let inner_h = 100.0;
 
                     // GLOBAL CLOCK
                     ui.vertical_centered(|ui| {
-                        ui.set_width(100.0);
+                        ui.set_width(80.0);
                         ui.label(egui::RichText::new("GLOBAL BPM").color(egui::Color32::from_gray(100)).size(9.0).strong());
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
@@ -876,13 +821,11 @@ impl InspectorApp {
 
                     // BOOTH CONTROL
                     ui.vertical_centered(|ui| {
-                        ui.set_width(110.0);
+                        ui.set_width(90.0);
                         ui.label(egui::RichText::new("BOOTH").size(8.0).strong().color(egui::Color32::from_gray(160)));
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
-                            let left_fader_pad: f32 = (110.0 - 24.0 - 16.0 - 8.0) / 2.0; // (width - fader_w - 2*vu_w - spacing) / 2
-                            ui.add_space(left_fader_pad.max(0.0));
 
                             if widgets::render_fader(ui, &mut self.booth_gain, 0.0..=1.5, egui::Color32::from_rgb(0, 180, 255), inner_h, 15.0).changed() {
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 22, param_id: 0, value: self.booth_gain, ramp_duration_samples: 128 });
@@ -896,13 +839,11 @@ impl InspectorApp {
 
                     // REC CONTROL
                     ui.vertical_centered(|ui| {
-                        ui.set_width(110.0);
+                        ui.set_width(90.0);
                         ui.label(egui::RichText::new("REC").size(8.0).strong().color(egui::Color32::from_gray(160)));
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
-                            let left_fader_pad: f32 = (110.0 - 24.0 - 16.0 - 8.0) / 2.0;
-                            ui.add_space(left_fader_pad.max(0.0));
 
                             if widgets::render_fader(ui, &mut self.rec_gain, 0.0..=1.5, egui::Color32::from_rgb(255, 50, 150), inner_h, 15.0).changed() {
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 23, param_id: 0, value: self.rec_gain, ramp_duration_samples: 128 });
@@ -916,13 +857,11 @@ impl InspectorApp {
 
                     // MASTER CONTROL
                     ui.vertical_centered(|ui| {
-                        ui.set_width(120.0);
+                        ui.set_width(100.0);
                         ui.label(egui::RichText::new("MASTER").size(8.0).strong().color(egui::Color32::from_gray(200)));
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
-                            let left_fader_pad: f32 = (120.0 - 24.0 - 16.0 - 8.0) / 2.0;
-                            ui.add_space(left_fader_pad.max(0.0));
 
                             if widgets::render_fader(ui, &mut self.master_gain, 0.0..=1.5, egui::Color32::from_rgb(0, 255, 180), inner_h, 20.0).changed() {
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.master_gain, ramp_duration_samples: 128 });
@@ -937,7 +876,6 @@ impl InspectorApp {
                     });
                 });
             });
-        });
     }
 
     fn render_central_mixer(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>, main_w: f32, height: f32) {
@@ -1318,63 +1256,54 @@ impl eframe::App for InspectorApp {
                         ui.add_space(15.0);
                     }
 
-                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                        ui.add_space(10.0);
-
-                        if self.active_right_tab.is_none() {
-                            if ui.add(egui::Button::new(egui::RichText::new("📂").size(20.0)).frame(false)).clicked() {
-                                self.active_right_tab = Some(RightTab::Library);
-                            }
-                        }
-                    });
                 });
             });
 
+        // RIGHT-ALIGNED VERTICAL NAVIGATION (Icon buttons only)
+        egui::SidePanel::right("right_nav")
+            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(8, 8, 10)).inner_margin(12.0))
+            .width_range(60.0..=60.0)
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(10.0);
+                    for (tab, label, icon) in [
+                        (RightTab::Library, "LIBRARY", "📁"),
+                        (RightTab::Metrics, "METRICS", "📊"),
+                        (RightTab::Notifications, "NOTIFS", "🔔"),
+                    ] {
+                        let is_active = self.active_right_tab == Some(tab);
+                        let color = if is_active { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(100) };
+
+                        let (rect, res) = ui.allocate_exact_size(egui::vec2(40.0, 40.0), egui::Sense::click());
+                        if res.clicked() {
+                            if is_active { self.active_right_tab = None; } else { self.active_right_tab = Some(tab); }
+                        }
+
+                        if is_active {
+                            ui.painter().rect_filled(rect.expand(2.0), 4.0, color.linear_multiply(0.05));
+                            ui.painter().vline(rect.max.x + 8.0, rect.y_range(), egui::Stroke::new(2.0, color));
+                        }
+
+                        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, icon, egui::FontId::proportional(20.0), color);
+                        res.on_hover_text(label);
+                        ui.add_space(15.0);
+                    }
+                });
+            });
+
+        // RIGHT SIDEBAR CONTENT (Appears to the left of right_nav when active)
         if let Some(tab) = self.active_right_tab {
-            egui::SidePanel::right("right_sidebar")
-                .frame(egui::Frame::none().fill(egui::Color32::from_rgb(12, 12, 14)).inner_margin(0.0))
+            egui::SidePanel::right("right_sidebar_content")
+                .frame(egui::Frame::none().fill(egui::Color32::from_rgb(12, 12, 14)).inner_margin(egui::Margin::symmetric(12.0, 8.0)))
                 .width_range(280.0..=400.0)
                 .show(ctx, |ui| {
                     ui.vertical(|ui| {
                         ui.add_space(8.0);
-
-                        egui::Frame::none().inner_margin(egui::Margin { left: 12.0, right: 12.0, top: 4.0, bottom: 80.0 }).show(ui, |ui| {
-                            match tab {
-                                RightTab::Library => views::library::render(self, ui),
-                                RightTab::Metrics => views::metrics::render(self, ui),
-                                RightTab::Notifications => views::notifications::render(self, ui),
-                            }
-                        });
-
-                        ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                            egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).inner_margin(8.0).show(ui, |ui| {
-                                ui.vertical(|ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
-                                        let btn_w = (ui.available_width() - 40.0) / 3.0;
-                                        for (t, label, icon) in [
-                                            (RightTab::Library, "LIB", "📁"),
-                                            (RightTab::Metrics, "MTR", "📊"),
-                                            (RightTab::Notifications, "NOT", "🔔"),
-                                        ] {
-                                            let is_active = self.active_right_tab == Some(t);
-                                            let btn = egui::Button::new(egui::RichText::new(format!("{} {}", icon, label)).small().strong().color(if is_active { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(120) }))
-                                                .frame(true)
-                                                .fill(if is_active { egui::Color32::from_gray(30) } else { egui::Color32::from_rgb(15, 15, 18) });
-
-                                            if ui.add_sized([btn_w, 32.0], btn).clicked() {
-                                                self.active_right_tab = Some(t);
-                                            }
-                                        }
-
-                                        ui.add_space(8.0);
-                                        if ui.add_sized([32.0, 32.0], egui::Button::new(egui::RichText::new("❌").color(egui::Color32::from_gray(100))).frame(true).fill(egui::Color32::from_rgb(30, 10, 10))).clicked() {
-                                            self.active_right_tab = None;
-                                        }
-                                    });
-                                });
-                            });
-                        });
+                        match tab {
+                            RightTab::Library => views::library::render(self, ui),
+                            RightTab::Metrics => views::metrics::render(self, ui),
+                            RightTab::Notifications => views::notifications::render(self, ui),
+                        }
                     });
                 });
         }
