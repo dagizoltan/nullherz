@@ -501,9 +501,9 @@ impl InspectorApp {
                     if i == 2 { ui.add_space(mixer_w + 10.0); }
                     ui.vertical(|ui| {
                         ui.set_width(deck_w);
-                        egui::Frame::none().fill(egui::Color32::from_rgb(15, 15, 18)).rounding(4.0).inner_margin(4.0).show(ui, |ui| {
+                        egui::Frame::none().fill(egui::Color32::from_rgb(10, 10, 12)).rounding(4.0).inner_margin(4.0).show(ui, |ui| {
                             ui.set_width(deck_w - 8.0);
-                            egui::ScrollArea::vertical().max_height(80.0).show(ui, |ui| {
+                            egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
                                 let slot_count = self.channel_fx_slots[i].len();
                                 for s_idx in 0..slot_count {
                                     ui.horizontal(|ui| {
@@ -1147,6 +1147,72 @@ impl InspectorApp {
     }
 
 
+    fn render_player(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Hi-Fi Music Player");
+        ui.add_space(20.0);
+
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(300.0);
+                ui.strong("Playlists");
+                ui.separator();
+                for (idx, pl) in self.playlists.iter().enumerate() {
+                    let is_sel = self.selected_playlist == Some(idx);
+                    if ui.selectable_label(is_sel, &pl.name).clicked() {
+                        self.selected_playlist = Some(idx);
+                    }
+                }
+                if ui.button("+ NEW PLAYLIST").clicked() {
+                    self.playlists.push(Playlist { name: format!("Playlist {}", self.playlists.len() + 1), tracks: vec![] });
+                }
+            });
+
+            ui.separator();
+
+            ui.vertical(|ui| {
+                ui.set_width(ui.available_width() - 20.0);
+                if let Some(idx) = self.selected_playlist {
+                    let pl = &self.playlists[idx];
+                    ui.strong(format!("Tracks in {}", pl.name));
+                    ui.add_space(10.0);
+                    if pl.tracks.is_empty() {
+                        ui.label(egui::RichText::new("No tracks in this playlist. Drag from Library to add.").weak());
+                    } else {
+                        for trk in &pl.tracks {
+                            ui.horizontal(|ui| {
+                                let _ = ui.button("▶");
+                                ui.label(format!("{} - {}", trk.artist, trk.title));
+                            });
+                        }
+                    }
+                } else {
+                    ui.label("Select a playlist to view tracks");
+                }
+            });
+        });
+
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+            ui.add_space(20.0);
+            egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).inner_margin(12.0).rounding(4.0).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                   let _ = ui.button(egui::RichText::new("⏮").size(20.0));
+                   if ui.button(egui::RichText::new(if self.player_is_playing { "⏸" } else { "▶" }).size(24.0)).clicked() {
+                       self.player_is_playing = !self.player_is_playing;
+                   }
+                   let _ = ui.button(egui::RichText::new("⏭").size(20.0));
+
+                   ui.add_space(20.0);
+                   ui.vertical(|ui| {
+                       ui.label("Now Playing: -");
+                       ui.spacing_mut().slider_width = ui.available_width() - 100.0;
+                       ui.add(egui::Slider::new(&mut 0.0, 0.0..=1.0).show_value(false));
+                   });
+                });
+            });
+        });
+    }
+
     fn render_arranger(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
         ui.heading("Song Arranger");
         ui.add_space(10.0);
@@ -1268,7 +1334,7 @@ impl eframe::App for InspectorApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             match self.active_view {
-                View::Player => { ui.heading("Player"); ui.label("Hi-Fi Music Player & Playlists"); },
+                View::Player => self.render_player(ui),
                 View::Console => self.render_dj_studio(ui, &telemetry),
                 View::Composer => views::sampler::render(self, ui, &telemetry),
                 View::Tools => {
