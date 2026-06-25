@@ -150,12 +150,19 @@ impl TransientDetector {
         let n = re.len().min(self.prev_magnitudes.len());
         let mut flux = 0.0;
 
+        // Use a small epsilon to avoid sqrt(0) issues or tiny fluctuations
+        let eps = 1e-6;
+
         for i in 0..n {
-            let mag = (re[i] * re[i] + im[i] * im[i]).sqrt();
+            let mag = (re[i] * re[i] + im[i] * im[i] + eps).sqrt();
             let diff = mag - self.prev_magnitudes[i];
+
+            // Weight higher frequencies slightly more for percussive onsets
+            let weight = 1.0 + (i as f32 / n as f32);
+
             // Only accumulate positive changes (onsets)
             if diff > 0.0 {
-                flux += diff;
+                flux += diff * weight;
             }
             self.prev_magnitudes[i] = mag;
         }
