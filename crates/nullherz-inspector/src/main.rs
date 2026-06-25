@@ -649,7 +649,7 @@ impl InspectorApp {
             ui.add_space(10.0);
 
             // DECK INFO HEADER FRAME
-            egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(8.0).show(ui, |ui| {
+            egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(4.0).show(ui, |ui| {
                 ui.set_width(ui.available_width() - 16.0);
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
@@ -682,7 +682,7 @@ impl InspectorApp {
                         });
                     });
 
-                    ui.add_space(4.0);
+                    ui.add_space(2.0);
 
                     ui.horizontal(|ui| {
                         egui::Frame::none().fill(egui::Color32::from_rgb(5, 5, 6)).inner_margin(6.0).rounding(2.0).show(ui, |ui| {
@@ -707,7 +707,7 @@ impl InspectorApp {
             });
 
             // WAVEFORM
-            ui.add_space(15.0);
+            ui.add_space(10.0);
             let (w_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 20.0, 120.0), egui::Sense::hover());
             ui.painter().rect_filled(w_rect, 2.0, egui::Color32::from_rgb(5, 5, 6));
 
@@ -802,7 +802,7 @@ impl InspectorApp {
             // Central Playhead
             ui.painter().vline(w_rect.center().x, w_rect.y_range(), egui::Stroke::new(2.5, egui::Color32::from_rgb(255, 255, 255)));
 
-            ui.add_space(15.0);
+            ui.add_space(10.0);
 
             ui.columns(3, |cols| {
                 // COL 1: JOG
@@ -886,7 +886,7 @@ impl InspectorApp {
 
                     ui.add_space(4.0);
                     let range = (1.0 - self.pitch_range[i])..=(1.0 + self.pitch_range[i]);
-                    let p_res = ui.add(egui::Slider::new(&mut self.pitch_bend[i], range).vertical().show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 8.0 }));
+                    let p_res = ui.add(egui::Slider::new(&mut self.pitch_bend[i], range).vertical().show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 12.0 }));
                     if p_res.changed() {
                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                             target_id: (i as u64 * 4),
@@ -1148,45 +1148,85 @@ impl InspectorApp {
 
 
     fn render_player(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Hi-Fi Music Player");
-        ui.add_space(20.0);
+        ui.heading("Precision Hi-Fi Player");
+        ui.add_space(12.0);
 
-        ui.horizontal(|ui| {
+        ui.horizontal_top(|ui| {
+            // Left: Library & Playlists
             ui.vertical(|ui| {
-                ui.set_width(300.0);
-                ui.strong("Playlists");
-                ui.separator();
+                ui.set_width(320.0);
+
+                ui.strong("Collections");
+                ui.add_space(4.0);
                 for (idx, pl) in self.playlists.iter().enumerate() {
                     let is_sel = self.selected_playlist == Some(idx);
-                    if ui.selectable_label(is_sel, &pl.name).clicked() {
+                    if ui.selectable_label(is_sel, format!("📁 {}", pl.name)).clicked() {
                         self.selected_playlist = Some(idx);
                     }
                 }
-                if ui.button("+ NEW PLAYLIST").clicked() {
+                if ui.button("+ New Playlist").clicked() {
                     self.playlists.push(Playlist { name: format!("Playlist {}", self.playlists.len() + 1), tracks: vec![] });
                 }
-            });
 
-            ui.separator();
-
-            ui.vertical(|ui| {
-                ui.set_width(ui.available_width() - 20.0);
-                if let Some(idx) = self.selected_playlist {
-                    let pl = &self.playlists[idx];
-                    ui.strong(format!("Tracks in {}", pl.name));
-                    ui.add_space(10.0);
-                    if pl.tracks.is_empty() {
-                        ui.label(egui::RichText::new("No tracks in this playlist. Drag from Library to add.").weak());
-                    } else {
-                        for trk in &pl.tracks {
+                ui.add_space(20.0);
+                ui.strong("Quick Access Library");
+                ui.separator();
+                egui::ScrollArea::vertical().id_source("player_lib").max_height(300.0).show(ui, |ui| {
+                    if let Ok(tracks) = self.library_db.list_tracks() {
+                        for track in tracks {
                             ui.horizontal(|ui| {
-                                let _ = ui.button("▶");
-                                ui.label(format!("{} - {}", trk.artist, trk.title));
+                                if ui.button("➕").on_hover_text("Add to selected playlist").clicked() {
+                                    if let Some(idx) = self.selected_playlist {
+                                        self.playlists[idx].tracks.push(Track { title: track.title.clone(), artist: track.artist.clone(), bpm: track.metadata.bpm as f32 });
+                                    }
+                                }
+                                ui.label(format!("{} - {}", track.artist, track.title));
                             });
                         }
                     }
+                });
+            });
+
+            ui.add_space(20.0);
+
+            // Right: Content Area
+            ui.vertical(|ui| {
+                ui.set_width(ui.available_width() - 20.0);
+                if let Some(idx) = self.selected_playlist {
+                    let pl = &mut self.playlists[idx];
+                    ui.horizontal(|ui| {
+                        ui.heading(&pl.name);
+                        ui.add_space(10.0);
+                        ui.label(egui::RichText::new(format!("{} tracks", pl.tracks.len())).weak());
+                    });
+                    ui.separator();
+                    ui.add_space(10.0);
+
+                    egui::ScrollArea::vertical().id_source("playlist_tracks").show(ui, |ui| {
+                        let mut to_remove = None;
+                        for (t_idx, trk) in pl.tracks.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                if ui.button("▶").clicked() {
+                                    self.player_is_playing = true;
+                                }
+                                ui.label(egui::RichText::new(&trk.artist).strong());
+                                ui.label("-");
+                                ui.label(&trk.title);
+
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.button("🗑").clicked() { to_remove = Some(t_idx); }
+                                    ui.label(egui::RichText::new(format!("{:.0} BPM", trk.bpm)).weak());
+                                });
+                            });
+                            ui.add_space(2.0);
+                        }
+                        if let Some(idx) = to_remove { pl.tracks.remove(idx); }
+                    });
                 } else {
-                    ui.label("Select a playlist to view tracks");
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(100.0);
+                        ui.label(egui::RichText::new("Select a Collection to begin listening").size(18.0).weak());
+                    });
                 }
             });
         });
@@ -1208,6 +1248,69 @@ impl InspectorApp {
                        ui.spacing_mut().slider_width = ui.available_width() - 100.0;
                        ui.add(egui::Slider::new(&mut 0.0, 0.0..=1.0).show_value(false));
                    });
+                });
+            });
+        });
+    }
+
+    fn render_composer(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Composer - Performance Launcher");
+        ui.add_space(12.0);
+
+        egui::ScrollArea::both().show(ui, |ui| {
+            ui.horizontal_top(|ui| {
+                // Tracks 1-8
+                for t in 0..8 {
+                    ui.vertical(|ui| {
+                        ui.set_width(100.0);
+
+                        // TRACK HEADER
+                        egui::Frame::none().fill(egui::Color32::from_gray(25)).rounding(2.0).inner_margin(4.0).show(ui, |ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.label(egui::RichText::new(format!("TRACK {}", t+1)).small().strong());
+                                ui.horizontal(|ui| {
+                                    let _ = ui.button(egui::RichText::new("S").small());
+                                    let _ = ui.button(egui::RichText::new("M").small());
+                                });
+                                widgets::render_vu_meter(ui, 0.0, 0.0, egui::Color32::from_rgb(0, 255, 100), 60.0);
+                            });
+                        });
+
+                        ui.add_space(8.0);
+
+                        // CLIPS
+                        for s in 0..8 {
+                            let (rect, res) = ui.allocate_exact_size(egui::vec2(100.0, 32.0), egui::Sense::click());
+                            let color = if s == 2 && t == 1 { egui::Color32::from_rgb(0, 255, 100) } else { egui::Color32::from_gray(20) };
+                            ui.painter().rect_filled(rect, 2.0, color);
+                            ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, egui::Color32::from_gray(40)));
+
+                            if res.clicked() { /* Trigger clip */ }
+                        }
+
+                        ui.add_space(10.0);
+                        // VOLUME FADER
+                        let mut vol = 0.8;
+                        widgets::render_fader(ui, &mut vol, 0.0..=1.0, egui::Color32::from_gray(100), 100.0, 15.0);
+                    });
+                    ui.add_space(8.0);
+                }
+
+                ui.separator();
+
+                // MASTER / SCENE LAUNCHER
+                ui.vertical(|ui| {
+                    ui.set_width(60.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(egui::RichText::new("MASTER").small().strong());
+                        ui.add_space(76.0); // Align with clip top
+                        for s in 0..8 {
+                            if ui.add(egui::Button::new(egui::RichText::new("▶").small()).min_size(egui::vec2(50.0, 32.0))).clicked() {
+                                // Launch scene
+                            }
+                            ui.add_space(4.0);
+                        }
+                    });
                 });
             });
         });
@@ -1286,36 +1389,33 @@ impl eframe::App for InspectorApp {
                         ui.add_space(15.0);
                     }
 
-                });
-            });
+                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                        ui.add_space(10.0);
 
-        // RIGHT-ALIGNED UTILITY NAVIGATION
-        egui::SidePanel::right("utility_panel")
-            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(8, 8, 10)).inner_margin(12.0))
-            .width_range(60.0..=60.0)
-            .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(10.0);
-                    for (tab, label, icon) in [
-                        (RightTab::Library, "LIBRARY", "📁"),
-                        (RightTab::Settings, "SETTINGS", "⚙"),
-                        (RightTab::Account, "ACCOUNT", "👤"),
-                    ] {
-                        let is_active = self.active_right_tab == Some(tab);
-                        let color = if is_active { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(100) };
-                        let (rect, res) = ui.allocate_exact_size(egui::vec2(40.0, 40.0), egui::Sense::click());
-                        if res.clicked() {
-                            if is_active { self.active_right_tab = None; }
-                            else { self.active_right_tab = Some(tab); }
+                        // RIGHT SIDEBAR / LIBRARY TOGGLE
+                        let lib_active = self.active_right_tab == Some(RightTab::Library);
+                        let lib_color = if lib_active { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(100) };
+                        if ui.add(egui::Button::new(egui::RichText::new("📁").size(20.0)).frame(false)).clicked() {
+                            self.active_right_tab = if lib_active { None } else { Some(RightTab::Library) };
                         }
-                        if is_active {
-                             ui.painter().rect_filled(rect.expand(2.0), 4.0, color.linear_multiply(0.05));
-                             ui.painter().vline(rect.max.x + 8.0, rect.y_range(), egui::Stroke::new(2.0, color));
+                        ui.add_space(10.0);
+
+                        for (tab, label, icon) in [
+                            (RightTab::Account, "ACCOUNT", "👤"),
+                            (RightTab::Settings, "SETTINGS", "⚙"),
+                        ] {
+                             let is_active = self.active_right_tab == Some(tab);
+                             let color = if is_active { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(100) };
+                             let (rect, res) = ui.allocate_exact_size(egui::vec2(40.0, 40.0), egui::Sense::click());
+                             if res.clicked() {
+                                 if is_active { self.active_right_tab = None; }
+                                 else { self.active_right_tab = Some(tab); }
+                             }
+                             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, icon, egui::FontId::proportional(20.0), color);
+                             res.on_hover_text(label);
+                             ui.add_space(10.0);
                         }
-                        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, icon, egui::FontId::proportional(20.0), color);
-                        res.on_hover_text(label);
-                        ui.add_space(15.0);
-                    }
+                    });
                 });
             });
 
@@ -1336,7 +1436,7 @@ impl eframe::App for InspectorApp {
             match self.active_view {
                 View::Player => self.render_player(ui),
                 View::Console => self.render_dj_studio(ui, &telemetry),
-                View::Composer => views::sampler::render(self, ui, &telemetry),
+                View::Composer => self.render_composer(ui),
                 View::Tools => {
                     ui.heading("Precision Audio Tools");
                     ui.add_space(20.0);
