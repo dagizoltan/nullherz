@@ -439,7 +439,8 @@ impl InspectorApp {
             self.render_oscillator_monitor(ui, telemetry);
             ui.add_space(10.0);
 
-            // MACRO ROW
+            // MACRO ROW (Hidden)
+            /*
             ui.horizontal(|ui| {
                 ui.add_space(10.0);
                 ui.label(egui::RichText::new("MACROS").small().strong().color(egui::Color32::from_gray(120)));
@@ -459,17 +460,19 @@ impl InspectorApp {
                 }
             });
             ui.add_space(10.0);
+            */
 
             // FX RACK ROW
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
                 for i in 0..4 {
                     if i == 2 {
-                        ui.add_space(mixer_w + 10.0); // Skip mixer column + spacing
+                        ui.add_space(mixer_w); // Skip mixer column
                     }
                     ui.vertical(|ui| {
                         ui.set_width(deck_w);
-                        egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(8.0).show(ui, |ui| {
+                        egui::Frame::none().fill(egui::Color32::from_rgb(25, 25, 30)).rounding(4.0).inner_margin(8.0).show(ui, |ui| {
+                            ui.set_width(deck_w - 16.0); // Fit frame
                             ui.horizontal(|ui| {
                                 ui.label(egui::RichText::new(format!("FX {}", (b'A' + i as u8) as char)).small().strong().color(Self::deck_color(i)));
                                 let fx_select_res = egui::ComboBox::from_id_source(format!("fx_select_{}", i))
@@ -780,11 +783,11 @@ impl InspectorApp {
 
             ui.add_space(15.0);
 
-            ui.columns(4, |cols| {
+            ui.columns(3, |cols| {
                 // COL 1: JOG
                 cols[0].vertical_centered(|ui| {
                     ui.add_space(10.0);
-                    let jog_size = (ui.available_width() * 0.95).min(100.0);
+                    let jog_size = (ui.available_width() * 0.95).min(110.0);
                     let (jog_rect, _) = ui.allocate_exact_size(egui::vec2(jog_size, jog_size), egui::Sense::hover());
                     let center = jog_rect.center();
                     let radius = jog_size / 2.0;
@@ -798,7 +801,7 @@ impl InspectorApp {
                         ui.painter().circle_stroke(center, radius * r, egui::Stroke::new(0.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10)));
                     }
 
-                    // Center Cap (Static)
+                    // Center Cap
                     ui.painter().circle_filled(center, radius * 0.35, egui::Color32::from_rgb(25, 25, 30));
                     ui.painter().circle_stroke(center, radius * 0.35, egui::Stroke::new(1.0, egui::Color32::from_gray(60)));
 
@@ -808,38 +811,38 @@ impl InspectorApp {
                     let needle_end = center + egui::vec2(angle.cos() * (radius * 0.98), angle.sin() * (radius * 0.98));
                     ui.painter().line_segment([needle_start, needle_end], egui::Stroke::new(5.0, color));
 
-                    // Directional Marker (Larger, bold tip)
+                    // Directional Marker
                     ui.painter().circle_filled(needle_end, 5.0, color);
                     ui.painter().circle_stroke(needle_end, 5.0, egui::Stroke::new(1.0, egui::Color32::WHITE));
                 });
 
                 // COL 2: TRANSPORT
                 cols[1].vertical_centered(|ui| {
-                    ui.add_space(10.0);
+                    ui.add_space(20.0);
                     let cue_color = if self.channel_cue[i] { egui::Color32::from_rgb(255, 150, 0) } else { egui::Color32::from_gray(40) };
                     let cue_btn = egui::Button::new(egui::RichText::new("CUE").color(cue_color).strong())
-                        .min_size(egui::vec2(60.0, 60.0))
-                        .rounding(30.0);
+                        .min_size(egui::vec2(80.0, 40.0))
+                        .rounding(6.0);
                     if ui.add(cue_btn).clicked() {
                         self.channel_cue[i] = !self.channel_cue[i];
                     }
-                    ui.add_space(15.0);
+                    ui.add_space(10.0);
                     let play_color = egui::Color32::from_rgb(0, 255, 100);
                     let play_btn = egui::Button::new(egui::RichText::new("PLAY").color(play_color).strong())
-                        .min_size(egui::vec2(60.0, 60.0))
-                        .rounding(30.0);
+                        .min_size(egui::vec2(80.0, 40.0))
+                        .rounding(6.0);
                     if ui.add(play_btn).clicked() {
                         // Play logic
                     }
                 });
 
-                // COL 3: SYNC & MISC
+                // COL 3: PITCH & SYNC
                 cols[2].vertical_centered(|ui| {
                     ui.add_space(10.0);
                     let s_color = if self.channel_sync[i] { color } else { egui::Color32::from_gray(40) };
                     let sync_btn = egui::Button::new(egui::RichText::new("SYNC").color(s_color).strong())
-                        .min_size(egui::vec2(50.0, 50.0))
-                        .rounding(25.0);
+                        .min_size(egui::vec2(ui.available_width() - 8.0, 24.0))
+                        .rounding(6.0);
                     if ui.add(sync_btn).clicked() {
                         self.channel_sync[i] = !self.channel_sync[i];
                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
@@ -849,10 +852,6 @@ impl InspectorApp {
                             ramp_duration_samples: 0,
                         });
                     }
-                });
-
-                // COL 4: PITCH
-                cols[3].vertical_centered(|ui| {
                     ui.add_space(2.0);
                     ui.label(egui::RichText::new("PITCH").size(7.0).strong().color(egui::Color32::from_gray(120)));
                     egui::ComboBox::from_id_source(format!("pitch_range_{}", i))
@@ -1027,7 +1026,6 @@ impl InspectorApp {
 
                         // GAIN / TRIM
                         if widgets::render_knob(ui, &mut self.channel_trims[i], 0.0..=2.0, "TRIM", Self::deck_color(i)).changed() {
-                            ui.add_space(12.0);
                             let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                                 target_id: (i as u64 * 4 + 1),
                                 param_id: 0,
@@ -1067,10 +1065,17 @@ impl InspectorApp {
 
                         ui.add_space(12.0);
 
-                        // FADER & VU
-                        ui.add_space(5.0);
-                        ui.horizontal_centered(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);
+                        // FADER & VU (Precisely Aligned to Center Axis)
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            let strip_w = col_w;
+                            let fader_w = 24.0;
+                            let spacing = 8.0;
+
+                            // Exact centering math for fader relative to strip
+                            let left_pad = (strip_w - fader_w) / 2.0;
+                            ui.add_space(left_pad);
+
                             if widgets::render_fader(ui, &mut self.channel_faders[i], 0.0..=1.0, Self::deck_color(i)).changed() {
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                                     target_id: (i as u64 * 4 + 1),
@@ -1080,7 +1085,9 @@ impl InspectorApp {
                                 });
                             }
 
-                            // VU METER
+                            ui.add_space(spacing);
+
+                            // VU METER (To the right of fader)
                             let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1].min(1.2));
                             if peak > self.channel_peak_hold[i] { self.channel_peak_hold[i] = peak; }
                             else { self.channel_peak_hold[i] *= 0.98; }

@@ -57,10 +57,10 @@ pub fn render_knob(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive
 
         if !label.is_empty() {
             ui.painter().text(
-                rect.center_bottom() + Vec2::new(0.0, 6.0),
+                rect.center_bottom() + Vec2::new(0.0, 8.0),
                 Align2::CENTER_TOP,
                 label,
-                FontId::proportional(9.0),
+                FontId::proportional(8.5),
                 Color32::from_gray(200)
             );
         }
