@@ -542,31 +542,56 @@ impl InspectorApp {
                     ui.painter().add(egui::Shape::line(d_points, egui::Stroke::new(1.5, color.additive())));
                     ui.painter().vline(d_rect.center().x, d_rect.y_range(), egui::Stroke::new(2.0, egui::Color32::WHITE));
 
-                    // MASTER MIX OSCILLOSCOPE (CDJ Style)
+                    // DUAL SIGNAL ALIGNMENT MONITORS
                     ui.add_space(5.0);
-                    let (m_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 20.0, 32.0), egui::Sense::hover());
+                    let mon_w = ui.available_width() - 20.0;
+
+                    // A. CHANNEL MONITOR (Local Track)
+                    let (c_rect, _) = ui.allocate_exact_size(egui::vec2(mon_w, 36.0), egui::Sense::hover());
+                    ui.painter().rect_filled(c_rect, 2.0, egui::Color32::from_rgb(5, 5, 6));
+                    let ch_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1].min(1.2));
+
+                    for (idx, glow_color, thickness) in [
+                        (0, color.linear_multiply(0.15), 4.0),
+                        (1, color.linear_multiply(0.4), 1.5),
+                        (2, egui::Color32::WHITE, 0.8),
+                    ] {
+                        let points: Vec<egui::Pos2> = (0..mon_w as i32).step_by(2).map(|x| {
+                            let px = x as f32 / mon_w;
+                            let wave1 = (px * 30.0 + time as f32 * 15.0 + (idx as f32 * 0.1)).sin();
+                            let wave2 = (px * 60.0 - time as f32 * 12.0).cos();
+                            let amp = (36.0 * 0.4) * (wave1 * 0.6 + wave2 * 0.4) * (0.2 + ch_peak * 0.8);
+                            egui::pos2(c_rect.min.x + x as f32, c_rect.center().y + amp)
+                        }).collect();
+                        ui.painter().add(egui::Shape::line(points, egui::Stroke::new(thickness, glow_color)));
+                    }
+                    ui.painter().vline(c_rect.center().x, c_rect.y_range(), egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40)));
+                    ui.painter().text(c_rect.min + egui::vec2(5.0, 5.0), egui::Align2::LEFT_TOP, "CHANNEL", egui::FontId::proportional(7.0), color.linear_multiply(0.5));
+
+                    // B. MASTER MIX MONITOR (CDJ Style)
+                    ui.add_space(4.0);
+                    let (m_rect, _) = ui.allocate_exact_size(egui::vec2(mon_w, 24.0), egui::Sense::hover());
                     ui.painter().rect_filled(m_rect, 2.0, egui::Color32::from_rgb(5, 5, 6));
 
-                    let m_width = m_rect.width();
-                    let m_height = m_rect.height();
                     let mix_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
                     let mix_color = egui::Color32::from_rgb(0, 255, 200);
 
                     for (idx, glow_color, thickness) in [
-                        (0, mix_color.linear_multiply(0.15), 4.0),
-                        (1, mix_color.linear_multiply(0.4), 1.5),
-                        (2, egui::Color32::WHITE, 0.8),
+                        (0, mix_color.linear_multiply(0.15), 3.0),
+                        (1, mix_color.linear_multiply(0.4), 1.2),
+                        (2, egui::Color32::WHITE, 0.6),
                     ] {
-                        let points: Vec<egui::Pos2> = (0..m_width as i32).step_by(2).map(|x| {
-                            let px = x as f32 / m_width;
+                        let points: Vec<egui::Pos2> = (0..mon_w as i32).step_by(2).map(|x| {
+                            let px = x as f32 / mon_w;
                             let wave1 = (px * 30.0 + time as f32 * 15.0 + (idx as f32 * 0.1)).sin();
                             let wave2 = (px * 60.0 - time as f32 * 12.0).cos();
-                            let amp = (m_height * 0.4) * (wave1 * 0.6 + wave2 * 0.4) * (0.2 + mix_peak * 0.8);
+                            let amp = (24.0 * 0.4) * (wave1 * 0.6 + wave2 * 0.4) * (0.2 + mix_peak * 0.8);
                             egui::pos2(m_rect.min.x + x as f32, m_rect.center().y + amp)
                         }).collect();
                         ui.painter().add(egui::Shape::line(points, egui::Stroke::new(thickness, glow_color)));
                     }
                     ui.painter().vline(m_rect.center().x, m_rect.y_range(), egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40)));
+                    ui.painter().text(m_rect.min + egui::vec2(5.0, 3.0), egui::Align2::LEFT_TOP, "MIX", egui::FontId::proportional(7.0), mix_color.linear_multiply(0.5));
                 }
             } else {
                 // FALLBACK Simulation if no real data
@@ -705,21 +730,22 @@ impl InspectorApp {
         let inner_rect = rect.shrink2(egui::vec2(6.0, 4.0));
         ui.allocate_ui_at_rect(inner_rect, |ui| {
             ui.vertical(|ui| {
-                // 1. MASTER CONTROLS STANDALONE ROW (Aligned with Channel Columns)
+                // 1. MASTER CONTROLS STANDALONE ROW (Perfectly Aligned)
                 ui.add_space(4.0);
                 ui.columns(4, |cols| {
-                    let labels = ["BOOTH", "REC", "MST"];
+                    let labels = ["BOOTH", "REC", "MASTER"];
                     let colors = [egui::Color32::from_rgb(0, 180, 255), egui::Color32::from_rgb(255, 50, 150), egui::Color32::from_rgb(0, 255, 180)];
 
                     for i in 0..3 {
                         cols[i].vertical_centered(|ui| {
+                            ui.label(egui::RichText::new(labels[i]).size(8.0).strong().color(egui::Color32::from_gray(120)));
+                            ui.add_space(2.0);
+
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
                                 let avail_w = ui.available_width();
-                                // Total width estimate: label(25) + space(4) + knob(36) + space(4) + stereo_vu(18) = 87
-                                ui.add_space(((avail_w - 87.0) / 2.0).max(0.0));
-
-                                ui.label(egui::RichText::new(labels[i]).size(8.0).strong().color(egui::Color32::from_gray(100)));
+                                // Knob is 36.0, stereo VU is 18.0 (2 * 8.0 + 2.0 spacing). Total = 54.0
+                                ui.add_space(((avail_w - 54.0) / 2.0).max(0.0));
 
                                 let (gain, peak_hold, target_id) = match i {
                                     0 => (&mut self.booth_gain, &mut self.booth_peak_hold, 22),
