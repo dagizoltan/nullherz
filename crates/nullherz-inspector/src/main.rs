@@ -622,62 +622,67 @@ impl InspectorApp {
 
         ui.child_ui(rect, egui::Layout::top_down(egui::Align::Center)).vertical(|ui| {
             ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                ui.add_space(10.0);
-                ui.label(egui::RichText::new(deck_name).color(if is_selected { color } else { egui::Color32::from_gray(180) }).strong());
 
-                let is_master = self.master_deck == Some(i);
-                let master_color = if is_master { color } else { egui::Color32::from_gray(40) };
-                if ui.add(egui::Button::new(egui::RichText::new("MASTER").small().strong().color(master_color)).frame(true)).clicked() {
-                    if is_master { self.master_deck = None; } else { self.master_deck = Some(i); }
-                }
+            // DECK INFO HEADER FRAME
+            egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(8.0).show(ui, |ui| {
+                ui.set_width(ui.available_width() - 16.0);
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(deck_name).color(if is_selected { color } else { egui::Color32::from_gray(180) }).strong());
 
-                if let Some(sample) = self.sample_registry.get(i as u64 * 4) {
-                    let key_text = if let Some(key) = sample.metadata.root_key {
-                        let notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-                        format!("{}", notes[(key.round() as usize) % 12])
-                    } else {
-                        "-".to_string()
-                    };
-                    ui.add_space(5.0);
-                    egui::Frame::none().fill(color.linear_multiply(0.1)).rounding(2.0).inner_margin(2.0).show(ui, |ui| {
-                        ui.label(egui::RichText::new(format!(" {} ", key_text)).small().strong().color(color));
+                        let is_master = self.master_deck == Some(i);
+                        let master_color = if is_master { color } else { egui::Color32::from_gray(40) };
+                        if ui.add(egui::Button::new(egui::RichText::new("MASTER").small().strong().color(master_color)).frame(true)).clicked() {
+                            if is_master { self.master_deck = None; } else { self.master_deck = Some(i); }
+                        }
+
+                        if let Some(sample) = self.sample_registry.get(i as u64 * 4) {
+                            let key_text = if let Some(key) = sample.metadata.root_key {
+                                let notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+                                format!("{}", notes[(key.round() as usize) % 12])
+                            } else {
+                                "-".to_string()
+                            };
+                            ui.add_space(5.0);
+                            egui::Frame::none().fill(color.linear_multiply(0.1)).rounding(2.0).inner_margin(2.0).show(ui, |ui| {
+                                ui.label(egui::RichText::new(format!(" {} ", key_text)).small().strong().color(color));
+                            });
+                            ui.label(egui::RichText::new(format!("{:.1} BPM", sample.metadata.bpm)).small().strong().color(color));
+                        }
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1]);
+                            let db = 20.0 * peak.log10().max(-60.0);
+                            ui.label(egui::RichText::new(format!("{:.1} dB", db)).small().color(if peak > 1.0 { egui::Color32::RED } else { egui::Color32::from_gray(100) }));
+                        });
                     });
-                    ui.label(egui::RichText::new(format!("{:.1} BPM", sample.metadata.bpm)).small().strong().color(color));
-                }
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(10.0);
-                    let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1]);
-                    let db = 20.0 * peak.log10().max(-60.0);
-                    ui.label(egui::RichText::new(format!("{:.1} dB", db)).small().color(if peak > 1.0 { egui::Color32::RED } else { egui::Color32::from_gray(100) }));
-                });
-            });
+                    ui.add_space(4.0);
 
-            ui.horizontal(|ui| {
-                ui.add_space(10.0);
-                egui::Frame::none().fill(egui::Color32::from_rgb(5, 5, 6)).inner_margin(6.0).rounding(2.0).show(ui, |ui| {
-                    ui.set_width(ui.available_width() - 100.0);
-                    if let Some(ref title) = self.now_playing[i] {
-                        ui.label(egui::RichText::new(title).color(color).size(13.0).strong());
-                    } else {
-                        ui.label(egui::RichText::new("READY TO LOAD").color(egui::Color32::from_gray(40)).size(11.0));
-                    }
-                });
+                    ui.horizontal(|ui| {
+                        egui::Frame::none().fill(egui::Color32::from_rgb(5, 5, 6)).inner_margin(6.0).rounding(2.0).show(ui, |ui| {
+                            ui.set_width(ui.available_width() - 100.0);
+                            if let Some(ref title) = self.now_playing[i] {
+                                ui.label(egui::RichText::new(title).color(color).size(13.0).strong());
+                            } else {
+                                ui.label(egui::RichText::new("READY TO LOAD").color(egui::Color32::from_gray(40)).size(11.0));
+                            }
+                        });
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(10.0);
-                    let total_sec = 324.0;
-                    let elapsed = (ui.input(|i| i.time) % total_sec as f64) as f32;
-                    let remaining = total_sec - elapsed;
-                    let mins = (remaining / 60.0) as i32;
-                    let secs = (remaining % 60.0) as i32;
-                    ui.label(egui::RichText::new(format!("-{:02}:{:02}", mins, secs)).color(color).monospace().size(16.0).strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let total_sec = 324.0;
+                            let elapsed = (ui.input(|i| i.time) % total_sec as f64) as f32;
+                            let remaining = total_sec - elapsed;
+                            let mins = (remaining / 60.0) as i32;
+                            let secs = (remaining % 60.0) as i32;
+                            ui.label(egui::RichText::new(format!("-{:02}:{:02}", mins, secs)).color(color).monospace().size(18.0).strong());
+                        });
+                    });
                 });
             });
 
             // WAVEFORM
-            ui.add_space(10.0);
+            ui.add_space(15.0);
             let (w_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width() - 20.0, 120.0), egui::Sense::hover());
             ui.painter().rect_filled(w_rect, 2.0, egui::Color32::from_rgb(5, 5, 6));
 
@@ -772,7 +777,7 @@ impl InspectorApp {
             // Central Playhead
             ui.painter().vline(w_rect.center().x, w_rect.y_range(), egui::Stroke::new(2.5, egui::Color32::from_rgb(255, 255, 255)));
 
-            ui.add_space(10.0);
+            ui.add_space(15.0);
 
             ui.columns(4, |cols| {
                 // COL 1: JOG
@@ -1008,9 +1013,16 @@ impl InspectorApp {
                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
                 let col_w = main_w / 4.0;
                 for i in 0..4 {
-                    ui.allocate_ui(egui::vec2(col_w, 320.0), |ui| {
+                    ui.allocate_ui(egui::vec2(col_w, 400.0), |ui| {
                         ui.vertical_centered(|ui| {
                         ui.set_width(col_w);
+
+                        // CHANNEL HEADER
+                        egui::Frame::none().fill(Self::deck_color(i).linear_multiply(0.2)).rounding(2.0).inner_margin(4.0).show(ui, |ui| {
+                            ui.set_width(col_w - 8.0);
+                            ui.label(egui::RichText::new(format!("CH {}", i + 1)).strong().color(Self::deck_color(i)));
+                        });
+                        ui.add_space(8.0);
 
                         // GAIN / TRIM
                         if widgets::render_knob(ui, &mut self.channel_trims[i], 0.0..=2.0, "TRIM", Self::deck_color(i)).changed() {
@@ -1022,7 +1034,7 @@ impl InspectorApp {
                             });
                         }
 
-                        ui.add_space(10.0);
+                        ui.add_space(15.0);
 
                         // HI / MID / LOW
                         for (label, param_idx, state_val) in [("HI", 2, &mut self.channel_eq_high[i]), ("MID", 1, &mut self.channel_eq_mid[i]), ("LOW", 0, &mut self.channel_eq_low[i])] {
@@ -1034,10 +1046,10 @@ impl InspectorApp {
                                     ramp_duration_samples: 0,
                                 });
                             }
-                            ui.add_space(6.0);
+                            ui.add_space(10.0);
                         }
 
-                        ui.add_space(8.0);
+                        ui.add_space(12.0);
 
                         // FX BUTTON
                         let fx_color = if self.channel_fx_enabled[i] { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(40) };
