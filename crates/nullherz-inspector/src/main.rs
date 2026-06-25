@@ -907,10 +907,10 @@ impl InspectorApp {
         let inner_rect = rect.shrink(12.0);
         ui.child_ui(inner_rect, egui::Layout::left_to_right(egui::Align::Center)).horizontal(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
-            let inner_h = inner_rect.height() - 32.0;
+            let inner_h = 85.0; // Fixed height to prevent overflow
 
             // BOOTH CONTROL
-            ui.vertical(|ui| {
+            ui.vertical_centered(|ui| {
                 ui.set_width(100.0);
                 ui.label(egui::RichText::new("BOOTH").size(8.0).strong().color(egui::Color32::from_gray(160)));
                 ui.add_space(4.0);
@@ -929,7 +929,7 @@ impl InspectorApp {
             ui.add_space(15.0);
 
             // REC CONTROL
-            ui.vertical(|ui| {
+            ui.vertical_centered(|ui| {
                 ui.set_width(100.0);
                 ui.label(egui::RichText::new("REC").size(8.0).strong().color(egui::Color32::from_gray(160)));
                 ui.add_space(4.0);
@@ -948,7 +948,7 @@ impl InspectorApp {
             ui.add_space(15.0);
 
             // MASTER CONTROL
-            ui.vertical(|ui| {
+            ui.vertical_centered(|ui| {
                 ui.set_width(110.0);
                 ui.label(egui::RichText::new("MASTER").size(8.0).strong().color(egui::Color32::from_gray(200)));
                 ui.add_space(4.0);
