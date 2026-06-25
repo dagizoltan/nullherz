@@ -1,3 +1,5 @@
+mod widgets;
+
 use serde::Deserialize;
 use std::env;
 use std::fs;
@@ -147,55 +149,6 @@ impl InspectorApp {
         }
     }
 
-    fn render_knob(ui: &mut egui::Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, label: &str) -> egui::Response {
-        let size = egui::vec2(32.0, 32.0);
-        let (rect, mut response) = ui.allocate_exact_size(size, egui::Sense::drag());
-
-        if response.dragged() {
-            let old_value = *value;
-            let delta = response.drag_delta().y * -0.01;
-            *value = (*value + delta).clamp(*range.start(), *range.end());
-            if *value != old_value {
-                response.mark_changed();
-            }
-        }
-
-        if ui.is_rect_visible(rect) {
-            let visuals = ui.style().interact(&response);
-            let center = rect.center();
-            let radius = rect.width() / 2.0;
-
-            // Outer Circle (Tactile Aluminum)
-            ui.painter().circle_filled(center, radius, egui::Color32::from_gray(30));
-            ui.painter().circle_stroke(center, radius, egui::Stroke::new(1.0, egui::Color32::from_gray(60)));
-
-            // Subtle shadow
-            ui.painter().circle_stroke(center, radius + 1.0, egui::Stroke::new(1.0, egui::Color32::from_black_alpha(50)));
-
-            // Pointer line
-            let normalized = (*value - *range.start()) / (*range.end() - *range.start());
-            let angle = egui::lerp(
-                (-135.0f32).to_radians()..=(135.0f32).to_radians(),
-                normalized,
-            );
-            let (sin, cos) = angle.sin_cos();
-            let pointer_start = center + egui::vec2(sin, -cos) * (radius * 0.2);
-            let pointer_end = center + egui::vec2(sin, -cos) * (radius * 0.95);
-
-            let color = if (normalized - 0.5).abs() < 0.01 { egui::Color32::from_rgb(0, 255, 200) } else { visuals.fg_stroke.color };
-            ui.painter().line_segment([pointer_start, pointer_end], egui::Stroke::new(4.0, egui::Color32::BLACK));
-            ui.painter().line_segment([pointer_start, pointer_end], egui::Stroke::new(2.0, color));
-
-            // Small indicator dot for center
-            ui.painter().circle_filled(center, 2.5, egui::Color32::from_gray(80));
-
-            if !label.is_empty() {
-                ui.painter().text(rect.center_bottom() + egui::vec2(0.0, 5.0), egui::Align2::CENTER_TOP, label, egui::FontId::proportional(8.0), egui::Color32::from_gray(120));
-            }
-        }
-
-        response
-    }
 
     pub fn new(graph: GraphJson, cc: &eframe::CreationContext<'_>) -> Self {
         let mut visuals = egui::Visuals::dark();
@@ -433,7 +386,7 @@ impl InspectorApp {
                 for i in 0..8 {
                     ui.vertical(|ui| {
                         ui.set_width(60.0);
-                        if Self::render_knob(ui, &mut self.macros[i], 0.0..=1.0, "").changed() {
+                        if widgets::render_knob(ui, &mut self.macros[i], 0.0..=1.0, "", egui::Color32::from_rgb(0, 255, 200)).changed() {
                             let _ = self.command_sender.send(nullherz_traits::Command::SetMacro {
                                 macro_id: i as u32,
                                 value: self.macros[i],
@@ -471,38 +424,64 @@ impl InspectorApp {
 
             // INTEGRATED MASTER & STATUS DASHBOARD
             ui.horizontal(|ui| {
-                let dash_w = total_w * 0.4;
-                let (d_rect, _) = ui.allocate_exact_size(egui::vec2(dash_w, 60.0), egui::Sense::hover());
-                ui.painter().rect_filled(d_rect, 2.0, egui::Color32::from_rgb(8, 8, 10));
+                let dash_w = 400.0;
+                let (d_rect, _) = ui.allocate_exact_size(egui::vec2(dash_w, 80.0), egui::Sense::hover());
+
+                // Dashboard Background (Vented Rack Look)
+                ui.painter().rect_filled(d_rect, 2.0, egui::Color32::from_rgb(15, 15, 18));
+                ui.painter().rect_stroke(d_rect, 2.0, egui::Stroke::new(1.0, egui::Color32::from_gray(40)));
+
+                // Subtle vent lines
+                for i in 0..5 {
+                    let y = d_rect.min.y + 5.0 + i as f32 * 15.0;
+                    ui.painter().hline(d_rect.max.x - 60.0..=d_rect.max.x - 10.0, y, egui::Stroke::new(1.0, egui::Color32::from_gray(25)));
+                }
 
                 ui.child_ui(d_rect, egui::Layout::left_to_right(egui::Align::Center)).horizontal(|ui| {
-                    ui.add_space(20.0);
+                    ui.add_space(15.0);
+
+                    // ENGINE TELEMETRY
                     ui.vertical(|ui| {
-                        ui.add_space(10.0);
+                        ui.add_space(15.0);
                         let cpu_pct = telemetry.as_ref().map_or(0.0, |t| {
                             let budget_ns = (128.0 / 44100.0) * 1e9;
                             (t.process_time_ns as f64 / budget_ns * 100.0).min(100.0)
                         });
-                        ui.label(egui::RichText::new(format!("CPU {:.0}%", cpu_pct)).small().color(egui::Color32::from_gray(80)));
-                        ui.label(egui::RichText::new("SYSTEM STABLE").color(egui::Color32::from_rgb(0, 255, 150)).size(8.0));
+                        ui.label(egui::RichText::new("ENGINE LOAD").color(egui::Color32::from_gray(100)).size(9.0).strong());
+                        ui.label(egui::RichText::new(format!("{:.1}%", cpu_pct)).monospace().size(18.0).color(if cpu_pct > 80.0 { egui::Color32::RED } else { egui::Color32::from_rgb(0, 255, 200) }));
                     });
 
                     ui.add_space(30.0);
+
+                    // GLOBAL CLOCK
                     ui.vertical(|ui| {
-                        ui.add_space(8.0);
+                        ui.add_space(12.0);
+                        ui.label(egui::RichText::new("GLOBAL BPM").color(egui::Color32::from_gray(100)).size(9.0).strong());
                         ui.horizontal(|ui| {
+                            ui.spacing_mut().button_padding = egui::vec2(2.0, 2.0);
                             if ui.button("-").clicked() { self.global_bpm -= 1.0; }
-                            ui.add(egui::DragValue::new(&mut self.global_bpm).speed(0.1).suffix(" BPM"));
+                            ui.add(egui::DragValue::new(&mut self.global_bpm).speed(0.1).fixed_decimals(1).custom_formatter(|n, _| format!("{:.1}", n)));
                             if ui.button("+").clicked() { self.global_bpm += 1.0; }
                         });
+
                         let q_color = if self.quantize_enabled { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_gray(40) };
                         if ui.add(egui::Button::new(egui::RichText::new("QUANTIZE").small().strong().color(q_color)).frame(false)).clicked() {
                             self.quantize_enabled = !self.quantize_enabled;
                         }
                     });
+
+                    ui.add_space(30.0);
+
+                    // X-RUNS / STABILITY
+                    ui.vertical(|ui| {
+                        ui.add_space(15.0);
+                        let xruns = telemetry.as_ref().map_or(0, |t| t.xrun_count);
+                        ui.label(egui::RichText::new("X-RUNS").color(egui::Color32::from_gray(100)).size(9.0).strong());
+                        ui.label(egui::RichText::new(format!("{:03}", xruns)).monospace().size(18.0).color(if xruns > 0 { egui::Color32::from_rgb(255, 150, 0) } else { egui::Color32::from_gray(50) }));
+                    });
                 });
 
-                ui.add_space(ui.available_width() - 320.0);
+                ui.add_space(ui.available_width() - 535.0); // Calibrated offset for master panel
                 self.render_master_panel(ui, telemetry);
             });
         });
@@ -534,7 +513,7 @@ impl InspectorApp {
                 ui.vertical_centered(|ui| {
                     ui.strong(format!("CH {}", i + 1));
                     let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1].min(1.2));
-                    if ui.add(egui::Slider::new(&mut self.channel_faders[i], 0.0..=1.2).vertical().show_value(false)).changed() {
+                    if widgets::render_fader(ui, &mut self.channel_faders[i], 0.0..=1.2, Self::deck_color(i)).changed() {
                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                             target_id: (i as u64 * 4 + 1),
                             param_id: 0,
@@ -542,7 +521,8 @@ impl InspectorApp {
                             ramp_duration_samples: 128,
                         });
                     }
-                    ui.label(format!("{:.0}%", peak * 100.0));
+                    widgets::render_vu_meter(ui, peak, peak, egui::Color32::from_rgb(0, 255, 180), 120.0);
+                    ui.label(format!("{:.1} dB", 20.0 * peak.log10().max(-60.0)));
                 });
                 ui.add_space(50.0);
             }
@@ -577,7 +557,10 @@ impl InspectorApp {
                 }
 
                 if let Some(sample) = self.sample_registry.get(i as u64 * 4) {
-                    ui.label(egui::RichText::new(format!("{:.1} BPM", sample.metadata.bpm)).small().color(egui::Color32::from_gray(100)));
+                    ui.label(egui::RichText::new(format!("{:.1} BPM", sample.metadata.bpm)).small().color(color));
+                    if let Some(key) = sample.metadata.root_key {
+                        ui.label(egui::RichText::new(format!("Key: {:.0}", key)).small().color(egui::Color32::from_gray(100)));
+                    }
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -623,15 +606,32 @@ impl InspectorApp {
             if let Some(sample) = self.sample_registry.get(i as u64 * 4) {
                 let peaks = &sample.metadata.peaks;
                 if !peaks.is_empty() {
-                    let mut points = Vec::new();
-                    for x in 0..w_width as usize {
-                        let p_idx = (x * peaks.len()) / w_width as usize;
-                        let val = peaks[p_idx.min(peaks.len() - 1)];
-                        let y_off = val * (w_height / 2.0);
-                        points.push(egui::pos2(w_rect.min.x + x as f32, w_rect.center().y - y_off));
-                        points.push(egui::pos2(w_rect.min.x + x as f32, w_rect.center().y + y_off));
+                    // Spectral Waveform Simulation: Layered Frequencies
+                    for (layer, scale, l_color) in [
+                        (0, 1.0, color),
+                        (1, 0.6, color.linear_multiply(0.5)),
+                        (2, 0.3, egui::Color32::WHITE.linear_multiply(0.2)),
+                    ] {
+                        let mut points = Vec::new();
+                        for x in 0..w_width as usize {
+                            let p_idx = (x * peaks.len()) / w_width as usize;
+                            let val = peaks[p_idx.min(peaks.len() - 1)] * scale;
+                            let y_off = val * (w_height / 2.0);
+                            points.push(egui::pos2(w_rect.min.x + x as f32, w_rect.center().y - y_off));
+                            points.push(egui::pos2(w_rect.min.x + x as f32, w_rect.center().y + y_off));
+                        }
+                        ui.painter().add(egui::Shape::line(points, egui::Stroke::new(if layer == 0 { 1.5 } else { 1.0 }, l_color)));
                     }
-                    ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.0, color)));
+
+                    // Hot Cues
+                    for (idx, cue) in sample.metadata.hot_cues.iter().enumerate() {
+                        if let Some(pos) = cue {
+                             let x_off = (*pos as f32 / sample.buffer.len() as f32) * w_width;
+                             let tx = w_rect.min.x + x_off;
+                             ui.painter().vline(tx, w_rect.y_range(), egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 255, 0)));
+                             ui.painter().text(egui::pos2(tx, w_rect.min.y + 5.0), egui::Align2::LEFT_TOP, format!("{}", idx+1), egui::FontId::proportional(8.0), egui::Color32::WHITE);
+                        }
+                    }
 
                     // DETAIL SCROLLING WAVEFORM
                     ui.add_space(5.0);
@@ -774,16 +774,50 @@ impl InspectorApp {
         });
     }
 
+    fn render_spectrum_analyzer(&self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(200.0, 100.0), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 2.0, egui::Color32::from_rgb(10, 10, 12));
+        ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, egui::Color32::from_gray(30)));
+
+        let time = ui.input(|i| i.time);
+        let num_bins = 32;
+        let bin_w = rect.width() / num_bins as f32;
+
+        for i in 0..num_bins {
+            let h_val = if let Some(t) = telemetry {
+                // Simulate spectrum from peak levels + some noise/oscillation
+                let base = t.peak_levels[21].min(1.0);
+                let noise = ((time * 10.0 + i as f64 * 0.5).sin() * 0.2 + 0.8) as f32;
+                let freq_falloff = 1.0 - (i as f32 / num_bins as f32).powi(2);
+                base * noise * freq_falloff
+            } else {
+                0.0
+            };
+
+            let h = h_val * rect.height();
+            let bin_rect = egui::Rect::from_min_size(
+                egui::pos2(rect.min.x + i as f32 * bin_w, rect.max.y - h),
+                egui::vec2(bin_w - 1.0, h)
+            );
+
+            let color = egui::Color32::from_rgb(0, (255.0 * (1.0 - i as f32 / num_bins as f32)) as u8, 200);
+            ui.painter().rect_filled(bin_rect, 0.0, color.linear_multiply(0.8));
+        }
+    }
+
     fn render_master_panel(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
         egui::Frame::none().fill(egui::Color32::from_rgb(25, 25, 30)).rounding(4.0).stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(40))).inner_margin(12.0).show(ui, |ui| {
             ui.horizontal(|ui| {
+                self.render_spectrum_analyzer(ui, telemetry);
+                ui.add_space(15.0);
+
                 ui.vertical(|ui| {
                     ui.set_width(70.0);
-                    if Self::render_knob(ui, &mut self.mastering_limiter_gain, 0.0..=2.0, "CEIL").changed() {
+                    if widgets::render_knob(ui, &mut self.mastering_limiter_gain, 0.0..=2.0, "CEIL", egui::Color32::from_rgb(0, 255, 200)).changed() {
                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.mastering_limiter_gain, ramp_duration_samples: 128 });
                     }
                     ui.add_space(10.0);
-                    if Self::render_knob(ui, &mut self.mastering_comp_threshold, 0.0..=1.0, "THR").changed() {
+                    if widgets::render_knob(ui, &mut self.mastering_comp_threshold, 0.0..=1.0, "THR", egui::Color32::from_rgb(0, 255, 200)).changed() {
                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 20, param_id: 0, value: self.mastering_comp_threshold, ramp_duration_samples: 128 });
                     }
                 });
@@ -797,27 +831,13 @@ impl InspectorApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
                     for _ in 0..2 {
-                        let (m_rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 100.0), egui::Sense::hover());
-                        ui.painter().rect_filled(m_rect, 1.0, egui::Color32::from_rgb(10, 10, 12));
-
-                            // Tick marks
-                            for db in [-48, -24, -12, -6, 0] {
-                                let val = 10.0f32.powf(db as f32 / 20.0);
-                                let ty = m_rect.max.y - (val * 100.0).min(100.0);
-                                ui.painter().hline(m_rect.x_range(), ty, egui::Stroke::new(0.5, egui::Color32::from_gray(60)));
-                            }
-
-                        let m_h = (peak * 100.0).min(100.0);
-                            let m_p_rect = egui::Rect::from_min_size(m_rect.max - egui::vec2(10.0, m_h), egui::vec2(10.0, m_h));
-                            let color = if peak > 1.0 { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_rgb(0, 255, 180) };
-                        ui.painter().rect_filled(m_p_rect, 0.0, color);
+                        widgets::render_vu_meter(ui, peak, self.master_peak_hold, egui::Color32::from_rgb(0, 255, 180), 100.0);
                     }
                 });
 
                 ui.add_space(10.0);
 
-                let m_fader = ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=1.5).vertical().show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 4.0 }));
-                if m_fader.changed() {
+                if widgets::render_fader(ui, &mut self.master_gain, 0.0..=1.5, egui::Color32::from_rgb(0, 255, 180)).changed() {
                     let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.master_gain, ramp_duration_samples: 128 });
                 }
             });
@@ -840,7 +860,7 @@ impl InspectorApp {
                         ui.set_width(60.0);
 
                         // GAIN / TRIM
-                        if Self::render_knob(ui, &mut self.channel_trims[i], 0.0..=2.0, "TRIM").changed() {
+                        if widgets::render_knob(ui, &mut self.channel_trims[i], 0.0..=2.0, "TRIM", Self::deck_color(i)).changed() {
                             let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                                 target_id: (i as u64 * 4 + 1),
                                 param_id: 0,
@@ -853,7 +873,7 @@ impl InspectorApp {
 
                         // HI / MID / LOW
                         for (label, param_idx, state_val) in [("HI", 2, &mut self.channel_eq_high[i]), ("MID", 1, &mut self.channel_eq_mid[i]), ("LOW", 0, &mut self.channel_eq_low[i])] {
-                            if Self::render_knob(ui, state_val, 0.0..=2.0, label).changed() {
+                            if widgets::render_knob(ui, state_val, 0.0..=2.0, label, Self::deck_color(i)).changed() {
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                                     target_id: (i as u64 * 4 + 3),
                                     param_id: param_idx,
@@ -883,8 +903,7 @@ impl InspectorApp {
                         // FADER & VU
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
-                            let fader_res = ui.add(egui::Slider::new(&mut self.channel_faders[i], 0.0..=1.0).vertical().show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 5.0 }));
-                            if fader_res.changed() {
+                            if widgets::render_fader(ui, &mut self.channel_faders[i], 0.0..=1.0, Self::deck_color(i)).changed() {
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                                     target_id: (i as u64 * 4 + 1),
                                     param_id: 0,
@@ -898,25 +917,7 @@ impl InspectorApp {
                             if peak > self.channel_peak_hold[i] { self.channel_peak_hold[i] = peak; }
                             else { self.channel_peak_hold[i] *= 0.98; }
 
-                            let (m_rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 100.0), egui::Sense::hover());
-                            ui.painter().rect_filled(m_rect, 1.0, egui::Color32::from_rgb(10, 10, 12));
-
-                            // Tick marks
-                            for db in [-24, -12, -6, 0] {
-                                let val = 10.0f32.powf(db as f32 / 20.0);
-                                let ty = m_rect.max.y - (val * 120.0).min(120.0);
-                                ui.painter().hline(m_rect.x_range(), ty, egui::Stroke::new(0.5, egui::Color32::from_gray(60)));
-                            }
-
-                            let m_h = (peak * 100.0).min(100.0);
-                            let m_p_rect = egui::Rect::from_min_size(m_rect.max - egui::vec2(8.0, m_h), egui::vec2(8.0, m_h));
-                            let meter_color = if peak > 1.0 { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_rgb(0, 255, 180) };
-                            ui.painter().rect_filled(m_p_rect, 0.0, meter_color);
-
-                            // Peak hold line
-                            let ph_h = (self.channel_peak_hold[i] * 100.0).min(100.0);
-                            let ph_y = m_rect.max.y - ph_h;
-                            ui.painter().hline(m_rect.x_range(), ph_y, egui::Stroke::new(1.0, Self::deck_color(i)));
+                            widgets::render_vu_meter(ui, peak, self.channel_peak_hold[i], egui::Color32::from_rgb(0, 255, 180), 120.0);
                         });
                     });
                 }
@@ -1002,7 +1003,7 @@ impl InspectorApp {
                 ui.add_space(5.0);
                 ui.horizontal(|ui| {
                     ui.label("Threshold");
-                    if ui.add(egui::Slider::new(&mut self.mastering_comp_threshold, 0.0..=1.0)).changed() {
+                    if widgets::render_knob(ui, &mut self.mastering_comp_threshold, 0.0..=1.0, "", egui::Color32::from_rgb(0, 255, 200)).changed() {
                          let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                             target_id: 20, param_id: 0, value: self.mastering_comp_threshold, ramp_duration_samples: 128
                         });
@@ -1022,8 +1023,8 @@ impl InspectorApp {
                 });
                 ui.add_space(5.0);
                 ui.horizontal(|ui| {
-                    ui.label("Ceiling (dB)");
-                    if ui.add(egui::Slider::new(&mut self.mastering_limiter_gain, 0.0..=1.5)).changed() {
+                    ui.label("Ceiling");
+                    if widgets::render_knob(ui, &mut self.mastering_limiter_gain, 0.0..=1.5, "", egui::Color32::from_rgb(0, 255, 200)).changed() {
                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                             target_id: 21, param_id: 0, value: self.mastering_limiter_gain, ramp_duration_samples: 128
                         });
@@ -1063,14 +1064,20 @@ impl eframe::App for InspectorApp {
                         (View::Topology, "TOPOLOGY", "🕸"),
                     ] {
                         let is_active = self.active_view == view;
-                        let bg_color = if is_active { egui::Color32::from_rgb(0, 255, 200).linear_multiply(0.1) } else { egui::Color32::TRANSPARENT };
+                        let color = if is_active { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(100) };
 
-                        egui::Frame::none().fill(bg_color).rounding(4.0).show(ui, |ui| {
-                            if ui.add(egui::Button::new(egui::RichText::new(icon).size(20.0)).frame(false)).on_hover_text(label).clicked() {
-                                self.active_view = view;
-                            }
-                        });
-                        ui.add_space(20.0);
+                        let (rect, res) = ui.allocate_exact_size(egui::vec2(40.0, 40.0), egui::Sense::click());
+                        if res.clicked() { self.active_view = view; }
+
+                        if is_active {
+                             ui.painter().rect_filled(rect.expand(2.0), 4.0, color.linear_multiply(0.05));
+                             ui.painter().vline(rect.min.x - 8.0, rect.y_range(), egui::Stroke::new(2.0, color));
+                        }
+
+                        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, icon, egui::FontId::proportional(20.0), color);
+                        res.on_hover_text(label);
+
+                        ui.add_space(15.0);
                     }
 
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
