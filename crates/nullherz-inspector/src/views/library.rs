@@ -2,7 +2,7 @@ use egui::{Color32, RichText, Ui, Frame, ScrollArea, Layout, Align, Stroke};
 use crate::InspectorApp;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
-    Frame::none().fill(Color32::from_rgb(12, 12, 14)).inner_margin(12.0).show(ui, |ui| {
+    ui.vertical(|ui| {
         ui.horizontal(|ui| {
             ui.label(RichText::new("LIBRARY").color(Color32::from_gray(150)).small().strong());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
