@@ -11,7 +11,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             ui.vertical_centered(|ui| {
                 ui.strong(format!("CH {}", i + 1));
                 let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[i*4 + 1].min(1.2));
-                if widgets::render_fader(ui, &mut app.channel_faders[i], 0.0..=1.2, InspectorApp::deck_color(i)).changed() {
+                if widgets::render_fader(ui, &mut app.channel_faders[i], 0.0..=1.2, InspectorApp::deck_color(i), 120.0, 30.0).changed() {
                     let _ = app.command_sender.send(nullherz_traits::Command::SetParam {
                         target_id: (i as u64 * 4 + 1),
                         param_id: 0,
