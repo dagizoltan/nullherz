@@ -448,7 +448,7 @@ impl InspectorApp {
                     self.render_oscillator_monitor(ui, telemetry);
                 });
                 ui.add_space(10.0);
-                self.render_master_panel(ui, telemetry);
+                self.render_master_panel(ui, telemetry, 160.0);
             });
             ui.add_space(10.0);
 
@@ -895,9 +895,12 @@ impl InspectorApp {
     }
 
 
-    fn render_master_panel(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
+    fn render_master_panel(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>, height: f32) {
         egui::Frame::none().fill(egui::Color32::from_rgb(25, 25, 30)).rounding(4.0).stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(40))).inner_margin(12.0).show(ui, |ui| {
+            ui.set_height(height - 24.0); // Match oscillator height accounting for margins
             ui.horizontal(|ui| {
+                let inner_h = height - 48.0;
+
                 // BOOTH CONTROL
                 ui.vertical(|ui| {
                     ui.set_width(100.0);
@@ -905,13 +908,13 @@ impl InspectorApp {
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
-                        if widgets::render_fader(ui, &mut self.booth_gain, 0.0..=1.5, egui::Color32::from_rgb(0, 180, 255), 100.0, 15.0).changed() {
+                        if widgets::render_fader(ui, &mut self.booth_gain, 0.0..=1.5, egui::Color32::from_rgb(0, 180, 255), inner_h, 15.0).changed() {
                             let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 22, param_id: 0, value: self.booth_gain, ramp_duration_samples: 128 });
                         }
                         let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.booth_gain;
                         if peak > self.booth_peak_hold { self.booth_peak_hold = peak; } else { self.booth_peak_hold *= 0.98; }
-                        widgets::render_vu_meter(ui, peak * 0.9, self.booth_peak_hold * 0.9, egui::Color32::from_rgb(0, 180, 255), 100.0);
-                        widgets::render_vu_meter(ui, peak, self.booth_peak_hold, egui::Color32::from_rgb(0, 180, 255), 100.0);
+                        widgets::render_vu_meter(ui, peak * 0.9, self.booth_peak_hold * 0.9, egui::Color32::from_rgb(0, 180, 255), inner_h);
+                        widgets::render_vu_meter(ui, peak, self.booth_peak_hold, egui::Color32::from_rgb(0, 180, 255), inner_h);
                     });
                 });
 
@@ -924,13 +927,13 @@ impl InspectorApp {
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
-                        if widgets::render_fader(ui, &mut self.rec_gain, 0.0..=1.5, egui::Color32::from_rgb(255, 50, 150), 100.0, 15.0).changed() {
+                        if widgets::render_fader(ui, &mut self.rec_gain, 0.0..=1.5, egui::Color32::from_rgb(255, 50, 150), inner_h, 15.0).changed() {
                             let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 23, param_id: 0, value: self.rec_gain, ramp_duration_samples: 128 });
                         }
                         let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.rec_gain;
                         if peak > self.rec_peak_hold { self.rec_peak_hold = peak; } else { self.rec_peak_hold *= 0.98; }
-                        widgets::render_vu_meter(ui, peak * 0.9, self.rec_peak_hold * 0.9, egui::Color32::from_rgb(255, 50, 150), 100.0);
-                        widgets::render_vu_meter(ui, peak, self.rec_peak_hold, egui::Color32::from_rgb(255, 50, 150), 100.0);
+                        widgets::render_vu_meter(ui, peak * 0.9, self.rec_peak_hold * 0.9, egui::Color32::from_rgb(255, 50, 150), inner_h);
+                        widgets::render_vu_meter(ui, peak, self.rec_peak_hold, egui::Color32::from_rgb(255, 50, 150), inner_h);
                     });
                 });
 
@@ -943,15 +946,15 @@ impl InspectorApp {
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
-                        if widgets::render_fader(ui, &mut self.master_gain, 0.0..=1.5, egui::Color32::from_rgb(0, 255, 180), 100.0, 20.0).changed() {
+                        if widgets::render_fader(ui, &mut self.master_gain, 0.0..=1.5, egui::Color32::from_rgb(0, 255, 180), inner_h, 20.0).changed() {
                             let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.master_gain, ramp_duration_samples: 128 });
                         }
                         let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
                         if peak > self.master_peak_hold { self.master_peak_hold = peak; }
                         else { self.master_peak_hold *= 0.98; }
 
-                        widgets::render_vu_meter(ui, peak * 0.95, self.master_peak_hold * 0.95, egui::Color32::from_rgb(0, 255, 180), 100.0);
-                        widgets::render_vu_meter(ui, peak, self.master_peak_hold, egui::Color32::from_rgb(0, 255, 180), 100.0);
+                        widgets::render_vu_meter(ui, peak * 0.95, self.master_peak_hold * 0.95, egui::Color32::from_rgb(0, 255, 180), inner_h);
+                        widgets::render_vu_meter(ui, peak, self.master_peak_hold, egui::Color32::from_rgb(0, 255, 180), inner_h);
                     });
                 });
             });
