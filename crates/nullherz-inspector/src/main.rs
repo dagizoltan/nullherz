@@ -177,8 +177,8 @@ pub struct FxSlot {
 #[derive(PartialEq, Clone, Copy)]
 pub enum RightTab {
     Library,
-    Settings,
-    Account,
+    Metrics,
+    Notifications,
 }
 
 impl InspectorApp {
@@ -443,8 +443,8 @@ impl InspectorApp {
             // TOP: OSCILLATOR & MASTER
             ui.horizontal(|ui| {
                 let total_w = ui.available_width();
-                let master_w = 370.0;
-                let oscillator_w = total_w - master_w;
+                let master_w = 520.0;
+                let oscillator_w = total_w - master_w - 10.0;
 
                 ui.vertical(|ui| {
                     ui.set_width(oscillator_w);
@@ -478,49 +478,6 @@ impl InspectorApp {
             ui.add_space(10.0);
             */
 
-            // FX RACK ROW (Multi-slot, compact)
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
-                for i in 0..4 {
-                    if i == 2 { ui.add_space(mixer_w + 10.0); }
-                    ui.vertical(|ui| {
-                        ui.set_width(deck_w);
-                        egui::Frame::none().fill(egui::Color32::from_rgb(10, 10, 12)).rounding(4.0).inner_margin(4.0).show(ui, |ui| {
-                            ui.set_width(deck_w - 8.0);
-                            egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-                                let slot_count = self.channel_fx_slots[i].len();
-                                for s_idx in 0..slot_count {
-                                    ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
-                                        let slot = &mut self.channel_fx_slots[i][s_idx];
-
-                                        ui.checkbox(&mut slot.enabled, "");
-
-                                        egui::ComboBox::from_id_source(format!("fx_sel_{}_{}", i, s_idx))
-                                            .selected_text(match slot.effect_type { 0 => "DLY", 1 => "RVB", 2 => "FLG", _ => "OFF" })
-                                            .width(60.0)
-                                            .show_ui(ui, |ui| {
-                                                ui.selectable_value(&mut slot.effect_type, 0, "DLY");
-                                                ui.selectable_value(&mut slot.effect_type, 1, "RVB");
-                                                ui.selectable_value(&mut slot.effect_type, 2, "FLG");
-                                            });
-
-                                        widgets::render_knob(ui, &mut slot.amount, 0.0..=1.0, "", Self::deck_color(i));
-
-                                        if ui.button("🗑").clicked() { /* logic to remove */ }
-                                    });
-                                    if s_idx < slot_count - 1 { ui.separator(); }
-                                }
-                                if ui.button("+ ADD FX").clicked() {
-                                    self.channel_fx_slots[i].push(FxSlot::default());
-                                }
-                            });
-                        });
-                    });
-                }
-            });
-
-            ui.add_space(10.0);
 
             // PERFORMANCE ROW: A, B, MIXER, C, D
             ui.horizontal_top(|ui| {
@@ -574,24 +531,6 @@ impl InspectorApp {
                         ui.label(egui::RichText::new(format!("{:.1}%", cpu_pct)).monospace().size(18.0).color(if cpu_pct > 80.0 { egui::Color32::RED } else { egui::Color32::from_rgb(0, 255, 200) }));
                     });
 
-                    ui.add_space(40.0);
-
-                    // GLOBAL CLOCK
-                    ui.vertical(|ui| {
-                        ui.add_space(12.0);
-                        ui.label(egui::RichText::new("GLOBAL BPM").color(egui::Color32::from_gray(100)).size(9.0).strong());
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().button_padding = egui::vec2(2.0, 2.0);
-                            if ui.button("-").clicked() { self.global_bpm -= 1.0; }
-                            ui.add(egui::DragValue::new(&mut self.global_bpm).speed(0.1).fixed_decimals(1).custom_formatter(|n, _| format!("{:.1}", n)));
-                            if ui.button("+").clicked() { self.global_bpm += 1.0; }
-                        });
-
-                        let q_color = if self.quantize_enabled { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_gray(40) };
-                        if ui.add(egui::Button::new(egui::RichText::new("QUANTIZE").small().strong().color(q_color)).frame(false)).clicked() {
-                            self.quantize_enabled = !self.quantize_enabled;
-                        }
-                    });
 
                     ui.add_space(40.0);
 
@@ -898,7 +837,7 @@ impl InspectorApp {
 
 
     fn render_master_panel(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>, height: f32) {
-        let width = 360.0;
+        let width = 520.0;
         let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
 
         ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(15, 15, 18));
@@ -906,12 +845,32 @@ impl InspectorApp {
 
         let inner_rect = rect.shrink(12.0);
         ui.child_ui(inner_rect, egui::Layout::left_to_right(egui::Align::Center)).horizontal(|ui| {
-            ui.spacing_mut().item_spacing.y = 2.0;
-            let inner_h = 85.0; // Fixed height to prevent overflow
+            ui.spacing_mut().item_spacing = egui::vec2(15.0, 0.0);
+            let inner_h = 100.0;
+
+            // GLOBAL CLOCK
+            ui.vertical_centered(|ui| {
+                ui.set_width(100.0);
+                ui.add_space(5.0);
+                ui.label(egui::RichText::new("GLOBAL BPM").color(egui::Color32::from_gray(100)).size(9.0).strong());
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().button_padding = egui::vec2(2.0, 2.0);
+                    if ui.button("-").clicked() { self.global_bpm -= 1.0; }
+                    ui.add(egui::DragValue::new(&mut self.global_bpm).speed(0.1).fixed_decimals(1).custom_formatter(|n, _| format!("{:.1}", n)));
+                    if ui.button("+").clicked() { self.global_bpm += 1.0; }
+                });
+
+                ui.add_space(8.0);
+                let q_color = if self.quantize_enabled { egui::Color32::from_rgb(255, 50, 50) } else { egui::Color32::from_gray(40) };
+                if ui.add(egui::Button::new(egui::RichText::new("QUANTIZE").small().strong().color(q_color)).frame(true)).clicked() {
+                    self.quantize_enabled = !self.quantize_enabled;
+                }
+            });
 
             // BOOTH CONTROL
             ui.vertical_centered(|ui| {
-                ui.set_width(100.0);
+                ui.set_width(110.0);
                 ui.label(egui::RichText::new("BOOTH").size(8.0).strong().color(egui::Color32::from_gray(160)));
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
@@ -926,11 +885,9 @@ impl InspectorApp {
                 });
             });
 
-            ui.add_space(15.0);
-
             // REC CONTROL
             ui.vertical_centered(|ui| {
-                ui.set_width(100.0);
+                ui.set_width(110.0);
                 ui.label(egui::RichText::new("REC").size(8.0).strong().color(egui::Color32::from_gray(160)));
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
@@ -945,11 +902,9 @@ impl InspectorApp {
                 });
             });
 
-            ui.add_space(15.0);
-
             // MASTER CONTROL
             ui.vertical_centered(|ui| {
-                ui.set_width(110.0);
+                ui.set_width(120.0);
                 ui.label(egui::RichText::new("MASTER").size(8.0).strong().color(egui::Color32::from_gray(200)));
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
@@ -1358,8 +1313,8 @@ impl eframe::App for InspectorApp {
                         ui.add_space(10.0);
 
                         for (tab, label, icon) in [
-                            (RightTab::Account, "ACCOUNT", "👤"),
-                            (RightTab::Settings, "SETTINGS", "⚙"),
+                            (RightTab::Metrics, "METRICS", "📊"),
+                            (RightTab::Notifications, "NOTIFICATIONS", "🔔"),
                         ] {
                              let is_active = self.active_right_tab == Some(tab);
                              let color = if is_active { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(100) };
@@ -1378,14 +1333,41 @@ impl eframe::App for InspectorApp {
 
         if let Some(tab) = self.active_right_tab {
             egui::SidePanel::right("right_sidebar")
-                .frame(egui::Frame::none().fill(egui::Color32::from_rgb(12, 12, 14)).inner_margin(12.0))
+                .frame(egui::Frame::none().fill(egui::Color32::from_rgb(12, 12, 14)).inner_margin(0.0))
                 .width_range(280.0..=400.0)
                 .show(ctx, |ui| {
-                    match tab {
-                        RightTab::Library => views::library::render(self, ui),
-                        RightTab::Settings => views::settings::render(self, ui),
-                        RightTab::Account => { ui.heading("Account"); ui.label("User Profile & Statistics"); },
-                    }
+                    ui.vertical(|ui| {
+                        // TAB BAR
+                        egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).inner_margin(4.0).show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
+                                for (t, label) in [
+                                    (RightTab::Library, "LIBRARY"),
+                                    (RightTab::Metrics, "METRICS"),
+                                    (RightTab::Notifications, "NOTIFS"),
+                                ] {
+                                    let is_active = self.active_right_tab == Some(t);
+                                    let btn = egui::Button::new(egui::RichText::new(label).small().strong().color(if is_active { egui::Color32::from_rgb(0, 255, 200) } else { egui::Color32::from_gray(100) }))
+                                        .frame(is_active)
+                                        .fill(if is_active { egui::Color32::from_gray(30) } else { egui::Color32::TRANSPARENT });
+
+                                    if ui.add_sized([ui.available_width() / 3.0 - 2.0, 24.0], btn).clicked() {
+                                        self.active_right_tab = Some(t);
+                                    }
+                                }
+                            });
+                        });
+
+                        ui.add_space(8.0);
+
+                        egui::Frame::none().inner_margin(12.0).show(ui, |ui| {
+                            match tab {
+                                RightTab::Library => views::library::render(self, ui),
+                                RightTab::Metrics => views::metrics::render(self, ui),
+                                RightTab::Notifications => views::notifications::render(self, ui),
+                            }
+                        });
+                    });
                 });
         }
 

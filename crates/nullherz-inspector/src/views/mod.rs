@@ -6,3 +6,5 @@ pub mod topology;
 pub mod mixer;
 pub mod broadcast;
 pub mod settings;
+pub mod metrics;
+pub mod notifications;
