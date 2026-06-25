@@ -46,7 +46,7 @@ fn main() -> eframe::Result<()> {
     if gui_mode {
         let native_options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_inner_size([1200.0, 800.0])
+                .with_inner_size([1280.0, 950.0])
                 .with_title("nullherz Precision Studio"),
             ..Default::default()
         };
@@ -429,6 +429,7 @@ impl InspectorApp {
         let total_w = ui.available_width();
         let mixer_w = 320.0;
         let deck_w = (total_w - mixer_w - 48.0) / 4.0;
+        let widget_h = 500.0;
 
         ui.vertical(|ui| {
             ui.set_width(total_w);
@@ -518,20 +519,20 @@ impl InspectorApp {
                 ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
 
                 // DECK A
-                ui.vertical(|ui| { ui.set_width(deck_w); self.render_deck(ui, 0, telemetry, 420.0); });
+                ui.vertical(|ui| { ui.set_width(deck_w); self.render_deck(ui, 0, telemetry, widget_h); });
                 // DECK B
-                ui.vertical(|ui| { ui.set_width(deck_w); self.render_deck(ui, 1, telemetry, 420.0); });
+                ui.vertical(|ui| { ui.set_width(deck_w); self.render_deck(ui, 1, telemetry, widget_h); });
 
                 // ULTRA-COMPACT CENTRAL MIXER
                 ui.vertical(|ui| {
                     ui.set_width(mixer_w);
-                    self.render_central_mixer(ui, telemetry, mixer_w);
+                    self.render_central_mixer(ui, telemetry, mixer_w, widget_h);
                 });
 
                 // DECK C
-                ui.vertical(|ui| { ui.set_width(deck_w); self.render_deck(ui, 2, telemetry, 420.0); });
+                ui.vertical(|ui| { ui.set_width(deck_w); self.render_deck(ui, 2, telemetry, widget_h); });
                 // DECK D
-                ui.vertical(|ui| { ui.set_width(deck_w); self.render_deck(ui, 3, telemetry, 420.0); });
+                ui.vertical(|ui| { ui.set_width(deck_w); self.render_deck(ui, 3, telemetry, widget_h); });
             });
 
             ui.add_space(20.0);
@@ -803,12 +804,13 @@ impl InspectorApp {
 
                     // Needle / Playhead (Rotating)
                     let angle = (time * 2.0) as f32;
-                    let needle_start = center + egui::vec2(angle.cos() * (radius * 0.4), angle.sin() * (radius * 0.4));
-                    let needle_end = center + egui::vec2(angle.cos() * (radius * 0.95), angle.sin() * (radius * 0.95));
-                    ui.painter().line_segment([needle_start, needle_end], egui::Stroke::new(3.0, color));
+                    let needle_start = center + egui::vec2(angle.cos() * (radius * 0.3), angle.sin() * (radius * 0.3));
+                    let needle_end = center + egui::vec2(angle.cos() * (radius * 0.98), angle.sin() * (radius * 0.98));
+                    ui.painter().line_segment([needle_start, needle_end], egui::Stroke::new(5.0, color));
 
-                    // Directional Marker
-                    ui.painter().circle_filled(needle_end, 3.0, color);
+                    // Directional Marker (Larger, bold tip)
+                    ui.painter().circle_filled(needle_end, 5.0, color);
+                    ui.painter().circle_stroke(needle_end, 5.0, egui::Stroke::new(1.0, egui::Color32::WHITE));
                 });
 
                 // COL 2: TRANSPORT
@@ -1000,8 +1002,8 @@ impl InspectorApp {
         });
     }
 
-    fn render_central_mixer(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>, main_w: f32) {
-        let rect = ui.allocate_exact_size(egui::vec2(main_w, 420.0), egui::Sense::hover()).0;
+    fn render_central_mixer(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>, main_w: f32, height: f32) {
+        let rect = ui.allocate_exact_size(egui::vec2(main_w, height), egui::Sense::hover()).0;
         ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(15, 15, 18));
         ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(30)));
 
@@ -1009,13 +1011,12 @@ impl InspectorApp {
             ui.add_space(10.0);
 
             // CHANNEL STRIPS
-            ui.horizontal_centered(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+            ui.columns(4, |cols| {
                 let col_w = main_w / 4.0;
                 for i in 0..4 {
-                    ui.allocate_ui(egui::vec2(col_w, 400.0), |ui| {
-                        ui.vertical_centered(|ui| {
+                    cols[i].vertical_centered(|ui| {
                         ui.set_width(col_w);
+                        ui.add_space(5.0);
 
                         // CHANNEL HEADER
                         egui::Frame::none().fill(Self::deck_color(i).linear_multiply(0.2)).rounding(2.0).inner_margin(4.0).show(ui, |ui| {
@@ -1026,6 +1027,7 @@ impl InspectorApp {
 
                         // GAIN / TRIM
                         if widgets::render_knob(ui, &mut self.channel_trims[i], 0.0..=2.0, "TRIM", Self::deck_color(i)).changed() {
+                            ui.add_space(12.0);
                             let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                                 target_id: (i as u64 * 4 + 1),
                                 param_id: 0,
@@ -1034,7 +1036,7 @@ impl InspectorApp {
                             });
                         }
 
-                        ui.add_space(15.0);
+                        ui.add_space(12.0);
 
                         // HI / MID / LOW
                         for (label, param_idx, state_val) in [("HI", 2, &mut self.channel_eq_high[i]), ("MID", 1, &mut self.channel_eq_mid[i]), ("LOW", 0, &mut self.channel_eq_low[i])] {
@@ -1046,7 +1048,7 @@ impl InspectorApp {
                                     ramp_duration_samples: 0,
                                 });
                             }
-                            ui.add_space(10.0);
+                            ui.add_space(12.0);
                         }
 
                         ui.add_space(12.0);
@@ -1084,7 +1086,6 @@ impl InspectorApp {
                             else { self.channel_peak_hold[i] *= 0.98; }
 
                             widgets::render_vu_meter(ui, peak, self.channel_peak_hold[i], egui::Color32::from_rgb(0, 255, 180), 120.0);
-                        });
                         });
                     });
                 }
