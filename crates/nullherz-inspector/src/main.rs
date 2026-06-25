@@ -112,10 +112,14 @@ pub struct InspectorApp {
     channel_eq_mid: [f32; 4],
     channel_eq_low: [f32; 4],
     channel_fx_enabled: [bool; 4],
+    channel_fx_select: [usize; 4],
+    channel_fx_amt: [f32; 4],
     channel_cue: [bool; 4],
     channel_sync: [bool; 4],
     quantize_enabled: bool,
     master_gain: f32,
+    booth_gain: f32,
+    rec_gain: f32,
     crossfader_pos: f32,
     library_db: nullherz_dna::LibraryDatabase,
     search_query: String,
@@ -240,10 +244,14 @@ impl InspectorApp {
             channel_eq_mid: [1.0; 4],
             channel_eq_low: [1.0; 4],
             channel_fx_enabled: [false; 4],
+            channel_fx_select: [0; 4],
+            channel_fx_amt: [0.5; 4],
             channel_cue: [false; 4],
             channel_sync: [false; 4],
             quantize_enabled: true,
             master_gain: 1.0,
+            booth_gain: 1.0,
+            rec_gain: 1.0,
             crossfader_pos: 0.5,
             library_db: nullherz_dna::LibraryDatabase::load("library.redb").expect("Failed to load library"),
             search_query: String::new(),
@@ -451,6 +459,41 @@ impl InspectorApp {
             });
             ui.add_space(10.0);
 
+            // FX RACK ROW
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
+                for i in 0..4 {
+                    if i == 2 {
+                        ui.add_space(mixer_w); // Skip mixer column
+                    }
+                    ui.vertical(|ui| {
+                        ui.set_width(deck_w);
+                        egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(8.0).show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(format!("FX {}", (b'A' + i as u8) as char)).small().strong().color(Self::deck_color(i)));
+                                egui::ComboBox::from_id_source(format!("fx_select_{}", i))
+                                    .selected_text(match self.channel_fx_select[i] {
+                                        0 => "DELAY",
+                                        1 => "REVERB",
+                                        2 => "FLANGER",
+                                        _ => "NONE",
+                                    })
+                                    .width(deck_w * 0.4)
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut self.channel_fx_select[i], 0, "DELAY");
+                                        ui.selectable_value(&mut self.channel_fx_select[i], 1, "REVERB");
+                                        ui.selectable_value(&mut self.channel_fx_select[i], 2, "FLANGER");
+                                    });
+
+                                widgets::render_knob(ui, &mut self.channel_fx_amt[i], 0.0..=1.0, "AMT", Self::deck_color(i));
+                            });
+                        });
+                    });
+                }
+            });
+
+            ui.add_space(10.0);
+
             // PERFORMANCE ROW: A, B, MIXER, C, D
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
@@ -533,7 +576,7 @@ impl InspectorApp {
                     });
                 });
 
-                ui.add_space(ui.available_width() - 535.0); // Calibrated offset for master panel
+                ui.add_space(ui.available_width() - 635.0); // Calibrated offset for master panel
                 self.render_master_panel(ui, telemetry);
             });
         });
@@ -710,53 +753,50 @@ impl InspectorApp {
 
             ui.add_space(10.0);
 
-            ui.horizontal(|ui| {
-                ui.add_space(15.0);
-                // JOG SIMULATION (Simplified)
-                let (jog_rect, _) = ui.allocate_exact_size(egui::vec2(100.0, 100.0), egui::Sense::hover());
-                ui.painter().circle_stroke(jog_rect.center(), 50.0, egui::Stroke::new(2.0, egui::Color32::from_gray(40)));
-                let angle = (time * 2.0) as f32;
-                let needle = jog_rect.center() + egui::vec2(angle.cos() * 45.0, angle.sin() * 45.0);
-                ui.painter().line_segment([jog_rect.center(), needle], egui::Stroke::new(2.0, color));
+            ui.columns(4, |cols| {
+                // COL 1: JOG
+                cols[0].vertical_centered(|ui| {
+                    let jog_size = (ui.available_width() * 0.8).min(80.0);
+                    let (jog_rect, _) = ui.allocate_exact_size(egui::vec2(jog_size, jog_size), egui::Sense::hover());
+                    ui.painter().circle_stroke(jog_rect.center(), jog_size / 2.0, egui::Stroke::new(2.0, egui::Color32::from_gray(40)));
+                    let angle = (time * 2.0) as f32;
+                    let needle = jog_rect.center() + egui::vec2(angle.cos() * (jog_size * 0.45), angle.sin() * (jog_size * 0.45));
+                    ui.painter().line_segment([jog_rect.center(), needle], egui::Stroke::new(2.0, color));
+                });
 
-                ui.add_space(15.0);
-
-                ui.vertical(|ui| {
+                // COL 2: TRANSPORT
+                cols[1].vertical_centered(|ui| {
                     let cue_color = if self.channel_cue[i] { egui::Color32::from_rgb(255, 150, 0) } else { egui::Color32::from_gray(40) };
-                    if ui.add(egui::Button::new(egui::RichText::new("CUE").color(cue_color).strong()).min_size(egui::vec2(60.0, 45.0))).clicked() {
+                    if ui.add(egui::Button::new(egui::RichText::new("CUE").color(cue_color).strong()).min_size(egui::vec2(ui.available_width(), 40.0))).clicked() {
                         self.channel_cue[i] = !self.channel_cue[i];
                     }
-                    ui.add_space(8.0);
+                    ui.add_space(5.0);
                     let play_color = egui::Color32::from_rgb(0, 255, 100);
-                    if ui.add(egui::Button::new(egui::RichText::new("PLAY").color(play_color).strong()).min_size(egui::vec2(60.0, 45.0))).clicked() {
+                    if ui.add(egui::Button::new(egui::RichText::new("PLAY").color(play_color).strong()).min_size(egui::vec2(ui.available_width(), 40.0))).clicked() {
                         // Play logic
                     }
                 });
 
-                ui.add_space(15.0);
-
-                ui.vertical(|ui| {
+                // COL 3: SYNC & MISC
+                cols[2].vertical_centered(|ui| {
                     let s_color = if self.channel_sync[i] { color } else { egui::Color32::from_gray(40) };
-                    if ui.add(egui::Button::new(egui::RichText::new("SYNC").color(s_color).strong()).min_size(egui::vec2(60.0, 45.0))).clicked() {
+                    if ui.add(egui::Button::new(egui::RichText::new("SYNC").color(s_color).strong()).min_size(egui::vec2(ui.available_width(), 40.0))).clicked() {
                         self.channel_sync[i] = !self.channel_sync[i];
                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
                             target_id: (i as u64 * 4),
-                            param_id: 2, // Sync/Quantize toggle
+                            param_id: 2,
                             value: if self.channel_sync[i] { 1.0 } else { 0.0 },
                             ramp_duration_samples: 0,
                         });
                     }
                 });
 
-                ui.add_space(15.0);
-
-                // PITCH FADER
-                ui.vertical(|ui| {
-                    ui.label(egui::RichText::new("PITCH").size(9.0).strong().color(egui::Color32::from_gray(100)));
-
+                // COL 4: PITCH
+                cols[3].vertical_centered(|ui| {
+                    ui.label(egui::RichText::new("PITCH").size(8.0).strong().color(egui::Color32::from_gray(100)));
                     egui::ComboBox::from_id_source(format!("pitch_range_{}", i))
                         .selected_text(format!("{:.0}%", self.pitch_range[i] * 100.0))
-                        .width(40.0)
+                        .width(ui.available_width())
                         .show_ui(ui, |ui| {
                             ui.selectable_value(&mut self.pitch_range[i], 0.08, "8%");
                             ui.selectable_value(&mut self.pitch_range[i], 0.16, "16%");
@@ -767,14 +807,14 @@ impl InspectorApp {
                     let p_res = ui.add(egui::Slider::new(&mut self.pitch_bend[i], range).vertical().show_value(false).handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 4.0 }));
                     if p_res.changed() {
                         let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
-                            target_id: (i as u64 * 4), // Targeting Sampler node
-                            param_id: 1, // Assume 1 is playback rate
+                            target_id: (i as u64 * 4),
+                            param_id: 1,
                             value: self.pitch_bend[i],
                             ramp_duration_samples: 128,
                         });
                     }
                     let pct = (self.pitch_bend[i] - 1.0) * 100.0;
-                    ui.label(egui::RichText::new(format!("{:+.1}%", pct)).size(10.0).monospace().color(color));
+                    ui.label(egui::RichText::new(format!("{:+.1}%", pct)).size(9.0).monospace().color(color));
                 });
             });
 
@@ -844,6 +884,28 @@ impl InspectorApp {
 
                 ui.add_space(15.0);
 
+                ui.vertical(|ui| {
+                    ui.set_width(40.0);
+                    ui.label(egui::RichText::new("BOOTH").size(7.0).color(egui::Color32::from_gray(100)));
+                    widgets::render_knob(ui, &mut self.booth_gain, 0.0..=1.5, "", egui::Color32::from_rgb(0, 255, 200));
+                    ui.add_space(5.0);
+                    let booth_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.booth_gain;
+                    widgets::render_vu_meter(ui, booth_peak, booth_peak, egui::Color32::from_rgb(0, 180, 255), 40.0);
+                });
+
+                ui.add_space(10.0);
+
+                ui.vertical(|ui| {
+                    ui.set_width(40.0);
+                    ui.label(egui::RichText::new("REC").size(7.0).color(egui::Color32::from_gray(100)));
+                    widgets::render_knob(ui, &mut self.rec_gain, 0.0..=1.5, "", egui::Color32::from_rgb(0, 255, 200));
+                    ui.add_space(5.0);
+                    let rec_peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2)) * self.rec_gain;
+                    widgets::render_vu_meter(ui, rec_peak, rec_peak, egui::Color32::from_rgb(255, 50, 150), 40.0);
+                });
+
+                ui.add_space(15.0);
+
                 let peak = telemetry.as_ref().map_or(0.0, |t| t.peak_levels[21].min(1.2));
                 if peak > self.master_peak_hold { self.master_peak_hold = peak; }
                 else { self.master_peak_hold *= 0.98; }
@@ -876,7 +938,7 @@ impl InspectorApp {
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);
                 for i in 0..4 {
-                    ui.vertical(|ui| {
+                    ui.vertical_centered(|ui| {
                         ui.set_width(60.0);
 
                         // GAIN / TRIM
@@ -921,7 +983,7 @@ impl InspectorApp {
                         ui.add_space(12.0);
 
                         // FADER & VU
-                        ui.horizontal(|ui| {
+                        ui.horizontal_centered(|ui| {
                             ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
                             if widgets::render_fader(ui, &mut self.channel_faders[i], 0.0..=1.0, Self::deck_color(i)).changed() {
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam {
