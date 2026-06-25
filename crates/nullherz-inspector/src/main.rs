@@ -686,7 +686,8 @@ impl InspectorApp {
                     // BOOTH
                     cols[0].vertical_centered(|ui| {
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
+                            ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
+                            ui.add_space(8.0); // Center the group content
                             if widgets::render_knob(ui, &mut self.booth_gain, 0.0..=1.5, "BOOTH", egui::Color32::from_rgb(0, 180, 255)).changed() {
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 22, param_id: 0, value: self.booth_gain, ramp_duration_samples: 128 });
                             }
@@ -703,7 +704,8 @@ impl InspectorApp {
                     // REC
                     cols[1].vertical_centered(|ui| {
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
+                            ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
+                            ui.add_space(8.0);
                             if widgets::render_knob(ui, &mut self.rec_gain, 0.0..=1.5, "REC", egui::Color32::from_rgb(255, 50, 150)).changed() {
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 23, param_id: 0, value: self.rec_gain, ramp_duration_samples: 128 });
                             }
@@ -720,7 +722,8 @@ impl InspectorApp {
                     // MASTER
                     cols[2].vertical_centered(|ui| {
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
+                            ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
+                            ui.add_space(8.0);
                             if widgets::render_knob(ui, &mut self.master_gain, 0.0..=1.5, "MASTER", egui::Color32::from_rgb(0, 255, 180)).changed() {
                                 let _ = self.command_sender.send(nullherz_traits::Command::SetParam { target_id: 21, param_id: 0, value: self.master_gain, ramp_duration_samples: 128 });
                             }
@@ -1042,7 +1045,8 @@ impl eframe::App for InspectorApp {
             .width_range(60.0..=60.0)
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 10.0);
-                ui.vertical_centered(|ui| {
+
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                     ui.add_space(4.0);
                     ui.label(egui::RichText::new("NH").color(egui::Color32::from_rgb(0, 255, 200)).strong().size(20.0));
                     ui.add_space(10.0);
@@ -1060,14 +1064,20 @@ impl eframe::App for InspectorApp {
                             self.active_view = view;
                         }
                     }
+                });
 
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    ui.add_space(4.0);
+                    if self.render_nav_item(ui, "⚙", "SETTINGS", false, true).clicked() {
+                        // Handle settings
+                    }
                 });
             });
 
         // RIGHT-ALIGNED VERTICAL NAVIGATION (Icon buttons only)
         egui::SidePanel::right("right_nav")
-            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(8, 8, 10)).inner_margin(8.0))
-            .width_range(60.0..=60.0)
+            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(8, 8, 10)).inner_margin(egui::Margin { left: 8.0, right: 12.0, top: 8.0, bottom: 8.0 }))
+            .width_range(64.0..=64.0)
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 10.0);
 
@@ -1094,11 +1104,6 @@ impl eframe::App for InspectorApp {
                     let is_open = self.active_right_tab.is_some();
                     if self.render_nav_item(ui, if is_open { "➡" } else { "⬅" }, "TOGGLE SIDEBAR", false, false).clicked() {
                         if is_open { self.active_right_tab = None; } else { self.active_right_tab = Some(RightTab::Library); }
-                    }
-                    ui.add_space(10.0);
-                    // Settings at the bottom
-                    if self.render_nav_item(ui, "⚙", "SETTINGS", false, false).clicked() {
-                        // Handle settings
                     }
                 });
             });
