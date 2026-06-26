@@ -8,3 +8,6 @@ pub mod broadcast;
 pub mod settings;
 pub mod metrics;
 pub mod notifications;
+pub mod dj_studio;
+pub mod player;
+pub mod composer;
