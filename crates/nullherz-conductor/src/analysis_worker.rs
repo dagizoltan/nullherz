@@ -152,7 +152,7 @@ impl AnalysisWorker {
             // semitone = 12 * log2(freq / 440) + 69
             for bin in 1..fft_size/2 {
                 let freq = (bin as f32 * sample_rate) / fft_size as f32;
-                if freq < 20.0 || freq > 2000.0 { continue; } // Focus on fundamental range
+                if !(20.0..=2000.0).contains(&freq) { continue; } // Focus on fundamental range
 
                 let mag = (re[bin]*re[bin] + im[bin]*im[bin]).sqrt();
                 let semitone = 12.0 * (freq / 440.0).log2() + 69.0;

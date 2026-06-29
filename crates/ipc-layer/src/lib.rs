@@ -390,9 +390,9 @@ pub struct RingBuffer<T> {
 unsafe impl<T: Send> Sync for RingBuffer<T> {}
 
 pub enum NonRtProducerInner<T> {
-    Spsc(tokio::sync::Mutex<Producer<T>>),
+    Spsc(std::sync::Mutex<Producer<T>>),
     Mpsc(Arc<MpscRingBuffer<T>>),
-    Boxed(tokio::sync::Mutex<Box<dyn nullherz_traits::CommandProducer>>),
+    Boxed(std::sync::Mutex<Box<dyn nullherz_traits::CommandProducer>>),
 }
 
 pub struct NonRtProducer<T> {
@@ -401,7 +401,7 @@ pub struct NonRtProducer<T> {
 
 impl<T> NonRtProducer<T> {
     pub fn new(producer: Producer<T>) -> Self {
-        Self { inner: Arc::new(NonRtProducerInner::Spsc(tokio::sync::Mutex::new(producer))) }
+        Self { inner: Arc::new(NonRtProducerInner::Spsc(std::sync::Mutex::new(producer))) }
     }
 
     pub fn from_mpsc(buffer: Arc<MpscRingBuffer<T>>) -> Self {
@@ -409,13 +409,13 @@ impl<T> NonRtProducer<T> {
     }
 
     pub fn from_boxed(producer: Box<dyn nullherz_traits::CommandProducer>) -> Self {
-        Self { inner: Arc::new(NonRtProducerInner::Boxed(tokio::sync::Mutex::new(producer))) }
+        Self { inner: Arc::new(NonRtProducerInner::Boxed(std::sync::Mutex::new(producer))) }
     }
 
-    pub async fn push(&self, item: T) -> Result<(), T> {
+    pub fn push(&self, item: T) -> Result<(), T> {
         match self.inner.as_ref() {
             NonRtProducerInner::Spsc(m) => {
-                let mut producer = m.lock().await;
+                let mut producer = m.lock().unwrap();
                 producer.push(item)
             }
             NonRtProducerInner::Mpsc(b) => {
@@ -429,17 +429,17 @@ impl<T> NonRtProducer<T> {
 }
 
 impl NonRtProducer<nullherz_traits::TimestampedCommand> {
-    pub async fn push_command(&self, item: nullherz_traits::TimestampedCommand) -> Result<(), nullherz_traits::Command> {
+    pub fn push_command(&self, item: nullherz_traits::TimestampedCommand) -> Result<(), nullherz_traits::Command> {
         match self.inner.as_ref() {
             NonRtProducerInner::Spsc(m) => {
-                let mut producer = m.lock().await;
+                let mut producer = m.lock().unwrap();
                 producer.push(item).map_err(|c| c.command)
             }
             NonRtProducerInner::Mpsc(b) => {
                 b.push(item).map_err(|c| c.command)
             }
             NonRtProducerInner::Boxed(m) => {
-                let producer = m.lock().await;
+                let producer = m.lock().unwrap();
                 producer.push_command(item)
             }
         }

@@ -39,7 +39,9 @@ impl GraphManager {
 
     /// Checks if a new graph is pending and swaps it in if so.
     /// Returns a reference to the active graph.
-    /// SAFETY: This must be called from the real-time thread.
+    /// # Safety
+    /// This must be called exclusively from the single real-time audio thread.
+    /// Concurrent execution of this method causes undefined behavior.
     pub unsafe fn swap_if_pending(&mut self, metrics: &EngineMetrics, health_signal: &Arc<std::sync::atomic::AtomicBool>) -> &mut dyn AudioProcessor {
         let pending = self.pending_graph.swap(std::ptr::null_mut(), Ordering::Acquire);
         if !pending.is_null() {
@@ -70,7 +72,10 @@ impl GraphManager {
     }
 
     /// Provides a mutable reference to the active graph.
-    /// SAFETY: The caller must ensure exclusive access, typically by being on the RT thread.
+    /// # Safety
+    /// The caller must ensure exclusive access, typically by being on the RT thread.
+    /// Concurrent access to the active graph while it is mutating causes UB.
+    #[allow(clippy::mut_from_ref)]
     pub unsafe fn get_active_graph_mut(&self) -> &mut dyn AudioProcessor {
         let graph_ptr = self.active_graph.load(Ordering::Acquire);
         unsafe { &mut **graph_ptr }

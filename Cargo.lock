@@ -2310,6 +2310,7 @@ dependencies = [
  "ipc-layer",
  "nullherz-backends",
  "nullherz-conductor",
+ "nullherz-dna",
  "nullherz-mixer",
  "nullherz-traits",
 ]

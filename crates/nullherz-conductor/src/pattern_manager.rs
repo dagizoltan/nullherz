@@ -18,6 +18,12 @@ pub struct PatternManager {
     last_processed_beat: f64,
 }
 
+impl Default for PatternManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PatternManager {
     pub fn new() -> Self {
         Self {

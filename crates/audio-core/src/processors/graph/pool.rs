@@ -32,7 +32,7 @@ impl nullherz_traits::ParallelExecutor for TaskPool {
         self.worker_producers.len()
     }
     fn push_job(&mut self, worker_idx: usize, job: Box<dyn std::any::Any + Send>) -> Result<(), Box<dyn std::any::Any + Send>> {
-        let job = job.downcast::<Job>().map_err(|e| e)?;
+        let job = job.downcast::<Job>()?;
         self.worker_producers[worker_idx].push(*job).map_err(|j| Box::new(j) as Box<dyn std::any::Any + Send>)
     }
     fn wait_for_completion(&mut self, target_count: usize) {
@@ -120,7 +120,7 @@ impl TaskPool {
                         let mut inner_context = nullherz_traits::ProcessContext {
 
                             transport: job.transport.as_ref(),
-                            host: job.host_ptr.and_then(|ptr| unsafe { Some(&*ptr) }),
+                            host: job.host_ptr.map(|ptr| unsafe { &*ptr }),
                             sub_block_offset: offset,
                             is_last_sub_block: job.is_last_sub_block,
                         };

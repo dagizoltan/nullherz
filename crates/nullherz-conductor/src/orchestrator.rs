@@ -141,18 +141,15 @@ impl Conductor {
         let mut engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
         if let Some(ref mut engine) = *engine_lock {
             for child in engine.list_children() {
-                if let Some(sampler) = child.as_any().downcast_ref::<nullherz_processors::SamplerProcessor>() {
-                    if let Some(id) = sampler.id_getter() {
-                        if let Some(sample) = self.transfusion_manager.sample_registry.get(id) {
-                             if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                if let Some(sampler) = child.as_any().downcast_ref::<nullherz_processors::SamplerProcessor>()
+                    && let Some(id) = sampler.id_getter()
+                        && let Some(sample) = self.transfusion_manager.sample_registry.get(id)
+                             && let Some(ref mut prod) = self.topology_manager.topo_producer {
                                  let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
                                      node_idx: sampler.id as u32,
                                      metadata: Arc::new(sample.metadata),
                                  });
                              }
-                        }
-                    }
-                }
             }
         }
     }
@@ -185,7 +182,7 @@ impl Conductor {
                     if type_id == nullherz_traits::ProcessorTypeId::SEQUENCER.0 {
                         let bytes = child.serialize_state();
                         // 1 byte (active_pattern) + 16 * (1 byte len + 16 * 64 steps)
-                        if bytes.len() >= 1 + 16 * (1 + 16 * 64) {
+                        if bytes.len() > 16 * (1 + 16 * 64) {
                             let mut patterns = Vec::new();
                             let active_pattern = bytes[0] as usize;
                             let mut cursor = 1;

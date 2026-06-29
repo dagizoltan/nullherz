@@ -243,11 +243,10 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
             external_outputs[i].copy_from_slice(&self.buffer_pool.buffers[p_idx].data[offset..offset + num_samples]);
         }
 
-        if is_last_sub_block {
-            if self.topology_coordinator.has_active_crossfades() {
+        if is_last_sub_block
+            && self.topology_coordinator.has_active_crossfades() {
                 self.buffer_pool.capture_old_buffers();
             }
-        }
 
         self.telemetry.update_peak_levels(topo, &self.buffer_pool.buffers, offset, num_samples);
     }
@@ -292,11 +291,10 @@ impl nullherz_traits::SnapshotProvider for ProcessorGraph {
         for i in 0..self.node_count {
             let node = &self.nodes[i];
             let processor = unsafe { &mut *node.processor.get() };
-            if let Some(snapshot) = processor.pull_snapshot() {
-                if let Some(meta) = processor.metadata() {
+            if let Some(snapshot) = processor.pull_snapshot()
+                && let Some(meta) = processor.metadata() {
                     target.push((meta.processor_id, snapshot));
                 }
-            }
             processor.pull_all_snapshots(target);
         }
     }
@@ -312,11 +310,10 @@ fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
             self.pending_mutation_count += 1;
         } else {
             // Drop if full.
-            if let TopologyMutation::AddNode { processor, .. } | TopologyMutation::SwapProcessor { processor, .. } = mutation {
-                 if let Some(ref mut prod) = self.garbage_producer {
+            if let TopologyMutation::AddNode { processor, .. } | TopologyMutation::SwapProcessor { processor, .. } = mutation
+                 && let Some(ref mut prod) = self.garbage_producer {
                      let _ = prod.push_processor(processor);
                  }
-            }
         }
     }
 fn apply_command(&mut self, command: &nullherz_traits::Command) {

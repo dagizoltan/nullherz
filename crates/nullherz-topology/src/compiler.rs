@@ -72,7 +72,7 @@ impl GraphCompiler {
 
                     for k in 0..routing.output_count {
                         let v_out = *routing.output_indices.get(k).unwrap_or(&0) % 64;
-                        let p_out = topo.virtual_to_physical[v_out as usize];
+                        let p_out = topo.virtual_to_physical[v_out];
                         if physical_writes_in_stage[p_out] || physical_reads_in_stage[p_out] {
                             collision = true;
                             break;
@@ -82,7 +82,7 @@ impl GraphCompiler {
 
                     for k in 0..routing.input_count {
                         let v_in = *routing.input_indices.get(k).unwrap_or(&0) % 64;
-                        let p_in = topo.virtual_to_physical[v_in as usize];
+                        let p_in = topo.virtual_to_physical[v_in];
                         if physical_writes_in_stage[p_in] {
                             collision = true;
                             break;
@@ -94,12 +94,12 @@ impl GraphCompiler {
                         stage_count += 1;
                         for k in 0..routing.output_count {
                             let v_out = *routing.output_indices.get(k).unwrap_or(&0) % 64;
-                            let p_out = topo.virtual_to_physical[v_out as usize];
+                            let p_out = topo.virtual_to_physical[v_out];
                             physical_writes_in_stage[p_out] = true;
                         }
                         for k in 0..routing.input_count {
                             let v_in = *routing.input_indices.get(k).unwrap_or(&0) % 64;
-                            let p_in = topo.virtual_to_physical[v_in as usize];
+                            let p_in = topo.virtual_to_physical[v_in];
                             physical_reads_in_stage[p_in] = true;
                         }
                     }

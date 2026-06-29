@@ -36,8 +36,8 @@ fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]], context: &
         let val = avg_cv * self.scale + self.offset;
 
         let is_mod_needed = (val - self.last_sent_value).abs() > MODULATION_THRESHOLD || self.last_sent_value.is_nan();
-        if is_mod_needed {
-            if let Some(host) = context.host {
+        if is_mod_needed
+            && let Some(host) = context.host {
                 host.push_command(0, nullherz_traits::Command::SetParam {
                     target_id: self.target_id,
                     param_id: self.param_id,
@@ -46,7 +46,6 @@ fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]], context: &
                 });
                 self.last_sent_value = val;
             }
-        }
     }
 }
 

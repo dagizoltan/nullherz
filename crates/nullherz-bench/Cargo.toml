@@ -12,3 +12,4 @@ nullherz-conductor = { path = "../nullherz-conductor" }
 audio-dsp = { path = "../audio-dsp" }
 fx-runtime = { path = "../fx-runtime" }
 ipc-layer = { path = "../ipc-layer" }
+nullherz-dna = { path = "../nullherz-dna" }

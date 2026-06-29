@@ -82,8 +82,8 @@ async fn handle_connection(
         loop {
             let tel = tel_provider.get_telemetry();
 
-            if let Some(t) = tel {
-                if t.sample_counter != last_sample_counter {
+            if let Some(t) = tel
+                && t.sample_counter != last_sample_counter {
                     if let Ok(json) = serde_json::to_string(&t) {
                         let msg = Message::Text(json.into());
                         if write.send(msg).await.is_err() {
@@ -92,7 +92,6 @@ async fn handle_connection(
                     }
                     last_sample_counter = t.sample_counter;
                 }
-            }
             tokio::time::sleep(tokio::time::Duration::from_millis(16)).await; // ~60fps
         }
     });
@@ -102,7 +101,7 @@ async fn handle_connection(
         match msg {
             Ok(Message::Text(text)) => {
                 if let Ok(cmd) = serde_json::from_str::<TimestampedCommand>(&text) {
-                    let _ = cmd_prod.push_command(cmd).await;
+                    let _ = cmd_prod.push_command(cmd);
                 }
             }
             Ok(Message::Close(_)) => break,

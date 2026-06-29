@@ -6,6 +6,12 @@ pub struct SidecarSupervisor {
     pub manager: SidecarManager,
 }
 
+impl Default for SidecarSupervisor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SidecarSupervisor {
     pub fn new() -> Self {
         Self {

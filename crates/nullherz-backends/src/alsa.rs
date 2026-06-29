@@ -137,12 +137,10 @@ impl AudioBackend for AlsaBackend {
                 {
                     if let Some(ref engine_arc) = *engine_handle.lock().unwrap() {
                          let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-                         unsafe {
                              (*engine_ptr).set_config(nullherz_traits::AudioConfig {
                                 sample_rate: rate as f32,
                                 block_size: period_size as usize,
                             });
-                         }
                     }
                 }
 
@@ -157,9 +155,7 @@ impl AudioBackend for AlsaBackend {
                             let (ch1, ch2) = outputs_raw.split_at_mut(1);
                             let mut out_refs = [&mut ch1[0][..actual_period], &mut ch2[0][..actual_period]];
                             let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-                            unsafe {
                                 (*engine_ptr).process_block(&[], &mut out_refs, actual_period);
-                            }
                         } else {
                             outputs_raw[0].fill(0.0);
                             outputs_raw[1].fill(0.0);

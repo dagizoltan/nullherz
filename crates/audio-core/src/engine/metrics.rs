@@ -10,6 +10,12 @@ pub struct EngineMetrics {
     pub resource_leaks: AtomicU64,
 }
 
+impl Default for EngineMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EngineMetrics {
     pub fn new() -> Self {
         Self {

@@ -9,6 +9,12 @@ pub struct MixerBridge {
     pub bundle_producer: Option<Producer<Vec<Command>>>,
 }
 
+impl Default for MixerBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MixerBridge {
     pub fn new() -> Self {
         Self {
@@ -42,11 +48,10 @@ impl MixerBridge {
             }
         }
 
-        if !bundle.is_empty() {
-            if let Some(ref mut prod) = self.bundle_producer {
+        if !bundle.is_empty()
+            && let Some(ref mut prod) = self.bundle_producer {
                 let _ = prod.push(bundle);
             }
-        }
     }
 
     pub fn update_timeline(&mut self, telemetry: &audio_core::Telemetry) {

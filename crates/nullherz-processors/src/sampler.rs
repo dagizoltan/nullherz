@@ -65,9 +65,9 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &m
 
 fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext, _executor: Option<&mut (dyn nullherz_traits::ParallelExecutor + '_)>) {
         // SYNC LOGIC
-        if self.quantize_enabled {
-            if let (Some(transport), Some(meta)) = (context.transport, &self.metadata) {
-                if meta.bpm > 10.0 {
+        if self.quantize_enabled
+            && let (Some(transport), Some(meta)) = (context.transport, &self.metadata)
+                && meta.bpm > 10.0 {
                     let sync_rate = (transport.bpm / meta.bpm) * self.playback_rate;
                     for voice in self.voices.iter_mut() {
                         voice.playback_rate = sync_rate;
@@ -86,8 +86,6 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
                         }
                     }
                 }
-            }
-        }
 
         if outputs.is_empty() { return; }
         let num_samples = outputs[0].len();
@@ -114,14 +112,13 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
 impl nullherz_traits::MidiResponder for SamplerProcessor {
     fn apply_midi(&mut self, event: ipc_layer::MidiEvent) {
         let status = event.status & 0xF0;
-        if status == 0x90 && event.data2 > 0 {
-            if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
+        if status == 0x90 && event.data2 > 0
+            && let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
                 let freq = 440.0 * 2.0f32.powf((event.data1 as f32 - 69.0) / 12.0);
                 let playback_rate = (freq / 440.0) * self.playback_rate;
                 let velocity = event.data2 as f32 / 127.0;
                 voice.trigger(self.sample_buffer.clone(), playback_rate, velocity);
             }
-        }
     }
 }
 
@@ -176,10 +173,10 @@ impl SamplerProcessor {
                 let mut offset = offset;
 
                 // QUANTIZATION LOGIC
-                if self.quantize_enabled {
-                    if let (Some(ctx), Some(meta)) = (context, &self.metadata) {
-                        if let Some(transport) = ctx.transport {
-                            if meta.bpm > 0.0 {
+                if self.quantize_enabled
+                    && let (Some(ctx), Some(meta)) = (context, &self.metadata)
+                        && let Some(transport) = ctx.transport
+                            && meta.bpm > 0.0 {
                                 let samples_per_beat = (transport.sample_rate * 60.0 / meta.bpm) as f64;
                                 let current_beat = transport.beat_position;
                                 let next_beat = current_beat.ceil();
@@ -192,9 +189,6 @@ impl SamplerProcessor {
                                 let grid_pos = (offset as f64 / samples_per_beat).round() * samples_per_beat;
                                 offset = grid_pos as u64;
                             }
-                        }
-                    }
-                }
 
                 for voice in self.voices.iter_mut() {
                     if voice.is_active {

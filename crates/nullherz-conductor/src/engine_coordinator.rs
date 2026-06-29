@@ -16,6 +16,12 @@ pub struct EngineCoordinator {
     pub command_producer: Option<Box<dyn CommandProducer>>,
 }
 
+impl Default for EngineCoordinator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EngineCoordinator {
     pub fn new() -> Self {
         Self {

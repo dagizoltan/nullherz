@@ -271,7 +271,7 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
 }
 
 unsafe extern "C" fn pw_param_changed(_data: *mut std::ffi::c_void, id: u32, _param: *const std::ffi::c_void) {
-    if id != 2 { } // SPA_PARAM_Props
+     // SPA_PARAM_Props
 
     // BE-2: Format/Rate read-back
     const SPA_PARAM_FORMAT: u32 = 2;
@@ -312,9 +312,7 @@ impl AudioBackend for PipewireBackend {
                 if let Some(ref engine_arc) = *engine_handle.lock().unwrap() {
                     target_rate = engine_arc.target_sample_rate() as u32;
                     let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-                    unsafe {
-                        (*engine_ptr).set_config(nullherz_traits::AudioConfig { sample_rate: target_rate as f32, block_size: 128 });
-                    }
+                    (*engine_ptr).set_config(nullherz_traits::AudioConfig { sample_rate: target_rate as f32, block_size: 128 });
                 }
             }
 

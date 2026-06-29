@@ -12,6 +12,12 @@ pub struct TopologyManager {
     pub active_node_types: std::collections::HashMap<u32, u32>,
 }
 
+impl Default for TopologyManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TopologyManager {
     pub fn new() -> Self {
         let mut v2p = [0usize; nullherz_traits::MAX_NODES];

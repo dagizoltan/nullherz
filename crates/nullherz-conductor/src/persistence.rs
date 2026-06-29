@@ -64,12 +64,12 @@ impl ProjectState {
     }
 
     pub fn save_to_file(&self, path: &str) -> std::io::Result<()> {
-        let json = serde_json::to_string_pretty(self).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let json = serde_json::to_string_pretty(self).map_err(|e| std::io::Error::other(e))?;
         std::fs::write(path, json)
     }
 
     pub fn load_from_file(path: &str) -> std::io::Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        serde_json::from_str(&content).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        serde_json::from_str(&content).map_err(|e| std::io::Error::other(e))
     }
 }

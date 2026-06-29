@@ -68,10 +68,9 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
         }
     }
 fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
-        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command {
-            if target_id == self.id {
+        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command
+            && target_id == self.id {
                 self.set_parameter(param_id, value, ramp_duration_samples);
             }
-        }
     }
 }

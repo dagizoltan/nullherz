@@ -6,11 +6,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("LIBRARY").color(Color32::from_gray(150)).small().strong());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("REFRESH").clicked() {
-                    if let Ok(db) = nullherz_dna::LibraryDatabase::load("library.redb") {
+                if ui.button("REFRESH").clicked()
+                    && let Ok(db) = nullherz_dna::LibraryDatabase::load("library.redb") {
                         app.library_db = db;
                     }
-                }
             });
         });
         ui.add_space(10.0);
@@ -19,7 +18,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
         ScrollArea::vertical().show(ui, |ui| {
             let mut tracks = app.library_db.list_tracks().unwrap_or_default();
-            tracks.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+            tracks.sort_by_key(|a| a.title.to_lowercase());
 
             for track in &tracks {
                 let title = &track.title;

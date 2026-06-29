@@ -186,7 +186,7 @@ impl AudioEngine {
 
     pub fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         let start_cycles = crate::get_cycles();
-        let num_samples = outputs.get(0).map(|o| o.len()).unwrap_or(0);
+        let num_samples = outputs.first().map(|o| o.len()).unwrap_or(0);
         if num_samples == 0 { return; }
 
         let host_ref = self.host.as_ref().map(|h| h as &dyn nullherz_traits::Host);
