@@ -42,8 +42,8 @@ impl nullherz_traits::Host for EngineHost {
 
 // SAFETY: AudioEngine is Send and Sync because all of its members are either
 // Send/Sync or are atomics that allow safe cross-thread access.
-unsafe impl Send for AudioEngine {}
-unsafe impl Sync for AudioEngine {}
+unsafe impl<K: ProcessingKernel> Send for AudioEngine<K> {}
+unsafe impl<K: ProcessingKernel> Sync for AudioEngine<K> {}
 
 /// Encapsulates all IPC resources required by the `AudioEngine`.
 /// This includes command streams, MIDI inputs, telemetry producers, and resource recycling channels.
@@ -60,7 +60,7 @@ pub struct EngineResources {
     pub telemetry_producer: Box<dyn nullherz_traits::TelemetryProducer>,
 }
 
-pub struct AudioEngine {
+pub struct AudioEngine<K: ProcessingKernel = StandardKernel> {
     command_consumer: Box<dyn nullherz_traits::CommandConsumer>,
     #[allow(dead_code)]
     command_producer: Box<dyn nullherz_traits::CommandProducer>,
@@ -78,7 +78,7 @@ pub struct AudioEngine {
     pub graph_manager: GraphManager,
     pub resource_recycler: ResourceRecycler,
     pub sample_registry: Arc<SampleRegistry>,
-    pub kernel: Box<dyn ProcessingKernel>,
+    pub kernel: K,
     pub host: Option<EngineHost>,
     pub pool: Option<Box<dyn nullherz_traits::ParallelExecutor>>,
     pub transport: nullherz_traits::Transport,
@@ -86,7 +86,7 @@ pub struct AudioEngine {
     pub logger: Arc<RtLogger>,
 }
 
-impl nullherz_traits::RenderingEngine for AudioEngine {
+impl<K: ProcessingKernel> nullherz_traits::RenderingEngine for AudioEngine<K> {
     fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize) {
         self.process_block(inputs, outputs, num_samples);
     }
@@ -113,17 +113,18 @@ impl nullherz_traits::RenderingEngine for AudioEngine {
     }
 }
 
-impl nullherz_traits::RenderingController for AudioEngine {
+impl<K: ProcessingKernel> nullherz_traits::RenderingController for AudioEngine<K> {
     fn set_pending_graph(&self, graph: Box<dyn AudioProcessor>) {
         self.set_pending_graph(graph);
     }
 }
 
-impl AudioEngine {
+impl<K: ProcessingKernel> AudioEngine<K> {
     pub fn new(
         resources: EngineResources,
         initial_graph: Box<dyn AudioProcessor>,
         logger: Arc<RtLogger>,
+        kernel: K,
     ) -> Self {
         let command_producer = dyn_clone::clone_box(&*resources.command_producer);
         Self {
@@ -143,7 +144,7 @@ impl AudioEngine {
                 resources.bundle_overflow_producer
             ),
             sample_registry: Arc::new(SampleRegistry::new()),
-            kernel: Box::new(StandardKernel),
+            kernel,
             telemetry_producer: resources.telemetry_producer,
             sample_counter: 0,
             xrun_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),

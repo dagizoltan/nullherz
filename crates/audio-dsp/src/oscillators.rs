@@ -412,10 +412,19 @@ impl SamplerVoice {
             }
             InterpolationType::Lagrange => {
                 let x = play_head - idx as f32;
-                let p0 = *buffer.get(idx.saturating_sub(1)).unwrap_or(&0.0);
-                let p1 = buffer[idx];
-                let p2 = buffer[idx + 1];
-                let p3 = buffer[idx + 2];
+                let start_idx = idx.saturating_sub(1);
+
+                // Direct SIMD pointer load for 4-point interpolation
+                // This avoids 4 individual bounds checks and indexing operations.
+                let ptr = unsafe { buffer.as_ptr().add(start_idx) };
+                let v = unsafe { crate::simd_vec::load_f32x4_ptr(ptr) };
+                let p: [f32; 4] = v.into();
+
+                let p0 = p[0];
+                let p1 = p[1];
+                let p2 = p[2];
+                let p3 = p[3];
+
                 let c1 = p1;
                 let c2 = -0.5 * p0 + 0.5 * p2;
                 let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;

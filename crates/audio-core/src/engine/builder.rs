@@ -91,7 +91,8 @@ impl EngineBuilder {
         let engine = AudioEngine::new(
             resources,
             initial_graph,
-            Arc::new(crate::rt_logging::RtLogger::new(256))
+            Arc::new(crate::rt_logging::RtLogger::new(256)),
+            crate::engine::processing_kernel::StandardKernel
         );
 
         let engine = Arc::new(engine);
