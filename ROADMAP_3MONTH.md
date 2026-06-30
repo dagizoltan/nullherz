@@ -5,7 +5,7 @@
 
 ---
 
-## Month 1: Stabilization & Control (Control-Plane Hardening)
+## Month 1: Stabilization & The 5 Layers of Transfusion
 *Goal: Finalize the primary control interfaces and ensure total signal reliability.*
 
 *   **MIDI Mapping System [High Priority]:**
@@ -20,7 +20,7 @@
 
 ---
 
-## Month 2: UI Enrichment & Performance (The Visual Instrument)
+## Month 2: UI Enrichment & Evolutionary Synthesis
 *Goal: Restore legacy visualizations and implement advanced creative features.*
 
 *   **Advanced Visualizers:**

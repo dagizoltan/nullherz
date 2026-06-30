@@ -5,26 +5,34 @@
 
 ---
 
-## 1. Executive Summary (The Producer's Desk)
-The Nullherz system has evolved from a raw DSP sandbox into a hardened, production-ready audio engine. From a production standpoint, the system's strength lies in its **Zero-Latency Orchestration** and **Deterministic State Management**. We have successfully bridged the gap between high-level creative intent (Sequencers, DJ Performance, Macro Modulation) and low-level execution.
+## 1. Executive Summary: The AnaWaves Philosophy
+The Nullherz system has evolved from a raw DSP sandbox into a hardened, production-ready realization of the **AnaWaves Sound Transfusion Theory**. Unlike traditional engines that treat sound as a linear product, Nullherz treats audio as an evolving biological entity capable of "transfusion"—the inheritance of foreign spectral and rhythmic traits.
 
+*   **Core Theory:** Sound is a process, not an object.
 *   **Vibe:** Industrial-grade, high-precision, and technically transparent.
 *   **Reliability:** Extremely high. The "Safe Mode" and sidecar supervisor ensure that even in the event of a DSP failure, the master clock and orchestration remain stable.
 *   **Creative Potential:** High. The Modulation Matrix and Project Persistence turn this from a "processor" into a "platform."
 
 ---
 
-## 2. Audio Engineering Analysis (The Signal Path)
-The signal path is designed for bit-exact transparency with specific musical colorations available via modular processors.
+## 2. Audio Engineering Analysis: The 5 Layers of Transfusion
 
-### 2.1 DSP Kernel Audit
-*   **Summing & Mixing:** Utilizing `SummingNode` with SIMD (f32x8) optimization. This ensures that even with 16+ tracks, the noise floor remains non-existent and the CPU overhead is negligible.
-*   **Crossover & EQ:** The `DjIsolator` and `SimdBiquad` processors provide the surgical precision required for high-end DJ performance.
-*   **Spectral Processing:** The engine features a `SpectralPipeline` with FFT/IFFT capabilities, enabling advanced frequency-domain effects like morphing and convolution.
-*   **Non-Linearity Handling:** All gain kernels (`Gain`) are hardened against non-finite values and include sample-accurate ramping to prevent "zipper noise" during automation.
+The signal path is architected to support the five core layers of the AnaWaves theory:
 
-### 2.2 Telemetry & Monitoring
-High-precision VU metering (stereo, dual-bar) and rolling waveform visualizations are phase-locked to the engine clock. The UI provides real-time feedback on peak levels and engine load, allowing for proactive headroom management.
+### 2.1 Layer 1: Granular Transfusion (Genetic Re-arrangement)
+Nullherz utilizes small grains (5–100ms) not just for texture, but for identity loss and re-arrangement. A Reese bass is decomposed into its "DNA" and can be reconstituted as a glitch lead or atmospheric pad while retaining its original genetic markers.
+
+### 2.2 Layer 2: Spectral Transfusion (Personality Inheritance)
+By working in the frequency domain via our `SpectralPipeline`, Nullherz allows one sound to "inherit" the personality of another. The spectral character of a vocal can be fused onto a bassline, turning EQ from a corrective tool into a character-defining trait.
+
+### 2.3 Layer 3: Cyclic Evolution (The Bounce as Reproduction)
+In Nullherz, the "export" is not the end. The Transfusion Manager captures engine snapshots, re-injecting them into the `SampleRegistry` as new "parents" for the next cycle of mutation.
+
+### 2.4 Layer 4: Plugin Ecosystem (Non-Linear Information Flow)
+Traditional chains (A → B → C) are replaced by cross-modulated ecosystems (A ↔ B ↔ C). Our Modulation Matrix enables information flow between granular amplitudes, spectral data, and envelope rhythms, creating a partially unpredictable, living system.
+
+### 2.5 Layer 5: Error Rehabilitation (Evolutionary Mutation)
+Nullherz treats digital artifacts—aliasing, buffer clicks, and feedback loops—not as bugs to be removed, but as "evolutionary mutations" that provide unique character.
 
 ---
 

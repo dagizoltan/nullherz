@@ -13,16 +13,16 @@
 
 ## 2. Our Strategic Moats (Why We Win)
 
+### 2.0 The "AnaWaves" Conceptual Moat
+Most competitors sell "Features." We sell a **Philosophy.** The "Sound Transfusion Theory" provides a conceptual framework that redefines the relationship between producer and sound. By positioning Nullherz as an "Ecosystem Giver" rather than just a "Synthesizer," we create a unique brand identity that resonates with the avant-garde (Neurofunk) and technical communities.
+
 ### 2.1 The "Rust Advantage" (Architectural Moat)
 Legacy competitors (Traktor, Ableton, Serato) are built on millions of lines of aging C++. They suffer from "legacy drag"—fear of refactoring critical RT paths.
 *   **Nullherz** is built on a modern, memory-safe foundation. Our **Triple-Plane Model** and **Sidecar Isolation** solve the #1 complaint of professional performers: **System Crashes.**
 *   **Market Play:** Position Nullherz as the "Mission Critical" engine. If the software crashes, the career is at risk. We offer the first "Uncrashable" DJ/Studio hybrid.
 
 ### 2.2 Workflow Convergence (Product Moat)
-Currently, the market is bifurcated:
-*   **DJ Tools:** Great for playback, poor for creation (Traktor/Rekordbox).
-*   **DAWs:** Great for creation, poor for live spontaneity (Ableton/Bitwig).
-*   **The Gap:** Nullherz bridges this. A DJ can start a set, transition into a 16-track sequencer, live-morph spectral timbres, and save the entire state as a "Project" that is production-ready. This eliminates the "Export to DAW" friction.
+Nullherz realizes the AnaWaves vision of **Cyclic Evolution**. Current workflows are linear: idea → export → end. In Nullherz, the "Export" is a "Birth." By allowing a DJ to capture their live performance, re-inject it into the granular engine, and evolve it in real-time, we eliminate the bifurcated market of "DJ Tools" vs "DAWs."
 
 ### 2.3 The Sidecar SDK (Ecosystem Moat)
 By allowing developers to write isolated DSP nodes in Rust, we create an ecosystem that is inherently more stable than the VST/AU mess. We can attract a new generation of "Audio Devs" who want modern tooling (Cargo) over legacy SDKs.
