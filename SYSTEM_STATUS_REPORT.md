@@ -43,48 +43,63 @@ The system's "Triple-Plane Model" is a masterclass in separation of concerns.
 
 ---
 
-## 4. Detailed Feature & Development Matrix
+## 4. Ultra-Granular Feature Matrix
 
-### 4.1 Core Infrastructure (The Engine Room)
-| Feature | Status | Engineering Notes |
-| :--- | :--- | :--- |
-| **Multi-Backend Support** | **DONE** | Native ALSA, JACK, and PipeWire backends integrated. |
-| **RT-Safe Execution** | **DONE** | Zero-allocation audio thread with FTZ/DAZ hardening. |
-| **SPSC/MPSC Protocol** | **DONE** | High-throughput, lock-free IPC via `ipc-layer`. |
-| **Parallel Processing** | **DONE** | Multi-worker graph execution via `ParallelExecutor`. |
-| **Atomic Topology** | **DONE** | Pointer-swap based graph mutations (O(1) complexity). |
-| **Crash Recovery** | **DONE** | Sidecar supervisor restarts failed DSP processes. |
+### 4.1 Core Rendering Engine
+| Feature | Sub-Feature | Status | Engineering Detail |
+| :--- | :--- | :--- | :--- |
+| **Backend** | Native ALSA Driver | **DONE** | Low-latency direct hardware access. |
+| | Native JACK Support | **DONE** | Synchronous integration with system graph. |
+| | PipeWire Backend | **DONE** | Modern Linux audio integration. |
+| **Safety** | FTZ/DAZ Hardening | **DONE** | Global prevention of denormal CPU spikes. |
+| | Sidecar RSS Limits | **DONE** | Cgroup-based memory constraints for plugins. |
+| | System Safe-Mode | **DONE** | Automatic fallback to bypass on DSP failure. |
+| **Execution** | Parallel Graph | **DONE** | Multi-threaded stage execution (MAX_NODES=64).|
+| | Off-Thread Compile | **DONE** | Kahn's Algorithm graph validation (Topo-Sync).|
+| | Sample-Accurate Cmds| **DONE** | 64-bit timestamped command bus. |
 
-### 4.2 DSP & Processing (The Signal Path)
-| Feature | Status | Engineering Notes |
-| :--- | :--- | :--- |
-| **SIMD Summing** | **DONE** | 16-to-1 summing nodes optimized for AVX/NEON. |
-| **Biquad Library** | **DONE** | Hardened filters (LP/HP/BP) with parameter ramping. |
-| **DJ Isolator** | **DONE** | High-slope 3-band crossover for performance EQ. |
-| **Spectral Engine** | **DONE** | FFT/IFFT pipeline with overlap-add windowing. |
-| **Sidecar SDK** | **DONE** | External DSP process support with RSS limits. |
-| **Wavetable Synthesis** | **DONE** | Lagrange-interpolated oscillators with FM/PM. |
+### 4.2 DSP Library & Kernels
+| Feature | Sub-Feature | Status | Engineering Detail |
+| :--- | :--- | :--- | :--- |
+| **Filtering** | 5-Coeff Biquad | **DONE** | Ramped coefficient updates (b0,b1,b2,a1,a2). |
+| | SIMD Biquad | **DONE** | 8/16-channel parallel filter processing. |
+| | DJ Isolator | **DONE** | 24dB/oct crossover with phase compensation. |
+| **Synthesis** | Wavetable Osc | **DONE** | Lagrange-interpolated, FM/PM capable. |
+| | Spectral Morph | **DONE** | Phase-vocoder based timbre shifting. |
+| **Mixing** | SIMD Summing | **DONE** | 16-to-1 summing with AVX-512 alignment. |
+| | Power-Curve XFade | **DONE** | Constant-power vs Linear crossfade modes. |
+| | Ramped Gain | **DONE** | Atomic smoothing to prevent zipper noise. |
 
-### 4.3 DJ & Performance (The Instrument)
-| Feature | Status | Engineering Notes |
-| :--- | :--- | :--- |
-| **Deck Control** | **DONE** | Pitch faders, Hot Cues, and Loop points. |
-| **Crossfader** | **DONE** | SIMD-optimized with configurable power curves. |
-| **Rolling Waveforms** | **DONE** | Real-time spectral simulation phase-locked to engine. |
-| **Hot Cue Jumping** | **DONE** | Sample-accurate playhead relocation. |
-| **Slip Mode** | **DONE** | Timeline-aware background playhead maintenance. |
-| **Library Management**| **DONE** | Native `redb` database for ACID-safe track metadata. |
-| **BPM Analysis** | **IN PROGRESS**| Histogram-based off-thread analyzer integrated. |
+### 4.3 Intelligence & Analysis
+| Feature | Sub-Feature | Status | Engineering Detail |
+| :--- | :--- | :--- | :--- |
+| **Temporal** | BPM Detection | **DONE** | Histogram-based interval estimation. |
+| | Transient Analysis | **DONE** | Frequency-weighted Spectral Flux detection. |
+| **Harmonic** | Root Key Detection | **DONE** | 12-bin Chromagram (4096 FFT size). |
+| | Key Sync | **PLANNED** | Real-time pitch shifting for harmonic mix. |
+| **Database** | ACID Library | **DONE** | `redb` backend for multi-GB track metadata. |
+| | Folder Monitoring | **DONE** | Background FS watcher for auto-ingestion. |
 
-### 4.4 Composition & Orchestration (The Studio)
-| Feature | Status | Engineering Notes |
-| :--- | :--- | :--- |
-| **Grid Sequencer** | **DONE** | 16-track x 64-step pattern management. |
-| **Modulation Matrix** | **DONE** | Macro-to-Param mapping with ramp propagation. |
-| **Timeline Management**| **DONE** | Sample-accurate arrangement and transport logic. |
-| **Project Persistence**| **DONE** | Full session serialization (Topology + Params + Patterns). |
-| **Automation Ramping** | **DONE** | Linear/Exponential parameter smoothing in RT. |
-| **MIDI Mapping** | **IN PROGRESS**| Sidecar-based MIDI bridge with dynamic routing. |
+### 4.4 DJ & Performance UI
+| Feature | Sub-Feature | Status | Engineering Detail |
+| :--- | :--- | :--- | :--- |
+| **Deck** | Rolling Waveform | **DONE** | Multi-layer spectral waveform simulation. |
+| | Phase-Locked Sync | **DONE** | Sample-counter based drift correction. |
+| | Hot Cue Bus | **DONE** | 8-point hot-cue storage and instant jump. |
+| | Slip Mode | **DONE** | Background playhead tracking during loops. |
+| **Mixer** | Precision VUs | **DONE** | Dual-bar stereo meters with peak hold. |
+| | FX Slot System | **DONE** | Modular insert/send routing architecture. |
+| **Sequencer** | 16x64 Grid | **DONE** | Multi-track step sequencer with pattern bank. |
+
+### 4.5 Studio & Orchestration
+| Feature | Sub-Feature | Status | Engineering Detail |
+| :--- | :--- | :--- | :--- |
+| **Modulation** | Macro Matrix | **DONE** | 8 Global Macros with ramped broadcast. |
+| | Scaling & Offset | **DONE** | Mapping range transformation (scaling). |
+| **Arrangement** | Song Timeline | **DONE** | Beat-aware arrangement event scheduling. |
+| | Pattern Manager | **DONE** | Dynamic orchestration of sequencer banks. |
+| **Persistence** | Session Save/Load | **DONE** | Full state serialization (Topology+Sequences).|
+| | MIDI Mapping | **IN PROGRESS**| Sidecar-based CC/Clock synchronization. |
 
 ---
 
