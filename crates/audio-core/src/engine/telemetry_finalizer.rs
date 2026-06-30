@@ -14,7 +14,7 @@ impl TelemetryFinalizer {
         sample_counter: &mut u64,
         start_cycles: u64,
         num_samples: usize,
-    ) {
+    ) -> Telemetry {
         let mut node_times = [0u64; 64];
         let mut peak_levels = [0.0f32; 64];
         let mut node_times_cycles = [0u64; 64];
@@ -35,7 +35,7 @@ impl TelemetryFinalizer {
         let block_end_sample = *sample_counter + num_samples as u64;
         *sample_counter = block_end_sample;
 
-        let _ = telemetry_producer.push_telemetry(Telemetry {
+        let telemetry = Telemetry {
             process_time_ns: current_ns,
             peak_process_time_ns: peak,
             sample_counter: *sample_counter,
@@ -43,6 +43,8 @@ impl TelemetryFinalizer {
             resource_leaks: metrics.resource_leaks.load(Ordering::Relaxed),
             node_times_ns: node_times,
             peak_levels,
-        });
+        };
+        let _ = telemetry_producer.push_telemetry(telemetry.clone());
+        telemetry
     }
 }

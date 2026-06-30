@@ -47,6 +47,9 @@ impl AnalysisWorker {
                 metadata.peaks = Arc::new(self.calculate_peaks(&sample.buffer, 1024));
                 metadata.root_key = self.detect_root_key(&sample.buffer);
 
+                // Generate Sound DNA (AnaWaves Stage 1)
+                metadata.dna = self.analyze_dna(&sample.buffer);
+
                 // Update registry with enriched metadata
                 self.sample_registry.register_with_metadata(id, sample.buffer.clone(), metadata.clone());
 
@@ -167,6 +170,52 @@ impl AnalysisWorker {
         if max_mag < 0.1 { return None; }
 
         Some(best_note as f32)
+    }
+
+    fn analyze_dna(&self, buffer: &[f32]) -> nullherz_dna::SoundDNA {
+        let mut dna = nullherz_dna::SoundDNA::default();
+
+        // 1. Spectral Personality Analysis
+        let fft_size = 1024;
+        let fft = SimdFft::new(fft_size);
+        let mut re = AlignedBuffer::new(fft_size);
+        let mut im = AlignedBuffer::new(fft_size);
+
+        // Analyze first block for energy map
+        if buffer.len() >= fft_size {
+            for j in 0..fft_size {
+                re[j] = buffer[j];
+                im[j] = 0.0;
+            }
+            fft.process(&mut re, &mut im);
+
+            // Map 512 bins to 64 energy bins
+            for i in 0..64 {
+                let mut sum = 0.0;
+                for k in 0..8 {
+                    let bin = i * 8 + k;
+                    sum += (re[bin] * re[bin] + im[bin] * im[bin]).sqrt();
+                }
+                dna.spectral.energy_map[i] = (sum * 255.0).min(255.0) as u8;
+            }
+        }
+
+        // 2. Rhythmic DNA (Onset Mask)
+        let transients = self.detect_transients(buffer);
+        if !transients.is_empty() {
+            let total_len = buffer.len() as f32;
+            for &t in &transients {
+                let pos_norm = t as f32 / total_len;
+                let step = (pos_norm * 64.0) as usize;
+                if step < 64 {
+                    let u64_idx = step / 16; // 4 u64s to cover 64 steps
+                    let bit_idx = step % 16;
+                    dna.rhythmic.onset_mask[u64_idx] |= 1 << bit_idx;
+                }
+            }
+        }
+
+        dna
     }
 
     fn detect_transients(&self, buffer: &[f32]) -> Vec<u64> {

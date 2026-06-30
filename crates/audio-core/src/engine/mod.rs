@@ -9,7 +9,7 @@ pub mod telemetry_finalizer;
 
 use std::sync::Arc;
 use ipc_layer::Producer;
-use nullherz_traits::{TimestampedCommand, ProcessingKernel, MidiConsumer, TopologyMutationConsumer, CommandBundleConsumer};
+use nullherz_traits::{TimestampedCommand, ProcessingKernel, MidiConsumer, TopologyMutationConsumer, CommandBundleConsumer, telemetry::Telemetry};
 use crate::processors::{AudioProcessor, TaskPool};
 use crate::rt_logging::RtLogger;
 use self::metrics::EngineMetrics;
@@ -60,6 +60,12 @@ pub struct EngineResources {
     pub telemetry_producer: Box<dyn nullherz_traits::TelemetryProducer>,
 }
 
+#[derive(Clone)]
+pub struct TelemetryLogEntry {
+    pub telemetry: Telemetry,
+    pub timestamp_cycles: u64,
+}
+
 pub struct AudioEngine<K: ProcessingKernel = StandardKernel> {
     command_consumer: Box<dyn nullherz_traits::CommandConsumer>,
     #[allow(dead_code)]
@@ -69,6 +75,7 @@ pub struct AudioEngine<K: ProcessingKernel = StandardKernel> {
     topology_consumer: Option<Box<dyn TopologyMutationConsumer>>,
 
     telemetry_producer: Box<dyn nullherz_traits::TelemetryProducer>,
+    telemetry_log_producer: Option<ipc_layer::Producer<TelemetryLogEntry>>,
     sample_counter: u64,
     xrun_count: std::sync::Arc<std::sync::atomic::AtomicU32>,
     pending_command: Option<TimestampedCommand>,
@@ -146,6 +153,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             sample_registry: Arc::new(SampleRegistry::new()),
             kernel,
             telemetry_producer: resources.telemetry_producer,
+            telemetry_log_producer: None,
             sample_counter: 0,
             xrun_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             pending_command: None,
@@ -163,6 +171,11 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             target_sample_rate: 44100.0,
             logger,
         }
+    }
+
+    pub fn with_flight_recorder(mut self, producer: ipc_layer::Producer<TelemetryLogEntry>) -> Self {
+        self.telemetry_log_producer = Some(producer);
+        self
     }
 
     pub fn xrun_counter(&self) -> std::sync::Arc<std::sync::atomic::AtomicU32> {
@@ -219,7 +232,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             num_samples
         );
 
-        TelemetryFinalizer::finalize_block_telemetry(
+        let telemetry = TelemetryFinalizer::finalize_block_telemetry(
             graph,
             &self.metrics,
             &mut self.telemetry_producer,
@@ -228,5 +241,13 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             start_cycles,
             num_samples
         );
+
+        // Black-Box Flight Recorder (RT-Safe SPSC push)
+        if let Some(ref mut log_prod) = self.telemetry_log_producer {
+            let _ = log_prod.push(TelemetryLogEntry {
+                telemetry,
+                timestamp_cycles: start_cycles,
+            });
+        }
     }
 }

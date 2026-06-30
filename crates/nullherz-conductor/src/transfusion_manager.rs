@@ -44,6 +44,7 @@ impl TransfusionManager {
                 loop_points: None,
                 beat_grid_offset: 0,
                 peaks: Arc::new(Vec::new()),
+                dna: nullherz_dna::SoundDNA::default(),
             };
 
             self.sample_registry.register_with_metadata(sample_id, snapshot, metadata);

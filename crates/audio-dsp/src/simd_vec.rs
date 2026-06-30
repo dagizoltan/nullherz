@@ -29,6 +29,8 @@ pub fn store_f32x4(data: &mut [f32], offset: usize, val: FloatX4) {
     data[offset..offset+4].copy_from_slice(&arr);
 }
 
+/// # Safety
+/// The caller must ensure that `ptr` is valid for at least 8 elements of type `f32`.
 #[inline(always)]
 pub unsafe fn load_f32x8_ptr(ptr: *const f32) -> FloatX8 {
     let mut arr = [0.0f32; 8];
@@ -36,6 +38,8 @@ pub unsafe fn load_f32x8_ptr(ptr: *const f32) -> FloatX8 {
     f32x8::new(arr)
 }
 
+/// # Safety
+/// The caller must ensure that `ptr` is valid for at least 4 elements of type `f32`.
 #[inline(always)]
 pub unsafe fn load_f32x4_ptr(ptr: *const f32) -> FloatX4 {
     let mut arr = [0.0f32; 4];
