@@ -492,6 +492,64 @@ impl ConformanceSuite {
     }
 }
 
+pub mod gauntlet {
+    use crate::AudioProcessor;
+    use super::StabilityTester;
+
+    pub struct GauntletRunner;
+
+    impl GauntletRunner {
+        pub fn run_stress_tests(processor: &mut dyn AudioProcessor) -> Result<(), String> {
+            println!("Gauntlet: Starting stress tests...");
+
+            // 1. Signal Stability
+            StabilityTester::verify_signal_bounds(processor, 100)?;
+
+            // 2. NaN Ingestion
+            Self::test_nan_ingestion(processor)?;
+
+            // 3. Buffer Size Oscillation
+            Self::test_buffer_oscillation(processor)?;
+
+            println!("Gauntlet: All tests PASSED.");
+            Ok(())
+        }
+
+        fn test_nan_ingestion(processor: &mut dyn AudioProcessor) -> Result<(), String> {
+            processor.reset();
+            let input = [f32::NAN; 64];
+            let mut output = [0.0f32; 64];
+            let mut ctx = crate::ProcessContext {
+                transport: None,
+                host: None,
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+
+            processor.process(&[&input], &mut [&mut output], &mut ctx);
+
+            // We expect the processor not to crash, and ideally handle non-finites gracefully
+            Ok(())
+        }
+
+        fn test_buffer_oscillation(processor: &mut dyn AudioProcessor) -> Result<(), String> {
+            let sizes = [1, 64, 3, 127, 256];
+            for size in sizes {
+                let input = vec![0.0f32; size];
+                let mut output = vec![0.0f32; size];
+                let mut ctx = crate::ProcessContext {
+                    transport: None,
+                    host: None,
+                    sub_block_offset: 0,
+                    is_last_sub_block: true,
+                };
+                processor.process(&[&input], &mut [&mut output], &mut ctx);
+            }
+            Ok(())
+        }
+    }
+}
+
 impl crate::SignalProcessor for MockProcessor {
 fn process(&mut self, _inputs: &[&[f32]], _outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         self.process_called_count += 1;

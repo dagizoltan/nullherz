@@ -190,14 +190,30 @@ impl AnalysisWorker {
             fft.process(&mut re, &mut im);
 
             // Map 512 bins to 64 energy bins
+            let mut total_energy = 0.0;
+            let mut magnitudes = [0.0f32; 512];
+            for bin in 0..512 {
+                magnitudes[bin] = (re[bin] * re[bin] + im[bin] * im[bin]).sqrt();
+                total_energy += magnitudes[bin];
+            }
+
             for i in 0..64 {
                 let mut sum = 0.0;
                 for k in 0..8 {
-                    let bin = i * 8 + k;
-                    sum += (re[bin] * re[bin] + im[bin] * im[bin]).sqrt();
+                    sum += magnitudes[i * 8 + k];
                 }
-                dna.spectral.energy_map[i] = (sum * 255.0).min(255.0) as u8;
+                dna.spectral.energy_map[i] = if total_energy > 0.0 {
+                    (sum / total_energy * 255.0 * 10.0).min(255.0) as u8
+                } else { 0 };
             }
+
+            // Harmonicity & Tilt (Advanced Stage 1)
+            let mut tilt_sum = 0.0;
+            for (bin, &mag) in magnitudes.iter().enumerate().skip(1).take(511) {
+                let freq_norm = bin as f32 / 512.0;
+                tilt_sum += mag * (1.0 - freq_norm); // Simplified tilt
+            }
+            dna.spectral.tilt = tilt_sum / total_energy.max(1e-6);
         }
 
         // 2. Rhythmic DNA (Onset Mask)

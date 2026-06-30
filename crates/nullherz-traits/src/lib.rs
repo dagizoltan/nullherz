@@ -148,6 +148,13 @@ pub enum Command {
         target_id: u64,
         param_id: u32,
     },
+    /// Domain-specific extension command (AnaWaves Stage 2)
+    Extension {
+        domain_id: u32,
+        target_id: u64,
+        opcode: u32,
+        data: [u8; 16],
+    },
 }
 
 #[repr(C)]
