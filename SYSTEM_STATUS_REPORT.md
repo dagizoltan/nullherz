@@ -43,16 +43,48 @@ The system's "Triple-Plane Model" is a masterclass in separation of concerns.
 
 ---
 
-## 4. Current Feature Matrix
+## 4. Detailed Feature & Development Matrix
 
+### 4.1 Core Infrastructure (The Engine Room)
 | Feature | Status | Engineering Notes |
 | :--- | :--- | :--- |
-| **Multi-Backend** | HARDENED | ALSA, JACK, and PipeWire support via `nullherz-backends`. |
-| **DJ Performance** | PRODUCTION-READY | Crossfaded deck swaps, isolators, and rolling waveforms. |
-| **Pattern Sequencer**| OPERATIONAL | 16-track, 64-step grid with sample-accurate triggering. |
-| **Macro Modulation**| OPERATIONAL | Modulation Matrix supports ramped parameter broadcasting. |
-| **Project Persistence**| OPERATIONAL | Full session save/load cycles via `redb` and custom serialization. |
-| **Transient Analysis**| INTEGRATED | Off-thread BPM and onset detection populated via `AnalysisWorker`. |
+| **Multi-Backend Support** | **DONE** | Native ALSA, JACK, and PipeWire backends integrated. |
+| **RT-Safe Execution** | **DONE** | Zero-allocation audio thread with FTZ/DAZ hardening. |
+| **SPSC/MPSC Protocol** | **DONE** | High-throughput, lock-free IPC via `ipc-layer`. |
+| **Parallel Processing** | **DONE** | Multi-worker graph execution via `ParallelExecutor`. |
+| **Atomic Topology** | **DONE** | Pointer-swap based graph mutations (O(1) complexity). |
+| **Crash Recovery** | **DONE** | Sidecar supervisor restarts failed DSP processes. |
+
+### 4.2 DSP & Processing (The Signal Path)
+| Feature | Status | Engineering Notes |
+| :--- | :--- | :--- |
+| **SIMD Summing** | **DONE** | 16-to-1 summing nodes optimized for AVX/NEON. |
+| **Biquad Library** | **DONE** | Hardened filters (LP/HP/BP) with parameter ramping. |
+| **DJ Isolator** | **DONE** | High-slope 3-band crossover for performance EQ. |
+| **Spectral Engine** | **DONE** | FFT/IFFT pipeline with overlap-add windowing. |
+| **Sidecar SDK** | **DONE** | External DSP process support with RSS limits. |
+| **Wavetable Synthesis** | **DONE** | Lagrange-interpolated oscillators with FM/PM. |
+
+### 4.3 DJ & Performance (The Instrument)
+| Feature | Status | Engineering Notes |
+| :--- | :--- | :--- |
+| **Deck Control** | **DONE** | Pitch faders, Hot Cues, and Loop points. |
+| **Crossfader** | **DONE** | SIMD-optimized with configurable power curves. |
+| **Rolling Waveforms** | **DONE** | Real-time spectral simulation phase-locked to engine. |
+| **Hot Cue Jumping** | **DONE** | Sample-accurate playhead relocation. |
+| **Slip Mode** | **DONE** | Timeline-aware background playhead maintenance. |
+| **Library Management**| **DONE** | Native `redb` database for ACID-safe track metadata. |
+| **BPM Analysis** | **IN PROGRESS**| Histogram-based off-thread analyzer integrated. |
+
+### 4.4 Composition & Orchestration (The Studio)
+| Feature | Status | Engineering Notes |
+| :--- | :--- | :--- |
+| **Grid Sequencer** | **DONE** | 16-track x 64-step pattern management. |
+| **Modulation Matrix** | **DONE** | Macro-to-Param mapping with ramp propagation. |
+| **Timeline Management**| **DONE** | Sample-accurate arrangement and transport logic. |
+| **Project Persistence**| **DONE** | Full session serialization (Topology + Params + Patterns). |
+| **Automation Ramping** | **DONE** | Linear/Exponential parameter smoothing in RT. |
+| **MIDI Mapping** | **IN PROGRESS**| Sidecar-based MIDI bridge with dynamic routing. |
 
 ---
 
