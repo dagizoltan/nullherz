@@ -2,8 +2,7 @@ use audio_core::engine::builder::EngineBuilder;
 use crate::backend::BackendManager;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use audio_core::AudioProcessor;
-use nullherz_traits::{Command, CommandProducer};
+use nullherz_traits::{AudioProcessor, Command, CommandProducer};
 
 pub struct EngineCoordinator {
     pub backend_manager: BackendManager,

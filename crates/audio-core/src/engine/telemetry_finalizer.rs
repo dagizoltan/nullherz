@@ -12,7 +12,7 @@ impl TelemetryFinalizer {
         outputs: &mut [&mut [f32]],
         telemetry_producer: &mut Box<dyn TelemetryProducer>,
         xrun_count_atomic: &Arc<AtomicU32>,
-        sample_counter: &mut u64,
+        sample_counter: u64,
         start_cycles: u64,
         num_samples: usize,
         fft: &audio_dsp::SimdFft,
@@ -34,7 +34,7 @@ impl TelemetryFinalizer {
 
         let elapsed_cycles = crate::get_cycles().wrapping_sub(start_cycles);
         let current_ns = (elapsed_cycles as f64 * ns_per_cycle) as u64;
-        let peak = metrics.update_peak(current_ns, *sample_counter, num_samples);
+        let peak = metrics.update_peak(current_ns, sample_counter, num_samples);
 
         // 1024-point Spectrum Analysis (AnaWaves Stage 2)
         // Optimized for RT-safety: No allocations, zero-padded input
@@ -77,13 +77,10 @@ impl TelemetryFinalizer {
             }
         }
 
-        let block_end_sample = *sample_counter + num_samples as u64;
-        *sample_counter = block_end_sample;
-
         let telemetry = Telemetry {
             process_time_ns: current_ns,
             peak_process_time_ns: peak,
-            sample_counter: *sample_counter,
+            sample_counter,
             xrun_count: xrun_count_atomic.load(Ordering::Relaxed),
             resource_leaks: metrics.resource_leaks.load(Ordering::Relaxed),
             node_times_ns: node_times,

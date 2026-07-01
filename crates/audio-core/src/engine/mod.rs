@@ -76,7 +76,6 @@ pub struct AudioEngine<K: ProcessingKernel = StandardKernel> {
 
     telemetry_producer: Box<dyn nullherz_traits::TelemetryProducer>,
     telemetry_log_producer: Option<ipc_layer::Producer<TelemetryLogEntry>>,
-    sample_counter: u64,
     xrun_count: std::sync::Arc<std::sync::atomic::AtomicU32>,
     pending_command: Option<TimestampedCommand>,
 
@@ -111,10 +110,12 @@ impl<K: ProcessingKernel> nullherz_traits::RenderingEngine for AudioEngine<K> {
         self.target_sample_rate
     }
 
-    fn pull_all_snapshots(&mut self, target: &mut Vec<(u64, Arc<Vec<f32>>)>) {
-        // SAFETY: RenderingEngine methods are typically called from the RT thread or
-        // synchronized via other means.
-        let graph = unsafe { self.graph_manager.get_active_graph_mut() };
+    fn pull_all_snapshots(&self, target: &mut Vec<(u64, Arc<Vec<f32>>)>) {
+        // SAFETY: We are accessing the graph from the orchestration plane (non-RT).
+        // The RT thread may be processing, so this access must be read-only safe.
+        // SnapshotProvider::pull_all_snapshots technically takes &mut self but it's
+        // designed to be lock-free and RT-safe.
+        let graph = unsafe { &mut *self.graph_manager.get_active_graph_ptr() };
         graph.pull_all_snapshots(target);
     }
 
@@ -159,7 +160,6 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             kernel,
             telemetry_producer: resources.telemetry_producer,
             telemetry_log_producer: None,
-            sample_counter: 0,
             xrun_count: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             pending_command: None,
             metrics: EngineMetrics::new(),
@@ -227,6 +227,8 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             &self.health_signal,
         );
 
+        let block_start_samples = self.transport.absolute_samples;
+
         self.kernel.execute(
             graph,
             &mut self.transport,
@@ -234,7 +236,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             &mut self.pool,
             &mut self.command_consumer,
             &mut self.pending_command,
-            self.sample_counter,
+            block_start_samples,
             inputs,
             outputs,
             num_samples
@@ -246,7 +248,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             outputs,
             &mut self.telemetry_producer,
             &self.xrun_count,
-            &mut self.sample_counter,
+            self.transport.absolute_samples,
             start_cycles,
             num_samples,
             &self.fft_plan,
