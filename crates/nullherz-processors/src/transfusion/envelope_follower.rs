@@ -24,7 +24,7 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &
     }
 }
 
-impl nullherz_traits::MidiResponder for EnvelopeFollowerProcessor { }
+impl nullherz_traits::MidiResponder for EnvelopeFollowerProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl nullherz_traits::SnapshotProvider for EnvelopeFollowerProcessor { }
 

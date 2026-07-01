@@ -127,7 +127,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
     let mut current_slice = None;
     if let Some(t) = telemetry {
-         let samples_per_beat = (44100.0 * 60.0 / app.global_bpm.max(1.0)) as f64;
+         let sample_rate = 44100.0; // Standard fallback for now
+         let samples_per_beat = (sample_rate * 60.0 / app.global_bpm.max(1.0)) as f64;
          let beats_per_slice = app.sampler_slice_grid as f64;
          let samples_per_slice = samples_per_beat * beats_per_slice;
          if samples_per_slice > 0.0 {

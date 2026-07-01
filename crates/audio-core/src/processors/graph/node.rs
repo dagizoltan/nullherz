@@ -29,7 +29,7 @@ impl nullherz_traits::SignalProcessor for DummyProcessor {
 fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {}
 }
 
-impl nullherz_traits::MidiResponder for DummyProcessor { }
+impl nullherz_traits::MidiResponder for DummyProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl nullherz_traits::SnapshotProvider for DummyProcessor { }
 

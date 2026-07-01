@@ -49,7 +49,7 @@ fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]], context: &
     }
 }
 
-impl nullherz_traits::MidiResponder for ModulationProcessor { }
+impl nullherz_traits::MidiResponder for ModulationProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl nullherz_traits::SnapshotProvider for ModulationProcessor { }
 

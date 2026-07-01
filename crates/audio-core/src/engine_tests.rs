@@ -172,7 +172,7 @@ fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut nullhe
             }
 }
 
-impl nullherz_traits::MidiResponder for MockProcessor { }
+impl nullherz_traits::MidiResponder for MockProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl nullherz_traits::SnapshotProvider for MockProcessor { }
 
@@ -228,7 +228,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {}
 }
 
-impl nullherz_traits::MidiResponder for MidiMockProcessor { fn apply_midi(&mut self, _event: ipc_layer::MidiEvent) { self.midi_received = true; } }
+impl nullherz_traits::MidiResponder for MidiMockProcessor { fn apply_midi(&mut self, _event: ipc_layer::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { self.midi_received = true; } }
 
 impl nullherz_traits::SnapshotProvider for MidiMockProcessor { }
 
@@ -283,7 +283,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 fn process(&mut self, _in: &[&[f32]], _out: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {}
 }
 
-impl nullherz_traits::MidiResponder for ParamMockProcessor { }
+impl nullherz_traits::MidiResponder for ParamMockProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl nullherz_traits::SnapshotProvider for ParamMockProcessor { }
 

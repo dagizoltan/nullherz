@@ -130,10 +130,11 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
         // The engine should enforce this, but we protect the processor here.
         let num_samples = num_samples.min(ipc_layer::MAX_BLOCK_SIZE);
 
-        // Render all voices into the temporary render_buffer once per cycle.
+        // Render all active voices into the temporary render_buffer once per cycle.
+        // Performance Optimization: Skip inactive voices to reduce branching and cache misses.
         self.render_buffer[..num_samples].fill(0.0);
         let render_slice = &mut self.render_buffer[..num_samples];
-        for voice in self.voices.iter_mut() {
+        for voice in self.voices.iter_mut().filter(|v| v.is_active) {
             voice.process_block(render_slice);
         }
 
@@ -145,12 +146,12 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
 }
 
 impl nullherz_traits::MidiResponder for SamplerProcessor {
-    fn apply_midi(&mut self, event: ipc_layer::MidiEvent) {
+    fn apply_midi(&mut self, event: ipc_layer::MidiEvent, context: Option<&nullherz_traits::ProcessContext>) {
         let status = event.status & 0xF0;
         if status == 0x90 && event.data2 > 0 {
             if self.slicer_mode {
                 if (36..=51).contains(&event.data1) {
-                    self.trigger_slice((event.data1 - 36) as u32, None);
+                    self.trigger_slice((event.data1 - 36) as u32, context);
                 }
             } else if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
                 let freq = 440.0 * 2.0f32.powf((event.data1 as f32 - 69.0) / 12.0);

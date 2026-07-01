@@ -50,7 +50,7 @@ fn test_sampler_sync_logic() {
     };
 
     // Trigger voice
-    sampler.apply_midi(ipc_layer::MidiEvent { timestamp_samples: 0, status: 0x90, data1: 60, data2: 100, _pad: 0 });
+    sampler.apply_midi(ipc_layer::MidiEvent { timestamp_samples: 0, status: 0x90, data1: 60, data2: 100, _pad: 0 }, Some(&context));
 
     // In a real scenario, the conductor would have synced the metadata.
     // For this test, we'll manually set it if we had a way.

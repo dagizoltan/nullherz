@@ -290,7 +290,15 @@ fn latency_samples(&self) -> usize {
     }
 }
 
-impl nullherz_traits::MidiResponder for ProcessorGraph { }
+impl nullherz_traits::MidiResponder for ProcessorGraph {
+    fn apply_midi(&mut self, event: nullherz_traits::MidiEvent, context: Option<&nullherz_traits::ProcessContext>) {
+        for i in 0..self.node_count {
+            let node = &self.nodes[i];
+            let processor = unsafe { &mut *node.processor.get() };
+            processor.apply_midi(event, context);
+        }
+    }
+}
 
 impl nullherz_traits::SnapshotProvider for ProcessorGraph {
     fn pull_all_snapshots(&mut self, target: &mut Vec<(u64, std::sync::Arc<Vec<f32>>)>) {
@@ -385,7 +393,7 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &
         }
 }
 
-impl nullherz_traits::MidiResponder for IdentityProcessor { }
+impl nullherz_traits::MidiResponder for IdentityProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl nullherz_traits::SnapshotProvider for IdentityProcessor { }
 

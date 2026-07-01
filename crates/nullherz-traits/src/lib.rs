@@ -435,7 +435,7 @@ pub trait SignalProcessor: Send {
 }
 
 pub trait MidiResponder: Send {
-    fn apply_midi(&mut self, _event: MidiEvent) {}
+    fn apply_midi(&mut self, _event: MidiEvent, _context: Option<&ProcessContext>) {}
 }
 
 pub trait SnapshotProvider: Send {

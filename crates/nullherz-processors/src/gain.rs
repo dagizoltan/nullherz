@@ -30,7 +30,7 @@ fn reset(&mut self) {
     }
 }
 
-impl nullherz_traits::MidiResponder for GainProcessor { }
+impl nullherz_traits::MidiResponder for GainProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl nullherz_traits::SnapshotProvider for GainProcessor { }
 
