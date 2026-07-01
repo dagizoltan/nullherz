@@ -135,4 +135,20 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
 
 fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+    fn load_state(&mut self, data: &[u8]) {
+        if data.len() < 1 + 16 * (1 + 16 * 64) { return; }
+        self.active_pattern = data[0] as usize;
+        let mut cursor = 1;
+        for p in self.patterns.iter_mut() {
+            p.len = data[cursor] as u32;
+            cursor += 1;
+            for track in 0..16 {
+                for step in 0..64 {
+                    p.grid[track][step] = data[cursor] == 1;
+                    cursor += 1;
+                }
+            }
+        }
+    }
 }

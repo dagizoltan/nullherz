@@ -444,6 +444,7 @@ pub trait AudioProcessor: SignalProcessor + MidiResponder + SnapshotProvider + S
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
     fn list_children(&self) -> Vec<&dyn AudioProcessor> { Vec::new() }
     fn resource_id(&self) -> Option<u64> { None }
+    fn load_state(&mut self, _data: &[u8]) {}
 }
 
 pub trait CommandProducer: Send + Sync + dyn_clone::DynClone {
