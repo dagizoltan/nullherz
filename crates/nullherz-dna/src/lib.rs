@@ -7,39 +7,12 @@ use redb::{Database, TableDefinition, ReadableTable, TableError};
 pub type SampleBuffer = Arc<Vec<f32>>;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct SampleMetadata {
-    pub bpm: f32,
-    #[serde(skip)]
-    pub transients: Arc<Vec<u64>>,
-    pub root_key: Option<f32>,
-    pub hot_cues: [Option<u64>; 8],
-    pub loop_points: Option<(u64, u64)>,
-    pub beat_grid_offset: u64,
-    #[serde(skip)]
-    pub peaks: Arc<Vec<f32>>,
-}
-
-impl SampleMetadata {
-    pub fn new_empty() -> Self {
-        Self {
-            bpm: 0.0,
-            transients: Arc::new(Vec::new()),
-            root_key: None,
-            hot_cues: [None; 8],
-            loop_points: None,
-            beat_grid_offset: 0,
-            peaks: Arc::new(Vec::new()),
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct LibraryTrack {
     pub id: u64,
     pub path: String,
     pub title: String,
     pub artist: String,
-    pub metadata: SampleMetadata,
+    pub metadata: nullherz_traits::SampleMetadata,
 }
 
 const TRACKS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("tracks");
@@ -47,7 +20,7 @@ const TRACKS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("tracks")
 #[derive(Clone)]
 pub struct RegisteredSample {
     pub buffer: SampleBuffer,
-    pub metadata: SampleMetadata,
+    pub metadata: nullherz_traits::SampleMetadata,
 }
 
 pub struct LibraryDatabase {
@@ -137,10 +110,10 @@ impl SampleRegistry {
     }
 
     pub fn register(&self, id: u64, buffer: SampleBuffer) {
-        self.register_with_metadata(id, buffer, SampleMetadata::new_empty());
+        self.register_with_metadata(id, buffer, nullherz_traits::SampleMetadata::new_empty());
     }
 
-    pub fn register_with_metadata(&self, id: u64, buffer: SampleBuffer, metadata: SampleMetadata) {
+    pub fn register_with_metadata(&self, id: u64, buffer: SampleBuffer, metadata: nullherz_traits::SampleMetadata) {
         let _lock = self.write_lock.lock().unwrap();
 
         let old_ptr = self.inner.load(Ordering::Acquire);
@@ -202,7 +175,7 @@ mod tests {
             path: "/test/path.wav".to_string(),
             title: "Test Track".to_string(),
             artist: "Test Artist".to_string(),
-            metadata: SampleMetadata::new_empty(),
+            metadata: nullherz_traits::SampleMetadata::new_empty(),
         };
 
         db.save_track(&track).unwrap();

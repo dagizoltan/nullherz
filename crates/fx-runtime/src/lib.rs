@@ -297,6 +297,19 @@ impl SidecarSupervisor {
             handle.last_heartbeat = std::time::Instant::now();
         }
     }
+
+    pub fn list_stalled_nodes(&self) -> Vec<u32> {
+        let mut stalled = Vec::new();
+        for handle in &self.active_sidecars {
+            if handle.status == SidecarStatus::Running {
+                let timed_out = handle.last_heartbeat.elapsed() > std::time::Duration::from_millis(500);
+                if timed_out {
+                    stalled.push(handle.node_idx);
+                }
+            }
+        }
+        stalled
+    }
 }
 
 #[cfg(test)]

@@ -24,7 +24,8 @@ impl MixerBridge {
     }
 
     pub fn apply_mixer_commands(&mut self, commands: Vec<Command>, topology_manager: &mut TopologyManager, modulation_matrix: &mut ModulationMatrix) {
-        let mut bundle = Vec::with_capacity(commands.len());
+        use smallvec::SmallVec;
+        let mut bundle: SmallVec<[Command; 16]> = SmallVec::new();
 
         for cmd in commands {
             if topology_manager.handle_topology_command(&cmd) {
@@ -50,7 +51,7 @@ impl MixerBridge {
 
         if !bundle.is_empty()
             && let Some(ref mut prod) = self.bundle_producer {
-                let _ = prod.push(bundle);
+                let _ = prod.push(bundle.to_vec());
             }
     }
 

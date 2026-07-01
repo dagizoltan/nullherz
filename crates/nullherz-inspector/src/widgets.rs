@@ -1,4 +1,4 @@
-use egui::{Color32, Rect, Response, Sense, Stroke, Ui, Vec2, Align2, FontId, lerp};
+use egui::{Color32, Rect, Response, Sense, Stroke, Ui, Vec2, Align2, FontId, lerp, vec2};
 
 pub fn render_knob(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, label: &str, accent_color: Color32) -> Response {
     let knob_size = 36.0;
@@ -67,6 +67,55 @@ pub fn render_knob(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive
     }
 
     response
+}
+
+pub fn render_spectrum_analyzer(ui: &mut Ui, spectrum: &[f32; 128], accent_color: Color32, height: f32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(10, 10, 12));
+    ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_gray(30)));
+
+    let w = rect.width();
+    let bin_w = w / 128.0;
+
+    for i in 0..128 {
+        let val = spectrum[i];
+        let h = (val * height * 5.0).min(height - 4.0);
+        let bin_rect = Rect::from_min_size(
+            rect.left_bottom() + vec2(i as f32 * bin_w, -h - 2.0),
+            vec2(bin_w.max(1.0), h)
+        );
+        ui.painter().rect_filled(bin_rect, 0.0, accent_color.linear_multiply(0.8));
+        ui.painter().rect_filled(bin_rect.shrink(1.0), 0.0, accent_color);
+    }
+}
+
+pub fn render_goniometer(ui: &mut Ui, pts: &[f32; 128], size: f32, accent_color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
+    ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(10, 10, 12));
+    ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_gray(30)));
+
+    let center = rect.center();
+    let half_s = size / 2.0;
+
+    // 45-degree axis lines
+    ui.painter().line_segment([center - vec2(half_s * 0.7, half_s * 0.7), center + vec2(half_s * 0.7, half_s * 0.7)], Stroke::new(0.5, Color32::from_gray(50)));
+    ui.painter().line_segment([center - vec2(-half_s * 0.7, half_s * 0.7), center + vec2(-half_s * 0.7, half_s * 0.7)], Stroke::new(0.5, Color32::from_gray(50)));
+
+    let mut points = Vec::with_capacity(64);
+    for i in 0..64 {
+        let l = pts[i * 2];
+        let r = pts[i * 2 + 1];
+
+        // 45-degree rotation for phase scope
+        let x = (l - r) * half_s * 0.9;
+        let y = -(l + r) * half_s * 0.9;
+
+        points.push(center + vec2(x, y));
+    }
+
+    if points.len() > 1 {
+        ui.painter().add(egui::Shape::line(points, Stroke::new(1.2, accent_color)));
+    }
 }
 
 pub fn render_vu_meter(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Color32, height: f32) {

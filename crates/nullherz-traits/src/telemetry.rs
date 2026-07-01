@@ -15,6 +15,10 @@ pub struct Telemetry {
     pub node_times_ns: [u64; MAX_NODES],
     #[serde(with = "BigArray")]
     pub peak_levels: [f32; MAX_NODES],
+    #[serde(with = "BigArray")]
+    pub spectrum: [f32; 128],
+    #[serde(with = "BigArray")]
+    pub goniometer_pts: [f32; 128],
 }
 
 pub struct TelemetryProcessor;

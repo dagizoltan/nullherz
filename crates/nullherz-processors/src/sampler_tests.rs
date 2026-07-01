@@ -19,6 +19,7 @@ fn test_sampler_sync_logic() {
         loop_points: None,
         beat_grid_offset: 0,
         peaks: Arc::new(Vec::new()),
+        dna: nullherz_dna::SoundDNA::default(),
     };
 
     sampler.apply_topology_mutation(nullherz_traits::TopologyMutation::AddSource {

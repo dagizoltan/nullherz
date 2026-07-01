@@ -11,6 +11,7 @@ pub struct EngineHandle {
     pub bundle_producer: Producer<Vec<nullherz_traits::Command>>,
     pub topology_producer: Producer<TopologyMutation>,
     pub telemetry_consumer: Consumer<Telemetry>,
+    pub telemetry_log_consumer: Option<Consumer<crate::engine::TelemetryLogEntry>>,
     pub garbage_consumer: Option<Consumer<Box<dyn AudioProcessor>>>,
     pub garbage_overflow_consumer: Option<Consumer<Box<dyn AudioProcessor>>>,
     pub bundle_garbage_consumer: Option<Consumer<Vec<nullherz_traits::Command>>>,
@@ -66,6 +67,7 @@ impl EngineBuilder {
         let (bundle_prod, bundle_cons) = RingBuffer::new(self.bundle_buffer_size).split();
         let (topo_prod, topo_cons) = RingBuffer::new(self.topology_buffer_size).split();
         let (tel_prod, tel_cons) = RingBuffer::new(self.telemetry_buffer_size).split();
+        let (tel_log_prod, tel_log_cons) = RingBuffer::new(128).split();
         let (garbage_prod, garbage_cons) = RingBuffer::new(self.garbage_buffer_size).split();
 
         // Optional overflow and deallocation cues
@@ -91,8 +93,9 @@ impl EngineBuilder {
         let engine = AudioEngine::new(
             resources,
             initial_graph,
-            Arc::new(crate::rt_logging::RtLogger::new(256))
-        );
+            Arc::new(crate::rt_logging::RtLogger::new(256)),
+            crate::engine::processing_kernel::StandardKernel
+        ).with_flight_recorder(tel_log_prod);
 
         let engine = Arc::new(engine);
 
@@ -103,6 +106,7 @@ impl EngineBuilder {
             bundle_producer: bundle_prod,
             topology_producer: topo_prod,
             telemetry_consumer: tel_cons,
+            telemetry_log_consumer: Some(tel_log_cons),
             garbage_consumer: Some(garbage_cons),
             garbage_overflow_consumer: Some(garbage_overflow_cons),
             bundle_garbage_consumer: Some(bundle_garbage_cons),

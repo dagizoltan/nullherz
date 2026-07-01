@@ -12,6 +12,7 @@ pub mod dsp_kernel_processor;
 pub mod modulation;
 pub mod sequencer;
 pub mod transfusion;
+pub mod fallback;
 #[cfg(test)]
 mod sampler_tests;
 #[cfg(feature = "test-utils")]
@@ -30,6 +31,7 @@ pub use spectral::SpectralProcessor;
 pub use modulation::ModulationProcessor;
 pub use sequencer::SequencerProcessor;
 pub use transfusion::*;
+pub use fallback::FallbackProcessor;
 pub use registry::ProcessorRegistry;
 
 #[cfg(test)]

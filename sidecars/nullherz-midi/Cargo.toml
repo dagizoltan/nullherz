@@ -5,3 +5,12 @@ edition = "2024"
 
 [lib]
 path = "src/lib.rs"
+
+[features]
+midir-backend = ["midir"]
+
+[dependencies]
+midir = { version = "0.9", optional = true }
+nullherz-traits = { path = "../../crates/nullherz-traits" }
+ipc-layer = { path = "../../crates/ipc-layer" }
+tokio = { version = "1.0", features = ["full"] }

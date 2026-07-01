@@ -9,12 +9,16 @@ impl TelemetryFinalizer {
     pub fn finalize_block_telemetry(
         graph: &mut dyn AudioProcessor,
         metrics: &EngineMetrics,
+        outputs: &mut [&mut [f32]],
         telemetry_producer: &mut Box<dyn TelemetryProducer>,
         xrun_count_atomic: &Arc<AtomicU32>,
         sample_counter: &mut u64,
         start_cycles: u64,
         num_samples: usize,
-    ) {
+        fft: &audio_dsp::SimdFft,
+        fft_re: &mut audio_dsp::AlignedBuffer,
+        fft_im: &mut audio_dsp::AlignedBuffer,
+    ) -> Telemetry {
         let mut node_times = [0u64; 64];
         let mut peak_levels = [0.0f32; 64];
         let mut node_times_cycles = [0u64; 64];
@@ -32,10 +36,51 @@ impl TelemetryFinalizer {
         let current_ns = (elapsed_cycles as f64 * ns_per_cycle) as u64;
         let peak = metrics.update_peak(current_ns, *sample_counter, num_samples);
 
+        // 1024-point Spectrum Analysis (AnaWaves Stage 2)
+        // Optimized for RT-safety: No allocations, zero-padded input
+        let mut spectrum = [0.0f32; 128];
+        if !outputs.is_empty() {
+            let fft_size = 1024;
+
+            // Clear buffers (re & im) before use
+            fft_re.fill(0.0);
+            fft_im.fill(0.0);
+
+            let out_l = &outputs[0];
+            let len = out_l.len().min(fft_size);
+            fft_re[..len].copy_from_slice(&out_l[..len]);
+
+            fft.process(fft_re, fft_im);
+
+            for i in 0..128 {
+                let mut sum = 0.0;
+                for k in 0..4 {
+                    let bin = i * 4 + k;
+                    sum += (fft_re[bin] * fft_re[bin] + fft_im[bin] * fft_im[bin]).sqrt();
+                }
+                spectrum[i] = sum / 4.0;
+            }
+        }
+
+        // Goniometer decimated L/R Capture
+        let mut goniometer_pts = [0.0f32; 128];
+        if outputs.len() >= 2 {
+            let left = &outputs[0];
+            let right = &outputs[1];
+            let step = left.len() / 64;
+            if step > 0 {
+                for i in 0..64 {
+                    let idx = i * step;
+                    goniometer_pts[i * 2] = left[idx];
+                    goniometer_pts[i * 2 + 1] = right[idx];
+                }
+            }
+        }
+
         let block_end_sample = *sample_counter + num_samples as u64;
         *sample_counter = block_end_sample;
 
-        let _ = telemetry_producer.push_telemetry(Telemetry {
+        let telemetry = Telemetry {
             process_time_ns: current_ns,
             peak_process_time_ns: peak,
             sample_counter: *sample_counter,
@@ -43,6 +88,10 @@ impl TelemetryFinalizer {
             resource_leaks: metrics.resource_leaks.load(Ordering::Relaxed),
             node_times_ns: node_times,
             peak_levels,
-        });
+            spectrum,
+            goniometer_pts,
+        };
+        let _ = telemetry_producer.push_telemetry(telemetry.clone());
+        telemetry
     }
 }

@@ -1,4 +1,5 @@
-use nullherz_dna::{SampleRegistry, LibraryDatabase, LibraryTrack, SampleMetadata};
+use nullherz_dna::{SampleRegistry, LibraryDatabase, LibraryTrack};
+use nullherz_traits::SampleMetadata;
 use std::sync::Arc;
 use std::time::Duration;
 
