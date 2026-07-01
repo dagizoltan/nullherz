@@ -8,7 +8,7 @@ pub struct SamplerProcessor {
     sample_buffer: std::sync::Arc<Vec<f32>>,
     render_buffer: [f32; ipc_layer::MAX_BLOCK_SIZE],
     sample_id: Option<u64>,
-    metadata: Option<nullherz_dna::SampleMetadata>,
+    metadata: Option<nullherz_traits::SampleMetadata>,
     quantize_enabled: bool,
     playback_rate: f32,
 }

@@ -91,6 +91,11 @@ pub struct AudioEngine<K: ProcessingKernel = StandardKernel> {
     pub transport: nullherz_traits::Transport,
     pub target_sample_rate: f32,
     pub logger: Arc<RtLogger>,
+
+    // Pre-allocated FFT resources for RT-safe spectrum analysis
+    fft_plan: audio_dsp::SimdFft,
+    fft_re: audio_dsp::AlignedBuffer,
+    fft_im: audio_dsp::AlignedBuffer,
 }
 
 impl<K: ProcessingKernel> nullherz_traits::RenderingEngine for AudioEngine<K> {
@@ -170,6 +175,9 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             },
             target_sample_rate: 44100.0,
             logger,
+            fft_plan: audio_dsp::SimdFft::new(1024),
+            fft_re: audio_dsp::AlignedBuffer::new(1024),
+            fft_im: audio_dsp::AlignedBuffer::new(1024),
         }
     }
 
@@ -235,11 +243,15 @@ impl<K: ProcessingKernel> AudioEngine<K> {
         let telemetry = TelemetryFinalizer::finalize_block_telemetry(
             graph,
             &self.metrics,
+            outputs,
             &mut self.telemetry_producer,
             &self.xrun_count,
             &mut self.sample_counter,
             start_cycles,
-            num_samples
+            num_samples,
+            &self.fft_plan,
+            &mut self.fft_re,
+            &mut self.fft_im,
         );
 
         // Black-Box Flight Recorder (RT-Safe SPSC push)

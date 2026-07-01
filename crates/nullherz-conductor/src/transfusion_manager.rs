@@ -1,6 +1,6 @@
 use std::sync::Arc;
-use nullherz_dna::{SampleRegistry, SampleMetadata};
-use nullherz_traits::RenderingEngine;
+use nullherz_dna::SampleRegistry;
+use nullherz_traits::{RenderingEngine, SampleMetadata};
 use audio_dsp::TransientDetector;
 
 /// Manages the registration and lifecycle of audio DNA (samples) captured by the engine.
@@ -44,7 +44,8 @@ impl TransfusionManager {
                 loop_points: None,
                 beat_grid_offset: 0,
                 peaks: Arc::new(Vec::new()),
-                dna: nullherz_dna::SoundDNA::default(),
+                dna: nullherz_traits::SoundDNA::default(),
+                midi_map: None,
             };
 
             self.sample_registry.register_with_metadata(sample_id, snapshot, metadata);

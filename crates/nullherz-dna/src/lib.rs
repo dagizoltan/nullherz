@@ -3,118 +3,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicPtr, Ordering};
 use redb::{Database, TableDefinition, ReadableTable, TableError};
-use serde_big_array::BigArray;
 
 pub type SampleBuffer = Arc<Vec<f32>>;
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct SpectralPersonality {
-    /// 64 x 8-bit bins representing normalized power spectrum (0-20kHz)
-    #[serde(with = "BigArray")]
-    pub energy_map: [u8; 64],
-    /// Ratio of periodic vs aperiodic energy across 8 octaves (16 bits per octave)
-    pub harmonicity: [u16; 8],
-    /// Spectral slope/tilt
-    pub tilt: f32,
-    /// Top 5 resonant peaks: (Freq, Q, Gain)
-    pub formant_peaks: [(f32, f32, f32); 5],
-}
-
-impl Default for SpectralPersonality {
-    fn default() -> Self {
-        Self {
-            energy_map: [0; 64],
-            harmonicity: [0; 8],
-            tilt: 0.0,
-            formant_peaks: [(0.0, 0.0, 0.0); 5],
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct RhythmicDNA {
-    /// 64-step bitmask indicating significant transient density over 4 bars
-    pub onset_mask: [u64; 4],
-    /// Measure of rhythmic complexity
-    pub syncopation_index: f32,
-    /// Deviation profile from absolute grid (Early/Late bias)
-    pub micro_timing: [i8; 12],
-}
-
-impl Default for RhythmicDNA {
-    fn default() -> Self {
-        Self {
-            onset_mask: [0; 4],
-            syncopation_index: 0.0,
-            micro_timing: [0; 12],
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct ArtifactProfile {
-    pub aliasing_threshold: f32,
-    pub noise_floor_db: f32,
-    pub glitch_density: f32,
-}
-
-impl Default for ArtifactProfile {
-    fn default() -> Self {
-        Self {
-            aliasing_threshold: 1.0,
-            noise_floor_db: -96.0,
-            glitch_density: 0.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct SoundDNA {
-    pub schema_version: u16,
-    pub spectral: SpectralPersonality,
-    pub rhythmic: RhythmicDNA,
-    pub artifacts: ArtifactProfile,
-}
-
-impl Default for SoundDNA {
-    fn default() -> Self {
-        Self {
-            schema_version: 1,
-            spectral: SpectralPersonality::default(),
-            rhythmic: RhythmicDNA::default(),
-            artifacts: ArtifactProfile::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct SampleMetadata {
-    pub bpm: f32,
-    #[serde(skip)]
-    pub transients: Arc<Vec<u64>>,
-    pub root_key: Option<f32>,
-    pub hot_cues: [Option<u64>; 8],
-    pub loop_points: Option<(u64, u64)>,
-    pub beat_grid_offset: u64,
-    #[serde(skip)]
-    pub peaks: Arc<Vec<f32>>,
-    pub dna: SoundDNA,
-}
-
-impl SampleMetadata {
-    pub fn new_empty() -> Self {
-        Self {
-            bpm: 0.0,
-            transients: Arc::new(Vec::new()),
-            root_key: None,
-            hot_cues: [None; 8],
-            loop_points: None,
-            beat_grid_offset: 0,
-            peaks: Arc::new(Vec::new()),
-            dna: SoundDNA::default(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct LibraryTrack {
@@ -122,7 +12,7 @@ pub struct LibraryTrack {
     pub path: String,
     pub title: String,
     pub artist: String,
-    pub metadata: SampleMetadata,
+    pub metadata: nullherz_traits::SampleMetadata,
 }
 
 const TRACKS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("tracks");
@@ -130,7 +20,7 @@ const TRACKS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("tracks")
 #[derive(Clone)]
 pub struct RegisteredSample {
     pub buffer: SampleBuffer,
-    pub metadata: SampleMetadata,
+    pub metadata: nullherz_traits::SampleMetadata,
 }
 
 pub struct LibraryDatabase {
@@ -220,10 +110,10 @@ impl SampleRegistry {
     }
 
     pub fn register(&self, id: u64, buffer: SampleBuffer) {
-        self.register_with_metadata(id, buffer, SampleMetadata::new_empty());
+        self.register_with_metadata(id, buffer, nullherz_traits::SampleMetadata::new_empty());
     }
 
-    pub fn register_with_metadata(&self, id: u64, buffer: SampleBuffer, metadata: SampleMetadata) {
+    pub fn register_with_metadata(&self, id: u64, buffer: SampleBuffer, metadata: nullherz_traits::SampleMetadata) {
         let _lock = self.write_lock.lock().unwrap();
 
         let old_ptr = self.inner.load(Ordering::Acquire);
@@ -285,7 +175,7 @@ mod tests {
             path: "/test/path.wav".to_string(),
             title: "Test Track".to_string(),
             artist: "Test Artist".to_string(),
-            metadata: SampleMetadata::new_empty(),
+            metadata: nullherz_traits::SampleMetadata::new_empty(),
         };
 
         db.save_track(&track).unwrap();

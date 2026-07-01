@@ -6,7 +6,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("nullherz-conductor starting...");
 
     let mut conductor = Conductor::new();
-    let (cmd_buffer, tel_cons) = conductor.setup_engine();
+    let (cmd_buffer, tel_cons, _midi_prod) = conductor.setup_engine();
 
     // Start the backend (defaulting to threaded for safety in sandbox)
     conductor.start_backend(nullherz_backends::AudioBackendType::Threaded)?;

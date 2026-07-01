@@ -172,8 +172,8 @@ impl AnalysisWorker {
         Some(best_note as f32)
     }
 
-    fn analyze_dna(&self, buffer: &[f32]) -> nullherz_dna::SoundDNA {
-        let mut dna = nullherz_dna::SoundDNA::default();
+    fn analyze_dna(&self, buffer: &[f32]) -> nullherz_traits::SoundDNA {
+        let mut dna = nullherz_traits::SoundDNA::default();
 
         // 1. Spectral Personality Analysis
         let fft_size = 1024;

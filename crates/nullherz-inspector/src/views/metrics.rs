@@ -1,5 +1,5 @@
 use egui::{Color32, RichText, Ui, Frame, ScrollArea, Layout, Align};
-use crate::InspectorApp;
+use crate::{InspectorApp, widgets};
 
 pub fn render(app: &InspectorApp, ui: &mut Ui) {
     let telemetry = app.last_telemetry.lock().unwrap();
@@ -33,6 +33,19 @@ pub fn render(app: &InspectorApp, ui: &mut Ui) {
                         ui.label(RichText::new("UPTIME (Samples)").color(Color32::from_gray(150)).small().strong());
                         ui.label(RichText::new(format!("{}", t.sample_counter)).monospace().color(Color32::from_gray(100)));
                     });
+                });
+
+                ui.add_space(20.0);
+                ui.heading("Spectrum Analysis");
+                ui.add_space(10.0);
+                widgets::render_spectrum_analyzer(ui, &t.spectrum, Color32::from_rgb(0, 255, 180), 120.0);
+
+                ui.add_space(20.0);
+                ui.heading("Goniometer");
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(ui.available_width() / 2.0 - 60.0);
+                    widgets::render_goniometer(ui, &t.goniometer_pts, 120.0, Color32::from_rgb(0, 180, 255));
                 });
 
                 ui.add_space(20.0);

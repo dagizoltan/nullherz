@@ -1,7 +1,8 @@
 use nullherz_traits::TimestampedCommand;
 use nullherz_mixer::MixerManager;
 use nullherz_conductor::Conductor;
-use nullherz_dna::{LibraryDatabase, LibraryTrack, SampleMetadata};
+use nullherz_dna::{LibraryDatabase, LibraryTrack};
+use nullherz_traits::SampleMetadata;
 use fx_runtime::{SidecarSupervisor, FailurePolicy};
 use std::time::Instant;
 
@@ -31,7 +32,7 @@ fn main() {
 
     // 2. Start Engine & Sidecar Supervisor
     let mut conductor = Conductor::new();
-    let (cmd_buffer, mut tel_cons) = conductor.setup_engine();
+    let (cmd_buffer, mut tel_cons, _midi_prod) = conductor.setup_engine();
 
     let mut mixer = MixerManager::new();
     let commands = mixer.create_4channel_mixer();

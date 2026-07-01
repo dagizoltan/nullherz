@@ -3,6 +3,7 @@ use crate::topology_manager::TopologyManager;
 use crate::transfusion_manager::TransfusionManager;
 use crate::mixer_bridge::MixerBridge;
 use crate::sidecar_supervisor::SidecarSupervisor;
+use crate::midi_mapper::MidiMapper;
 use crate::pattern_manager::PatternManager;
 use crate::modulation_matrix::ModulationMatrix;
 use nullherz_traits::{Command, CommandProducer, RenderingEngine, telemetry::Telemetry};
@@ -17,6 +18,7 @@ pub struct Conductor {
     pub sidecar_supervisor: SidecarSupervisor,
     pub pattern_manager: PatternManager,
     pub modulation_matrix: ModulationMatrix,
+    pub midi_mapper: MidiMapper,
     pub analysis_worker: Option<crate::analysis_worker::AnalysisWorker>,
     pub folder_monitor: Option<crate::folder_monitor::FolderMonitor>,
     pub library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>,
@@ -44,19 +46,20 @@ impl Conductor {
             sidecar_supervisor: SidecarSupervisor::new(),
             pattern_manager: PatternManager::new(),
             modulation_matrix: ModulationMatrix::new(),
+            midi_mapper: MidiMapper::new(),
             analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
             folder_monitor: Some(crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())),
             library,
         }
     }
 
-    pub fn setup_engine(&mut self) -> (Box<dyn CommandProducer>, ipc_layer::Consumer<audio_core::Telemetry>) {
+    pub fn setup_engine(&mut self) -> (Box<dyn CommandProducer>, ipc_layer::Consumer<audio_core::Telemetry>, ipc_layer::Producer<nullherz_traits::MidiEvent>) {
         let handle = self.engine_coordinator.setup();
 
         self.mixer_bridge.bundle_producer = Some(handle.bundle_producer);
         self.topology_manager.topo_producer = Some(ipc_layer::NonRtProducer::new(handle.topology_producer));
 
-        (handle.command_producer, handle.telemetry_consumer)
+        (handle.command_producer, handle.telemetry_consumer, handle.midi_producer)
     }
 
     pub fn start_backend(&mut self, backend_type: nullherz_backends::AudioBackendType) -> Result<(), String> {
@@ -83,6 +86,15 @@ impl Conductor {
 
     pub fn apply_mixer_commands(&mut self, commands: Vec<Command>) {
         self.mixer_bridge.apply_mixer_commands(commands, &mut self.topology_manager, &mut self.modulation_matrix);
+    }
+
+    pub fn handle_midi_events(&mut self, events: Vec<nullherz_traits::MidiEvent>) {
+        for event in events {
+            let mapped_commands = self.midi_mapper.translate(&event);
+            if !mapped_commands.is_empty() {
+                self.apply_mixer_commands(mapped_commands);
+            }
+        }
     }
 
     pub fn tick(&mut self) {
