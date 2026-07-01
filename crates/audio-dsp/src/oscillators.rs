@@ -268,6 +268,8 @@ pub struct SamplerVoice {
     pub grain_duration_samples: u32,
     pub overlap_count: u32,
     pub window_lut: [f32; 1024],
+    pub trigger_offset: f32,
+    pub trigger_beat: f64,
 }
 
 impl Default for SamplerVoice {
@@ -301,12 +303,20 @@ impl SamplerVoice {
                 }
                 lut
             },
+            trigger_offset: 0.0,
+            trigger_beat: 0.0,
         }
     }
 
     pub fn trigger(&mut self, buffer: std::sync::Arc<Vec<f32>>, playback_rate: f32, velocity: f32) {
+        self.trigger_at(buffer, playback_rate, velocity, 0.0, 0.0);
+    }
+
+    pub fn trigger_at(&mut self, buffer: std::sync::Arc<Vec<f32>>, playback_rate: f32, velocity: f32, offset: f32, beat: f64) {
         self.buffer = Some(buffer);
-        self.play_head = 0.0;
+        self.play_head = offset;
+        self.trigger_offset = offset;
+        self.trigger_beat = beat;
         self.playback_rate = playback_rate;
         self.velocity = velocity;
         self.is_active = true;

@@ -136,6 +136,10 @@ pub enum Command {
         node_idx: u32,
         enabled: bool,
     },
+    TriggerSlice {
+        node_idx: u32,
+        slice_idx: u32,
+    },
     // Macro Modulation Commands
     SetMacro {
         macro_id: u32,

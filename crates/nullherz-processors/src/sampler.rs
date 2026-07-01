@@ -4,13 +4,16 @@ use audio_dsp::SamplerVoice;
 #[derive(Debug)]
 pub struct SamplerProcessor {
     pub id: u64,
-    voices: Vec<SamplerVoice>,
+    pub voices: Vec<SamplerVoice>,
     sample_buffer: std::sync::Arc<Vec<f32>>,
     render_buffer: [f32; ipc_layer::MAX_BLOCK_SIZE],
     sample_id: Option<u64>,
     metadata: Option<nullherz_traits::SampleMetadata>,
     quantize_enabled: bool,
     playback_rate: f32,
+    pub slicer_mode: bool,
+    pub slice_grid_beats: f32,
+    pub beats_per_bar: f32,
 }
 
 impl SamplerProcessor {
@@ -25,6 +28,9 @@ impl SamplerProcessor {
             metadata: None,
             quantize_enabled: true,
             playback_rate: 1.0,
+            slicer_mode: false,
+            slice_grid_beats: 0.25,
+            beats_per_bar: 4.0,
         }
     }
 
@@ -43,12 +49,34 @@ impl SamplerProcessor {
             2 => {
                 self.quantize_enabled = value > 0.5;
             }
+            3 => {
+                self.slicer_mode = value > 0.5;
+            }
+            4 => {
+                self.slice_grid_beats = value;
+            }
+            5 => {
+                self.beats_per_bar = value;
+            }
             _ => {}
         }
     }
 
     pub fn id_getter(&self) -> Option<u64> {
         self.sample_id
+    }
+
+    fn trigger_slice(&mut self, slice_idx: u32, context: Option<&nullherz_traits::ProcessContext>) {
+        if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
+            let bpm = self.metadata.as_ref().map(|m| m.bpm).unwrap_or(120.0);
+            let sample_rate = context.and_then(|c| c.transport).map(|t| t.sample_rate).unwrap_or(44100.0);
+            let beat_pos = context.and_then(|c| c.transport).map(|t| t.beat_position).unwrap_or(0.0);
+
+            let samples_per_beat = (sample_rate * 60.0 / bpm.max(1.0)) as f64;
+            let offset = slice_idx as f32 * self.slice_grid_beats * samples_per_beat as f32;
+
+            voice.trigger_at(self.sample_buffer.clone(), self.playback_rate, 1.0, offset, beat_pos);
+        }
     }
 }
 
@@ -75,11 +103,18 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
                         // PHASE LOCK
                         if voice.is_active {
                             let samples_per_beat = (transport.sample_rate * 60.0 / meta.bpm) as f64;
-                            let expected_pos_beats = transport.beat_position;
-                            let expected_pos_samples = (expected_pos_beats * samples_per_beat) % self.sample_buffer.len().max(1) as f64;
+
+                            let expected_pos_samples = if self.slicer_mode {
+                                // Slicer-aware phase locking
+                                let beat_diff = transport.beat_position - voice.trigger_beat;
+                                voice.trigger_offset + (beat_diff as f32 * samples_per_beat as f32)
+                            } else {
+                                let expected_pos_beats = transport.beat_position;
+                                (expected_pos_beats * samples_per_beat) as f32 % self.sample_buffer.len().max(1) as f32
+                            };
 
                             // Gently nudge playhead towards locked phase
-                            let diff = expected_pos_samples as f32 - voice.play_head;
+                            let diff = expected_pos_samples - voice.play_head;
                             if diff.abs() > 0.001 {
                                 voice.play_head += diff * 0.01; // Smooth convergence
                             }
@@ -112,13 +147,18 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
 impl nullherz_traits::MidiResponder for SamplerProcessor {
     fn apply_midi(&mut self, event: ipc_layer::MidiEvent) {
         let status = event.status & 0xF0;
-        if status == 0x90 && event.data2 > 0
-            && let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
+        if status == 0x90 && event.data2 > 0 {
+            if self.slicer_mode {
+                if (36..=51).contains(&event.data1) {
+                    self.trigger_slice((event.data1 - 36) as u32, None);
+                }
+            } else if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
                 let freq = 440.0 * 2.0f32.powf((event.data1 as f32 - 69.0) / 12.0);
                 let playback_rate = (freq / 440.0) * self.playback_rate;
                 let velocity = event.data2 as f32 / 127.0;
                 voice.trigger(self.sample_buffer.clone(), playback_rate, velocity);
             }
+        }
     }
 }
 
@@ -136,6 +176,9 @@ fn get_parameter(&self, param_id: u32) -> f32 {
     match param_id {
         1 => self.playback_rate,
         2 => if self.quantize_enabled { 1.0 } else { 0.0 },
+        3 => if self.slicer_mode { 1.0 } else { 0.0 },
+        4 => self.slice_grid_beats,
+        5 => self.beats_per_bar,
         _ => 0.0,
     }
 }
@@ -164,7 +207,7 @@ fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
 }
 
 impl SamplerProcessor {
-    fn apply_command_with_context(&mut self, command: &nullherz_traits::ProcessorCommand, context: Option<&nullherz_traits::ProcessContext>) {
+    pub fn apply_command_with_context(&mut self, command: &nullherz_traits::ProcessorCommand, context: Option<&nullherz_traits::ProcessContext>) {
         match *command {
             nullherz_traits::Command::JumpToHotCue { node_idx: _, cue_idx } => {
                 let offset = if let Some(ref metadata) = self.metadata {
@@ -192,6 +235,9 @@ impl SamplerProcessor {
                         voice.play_head = offset as f32;
                     }
                 }
+            }
+            nullherz_traits::Command::TriggerSlice { node_idx: _, slice_idx } => {
+                self.trigger_slice(slice_idx, context);
             }
             nullherz_traits::Command::JumpByBeats { node_idx: _, beats } => {
                 if let (Some(ctx), Some(meta)) = (context, &self.metadata)
