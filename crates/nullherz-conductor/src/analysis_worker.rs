@@ -135,10 +135,10 @@ impl AnalysisWorker {
 
         let bpm = (44100.0 * 60.0) / best_interval as f32;
 
-        // Standardize to common dance music ranges (70-160 BPM)
+        // Standardize to common dance music ranges (70-175 BPM)
         let mut final_bpm = bpm;
         while final_bpm < 70.0 { final_bpm *= 2.0; }
-        while final_bpm > 160.0 { final_bpm /= 2.0; }
+        while final_bpm > 175.0 { final_bpm /= 2.0; }
 
         final_bpm
     }

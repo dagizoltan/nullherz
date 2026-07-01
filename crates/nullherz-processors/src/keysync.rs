@@ -1,5 +1,6 @@
 use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata, AudioConfig};
 use audio_dsp::spectral::SpectralPipeline;
+use wide::*;
 
 pub struct KeySyncProcessor {
     pub id: u64,
@@ -46,17 +47,62 @@ impl nullherz_traits::SignalProcessor for KeySyncProcessor {
             scratch_re.fill(0.0);
             scratch_im.fill(0.0);
 
-            for i in 0..n/2 {
-                let target = (i as f32 * ratio) as usize;
-                if target < n/2 {
-                    scratch_re[target] = re[i];
-                    scratch_im[target] = im[i];
+            // SIMD-optimized bin mapping with linear interpolation for higher quality
+            let n_half = n / 2;
+            let inv_ratio = 1.0 / ratio;
 
-                    // Conjugate for IFFT symmetry
-                    if target > 0 {
-                        scratch_re[n - target] = re[i];
-                        scratch_im[n - target] = -im[i];
+            // SIMD path for interpolation
+            let mut i = 1;
+            let v_inv_ratio = f32x8::from(inv_ratio);
+            let v_indices = f32x8::from([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]);
+
+            while i + 8 < n_half {
+                let v_i = f32x8::from(i as f32) + v_indices;
+                let v_source_pos = v_i * v_inv_ratio;
+                let v_source_idx = v_source_pos.floor();
+                let v_fraction = v_source_pos - v_source_idx;
+
+                let source_indices: [f32; 8] = v_source_idx.into();
+                let fractions: [f32; 8] = v_fraction.into();
+
+                for (j, &s_idx_f) in source_indices.iter().enumerate() {
+                    let s_idx = s_idx_f as usize;
+                    if s_idx + 1 < n_half {
+                        let f = fractions[j];
+                        let r_val = re[s_idx] + (re[s_idx + 1] - re[s_idx]) * f;
+                        let i_val = im[s_idx] + (im[s_idx + 1] - im[s_idx]) * f;
+
+                        let idx = i + j;
+                        scratch_re[idx] = r_val;
+                        scratch_im[idx] = i_val;
+                        scratch_re[n - idx] = r_val;
+                        scratch_im[n - idx] = -i_val;
                     }
+                }
+                i += 8;
+            }
+
+            for i in i..n_half {
+                let source_pos = i as f32 * inv_ratio;
+                let source_idx = source_pos as usize;
+                let fraction = source_pos - source_idx as f32;
+
+                if source_idx + 1 < n_half {
+                    // Linear interpolation between bins
+                    let re0 = re[source_idx];
+                    let re1 = re[source_idx + 1];
+                    let im0 = im[source_idx];
+                    let im1 = im[source_idx + 1];
+
+                    let r_val = re0 + (re1 - re0) * fraction;
+                    let i_val = im0 + (im1 - im0) * fraction;
+
+                    scratch_re[i] = r_val;
+                    scratch_im[i] = i_val;
+
+                    // Conjugate symmetry
+                    scratch_re[n - i] = r_val;
+                    scratch_im[n - i] = -i_val;
                 }
             }
 
