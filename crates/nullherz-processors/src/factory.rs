@@ -9,6 +9,7 @@ use crate::sampler::*;
 use crate::modulation::*;
 use crate::sequencer::*;
 use crate::transfusion::*;
+use crate::keysync::*;
 
 pub struct GainFactory;
 impl ProcessorFactory for GainFactory {
@@ -132,4 +133,12 @@ impl ProcessorFactory for SimdBiquadFactory {
         Some(Box::new(crate::dsp_kernel_processor::MultiChannelDspProcessor::new(node_idx as u64, audio_dsp::SimdBiquad::new(coeffs), 8)))
     }
     fn name(&self) -> &'static str { "SimdBiquad" }
+}
+
+pub struct KeySyncFactory;
+impl ProcessorFactory for KeySyncFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(KeySyncProcessor::new(node_idx as u64, 1024)))
+    }
+    fn name(&self) -> &'static str { "KeySync" }
 }

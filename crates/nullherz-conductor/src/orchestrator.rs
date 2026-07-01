@@ -22,6 +22,7 @@ pub struct Conductor {
     pub analysis_worker: Option<crate::analysis_worker::AnalysisWorker>,
     pub folder_monitor: Option<crate::folder_monitor::FolderMonitor>,
     pub library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>,
+    pub midi_consumer: Option<ipc_layer::Consumer<nullherz_traits::MidiEvent>>,
 }
 
 impl Default for Conductor {
@@ -50,6 +51,7 @@ impl Conductor {
             analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
             folder_monitor: Some(crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())),
             library,
+            midi_consumer: None,
         }
     }
 
@@ -60,6 +62,10 @@ impl Conductor {
         self.topology_manager.topo_producer = Some(ipc_layer::NonRtProducer::new(handle.topology_producer));
 
         (handle.command_producer, handle.telemetry_consumer, handle.midi_producer)
+    }
+
+    pub fn set_midi_consumer(&mut self, consumer: ipc_layer::Consumer<nullherz_traits::MidiEvent>) {
+        self.midi_consumer = Some(consumer);
     }
 
     pub fn start_backend(&mut self, backend_type: nullherz_backends::AudioBackendType) -> Result<(), String> {
@@ -98,6 +104,17 @@ impl Conductor {
     }
 
     pub fn tick(&mut self) {
+        // Drain MIDI Consumer
+        if let Some(ref mut consumer) = self.midi_consumer {
+            let mut events = Vec::new();
+            while let Some(event) = consumer.pop() {
+                events.push(event);
+            }
+            if !events.is_empty() {
+                self.handle_midi_events(events);
+            }
+        }
+
         // Update Pattern Orchestration
         let arrangement_commands = self.pattern_manager.tick(self.mixer_bridge.timeline.current_beat);
         if !arrangement_commands.is_empty() {
