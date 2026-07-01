@@ -26,7 +26,7 @@ impl nullherz_traits::SignalProcessor for FallbackProcessor {
     fn reset(&mut self) {}
 }
 
-impl nullherz_traits::MidiResponder for FallbackProcessor {}
+impl nullherz_traits::MidiResponder for FallbackProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 impl nullherz_traits::SnapshotProvider for FallbackProcessor {}
 
 impl AudioProcessor for FallbackProcessor {

@@ -26,7 +26,7 @@ fn set_safe_mode(&mut self, enabled: bool) {
     }
 }
 
-impl <K: DspKernel + 'static> nullherz_traits::MidiResponder for DspKernelProcessor<K> { }
+impl <K: DspKernel + 'static> nullherz_traits::MidiResponder for DspKernelProcessor<K> { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl <K: DspKernel + 'static> nullherz_traits::SnapshotProvider for DspKernelProcessor<K> { }
 
@@ -79,7 +79,7 @@ fn set_safe_mode(&mut self, enabled: bool) {
     }
 }
 
-impl <K: DspKernel + 'static> nullherz_traits::MidiResponder for MultiChannelDspProcessor<K> { }
+impl <K: DspKernel + 'static> nullherz_traits::MidiResponder for MultiChannelDspProcessor<K> { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl <K: DspKernel + 'static> nullherz_traits::SnapshotProvider for MultiChannelDspProcessor<K> { }
 

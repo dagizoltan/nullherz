@@ -46,7 +46,7 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &
     }
 }
 
-impl nullherz_traits::MidiResponder for CaptureProcessor { }
+impl nullherz_traits::MidiResponder for CaptureProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl nullherz_traits::SnapshotProvider for CaptureProcessor {
     fn pull_snapshot(&mut self) -> Option<std::sync::Arc<Vec<f32>>> {

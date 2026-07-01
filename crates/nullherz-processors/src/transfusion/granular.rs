@@ -194,7 +194,7 @@ fn latency_samples(&self) -> usize {
     }
 }
 
-impl nullherz_traits::MidiResponder for GranularProcessor { }
+impl nullherz_traits::MidiResponder for GranularProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl nullherz_traits::SnapshotProvider for GranularProcessor { }
 

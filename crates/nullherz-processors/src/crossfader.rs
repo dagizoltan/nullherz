@@ -22,7 +22,7 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &
 fn reset(&mut self) {}
 }
 
-impl nullherz_traits::MidiResponder for CrossfaderProcessor { }
+impl nullherz_traits::MidiResponder for CrossfaderProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl nullherz_traits::SnapshotProvider for CrossfaderProcessor { }
 

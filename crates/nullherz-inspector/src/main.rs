@@ -167,6 +167,11 @@ pub struct InspectorApp {
     pub(crate) sequencer_grid: [[bool; 64]; 16],
     pub(crate) sequencer_active_step: usize,
 
+    // Sampler/Slicer state
+    pub(crate) sampler_slicer_mode: bool,
+    pub(crate) sampler_slice_grid: f32, // index into [1.0, 0.5, 0.25]
+    pub(crate) sampler_beats_per_bar: f32,
+
     // Player & Playlist state
     pub(crate) playlists: Vec<Playlist>,
     pub(crate) selected_playlist: Option<usize>,
@@ -321,6 +326,9 @@ impl InspectorApp {
             spectral_window_shape: 0,
             sequencer_grid: [[false; 64]; 16],
             sequencer_active_step: 0,
+            sampler_slicer_mode: false,
+            sampler_slice_grid: 0.25,
+            sampler_beats_per_bar: 4.0,
             playlists: vec![
                 Playlist { name: "Peak Hour".into(), tracks: vec![] },
                 Playlist { name: "Deep Tech".into(), tracks: vec![] },

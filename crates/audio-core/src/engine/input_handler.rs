@@ -40,8 +40,14 @@ impl EngineInputHandler {
         }
 
         if let Some(cons) = midi_consumer {
+            let context = nullherz_traits::ProcessContext {
+                transport: Some(transport),
+                host: None,
+                sub_block_offset: 0,
+                is_last_sub_block: false,
+            };
             while let Some(event) = cons.pop() {
-                graph.apply_midi(event);
+                graph.apply_midi(event, Some(&context));
             }
         }
     }

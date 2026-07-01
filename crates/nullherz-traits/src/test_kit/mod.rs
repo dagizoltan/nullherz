@@ -559,7 +559,7 @@ fn reset(&mut self) {
     }
 }
 
-impl crate::MidiResponder for MockProcessor { }
+impl crate::MidiResponder for MockProcessor { fn apply_midi(&mut self, _event: crate::MidiEvent, _context: Option<&crate::ProcessContext>) { } }
 
 impl crate::SnapshotProvider for MockProcessor { }
 

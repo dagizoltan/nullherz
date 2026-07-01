@@ -21,7 +21,7 @@ fn process(&mut self, _in: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut nul
             }
 }
 
-impl nullherz_traits::MidiResponder for DynamicProcessor { }
+impl nullherz_traits::MidiResponder for DynamicProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl nullherz_traits::SnapshotProvider for DynamicProcessor { }
 

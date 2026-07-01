@@ -16,6 +16,8 @@ pub mod transfusion;
 pub mod fallback;
 #[cfg(test)]
 mod sampler_tests;
+#[cfg(test)]
+mod sampler_slicer_tests;
 #[cfg(feature = "test-utils")]
 pub mod test_kit;
 

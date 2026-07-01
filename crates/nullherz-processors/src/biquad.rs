@@ -32,7 +32,7 @@ fn reset(&mut self) {
     }
 }
 
-impl nullherz_traits::MidiResponder for BiquadProcessor { }
+impl nullherz_traits::MidiResponder for BiquadProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl nullherz_traits::SnapshotProvider for BiquadProcessor { }
 
@@ -130,7 +130,7 @@ fn reset(&mut self) {
     }
 }
 
-impl nullherz_traits::MidiResponder for SimdBiquadProcessor { }
+impl nullherz_traits::MidiResponder for SimdBiquadProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl nullherz_traits::SnapshotProvider for SimdBiquadProcessor { }
 

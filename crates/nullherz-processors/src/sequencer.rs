@@ -81,7 +81,7 @@ fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &
     }
 }
 
-impl nullherz_traits::MidiResponder for SequencerProcessor { }
+impl nullherz_traits::MidiResponder for SequencerProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
 
 impl nullherz_traits::SnapshotProvider for SequencerProcessor { }
 

@@ -32,7 +32,7 @@ fn main() {
 
     // 2. Start Engine & Sidecar Supervisor
     let mut conductor = Conductor::new();
-    let (cmd_buffer, mut tel_cons, _midi_prod) = conductor.setup_engine();
+    let ctx = conductor.setup_engine(); let cmd_buffer = ctx.command_producer; let mut tel_cons = ctx.telemetry_consumer; let _midi_prod = ctx.midi_producer;
 
     let mut mixer = MixerManager::new();
     let commands = mixer.create_4channel_mixer();
