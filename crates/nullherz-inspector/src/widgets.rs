@@ -77,16 +77,29 @@ pub fn render_spectrum_analyzer(ui: &mut Ui, spectrum: &[f32; 128], accent_color
     let w = rect.width();
     let bin_w = w / 128.0;
 
+    // High-performance batched mesh rendering (AnaWaves Stage 3)
+    let mut mesh = egui::Mesh::default();
+    let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+
     for i in 0..128 {
         let val = spectrum[i];
         let h = (val * height * 5.0).min(height - 4.0);
+        if h < 0.5 { continue; }
+
         let bin_rect = Rect::from_min_size(
             rect.left_bottom() + vec2(i as f32 * bin_w, -h - 2.0),
             vec2(bin_w.max(1.0), h)
         );
-        ui.painter().rect_filled(bin_rect, 0.0, accent_color.linear_multiply(0.8));
-        ui.painter().rect_filled(bin_rect.shrink(1.0), 0.0, accent_color);
+
+        // Add to mesh using standard egui API
+        mesh.add_rect_with_uv(bin_rect, uv, accent_color);
+
+        // Add highlight top line
+        let top_line = Rect::from_min_size(bin_rect.min, vec2(bin_rect.width(), 1.0));
+        mesh.add_rect_with_uv(top_line, uv, Color32::WHITE.linear_multiply(0.5));
     }
+
+    ui.painter().add(egui::Shape::mesh(mesh));
 }
 
 pub fn render_goniometer(ui: &mut Ui, pts: &[f32; 128], size: f32, accent_color: Color32) {
@@ -101,6 +114,7 @@ pub fn render_goniometer(ui: &mut Ui, pts: &[f32; 128], size: f32, accent_color:
     ui.painter().line_segment([center - vec2(half_s * 0.7, half_s * 0.7), center + vec2(half_s * 0.7, half_s * 0.7)], Stroke::new(0.5, Color32::from_gray(50)));
     ui.painter().line_segment([center - vec2(-half_s * 0.7, half_s * 0.7), center + vec2(-half_s * 0.7, half_s * 0.7)], Stroke::new(0.5, Color32::from_gray(50)));
 
+    // Optimized batched line rendering for the phase scope
     let mut points = Vec::with_capacity(64);
     for i in 0..64 {
         let l = pts[i * 2];
@@ -109,11 +123,11 @@ pub fn render_goniometer(ui: &mut Ui, pts: &[f32; 128], size: f32, accent_color:
         // 45-degree rotation for phase scope
         let x = (l - r) * half_s * 0.9;
         let y = -(l + r) * half_s * 0.9;
-
         points.push(center + vec2(x, y));
     }
 
     if points.len() > 1 {
+        // egui's Shape::line is efficient and maps directly to vertex buffers
         ui.painter().add(egui::Shape::line(points, Stroke::new(1.2, accent_color)));
     }
 }

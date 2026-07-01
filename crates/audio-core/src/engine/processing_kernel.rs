@@ -1,6 +1,7 @@
 use nullherz_traits::{AudioProcessor, TimestampedCommand, SubBlockIterator, SubBlock, Transport, Host, ParallelExecutor, ProcessingKernel, CommandConsumer};
 use crate::engine::command_dispatcher::CommandDispatcher;
 
+#[derive(Default, Clone)]
 pub struct StandardKernel;
 
 impl ProcessingKernel for StandardKernel {

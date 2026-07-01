@@ -122,6 +122,10 @@ pub enum Command {
         node_idx: u32,
         cue_idx: u32,
     },
+    JumpByBeats {
+        node_idx: u32,
+        beats: f32,
+    },
     SetLoop {
         node_idx: u32,
         enabled: bool,
@@ -279,6 +283,10 @@ pub enum TopologyMutation {
     UpdateMetadata {
         node_idx: u32,
         metadata: Arc<SampleMetadata>,
+    },
+    LoadProcessorState {
+        node_idx: u32,
+        state_data: Arc<Vec<u8>>,
     },
     SetTopology(Arc<GraphTopology>),
 }

@@ -182,14 +182,7 @@ impl SamplerProcessor {
                         && let Some(transport) = ctx.transport
                             && meta.bpm > 0.0 {
                                 let samples_per_beat = (transport.sample_rate * 60.0 / meta.bpm) as f64;
-                                let current_beat = transport.beat_position;
-                                let next_beat = current_beat.ceil();
-                                let beats_to_wait = next_beat - current_beat;
-                                let _samples_to_wait = (beats_to_wait * samples_per_beat) as u64;
-
-                                // Shift offset to align with grid if we were to jump NOW
-                                // Actually, for DJ sync, we usually want to delay the jump until the next beat
-                                // but for simplicity in this kernel, we'll align the target offset.
+                                // Align to beat grid
                                 let grid_pos = (offset as f64 / samples_per_beat).round() * samples_per_beat;
                                 offset = grid_pos as u64;
                             }
@@ -199,6 +192,28 @@ impl SamplerProcessor {
                         voice.play_head = offset as f32;
                     }
                 }
+            }
+            nullherz_traits::Command::JumpByBeats { node_idx: _, beats } => {
+                if let (Some(ctx), Some(meta)) = (context, &self.metadata)
+                    && let Some(transport) = ctx.transport
+                        && meta.bpm > 0.0 {
+                            let samples_per_beat = (transport.sample_rate * 60.0 / meta.bpm) as f64;
+                            let jump_samples = (beats as f64 * samples_per_beat) as f32;
+
+                            for voice in self.voices.iter_mut() {
+                                if voice.is_active {
+                                    // Law of Bit-Exact Reset: Jumps should be precise and not introduce DC offsets
+                                    // Linear interpolation in voice handles the fractional position
+                                    voice.play_head += jump_samples;
+
+                                    // Clamp to buffer range
+                                    if voice.play_head < 0.0 { voice.play_head = 0.0; }
+                                    if voice.play_head >= self.sample_buffer.len() as f32 {
+                                        voice.play_head = (self.sample_buffer.len() as f32 - 1.0).max(0.0);
+                                    }
+                                }
+                            }
+                        }
             }
             nullherz_traits::Command::SetLoop { node_idx: _, enabled, start_samples, end_samples } => {
                 for voice in self.voices.iter_mut() {
