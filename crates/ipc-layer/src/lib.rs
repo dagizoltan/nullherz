@@ -587,7 +587,7 @@ impl<T> MpscRingBuffer<T> {
     }
 }
 
-#[cfg(feature = "kani-verify")]
+#[cfg(all(feature = "kani-verify", kani))]
 #[allow(unexpected_cfgs)]
 mod proofs {
     use super::*;

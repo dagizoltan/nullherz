@@ -1,4 +1,5 @@
 use crate::AudioEngine;
+use crate::engine::processing_kernel::StandardKernel;
 use crate::processors::{ProcessorGraph, AudioProcessor, TopologyMutation};
 use nullherz_traits::{TimestampedCommand, Command};
 use ipc_layer::{RingBuffer, MpscRingBuffer};
@@ -56,7 +57,8 @@ mod tests {
             let mut engine = AudioEngine::new(
                 resources,
                 Box::new(graph),
-                Arc::new(crate::rt_logging::RtLogger::new(256))
+                Arc::new(crate::rt_logging::RtLogger::new(256)),
+                StandardKernel::default()
             );
 
             let mut topo_prod_cloned = topo_prod;
@@ -98,7 +100,8 @@ mod tests {
         let mut engine = AudioEngine::new(
             resources,
             Box::new(graph),
-            Arc::new(crate::rt_logging::RtLogger::new(256))
+            Arc::new(crate::rt_logging::RtLogger::new(256)),
+            StandardKernel::default()
         );
 
         let mut out_l = [0.0f32; 128];
@@ -147,7 +150,8 @@ mod tests {
             let mut engine = AudioEngine::new(
                 resources,
                 Box::new(graph),
-                Arc::new(crate::rt_logging::RtLogger::new(256))
+                Arc::new(crate::rt_logging::RtLogger::new(256)),
+                StandardKernel::default()
             );
 
             let mut out_l = [0.0f32; 128];
@@ -202,7 +206,8 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         let mut engine = AudioEngine::new(
             resources,
             Box::new(MockProcessor { process_count: 0 }),
-            Arc::new(crate::rt_logging::RtLogger::new(256))
+            Arc::new(crate::rt_logging::RtLogger::new(256)),
+            StandardKernel::default()
         );
 
         let mut out = [0.0f32; 128];
@@ -255,7 +260,8 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         let mut engine = AudioEngine::new(
             resources,
             Box::new(MidiMockProcessor { midi_received: false }),
-            Arc::new(crate::rt_logging::RtLogger::new(256))
+            Arc::new(crate::rt_logging::RtLogger::new(256)),
+            StandardKernel::default()
         );
 
         let mut out = [0.0f32; 128];
@@ -326,7 +332,8 @@ fn apply_command(&mut self, cmd: &Command) {
         let mut engine = AudioEngine::new(
             resources,
             Box::new(ParamMockProcessor { param_value: 0.0, apply_count: 0, id: proc_id }),
-            Arc::new(crate::rt_logging::RtLogger::new(256))
+            Arc::new(crate::rt_logging::RtLogger::new(256)),
+            StandardKernel::default()
         );
 
         let mut out = [0.0f32; 128];

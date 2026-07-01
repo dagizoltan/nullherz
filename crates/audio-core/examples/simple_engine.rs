@@ -51,7 +51,8 @@ fn main() {
     let engine = AudioEngine::new(
         resources,
         initial_proc,
-        Arc::new(audio_core::rt_logging::RtLogger::new(256))
+        Arc::new(audio_core::rt_logging::RtLogger::new(256)),
+        audio_core::engine::processing_kernel::StandardKernel::default()
     );
 
     println!("Engine created. Peak ns: {}", engine.metrics.peak_ns.load(std::sync::atomic::Ordering::Relaxed));

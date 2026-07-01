@@ -84,10 +84,36 @@ impl AudioProcessor for SpectralMorphProcessor {
 fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
-        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command
-            && target_id == self.id {
-                self.set_parameter(param_id, value, ramp_duration_samples);
+        match *command {
+            nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } => {
+                if target_id == self.id {
+                    self.set_parameter(param_id, value, ramp_duration_samples);
+                }
             }
+            nullherz_traits::Command::Extension { domain_id, target_id, opcode, data } => {
+                if domain_id == 0x53504543 && target_id == self.id { // "SPEC"
+                    match opcode {
+                        0x01 => { // Set Window Shape (alternate via opcode)
+                            let shape_val = data[0];
+                            let shape = match shape_val {
+                                0 => SpectralWindowShape::Hann,
+                                1 => SpectralWindowShape::Hamming,
+                                2 => SpectralWindowShape::Blackman,
+                                3 => SpectralWindowShape::Rectangular,
+                                _ => SpectralWindowShape::Hann,
+                            };
+                            self.pipeline.update_window(shape);
+                            self.modulator_pipeline.update_window(shape);
+                        }
+                        0x02 => { // Advanced Morph Parameter (e.g. Spectral Tilt offset)
+                             // data[0..4] could be a f32
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
         match param_id {

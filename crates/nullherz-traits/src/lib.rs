@@ -122,6 +122,10 @@ pub enum Command {
         node_idx: u32,
         cue_idx: u32,
     },
+    JumpByBeats {
+        node_idx: u32,
+        beats: f32,
+    },
     SetLoop {
         node_idx: u32,
         enabled: bool,

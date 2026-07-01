@@ -160,6 +160,9 @@ pub struct InspectorApp {
     pub(crate) mastering_limiter_gain: f32,
     pub(crate) mastering_limiter_lookahead: f32,
 
+    // Spectral Morph extension state
+    pub(crate) spectral_window_shape: u8,
+
     // Sequencer state
     pub(crate) sequencer_grid: [[bool; 64]; 16],
     pub(crate) sequencer_active_step: usize,
@@ -315,6 +318,7 @@ impl InspectorApp {
             mastering_limiter_enabled: false,
             mastering_limiter_gain: 1.0,
             mastering_limiter_lookahead: 0.5,
+            spectral_window_shape: 0,
             sequencer_grid: [[false; 64]; 16],
             sequencer_active_step: 0,
             playlists: vec![

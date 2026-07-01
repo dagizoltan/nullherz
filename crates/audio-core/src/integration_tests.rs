@@ -1,6 +1,7 @@
 #[cfg(feature = "test-utils")]
 mod integration_tests {
     use crate::{AudioEngine, ProcessorGraph};
+    use crate::engine::processing_kernel::StandardKernel;
     use nullherz_traits::{AudioProcessor, test_kit::{TestHost, MockProcessor}, ProcessorTypeId, GarbageProducer};
     use nullherz_processors::ProcessorRegistry;
     use ipc_layer::RingBuffer;
@@ -70,7 +71,8 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         let mut engine = AudioEngine::new(
             resources,
             Box::new(graph),
-            Arc::new(crate::rt_logging::RtLogger::new(256))
+            Arc::new(crate::rt_logging::RtLogger::new(256)),
+            StandardKernel::default()
         );
 
         // 3. Process
@@ -119,7 +121,8 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         let mut engine = AudioEngine::new(
             resources,
             Box::new(graph),
-            Arc::new(crate::rt_logging::RtLogger::new(256))
+            Arc::new(crate::rt_logging::RtLogger::new(256)),
+            StandardKernel::default()
         );
 
         // 3. Run a block

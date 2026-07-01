@@ -8,6 +8,44 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
     ui.label(RichText::new("Route macros to any engine parameter with custom scaling.").color(Color32::from_gray(120)));
     ui.add_space(20.0);
 
+    Frame::none().fill(Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(15.0).show(ui, |ui| {
+        ui.vertical(|ui| {
+            ui.label(RichText::new("SPECTRAL MORPH EXTENSION").color(Color32::from_rgb(255, 50, 150)).strong());
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                ui.label("Window Shape:");
+                let prev_shape = app.spectral_window_shape;
+                egui::ComboBox::from_id_source("window_shape")
+                    .selected_text(match app.spectral_window_shape {
+                        0 => "Hann",
+                        1 => "Hamming",
+                        2 => "Blackman",
+                        3 => "Rectangular",
+                        _ => "Unknown",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut app.spectral_window_shape, 0, "Hann");
+                        ui.selectable_value(&mut app.spectral_window_shape, 1, "Hamming");
+                        ui.selectable_value(&mut app.spectral_window_shape, 2, "Blackman");
+                        ui.selectable_value(&mut app.spectral_window_shape, 3, "Rectangular");
+                    });
+
+                if app.spectral_window_shape != prev_shape {
+                    let mut data = [0u8; 16];
+                    data[0] = app.spectral_window_shape;
+                    let _ = app.command_sender.send(nullherz_traits::Command::Extension {
+                        domain_id: 0x53504543,
+                        target_id: 100, // Assuming Spectral Morph is at Node 100 for this demo
+                        opcode: 0x01,
+                        data,
+                    });
+                }
+            });
+        });
+    });
+
+    ui.add_space(20.0);
+
     ScrollArea::vertical().show(ui, |ui| {
         ui.set_width(ui.available_width());
 

@@ -94,7 +94,7 @@ impl EngineBuilder {
             resources,
             initial_graph,
             Arc::new(crate::rt_logging::RtLogger::new(256)),
-            crate::engine::processing_kernel::StandardKernel
+            crate::engine::processing_kernel::StandardKernel::default()
         ).with_flight_recorder(tel_log_prod);
 
         let engine = Arc::new(engine);
