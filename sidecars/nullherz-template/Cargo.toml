@@ -1,0 +1,9 @@
+[package]
+name = "nullherz-template"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sidecar-sdk = { path = "../../crates/sidecar-sdk" }
+nullherz-traits = { path = "../../crates/nullherz-traits" }
+ipc-layer = { path = "../../crates/ipc-layer" }

@@ -109,17 +109,36 @@ impl AnalysisWorker {
             *histogram.entry(bucket).or_default() += 1;
         }
 
-        let best_interval = histogram.into_iter()
+        // Smoothing: Consolidate double/half intervals
+        let mut smoothed_histogram: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+        let keys: Vec<u64> = histogram.keys().cloned().collect();
+        for &k in &keys {
+            let count = histogram[&k];
+            let mut matched = false;
+            for &sk in smoothed_histogram.keys() {
+                let ratio = k as f32 / sk as f32;
+                if (ratio - 1.0).abs() < 0.05 || (ratio - 2.0).abs() < 0.05 || (ratio - 0.5).abs() < 0.05 {
+                    *smoothed_histogram.get_mut(&sk).unwrap() += count;
+                    matched = true;
+                    break;
+                }
+            }
+            if !matched {
+                smoothed_histogram.insert(k, count);
+            }
+        }
+
+        let best_interval = smoothed_histogram.into_iter()
             .max_by_key(|&(_, count)| count)
             .map(|(bucket, _)| bucket)
             .unwrap_or(22050); // Default to 120bpm if nothing found
 
         let bpm = (44100.0 * 60.0) / best_interval as f32;
 
-        // Standardize to common ranges
+        // Standardize to common dance music ranges (70-160 BPM)
         let mut final_bpm = bpm;
         while final_bpm < 70.0 { final_bpm *= 2.0; }
-        while final_bpm > 180.0 { final_bpm /= 2.0; }
+        while final_bpm > 160.0 { final_bpm /= 2.0; }
 
         final_bpm
     }

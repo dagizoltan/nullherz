@@ -41,6 +41,7 @@ impl ProcessorTypeId {
     pub const CAPTURE: Self = Self(110);
     pub const DJ_ISOLATOR: Self = Self(120);
     pub const SIMD_BIQUAD: Self = Self(130);
+    pub const KEY_SYNC: Self = Self(140);
 }
 
 impl From<u32> for ProcessorTypeId {

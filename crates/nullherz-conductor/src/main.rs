@@ -8,6 +8,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut conductor = Conductor::new();
     let (cmd_buffer, tel_cons, _midi_prod) = conductor.setup_engine();
 
+    // --- MIDI SIDECAR BRIDGE SETUP ---
+    // This allows the nullherz-midi sidecar to talk to the conductor's mapping engine.
+    let (_midi_sidecar_prod, midi_sidecar_cons) = ipc_layer::RingBuffer::new(256).split();
+    conductor.set_midi_consumer(midi_sidecar_cons);
+
     // Start the backend (defaulting to threaded for safety in sandbox)
     conductor.start_backend(nullherz_backends::AudioBackendType::Threaded)?;
     println!("Audio engine started.");

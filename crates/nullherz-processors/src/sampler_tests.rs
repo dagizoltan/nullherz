@@ -1,6 +1,5 @@
-use nullherz_traits::{AudioProcessor, Transport, ProcessContext, AudioConfig, SignalProcessor, MidiResponder};
+use nullherz_traits::{AudioProcessor, Transport, ProcessContext, AudioConfig, SignalProcessor, MidiResponder, SampleMetadata, SoundDNA};
 use crate::SamplerProcessor;
-use nullherz_dna::SampleMetadata;
 use std::sync::Arc;
 
 #[test]
@@ -19,7 +18,8 @@ fn test_sampler_sync_logic() {
         loop_points: None,
         beat_grid_offset: 0,
         peaks: Arc::new(Vec::new()),
-        dna: nullherz_dna::SoundDNA::default(),
+        dna: SoundDNA::default(),
+        midi_map: None,
     };
 
     sampler.apply_topology_mutation(nullherz_traits::TopologyMutation::AddSource {
