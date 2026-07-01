@@ -330,24 +330,15 @@ impl Conductor {
             self.topology_manager.handle_topology_command(&cmd);
         }
 
-        // 3. Reconstruct Processor States (Generic approach)
-        let mut engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
-        if let Some(ref mut engine) = *engine_lock {
-            for p_state in &state.processor_states {
-                for child in engine.list_children() {
-                    if let Some(m) = child.metadata() {
-                        if m.processor_id as u32 == p_state.node_idx {
-                            // This is safe because we are on the conductor thread,
-                            // but ideally we'd use a command to the RT thread.
-                            // For now, this validates the generic load_state approach.
-                            let child_ptr = child as *const dyn nullherz_traits::AudioProcessor as *mut dyn nullherz_traits::AudioProcessor;
-                            unsafe { (*child_ptr).load_state(&p_state.state_data); }
-                        }
-                    }
-                }
+        // 3. Reconstruct Processor States (Generic approach via TopologyMutation)
+        for p_state in &state.processor_states {
+            if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                let _ = prod.push(nullherz_traits::TopologyMutation::LoadProcessorState {
+                    node_idx: p_state.node_idx,
+                    state_data: Arc::new(p_state.state_data.clone()),
+                });
             }
         }
-        drop(engine_lock);
 
         // 4. Reconstruct Modulation Matrix
         self.modulation_matrix = state.modulation_matrix;

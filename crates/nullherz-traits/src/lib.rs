@@ -284,6 +284,10 @@ pub enum TopologyMutation {
         node_idx: u32,
         metadata: Arc<SampleMetadata>,
     },
+    LoadProcessorState {
+        node_idx: u32,
+        state_data: Arc<Vec<u8>>,
+    },
     SetTopology(Arc<GraphTopology>),
 }
 

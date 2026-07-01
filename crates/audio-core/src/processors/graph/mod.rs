@@ -157,6 +157,12 @@ impl ProcessorGraph {
                     unsafe { (*self.nodes[idx].processor.get()).apply_topology_mutation(TopologyMutation::UpdateMetadata { node_idx, metadata }); }
                 }
             }
+            TopologyMutation::LoadProcessorState { node_idx, state_data } => {
+                let idx = node_idx as usize;
+                if idx < self.node_count {
+                    unsafe { (*self.nodes[idx].processor.get()).load_state(&state_data); }
+                }
+            }
         }
     }
 
