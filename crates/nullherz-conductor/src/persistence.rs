@@ -38,11 +38,18 @@ pub struct SequencerNodeState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessorState {
+    pub node_idx: u32,
+    pub state_data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectState {
     pub nodes: Vec<NodeState>,
     pub edges: Vec<EdgeState>,
     pub output_edges: Vec<OutputEdgeState>,
     pub sequencers: Vec<SequencerNodeState>,
+    pub processor_states: Vec<ProcessorState>,
     pub modulation_matrix: crate::modulation_matrix::ModulationMatrix,
     pub arrangement: crate::pattern_manager::SongArrangement,
     pub bpm: f32,
@@ -56,6 +63,7 @@ impl ProjectState {
             edges: Vec::new(),
             output_edges: Vec::new(),
             sequencers: Vec::new(),
+            processor_states: Vec::new(),
             modulation_matrix: crate::modulation_matrix::ModulationMatrix::default(),
             arrangement: crate::pattern_manager::SongArrangement::default(),
             bpm: 120.0,

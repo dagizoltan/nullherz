@@ -6,7 +6,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("nullherz-conductor starting...");
 
     let mut conductor = Conductor::new();
-    let (cmd_buffer, tel_cons, _midi_prod) = conductor.setup_engine();
+    let context = conductor.setup_engine();
 
     // --- MIDI SIDECAR BRIDGE SETUP ---
     // This allows the nullherz-midi sidecar to talk to the conductor's mapping engine.
@@ -17,10 +17,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     conductor.start_backend(nullherz_backends::AudioBackendType::Threaded)?;
     println!("Audio engine started.");
 
-    let cmd_prod_gateway = ipc_layer::NonRtProducer::from_boxed(cmd_buffer);
+    let cmd_prod_gateway = ipc_layer::NonRtProducer::from_boxed(context.command_producer);
 
     let _gateway_task = tokio::spawn(async move {
-        let _ = nullherz_gateway::run_gateway("127.0.0.1:9001", cmd_prod_gateway, tel_cons).await;
+        let _ = nullherz_gateway::run_gateway("127.0.0.1:9001", cmd_prod_gateway, context.telemetry_consumer).await;
         println!("Gateway bridge closed.");
     });
 

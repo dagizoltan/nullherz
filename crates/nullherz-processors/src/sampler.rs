@@ -157,6 +157,10 @@ fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutatio
 fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
         self.apply_command_with_context(command, None);
     }
+
+    fn resource_id(&self) -> Option<u64> {
+        self.sample_id
+    }
 }
 
 impl SamplerProcessor {

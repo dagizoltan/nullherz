@@ -138,33 +138,18 @@ impl AudioProcessor for KeySyncProcessor {
     }
 
     fn metadata(&self) -> Option<ProcessorMetadata> {
+        let mut parameters = [ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 }; 16];
+        parameters[0] = ParameterMetadata {
+            id: 0,
+            name: *b"Semitones\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+            min: -12.0,
+            max: 12.0,
+            default: 0.0,
+        };
         Some(ProcessorMetadata {
             processor_id: self.id,
             num_parameters: 1,
-            parameters: [
-                ParameterMetadata {
-                    id: 0,
-                    name: *b"Semitones\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
-                    min: -12.0,
-                    max: 12.0,
-                    default: 0.0,
-                },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-                ParameterMetadata { id: 0, name: [0; 32], min: 0.0, max: 0.0, default: 0.0 },
-            ],
+            parameters,
         })
     }
 }
