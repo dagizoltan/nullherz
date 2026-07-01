@@ -114,16 +114,20 @@ impl AnalysisWorker {
         let keys: Vec<u64> = histogram.keys().cloned().collect();
         for &k in &keys {
             let count = histogram[&k];
-            let mut matched = false;
+            let mut matched_key = None;
+
+            // Find an existing bucket that is related (harmonic/sub-harmonic)
             for &sk in smoothed_histogram.keys() {
                 let ratio = k as f32 / sk as f32;
                 if (ratio - 1.0).abs() < 0.05 || (ratio - 2.0).abs() < 0.05 || (ratio - 0.5).abs() < 0.05 {
-                    *smoothed_histogram.get_mut(&sk).unwrap() += count;
-                    matched = true;
+                    matched_key = Some(sk);
                     break;
                 }
             }
-            if !matched {
+
+            if let Some(sk) = matched_key {
+                *smoothed_histogram.get_mut(&sk).unwrap() += count;
+            } else {
                 smoothed_histogram.insert(k, count);
             }
         }
@@ -137,8 +141,12 @@ impl AnalysisWorker {
 
         // Standardize to common dance music ranges (70-175 BPM)
         let mut final_bpm = bpm;
-        while final_bpm < 70.0 { final_bpm *= 2.0; }
-        while final_bpm > 175.0 { final_bpm /= 2.0; }
+        if final_bpm > 10.0 {
+            while final_bpm < 70.0 { final_bpm *= 2.0; }
+            while final_bpm > 175.0 { final_bpm /= 2.0; }
+        } else {
+            final_bpm = 120.0; // Default fallback for unmeasurable signals
+        }
 
         final_bpm
     }

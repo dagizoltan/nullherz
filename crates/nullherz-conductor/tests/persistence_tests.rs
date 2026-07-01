@@ -15,10 +15,9 @@ fn test_project_persistence_roundtrip() {
         type_id: ProcessorTypeId::SAMPLER.into(),
         params: vec![(1, 1.0)],
     });
-    state.sequencers.push(SequencerNodeState {
+    state.processor_states.push(ProcessorState {
         node_idx: 1,
-        patterns: vec![SequencerPatternState { grid: [[true; 64]; 16], len: 16 }; 16],
-        active_pattern: 0,
+        state_data: vec![0, 1, 2, 3],
     });
 
     state.save_to_file(temp_path).unwrap();

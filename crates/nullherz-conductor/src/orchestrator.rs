@@ -6,7 +6,7 @@ use crate::sidecar_supervisor::SidecarSupervisor;
 use crate::midi_mapper::MidiMapper;
 use crate::pattern_manager::PatternManager;
 use crate::modulation_matrix::ModulationMatrix;
-use nullherz_traits::{Command, CommandProducer, RenderingEngine, telemetry::Telemetry};
+use nullherz_traits::{Command, RenderingEngine, telemetry::Telemetry};
 use std::sync::Arc;
 use nullherz_dna::SampleRegistry;
 
@@ -55,13 +55,17 @@ impl Conductor {
         }
     }
 
-    pub fn setup_engine(&mut self) -> (Box<dyn CommandProducer>, ipc_layer::Consumer<audio_core::Telemetry>, ipc_layer::Producer<nullherz_traits::MidiEvent>) {
+    pub fn setup_engine(&mut self) -> crate::EngineContext {
         let handle = self.engine_coordinator.setup();
 
         self.mixer_bridge.bundle_producer = Some(handle.bundle_producer);
         self.topology_manager.topo_producer = Some(ipc_layer::NonRtProducer::new(handle.topology_producer));
 
-        (handle.command_producer, handle.telemetry_consumer, handle.midi_producer)
+        crate::EngineContext {
+            command_producer: handle.command_producer,
+            telemetry_consumer: handle.telemetry_consumer,
+            midi_producer: handle.midi_producer,
+        }
     }
 
     pub fn set_midi_consumer(&mut self, consumer: ipc_layer::Consumer<nullherz_traits::MidiEvent>) {
@@ -170,15 +174,18 @@ impl Conductor {
         let mut engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
         if let Some(ref mut engine) = *engine_lock {
             for child in engine.list_children() {
-                if let Some(sampler) = child.as_any().downcast_ref::<nullherz_processors::SamplerProcessor>()
-                    && let Some(id) = sampler.id_getter()
-                        && let Some(sample) = self.transfusion_manager.sample_registry.get(id)
-                             && let Some(ref mut prod) = self.topology_manager.topo_producer {
-                                 let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
-                                     node_idx: sampler.id as u32,
-                                     metadata: Arc::new(sample.metadata),
-                                 });
-                             }
+                if let Some(id) = child.resource_id() {
+                    if let Some(sample) = self.transfusion_manager.sample_registry.get(id) {
+                        if let Some(m) = child.metadata() {
+                            if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                                let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
+                                    node_idx: m.processor_id as u32,
+                                    metadata: Arc::new(sample.metadata),
+                                });
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -207,21 +214,28 @@ impl Conductor {
                         params,
                     });
 
-                    // Collect Sequencer Data if applicable
+                    let state_data = child.serialize_state();
+                    if !state_data.is_empty() {
+                        state.processor_states.push(crate::persistence::ProcessorState {
+                            node_idx,
+                            state_data: state_data.clone(),
+                        });
+                    }
+
+                    // Collect Sequencer Data if applicable (Legacy path until Stage 3 generic loading)
                     if type_id == nullherz_traits::ProcessorTypeId::SEQUENCER.0 {
-                        let bytes = child.serialize_state();
                         // 1 byte (active_pattern) + 16 * (1 byte len + 16 * 64 steps)
-                        if bytes.len() > 16 * (1 + 16 * 64) {
+                        if state_data.len() > 16 * (1 + 16 * 64) {
                             let mut patterns = Vec::new();
-                            let active_pattern = bytes[0] as usize;
+                            let active_pattern = state_data[0] as usize;
                             let mut cursor = 1;
                             for _ in 0..16 {
-                                let len = bytes[cursor] as u32;
+                                let len = state_data[cursor] as u32;
                                 cursor += 1;
                                 let mut grid = [[false; 64]; 16];
                                 for track in 0..16 {
                                     for step in 0..64 {
-                                        grid[track][step] = bytes[cursor] == 1;
+                                        grid[track][step] = state_data[cursor] == 1;
                                         cursor += 1;
                                     }
                                 }
@@ -316,7 +330,7 @@ impl Conductor {
             self.topology_manager.handle_topology_command(&cmd);
         }
 
-        // 3. Reconstruct Sequencer Patterns
+        // 3. Reconstruct Sequencer Patterns (Legacy path until Stage 3 generic loading)
         for seq in &state.sequencers {
             if let Some(ref mut prod) = self.engine_coordinator.command_producer {
                 for (p_idx, pat) in seq.patterns.iter().enumerate() {
@@ -368,6 +382,10 @@ impl Conductor {
                     },
                 });
             }
+        }
+
+        // 3b. Reconstruct Generic Processor States (Placeholder for Stage 3)
+        for _p_state in &state.processor_states {
         }
 
         // 4. Reconstruct Modulation Matrix

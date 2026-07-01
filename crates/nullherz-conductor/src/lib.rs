@@ -14,6 +14,12 @@ pub mod pattern_manager;
 pub mod modulation_matrix;
 
 pub use orchestrator::Conductor;
+
+pub struct EngineContext {
+    pub command_producer: Box<dyn nullherz_traits::CommandProducer>,
+    pub telemetry_consumer: ipc_layer::Consumer<audio_core::Telemetry>,
+    pub midi_producer: ipc_layer::Producer<nullherz_traits::MidiEvent>,
+}
 pub use timeline::Timeline;
 pub use backend::BackendManager;
 
