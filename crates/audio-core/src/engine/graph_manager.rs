@@ -71,6 +71,15 @@ impl GraphManager {
         unsafe { &mut **graph_ptr }
     }
 
+    /// Provides a raw pointer to the active graph for non-RT access.
+    /// # Safety
+    /// Access must be handled with care to avoid racing with the RT thread.
+    pub unsafe fn get_active_graph_ptr(&self) -> *mut dyn AudioProcessor {
+        let graph_ptr = self.active_graph.load(Ordering::Acquire);
+        // SAFETY: graph_ptr is valid for the duration of the caller's use if synchronized.
+        unsafe { &mut **graph_ptr as *mut dyn AudioProcessor }
+    }
+
     /// Provides a mutable reference to the active graph.
     /// # Safety
     /// The caller must ensure exclusive access, typically by being on the RT thread.

@@ -6,7 +6,7 @@ use crate::sidecar_supervisor::SidecarSupervisor;
 use crate::midi_mapper::MidiMapper;
 use crate::pattern_manager::PatternManager;
 use crate::modulation_matrix::ModulationMatrix;
-use nullherz_traits::{Command, RenderingEngine, telemetry::Telemetry};
+use nullherz_traits::{Command, telemetry::Telemetry};
 use std::sync::Arc;
 use nullherz_dna::SampleRegistry;
 
@@ -158,21 +158,15 @@ impl Conductor {
     }
 
     fn handle_transfusion_registrations(&mut self) {
-        let mut engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
-        if let Some(ref mut engine) = *engine_lock {
-            // RenderingEngine::pull_all_snapshots needs &mut.
-            // We'll use the same raw pointer hack as in backends for now,
-            // as this is a non-RT call from the conductor.
-            let engine_ptr = Arc::as_ptr(engine) as *mut dyn RenderingEngine;
-            unsafe {
-                self.transfusion_manager.poll_snapshots(&mut *engine_ptr);
-            }
+        let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+        if let Some(ref engine) = *engine_lock {
+            self.transfusion_manager.poll_snapshots(engine.as_ref());
         }
     }
 
     fn sync_sampler_metadata(&mut self) {
-        let mut engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
-        if let Some(ref mut engine) = *engine_lock {
+        let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+        if let Some(ref engine) = *engine_lock {
             for child in engine.list_children() {
                 if let Some(id) = child.resource_id() {
                     if let Some(sample) = self.transfusion_manager.sample_registry.get(id) {

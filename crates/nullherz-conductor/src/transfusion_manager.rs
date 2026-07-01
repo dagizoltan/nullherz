@@ -20,7 +20,7 @@ impl TransfusionManager {
     }
 
     /// Polls the engine for new snapshots and registers them in the `SampleRegistry`.
-    pub fn poll_snapshots(&mut self, engine: &mut dyn RenderingEngine) {
+    pub fn poll_snapshots(&mut self, engine: &dyn RenderingEngine) {
         let mut snapshots = Vec::new();
         engine.pull_all_snapshots(&mut snapshots);
 

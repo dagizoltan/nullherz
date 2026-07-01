@@ -647,7 +647,7 @@ pub trait RenderingEngine: Send + Sync {
     /// Returns the target sample rate configured for the engine.
     fn target_sample_rate(&self) -> f32;
     /// Pulls all available snapshots from the signal graph for registration.
-    fn pull_all_snapshots(&mut self, target: &mut Vec<(u64, Arc<Vec<f32>>)>);
+    fn pull_all_snapshots(&self, target: &mut Vec<(u64, Arc<Vec<f32>>)>);
     /// Returns a list of all currently active child processors.
     fn list_children(&self) -> Vec<&dyn AudioProcessor>;
 }
