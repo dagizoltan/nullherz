@@ -41,7 +41,7 @@ fn main() {
     // Commit topology
     let _ = cmd_buffer.push_command(TimestampedCommand {
         timestamp_samples: 0,
-        command: nullherz_traits::Command::CommitTopology,
+        command: nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology),
     });
 
     conductor.start_backend(nullherz_backends::AudioBackendType::Threaded).unwrap();

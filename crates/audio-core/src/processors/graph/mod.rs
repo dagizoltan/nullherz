@@ -331,13 +331,14 @@ fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
         }
     }
 fn apply_command(&mut self, command: &nullherz_traits::Command) {
+        use nullherz_traits::{Command, CoreCommand, MixerCommand};
         match command {
-            nullherz_traits::Command::SetSafeMode(enabled) => {
+            Command::Core(CoreCommand::SetSafeMode(enabled)) => {
                 for node in self.nodes.iter() {
                     unsafe { (*node.processor.get()).set_safe_mode(*enabled); }
                 }
             }
-            nullherz_traits::Command::CommitTopology => {
+            Command::Core(CoreCommand::CommitTopology) => {
                 // First apply all buffered mutations to the inactive topology
                 for i in 0..self.pending_mutation_count {
                     if let Some(m) = self.pending_mutations[i].take() {
@@ -349,7 +350,7 @@ fn apply_command(&mut self, command: &nullherz_traits::Command) {
                 self.calculate_stages();
                 self.commit_graph();
             }
-            nullherz_traits::Command::Bundle { .. } => {
+            Command::Mixer(MixerCommand::Bundle { .. }) => {
                 // BUG-07: ProcessorGraph must not broadcast the Bundle itself,
                 // because CommandDispatcher already expanded it into individual SetParam calls.
                 // We do nothing here to avoid double-application.

@@ -1,36 +1,34 @@
-use nullherz_traits::Command;
-use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
+use nullherz_traits::Command;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ModulationMapping {
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct ModMapping {
     pub target_id: u64,
     pub param_id: u32,
     pub scaling: f32,
     pub ramp_duration_samples: u32,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Default)]
 pub struct ModulationMatrix {
-    pub mappings: HashMap<u32, Vec<ModulationMapping>>,
+    pub mappings: HashMap<u32, Vec<ModMapping>>,
 }
 
 impl ModulationMatrix {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            mappings: HashMap::new(),
+        }
     }
 
     pub fn add_mapping(&mut self, macro_id: u32, target_id: u64, param_id: u32, scaling: f32, ramp_duration_samples: u32) {
-        let mapping = ModulationMapping {
+        let entry = self.mappings.entry(macro_id).or_insert_with(Vec::new);
+        entry.push(ModMapping {
             target_id,
             param_id,
             scaling,
             ramp_duration_samples,
-        };
-        let mappings = self.mappings.entry(macro_id).or_default();
-        // Avoid duplicate mappings for same target/param
-        mappings.retain(|m| m.target_id != target_id || m.param_id != param_id);
-        mappings.push(mapping);
+        });
     }
 
     pub fn remove_mapping(&mut self, macro_id: u32, target_id: u64, param_id: u32) {
@@ -43,12 +41,12 @@ impl ModulationMatrix {
         let mut expanded = Vec::new();
         if let Some(mappings) = self.mappings.get(&macro_id) {
             for mapping in mappings {
-                expanded.push(Command::SetParam {
+                expanded.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                     target_id: mapping.target_id,
                     param_id: mapping.param_id,
                     value: value * mapping.scaling,
                     ramp_duration_samples: mapping.ramp_duration_samples,
-                });
+                }));
             }
         }
         expanded

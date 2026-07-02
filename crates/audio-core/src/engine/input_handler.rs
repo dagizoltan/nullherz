@@ -58,11 +58,12 @@ impl EngineInputHandler {
         sample_registry: &SampleRegistry,
         cmd: &Command,
     ) {
+        use nullherz_traits::ResourceCommand;
         match cmd {
-            Command::RegisterCapture { .. } => {
+            Command::Resource(ResourceCommand::RegisterCapture { .. }) => {
                 graph.apply_command(cmd);
             }
-            Command::AddSourceFromRegistry { granular_node_idx, sample_id } => {
+            Command::Resource(ResourceCommand::AddSourceFromRegistry { granular_node_idx, sample_id }) => {
                 if let Some(sample) = sample_registry.get(*sample_id) {
                     graph.apply_topology_mutation(TopologyMutation::AddSource {
                         node_idx: *granular_node_idx,

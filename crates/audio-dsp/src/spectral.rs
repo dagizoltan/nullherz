@@ -100,6 +100,13 @@ impl SpectralPipeline {
         {
             use crate::simd_vec::*;
             let mut i = 0;
+            while i + 16 <= n {
+                let v_in = load_f32x16(&self.in_buffer, i);
+                let v_win = load_f32x16(&self.window, i);
+                let v_res = v_in * v_win;
+                store_f32x16(&mut self.scratch_re, i, v_res);
+                i += 16;
+            }
             while i + 8 <= n {
                 let v_in = load_f32x8(&self.in_buffer, i);
                 let v_win = load_f32x8(&self.window, i);
@@ -137,8 +144,37 @@ impl SpectralPipeline {
         {
             use crate::simd_vec::*;
             use wide::*;
-            let v_norm = f32x8::from(norm);
+            let v_norm_16 = FloatX16::splat(norm);
             let mut i = 0;
+            while i + 16 <= n {
+                let v_re = load_f32x16(&self.scratch_re, i);
+                let v_win = load_f32x16(&self.window, i);
+                let v_val = (v_re * v_norm_16) * v_win;
+
+                #[cfg(target_feature = "avx512f")]
+                {
+                    let res: [f32; 16] = v_val.into();
+                    for (j, val) in res.iter().enumerate() {
+                        let target_ptr = (self.out_ptr + i + j) & mask;
+                        unsafe { *self.out_buffer.get_unchecked_mut(target_ptr) += *val; }
+                    }
+                }
+                #[cfg(not(target_feature = "avx512f"))]
+                {
+                    let res_low: [f32; 8] = v_val.low.into();
+                    let res_high: [f32; 8] = v_val.high.into();
+                    for (j, val) in res_low.iter().enumerate() {
+                        let target_ptr = (self.out_ptr + i + j) & mask;
+                        unsafe { *self.out_buffer.get_unchecked_mut(target_ptr) += *val; }
+                    }
+                    for (j, val) in res_high.iter().enumerate() {
+                        let target_ptr = (self.out_ptr + i + 8 + j) & mask;
+                        unsafe { *self.out_buffer.get_unchecked_mut(target_ptr) += *val; }
+                    }
+                }
+                i += 16;
+            }
+            let v_norm = f32x8::from(norm);
             while i + 8 <= n {
                 let v_re = load_f32x8(&self.scratch_re, i);
                 let v_win = load_f32x8(&self.window, i);

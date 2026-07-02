@@ -56,68 +56,56 @@ impl From<ProcessorTypeId> for u32 {
     }
 }
 
-/// Represents an action to be performed by the audio engine.
-/// Fixed-size strings are used to avoid heap allocations in the RT thread.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum Command {
+pub enum CoreCommand {
+    Play,
+    Stop,
+    SetSafeMode(bool),
+    RequestSnapshots,
+    CommitTopology,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum MixerCommand {
     SetParam {
-        /// Target ID (e.g. hash of a name or a fixed-size buffer)
         target_id: u64,
         param_id: u32,
         value: f32,
         ramp_duration_samples: u32,
     },
-    Play,
-    Stop,
-    UpdateEdge {
-        node_idx: u32,
-        input_idx: u32,
-        new_buffer_idx: u32,
-    },
-    UpdateOutputEdge {
-        node_idx: u32,
-        output_idx: u32,
-        new_buffer_idx: u32,
-    },
-    UpdateEdgeCrossfaded {
-        node_idx: u32,
-        input_idx: u32,
-        new_buffer_idx: u32,
-        duration_samples: u32,
-    },
-    SwapProcessor {
-        node_idx: u32,
-        processor_type_id: ProcessorTypeId,
-    },
     Bundle {
-        // Flat array of parameter updates: [node_id, param_id, value_bits, ...]
         count: u32,
-        data: [u64; 12], // Supports up to 4 bundled SetParam commands
+        data: [u64; 12],
     },
-    AddNode {
-        processor_type_id: ProcessorTypeId,
-        node_idx: u32,
+    SetMacro {
+        macro_id: u32,
+        value: f32,
     },
-    CommitTopology,
-    SetSafeMode(bool),
-    RequestSnapshots,
+    AddModMapping {
+        macro_id: u32,
+        target_id: u64,
+        param_id: u32,
+        scaling: f32,
+        ramp_duration_samples: u32,
+    },
+    RemoveModMapping {
+        macro_id: u32,
+        target_id: u64,
+        param_id: u32,
+    },
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum PerformanceCommand {
     SetSequencerStep {
         node_idx: u32,
         track: u32,
         step: u32,
         value: bool,
     },
-    // Transfusion-specific commands
-    RegisterCapture {
-        capture_node_idx: u32,
-        sample_id: u64,
-    },
-    AddSourceFromRegistry {
-        granular_node_idx: u32,
-        sample_id: u64,
-    },
-    // DJ specific performance commands
     JumpToHotCue {
         node_idx: u32,
         cue_idx: u32,
@@ -140,30 +128,41 @@ pub enum Command {
         node_idx: u32,
         slice_idx: u32,
     },
-    // Macro Modulation Commands
-    SetMacro {
-        macro_id: u32,
-        value: f32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum ResourceCommand {
+    RegisterCapture {
+        capture_node_idx: u32,
+        sample_id: u64,
     },
-    AddModMapping {
-        macro_id: u32,
-        target_id: u64,
-        param_id: u32,
-        scaling: f32,
-        ramp_duration_samples: u32,
+    AddSourceFromRegistry {
+        granular_node_idx: u32,
+        sample_id: u64,
     },
-    RemoveModMapping {
-        macro_id: u32,
-        target_id: u64,
-        param_id: u32,
-    },
-    /// Domain-specific extension command (AnaWaves Stage 2)
-    Extension {
-        domain_id: u32,
-        target_id: u64,
-        opcode: u32,
-        data: [u8; 16],
-    },
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct OpaqueEnvelope {
+    pub domain_id: u32,
+    pub target_id: u64,
+    pub opcode: u32,
+    pub data: [u8; 32],
+}
+
+/// Represents an action to be performed by the audio engine.
+/// Refactored into a modular hierarchy to ensure ABI stability and decoupling.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum Command {
+    Core(CoreCommand),
+    Mixer(MixerCommand),
+    Performance(PerformanceCommand),
+    Topology(TopologyCommand),
+    Resource(ResourceCommand),
+    Extension(OpaqueEnvelope),
 }
 
 #[repr(C)]
@@ -669,7 +668,7 @@ impl Command {
             let target_id = data[i * 3];
             let param_id = data[i * 3 + 1] as u32;
             let value = f32::from_bits(data[i * 3 + 2] as u32);
-            commands.push(Command::SetParam { target_id, param_id, value, ramp_duration_samples: 0 });
+            commands.push(Command::Mixer(MixerCommand::SetParam { target_id, param_id, value, ramp_duration_samples: 0 }));
         }
         commands
     }

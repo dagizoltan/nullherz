@@ -44,7 +44,7 @@ As we capture and analyze user tracks, data privacy is paramount.
 ---
 
 ## 6. Pre-Implementation Audit Items
-- [ ] Finalize "Sound DNA" bit-layout (RFC Complete).
+- [x] Finalize "Sound DNA" bit-layout (RFC Complete).
 - [ ] Select initial commercial license (EULA vs GPL/MIT for sidecars).
 - [ ] Benchmark "distributed DSP" latency over local 10Gbe.
 

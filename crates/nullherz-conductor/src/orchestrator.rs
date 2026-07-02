@@ -136,7 +136,7 @@ impl Conductor {
             if let Some(ref prod) = self.engine_coordinator.command_producer {
                 let _ = prod.push_command(nullherz_traits::TimestampedCommand {
                     timestamp_samples: 0,
-                    command: nullherz_traits::Command::SetSafeMode(true),
+                    command: nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetSafeMode(true)),
                 });
             }
         }
@@ -283,10 +283,10 @@ impl Conductor {
 
         // 1. Reconstruct Nodes
         for node in &state.nodes {
-            let cmd = nullherz_traits::Command::AddNode {
+            let cmd = nullherz_traits::Command::Topology(nullherz_traits::TopologyCommand::AddNode {
                 processor_type_id: node.type_id.into(),
                 node_idx: node.id,
-            };
+            });
             self.topology_manager.handle_topology_command(&cmd);
 
             // Apply parameters
@@ -294,33 +294,32 @@ impl Conductor {
                 for (param_id, value) in &node.params {
                     let _ = prod.push_command(nullherz_traits::TimestampedCommand {
                         timestamp_samples: 0,
-                        command: nullherz_traits::Command::SetParam {
+                        command: nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                             target_id: node.id as u64,
                             param_id: *param_id,
                             value: *value,
-                            ramp_duration_samples: 0,
-                        },
-                    });
+                            ramp_duration_samples: 0 }) });
+
                 }
             }
         }
 
         // 2. Reconstruct Edges
         for edge in &state.edges {
-            let cmd = nullherz_traits::Command::UpdateEdge {
+            let cmd = nullherz_traits::Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge {
                 node_idx: edge.node_idx,
                 input_idx: edge.input_idx,
-                new_buffer_idx: edge.buffer_idx,
-            };
+                new_buffer_idx: edge.buffer_idx });
+
             self.topology_manager.handle_topology_command(&cmd);
         }
 
         for edge in &state.output_edges {
-            let cmd = nullherz_traits::Command::UpdateOutputEdge {
+            let cmd = nullherz_traits::Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge {
                 node_idx: edge.node_idx,
                 output_idx: edge.output_idx,
-                new_buffer_idx: edge.buffer_idx,
-            };
+                new_buffer_idx: edge.buffer_idx });
+
             self.topology_manager.handle_topology_command(&cmd);
         }
 
@@ -344,13 +343,13 @@ impl Conductor {
         if let Some(ref mut prod) = self.engine_coordinator.command_producer {
             let _ = prod.push_command(nullherz_traits::TimestampedCommand {
                 timestamp_samples: 0,
-                command: if state.transport_playing { nullherz_traits::Command::Play } else { nullherz_traits::Command::Stop },
+                command: if state.transport_playing { nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Play) } else { nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop) },
             });
             // BPM is handled via MixerBridge timeline updates, but we should ensure the UI/Gateway is updated.
         }
 
         // 5. Commit Topology
-        self.topology_manager.handle_topology_command(&nullherz_traits::Command::CommitTopology);
+        self.topology_manager.handle_topology_command(&nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology));
 
         Ok(())
     }

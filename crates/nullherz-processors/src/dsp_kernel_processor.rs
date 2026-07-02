@@ -38,7 +38,7 @@ fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u3
         self.kernel.get_parameter(param_id)
     }
 fn apply_command(&mut self, command: &ProcessorCommand) {
-        if let Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command
+        if let Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, ramp_duration_samples }) = *command
             && target_id == self.id {
                 self.set_parameter(param_id, value, ramp_duration_samples);
             }
@@ -93,7 +93,7 @@ fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u3
         if !self.kernels.is_empty() { self.kernels[0].get_parameter(param_id) } else { 0.0 }
     }
 fn apply_command(&mut self, command: &ProcessorCommand) {
-        if let Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command
+        if let Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, ramp_duration_samples }) = *command
             && target_id == self.id {
                 self.set_parameter(param_id, value, ramp_duration_samples);
             }

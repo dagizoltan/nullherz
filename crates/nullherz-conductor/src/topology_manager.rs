@@ -48,7 +48,7 @@ impl TopologyManager {
         let sr = self.current_sample_rate;
 
         match *cmd {
-            Command::AddNode { processor_type_id, node_idx } => {
+            Command::Topology(nullherz_traits::TopologyCommand::AddNode {  processor_type_id, node_idx }) => {
                 if let Some(processor) = self.registry.create_by_id(processor_type_id.0, node_idx, sr) {
                     self.active_node_types.insert(node_idx, processor_type_id.0);
                     let idx = node_idx as usize;
@@ -63,14 +63,14 @@ impl TopologyManager {
                     return true;
                 }
             }
-            Command::SwapProcessor { node_idx, processor_type_id } => {
+            Command::Topology(nullherz_traits::TopologyCommand::SwapProcessor {  node_idx, processor_type_id }) => {
                 if let Some(processor) = self.registry.create_by_id(processor_type_id.0, node_idx, sr) {
                     self.active_node_types.insert(node_idx, processor_type_id.0);
                     let _ = prod.push(TopologyMutation::SwapProcessor { node_idx, processor });
                     return true;
                 }
             }
-            Command::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
+            Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge {   node_idx, input_idx, new_buffer_idx }) => {
                 let n_idx = node_idx as usize;
                 let i_idx = input_idx as usize;
                 if n_idx < nullherz_traits::MAX_NODES && i_idx < nullherz_traits::MAX_CHANNELS {
@@ -82,7 +82,7 @@ impl TopologyManager {
                 let _ = prod.push(TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx });
                 return true;
             }
-            Command::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
+            Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge {   node_idx, output_idx, new_buffer_idx }) => {
                 let n_idx = node_idx as usize;
                 let o_idx = output_idx as usize;
                 if n_idx < nullherz_traits::MAX_NODES && o_idx < nullherz_traits::MAX_CHANNELS {
@@ -94,7 +94,7 @@ impl TopologyManager {
                 let _ = prod.push(TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx });
                 return true;
             }
-            Command::CommitTopology => {
+            Command::Core(nullherz_traits::CoreCommand::CommitTopology) => {
                 // RT-2: Off-thread compilation
                 if let Ok(plan) = GraphCompiler::compile(&self.current_topology) {
                     self.current_topology.plan = plan;

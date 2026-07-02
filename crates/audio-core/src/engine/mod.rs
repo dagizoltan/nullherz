@@ -33,9 +33,10 @@ impl nullherz_traits::Host for EngineHost {
     }
 
     fn request_registration(&self, capture_node_idx: u32, sample_id: u64) {
+        use nullherz_traits::{Command, ResourceCommand};
         let _ = self.command_producer.push_command(TimestampedCommand {
             timestamp_samples: 0, // ASAP
-            command: nullherz_traits::Command::RegisterCapture { capture_node_idx, sample_id },
+            command: Command::Resource(ResourceCommand::RegisterCapture { capture_node_idx, sample_id }),
         });
     }
 }
