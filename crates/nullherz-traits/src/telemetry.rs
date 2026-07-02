@@ -11,6 +11,8 @@ pub struct Telemetry {
     pub sample_counter: u64,
     pub xrun_count: u32,
     pub resource_leaks: u64,
+    pub bpm: f32,
+    pub beat_position: f64,
     #[serde(with = "BigArray")]
     pub node_times_ns: [u64; MAX_NODES],
     #[serde(with = "BigArray")]

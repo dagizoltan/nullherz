@@ -42,6 +42,7 @@ impl ProcessorTypeId {
     pub const DJ_ISOLATOR: Self = Self(120);
     pub const SIMD_BIQUAD: Self = Self(130);
     pub const KEY_SYNC: Self = Self(140);
+    pub const PERSONALITY_INHERITANCE: Self = Self(150);
 }
 
 impl From<u32> for ProcessorTypeId {
@@ -494,7 +495,7 @@ pub struct SpectralPersonality {
     /// Spectral slope/tilt
     pub tilt: f32,
     /// Top 5 resonant peaks: (Freq, Q, Gain)
-    pub formant_peaks: [(f32, f32, f32); 5],
+    pub formant_peaks: [(f32, u16, u16); 5],
 }
 
 impl Default for SpectralPersonality {
@@ -503,7 +504,7 @@ impl Default for SpectralPersonality {
             energy_map: [0; 64],
             harmonicity: [0; 8],
             tilt: 0.0,
-            formant_peaks: [(0.0, 0.0, 0.0); 5],
+            formant_peaks: [(0.0, 0, 0); 5],
         }
     }
 }
@@ -515,7 +516,7 @@ pub struct RhythmicDNA {
     /// Measure of rhythmic complexity
     pub syncopation_index: f32,
     /// Deviation profile from absolute grid (Early/Late bias)
-    pub micro_timing: [i8; 12],
+    pub micro_timing: [i16; 12],
 }
 
 impl Default for RhythmicDNA {

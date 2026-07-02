@@ -255,6 +255,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             &self.fft_plan,
             &mut self.fft_re,
             &mut self.fft_im,
+            &self.transport,
         );
 
         // Black-Box Flight Recorder (RT-Safe SPSC push)
