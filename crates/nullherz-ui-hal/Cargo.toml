@@ -1,0 +1,10 @@
+[package]
+name = "nullherz-ui-hal"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+egui = "0.27"
+nullherz-traits = { path = "../nullherz-traits" }
+wgpu = "0.19"
+raw-window-handle = "0.6"

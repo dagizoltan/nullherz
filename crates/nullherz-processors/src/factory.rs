@@ -142,3 +142,11 @@ impl ProcessorFactory for KeySyncFactory {
     }
     fn name(&self) -> &'static str { "KeySync" }
 }
+
+pub struct PersonalityInheritanceFactory;
+impl ProcessorFactory for PersonalityInheritanceFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(PersonalityInheritanceProcessor::new(node_idx as u64, 1024)))
+    }
+    fn name(&self) -> &'static str { "PersonalityInheritance" }
+}

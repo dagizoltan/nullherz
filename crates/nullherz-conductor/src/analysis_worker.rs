@@ -243,19 +243,36 @@ impl AnalysisWorker {
             dna.spectral.tilt = tilt_sum / total_energy.max(1e-6);
         }
 
-        // 2. Rhythmic DNA (Onset Mask)
+        // 2. Rhythmic DNA (Onset Mask & Syncopation)
         let transients = self.detect_transients(buffer);
         if !transients.is_empty() {
             let total_len = buffer.len() as f32;
+            let mut steps = [false; 64];
             for &t in &transients {
                 let pos_norm = t as f32 / total_len;
                 let step = (pos_norm * 64.0) as usize;
                 if step < 64 {
-                    let u64_idx = step / 16; // 4 u64s to cover 64 steps
-                    let bit_idx = step % 16;
-                    dna.rhythmic.onset_mask[u64_idx] |= 1 << bit_idx;
+                    steps[step] = true;
+                    let u64_idx = step / 64;
+                    let bit_idx = step % 64;
+                    if u64_idx < 4 {
+                        dna.rhythmic.onset_mask[u64_idx] |= 1 << bit_idx;
+                    }
                 }
             }
+
+            // Syncopation Index Calculation (LHL algorithm approximation)
+            let mut syncopation = 0.0;
+            let weights = [0, 4, 2, 4, 1, 4, 2, 4, 0, 4, 2, 4, 1, 4, 2, 4]; // Simplified 16-step weights
+            for i in 0..64 {
+                if steps[i] {
+                    let next = (i + 1) % 64;
+                    if !steps[next] {
+                        syncopation += weights[i % 16] as f32;
+                    }
+                }
+            }
+            dna.rhythmic.syncopation_index = syncopation / 64.0;
         }
 
         dna

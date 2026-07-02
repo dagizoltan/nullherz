@@ -41,6 +41,7 @@ impl ProcessorRegistry {
         self.register_with_type(ProcessorTypeId::DJ_ISOLATOR, Box::new(DjIsolatorFactory));
         self.register_with_type(ProcessorTypeId::SIMD_BIQUAD, Box::new(SimdBiquadFactory));
         self.register_with_type(ProcessorTypeId::KEY_SYNC, Box::new(KeySyncFactory));
+        self.register_with_type(ProcessorTypeId::PERSONALITY_INHERITANCE, Box::new(PersonalityInheritanceFactory));
     }
 
     pub fn register(&mut self, id: u32, factory: Box<dyn ProcessorFactory>) {
