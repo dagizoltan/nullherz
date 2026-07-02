@@ -67,10 +67,10 @@ fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 fn apply_command(&mut self, command: &Command) {
         match command {
-            Command::Stop => {
+            nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop) => {
                 self.is_frozen.store(true, Ordering::Release);
             }
-            Command::Play => {
+            nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Play) => {
                 self.is_frozen.store(false, Ordering::Release);
             }
             _ => {}

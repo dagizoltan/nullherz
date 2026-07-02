@@ -8,32 +8,33 @@ impl CommandDispatcher {
         graph: &mut dyn AudioProcessor,
         cmd: &nullherz_traits::Command,
     ) {
+        use nullherz_traits::{Command, CoreCommand, MixerCommand, TopologyCommand};
         match cmd {
-            nullherz_traits::Command::Play => {
+            Command::Core(CoreCommand::Play) => {
                 if !transport.is_playing {
                     transport.is_playing = true;
                     graph.apply_command(cmd);
                 }
             }
-            nullherz_traits::Command::Stop => {
+            Command::Core(CoreCommand::Stop) => {
                 if transport.is_playing {
                     transport.is_playing = false;
                     graph.apply_command(cmd);
                 }
             }
-            nullherz_traits::Command::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
+            Command::Topology(TopologyCommand::UpdateEdge { node_idx, input_idx, new_buffer_idx }) => {
                 Self::apply_topology_update(graph, *node_idx, Some(*input_idx), None, *new_buffer_idx);
             }
-            nullherz_traits::Command::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
+            Command::Topology(TopologyCommand::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx }) => {
                 Self::apply_topology_update(graph, *node_idx, None, Some(*output_idx), *new_buffer_idx);
             }
-            nullherz_traits::Command::CommitTopology => {
+            Command::Core(CoreCommand::CommitTopology) => {
                 Self::commit_topology(graph);
             }
-            nullherz_traits::Command::Bundle { count, data } => {
+            Command::Mixer(MixerCommand::Bundle { count, data }) => {
                 Self::handle_bundle_command(graph, *count, *data);
             }
-            nullherz_traits::Command::AddNode { .. } | nullherz_traits::Command::SwapProcessor { .. } => {
+            Command::Topology(TopologyCommand::AddNode { .. }) | Command::Topology(TopologyCommand::SwapProcessor { .. }) => {
                 // Ignore structural mutations in RT command loop.
             }
             _ => { graph.apply_command(cmd); }
@@ -57,7 +58,8 @@ impl CommandDispatcher {
     }
 
     fn commit_topology(graph: &mut dyn AudioProcessor) {
-        graph.apply_command(&nullherz_traits::Command::CommitTopology);
+        use nullherz_traits::{Command, CoreCommand};
+        graph.apply_command(&Command::Core(CoreCommand::CommitTopology));
     }
 
     fn handle_bundle_command(graph: &mut dyn AudioProcessor, count: u32, data: [u64; 12]) {

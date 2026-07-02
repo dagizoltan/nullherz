@@ -38,12 +38,12 @@ fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]], context: &
         let is_mod_needed = (val - self.last_sent_value).abs() > MODULATION_THRESHOLD || self.last_sent_value.is_nan();
         if is_mod_needed
             && let Some(host) = context.host {
-                host.push_command(0, nullherz_traits::Command::SetParam {
+                host.push_command(0, nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                     target_id: self.target_id,
                     param_id: self.param_id,
                     value: val,
                     ramp_duration_samples: 32,
-                });
+                }));
                 self.last_sent_value = val;
             }
     }

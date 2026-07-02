@@ -70,12 +70,12 @@ impl ConformanceSuite {
         for &val in &values {
             processor.reset();
             processor.set_parameter(param_id, val, 0);
-            processor.apply_command(&crate::ProcessorCommand::SetParam {
+            processor.apply_command(&crate::Command::Mixer(crate::MixerCommand::SetParam {
                 target_id: 0,
                 param_id,
                 value: val,
                 ramp_duration_samples: 0,
-            });
+            }));
 
             let inputs = [ &input[..] ];
             let mut outputs = [ &mut output[..] ];
@@ -236,12 +236,12 @@ impl ConformanceSuite {
 
         for (i, val) in input.iter_mut().enumerate() { *val = i as f32 * 0.01; }
 
-        processor.apply_command(&crate::ProcessorCommand::SetParam {
+        processor.apply_command(&crate::Command::Mixer(crate::MixerCommand::SetParam {
             target_id: 0,
             param_id: 999, // Reserved for bypass in our convention
             value: 1.0,
             ramp_duration_samples: 0,
-        });
+        }));
 
         let inputs = [ &input[..] ];
         let mut outputs = [ &mut output[..] ];
@@ -349,20 +349,20 @@ impl ConformanceSuite {
         let mut output = vec![0.0f32; block_size];
 
         // 1. Initial state
-        processor.apply_command(&crate::ProcessorCommand::SetParam {
+        processor.apply_command(&crate::Command::Mixer(crate::MixerCommand::SetParam {
             target_id: 0,
             param_id,
             value: 0.0,
             ramp_duration_samples: 0,
-        });
+        }));
 
         // 2. Start ramp to 1.0 over the block size
-        processor.apply_command(&crate::ProcessorCommand::SetParam {
+        processor.apply_command(&crate::Command::Mixer(crate::MixerCommand::SetParam {
             target_id: 0,
             param_id,
             value: 1.0,
             ramp_duration_samples: block_size as u32,
-        });
+        }));
 
         let inputs = [ &input[..] ];
         let mut outputs = [ &mut output[..] ];
@@ -566,8 +566,8 @@ impl crate::SnapshotProvider for MockProcessor { }
 impl AudioProcessor for MockProcessor {
 fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-fn apply_command(&mut self, command: &crate::ProcessorCommand) {
-        if let crate::ProcessorCommand::SetParam { param_id, value, .. } = command {
+fn apply_command(&mut self, command: &crate::Command) {
+        if let crate::Command::Mixer(crate::MixerCommand::SetParam { param_id, value, .. }) = command {
             self.last_param_id = *param_id;
             self.last_param_value = *value;
         }
@@ -687,7 +687,7 @@ mod tests {
         let mut mock = MockProcessor::new();
 
         // Command at sample 100
-        let commands = vec![(100, crate::ProcessorCommand::SetParam { target_id: 0, param_id: 1, value: 0.5, ramp_duration_samples: 0 })];
+        let commands = vec![(100, crate::Command::Mixer(crate::MixerCommand::SetParam { target_id: 0, param_id: 1, value: 0.5, ramp_duration_samples: 0 }))];
 
         // Process first block (128 samples)
         host.process_with_commands(&mut mock, 128, &commands);
@@ -723,7 +723,7 @@ impl VirtualClockHost {
         &mut self,
         processor: &mut P,
         num_samples: usize,
-        commands: &[(u64, crate::ProcessorCommand)],
+        commands: &[(u64, crate::Command)],
     ) {
         let mut iter = crate::SubBlockIterator::new(num_samples, crate::MAX_BLOCK_SIZE);
         let block_start = self.sample_counter;

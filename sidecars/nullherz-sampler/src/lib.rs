@@ -71,7 +71,7 @@ impl AudioProcessor for SamplerSidecar {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
     fn apply_command(&mut self, cmd: &nullherz_traits::Command) {
-        if let nullherz_traits::Command::Play = cmd {
+        if let nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Play) = cmd {
             self.trigger(0, 0);
         }
     }

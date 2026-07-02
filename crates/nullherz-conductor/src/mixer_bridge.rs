@@ -33,14 +33,14 @@ impl MixerBridge {
             }
 
             match cmd {
-                Command::SetMacro { macro_id, value } => {
+                Command::Mixer(nullherz_traits::MixerCommand::SetMacro { macro_id, value }) => {
                     let expanded = modulation_matrix.expand_macro(macro_id, value);
                     bundle.extend(expanded);
                 }
-                Command::AddModMapping { macro_id, target_id, param_id, scaling, ramp_duration_samples } => {
+                Command::Mixer(nullherz_traits::MixerCommand::AddModMapping { macro_id, target_id, param_id, scaling, ramp_duration_samples }) => {
                     modulation_matrix.add_mapping(macro_id, target_id, param_id, scaling, ramp_duration_samples);
                 }
-                Command::RemoveModMapping { macro_id, target_id, param_id } => {
+                Command::Mixer(nullherz_traits::MixerCommand::RemoveModMapping { macro_id, target_id, param_id }) => {
                     modulation_matrix.remove_mapping(macro_id, target_id, param_id);
                 }
                 _ => {

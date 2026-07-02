@@ -28,7 +28,7 @@ impl MidiMapper {
                         if trigger.note_number == event.data1 {
                             match &trigger.target {
                                 MidiTarget::Command(cmd) => commands.push(*cmd),
-                                _ => {} // Triggers primarily target commands (Play/Stop/Jump)
+                                _ => {}
                             }
                         }
                     }
@@ -42,18 +42,18 @@ impl MidiMapper {
 
                         match &ctrl.target {
                             MidiTarget::Param { target_id, param_id } => {
-                                commands.push(Command::SetParam {
+                                commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                     target_id: *target_id,
                                     param_id: *param_id,
                                     value: target_val,
-                                    ramp_duration_samples: 128, // Default smoothing for CC
-                                });
+                                    ramp_duration_samples: 128
+                                }));
                             }
                             MidiTarget::Macro { macro_id } => {
-                                commands.push(Command::SetMacro {
+                                commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetMacro {
                                     macro_id: *macro_id,
-                                    value: target_val,
-                                });
+                                    value: target_val
+                                }));
                             }
                             _ => {}
                         }

@@ -47,7 +47,7 @@ fn test_sampler_slicer_offsets() {
     };
 
     // Trigger slice 4 via Command
-    sampler.apply_command(&Command::TriggerSlice { node_idx: 0, slice_idx: 4 });
+    sampler.apply_command(&Command::Performance(nullherz_traits::PerformanceCommand::TriggerSlice { node_idx: 0, slice_idx: 4 }));
 
     // Offset should be: slice_idx(4) * grid(0.25) * samples_per_beat(22050) = 1.0 * 22050 = 22050
     let samples_per_beat = 22050.0;
@@ -58,7 +58,7 @@ fn test_sampler_slicer_offsets() {
 
     // Now test with context
     sampler.reset();
-    sampler.apply_command_with_context(&Command::TriggerSlice { node_idx: 0, slice_idx: 8 }, Some(&context));
+    sampler.apply_command_with_context(&Command::Performance(nullherz_traits::PerformanceCommand::TriggerSlice { node_idx: 0, slice_idx: 8 }), Some(&context));
     let active_voice = sampler.voices.iter().find(|v| v.is_active).expect("No active voice after trigger");
     assert_eq!(active_voice.play_head, 8.0 * 0.25 * samples_per_beat as f32);
     assert_eq!(active_voice.trigger_beat, 1.0);
@@ -108,7 +108,7 @@ fn test_sampler_slicer_phase_lock() {
         is_last_sub_block: true,
     };
 
-    sampler.apply_command_with_context(&Command::TriggerSlice { node_idx: 0, slice_idx: 0 }, Some(&context));
+    sampler.apply_command_with_context(&Command::Performance(nullherz_traits::PerformanceCommand::TriggerSlice { node_idx: 0, slice_idx: 0 }), Some(&context));
 
     // Initial state: play_head = 0.0, trigger_beat = 1.0
     // Simulate drift: move playhead to 100.0

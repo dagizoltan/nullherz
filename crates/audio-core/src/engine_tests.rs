@@ -116,9 +116,9 @@ mod tests {
             commands in prop::collection::vec(
                 prop_oneof![
                     (0..100u64, 0..10u32, 0.0f32..1.0f32).prop_map(|(target, param, val)|
-                        Command::SetParam { target_id: target, param_id: param, value: val, ramp_duration_samples: 0 }
-                    ),
-                    prop_oneof![Just(Command::Play), Just(Command::Stop)],
+                        Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id: target, param_id: param, value: val, ramp_duration_samples: 0 })),
+                    Just(Command::Core(nullherz_traits::CoreCommand::Play)),
+                    Just(Command::Core(nullherz_traits::CoreCommand::Stop)),
                 ],
                 1..20
             )
@@ -188,7 +188,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         // Push a command at sample 50
         let _ = cmd_buffer.push(TimestampedCommand {
             timestamp_samples: 50,
-            command: Command::Play,
+            command: Command::Core(nullherz_traits::CoreCommand::Play),
         });
 
         let resources = crate::engine::EngineResources {
@@ -291,7 +291,7 @@ impl AudioProcessor for ParamMockProcessor {
 fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 fn apply_command(&mut self, cmd: &Command) {
-                if let Command::SetParam { target_id, value, .. } = cmd {
+                if let Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, value, .. }) = cmd {
                     if *target_id == self.id {
                         self.param_value = *value;
                         self.apply_count += 1;
@@ -313,7 +313,7 @@ fn apply_command(&mut self, cmd: &Command) {
 
         let _ = cmd_buffer.push(TimestampedCommand {
             timestamp_samples: 0,
-            command: Command::Bundle { count: 1, data: bundle_data },
+            command: Command::Mixer(nullherz_traits::MixerCommand::Bundle { count: 1, data: bundle_data }),
         });
 
         let resources = crate::engine::EngineResources {

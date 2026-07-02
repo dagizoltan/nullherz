@@ -69,7 +69,7 @@ fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &
                         if pattern.grid[track][step_idx] {
                             host.push_command(
                                 self.current_sample + sample_offset.min(block_len - 1),
-                                nullherz_traits::Command::Play,
+                                nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Play),
                             );
                         }
                     }
@@ -88,7 +88,7 @@ impl nullherz_traits::SnapshotProvider for SequencerProcessor { }
 impl AudioProcessor for SequencerProcessor {
 fn apply_command(&mut self, command: &nullherz_traits::Command) {
         #[allow(clippy::collapsible_if)]
-        if let nullherz_traits::Command::SetSequencerStep { node_idx, track, step, value } = command {
+        if let nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::SetSequencerStep { node_idx, track, step, value }) = command {
             if *node_idx == self.id && *track < 16 && *step < 64 {
                 self.patterns[self.active_pattern].grid[*track as usize][*step as usize] = *value;
             }

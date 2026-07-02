@@ -209,8 +209,9 @@ fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
 
 impl SamplerProcessor {
     pub fn apply_command_with_context(&mut self, command: &nullherz_traits::ProcessorCommand, context: Option<&nullherz_traits::ProcessContext>) {
+        use nullherz_traits::{Command, PerformanceCommand};
         match *command {
-            nullherz_traits::Command::JumpToHotCue { node_idx: _, cue_idx } => {
+            Command::Performance(PerformanceCommand::JumpToHotCue { node_idx: _, cue_idx }) => {
                 let offset = if let Some(ref metadata) = self.metadata {
                     metadata.hot_cues.get(cue_idx as usize).and_then(|&c| c)
                         .unwrap_or((cue_idx as f32 * 0.1 * self.sample_buffer.len() as f32) as u64)
@@ -237,10 +238,10 @@ impl SamplerProcessor {
                     }
                 }
             }
-            nullherz_traits::Command::TriggerSlice { node_idx: _, slice_idx } => {
+            Command::Performance(PerformanceCommand::TriggerSlice { node_idx: _, slice_idx }) => {
                 self.trigger_slice(slice_idx, context);
             }
-            nullherz_traits::Command::JumpByBeats { node_idx: _, beats } => {
+            Command::Performance(PerformanceCommand::JumpByBeats { node_idx: _, beats }) => {
                 if let (Some(ctx), Some(meta)) = (context, &self.metadata)
                     && let Some(transport) = ctx.transport
                         && meta.bpm > 0.0 {
@@ -262,14 +263,14 @@ impl SamplerProcessor {
                             }
                         }
             }
-            nullherz_traits::Command::SetLoop { node_idx: _, enabled, start_samples, end_samples } => {
+            Command::Performance(PerformanceCommand::SetLoop { node_idx: _, enabled, start_samples, end_samples }) => {
                 for voice in self.voices.iter_mut() {
                     voice.loop_enabled = enabled;
                     voice.loop_start = start_samples;
                     voice.loop_end = end_samples;
                 }
             }
-            nullherz_traits::Command::SetSlipMode { node_idx: _, enabled } => {
+            Command::Performance(PerformanceCommand::SetSlipMode { node_idx: _, enabled }) => {
                 for voice in self.voices.iter_mut() {
                     voice.slip_enabled = enabled;
                     if !enabled {

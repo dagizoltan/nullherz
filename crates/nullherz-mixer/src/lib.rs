@@ -39,7 +39,7 @@ impl MixerManager {
         let mut commands = Vec::new();
         let cf_id = self.id_allocator.allocate_node_id();
         println!("Creating Master Crossfader (Node {})", cf_id);
-        commands.push(Command::AddNode { node_idx: cf_id, processor_type_id: ProcessorTypeId::CROSSFADER });
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: cf_id, processor_type_id: ProcessorTypeId::CROSSFADER }));
         commands
     }
 
@@ -60,51 +60,51 @@ impl MixerManager {
         let xf_out_r = self.id_allocator.allocate_buffer_id(1);
 
         // Left Path
-        commands.push(Command::AddNode { node_idx: xf_l_id, processor_type_id: ProcessorTypeId::CROSSFADER });
-        commands.push(Command::UpdateEdge { node_idx: xf_l_id, input_idx: 0, new_buffer_idx: self.config.dj_a_l as u32 });
-        commands.push(Command::UpdateEdge { node_idx: xf_l_id, input_idx: 1, new_buffer_idx: self.config.dj_b_l as u32 });
-        commands.push(Command::UpdateOutputEdge { node_idx: xf_l_id, output_idx: 0, new_buffer_idx: xf_out_l });
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: xf_l_id, processor_type_id: ProcessorTypeId::CROSSFADER }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: xf_l_id, input_idx: 0, new_buffer_idx: self.config.dj_a_l as u32 }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: xf_l_id, input_idx: 1, new_buffer_idx: self.config.dj_b_l as u32 }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: xf_l_id, output_idx: 0, new_buffer_idx: xf_out_l }));
 
         // Right Path
-        commands.push(Command::AddNode { node_idx: xf_r_id, processor_type_id: ProcessorTypeId::CROSSFADER });
-        commands.push(Command::UpdateEdge { node_idx: xf_r_id, input_idx: 0, new_buffer_idx: self.config.dj_a_r as u32 });
-        commands.push(Command::UpdateEdge { node_idx: xf_r_id, input_idx: 1, new_buffer_idx: self.config.dj_b_r as u32 });
-        commands.push(Command::UpdateOutputEdge { node_idx: xf_r_id, output_idx: 0, new_buffer_idx: xf_out_r });
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: xf_r_id, processor_type_id: ProcessorTypeId::CROSSFADER }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: xf_r_id, input_idx: 0, new_buffer_idx: self.config.dj_a_r as u32 }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: xf_r_id, input_idx: 1, new_buffer_idx: self.config.dj_b_r as u32 }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: xf_r_id, output_idx: 0, new_buffer_idx: xf_out_r }));
 
         // Summing to FX Chain
         let sum_id = self.id_allocator.allocate_node_id();
         let sum_out_l = self.id_allocator.allocate_buffer_id(1);
         let sum_out_r = self.id_allocator.allocate_buffer_id(1);
 
-        commands.push(Command::AddNode { node_idx: sum_id, processor_type_id: ProcessorTypeId::SUMMING });
-        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 0, new_buffer_idx: xf_out_l });
-        commands.push(Command::UpdateEdge { node_idx: sum_id, input_idx: 1, new_buffer_idx: xf_out_r });
-        commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 0, new_buffer_idx: sum_out_l });
-        commands.push(Command::UpdateOutputEdge { node_idx: sum_id, output_idx: 1, new_buffer_idx: sum_out_r });
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: sum_id, processor_type_id: ProcessorTypeId::SUMMING }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: sum_id, input_idx: 0, new_buffer_idx: xf_out_l }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: sum_id, input_idx: 1, new_buffer_idx: xf_out_r }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: sum_id, output_idx: 0, new_buffer_idx: sum_out_l }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: sum_id, output_idx: 1, new_buffer_idx: sum_out_r }));
 
         // --- MASTER FX CHAIN ---
 
         // 1. Master EQ (Biquad)
         let eq_id = self.id_allocator.allocate_node_id();
         let eq_out_l = self.id_allocator.allocate_buffer_id(1);
-        commands.push(Command::AddNode { node_idx: eq_id, processor_type_id: ProcessorTypeId::BIQUAD });
-        commands.push(Command::UpdateEdge { node_idx: eq_id, input_idx: 0, new_buffer_idx: sum_out_l });
-        commands.push(Command::UpdateOutputEdge { node_idx: eq_id, output_idx: 0, new_buffer_idx: eq_out_l });
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: eq_id, processor_type_id: ProcessorTypeId::BIQUAD }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: eq_id, input_idx: 0, new_buffer_idx: sum_out_l }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: eq_id, output_idx: 0, new_buffer_idx: eq_out_l }));
 
         // 2. Master Compressor (Envelope Follower)
         let comp_id = self.id_allocator.allocate_node_id();
         let comp_out_l = self.id_allocator.allocate_buffer_id(1);
-        commands.push(Command::AddNode { node_idx: comp_id, processor_type_id: ProcessorTypeId::ENVELOPE_FOLLOWER });
-        commands.push(Command::UpdateEdge { node_idx: comp_id, input_idx: 0, new_buffer_idx: eq_out_l });
-        commands.push(Command::UpdateOutputEdge { node_idx: comp_id, output_idx: 0, new_buffer_idx: comp_out_l });
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: comp_id, processor_type_id: ProcessorTypeId::ENVELOPE_FOLLOWER }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: comp_id, input_idx: 0, new_buffer_idx: eq_out_l }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: comp_id, output_idx: 0, new_buffer_idx: comp_out_l }));
 
         // 3. Master Limiter/Gain
         let lim_id = self.id_allocator.allocate_node_id();
-        commands.push(Command::AddNode { node_idx: lim_id, processor_type_id: ProcessorTypeId::GAIN });
-        commands.push(Command::UpdateEdge { node_idx: lim_id, input_idx: 0, new_buffer_idx: comp_out_l });
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: lim_id, processor_type_id: ProcessorTypeId::GAIN }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: lim_id, input_idx: 0, new_buffer_idx: comp_out_l }));
 
-        commands.push(Command::UpdateOutputEdge { node_idx: lim_id, output_idx: 0, new_buffer_idx: self.config.master_l as u32 });
-        commands.push(Command::UpdateOutputEdge { node_idx: lim_id, output_idx: 1, new_buffer_idx: self.config.master_r as u32 });
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: lim_id, output_idx: 0, new_buffer_idx: self.config.master_l as u32 }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: lim_id, output_idx: 1, new_buffer_idx: self.config.master_r as u32 }));
 
         commands
     }
@@ -152,7 +152,7 @@ mod tests {
         fn test_mixer_generated_topology_acyclic(
             num_fx in 0..5u32,
             fx_type in 0..100u32
-        ) {
+       ) {
             let mut mixer = MixerManager::new();
             let fx_ids: Vec<u32> = vec![fx_type; num_fx as usize];
             let commands = mixer.create_studio_strip("Test", &fx_ids);
@@ -163,7 +163,7 @@ mod tests {
             // For studio strip, it's linear: Gain -> FX1 -> FX2 -> ... -> Fader.
             let mut last_node_idx = None;
             for cmd in commands {
-                if let Command::AddNode { node_idx, .. } = cmd {
+                if let Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx, .. }) = cmd {
                     if let Some(last) = last_node_idx {
                         assert!(node_idx > last);
                     }
@@ -183,13 +183,13 @@ mod tests {
 
         for cmd in &commands {
             match cmd {
-                Command::AddNode { node_idx: _, .. } => {
+                Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: _, .. }) => {
                     // All nodes should eventually have inputs/outputs or be sources
                 }
-                Command::UpdateEdge { node_idx, .. } => {
+                Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx, .. }) => {
                     nodes_with_inputs.insert(*node_idx);
                 }
-                Command::UpdateOutputEdge { node_idx, .. } => {
+                Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx, .. }) => {
                     nodes_with_outputs.insert(*node_idx);
                 }
                 _ => {}

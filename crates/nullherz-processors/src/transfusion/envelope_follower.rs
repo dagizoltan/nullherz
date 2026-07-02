@@ -32,7 +32,7 @@ impl AudioProcessor for EnvelopeFollowerProcessor {
 fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
-        if let nullherz_traits::Command::SetParam { target_id, param_id, value, ramp_duration_samples } = *command
+        if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, ramp_duration_samples }) = *command
             && target_id == self.id {
                 self.set_parameter(param_id, value, ramp_duration_samples);
             }

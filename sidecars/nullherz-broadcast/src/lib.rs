@@ -83,8 +83,8 @@ fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 fn apply_command(&mut self, cmd: &nullherz_traits::Command) {
         match cmd {
-            nullherz_traits::Command::Play => self.is_active = true,
-            nullherz_traits::Command::Stop => self.is_active = false,
+            nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Play) => self.is_active = true,
+            nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop) => self.is_active = false,
             _ => {}
         }
     }

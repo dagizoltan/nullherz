@@ -6,10 +6,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("LIBRARY").color(Color32::from_gray(150)).small().strong());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("REFRESH").clicked()
-                    && let Ok(db) = nullherz_dna::LibraryDatabase::load("library.redb") {
+                if ui.button("REFRESH").clicked() {
+                    if let Ok(db) = nullherz_dna::LibraryDatabase::load("library.redb") {
                         app.library_db = db;
                     }
+                }
             });
         });
         ui.add_space(10.0);
@@ -40,22 +41,22 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 res.context_menu(|ui| {
                     for deck_idx in 0..4 {
                         if ui.button(format!("Load to Deck {}", (b'A' + deck_idx as u8) as char)).clicked() {
-                            let _ = app.command_sender.send(nullherz_traits::Command::AddSourceFromRegistry {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
                                 granular_node_idx: (deck_idx as u32 * 4),
                                 sample_id: track.id,
-                            });
-                                    app.now_playing[deck_idx] = Some(title.to_string());
+                            }));
+                            app.now_playing[deck_idx] = Some(title.to_string());
                             ui.close_menu();
                         }
                     }
                 });
 
                 if res.clicked() {
-                    let _ = app.command_sender.send(nullherz_traits::Command::AddSourceFromRegistry {
+                    let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
                         granular_node_idx: (app.selected_deck as u32 * 4),
                         sample_id: track.id,
-                    });
-                            app.now_playing[app.selected_deck] = Some(title.to_string());
+                    }));
+                    app.now_playing[app.selected_deck] = Some(title.to_string());
                 }
 
                 ui.child_ui(rect, Layout::left_to_right(Align::Center)).horizontal(|ui| {
