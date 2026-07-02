@@ -18,6 +18,7 @@ impl TelemetryFinalizer {
         fft: &audio_dsp::SimdFft,
         fft_re: &mut audio_dsp::AlignedBuffer,
         fft_im: &mut audio_dsp::AlignedBuffer,
+        transport: &nullherz_traits::Transport,
     ) -> Telemetry {
         let mut node_times = [0u64; 64];
         let mut peak_levels = [0.0f32; 64];
@@ -83,6 +84,8 @@ impl TelemetryFinalizer {
             sample_counter,
             xrun_count: xrun_count_atomic.load(Ordering::Relaxed),
             resource_leaks: metrics.resource_leaks.load(Ordering::Relaxed),
+            bpm: transport.bpm,
+            beat_position: transport.beat_position,
             node_times_ns: node_times,
             peak_levels,
             spectrum,

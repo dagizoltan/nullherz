@@ -1,10 +1,8 @@
-use std::fs;
-use std::env;
 use serde::{Deserialize, Serialize};
 use eframe::egui;
 use std::sync::{Arc, Mutex};
 use audio_core::Telemetry;
-use nullherz_traits::{Command, CoreCommand, MixerCommand, PerformanceCommand, ResourceCommand, OpaqueEnvelope};
+use nullherz_traits::Command;
 use std::sync::mpsc;
 
 mod widgets;
@@ -205,13 +203,101 @@ impl eframe::App for InspectorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let telemetry = self.last_telemetry.lock().unwrap().clone();
 
+        // 1. Left Sidebar (Navigation Plane)
+        egui::SidePanel::left("left_sidebar")
+            .resizable(false)
+            .default_width(70.0)
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(10.0);
+                    // Minimalist Logo/Brand
+                    ui.label(egui::RichText::new("Ω").size(24.0).color(egui::Color32::from_rgb(0, 255, 200)));
+                    ui.add_space(20.0);
+
+                    let nav_buttons = [
+                        (View::Console, "📻", "LIVE"),
+                        (View::Composer, "🎹", "BUILD"),
+                        (View::Sampler, "🎤", "SAMPL"),
+                        (View::Mixer, "🎚", "MIX"),
+                        (View::Topology, "🕸", "NODE"),
+                        (View::Modulation, "〰", "MOD"),
+                        (View::Settings, "⚙", "SET"),
+                    ];
+
+                    for (view, icon, label) in nav_buttons {
+                        let is_selected = self.active_view == view;
+                        let bg_color = if is_selected { egui::Color32::from_gray(50) } else { egui::Color32::TRANSPARENT };
+
+                        if ui.add(egui::Button::new(egui::RichText::new(icon).size(20.0)).fill(bg_color).min_size(egui::vec2(50.0, 50.0))).on_hover_text(label).clicked() {
+                            self.active_view = view;
+                        }
+                        ui.add_space(10.0);
+                    }
+                });
+            });
+
+        // 2. Right Sidebar (Intelligence Plane - Collapsible)
+        if let Some(tab) = self.active_right_tab {
+            egui::SidePanel::right("right_sidebar")
+                .resizable(true)
+                .default_width(300.0)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        if ui.selectable_label(self.active_right_tab == Some(RightTab::Library), "LIBRARY").clicked() {
+                            self.active_right_tab = Some(RightTab::Library);
+                        }
+                        if ui.selectable_label(self.active_right_tab == Some(RightTab::Notifications), "AI/ANALYSIS").clicked() {
+                            self.active_right_tab = Some(RightTab::Notifications);
+                        }
+                        if ui.selectable_label(self.active_right_tab == Some(RightTab::Metrics), "SYSTEM").clicked() {
+                            self.active_right_tab = Some(RightTab::Metrics);
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("❌").clicked() { self.active_right_tab = None; }
+                        });
+                    });
+                    ui.separator();
+
+                    match tab {
+                        RightTab::Library => views::library::render(self, ui),
+                        RightTab::Notifications => views::notifications::render(self, ui),
+                        RightTab::Metrics => views::metrics::render(self, ui),
+                    }
+                });
+        }
+
+        // 3. Bottom Bar (Status & Global Controls)
+        egui::TopBottomPanel::bottom("bottom_bar").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("nullherz Alpha").size(10.0).color(egui::Color32::from_gray(100)));
+                ui.separator();
+
+                if let Some(t) = &telemetry {
+                    ui.label(format!("BPM: {:.1}", t.bpm));
+                    ui.separator();
+                    ui.label(format!("POS: {:.2}", t.beat_position));
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if self.active_right_tab.is_none() {
+                        if ui.button("📂 LIBRARY").clicked() { self.active_right_tab = Some(RightTab::Library); }
+                    }
+                    ui.separator();
+                    ui.toggle_value(&mut self.is_streaming, "📡 BROADCAST");
+                });
+            });
+        });
+
+        // 4. Central Panel (Execution Plane)
         egui::CentralPanel::default().show(ctx, |ui| {
-             ui.heading("nullherz Studio");
              match self.active_view {
                  View::Console => views::dj_studio::render(self, ui, &telemetry),
                  View::Sampler => views::sampler::render(self, ui, &telemetry),
                  View::Mixer => views::mixer::render(self, ui, &telemetry),
                  View::Library => views::library::render(self, ui),
+                 View::Topology => views::topology::render(self, ui, &telemetry),
+                 View::Modulation => views::modulation::render(self, ui, &telemetry),
+                 View::Composer => views::composer::render(self, ui),
                  _ => { ui.label("View coming soon..."); }
              }
         });
