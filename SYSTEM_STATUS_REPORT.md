@@ -84,7 +84,7 @@ The system's "Triple-Plane Model" is a masterclass in separation of concerns.
 | **Temporal** | BPM Detection | **DONE** | Histogram-based interval estimation. |
 | | Transient Analysis | **DONE** | Frequency-weighted Spectral Flux detection. |
 | **Harmonic** | Root Key Detection | **DONE** | 12-bin Chromagram (4096 FFT size). |
-| | Key Sync | **PLANNED** | Real-time pitch shifting for harmonic mix. |
+| | Key Sync | **DONE** | Real-time pitch shifting for harmonic mix. |
 | **Database** | ACID Library | **DONE** | `redb` backend for multi-GB track metadata. |
 | | Folder Monitoring | **DONE** | Background FS watcher for auto-ingestion. |
 
@@ -95,6 +95,7 @@ The system's "Triple-Plane Model" is a masterclass in separation of concerns.
 | | Phase-Locked Sync | **DONE** | Sample-counter based drift correction. |
 | | Hot Cue Bus | **DONE** | 8-point hot-cue storage and instant jump. |
 | | Slip Mode | **DONE** | Background playhead tracking during loops. |
+| | Loop Slicer | **DONE** | MPC-style beat-aligned slice triggering. |
 | **Mixer** | Precision VUs | **DONE** | Dual-bar stereo meters with peak hold. |
 | | FX Slot System | **DONE** | Modular insert/send routing architecture. |
 | **Sequencer** | 16x64 Grid | **DONE** | Multi-track step sequencer with pattern bank. |

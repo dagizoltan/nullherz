@@ -10,8 +10,8 @@
 
 | Task | Priority | Description |
 | :--- | :---: | :--- |
-| **Kernel Devirtualization** | Medium | Replace `Box<dyn ProcessingKernel>` with a static dispatch or a specialized enum to eliminate vtable lookups in the RT loop. |
-| **Pre-allocated Commands** | Medium | Refactor `MixerBridge` to use a pool of pre-allocated `Vec<Command>` to avoid heap pressure during macro modulation expansion. |
+| **Kernel Devirtualization** | DONE | Replaced `Box<dyn ProcessingKernel>` with static dispatch (`AudioEngine<K: ProcessingKernel>`). |
+| **Pre-allocated Commands** | DONE | Refactored `MixerBridge` to use a pool of pre-allocated `Vec<Command>` to avoid heap pressure during macro modulation expansion. |
 | **Stack-Pinning** | High | Investigate stack-pinning for critical DSP nodes to improve cache locality and prevent accidental movement during block cycles. |
 | **Denormal Safeguard v2**| Low | Add explicit `is_subnormal` checks in the `Gain` kernel as a secondary defense to FTZ/DAZ hardware flags. |
 

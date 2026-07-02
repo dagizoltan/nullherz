@@ -26,12 +26,12 @@
 *   **Advanced Visualizers:**
     *   Re-integrate the high-precision Goniometer and Spectrum Analyzer as modular views in the Metrics tab.
     *   Optimize the Wide Oscillator monitor for lower GPU overhead using simplified vertex buffers.
-*   **Harmonic Mixing (Key Sync):**
-    *   Implement the `KeySync` processor (Planned in Feature Matrix).
-    *   Enable real-time pitch shifting (+/- 12 semitones) without affecting playback tempo.
-*   **Advanced Looping & Slicing:**
-    *   Introduce "Beat Jump" functionality (1, 2, 4, 8, 16 beats) phase-locked to the transport.
-    *   Implement a "Loop Slicer" mode in the Sampler view for instant MPC-style remixing.
+*   **Harmonic Mixing (Key Sync) [DONE]:**
+    *   Implemented the `KeySync` processor using spectral-domain bin mapping.
+    *   Enabled real-time pitch shifting (+/- 12 semitones) with SIMD-optimized linear interpolation.
+*   **Advanced Looping & Slicing [DONE]:**
+    *   Introduced "Beat Jump" functionality via `JumpByBeats` command.
+    *   Implemented a "Loop Slicer" mode in `SamplerProcessor` for instant MPC-style remixing.
 
 ---
 
