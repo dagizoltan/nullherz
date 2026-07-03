@@ -40,48 +40,54 @@ impl SidecarSupervisor {
 
     pub async fn listen_for_remote_sidecars(remote_manager: Arc<Mutex<RemoteSidecarManager>>, addr: &str) -> std::io::Result<()> {
         let consumer = TcpIpcConsumer::bind(addr).await?;
-        let addr_string = addr.to_string();
-        println!("Conductor: Listening for remote sidecars on {}", addr_string);
+        println!("Conductor: Listening for remote sidecars on {}", addr);
 
         tokio::spawn(async move {
             loop {
-                if let Ok(stream) = consumer.accept().await {
-                    let remote_manager_clone = remote_manager.clone();
-                    let addr_clone = addr_string.clone();
+                match consumer.accept().await {
+                    Ok(stream) => {
+                        let peer_addr = stream.peer_addr().map(|a| a.to_string()).unwrap_or_else(|_| "unknown".to_string());
+                        let remote_manager_clone = remote_manager.clone();
+                        let addr_clone = peer_addr.clone();
 
-                    let stream_arc = Arc::new(Mutex::new(stream));
-                    let stream_reader = stream_arc.clone();
+                        let stream_arc = Arc::new(Mutex::new(stream));
+                        let stream_reader = stream_arc.clone();
 
-                    tokio::spawn(async move {
-                        loop {
-                            let mut stream_lock = stream_reader.lock().await;
-                            // 1. Read length prefix (u32)
-                            let mut len_buf = [0u8; 4];
-                            if stream_lock.read_exact(&mut len_buf).await.is_err() { break; }
-                            let len = u32::from_be_bytes(len_buf) as usize;
+                        tokio::spawn(async move {
+                            loop {
+                                let mut stream_lock = stream_reader.lock().await;
+                                // 1. Read length prefix (u32)
+                                let mut len_buf = [0u8; 4];
+                                if stream_lock.read_exact(&mut len_buf).await.is_err() { break; }
+                                let len = u32::from_be_bytes(len_buf) as usize;
 
-                            if len > 65536 { break; } // Safety limit
+                                if len > 65536 { break; } // Safety limit
 
-                            // 2. Read JSON payload
-                            let mut buffer = vec![0u8; len];
-                            if stream_lock.read_exact(&mut buffer).await.is_err() { break; }
+                                // 2. Read JSON payload
+                                let mut buffer = vec![0u8; len];
+                                if stream_lock.read_exact(&mut buffer).await.is_err() { break; }
 
-                            if let Ok(cmd) = serde_json::from_slice::<TimestampedCommand>(&buffer) {
-                                let mut manager = remote_manager_clone.lock().await;
-                                manager.pending_commands.push(cmd);
+                                if let Ok(cmd) = serde_json::from_slice::<TimestampedCommand>(&buffer) {
+                                    let mut manager = remote_manager_clone.lock().await;
+                                    manager.pending_commands.push(cmd);
+                                }
+                                drop(stream_lock);
+                                tokio::task::yield_now().await;
                             }
-                            drop(stream_lock);
-                            tokio::task::yield_now().await;
-                        }
-                        println!("Conductor: Remote sidecar disconnected from {}", addr_clone);
-                    });
+                            println!("Conductor: Remote sidecar disconnected from {}", addr_clone);
+                        });
 
-                    let mut manager = remote_manager.lock().await;
-                    manager.remote_nodes.push(RemoteSidecar {
-                        addr: addr_string.clone(),
-                        stream: stream_arc,
-                    });
-                    println!("Conductor: Attached remote sidecar from source {}", addr_string);
+                        let mut manager = remote_manager.lock().await;
+                        manager.remote_nodes.push(RemoteSidecar {
+                            addr: peer_addr.clone(),
+                            stream: stream_arc,
+                        });
+                        println!("Conductor: Attached remote sidecar from {}", peer_addr);
+                    }
+                    Err(e) => {
+                        eprintln!("Conductor: TCP accept error: {}. Backing off...", e);
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
                 }
             }
         });
@@ -113,6 +119,19 @@ impl SidecarSupervisor {
         let mut remote_cmds = Vec::new();
         if let Ok(mut manager) = self.remote_manager.try_lock() {
             remote_cmds = std::mem::take(&mut manager.pending_commands);
+
+            // 4. Prune disconnected nodes
+            manager.remote_nodes.retain(|node| {
+                if let Ok(mut stream) = node.stream.try_lock() {
+                    // Check if stream is still alive (write 0 bytes)
+                    // In a more robust system we might use a heartbeat.
+                    // For now, if the reading task terminates, it doesn't automatically remove from list.
+                    // This retain is a placeholder for a more complex liveness check.
+                    true
+                } else {
+                    true // Node busy
+                }
+            });
         }
         remote_cmds
     }
