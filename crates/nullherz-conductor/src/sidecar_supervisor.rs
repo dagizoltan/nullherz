@@ -8,12 +8,32 @@ use tokio::io::AsyncReadExt;
 
 pub struct RemoteSidecar {
     pub addr: String,
-    pub stream: Arc<Mutex<tokio::net::TcpStream>>,
+    pub writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
 }
 
 pub struct RemoteSidecarManager {
     pub remote_nodes: Vec<RemoteSidecar>,
     pub pending_commands: Vec<TimestampedCommand>,
+}
+
+impl RemoteSidecarManager {
+    pub async fn broadcast_command(&mut self, cmd: TimestampedCommand) {
+        let serialized = match serde_json::to_vec(&cmd) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let len = serialized.len() as u32;
+
+        for node in &mut self.remote_nodes {
+            if let Ok(mut writer) = node.writer.try_lock() {
+                use tokio::io::AsyncWriteExt;
+                let mut full_payload = Vec::with_capacity(4 + serialized.len());
+                full_payload.extend_from_slice(&len.to_be_bytes());
+                full_payload.extend_from_slice(&serialized);
+                let _ = writer.write_all(&full_payload).await;
+            }
+        }
+    }
 }
 
 pub struct SidecarSupervisor {
@@ -50,28 +70,26 @@ impl SidecarSupervisor {
                         let remote_manager_clone = remote_manager.clone();
                         let addr_clone = peer_addr.clone();
 
-                        let stream_arc = Arc::new(Mutex::new(stream));
-                        let stream_reader = stream_arc.clone();
+                        let (mut reader, writer) = stream.into_split();
+                        let writer_arc = Arc::new(Mutex::new(writer));
 
                         tokio::spawn(async move {
                             loop {
-                                let mut stream_lock = stream_reader.lock().await;
                                 // 1. Read length prefix (u32)
                                 let mut len_buf = [0u8; 4];
-                                if stream_lock.read_exact(&mut len_buf).await.is_err() { break; }
+                                if reader.read_exact(&mut len_buf).await.is_err() { break; }
                                 let len = u32::from_be_bytes(len_buf) as usize;
 
                                 if len > 65536 { break; } // Safety limit
 
                                 // 2. Read JSON payload
                                 let mut buffer = vec![0u8; len];
-                                if stream_lock.read_exact(&mut buffer).await.is_err() { break; }
+                                if reader.read_exact(&mut buffer).await.is_err() { break; }
 
                                 if let Ok(cmd) = serde_json::from_slice::<TimestampedCommand>(&buffer) {
                                     let mut manager = remote_manager_clone.lock().await;
                                     manager.pending_commands.push(cmd);
                                 }
-                                drop(stream_lock);
                                 tokio::task::yield_now().await;
                             }
                             println!("Conductor: Remote sidecar disconnected from {}", addr_clone);
@@ -80,7 +98,7 @@ impl SidecarSupervisor {
                         let mut manager = remote_manager.lock().await;
                         manager.remote_nodes.push(RemoteSidecar {
                             addr: peer_addr.clone(),
-                            stream: stream_arc,
+                            writer: writer_arc,
                         });
                         println!("Conductor: Attached remote sidecar from {}", peer_addr);
                     }
@@ -93,6 +111,11 @@ impl SidecarSupervisor {
         });
 
         Ok(())
+    }
+
+    pub async fn broadcast_to_remote(&mut self, cmd: TimestampedCommand) {
+        let mut manager = self.remote_manager.lock().await;
+        manager.broadcast_command(cmd).await;
     }
 
     pub fn supervise(&mut self, topology_manager: &mut TopologyManager) -> Vec<TimestampedCommand> {
@@ -122,11 +145,11 @@ impl SidecarSupervisor {
 
             // 4. Prune disconnected nodes
             manager.remote_nodes.retain(|node| {
-                if let Ok(mut stream) = node.stream.try_lock() {
-                    // Check if stream is still alive (write 0 bytes)
-                    // In a more robust system we might use a heartbeat.
-                    // For now, if the reading task terminates, it doesn't automatically remove from list.
-                    // This retain is a placeholder for a more complex liveness check.
+                if let Ok(mut writer) = node.writer.try_lock() {
+                    // Quick check if peer disconnected by attempting a zero-byte write
+                    // (Technically OwnedWriteHalf doesn't have a reliable non-blocking is_closed)
+                    // We'll rely on the background reader task to inform disconnection in a more
+                    // advanced implementation. For now, keep alive if lock is obtainable.
                     true
                 } else {
                     true // Node busy

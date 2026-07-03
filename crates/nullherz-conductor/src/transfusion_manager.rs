@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use nullherz_dna::SampleRegistry;
+use nullherz_dna::{SampleRegistry, LibraryDatabase};
 use nullherz_traits::{RenderingEngine, SampleMetadata};
 use audio_dsp::TransientDetector;
 
@@ -16,6 +16,41 @@ impl TransfusionManager {
         Self {
             sample_registry,
             transient_detector: TransientDetector::new(1024, 0.5),
+        }
+    }
+
+    pub fn commit_breeding(&self, parent_a_id: u64, parent_b_id: u64, bias: f32, library: &LibraryDatabase) {
+        if let (Some(parent_a), Some(parent_b)) = (self.sample_registry.get(parent_a_id), self.sample_registry.get(parent_b_id)) {
+            // 1. Breed DNA
+            let child_dna = nullherz_dna::transfuse_dna(&parent_a.metadata.dna, &parent_b.metadata.dna, bias);
+
+            // 2. Interpolate Audio Buffers (Simple time-domain linear blend for now)
+            let len = parent_a.buffer.len().min(parent_b.buffer.len());
+            let mut child_buffer = Vec::with_capacity(len);
+            for i in 0..len {
+                child_buffer.push(parent_a.buffer[i] * (1.0 - bias) + parent_b.buffer[i] * bias);
+            }
+
+            // 3. Register child
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
+            let child_id = (parent_a_id ^ parent_b_id).wrapping_add(now);
+            let mut child_metadata = parent_a.metadata.clone();
+            child_metadata.dna = child_dna;
+
+            let buffer_arc = Arc::new(child_buffer);
+            self.sample_registry.register_with_metadata(child_id, buffer_arc.clone(), child_metadata.clone());
+
+            // 4. Save to Database
+            let track = nullherz_dna::LibraryTrack {
+                id: child_id,
+                path: format!("breeding/child_{}.wav", child_id),
+                title: format!("Child of {} x {}", parent_a_id, parent_b_id),
+                artist: "AnaWaves Breeder".to_string(),
+                metadata: child_metadata,
+            };
+            let _ = library.save_track(&track);
+            println!("Breeding Commited: Created Child ID={}", child_id);
         }
     }
 

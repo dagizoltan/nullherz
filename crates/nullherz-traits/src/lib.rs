@@ -149,6 +149,11 @@ pub enum ResourceCommand {
         granular_node_idx: u32,
         sample_id: u64,
     },
+    CommitBreeding {
+        parent_a_id: u64,
+        parent_b_id: u64,
+        bias: f32,
+    },
 }
 
 #[repr(C)]

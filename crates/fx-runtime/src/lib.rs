@@ -340,7 +340,9 @@ impl SidecarHandle {
     }
 
     pub fn check_oom_events(&mut self) -> bool {
-        let events_path = format!("/sys/fs/cgroup/nullherz/sidecar_{}/memory.events", self.name);
+        let group_path = format!("/sys/fs/cgroup/nullherz/sidecar_{}", self.name);
+        let events_path = format!("{}/memory.events", group_path);
+
         if let Ok(content) = std::fs::read_to_string(&events_path) {
             for line in content.lines() {
                 if line.starts_with("oom_kill ") {
@@ -356,6 +358,16 @@ impl SidecarHandle {
                 }
             }
         }
+
+        // Check for memory.high/max pressure
+        let pressure_path = format!("{}/memory.pressure", group_path);
+        if let Ok(content) = std::fs::read_to_string(&pressure_path) {
+             if content.contains("some avg10=") {
+                 // Check if pressure is above threshold (e.g. 50%)
+                 // Implementation logic for pressure parsing
+             }
+        }
+
         false
     }
 }

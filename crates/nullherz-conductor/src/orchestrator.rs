@@ -91,6 +91,10 @@ impl Conductor {
             tokio::spawn(async move {
                 let _ = crate::sidecar_supervisor::SidecarSupervisor::listen_for_remote_sidecars(remote_manager, "0.0.0.0:9000").await;
             });
+
+            // Start UDP Discovery Beacon
+            let discovery = crate::discovery::DiscoveryBeacon::new(9000, "Conductor");
+            discovery.start_broadcast();
         }
 
         crate::EngineContext {
@@ -141,6 +145,20 @@ impl Conductor {
 
     pub fn apply_mixer_commands(&mut self, commands: Vec<Command>) {
         let mut final_commands = Vec::new();
+
+        // Broadcast to remote nodes (Distributed Control Plane)
+        for cmd in &commands {
+            let ts_cmd = nullherz_traits::TimestampedCommand {
+                timestamp_samples: 0,
+                command: *cmd,
+            };
+            let remote_manager = self.sidecar_supervisor.remote_manager.clone();
+            tokio::spawn(async move {
+                let mut manager = remote_manager.lock().await;
+                manager.broadcast_command(ts_cmd).await;
+            });
+        }
+
         for cmd in commands {
              match cmd {
                  Command::Performance(nullherz_traits::PerformanceCommand::LaunchClip { row, col }) => {
@@ -153,6 +171,10 @@ impl Conductor {
                              let _ = prod.push(m);
                          }
                      }
+                 }
+                 Command::Resource(nullherz_traits::ResourceCommand::CommitBreeding { parent_a_id, parent_b_id, bias }) => {
+                     let lib = self.library.lock().unwrap();
+                     self.transfusion_manager.commit_breeding(parent_a_id, parent_b_id, bias, &lib);
                  }
                  _ => final_commands.push(cmd),
              }

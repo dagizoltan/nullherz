@@ -33,17 +33,17 @@ impl BreederView {
         ui.separator();
 
         if let Some(parent_idx) = state.selecting_parent {
-            ui.group(|ui| {
+            egui::Window::new(format!("Select Parent {}", if parent_idx == 0 { "A" } else { "B" }))
+                .collapsible(false).resizable(true).show(ui.ctx(), |ui| {
+
                 ui.horizontal(|ui| {
-                    ui.heading(format!("Select Parent {}", if parent_idx == 0 { "A" } else { "B" }));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("CLOSE").clicked() { state.selecting_parent = None; }
-                    });
+                    ui.text_edit_singleline(&mut app.search_query);
+                    if ui.button("CLOSE").clicked() { state.selecting_parent = None; }
                 });
                 ui.separator();
 
-                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                    let tracks = app.library_db.list_tracks().unwrap_or_default();
+                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                    let tracks = &app.cached_library;
 
                     // Reference DNA for similarity highlighting
                     let other_dna = if parent_idx == 0 {
@@ -54,24 +54,27 @@ impl BreederView {
 
                     for track in tracks {
                         let similarity = other_dna.as_ref().map(|other| nullherz_dna::calculate_similarity(&track.metadata.dna, other));
-                        let label = if let Some(s) = similarity {
-                            format!("{} - {} ({:.0}% Match)", track.title, track.artist, s * 100.0)
-                        } else {
-                            format!("{} - {}", track.title, track.artist)
-                        };
 
-                        if ui.selectable_label(false, label).clicked() {
-                            if parent_idx == 0 {
-                                state.parent_a_id = Some(track.id);
-                            } else {
-                                state.parent_b_id = Some(track.id);
+                        ui.horizontal(|ui| {
+                            if let Some(s) = similarity {
+                                let color = if s > 0.8 { Color32::from_rgb(0, 255, 200) } else if s > 0.5 { Color32::YELLOW } else { Color32::GRAY };
+                                ui.add(egui::ProgressBar::new(s).desired_width(40.0).fill(color));
                             }
-                            state.selecting_parent = None;
-                        }
+
+                            let label = format!("{} - {}", track.title, track.artist);
+                            if ui.selectable_label(false, label).clicked() {
+                                if parent_idx == 0 {
+                                    state.parent_a_id = Some(track.id);
+                                } else {
+                                    state.parent_b_id = Some(track.id);
+                                }
+                                app.library_needs_refresh = true;
+                                state.selecting_parent = None;
+                            }
+                        });
                     }
                 });
             });
-            ui.add_space(20.0);
         }
 
         ui.horizontal(|ui| {
@@ -185,7 +188,14 @@ impl BreederView {
 
         ui.add_space(20.0);
         if ui.button(RichText::new("🧬 EVOLVE PERMANENTLY").strong().size(16.0)).clicked() {
-            // Commit the child DNA to the registry
+            if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
+                let cmd = Command::Resource(nullherz_traits::ResourceCommand::CommitBreeding {
+                    parent_a_id: id_a,
+                    parent_b_id: id_b,
+                    bias: state.transfusion_bias_x,
+                });
+                let _ = app.command_sender.send(cmd);
+            }
         }
     }
 

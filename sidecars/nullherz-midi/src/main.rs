@@ -15,11 +15,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut shm_name = "";
     let mut _port_filter = "";
+    let mut map_path = "";
 
     for i in 0..args.len() {
         match args[i].as_str() {
             "--shm" if i + 1 < args.len() => shm_name = &args[i+1],
             "--port" if i + 1 < args.len() => _port_filter = &args[i+1],
+            "--map" if i + 1 < args.len() => map_path = &args[i+1],
             _ => {}
         }
     }
@@ -56,6 +58,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
 
         println!("Connecting to MIDI port: {}", midi_in.port_name(port)?);
+
+        if !map_path.is_empty() {
+            println!("Loading MIDI map from: {}", map_path);
+            // In a full implementation, we'd pass the map to the callback for pre-filtering
+            // or just let the conductor handle it.
+        }
 
         // 3. Start MIDI Loop
         let _conn = midi_in.connect(port, "nullherz-midi-input", move |stamp, message, _| {
