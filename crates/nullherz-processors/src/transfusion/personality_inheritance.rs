@@ -140,6 +140,27 @@ impl nullherz_traits::SignalProcessor for PersonalityInheritanceProcessor {
                     im[i] *= 1.0 + resonance;
                 }
             }
+             // Atmosphere: Apply Early Reflections (Tapped Delay)
+             if s_bias > 0.1 {
+                 for tap_idx in 0..8 {
+                     let delay_ms = spatial.er_taps[tap_idx];
+                     if delay_ms > 0.0 {
+                         let delay_samples = (delay_ms * 44.1 * s_bias).min(44000.0);
+                         let gain = spatial.er_gains[tap_idx] * s_bias * 0.3;
+
+                         let read_ptr = (self.write_ptr as f32 - delay_samples + self.delay_buffer.len() as f32) % self.delay_buffer.len() as f32;
+                         let idx = read_ptr as usize % self.delay_buffer.len();
+                         let reflection = self.delay_buffer[idx] * gain;
+
+                         // Add reflection back to spectral domain or time domain surrogate
+                         // Simplified: just boost the bins slightly for "smear" effect
+                         for i in 0..n {
+                             re[i] += reflection * 0.01;
+                         }
+                     }
+                 }
+             }
+
             // Apply Spatial DNA to spectral bins (simplified widening/narrowing)
             for bin in 0..n {
                 // High frequencies are usually more susceptible to width changes

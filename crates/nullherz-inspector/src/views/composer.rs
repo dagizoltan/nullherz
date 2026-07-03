@@ -1,8 +1,9 @@
 use egui::{Ui, ScrollArea, Color32, Vec2, Sense};
 use crate::InspectorApp;
+use audio_core::Telemetry;
 use nullherz_traits::{Command, PerformanceCommand};
 
-pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
+pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     ui.horizontal(|ui| {
         ui.heading("Track Composer");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -37,10 +38,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         for col in 0..8 {
                             let (rect, response) = ui.allocate_exact_size(Vec2::new(60.0, 60.0), Sense::click());
 
-                            // Visual State (mock for animation/state demonstration)
-                            let is_playing = row == 0 && col == 0;
-                            let is_starting = false;
+                            // True Visual State from Telemetry
+                            let mut is_playing = false;
+                            let mut is_starting = false;
 
+                            if let Some(t) = telemetry {
+                                is_playing = t.active_clips[row] == col as u8;
+                                is_starting = (t.starting_clips_mask[row] >> col) & 1 == 1;
+                            }
 
                             let color = if is_playing {
                                 Color32::from_rgb(0, 255, 100)

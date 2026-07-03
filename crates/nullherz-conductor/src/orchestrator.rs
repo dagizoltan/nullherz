@@ -93,8 +93,9 @@ impl Conductor {
         self.engine_coordinator.drain_garbage();
     }
 
-    pub fn update_timeline(&mut self, telemetry: &Telemetry) {
+    pub fn update_timeline(&mut self, telemetry: &mut Telemetry) {
         self.mixer_bridge.update_timeline(telemetry);
+        self.clip_orchestrator.collect_telemetry(&mut telemetry.active_clips, &mut telemetry.starting_clips_mask);
     }
 
     pub fn apply_mixer_commands(&mut self, commands: Vec<Command>) {

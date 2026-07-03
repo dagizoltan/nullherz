@@ -90,6 +90,8 @@ impl TelemetryFinalizer {
             peak_levels,
             spectrum,
             goniometer_pts,
+            active_clips: [255; 8],
+            starting_clips_mask: [0; 8],
         };
         let _ = telemetry_producer.push_telemetry(telemetry.clone());
         telemetry
