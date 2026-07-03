@@ -509,27 +509,32 @@ impl SamplerVoice {
                 let x = play_head - idx as f32;
                 let start_idx = idx.saturating_sub(1);
 
-                let (p0, p1, p2, p3) = if start_idx + 4 <= buffer.len() {
-                    // Direct SIMD pointer load for 4-point interpolation (Optimized path)
+                if start_idx + 4 <= buffer.len() {
+                    // Optimized Vector Path (SIMD 4-point Lagrange)
                     let ptr = unsafe { buffer.as_ptr().add(start_idx) };
                     let v = unsafe { crate::simd_vec::load_f32x4_ptr(ptr) };
                     let p: [f32; 4] = v.into();
-                    (p[0], p[1], p[2], p[3])
+
+                    let p0 = p[0]; let p1 = p[1]; let p2 = p[2]; let p3 = p[3];
+
+                    let c1 = p1;
+                    let c2 = -0.5 * p0 + 0.5 * p2;
+                    let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+                    let c4 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+                    ((c4 * x + c3) * x + c2) * x + c1
                 } else {
                     // Safe scalar fallback for buffer end (Boundary path)
-                    (
-                        *buffer.get(start_idx).unwrap_or(&0.0),
-                        *buffer.get(start_idx + 1).unwrap_or(&0.0),
-                        *buffer.get(start_idx + 2).unwrap_or(&0.0),
-                        *buffer.get(start_idx + 3).unwrap_or(&0.0)
-                    )
-                };
+                    let p0 = *buffer.get(start_idx).unwrap_or(&0.0);
+                    let p1 = *buffer.get(start_idx + 1).unwrap_or(&0.0);
+                    let p2 = *buffer.get(start_idx + 2).unwrap_or(&0.0);
+                    let p3 = *buffer.get(start_idx + 3).unwrap_or(&0.0);
 
-                let c1 = p1;
-                let c2 = -0.5 * p0 + 0.5 * p2;
-                let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
-                let c4 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
-                ((c4 * x + c3) * x + c2) * x + c1
+                    let c1 = p1;
+                    let c2 = -0.5 * p0 + 0.5 * p2;
+                    let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+                    let c4 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+                    ((c4 * x + c3) * x + c2) * x + c1
+                }
             }
         }
     }
