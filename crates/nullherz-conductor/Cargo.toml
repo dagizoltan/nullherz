@@ -21,3 +21,4 @@ serde_with = "3.0"
 smallvec = "1.13"
 nullherz-gateway = { path = "../nullherz-gateway" }
 audio-dsp = { path = "../audio-dsp" }
+rayon = "1.10"
