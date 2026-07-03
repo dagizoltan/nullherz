@@ -116,6 +116,33 @@ impl LibraryDatabase {
         }
         Ok(tracks)
     }
+
+    pub fn list_crates(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        let read_txn = self.db.begin_read()?;
+        let table = match read_txn.open_table(CRATES_TABLE) {
+            Ok(t) => t,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+
+        let mut crate_names = std::collections::HashSet::new();
+        for res in table.iter()? {
+            let (key_guard, _) = res?;
+            let (name, _) = key_guard.value();
+            crate_names.insert(name.to_string());
+        }
+        Ok(crate_names.into_iter().collect())
+    }
+
+    pub fn remove_from_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(CRATES_TABLE)?;
+            table.remove((crate_name, track_id))?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
 }
 
 pub struct SampleRegistry {
@@ -379,4 +406,21 @@ pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits:
     child.spatial.room_size = dna_a.spatial.room_size * inv_bias + dna_b.spatial.room_size * bias;
 
     child
+}
+
+pub struct Matchmaker;
+
+impl Matchmaker {
+    pub fn rank_compatibility(target: &nullherz_traits::SoundDNA, candidates: &[LibraryTrack], limit: usize) -> Vec<(u64, f32)> {
+        let mut scores: Vec<(u64, f32)> = candidates.iter()
+            .map(|track| {
+                let score = calculate_similarity(target, &track.metadata.dna);
+                (track.id, score)
+            })
+            .collect();
+
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores.truncate(limit);
+        scores
+    }
 }

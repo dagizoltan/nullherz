@@ -16,7 +16,7 @@ impl TcpIpcProducer {
     pub async fn send_command(&self, cmd: TimestampedCommand) -> Result<(), std::io::Error> {
         let serialized = serde_json::to_vec(&cmd).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         let mut stream = self.stream.lock().await;
-        stream.write_u32(serialized.len() as u32).await?;
+        stream.write_u32(serialized.len() as u32).await?; // Big-endian by default in write_u32? No, tokio is BigEndian
         stream.write_all(&serialized).await?;
         Ok(())
     }

@@ -68,6 +68,7 @@ impl Conductor {
         let handle = self.engine_coordinator.setup();
 
         self.mixer_bridge.bundle_producer = Some(handle.bundle_producer);
+        self.mixer_bridge.bundle_pool = handle.bundle_garbage_consumer;
         self.topology_manager.topo_producer = Some(ipc_layer::NonRtProducer::new(handle.topology_producer));
 
         // Setup MIDI Bridge SHM
@@ -82,6 +83,18 @@ impl Conductor {
                 buffer: shm_arc,
                 rb,
             });
+        }
+
+        // Setup Remote Sidecar Listener (Stage 2 Distributed DSP)
+        if let Ok(_handle) = tokio::runtime::Handle::try_current() {
+            let remote_manager = self.sidecar_supervisor.remote_manager.clone();
+            tokio::spawn(async move {
+                let _ = crate::sidecar_supervisor::SidecarSupervisor::listen_for_remote_sidecars(remote_manager, "0.0.0.0:9000").await;
+            });
+
+            // Start UDP Discovery Beacon
+            let discovery = crate::discovery::DiscoveryBeacon::new(9000, "Conductor");
+            discovery.start_broadcast();
         }
 
         crate::EngineContext {
@@ -132,6 +145,20 @@ impl Conductor {
 
     pub fn apply_mixer_commands(&mut self, commands: Vec<Command>) {
         let mut final_commands = Vec::new();
+
+        // Broadcast to remote nodes (Distributed Control Plane)
+        for cmd in &commands {
+            let ts_cmd = nullherz_traits::TimestampedCommand {
+                timestamp_samples: 0,
+                command: *cmd,
+            };
+            let remote_manager = self.sidecar_supervisor.remote_manager.clone();
+            tokio::spawn(async move {
+                let mut manager = remote_manager.lock().await;
+                manager.broadcast_command(ts_cmd).await;
+            });
+        }
+
         for cmd in commands {
              match cmd {
                  Command::Performance(nullherz_traits::PerformanceCommand::LaunchClip { row, col }) => {
@@ -144,6 +171,10 @@ impl Conductor {
                              let _ = prod.push(m);
                          }
                      }
+                 }
+                 Command::Resource(nullherz_traits::ResourceCommand::CommitBreeding { parent_a_id, parent_b_id, bias }) => {
+                     let lib = self.library.lock().unwrap();
+                     self.transfusion_manager.commit_breeding(parent_a_id, parent_b_id, bias, &lib);
                  }
                  _ => final_commands.push(cmd),
              }
@@ -216,6 +247,13 @@ impl Conductor {
              eprintln!("Recovered sidecar process for node {}. Re-inserting into audio graph...", node_idx);
             if let Some(ref mut prod) = self.topology_manager.topo_producer {
                 let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor { node_idx, processor });
+            }
+        }
+
+        let remote_commands = self.sidecar_supervisor.supervise(&mut self.topology_manager);
+        for ts_cmd in remote_commands {
+            if let Some(ref prod) = self.engine_coordinator.command_producer {
+                let _ = prod.push_command(ts_cmd);
             }
         }
 

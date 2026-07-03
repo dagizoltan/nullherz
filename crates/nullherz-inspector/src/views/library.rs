@@ -2,9 +2,35 @@ use egui::{Color32, RichText, Ui, ScrollArea, Layout, Align, Stroke};
 use crate::InspectorApp;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
-    ui.vertical(|ui| {
+    ui.horizontal(|ui| {
+        // Crate Sidebar (Mini)
+        ui.vertical(|ui| {
+            ui.set_max_width(80.0);
+            ui.label(RichText::new("CRATES").small().strong());
+            ui.separator();
+
+            let is_all = app.active_crate.is_none();
+            if ui.selectable_label(is_all, "ALL").clicked() { app.active_crate = None; }
+
+            let crates = app.library_db.list_crates().unwrap_or_default();
+            for crate_name in crates {
+                let is_selected = app.active_crate.as_deref() == Some(&crate_name);
+                if ui.selectable_label(is_selected, &crate_name).clicked() {
+                    app.active_crate = Some(crate_name);
+                    app.library_needs_refresh = true;
+                }
+            }
+        });
+
+        ui.separator();
+
+        ui.vertical(|ui| {
+        // Change Tracking
+        let breeding_a = app.breeding_view.parent_a_id;
+        let breeding_b = app.breeding_view.parent_b_id;
+
         // Breeding Lab Header
-        if app.breeding_view.parent_a_id.is_some() || app.breeding_view.parent_b_id.is_some() {
+        if breeding_a.is_some() || breeding_b.is_some() {
             ui.group(|ui| {
                 ui.label(RichText::new("🧬 DNA BREEDING LAB").strong().color(Color32::from_rgb(0, 255, 200)));
                 ui.horizontal(|ui| {
@@ -35,21 +61,60 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             ui.label(RichText::new("LIBRARY").color(Color32::from_gray(150)).small().strong());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.button("REFRESH").clicked() {
-                    if let Ok(db) = nullherz_dna::LibraryDatabase::load("library.redb") {
-                        app.library_db = db;
-                    }
+                    app.library_needs_refresh = true;
                 }
             });
         });
         ui.add_space(10.0);
-        ui.text_edit_singleline(&mut app.search_query);
+        ui.horizontal(|ui| {
+            if ui.text_edit_singleline(&mut app.search_query).changed() {
+                app.library_needs_refresh = true;
+            }
+            if ui.button("🔍").clicked() { app.library_needs_refresh = true; }
+        });
         ui.add_space(15.0);
 
-        ScrollArea::vertical().show(ui, |ui| {
-            let mut tracks = app.library_db.list_tracks().unwrap_or_default();
-            tracks.sort_by_key(|a| a.title.to_lowercase());
+        // Optimized Library Retrieval & Sorting
+        if app.library_needs_refresh {
+            let mut tracks = if let Some(ref crate_name) = app.active_crate {
+                app.library_db.get_tracks_in_crate(crate_name).unwrap_or_default()
+            } else {
+                app.library_db.list_tracks().unwrap_or_default()
+            };
 
-            for track in &tracks {
+            // Search filter
+            if !app.search_query.is_empty() {
+                let q = app.search_query.to_lowercase();
+                tracks.retain(|t| t.title.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q));
+            }
+
+            // Matchmaking Sort
+            let breeding_target = if let Some(id_a) = breeding_a {
+                app.library_db.get_track(id_a).ok().flatten().map(|t| t.metadata.dna)
+            } else if let Some(id_b) = breeding_b {
+                app.library_db.get_track(id_b).ok().flatten().map(|t| t.metadata.dna)
+            } else {
+                None
+            };
+
+            if let Some(target_dna) = breeding_target {
+                tracks.sort_by(|a, b| {
+                    let score_a = nullherz_dna::calculate_similarity(&target_dna, &a.metadata.dna);
+                    let score_b = nullherz_dna::calculate_similarity(&target_dna, &b.metadata.dna);
+                    score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            } else {
+                tracks.sort_by_key(|a| a.title.to_lowercase());
+            }
+
+            app.cached_library = tracks;
+            app.library_needs_refresh = false;
+        }
+
+        ScrollArea::vertical().show(ui, |ui| {
+            let tracks = &app.cached_library;
+
+            for track in tracks {
                 let title = &track.title;
                 let artist = &track.artist;
                 let bpm = track.metadata.bpm;
@@ -69,10 +134,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 res.context_menu(|ui| {
                     if ui.button("Set as Breeding Parent A").clicked() {
                         app.breeding_view.parent_a_id = Some(track.id);
+                        app.library_needs_refresh = true;
                         ui.close_menu();
                     }
                     if ui.button("Set as Breeding Parent B").clicked() {
                         app.breeding_view.parent_b_id = Some(track.id);
+                        app.library_needs_refresh = true;
                         ui.close_menu();
                     }
                     ui.separator();
@@ -111,6 +178,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 });
                 ui.painter().hline(rect.x_range(), rect.max.y, Stroke::new(1.0, Color32::from_gray(20)));
             }
+        });
         });
     });
 }
