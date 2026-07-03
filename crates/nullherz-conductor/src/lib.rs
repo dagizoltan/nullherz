@@ -12,6 +12,7 @@ pub mod folder_monitor;
 pub mod persistence;
 pub mod pattern_manager;
 pub mod modulation_matrix;
+pub mod clip_orchestrator;
 
 pub use orchestrator::Conductor;
 

@@ -1,19 +1,25 @@
-use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata, SpectralPersonality};
+use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata, SpectralPersonality, RhythmicDNA};
 use audio_dsp::SpectralPipeline;
 use std::sync::Arc;
 
 /// PersonalityInheritance Processor
-/// Realizes the AnaWaves Stage 2 "Transfusion" by allowing one node to inherit
-/// the SpectralPersonality (energy map) of another.
+/// Realizes the AnaWaves Stage 2 & 3 "Transfusion" by allowing one node to inherit
+/// the SpectralPersonality (energy map) and RhythmicDNA of another.
 pub struct PersonalityInheritanceProcessor {
     pub id: u64,
     pipeline: SpectralPipeline,
 
     // The "Source" DNA to inherit from
     source_personality: Arc<SpectralPersonality>,
+    source_rhythmic: Arc<RhythmicDNA>,
 
     // Parameters
     transfusion_bias: f32, // 0.0 = original, 1.0 = full inheritance
+    rhythmic_bias: f32,    // 0.0 = original, 1.0 = full rhythmic transfusion
+
+    // Layer 3: Rhythmic Pulse Inheritance (Delay Line)
+    delay_buffer: Vec<f32>,
+    write_ptr: usize,
 }
 
 impl PersonalityInheritanceProcessor {
@@ -22,7 +28,11 @@ impl PersonalityInheritanceProcessor {
             id,
             pipeline: SpectralPipeline::new(fft_size),
             source_personality: Arc::new(SpectralPersonality::default()),
+            source_rhythmic: Arc::new(RhythmicDNA::default()),
             transfusion_bias: 0.5,
+            rhythmic_bias: 0.5,
+            delay_buffer: vec![0.0; 44100], // 1 second max delay
+            write_ptr: 0,
         }
     }
 
@@ -40,15 +50,54 @@ impl nullherz_traits::SignalProcessor for PersonalityInheritanceProcessor {
         self.pipeline.fft.size
     }
 
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
 
         let input = inputs[0];
         let output = &mut outputs[0];
         let bias = self.transfusion_bias;
+        let r_bias = self.rhythmic_bias;
         let personality = &self.source_personality;
+        let rhythmic = &self.source_rhythmic;
 
-        self.pipeline.process(input, output, |re, im, n, _window, _fft| {
+        // Apply Rhythmic Micro-timing (Layer 3)
+        let mut rhythmic_input = vec![0.0; input.len()];
+        if let Some(transport) = context.transport {
+            let samples_per_beat = (transport.sample_rate as f64 * 60.0) / transport.bpm as f64;
+            let current_beat = transport.beat_position;
+
+            for (i, &sample) in input.iter().enumerate() {
+                let sample_beat = current_beat + (i as f64 / samples_per_beat);
+                let _beat_in_pattern = (sample_beat % 4.0) as usize;
+                let step = ((sample_beat * 4.0) % 64.0) as usize;
+
+                // Micro-timing offset (Early/Late)
+                let micro_offset_ms = rhythmic.micro_timing[step % 12] as f32; // micro_timing is in ms
+                let delay_samples = (micro_offset_ms * transport.sample_rate * 0.001) * r_bias;
+
+                // Read from delay line with linear interpolation
+                let read_ptr = (self.write_ptr as f32 - delay_samples + self.delay_buffer.len() as f32) % self.delay_buffer.len() as f32;
+                let idx0 = read_ptr.floor() as usize;
+                let idx1 = (idx0 + 1) % self.delay_buffer.len();
+                let frac = read_ptr - idx0 as f32;
+                let delayed_sample = self.delay_buffer[idx0] * (1.0 - frac) + self.delay_buffer[idx1] * frac;
+
+                // Onset Mask Gating (Layer 3)
+                let mask_val = (rhythmic.onset_mask[step / 16] >> (step % 16)) & 1;
+                let target_gain = if mask_val == 1 { 1.2 } else { 0.8 };
+                let gain = 1.0 + (target_gain - 1.0) * r_bias;
+
+                rhythmic_input[i] = delayed_sample * gain;
+
+                // Update delay buffer
+                self.delay_buffer[self.write_ptr] = sample;
+                self.write_ptr = (self.write_ptr + 1) % self.delay_buffer.len();
+            }
+        } else {
+            rhythmic_input.copy_from_slice(input);
+        }
+
+        self.pipeline.process(&rhythmic_input, output, |re, im, n, _window, _fft| {
             // energy_map is 64 bins covering 0-20kHz.
             // We map these 64 bins back to the N FFT bins.
             let bins_per_map_entry = n / 2 / 64;
@@ -105,12 +154,14 @@ impl AudioProcessor for PersonalityInheritanceProcessor {
             // In a real scenario, node_idx would be checked against our routing,
             // but here we might accept metadata updates to refresh the personality.
             self.source_personality = Arc::new(metadata.dna.spectral.clone());
+            self.source_rhythmic = Arc::new(metadata.dna.rhythmic.clone());
         }
     }
 
     fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
         match param_id {
             0 => self.transfusion_bias = value.clamp(0.0, 1.0),
+            1 => self.rhythmic_bias = value.clamp(0.0, 1.0),
             _ => {}
         }
     }
@@ -126,6 +177,7 @@ impl AudioProcessor for PersonalityInheritanceProcessor {
 
         let names = [
             (0, "Transfusion Bias", 0.0, 1.0, 0.5),
+            (1, "Rhythmic Bias", 0.0, 1.0, 0.5),
         ];
 
         for (i, (id, name, min, max, default)) in names.iter().enumerate() {

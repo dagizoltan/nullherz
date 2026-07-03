@@ -124,6 +124,7 @@ pub struct InspectorApp {
     pub(crate) selected_playlist: Option<usize>,
     pub(crate) player_queue: Vec<Track>,
     pub(crate) player_is_playing: bool,
+    pub(crate) wgpu_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::wgpu_backend::WgpuRenderer>>>,
 }
 
 impl InspectorApp {
@@ -185,6 +186,7 @@ impl InspectorApp {
             selected_playlist: None,
             player_queue: vec![],
             player_is_playing: false,
+            wgpu_renderer: None,
         }
     }
 
