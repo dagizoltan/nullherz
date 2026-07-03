@@ -98,7 +98,26 @@ impl Conductor {
     }
 
     pub fn apply_mixer_commands(&mut self, commands: Vec<Command>) {
-        self.mixer_bridge.apply_mixer_commands(commands, &mut self.topology_manager, &mut self.modulation_matrix);
+        let mut final_commands = Vec::new();
+        for cmd in commands {
+             match cmd {
+                 Command::Performance(nullherz_traits::PerformanceCommand::LaunchClip { row, col }) => {
+                     self.clip_orchestrator.launch_clip(row as usize, col as usize);
+                 }
+                 Command::Performance(nullherz_traits::PerformanceCommand::TransfuseRow { row }) => {
+                     let mutations = self.clip_orchestrator.transfuse_row(row as usize);
+                     for m in mutations {
+                         if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                             let _ = prod.push(m);
+                         }
+                     }
+                 }
+                 _ => final_commands.push(cmd),
+             }
+        }
+        if !final_commands.is_empty() {
+            self.mixer_bridge.apply_mixer_commands(final_commands, &mut self.topology_manager, &mut self.modulation_matrix);
+        }
     }
 
     pub fn handle_midi_events(&mut self, events: Vec<nullherz_traits::MidiEvent>) {

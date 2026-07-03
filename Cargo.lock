@@ -2473,6 +2473,7 @@ dependencies = [
  "audio-core",
  "eframe",
  "egui",
+ "egui-wgpu",
  "futures-util",
  "nullherz-dna",
  "nullherz-traits",
@@ -2510,6 +2511,7 @@ dependencies = [
  "ipc-layer",
  "nullherz-dna",
  "nullherz-traits",
+ "rand 0.8.6",
  "serde",
  "wide",
 ]
@@ -2547,6 +2549,7 @@ dependencies = [
 name = "nullherz-ui-hal"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "egui",
  "nullherz-traits",
  "raw-window-handle 0.6.2",

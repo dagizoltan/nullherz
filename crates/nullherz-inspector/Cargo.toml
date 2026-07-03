@@ -15,3 +15,4 @@ tokio-tungstenite = "0.26"
 futures-util = "0.3"
 nullherz-dna = { path = "../nullherz-dna" }
 nullherz-ui-hal = { path = "../nullherz-ui-hal" }
+egui-wgpu = "0.27"
