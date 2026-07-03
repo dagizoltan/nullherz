@@ -124,6 +124,9 @@ pub struct InspectorApp {
     pub(crate) selected_playlist: Option<usize>,
     pub(crate) player_queue: Vec<Track>,
     pub(crate) player_is_playing: bool,
+    pub(crate) breeding_parent_a: Option<u64>,
+    pub(crate) breeding_parent_b: Option<u64>,
+    pub(crate) breeding_bias: f32,
     pub(crate) wgpu_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::wgpu_backend::WgpuRenderer>>>,
     pub(crate) waveform_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>>,
 }
@@ -187,6 +190,9 @@ impl InspectorApp {
             selected_playlist: None,
             player_queue: vec![],
             player_is_playing: false,
+            breeding_parent_a: None,
+            breeding_parent_b: None,
+            breeding_bias: 0.5,
             wgpu_renderer: None,
             waveform_renderer: None,
         }
@@ -301,7 +307,7 @@ impl eframe::App for InspectorApp {
                  View::Library => views::library::render(self, ui),
                  View::Topology => views::topology::render(self, ui, &telemetry),
                  View::Modulation => views::modulation::render(self, ui, &telemetry),
-                 View::Composer => views::composer::render(self, ui),
+                 View::Composer => views::composer::render(self, ui, &telemetry),
                  _ => { ui.label("View coming soon..."); }
              }
         });

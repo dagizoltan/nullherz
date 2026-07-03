@@ -557,7 +557,10 @@ impl Default for ArtifactProfile {
 pub struct SpatialDNA {
     pub stereo_width: f32,
     pub room_size: f32,
-    pub early_reflections: f32,
+    /// Delay offsets of the first 8 reflection taps in ms
+    pub er_taps: [f32; 8],
+    /// Gain of the first 8 reflection taps
+    pub er_gains: [f32; 8],
 }
 
 impl Default for SpatialDNA {
@@ -565,7 +568,8 @@ impl Default for SpatialDNA {
         Self {
             stereo_width: 1.0,
             room_size: 0.0,
-            early_reflections: 0.0,
+            er_taps: [0.0; 8],
+            er_gains: [0.0; 8],
         }
     }
 }

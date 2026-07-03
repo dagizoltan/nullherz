@@ -336,6 +336,22 @@ impl AnalysisWorker {
             if decay_db < -10.0 {
                  dna.spatial.room_size = (decay_db.abs() / 60.0).clamp(0.0, 1.0);
             }
+
+            // 3. Early Reflections (ER) pattern
+            // Find secondary peaks in the first 50ms after transient
+            let er_window_samples = (sample_rate * 0.05) as usize;
+            let er_zone = &tail[..er_window_samples.min(tail.len())];
+
+            let mut tap_idx = 0;
+            for (i, chunk) in er_zone.chunks(64).enumerate() {
+                if tap_idx >= 8 { break; }
+                let rms = (chunk.iter().map(|x| x*x).sum::<f32>() / chunk.len() as f32).sqrt();
+                if rms > rms_max * 0.1 { // Detect distinct reflection
+                    dna.spatial.er_taps[tap_idx] = (i * 64) as f32 / sample_rate * 1000.0;
+                    dna.spatial.er_gains[tap_idx] = (rms / rms_max).min(1.0);
+                    tap_idx += 1;
+                }
+            }
         }
     }
 

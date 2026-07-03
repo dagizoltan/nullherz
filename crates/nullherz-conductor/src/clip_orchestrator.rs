@@ -31,6 +31,23 @@ pub struct ClipOrchestrator {
 }
 
 impl ClipOrchestrator {
+    pub fn collect_telemetry(&self, active_clips: &mut [u8; 8], starting_masks: &mut [u8; 8]) {
+        active_clips.fill(255);
+        starting_masks.fill(0);
+
+        for (r, row) in self.grid.clips.iter().enumerate().take(8) {
+            for (c, clip_opt) in row.iter().enumerate().take(8) {
+                if let Some(clip) = clip_opt {
+                    match clip.state {
+                        ClipState::Playing => active_clips[r] = c as u8,
+                        ClipState::Starting => starting_masks[r] |= 1 << c,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             grid: ClipGrid::default(),

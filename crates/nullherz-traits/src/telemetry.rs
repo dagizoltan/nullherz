@@ -21,9 +21,33 @@ pub struct Telemetry {
     pub spectrum: [f32; 128],
     #[serde(with = "BigArray")]
     pub goniometer_pts: [f32; 128],
+    /// Row-wise active clip index (255 = none)
+    pub active_clips: [u8; 8],
+    /// Bitmask of clips in "Starting/Quantizing" state (Row per byte)
+    pub starting_clips_mask: [u8; 8],
 }
 
 pub struct TelemetryProcessor;
+
+impl Default for Telemetry {
+    fn default() -> Self {
+        Self {
+            process_time_ns: 0,
+            peak_process_time_ns: 0,
+            sample_counter: 0,
+            xrun_count: 0,
+            resource_leaks: 0,
+            bpm: 120.0,
+            beat_position: 0.0,
+            node_times_ns: [0; MAX_NODES],
+            peak_levels: [0.0; MAX_NODES],
+            spectrum: [0.0; 128],
+            goniometer_pts: [0.0; 128],
+            active_clips: [255; 8],
+            starting_clips_mask: [0; 8],
+        }
+    }
+}
 
 impl TelemetryProcessor {
     pub fn collect_node_times(
