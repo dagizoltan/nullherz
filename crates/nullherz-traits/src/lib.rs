@@ -4,6 +4,7 @@ pub mod telemetry;
 pub mod error;
 
 use std::sync::Arc;
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 #[derive(Debug, Clone, Copy)]
 pub struct AudioConfig {
@@ -11,7 +12,8 @@ pub struct AudioConfig {
     pub block_size: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub struct Transport {
     pub bpm: f32,
     pub beat_position: f64,
@@ -21,7 +23,8 @@ pub struct Transport {
 }
 
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub struct ProcessorTypeId(pub u32);
 
 impl ProcessorTypeId {
@@ -58,7 +61,8 @@ impl From<ProcessorTypeId> for u32 {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub enum CoreCommand {
     Play,
     Stop,
@@ -68,7 +72,8 @@ pub enum CoreCommand {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub enum MixerCommand {
     SetParam {
         target_id: u64,
@@ -99,7 +104,8 @@ pub enum MixerCommand {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub enum PerformanceCommand {
     SetSequencerStep {
         node_idx: u32,
@@ -139,7 +145,8 @@ pub enum PerformanceCommand {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub enum ResourceCommand {
     RegisterCapture {
         capture_node_idx: u32,
@@ -157,7 +164,8 @@ pub enum ResourceCommand {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub struct OpaqueEnvelope {
     pub domain_id: u32,
     pub target_id: u64,
@@ -166,19 +174,22 @@ pub struct OpaqueEnvelope {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub struct DnaCommand {
     pub target_id: u64,
     pub layer_mask: u32,
     pub bias: f32,
     #[serde(with = "serde_big_array::BigArray")]
+    #[archive(with = rkyv::with::CopyOptimize)]
     pub payload: [u8; 128],
 }
 
 /// Represents an action to be performed by the audio engine.
 /// Refactored into a modular hierarchy to ensure ABI stability and decoupling.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub enum Command {
     Core(CoreCommand),
     Mixer(MixerCommand),
@@ -190,7 +201,8 @@ pub enum Command {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub enum TopologyCommand {
     AddNode {
         processor_type_id: ProcessorTypeId,
@@ -214,16 +226,27 @@ pub enum TopologyCommand {
 
 /// A command with an associated timestamp for deterministic execution.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub struct TimestampedCommand {
     pub timestamp_samples: u64,
     pub command: Command,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum HandshakeMessage {
+    Hello { protocol_version: u32 },
+    Identify { metadata: ProcessorMetadata },
+    Heartbeat { timestamp_ns: u64 },
+    SyncTransport { transport: Transport },
+}
+
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub struct ParameterMetadata {
     pub id: u32,
+    #[archive(with = rkyv::with::CopyOptimize)]
     pub name: [u8; 32],
     pub min: f32,
     pub max: f32,
@@ -231,7 +254,8 @@ pub struct ParameterMetadata {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub struct ProcessorMetadata {
     pub processor_id: u64,
     pub num_parameters: u32,
@@ -508,16 +532,20 @@ pub trait CommandBundleConsumer: Send {
     fn pop(&mut self) -> Option<Vec<Command>>;
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub struct SpectralPersonality {
     /// 64 x 8-bit bins representing normalized power spectrum (0-20kHz)
     #[serde(with = "serde_big_array::BigArray")]
+    #[archive(with = rkyv::with::CopyOptimize)]
     pub energy_map: [u8; 64],
     /// Ratio of periodic vs aperiodic energy across 8 octaves (16 bits per octave)
+    #[archive(with = rkyv::with::CopyOptimize)]
     pub harmonicity: [u16; 8],
     /// Spectral slope/tilt
     pub tilt: f32,
     /// Top 5 resonant peaks: (Freq, Q, Gain)
+    #[archive(with = rkyv::with::CopyOptimize)]
     pub formant_peaks: [(f32, u16, u16); 5],
 }
 
@@ -532,13 +560,16 @@ impl Default for SpectralPersonality {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub struct RhythmicDNA {
     /// 64-step bitmask indicating significant transient density over 4 bars
+    #[archive(with = rkyv::with::CopyOptimize)]
     pub onset_mask: [u64; 4],
     /// Measure of rhythmic complexity
     pub syncopation_index: f32,
     /// Deviation profile from absolute grid (Early/Late bias)
+    #[archive(with = rkyv::with::CopyOptimize)]
     pub micro_timing: [i16; 12],
 }
 
@@ -552,7 +583,8 @@ impl Default for RhythmicDNA {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub struct ArtifactProfile {
     pub aliasing_threshold: f32,
     pub noise_floor_db: f32,
@@ -569,13 +601,16 @@ impl Default for ArtifactProfile {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub struct SpatialDNA {
     pub stereo_width: f32,
     pub room_size: f32,
     /// Delay offsets of the first 8 reflection taps in ms
+    #[archive(with = rkyv::with::CopyOptimize)]
     pub er_taps: [f32; 8],
     /// Gain of the first 8 reflection taps
+    #[archive(with = rkyv::with::CopyOptimize)]
     pub er_gains: [f32; 8],
 }
 
@@ -590,7 +625,8 @@ impl Default for SpatialDNA {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Archive, RkyvDeserialize, RkyvSerialize)]
+#[archive(check_bytes)]
 pub struct SoundDNA {
     pub schema_version: u16,
     pub spectral: SpectralPersonality,

@@ -362,10 +362,19 @@ impl SidecarHandle {
         // Check for memory.high/max pressure
         let pressure_path = format!("{}/memory.pressure", group_path);
         if let Ok(content) = std::fs::read_to_string(&pressure_path) {
-             if content.contains("some avg10=") {
-                 // Check if pressure is above threshold (e.g. 50%)
-                 // Implementation logic for pressure parsing
-             }
+            // Memory pressure format: "some avg10=0.00 avg60=0.00 avg300=0.00 total=0"
+            for line in content.lines() {
+                if line.starts_with("some ") {
+                    if let Some(avg10_part) = line.split_whitespace().find(|s| s.starts_with("avg10=")) {
+                        if let Ok(val) = avg10_part[6..].parse::<f32>() {
+                            if val > 50.0 {
+                                eprintln!("Sidecar {} CRITICAL memory pressure detected: {}%", self.name, val);
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         false

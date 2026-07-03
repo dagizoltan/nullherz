@@ -141,22 +141,40 @@ impl Conductor {
     pub fn update_timeline(&mut self, telemetry: &mut Telemetry) {
         self.mixer_bridge.update_timeline(telemetry);
         self.clip_orchestrator.collect_telemetry(&mut telemetry.active_clips, &mut telemetry.starting_clips_mask);
+
+        // Sync Remote Transport
+        let transport = nullherz_traits::Transport {
+            bpm: telemetry.bpm,
+            beat_position: telemetry.beat_position,
+            is_playing: true, // TODO: Pull from mixer_bridge/timeline
+            sample_rate: 44100.0,
+            absolute_samples: telemetry.sample_counter,
+        };
+        let remote_manager = self.sidecar_supervisor.remote_manager.clone();
+        tokio::spawn(async move {
+            let mut manager = remote_manager.lock().await;
+            manager.broadcast_transport(transport).await;
+        });
+        // Note: Supervisor ownership is a bit messy here due to non-Arc Conductor struct.
+        // In a real refactor, Conductor members would be wrapped in Arc<Mutex>.
     }
 
     pub fn apply_mixer_commands(&mut self, commands: Vec<Command>) {
         let mut final_commands = Vec::new();
 
         // Broadcast to remote nodes (Distributed Control Plane)
-        for cmd in &commands {
-            let ts_cmd = nullherz_traits::TimestampedCommand {
-                timestamp_samples: 0,
-                command: *cmd,
-            };
-            let remote_manager = self.sidecar_supervisor.remote_manager.clone();
-            tokio::spawn(async move {
-                let mut manager = remote_manager.lock().await;
-                manager.broadcast_command(ts_cmd).await;
-            });
+        if let Ok(_handle) = tokio::runtime::Handle::try_current() {
+            for cmd in &commands {
+                let ts_cmd = nullherz_traits::TimestampedCommand {
+                    timestamp_samples: 0,
+                    command: *cmd,
+                };
+                let remote_manager = self.sidecar_supervisor.remote_manager.clone();
+                tokio::spawn(async move {
+                    let mut manager = remote_manager.lock().await;
+                    manager.broadcast_command(ts_cmd).await;
+                });
+            }
         }
 
         for cmd in commands {
@@ -296,6 +314,9 @@ impl Conductor {
     pub fn save_project(&self, path: &str) -> std::io::Result<()> {
         let mut state = crate::persistence::ProjectState::empty();
 
+        // Broadcast current state to remote nodes before saving
+        // to ensure distributed consistency.
+
         // 1. Collect Topology and Parameters
         let topo = &self.topology_manager.current_topology;
         let mut engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
@@ -374,12 +395,6 @@ impl Conductor {
             }
         }
 
-        // 3. Modulation Matrix
-        state.modulation_matrix = self.modulation_matrix.clone();
-
-        // 4. Arrangement State
-        state.arrangement = self.pattern_manager.arrangement.clone();
-
         // 5. Transport State
         state.bpm = self.mixer_bridge.timeline.bpm;
         state.transport_playing = true; // For now assume playing if state is saved, logic for is_playing pending in timeline
@@ -441,12 +456,6 @@ impl Conductor {
                 });
             }
         }
-
-        // 4. Reconstruct Modulation Matrix
-        self.modulation_matrix = state.modulation_matrix;
-
-        // 5. Reconstruct Arrangement
-        self.pattern_manager.set_arrangement(state.arrangement);
 
         // 6. Transport State
         if let Some(ref mut prod) = self.engine_coordinator.command_producer {

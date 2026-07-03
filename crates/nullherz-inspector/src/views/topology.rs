@@ -2,7 +2,7 @@ use egui::{Ui, Color32, RichText};
 use crate::InspectorApp;
 use audio_core::Telemetry;
 
-pub fn render(app: &InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
+pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     ui.heading("System Topology");
     ui.add_space(10.0);
 
@@ -25,6 +25,14 @@ pub fn render(app: &InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
                 });
             }
         });
+    });
+
+    ui.add_space(20.0);
+    ui.heading("Remote DSP Nodes");
+    ui.group(|ui| {
+        // In a real implementation we would fetch this from the conductor via a dedicated channel
+        // For now, let's assume we have a way to see them.
+        ui.label("Remote Node Discovery active on port 9000");
     });
 
     ui.add_space(20.0);

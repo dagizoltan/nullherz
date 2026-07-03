@@ -1,6 +1,6 @@
 use fx_runtime::SidecarManager;
 use crate::topology_manager::TopologyManager;
-use nullherz_traits::{TopologyMutation, Command, TimestampedCommand};
+use nullherz_traits::{TopologyMutation, Command, TimestampedCommand, ProcessorMetadata, HandshakeMessage};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use ipc_layer::tcp::TcpIpcConsumer;
@@ -9,6 +9,7 @@ use tokio::io::AsyncReadExt;
 pub struct RemoteSidecar {
     pub addr: String,
     pub writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
+    pub metadata: Option<ProcessorMetadata>,
 }
 
 pub struct RemoteSidecarManager {
@@ -18,7 +19,16 @@ pub struct RemoteSidecarManager {
 
 impl RemoteSidecarManager {
     pub async fn broadcast_command(&mut self, cmd: TimestampedCommand) {
-        let serialized = match serde_json::to_vec(&cmd) {
+        self.broadcast_item(&cmd).await;
+    }
+
+    pub async fn broadcast_transport(&mut self, transport: nullherz_traits::Transport) {
+        let msg = HandshakeMessage::SyncTransport { transport };
+        self.broadcast_item(&msg).await;
+    }
+
+    async fn broadcast_item<T: serde::Serialize>(&mut self, item: &T) {
+        let serialized = match serde_json::to_vec(item) {
             Ok(s) => s,
             Err(_) => return,
         };
@@ -86,7 +96,19 @@ impl SidecarSupervisor {
                                 let mut buffer = vec![0u8; len];
                                 if reader.read_exact(&mut buffer).await.is_err() { break; }
 
-                                if let Ok(cmd) = serde_json::from_slice::<TimestampedCommand>(&buffer) {
+                                // Handle Handshake or Command
+                                if let Ok(msg) = serde_json::from_slice::<HandshakeMessage>(&buffer) {
+                                    match msg {
+                                        HandshakeMessage::Identify { metadata } => {
+                                            let mut manager = remote_manager_clone.lock().await;
+                                            if let Some(node) = manager.remote_nodes.iter_mut().find(|n| n.addr == addr_clone) {
+                                                node.metadata = Some(metadata);
+                                                println!("Conductor: Identified remote sidecar {} as node {}", addr_clone, metadata.processor_id);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                } else if let Ok(cmd) = serde_json::from_slice::<TimestampedCommand>(&buffer) {
                                     let mut manager = remote_manager_clone.lock().await;
                                     manager.pending_commands.push(cmd);
                                 }
@@ -99,6 +121,7 @@ impl SidecarSupervisor {
                         manager.remote_nodes.push(RemoteSidecar {
                             addr: peer_addr.clone(),
                             writer: writer_arc,
+                            metadata: None,
                         });
                         println!("Conductor: Attached remote sidecar from {}", peer_addr);
                     }
@@ -116,6 +139,11 @@ impl SidecarSupervisor {
     pub async fn broadcast_to_remote(&mut self, cmd: TimestampedCommand) {
         let mut manager = self.remote_manager.lock().await;
         manager.broadcast_command(cmd).await;
+    }
+
+    pub async fn sync_remote_transport(&mut self, transport: nullherz_traits::Transport) {
+        let mut manager = self.remote_manager.lock().await;
+        manager.broadcast_transport(transport).await;
     }
 
     pub fn supervise(&mut self, topology_manager: &mut TopologyManager) -> Vec<TimestampedCommand> {
