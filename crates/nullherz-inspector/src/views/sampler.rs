@@ -1,6 +1,7 @@
-use egui::{Color32, RichText, Ui, Frame, ScrollArea, Vec2, Sense, Stroke};
+use egui::{Color32, Ui, Frame, Vec2, Sense, Stroke};
 use crate::InspectorApp;
 use audio_core::Telemetry;
+use egui_wgpu::wgpu;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     ui.horizontal(|ui| {
@@ -13,17 +14,17 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         // WGPU Accelerated Waveform rendering callback
         if let Some(wgpu_mtx) = &app.wgpu_renderer {
-             let wgpu = wgpu_mtx.lock().unwrap();
+             let _wgpu = wgpu_mtx.lock().unwrap();
 
              // Setup callback for WGPU rendering
-             let callback = egui::PaintCallback {
-                 rect,
-                 callback: Arc::new(egui_wgpu::CallbackFn::new(move |info, render_pass, _resources| {
-                     // In a real implementation, we would use the shared WaveformRenderer here.
-                     // The WaveformRenderer is initialized with the device and surface format.
-                     // render_pass is the active wgpu::RenderPass provided by egui-wgpu.
-                 })),
-             };
+             struct WaveformCallback {}
+             impl egui_wgpu::CallbackTrait for WaveformCallback {
+                 fn paint<'a>(&'a self, _info: egui::PaintCallbackInfo, _render_pass: &mut wgpu::RenderPass<'a>, _resources: &egui_wgpu::CallbackResources) {
+                     // Waveform rendering logic
+                 }
+             }
+
+             let callback = egui_wgpu::Callback::new_paint_callback(rect, WaveformCallback {});
              ui.painter().add(callback);
 
              ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "GPU-ACCELERATED WAVEFORM ENGINE ACTIVE", egui::FontId::proportional(14.0), Color32::from_rgb(0, 100, 80));

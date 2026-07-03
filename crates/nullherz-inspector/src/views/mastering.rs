@@ -1,4 +1,4 @@
-use egui::{Ui, Color32, RichText, Frame};
+use egui::{Ui, Color32, Frame};
 use crate::{InspectorApp, widgets};
 use audio_core::Telemetry;
 

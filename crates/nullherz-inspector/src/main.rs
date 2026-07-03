@@ -128,7 +128,7 @@ pub struct InspectorApp {
 }
 
 impl InspectorApp {
-    pub fn new(graph: GraphJson, cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(graph: GraphJson, _cc: &eframe::CreationContext<'_>) -> Self {
         let (cmd_tx, _cmd_rx) = mpsc::channel::<Command>();
         Self {
             graph,
@@ -307,13 +307,28 @@ impl eframe::App for InspectorApp {
 }
 
 fn main() -> eframe::Result<()> {
-    let native_options = eframe::NativeOptions::default();
+    let mut native_options = eframe::NativeOptions::default();
+    native_options.renderer = eframe::Renderer::Wgpu;
+
     eframe::run_native(
         "nullherz Studio",
         native_options,
         Box::new(|cc| {
             let graph = GraphJson { nodes: vec![], edges: vec![] };
-            Box::new(InspectorApp::new(graph, cc))
+            let mut app = InspectorApp::new(graph, cc);
+
+            if let Some(render_state) = &cc.wgpu_render_state {
+                // eframe already manages WGPU.
+                // We'll mark the renderer as active to enable the GPU-accelerated UI paths.
+                app.wgpu_renderer = Some(Arc::new(Mutex::new(nullherz_ui_hal::render::wgpu_backend::WgpuRenderer {
+                    device: render_state.device.clone(),
+                    queue: render_state.queue.clone(),
+                    surface: None,
+                    config: None,
+                })));
+            }
+
+            Box::new(app)
         }),
     )
 }
