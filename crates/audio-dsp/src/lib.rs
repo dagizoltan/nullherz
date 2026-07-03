@@ -50,20 +50,26 @@ impl SummingNode {
     }
 
     pub fn process_16_to_1_simd(&self, inputs: &[&[f32]], output: &mut [f32]) {
-        use wide::*;
         use crate::simd_vec::*;
         let len = output.len();
         output.fill(0.0);
-        let b_gain = f32x8::from(self.gain);
+        let b_gain = FloatX16::from(self.gain);
 
         for input in inputs {
             let input_len = input.len();
             let process_len = len.min(input_len);
             let mut i = 0;
+            while i + 16 <= process_len {
+                let v_in = load_f32x16(input, i);
+                let v_out = load_f32x16(output, i);
+                let res = v_out + (v_in * b_gain);
+                store_f32x16(output, i, res);
+                i += 16;
+            }
             while i + 8 <= process_len {
                 let v_in = load_f32x8(input, i);
                 let v_out = load_f32x8(output, i);
-                let res = v_out + (v_in * b_gain);
+                let res = v_out + (v_in * wide::f32x8::from(self.gain));
                 store_f32x8(output, i, res);
                 i += 8;
             }
@@ -106,7 +112,6 @@ impl Crossfader {
     }
 
     pub fn process_block_simd(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
-        use wide::*;
         use crate::simd_vec::*;
         let len = output.len();
         let (gain_a, gain_b) = if self.curve > 0.5 {
@@ -114,14 +119,21 @@ impl Crossfader {
         } else {
             ( 1.0 - self.position, self.position )
         };
-        let b_gain_b = f32x8::from(gain_b);
-        let b_gain_a = f32x8::from(gain_a);
+        let b_gain_b_16 = FloatX16::from(gain_b);
+        let b_gain_a_16 = FloatX16::from(gain_a);
 
         let mut i = 0;
+        while i + 16 <= len {
+            let va = load_f32x16(input_a, i);
+            let vb = load_f32x16(input_b, i);
+            let res = (va * b_gain_a_16) + (vb * b_gain_b_16);
+            store_f32x16(output, i, res);
+            i += 16;
+        }
         while i + 8 <= len {
             let va = load_f32x8(input_a, i);
             let vb = load_f32x8(input_b, i);
-            let res = (va * b_gain_a) + (vb * b_gain_b);
+            let res = (va * wide::f32x8::from(gain_a)) + (vb * wide::f32x8::from(gain_b));
             store_f32x8(output, i, res);
             i += 8;
         }

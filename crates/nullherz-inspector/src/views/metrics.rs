@@ -1,9 +1,11 @@
 use egui::{Ui, Color32, Frame};
 use crate::{InspectorApp, widgets};
 
-pub fn render(_app: &InspectorApp, ui: &mut Ui) {
+pub fn render(app: &InspectorApp, ui: &mut Ui) {
     ui.heading("System Metrics");
     ui.add_space(20.0);
+
+    let telemetry = app.last_telemetry.lock().unwrap().clone();
 
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.vertical(|ui| {
@@ -11,17 +13,46 @@ pub fn render(_app: &InspectorApp, ui: &mut Ui) {
             ui.add_space(10.0);
 
             Frame::none().fill(Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(12.0).show(ui, |ui| {
-                ui.label("Average Cycle Load: 45%");
-                ui.label("Max Jitter: 1.2ms");
+                if let Some(t) = &telemetry {
+                    let load = (t.process_time_ns as f32 / 1_000_000.0) / (256.0 / 44100.0 * 1000.0) * 100.0;
+                    ui.label(format!("Engine Load: {:.1}%", load));
+                    ui.label(format!("Block Time: {:.2}ms", t.process_time_ns as f32 / 1_000_000.0));
+                    ui.label(format!("Peak Time: {:.2}ms", t.peak_process_time_ns as f32 / 1_000_000.0));
+                    ui.label(format!("X-RUNS: {}", t.xrun_count));
+                } else {
+                    ui.label("Waiting for engine telemetry...");
+                }
             });
 
             ui.add_space(20.0);
-            ui.strong("Visualizers");
+            ui.strong("Spectral Analysis");
             ui.add_space(10.0);
 
             Frame::none().fill(Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(12.0).show(ui, |ui| {
-                ui.label("Spectrum Analyzer [Placeholder]");
-                widgets::render_vu_meter(ui, 0.5, 1.0, Color32::WHITE, 200.0);
+                if let Some(t) = &telemetry {
+                    widgets::render_spectrum_analyzer(ui, &t.spectrum, Color32::from_rgb(0, 255, 200), 120.0);
+                } else {
+                    ui.label("No spectral data available.");
+                }
+            });
+
+            ui.add_space(20.0);
+            ui.strong("Phase & Correlation");
+            ui.add_space(10.0);
+
+            Frame::none().fill(Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(12.0).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if let Some(t) = &telemetry {
+                        widgets::render_goniometer(ui, &t.goniometer_pts, 200.0, Color32::from_rgb(0, 255, 200));
+                        ui.add_space(20.0);
+                        ui.vertical(|ui| {
+                             ui.label("Master Out (L/R)");
+                             widgets::render_vu_meter(ui, t.peak_levels[0], t.peak_levels[0], Color32::WHITE, 160.0);
+                        });
+                    } else {
+                        ui.label("No phase data available.");
+                    }
+                });
             });
         });
     });

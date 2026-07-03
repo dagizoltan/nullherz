@@ -72,6 +72,12 @@ impl FloatX16 {
     }
 }
 
+impl From<f32> for FloatX16 {
+    fn from(val: f32) -> Self {
+        Self::splat(val)
+    }
+}
+
 impl std::ops::Add for FloatX16 {
     type Output = Self;
     fn add(self, rhs: Self) -> Self {
@@ -121,5 +127,46 @@ pub fn store_f32x16(data: &mut [f32], offset: usize, val: FloatX16) {
     {
         store_f32x8(data, offset, val.low);
         store_f32x8(data, offset + 8, val.high);
+    }
+}
+
+/// # Safety
+/// The caller must ensure that `ptr` is valid for at least 16 elements of type `f32`.
+#[inline(always)]
+pub unsafe fn load_f32x16_ptr(ptr: *const f32) -> FloatX16 {
+    #[cfg(target_feature = "avx512f")]
+    {
+        let mut arr = [0.0f32; 16];
+        unsafe { std::ptr::copy_nonoverlapping(ptr, arr.as_mut_ptr(), 16); }
+        f32x16::new(arr)
+    }
+    #[cfg(not(target_feature = "avx512f"))]
+    {
+        unsafe {
+            FloatX16 {
+                low: load_f32x8_ptr(ptr),
+                high: load_f32x8_ptr(ptr.add(8)),
+            }
+        }
+    }
+}
+
+/// # Safety
+/// The caller must ensure that `ptr` is valid for at least 16 elements of type `f32`.
+#[inline(always)]
+pub unsafe fn store_f32x16_ptr(ptr: *mut f32, val: FloatX16) {
+    #[cfg(target_feature = "avx512f")]
+    {
+        let arr: [f32; 16] = val.into();
+        unsafe { std::ptr::copy_nonoverlapping(arr.as_ptr(), ptr, 16); }
+    }
+    #[cfg(not(target_feature = "avx512f"))]
+    {
+        let low_arr: [f32; 8] = val.low.into();
+        let high_arr: [f32; 8] = val.high.into();
+        unsafe {
+            std::ptr::copy_nonoverlapping(low_arr.as_ptr(), ptr, 8);
+            std::ptr::copy_nonoverlapping(high_arr.as_ptr(), ptr.add(8), 8);
+        }
     }
 }
