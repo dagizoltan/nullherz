@@ -84,7 +84,7 @@ The system's "Triple-Plane Model" is a masterclass in separation of concerns.
 | **Temporal** | BPM Detection | **DONE** | Histogram-based interval estimation. |
 | | Transient Analysis | **DONE** | Frequency-weighted Spectral Flux detection. |
 | **Harmonic** | Root Key Detection | **DONE** | 12-bin Chromagram (4096 FFT size). |
-| | Key Sync | **DONE** | Real-time pitch shifting for harmonic mix. |
+| | Key Sync | **DONE** | Real-time pitch shifting (+/- 12 semitones) via `SpectralPipeline`. |
 | **Database** | ACID Library | **DONE** | `redb` backend for multi-GB track metadata. |
 | | Folder Monitoring | **DONE** | Background FS watcher for auto-ingestion. |
 
@@ -105,6 +105,7 @@ The system's "Triple-Plane Model" is a masterclass in separation of concerns.
 | :--- | :--- | :--- | :--- |
 | **Modulation** | Macro Matrix | **DONE** | 8 Global Macros with ramped broadcast. |
 | | Scaling & Offset | **DONE** | Mapping range transformation (scaling). |
+| **Transfusion** | Personality Inherit. | **DONE** | Real-time DNA propagation across 5 layers. |
 | **Arrangement** | Song Timeline | **DONE** | Beat-aware arrangement event scheduling. |
 | | Pattern Manager | **DONE** | Dynamic orchestration of sequencer banks. |
 | **Persistence** | Session Save/Load | **DONE** | Full state serialization (Topology+Sequences).|

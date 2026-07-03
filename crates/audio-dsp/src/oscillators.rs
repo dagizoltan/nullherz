@@ -39,8 +39,12 @@ impl SineOscillator {
 impl Oscillator for SineOscillator {
     fn next_sample(&mut self) -> f32 {
         let idx = self.phase as usize % LUT_SIZE;
-        let sample = self.lut[idx];
+        let mut sample = self.lut[idx];
+        if !sample.is_finite() { sample = 0.0; }
+
         self.phase += self.phase_inc;
+        if !self.phase.is_finite() { self.phase = 0.0; }
+
         if self.phase >= LUT_SIZE as f32 {
             self.phase -= LUT_SIZE as f32;
         }
@@ -119,8 +123,8 @@ impl WavetableOscillator {
         use wide::*;
         use crate::simd_vec::*;
 
-        let mut b_phases = load_f32x8(&self.phases, 0);
-        let b_base_incs = load_f32x8(&self.phase_incs, 0);
+        let mut b_phases = unsafe { load_f32x8_ptr(self.phases.as_ptr()) };
+        let b_base_incs = unsafe { load_f32x8_ptr(self.phase_incs.as_ptr()) };
         let b_2048 = f32x8::from(2048.0);
         let b_1 = f32x8::from(1.0);
 
@@ -177,7 +181,88 @@ impl WavetableOscillator {
             b_phases += wrap_neg_mask.blend(b_2048, f32x8::ZERO);
         }
 
-        store_f32x8(&mut self.phases, 0, b_phases);
+        unsafe { store_f32x8_ptr(self.phases.as_mut_ptr(), b_phases); }
+    }
+
+    pub fn process_16_channels(&mut self, fm: [*const f32; 16], pm: [*const f32; 16], outputs: [*mut f32; 16], len: usize) {
+        use crate::simd_vec::*;
+
+        let mut b_phases = unsafe { load_f32x16_ptr(self.phases.as_ptr()) };
+        let b_base_incs = unsafe { load_f32x16_ptr(self.phase_incs.as_ptr()) };
+        let b_2048 = FloatX16::from(2048.0);
+        let b_1 = FloatX16::from(1.0);
+
+        for i in 0..len {
+            let mut fm_arr = [0.0f32; 16];
+            let mut pm_arr = [0.0f32; 16];
+            for ch in 0..16 {
+                unsafe {
+                    fm_arr[ch] = *fm[ch].add(i);
+                    pm_arr[ch] = *pm[ch].add(i);
+                }
+            }
+            let b_fm = FloatX16::new(fm_arr);
+            let b_pm = FloatX16::new(pm_arr);
+
+            let b_mod_inc = b_base_incs * (b_1 + b_fm);
+            let b_mod_phase = b_phases + (b_pm * b_2048);
+
+            // Scalar fallback for table lookup within SIMD loop
+            // High-density Stage 2 AnaWaves performance.
+            let mut b_out_arr = [0.0f32; 16];
+
+            #[cfg(target_feature = "avx512f")]
+            {
+                // In a true AVX-512 scenario, we might use gather instructions,
+                // but for now we'll use a reliable scalar extraction.
+                let phases_arr: [f32; 16] = b_mod_phase.into();
+                for ch in 0..16 {
+                    let p = phases_arr[ch];
+                    let idx_f = p.floor();
+                    let idx = (idx_f as i32 & 2047) as usize;
+                    let next_idx = (idx + 1) & 2047;
+                    let frac = p - idx_f;
+                    b_out_arr[ch] = self.table[idx] * (1.0 - frac) + self.table[next_idx] * frac;
+                }
+            }
+            #[cfg(not(target_feature = "avx512f"))]
+            {
+                let phases_low: [f32; 8] = b_mod_phase.low.into();
+                let phases_high: [f32; 8] = b_mod_phase.high.into();
+                for ch in 0..8 {
+                    let p = phases_low[ch];
+                    let idx_f = p.floor();
+                    let idx = (idx_f as i32 & 2047) as usize;
+                    let next_idx = (idx + 1) & 2047;
+                    let frac = p - idx_f;
+                    b_out_arr[ch] = self.table[idx] * (1.0 - frac) + self.table[next_idx] * frac;
+                }
+                for ch in 0..8 {
+                    let p = phases_high[ch];
+                    let idx_f = p.floor();
+                    let idx = (idx_f as i32 & 2047) as usize;
+                    let next_idx = (idx + 1) & 2047;
+                    let frac = p - idx_f;
+                    b_out_arr[ch+8] = self.table[idx] * (1.0 - frac) + self.table[next_idx] * frac;
+                }
+            }
+
+            for ch in 0..16 {
+                unsafe { *outputs[ch].add(i) = b_out_arr[ch] };
+            }
+
+            b_phases = b_phases + b_mod_inc;
+
+            // Wrap b_phases (optimized branchless if possible, but keeping logic correct)
+            let mut p_arr: [f32; 16] = b_phases.into();
+            for p in p_arr.iter_mut() {
+                if *p >= 2048.0 { *p -= 2048.0; }
+                else if *p < 0.0 { *p += 2048.0; }
+            }
+            b_phases = FloatX16::new(p_arr);
+        }
+
+        unsafe { store_f32x16_ptr(self.phases.as_mut_ptr(), b_phases); }
     }
 }
 

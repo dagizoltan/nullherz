@@ -10,8 +10,8 @@
 
 | Task | Priority | Description |
 | :--- | :---: | :--- |
-| **Kernel Devirtualization** | DONE | Replaced `Box<dyn ProcessingKernel>` with static dispatch (`AudioEngine<K: ProcessingKernel>`). |
-| **Pre-allocated Commands** | DONE | Refactored `MixerBridge` to use a pool of pre-allocated `Vec<Command>` to avoid heap pressure during macro modulation expansion. |
+| **Kernel Devirtualization** | VERIFIED | Replaced `Box<dyn ProcessingKernel>` with static dispatch (`AudioEngine<K: ProcessingKernel>`). Verified via `audio-core`. |
+| **Pre-allocated Commands** | VERIFIED | Refactored `MixerBridge` to use a pool of pre-allocated `Vec<Command>` via `ResourceRecycler`. Verified via `nullherz-conductor`. |
 | **Stack-Pinning** | High | Investigate stack-pinning for critical DSP nodes to improve cache locality and prevent accidental movement during block cycles. |
 | **Denormal Safeguard v2**| Low | Add explicit `is_subnormal` checks in the `Gain` kernel as a secondary defense to FTZ/DAZ hardware flags. |
 
@@ -53,8 +53,7 @@
 
 ## 5. Summary of Immediate Action Items
 1.  **SIMD Pointer Access:** Refactor sampler kernels for direct aligned memory access.
-2.  **Kernel Dispatch:** Devirtualize the rendering kernel.
-3.  **UI Geometry Caching:** Optimize industrial-steel widget rendering.
+2.  **UI Geometry Caching:** Optimize industrial-steel widget rendering.
 
 ---
 
