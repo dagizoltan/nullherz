@@ -160,6 +160,16 @@ pub struct OpaqueEnvelope {
     pub data: [u8; 32],
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DnaCommand {
+    pub target_id: u64,
+    pub layer_mask: u32,
+    pub bias: f32,
+    #[serde(with = "serde_big_array::BigArray")]
+    pub payload: [u8; 128],
+}
+
 /// Represents an action to be performed by the audio engine.
 /// Refactored into a modular hierarchy to ensure ABI stability and decoupling.
 #[repr(C)]
@@ -171,6 +181,7 @@ pub enum Command {
     Topology(TopologyCommand),
     Resource(ResourceCommand),
     Extension(OpaqueEnvelope),
+    Dna(DnaCommand),
 }
 
 #[repr(C)]

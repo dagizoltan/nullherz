@@ -163,10 +163,16 @@ impl SidecarSupervisor {
             eprintln!("Warning: could not move sidecar {} to cgroup: {}", name, e);
         }
 
-        // SC-4: Enforce real memory limits via cgroups if possible
+        // SC-4: Enforce real memory limits via hierarchical cgroups
+        // Create a specific group for this sidecar instance
+        let group_name = format!("nullherz/sidecar_{}", name);
+        if let Err(e) = move_to_cgroup(&group_name, child.id() as i32) {
+             eprintln!("Warning: could not move sidecar {} to cgroup {}: {}", name, group_name, e);
+        }
+
         // We'll set a limit of 1.5x the estimated IPC memory or 16MB minimum.
         let rss_limit = (estimated_size * 3 / 2).max(16 * 1024 * 1024);
-        if let Err(e) = ipc_layer::set_cgroup_memory_limit("nullherz", rss_limit) {
+        if let Err(e) = ipc_layer::set_cgroup_memory_limit(&group_name, rss_limit) {
              eprintln!("Warning: could not set cgroup memory limit for sidecar {}: {}", name, e);
         }
         if let Err(e) = ipc_layer::set_rt_priority_for(child.id() as i32, 80) {
@@ -225,7 +231,14 @@ impl SidecarSupervisor {
             }
 
             let exited = match handle.process.try_wait() {
-                Ok(Some(_status)) => true,
+                Ok(Some(status)) => {
+                    // Check if it was killed by OOM killer (cgroups)
+                    // On Linux, a status of 9 (SIGKILL) might indicate OOM or manual kill.
+                    if status.code().is_none() {
+                        eprintln!("Sidecar {} terminated by signal (Potential OOM/Cgroup kill)", handle.name);
+                    }
+                    true
+                },
                 Ok(None) => false,
                 Err(_) => true,
             };
