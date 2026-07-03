@@ -3,14 +3,20 @@ name = "nullherz-midi"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "nullherz-midi"
+path = "src/main.rs"
+
 [lib]
 path = "src/lib.rs"
 
 [features]
+default = ["midir-backend"]
 midir-backend = ["midir"]
 
 [dependencies]
 midir = { version = "0.9", optional = true }
+libc = "0.2"
 nullherz-traits = { path = "../../crates/nullherz-traits" }
 ipc-layer = { path = "../../crates/ipc-layer" }
 tokio = { version = "1.0", features = ["full"] }
