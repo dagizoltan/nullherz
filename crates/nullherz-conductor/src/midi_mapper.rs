@@ -15,6 +15,12 @@ impl MidiMapper {
         Self { active_map: None }
     }
 
+    pub fn load_from_json(&mut self, json: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let map: MidiMap = serde_json::from_str(json)?;
+        self.active_map = Some(map);
+        Ok(())
+    }
+
     pub fn translate(&self, event: &MidiEvent) -> Vec<Command> {
         let mut commands = Vec::new();
         let Some(ref map) = self.active_map else { return commands; };

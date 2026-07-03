@@ -161,6 +161,19 @@ impl<T: Copy + Send + Into<nullherz_traits::TimestampedCommand>> nullherz_traits
     }
 }
 
+pub struct IpcMidiConsumer {
+    pub buffer: Arc<SharedMemory>,
+    pub rb: *const ShmRingBuffer<MidiEvent>,
+}
+
+unsafe impl Send for IpcMidiConsumer {}
+
+impl IpcMidiConsumer {
+    pub fn pop(&mut self) -> Option<MidiEvent> {
+        unsafe { (*self.rb).pop() }
+    }
+}
+
 #[derive(Clone)]
 pub struct LocalMpscCommandProducer(pub Arc<MpscRingBuffer<nullherz_traits::TimestampedCommand>>);
 impl nullherz_traits::CommandProducer for LocalMpscCommandProducer {

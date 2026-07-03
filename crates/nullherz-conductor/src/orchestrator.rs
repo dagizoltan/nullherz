@@ -25,6 +25,9 @@ pub struct Conductor {
     pub folder_monitor: Option<crate::folder_monitor::FolderMonitor>,
     pub library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>,
     pub midi_consumer: Option<ipc_layer::Consumer<nullherz_traits::MidiEvent>>,
+    pub external_midi_consumer: Option<ipc_layer::IpcMidiConsumer>,
+    midi_child: Option<std::process::Child>,
+    midi_shm: Option<Arc<ipc_layer::SharedMemory>>,
 }
 
 impl Default for Conductor {
@@ -55,6 +58,9 @@ impl Conductor {
             folder_monitor: Some(crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())),
             library,
             midi_consumer: None,
+            external_midi_consumer: None,
+            midi_child: None,
+            midi_shm: None,
         }
     }
 
@@ -64,10 +70,36 @@ impl Conductor {
         self.mixer_bridge.bundle_producer = Some(handle.bundle_producer);
         self.topology_manager.topo_producer = Some(ipc_layer::NonRtProducer::new(handle.topology_producer));
 
+        // Setup MIDI Bridge SHM
+        let shm_name = "nullherz_midi_bridge";
+        if let Ok(shm) = ipc_layer::SharedMemory::create(shm_name, 65536) {
+            unsafe { ipc_layer::ShmRingBuffer::<nullherz_traits::MidiEvent>::init(shm.ptr(), 1024); }
+            let rb = shm.ptr() as *const ipc_layer::ShmRingBuffer<nullherz_traits::MidiEvent>;
+
+            let shm_arc = Arc::new(shm);
+            self.midi_shm = Some(shm_arc.clone());
+            self.external_midi_consumer = Some(ipc_layer::IpcMidiConsumer {
+                buffer: shm_arc,
+                rb,
+            });
+        }
+
         crate::EngineContext {
             command_producer: handle.command_producer,
             telemetry_consumer: handle.telemetry_consumer,
             midi_producer: handle.midi_producer,
+        }
+    }
+
+    pub fn start_midi_bridge(&mut self, binary_path: &str, port_filter: Option<&str>) {
+        if self.midi_child.is_some() { return; }
+        let mut cmd = std::process::Command::new(binary_path);
+        cmd.arg("--shm").arg("nullherz_midi_bridge");
+        if let Some(f) = port_filter { cmd.arg("--port").arg(f); }
+
+        if let Ok(child) = cmd.spawn() {
+            self.midi_child = Some(child);
+            println!("MIDI Bridge process spawned (PID: {})", self.midi_child.as_ref().unwrap().id());
         }
     }
 
@@ -131,8 +163,19 @@ impl Conductor {
     }
 
     pub fn tick(&mut self) {
-        // Drain MIDI Consumer
+        // Drain Local MIDI Consumer
         if let Some(ref mut consumer) = self.midi_consumer {
+            let mut events = Vec::new();
+            while let Some(event) = consumer.pop() {
+                events.push(event);
+            }
+            if !events.is_empty() {
+                self.handle_midi_events(events);
+            }
+        }
+
+        // Drain External MIDI Consumer (Sidecar Bridge)
+        if let Some(ref mut consumer) = self.external_midi_consumer {
             let mut events = Vec::new();
             while let Some(event) = consumer.pop() {
                 events.push(event);
