@@ -1,4 +1,4 @@
-use egui::{Ui, ScrollArea, Color32, Frame, Vec2, Sense};
+use egui::{Ui, ScrollArea, Color32, Vec2, Sense};
 use crate::InspectorApp;
 use nullherz_traits::{Command, PerformanceCommand};
 

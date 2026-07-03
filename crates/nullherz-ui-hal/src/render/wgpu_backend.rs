@@ -4,8 +4,8 @@ use raw_window_handle::{HasWindowHandle, HasDisplayHandle};
 pub struct WgpuRenderer {
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
-    pub surface: wgpu::Surface<'static>,
-    pub config: wgpu::SurfaceConfiguration,
+    pub surface: Option<wgpu::Surface<'static>>,
+    pub config: Option<wgpu::SurfaceConfiguration>,
 }
 
 impl WgpuRenderer {
@@ -63,21 +63,26 @@ impl WgpuRenderer {
         Ok(Self {
             device: Arc::new(device),
             queue: Arc::new(queue),
-            surface,
-            config,
+            surface: Some(surface),
+            config: Some(config),
         })
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
-            self.config.width = width;
-            self.config.height = height;
-            self.surface.configure(&self.device, &self.config);
+            if let Some(config) = &mut self.config {
+                config.width = width;
+                config.height = height;
+                if let Some(surface) = &self.surface {
+                    surface.configure(&self.device, config);
+                }
+            }
         }
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        let output = self.surface.get_current_texture()?;
+        let surface = self.surface.as_ref().ok_or(wgpu::SurfaceError::Lost)?;
+        let output = surface.get_current_texture()?;
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
