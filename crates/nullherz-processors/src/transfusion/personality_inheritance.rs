@@ -1,4 +1,4 @@
-use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata, SpectralPersonality, RhythmicDNA, ArtifactProfile};
+use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata, SpectralPersonality, RhythmicDNA, ArtifactProfile, SpatialDNA};
 use audio_dsp::SpectralPipeline;
 use std::sync::Arc;
 
@@ -13,11 +13,13 @@ pub struct PersonalityInheritanceProcessor {
     source_personality: Arc<SpectralPersonality>,
     source_rhythmic: Arc<RhythmicDNA>,
     source_artifacts: Arc<ArtifactProfile>,
+    source_spatial: Arc<SpatialDNA>,
 
     // Parameters
     transfusion_bias: f32, // 0.0 = original, 1.0 = full inheritance
     rhythmic_bias: f32,    // 0.0 = original, 1.0 = full rhythmic transfusion
     artifact_bias: f32,    // 0.0 = original, 1.0 = full artifact transfusion
+    spatial_bias: f32,     // 0.0 = original, 1.0 = full spatial transfusion
 
     // Layer 3: Rhythmic Pulse Inheritance (Delay Line)
     delay_buffer: Vec<f32>,
@@ -32,9 +34,11 @@ impl PersonalityInheritanceProcessor {
             source_personality: Arc::new(SpectralPersonality::default()),
             source_rhythmic: Arc::new(RhythmicDNA::default()),
             source_artifacts: Arc::new(ArtifactProfile::default()),
+            source_spatial: Arc::new(SpatialDNA::default()),
             transfusion_bias: 0.5,
             rhythmic_bias: 0.5,
             artifact_bias: 0.5,
+            spatial_bias: 0.5,
             delay_buffer: vec![0.0; 44100], // 1 second max delay
             write_ptr: 0,
         }
@@ -62,9 +66,11 @@ impl nullherz_traits::SignalProcessor for PersonalityInheritanceProcessor {
         let bias = self.transfusion_bias;
         let r_bias = self.rhythmic_bias;
         let a_bias = self.artifact_bias;
+        let s_bias = self.spatial_bias;
         let personality = &self.source_personality;
         let rhythmic = &self.source_rhythmic;
         let artifacts = &self.source_artifacts;
+        let spatial = &self.source_spatial;
 
         // Apply Rhythmic Micro-timing (Layer 3)
         let mut rhythmic_input = vec![0.0; input.len()];
@@ -114,7 +120,24 @@ impl nullherz_traits::SignalProcessor for PersonalityInheritanceProcessor {
             }
         }
 
+        // Apply Spatial Transfusion (Layer 5) - Mid/Side width manipulation
+        let mut width_scale = 1.0;
+        if s_bias > 0.0 {
+            // Transfuse stereo width from source
+            let target_width = spatial.stereo_width;
+            width_scale = 1.0 + (target_width - 1.0) * s_bias;
+        }
+
         self.pipeline.process(&rhythmic_input, output, |re, im, n, _window, _fft| {
+            // Apply Spatial DNA to spectral bins (simplified widening/narrowing)
+            for bin in 0..n {
+                // High frequencies are usually more susceptible to width changes
+                let freq_norm = bin as f32 / n as f32;
+                let bin_width_scale = 1.0 + (width_scale - 1.0) * freq_norm;
+                re[bin] *= bin_width_scale;
+                im[bin] *= bin_width_scale;
+            }
+
             // energy_map is 64 bins covering 0-20kHz.
             // We map these 64 bins back to the N FFT bins.
             let bins_per_map_entry = n / 2 / 64;
@@ -173,6 +196,7 @@ impl AudioProcessor for PersonalityInheritanceProcessor {
             self.source_personality = Arc::new(metadata.dna.spectral.clone());
             self.source_rhythmic = Arc::new(metadata.dna.rhythmic.clone());
             self.source_artifacts = Arc::new(metadata.dna.artifacts.clone());
+            self.source_spatial = Arc::new(metadata.dna.spatial.clone());
         }
     }
 
@@ -181,6 +205,7 @@ impl AudioProcessor for PersonalityInheritanceProcessor {
             0 => self.transfusion_bias = value.clamp(0.0, 1.0),
             1 => self.rhythmic_bias = value.clamp(0.0, 1.0),
             2 => self.artifact_bias = value.clamp(0.0, 1.0),
+            3 => self.spatial_bias = value.clamp(0.0, 1.0),
             _ => {}
         }
     }
@@ -198,6 +223,7 @@ impl AudioProcessor for PersonalityInheritanceProcessor {
             (0, "Transfusion Bias", 0.0, 1.0, 0.5),
             (1, "Rhythmic Bias", 0.0, 1.0, 0.5),
             (2, "Artifact Bias", 0.0, 1.0, 0.5),
+            (3, "Spatial Bias", 0.0, 1.0, 0.5),
         ];
 
         for (i, (id, name, min, max, default)) in names.iter().enumerate() {

@@ -554,11 +554,29 @@ impl Default for ArtifactProfile {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct SpatialDNA {
+    pub stereo_width: f32,
+    pub room_size: f32,
+    pub early_reflections: f32,
+}
+
+impl Default for SpatialDNA {
+    fn default() -> Self {
+        Self {
+            stereo_width: 1.0,
+            room_size: 0.0,
+            early_reflections: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct SoundDNA {
     pub schema_version: u16,
     pub spectral: SpectralPersonality,
     pub rhythmic: RhythmicDNA,
     pub artifacts: ArtifactProfile,
+    pub spatial: SpatialDNA,
 }
 
 impl Default for SoundDNA {
@@ -568,6 +586,7 @@ impl Default for SoundDNA {
             spectral: SpectralPersonality::default(),
             rhythmic: RhythmicDNA::default(),
             artifacts: ArtifactProfile::default(),
+            spatial: SpatialDNA::default(),
         }
     }
 }

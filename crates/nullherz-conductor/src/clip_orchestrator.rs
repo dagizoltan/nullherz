@@ -2,6 +2,13 @@ use std::sync::Arc;
 use nullherz_traits::{Command, PerformanceCommand, SoundDNA, TopologyMutation};
 use serde::{Serialize, Deserialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClipState {
+    Stopped,
+    Starting,
+    Playing,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Clip {
     pub name: String,
@@ -9,6 +16,7 @@ pub struct Clip {
     pub sampler_slice_idx: Option<u32>,
     pub dna_template: Option<SoundDNA>,
     pub node_id: u32,
+    pub state: ClipState,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19,6 +27,7 @@ pub struct ClipGrid {
 pub struct ClipOrchestrator {
     pub grid: ClipGrid,
     pub pending_launches: Vec<(usize, usize)>, // (Row, Column)
+    pub last_quantize_beat: i64,
 }
 
 impl ClipOrchestrator {
@@ -26,10 +35,16 @@ impl ClipOrchestrator {
         Self {
             grid: ClipGrid::default(),
             pending_launches: Vec::new(),
+            last_quantize_beat: -1,
         }
     }
 
     pub fn launch_clip(&mut self, row: usize, col: usize) {
+        if row < self.grid.clips.len() && col < self.grid.clips[row].len() {
+            if let Some(clip) = &mut self.grid.clips[row][col] {
+                clip.state = ClipState::Starting;
+            }
+        }
         self.pending_launches.push((row, col));
     }
 
@@ -69,13 +84,27 @@ impl ClipOrchestrator {
     pub fn tick(&mut self, current_beat: f64) -> Vec<Command> {
         let mut commands = Vec::new();
 
-        // Simple 1-beat quantization for launches
-        let is_on_beat = (current_beat * 100.0).round() % 100.0 < 5.0;
+        let current_int_beat = current_beat.floor() as i64;
+        let is_quantize_trigger = current_int_beat > self.last_quantize_beat;
 
-        if is_on_beat && !self.pending_launches.is_empty() {
-            for (row, col) in self.pending_launches.drain(..) {
-                if row < self.grid.clips.len() && col < self.grid.clips[row].len() {
-                    if let Some(clip) = &self.grid.clips[row][col] {
+        if is_quantize_trigger {
+            self.last_quantize_beat = current_int_beat;
+
+            if !self.pending_launches.is_empty() {
+                for (row, col) in self.pending_launches.drain(..) {
+                    if row >= self.grid.clips.len() || col >= self.grid.clips[row].len() { continue; }
+
+                    // Stop other clips in the same row
+                    for c_idx in 0..self.grid.clips[row].len() {
+                        if let Some(other_clip) = &mut self.grid.clips[row][c_idx] {
+                            if c_idx != col {
+                                other_clip.state = ClipState::Stopped;
+                            }
+                        }
+                    }
+
+                    if let Some(clip) = &mut self.grid.clips[row][col] {
+                        clip.state = ClipState::Playing;
                         if let Some(pattern_idx) = clip.sequencer_pattern_idx {
                             commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                 target_id: clip.node_id as u64,
