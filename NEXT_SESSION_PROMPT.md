@@ -1,38 +1,36 @@
-# Session Handover: Nullherz/AnaWaves Implementation Stage 2
+# Nullherz Stage 2 Session Prompt: Genetic Transfusion & Ecosystem Scaling
 
-## 1. Context Summary
-We have successfully completed **Implementation Stage 1: The Hardened Foundation.** The system now features a devirtualized execution core, real-time safe telemetry (Spectrum/Goniometer), and a formal 'Sound DNA' genetic schema. The project is strategically anchored by a 14-document strategic suite (Status Reports, 3-Month Roadmap, Financial Proposals).
+**Role**: Senior Audio & Rust Systems Architect
+**Context**: We have successfully completed the architectural hardening and optimization phase (Alpha Baseline). The engine is now 16-wide SIMD (AVX-512) capable, hardened against NaN/Denormal instability, and features a decoupled Universal MIDI Bridge via Shared Memory.
 
-## 2. Immediate Objectives for Next Session
+**Current Technical Baseline**:
+1.  **Triple-Plane Isolation**: Orchestration (`nullherz-conductor`), Protocol (`ipc-layer`), and Execution (`audio-core`) are strictly separated.
+2.  **Law of Zero Allocation**: The execution path is heap-allocation-free, lock-free, and syscall-free (codified in `AGENTS.md`).
+3.  **SIMD Foundation**: `FloatX16` abstraction provides portable 16-wide paths for all core DSP kernels.
+4.  **Hardware Ready**: `nullherz-midi` sidecar and `nullherz-setup` wizard enable hardware integration and discovery.
+5.  **Signal Resilience**: Universal `is_finite` checks and `-300dB` denormal flushes are active.
 
-### A. MIDI Integration & Social Proof
-*   **Task:** Connect the `nullherz-midi` sidecar producer to the `Conductor`'s MIDI mapping engine.
-*   **Goal:** Enable a physical MIDI controller (e.g., a fader) to modulate a Nullherz macro or parameter in real-time, proving the 'Control Plane Hardening' milestones of Month 1.
-*   **Verification:** Use the `test_midi_cc_translation` integration test as a baseline.
+**Objective: Move from "Hardened Engine" to "Evolutionary Instrument"**
 
-### B. Harmonic Engine Stage 1 (Key Sync)
-*   **Task:** Implement the `KeySync` processor as defined in the Roadmap.
-*   **Goal:** Allow real-time pitch shifting (+/- 12 semitones) on a deck using a high-quality resampling or phase-vocoder approach, adhering to the 'Law of SIMD-First Design.'
-*   **AnaWaves Integration:** The processor must be 'Spectral Export' ready (Layer 2).
+### Task 1: Stage 2 AnaWaves "Personality Inheritance"
+Implement the core logic for the `DnaCommand` recently added to `nullherz-traits`.
+*   **Genetic Interpolation**: In `nullherz-dna`, create a high-performance kernel that can interpolate between two `SoundDNA` bit-layouts at audio-rate or block-rate.
+*   **Trait Propagation**: Update the `PersonalityInheritanceProcessor` (ProcessorTypeId 150) to consume `DnaCommand` payloads and apply spectral/rhythmic traits to the signal path in real-time.
 
-### C. Intelligence Hardening
-*   **Task:** Refine `AnalysisWorker` BPM detection.
-*   **Goal:** Implement the "histogram smoothing" specified in the roadmap to eliminate double/half BPM errors, ensuring the 'Rhythmic DNA' is precise.
+### Task 2: Advanced Sidecar Sandboxing & SDK
+*   **Cgroup Enforcement**: Refine the `SidecarSupervisor` in `fx-runtime` to actively monitor and report cgroup memory pressure events (OOM) via the telemetry stream.
+*   **SDK Formalization**: Create a standard `sidecar-sdk` example for a "Spectral Transfuser" plugin that utilizes the new 16-wide SIMD utilities and the `DnaCommand` schema.
 
-### D. Sidecar SDK Formalization
-*   **Task:** Create the `cargo generate` template for Nullherz Sidecars.
-*   **Goal:** Lower the barrier for 3rd-party developers to contribute AnaWaves-compliant DSP nodes.
+### Task 3: UI-Driven Evolution (The "Breeder" View)
+*   **Breeding Interface**: In `nullherz-inspector`, implement a new "DNA Breeder" view. This should allow users to select two "Parent" samples from the registry and use a 2D Macro-XY pad to "Transfuse" their genetic traits.
+*   **Real-time Visualization**: Use the restored Spectrum and Goniometer metrics to show the "Genetic Drift" of the signal as transfusion bias is adjusted.
 
-## 3. Reference Documents
-- `ROADMAP_3MONTH.md`: Monthly milestones.
-- `ENGINEERING_HARDENING_MANIFESTO.md`: The Three Laws (Zero-Alloc, Bit-Exact, SIMD-First).
-- `ANAWAVES_GENETIC_SCHEMA_RFC.md`: Sound DNA bit-layouts.
-- `TECHNICAL_OPTIMIZATION_LOG.md`: Performance backlog (AVX-512 path, etc).
+### Task 4: High-Scale Library Management
+*   **redb Optimization**: Benchmark the `LibraryDatabase` for 100k+ entries. Implement the "Crating" system (smart folders/playlists) mentioned in the 3-month roadmap.
 
-## 4. Final Verification Status
-- [x] RT-Safe Spectrum/Goniometer.
-- [x] SIMD-Optimized Sampler.
-- [x] Genetic Schema Persistence.
-- [x] Soft Fallback Supervisor.
+**Critical Constraints**:
+*   Maintain strict RT-safety (no allocations in the hot path).
+*   Ensure all new DSP logic utilizes the `FloatX16` SIMD path where possible.
+*   Adhere to the governance rules defined in `AGENTS.md`.
 
-**Requested Behavior for Next Architect:** "Harden the control path by bridging the MIDI sidecar to the mapper, then initiate implementation of the KeySync processor."
+**Required Reading**: `AGENTS.md`, `SYSTEM_STATUS_REPORT.md`, `TECHNICAL_OPTIMIZATION_LOG.md`.

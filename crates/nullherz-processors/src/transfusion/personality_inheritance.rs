@@ -206,6 +206,36 @@ impl nullherz_traits::MidiResponder for PersonalityInheritanceProcessor {
 
 impl nullherz_traits::SnapshotProvider for PersonalityInheritanceProcessor { }
 
+impl PersonalityInheritanceProcessor {
+    fn handle_dna_command(&mut self, cmd: &nullherz_traits::DnaCommand) {
+        // Stage 2: Bit-level trait transfusion from command payload
+        let bias = cmd.bias.clamp(0.0, 1.0);
+        let mask = cmd.layer_mask;
+
+        // 1. Spectral Layer (Bytes 0-63 of payload = Energy Map)
+        if mask & 1 != 0 {
+            let mut new_personality = (*self.source_personality).clone();
+            for i in 0..64 {
+                let target = cmd.payload[i] as f32;
+                let current = new_personality.energy_map[i] as f32;
+                new_personality.energy_map[i] = (current * (1.0 - bias) + target * bias) as u8;
+            }
+            self.source_personality = Arc::new(new_personality);
+        }
+
+        // 2. Rhythmic Layer (Bytes 64-75 of payload = Micro-timing deviations)
+        if mask & 2 != 0 {
+            let mut new_rhythmic = (*self.source_rhythmic).clone();
+            for i in 0..12 {
+                let target = (cmd.payload[64 + i] as i8) as f32;
+                let current = new_rhythmic.micro_timing[i] as f32;
+                new_rhythmic.micro_timing[i] = (current * (1.0 - bias) + target * bias) as i16;
+            }
+            self.source_rhythmic = Arc::new(new_rhythmic);
+        }
+    }
+}
+
 impl AudioProcessor for PersonalityInheritanceProcessor {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
@@ -215,6 +245,11 @@ impl AudioProcessor for PersonalityInheritanceProcessor {
             nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, .. }) => {
                 if *target_id == self.id {
                     self.set_parameter(*param_id, *value, 0);
+                }
+            }
+            nullherz_traits::Command::Dna(dna_cmd) => {
+                if dna_cmd.target_id == self.id {
+                    self.handle_dna_command(dna_cmd);
                 }
             }
             _ => {}

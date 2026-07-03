@@ -254,6 +254,7 @@ impl SidecarSupervisor {
                         return true;
                     }
                     FailurePolicy::AutoRestart => {
+                        handle.cleanup_cgroup();
                         if handle.restart_count < 5 {
                             handle.status = SidecarStatus::Restarting;
                             let size = self.limiter.estimate_sidecar_memory(handle.num_channels);
@@ -325,6 +326,15 @@ impl SidecarSupervisor {
     }
 }
 
+impl SidecarHandle {
+    pub fn cleanup_cgroup(&self) {
+        let group_path = format!("/sys/fs/cgroup/nullherz/sidecar_{}", self.name);
+        if std::path::Path::new(&group_path).exists() {
+            let _ = std::fs::remove_dir(&group_path);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,6 +368,7 @@ impl Drop for SidecarSupervisor {
         for handle in self.active_sidecars.iter_mut() {
             let _ = handle.process.kill();
             let _ = handle.process.wait();
+            handle.cleanup_cgroup();
         }
     }
 }

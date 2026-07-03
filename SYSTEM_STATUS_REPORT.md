@@ -60,12 +60,13 @@ The system's "Triple-Plane Model" is a masterclass in separation of concerns.
 | | Native JACK Support | **DONE** | Synchronous integration with system graph. |
 | | PipeWire Backend | **DONE** | Modern Linux audio integration. |
 | **Safety** | FTZ/DAZ Hardening | **DONE** | Global prevention of denormal CPU spikes. |
-| | Sidecar RSS Limits | **DONE** | Cgroup-based memory constraints for plugins. |
+| | Sidecar RSS Limits | **DONE** | Hierarchical cgroup constraints for plugins. |
 | | System Safe-Mode | **DONE** | Automatic fallback to bypass on DSP failure. |
 | **Execution** | Parallel Graph | **DONE** | Multi-threaded stage execution (MAX_NODES=64).|
 | | Off-Thread Compile | **DONE** | Kahn's Algorithm graph validation (Topo-Sync).|
 | | Sample-Accurate Cmds| **DONE** | 64-bit timestamped command bus. |
 | | SIMD Optimization | **DONE** | 16-wide (AVX-512) path for Summing/XFade. |
+| | DNA Commands | **DONE** | High-density Stage 2 genetic payloads ([u8; 128]). |
 
 ### 4.2 DSP Library & Kernels
 | Feature | Sub-Feature | Status | Engineering Detail |
