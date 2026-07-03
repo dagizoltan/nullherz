@@ -1,4 +1,4 @@
-use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata, SpectralPersonality, RhythmicDNA};
+use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata, SpectralPersonality, RhythmicDNA, ArtifactProfile};
 use audio_dsp::SpectralPipeline;
 use std::sync::Arc;
 
@@ -12,10 +12,12 @@ pub struct PersonalityInheritanceProcessor {
     // The "Source" DNA to inherit from
     source_personality: Arc<SpectralPersonality>,
     source_rhythmic: Arc<RhythmicDNA>,
+    source_artifacts: Arc<ArtifactProfile>,
 
     // Parameters
     transfusion_bias: f32, // 0.0 = original, 1.0 = full inheritance
     rhythmic_bias: f32,    // 0.0 = original, 1.0 = full rhythmic transfusion
+    artifact_bias: f32,    // 0.0 = original, 1.0 = full artifact transfusion
 
     // Layer 3: Rhythmic Pulse Inheritance (Delay Line)
     delay_buffer: Vec<f32>,
@@ -29,8 +31,10 @@ impl PersonalityInheritanceProcessor {
             pipeline: SpectralPipeline::new(fft_size),
             source_personality: Arc::new(SpectralPersonality::default()),
             source_rhythmic: Arc::new(RhythmicDNA::default()),
+            source_artifacts: Arc::new(ArtifactProfile::default()),
             transfusion_bias: 0.5,
             rhythmic_bias: 0.5,
+            artifact_bias: 0.5,
             delay_buffer: vec![0.0; 44100], // 1 second max delay
             write_ptr: 0,
         }
@@ -57,8 +61,10 @@ impl nullherz_traits::SignalProcessor for PersonalityInheritanceProcessor {
         let output = &mut outputs[0];
         let bias = self.transfusion_bias;
         let r_bias = self.rhythmic_bias;
+        let a_bias = self.artifact_bias;
         let personality = &self.source_personality;
         let rhythmic = &self.source_rhythmic;
+        let artifacts = &self.source_artifacts;
 
         // Apply Rhythmic Micro-timing (Layer 3)
         let mut rhythmic_input = vec![0.0; input.len()];
@@ -95,6 +101,17 @@ impl nullherz_traits::SignalProcessor for PersonalityInheritanceProcessor {
             }
         } else {
             rhythmic_input.copy_from_slice(input);
+        }
+
+        // Apply Artifact Profile (Layer 4) - Simplified Noise Floor Injection
+        if a_bias > 0.0 {
+            let noise_gain = (10.0f32.powf(artifacts.noise_floor_db / 20.0)) * a_bias;
+            for (i, s) in rhythmic_input.iter_mut().enumerate() {
+                // RT-Safe pseudo-random noise (simple hash to avoid TLs/Locks)
+                let n = ((i as u32).wrapping_mul(1103515245).wrapping_add(12345)) as f32 / 2147483647.0;
+                let noise = (n * 2.0 - 1.0) * noise_gain;
+                *s += noise;
+            }
         }
 
         self.pipeline.process(&rhythmic_input, output, |re, im, n, _window, _fft| {
@@ -155,6 +172,7 @@ impl AudioProcessor for PersonalityInheritanceProcessor {
             // but here we might accept metadata updates to refresh the personality.
             self.source_personality = Arc::new(metadata.dna.spectral.clone());
             self.source_rhythmic = Arc::new(metadata.dna.rhythmic.clone());
+            self.source_artifacts = Arc::new(metadata.dna.artifacts.clone());
         }
     }
 
@@ -162,6 +180,7 @@ impl AudioProcessor for PersonalityInheritanceProcessor {
         match param_id {
             0 => self.transfusion_bias = value.clamp(0.0, 1.0),
             1 => self.rhythmic_bias = value.clamp(0.0, 1.0),
+            2 => self.artifact_bias = value.clamp(0.0, 1.0),
             _ => {}
         }
     }
@@ -178,6 +197,7 @@ impl AudioProcessor for PersonalityInheritanceProcessor {
         let names = [
             (0, "Transfusion Bias", 0.0, 1.0, 0.5),
             (1, "Rhythmic Bias", 0.0, 1.0, 0.5),
+            (2, "Artifact Bias", 0.0, 1.0, 0.5),
         ];
 
         for (i, (id, name, min, max, default)) in names.iter().enumerate() {

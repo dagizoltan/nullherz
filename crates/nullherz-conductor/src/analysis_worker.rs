@@ -40,15 +40,16 @@ impl AnalysisWorker {
             if let Some(sample) = self.sample_registry.get(id) {
                 println!("AnalysisWorker: Analyzing sample ID={}", id);
                 let mut metadata = sample.metadata.clone();
+                let sample_rate = 44100.0; // Assume 44.1k for now, ideally get from metadata
 
                 // Perform BPM, Transient and Key Analysis
-                metadata.bpm = self.detect_bpm(&sample.buffer);
-                metadata.transients = Arc::new(self.detect_transients(&sample.buffer));
+                metadata.bpm = self.detect_bpm(&sample.buffer, sample_rate);
+                metadata.transients = Arc::new(self.detect_transients(&sample.buffer, sample_rate));
                 metadata.peaks = Arc::new(self.calculate_peaks(&sample.buffer, 1024));
-                metadata.root_key = self.detect_root_key(&sample.buffer);
+                metadata.root_key = self.detect_root_key(&sample.buffer, sample_rate);
 
                 // Generate Sound DNA (AnaWaves Stage 1)
-                metadata.dna = self.analyze_dna(&sample.buffer);
+                metadata.dna = self.analyze_dna(&sample.buffer, metadata.bpm, sample_rate);
 
                 // Update registry with enriched metadata
                 self.sample_registry.register_with_metadata(id, sample.buffer.clone(), metadata.clone());
@@ -86,9 +87,9 @@ impl AnalysisWorker {
         peaks
     }
 
-    fn detect_bpm(&self, buffer: &[f32]) -> f32 {
+    fn detect_bpm(&self, buffer: &[f32], sample_rate: f32) -> f32 {
         if buffer.is_empty() { return 0.0; }
-        let transients = self.detect_transients(buffer);
+        let transients = self.detect_transients(buffer, sample_rate);
         if transients.len() < 4 { return 128.0; }
 
         let mut intervals = Vec::new();
@@ -135,9 +136,9 @@ impl AnalysisWorker {
         let best_interval = smoothed_histogram.into_iter()
             .max_by_key(|&(_, count)| count)
             .map(|(bucket, _)| bucket)
-            .unwrap_or(22050); // Default to 120bpm if nothing found
+            .unwrap_or((sample_rate / 2.0) as u64); // Default to 120bpm if nothing found
 
-        let bpm = (44100.0 * 60.0) / best_interval as f32;
+        let bpm = (sample_rate * 60.0) / best_interval as f32;
 
         // Standardize to common dance music ranges (70-175 BPM)
         let mut final_bpm = bpm;
@@ -151,7 +152,7 @@ impl AnalysisWorker {
         final_bpm
     }
 
-    fn detect_root_key(&self, buffer: &[f32]) -> Option<f32> {
+    fn detect_root_key(&self, buffer: &[f32], sample_rate: f32) -> Option<f32> {
         if buffer.is_empty() { return None; }
 
         let fft_size = 4096; // Higher resolution for key detection
@@ -160,7 +161,6 @@ impl AnalysisWorker {
         let mut im = AlignedBuffer::new(fft_size);
 
         let mut chromagram = [0.0f32; 12];
-        let sample_rate = 44100.0;
 
         // Analyze up to 2 seconds or buffer length
         let max_samples = buffer.len().min(sample_rate as usize * 2);
@@ -199,7 +199,7 @@ impl AnalysisWorker {
         Some(best_note as f32)
     }
 
-    fn analyze_dna(&self, buffer: &[f32]) -> nullherz_traits::SoundDNA {
+    fn analyze_dna(&self, buffer: &[f32], bpm: f32, sample_rate: f32) -> nullherz_traits::SoundDNA {
         let mut dna = nullherz_traits::SoundDNA::default();
 
         // 1. Spectral Personality Analysis
@@ -244,7 +244,7 @@ impl AnalysisWorker {
         }
 
         // 2. Rhythmic DNA (Onset Mask & Syncopation)
-        let transients = self.detect_transients(buffer);
+        let transients = self.detect_transients(buffer, sample_rate);
         if !transients.is_empty() {
             let total_len = buffer.len() as f32;
             let mut steps = [false; 64];
@@ -273,12 +273,36 @@ impl AnalysisWorker {
                 }
             }
             dna.rhythmic.syncopation_index = syncopation / 64.0;
+
+            // 3. Micro-timing Profile Detection
+            // Calculate deviation from a perfect 16th-note grid
+            if bpm > 10.0 {
+                let samples_per_beat = (sample_rate as f64 * 60.0) / bpm as f64;
+                let samples_per_step = samples_per_beat / 4.0; // 16th note
+
+                let mut deviations: [Vec<i16>; 12] = Default::default();
+                for &t in &transients {
+                    let step_idx = (t as f64 / samples_per_step).round();
+                    let grid_pos = step_idx * samples_per_step;
+                    let deviation_ms = ((t as f64 - grid_pos) / sample_rate as f64) * 1000.0;
+
+                    let profile_idx = step_idx as usize % 12;
+                    deviations[profile_idx].push(deviation_ms as i16);
+                }
+
+                for i in 0..12 {
+                    if !deviations[i].is_empty() {
+                        let sum: i32 = deviations[i].iter().map(|&x| x as i32).sum();
+                        dna.rhythmic.micro_timing[i] = (sum / deviations[i].len() as i32) as i16;
+                    }
+                }
+            }
         }
 
         dna
     }
 
-    fn detect_transients(&self, buffer: &[f32]) -> Vec<u64> {
+    fn detect_transients(&self, buffer: &[f32], _sample_rate: f32) -> Vec<u64> {
         let mut transients = Vec::new();
         let fft_size = 1024;
         let hop_size = 512;

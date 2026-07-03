@@ -13,9 +13,19 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         // WGPU Accelerated Waveform rendering callback
         if let Some(wgpu_mtx) = &app.wgpu_renderer {
-             let _wgpu = wgpu_mtx.lock().unwrap();
-             // In a full implementation, we would use egui::PaintCallback here to invoke the WGPU renderer.
-             // For now we simulate the zero-lag playhead tracking on top of the WGPU-ready zone.
+             let wgpu = wgpu_mtx.lock().unwrap();
+
+             // Setup callback for WGPU rendering
+             let callback = egui::PaintCallback {
+                 rect,
+                 callback: Arc::new(egui_wgpu::CallbackFn::new(move |info, render_pass, _resources| {
+                     // In a real implementation, we would use the shared WaveformRenderer here.
+                     // The WaveformRenderer is initialized with the device and surface format.
+                     // render_pass is the active wgpu::RenderPass provided by egui-wgpu.
+                 })),
+             };
+             ui.painter().add(callback);
+
              ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "GPU-ACCELERATED WAVEFORM ENGINE ACTIVE", egui::FontId::proportional(14.0), Color32::from_rgb(0, 100, 80));
         } else {
              ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "WGPU Accelerated Waveform (120fps)", egui::FontId::proportional(14.0), Color32::GRAY);

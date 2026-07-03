@@ -129,6 +129,13 @@ pub enum PerformanceCommand {
         node_idx: u32,
         slice_idx: u32,
     },
+    LaunchClip {
+        row: u32,
+        col: u32,
+    },
+    TransfuseRow {
+        row: u32,
+    },
 }
 
 #[repr(C)]

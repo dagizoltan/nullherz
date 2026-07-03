@@ -9,6 +9,7 @@ audio-dsp = { path = "../audio-dsp" }
 nullherz-dna = { path = "../nullherz-dna" }
 ipc-layer = { path = "../ipc-layer" }
 wide = "0.7.30"
+rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 
 [features]
