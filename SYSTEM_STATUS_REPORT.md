@@ -88,6 +88,7 @@ The system's "Triple-Plane Model" is a masterclass in separation of concerns.
 | **Harmonic** | Root Key Detection | **DONE** | 12-bin Chromagram (4096 FFT size). |
 | | Key Sync | **DONE** | Real-time pitch shifting (+/- 12 semitones) via `SpectralPipeline`. |
 | **Database** | ACID Library | **DONE** | `redb` backend for multi-GB track metadata. |
+| | Smart Crating | **DONE** | $O(\log N)$ composite keys for 100k+ scalability. |
 | | Folder Monitoring | **DONE** | Background FS watcher for auto-ingestion. |
 
 ### 4.4 DJ & Performance UI
@@ -108,6 +109,7 @@ The system's "Triple-Plane Model" is a masterclass in separation of concerns.
 | **Modulation** | Macro Matrix | **DONE** | 8 Global Macros with ramped broadcast. |
 | | Scaling & Offset | **DONE** | Mapping range transformation (scaling). |
 | **Transfusion** | Personality Inherit. | **DONE** | Real-time DNA propagation across 5 layers. |
+| | DNA Breeder | **DONE** | Interactive XY Pad for genetic interpolation. |
 | **Arrangement** | Song Timeline | **DONE** | Beat-aware arrangement event scheduling. |
 | | Pattern Manager | **DONE** | Dynamic orchestration of sequencer banks. |
 | **Persistence** | Session Save/Load | **DONE** | Full state serialization (Topology+Sequences).|
@@ -116,9 +118,9 @@ The system's "Triple-Plane Model" is a masterclass in separation of concerns.
 ---
 
 ## 5. Technical Debt & Roadmap
-1.  **Goniometer/Spectrum Restoration:** Legacy monitors were removed during the DJ refactor; they should be reintroduced as modular "Metrics" views.
-2.  **Remote Sidecars:** While local sidecars are stable, the protocol plane is ready for network-transparent DSP distribution.
-3.  **Library Scaling:** Continue optimizing the `redb` implementation for track collections exceeding 100k entries.
+1.  **Goniometer/Spectrum Restoration:** The Breeder view now has placeholders for these; they should be fully integrated with real-time telemetry.
+2.  **Remote Sidecars:** While local sidecars are stable and OOM-hardened, the protocol plane is ready for network-transparent DSP distribution.
+3.  **DNA Batch Processing**: Implement batch DNA extraction for large folders in the `AnalysisWorker`.
 
 ---
 

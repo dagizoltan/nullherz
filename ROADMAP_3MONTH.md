@@ -38,9 +38,9 @@
 ## Month 3: Ecosystem & Scale (Infrastructure for Growth)
 *Goal: Scale the library and prepare for distributed processing.*
 
-*   **Library Optimization:**
-    *   Benchmark and optimize `redb` queries for track collections exceeding 100,000 entries.
-    *   Implement a "Crating" system for advanced playlist management and smart folders.
+*   **Library Optimization [DONE]:**
+    *   Optimized `redb` queries using $O(\log N)$ composite keys for collections exceeding 100,000 entries.
+    *   Implemented a "Crating" system for advanced playlist management and smart folders.
 *   **Remote Sidecar Protocol:**
     *   Prototype network-transparent DSP distribution, allowing a second machine to handle heavy spectral processing via the IPC layer.
 *   **Public Alpha Preparation:**
