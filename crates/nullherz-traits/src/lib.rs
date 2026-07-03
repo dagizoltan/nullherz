@@ -65,6 +65,7 @@ pub enum CoreCommand {
     SetSafeMode(bool),
     RequestSnapshots,
     CommitTopology,
+    SetBpm(f32),
 }
 
 #[repr(C)]

@@ -1,22 +1,34 @@
 use fx_runtime::SidecarManager;
 use crate::topology_manager::TopologyManager;
-use nullherz_traits::{TopologyMutation, Command, TimestampedCommand};
+use nullherz_traits::{TopologyMutation, TimestampedCommand};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use ipc_layer::tcp::TcpIpcConsumer;
 use tokio::io::AsyncReadExt;
+use std::time::{Instant, Duration};
 
 pub struct RemoteSidecar {
     pub addr: String,
     pub writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
+    pub last_heartbeat: Instant,
+    pub is_active: bool,
 }
 
 pub struct RemoteSidecarManager {
     pub remote_nodes: Vec<RemoteSidecar>,
     pub pending_commands: Vec<TimestampedCommand>,
+    pub last_broadcast_time: Instant,
 }
 
 impl RemoteSidecarManager {
+    pub fn new() -> Self {
+        Self {
+            remote_nodes: Vec::new(),
+            pending_commands: Vec::new(),
+            last_broadcast_time: Instant::now(),
+        }
+    }
+
     pub async fn broadcast_command(&mut self, cmd: TimestampedCommand) {
         let serialized = match serde_json::to_vec(&cmd) {
             Ok(s) => s,
@@ -51,10 +63,7 @@ impl SidecarSupervisor {
     pub fn new() -> Self {
         Self {
             manager: SidecarManager::new(),
-            remote_manager: Arc::new(Mutex::new(RemoteSidecarManager {
-                remote_nodes: Vec::new(),
-                pending_commands: Vec::new(),
-            })),
+            remote_manager: Arc::new(Mutex::new(RemoteSidecarManager::new())),
         }
     }
 
@@ -88,6 +97,10 @@ impl SidecarSupervisor {
 
                                 if let Ok(cmd) = serde_json::from_slice::<TimestampedCommand>(&buffer) {
                                     let mut manager = remote_manager_clone.lock().await;
+                                    // Update heartbeat if this was a Ping or any command
+                                    if let Some(node) = manager.remote_nodes.iter_mut().find(|n| n.addr == addr_clone) {
+                                        node.last_heartbeat = Instant::now();
+                                    }
                                     manager.pending_commands.push(cmd);
                                 }
                                 tokio::task::yield_now().await;
@@ -99,6 +112,8 @@ impl SidecarSupervisor {
                         manager.remote_nodes.push(RemoteSidecar {
                             addr: peer_addr.clone(),
                             writer: writer_arc,
+                            last_heartbeat: Instant::now(),
+                            is_active: true,
                         });
                         println!("Conductor: Attached remote sidecar from {}", peer_addr);
                     }
@@ -143,16 +158,14 @@ impl SidecarSupervisor {
         if let Ok(mut manager) = self.remote_manager.try_lock() {
             remote_cmds = std::mem::take(&mut manager.pending_commands);
 
-            // 4. Prune disconnected nodes
+            // 4. Prune disconnected nodes based on heartbeat timeout (5 seconds)
+            let now = Instant::now();
             manager.remote_nodes.retain(|node| {
-                if let Ok(mut writer) = node.writer.try_lock() {
-                    // Quick check if peer disconnected by attempting a zero-byte write
-                    // (Technically OwnedWriteHalf doesn't have a reliable non-blocking is_closed)
-                    // We'll rely on the background reader task to inform disconnection in a more
-                    // advanced implementation. For now, keep alive if lock is obtainable.
-                    true
+                if now.duration_since(node.last_heartbeat) > Duration::from_secs(5) {
+                    eprintln!("Conductor: Remote sidecar {} timed out. Dropping...", node.addr);
+                    false
                 } else {
-                    true // Node busy
+                    node.is_active
                 }
             });
         }

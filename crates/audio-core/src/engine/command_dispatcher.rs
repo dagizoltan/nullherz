@@ -31,6 +31,9 @@ impl CommandDispatcher {
             Command::Core(CoreCommand::CommitTopology) => {
                 Self::commit_topology(graph);
             }
+            Command::Core(CoreCommand::SetBpm(bpm)) => {
+                transport.bpm = *bpm;
+            }
             Command::Mixer(MixerCommand::Bundle { count, data }) => {
                 Self::handle_bundle_command(graph, *count, *data);
             }
