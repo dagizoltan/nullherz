@@ -53,7 +53,10 @@ impl GraphTelemetry {
                 }
                 if channel_peak > node_peak { node_peak = channel_peak; }
             }
-            self.peak_levels[n_idx].store(node_peak.to_bits(), Ordering::Relaxed);
+            let current_bits = self.peak_levels[n_idx].load(Ordering::Relaxed);
+            if node_peak.to_bits() != current_bits {
+                self.peak_levels[n_idx].store(node_peak.to_bits(), Ordering::Relaxed);
+            }
         }
     }
 }

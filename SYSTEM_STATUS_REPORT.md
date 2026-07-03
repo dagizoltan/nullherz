@@ -65,6 +65,7 @@ The system's "Triple-Plane Model" is a masterclass in separation of concerns.
 | **Execution** | Parallel Graph | **DONE** | Multi-threaded stage execution (MAX_NODES=64).|
 | | Off-Thread Compile | **DONE** | Kahn's Algorithm graph validation (Topo-Sync).|
 | | Sample-Accurate Cmds| **DONE** | 64-bit timestamped command bus. |
+| | SIMD Optimization | **DONE** | 16-wide (AVX-512) path for Summing/XFade. |
 
 ### 4.2 DSP Library & Kernels
 | Feature | Sub-Feature | Status | Engineering Detail |
@@ -74,9 +75,9 @@ The system's "Triple-Plane Model" is a masterclass in separation of concerns.
 | | DJ Isolator | **DONE** | 24dB/oct crossover with phase compensation. |
 | **Synthesis** | Wavetable Osc | **DONE** | Lagrange-interpolated, FM/PM capable. |
 | | Spectral Morph | **DONE** | Phase-vocoder based timbre shifting. |
-| **Mixing** | SIMD Summing | **DONE** | 16-to-1 summing with AVX-512 alignment. |
+| **Mixing** | SIMD Summing | **DONE** | 16-to-1 summing with AVX-512 optimization. |
 | | Power-Curve XFade | **DONE** | Constant-power vs Linear crossfade modes. |
-| | Ramped Gain | **DONE** | Atomic smoothing to prevent zipper noise. |
+| | Ramped Gain | **DONE** | Atomic smoothing with Denormal safeguards. |
 
 ### 4.3 Intelligence & Analysis
 | Feature | Sub-Feature | Status | Engineering Detail |
