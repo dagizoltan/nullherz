@@ -2,6 +2,7 @@ use std::sync::Arc;
 use nullherz_dna::SampleRegistry;
 use audio_dsp::{TransientDetector, SimdFft, AlignedBuffer};
 use std::time::Duration;
+use rayon::prelude::*;
 
 pub struct AnalysisWorker {
     sample_registry: Arc<SampleRegistry>,
@@ -34,41 +35,42 @@ impl AnalysisWorker {
 
     fn run_once(&mut self) {
         let ids = self.sample_registry.list_ids();
-        for id in ids {
-            if self.processed_ids.contains(&id) { continue; }
+        let unprocessed_ids: Vec<u64> = ids.into_iter()
+            .filter(|id| !self.processed_ids.contains(id))
+            .collect();
 
-            if let Some(sample) = self.sample_registry.get(id) {
-                println!("AnalysisWorker: Analyzing sample ID={}", id);
+        if unprocessed_ids.is_empty() { return; }
+
+        println!("AnalysisWorker: Processing {} new samples in batch", unprocessed_ids.len());
+
+        let results: Vec<(u64, nullherz_traits::SampleMetadata, Arc<Vec<f32>>)> = unprocessed_ids.into_par_iter()
+            .filter_map(|id| {
+                let sample = self.sample_registry.get(id)?;
                 let mut metadata = sample.metadata.clone();
-                let sample_rate = 44100.0; // Assume 44.1k for now, ideally get from metadata
+                let sample_rate = 44100.0;
 
-                // Perform BPM, Transient and Key Analysis
                 metadata.bpm = self.detect_bpm(&sample.buffer, sample_rate);
                 metadata.transients = Arc::new(self.detect_transients(&sample.buffer, sample_rate));
                 metadata.peaks = Arc::new(self.calculate_peaks(&sample.buffer, 1024));
                 metadata.root_key = self.detect_root_key(&sample.buffer, sample_rate);
-
-                // Generate Sound DNA (AnaWaves Stage 1)
                 metadata.dna = self.analyze_dna(&sample.buffer, metadata.bpm, sample_rate);
+                self.analyze_spatial(&sample.buffer, &mut metadata.dna, sample_rate);
 
-            // Layer 5: Atmosphere Extraction (Reverb/Spatial)
-            self.analyze_spatial(&sample.buffer, &mut metadata.dna, sample_rate);
+                Some((id, metadata, sample.buffer))
+            }).collect();
 
-                // Update registry with enriched metadata
-                self.sample_registry.register_with_metadata(id, sample.buffer.clone(), metadata.clone());
+        for (id, metadata, buffer) in results {
+            self.sample_registry.register_with_metadata(id, buffer, metadata.clone());
 
-                // Update Library Database (redb)
-                if let Some(ref lib_mutex) = self.library {
-                    let lib = lib_mutex.lock().unwrap();
-                    if let Ok(Some(mut track)) = lib.get_track(id) {
-                        track.metadata = metadata;
-                        let _ = lib.save_track(&track);
-                    }
+            if let Some(ref lib_mutex) = self.library {
+                let lib = lib_mutex.lock().unwrap();
+                if let Ok(Some(mut track)) = lib.get_track(id) {
+                    track.metadata = metadata;
+                    let _ = lib.save_track(&track);
                 }
-
-                self.processed_ids.insert(id);
-                println!("AnalysisWorker: Enriched metadata for ID={}", id);
             }
+            self.processed_ids.insert(id);
+            println!("AnalysisWorker: Enriched metadata for ID={}", id);
         }
     }
 

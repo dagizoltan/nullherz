@@ -7,6 +7,8 @@ pub struct BreederView {
     pub transfusion_bias_x: f32, // Spectral Bias
     pub transfusion_bias_y: f32, // Rhythmic Bias
     pub target_node_idx: u32,
+    pub smoothed_spectrum: [f32; 128],
+    pub selecting_parent: Option<usize>, // 0 for A, 1 for B
 }
 
 impl BreederView {
@@ -17,12 +19,56 @@ impl BreederView {
             transfusion_bias_x: 0.5,
             transfusion_bias_y: 0.5,
             target_node_idx: 150, // PersonalityInheritanceProcessor default ID
+            smoothed_spectrum: [0.0; 128],
+            selecting_parent: None,
         }
     }
 
     pub fn show(ui: &mut Ui, state: &mut BreederView, _app_telemetry: &Option<audio_core::Telemetry>, app: &mut crate::InspectorApp) {
         ui.heading("DNA Breeder");
         ui.separator();
+
+        if let Some(parent_idx) = state.selecting_parent {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.heading(format!("Select Parent {}", if parent_idx == 0 { "A" } else { "B" }));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("CLOSE").clicked() { state.selecting_parent = None; }
+                    });
+                });
+                ui.separator();
+
+                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    let tracks = app.library_db.list_tracks().unwrap_or_default();
+
+                    // Reference DNA for similarity highlighting
+                    let other_dna = if parent_idx == 0 {
+                        state.parent_b_id.and_then(|id| app.library_db.get_track(id).ok().flatten()).map(|t| t.metadata.dna)
+                    } else {
+                        state.parent_a_id.and_then(|id| app.library_db.get_track(id).ok().flatten()).map(|t| t.metadata.dna)
+                    };
+
+                    for track in tracks {
+                        let similarity = other_dna.as_ref().map(|other| nullherz_dna::calculate_similarity(&track.metadata.dna, other));
+                        let label = if let Some(s) = similarity {
+                            format!("{} - {} ({:.0}% Match)", track.title, track.artist, s * 100.0)
+                        } else {
+                            format!("{} - {}", track.title, track.artist)
+                        };
+
+                        if ui.selectable_label(false, label).clicked() {
+                            if parent_idx == 0 {
+                                state.parent_a_id = Some(track.id);
+                            } else {
+                                state.parent_b_id = Some(track.id);
+                            }
+                            state.selecting_parent = None;
+                        }
+                    }
+                });
+            });
+            ui.add_space(20.0);
+        }
 
         ui.horizontal(|ui| {
             // Parent A Selection
@@ -32,8 +78,7 @@ impl BreederView {
                     .map(|t| t.title).unwrap_or_else(|| "Select Sample".to_string());
 
                 if ui.button(label).clicked() {
-                    // In a real app, this would open a modal.
-                    // For now, we use the library sidebar selection.
+                    state.selecting_parent = Some(0);
                 }
             });
 
@@ -47,7 +92,9 @@ impl BreederView {
                 let label = state.parent_b_id.and_then(|id| app.library_db.get_track(id).ok().flatten())
                     .map(|t| t.title).unwrap_or_else(|| "Select Sample".to_string());
 
-                if ui.button(label).clicked() { }
+                if ui.button(label).clicked() {
+                    state.selecting_parent = Some(1);
+                }
             });
         });
 
@@ -81,17 +128,34 @@ impl BreederView {
 
             ui.add_space(20.0);
 
-            // Visualizers (Mockup - in real app, these use app.last_telemetry)
+            // Visualizers (Real-time Feedback)
             ui.vertical(|ui| {
                 ui.label("Real-time Evolution Monitor");
+                let telemetry = app.last_telemetry.lock().unwrap();
+
                 ui.group(|ui| {
-                    ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
-                    ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "SPECTRUM", egui::FontId::proportional(12.0), Color32::GRAY);
+                    if let Some(t) = &*telemetry {
+                        // EMA Smoothing
+                        let alpha = 0.2;
+                        for i in 0..128 {
+                            state.smoothed_spectrum[i] = state.smoothed_spectrum[i] * (1.0 - alpha) + t.spectrum[i] * alpha;
+                        }
+                        crate::widgets::render_spectrum_analyzer(ui, &state.smoothed_spectrum, Color32::from_rgb(0, 255, 200), 100.0);
+                    } else {
+                        ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
+                        ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "NO SIGNAL", egui::FontId::proportional(12.0), Color32::GRAY);
+                    }
                 });
+
                 ui.add_space(10.0);
+
                 ui.group(|ui| {
-                    ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
-                    ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "GONIOMETER", egui::FontId::proportional(12.0), Color32::GRAY);
+                    if let Some(t) = &*telemetry {
+                        crate::widgets::render_goniometer(ui, &t.goniometer_pts, 200.0, Color32::from_rgb(0, 255, 200));
+                    } else {
+                        ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
+                        ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "GONIOMETER", egui::FontId::proportional(12.0), Color32::GRAY);
+                    }
                 });
             });
         });

@@ -5,6 +5,8 @@ use std::alloc::Layout;
 use std::ffi::CString;
 use std::sync::Arc;
 
+pub mod tcp;
+
 #[derive(Debug)]
 pub enum IpcError {
     ShmOpenFailed(String),

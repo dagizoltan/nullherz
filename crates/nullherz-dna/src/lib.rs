@@ -254,6 +254,25 @@ mod tests {
     }
 
     #[test]
+    fn test_genetic_similarity() {
+        use nullherz_traits::SoundDNA;
+        let mut dna_a = SoundDNA::default();
+        let mut dna_b = SoundDNA::default();
+
+        for i in 0..64 {
+            dna_a.spectral.energy_map[i] = 100;
+            dna_b.spectral.energy_map[i] = 110;
+        }
+
+        let sim = calculate_similarity(&dna_a, &dna_b);
+        assert!(sim > 0.9);
+
+        for i in 0..64 { dna_b.spectral.energy_map[i] = 200; }
+        let sim_low = calculate_similarity(&dna_a, &dna_b);
+        assert!(sim_low < sim);
+    }
+
+    #[test]
     fn test_simd_dna_interpolation() {
         use nullherz_traits::SoundDNA;
         let mut dna_a = SoundDNA::default();
@@ -302,6 +321,19 @@ pub fn interpolate_energy_map(dest: &mut [u8; 64], src_a: &[u8; 64], src_b: &[u8
             dest[i + j] = res_arr[j].clamp(0.0, 255.0) as u8;
         }
     }
+}
+
+pub fn calculate_similarity(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA) -> f32 {
+    let mut spectral_sim = 0.0;
+    for i in 0..64 {
+        let diff = (dna_a.spectral.energy_map[i] as f32 - dna_b.spectral.energy_map[i] as f32).abs();
+        spectral_sim += 1.0 - (diff / 255.0);
+    }
+    spectral_sim /= 64.0;
+
+    let rhythmic_sim = 1.0 - (dna_a.rhythmic.syncopation_index - dna_b.rhythmic.syncopation_index).abs();
+
+    (spectral_sim * 0.7) + (rhythmic_sim * 0.3)
 }
 
 pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA, bias: f32) -> nullherz_traits::SoundDNA {
