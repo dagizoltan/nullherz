@@ -14,5 +14,6 @@ members = [
     "crates/nullherz-bench", "sidecars/nullherz-dummy",
     "crates/nullherz-gateway",
     "crates/nullherz-topology",
+    "crates/nullherz-setup",
 ]
 resolver = "2"
