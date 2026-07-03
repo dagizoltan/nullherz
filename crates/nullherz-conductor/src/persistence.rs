@@ -52,6 +52,7 @@ pub struct ProjectState {
     pub processor_states: Vec<ProcessorState>,
     pub modulation_matrix: crate::modulation_matrix::ModulationMatrix,
     pub arrangement: crate::pattern_manager::SongArrangement,
+    pub clip_grid: crate::clip_orchestrator::ClipGrid,
     pub bpm: f32,
     pub transport_playing: bool,
 }
@@ -66,6 +67,7 @@ impl ProjectState {
             processor_states: Vec::new(),
             modulation_matrix: crate::modulation_matrix::ModulationMatrix::default(),
             arrangement: crate::pattern_manager::SongArrangement::default(),
+            clip_grid: crate::clip_orchestrator::ClipGrid::default(),
             bpm: 120.0,
             transport_playing: false,
         }

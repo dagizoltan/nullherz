@@ -122,13 +122,24 @@ impl nullherz_traits::SignalProcessor for PersonalityInheritanceProcessor {
 
         // Apply Spatial Transfusion (Layer 5) - Mid/Side width manipulation
         let mut width_scale = 1.0;
+        let mut room_env = 0.0;
         if s_bias > 0.0 {
-            // Transfuse stereo width from source
+            // Transfuse stereo width and "roominess" from source
             let target_width = spatial.stereo_width;
             width_scale = 1.0 + (target_width - 1.0) * s_bias;
+            room_env = spatial.room_size * s_bias;
         }
 
         self.pipeline.process(&rhythmic_input, output, |re, im, n, _window, _fft| {
+            // Atmosphere: Apply a simple spectral reverb simulation
+            if room_env > 0.1 {
+                for i in 0..n {
+                    // Simulate decay by boosting bins based on room size
+                    let resonance = (i as f32 * 0.01).sin().abs() * room_env * 0.2;
+                    re[i] *= 1.0 + resonance;
+                    im[i] *= 1.0 + resonance;
+                }
+            }
             // Apply Spatial DNA to spectral bins (simplified widening/narrowing)
             for bin in 0..n {
                 // High frequencies are usually more susceptible to width changes

@@ -190,3 +190,49 @@ mod tests {
         let _ = fs::remove_file(db_path);
     }
 }
+
+pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA, bias: f32) -> nullherz_traits::SoundDNA {
+    let mut child = nullherz_traits::SoundDNA::default();
+    let inv_bias = 1.0 - bias;
+
+    // 1. Spectral Transfusion
+    for i in 0..64 {
+        child.spectral.energy_map[i] = (dna_a.spectral.energy_map[i] as f32 * inv_bias + dna_b.spectral.energy_map[i] as f32 * bias) as u8;
+    }
+    child.spectral.tilt = dna_a.spectral.tilt * inv_bias + dna_b.spectral.tilt * bias;
+
+    // 2. Rhythmic Transfusion
+    for i in 0..4 {
+        // Probabilistic bitmask merge
+        let mask_a = dna_a.rhythmic.onset_mask[i];
+        let mask_b = dna_b.rhythmic.onset_mask[i];
+        let mut child_mask = 0u64;
+        for bit in 0..64 {
+            let bit_a = (mask_a >> bit) & 1;
+            let bit_b = (mask_b >> bit) & 1;
+            let prob = if bit_a == 1 && bit_b == 1 { 1.0 }
+                      else if bit_a == 1 { inv_bias }
+                      else if bit_b == 1 { bias }
+                      else { 0.0 };
+
+            if (i as u32).wrapping_mul(bit as u32).wrapping_mul(1103515245).wrapping_add(12345) as f32 / 4294967295.0 < prob {
+                child_mask |= 1 << bit;
+            }
+        }
+        child.rhythmic.onset_mask[i] = child_mask;
+    }
+    child.rhythmic.syncopation_index = dna_a.rhythmic.syncopation_index * inv_bias + dna_b.rhythmic.syncopation_index * bias;
+    for i in 0..12 {
+        child.rhythmic.micro_timing[i] = (dna_a.rhythmic.micro_timing[i] as f32 * inv_bias + dna_b.rhythmic.micro_timing[i] as f32 * bias) as i16;
+    }
+
+    // 3. Artifact Transfusion
+    child.artifacts.noise_floor_db = dna_a.artifacts.noise_floor_db * inv_bias + dna_b.artifacts.noise_floor_db * bias;
+    child.artifacts.glitch_density = dna_a.artifacts.glitch_density * inv_bias + dna_b.artifacts.glitch_density * bias;
+
+    // 4. Spatial Transfusion
+    child.spatial.stereo_width = dna_a.spatial.stereo_width * inv_bias + dna_b.spatial.stereo_width * bias;
+    child.spatial.room_size = dna_a.spatial.room_size * inv_bias + dna_b.spatial.room_size * bias;
+
+    child
+}
