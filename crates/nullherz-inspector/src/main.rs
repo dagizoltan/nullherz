@@ -42,6 +42,7 @@ pub enum View {
     Mixer,
     Settings,
     Library,
+    Breeder,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -124,9 +125,7 @@ pub struct InspectorApp {
     pub(crate) selected_playlist: Option<usize>,
     pub(crate) player_queue: Vec<Track>,
     pub(crate) player_is_playing: bool,
-    pub(crate) breeding_parent_a: Option<u64>,
-    pub(crate) breeding_parent_b: Option<u64>,
-    pub(crate) breeding_bias: f32,
+    pub(crate) breeding_view: views::breeder::BreederView,
     pub(crate) wgpu_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::wgpu_backend::WgpuRenderer>>>,
     pub(crate) waveform_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>>,
 }
@@ -190,9 +189,7 @@ impl InspectorApp {
             selected_playlist: None,
             player_queue: vec![],
             player_is_playing: false,
-            breeding_parent_a: None,
-            breeding_parent_b: None,
-            breeding_bias: 0.5,
+            breeding_view: views::breeder::BreederView::new(),
             wgpu_renderer: None,
             waveform_renderer: None,
         }
@@ -231,6 +228,7 @@ impl eframe::App for InspectorApp {
                         (View::Mixer, "🎚", "MIX"),
                         (View::Topology, "🕸", "NODE"),
                         (View::Modulation, "〰", "MOD"),
+                        (View::Breeder, "🧬", "BREED"),
                         (View::Settings, "⚙", "SET"),
                     ];
 
@@ -308,6 +306,11 @@ impl eframe::App for InspectorApp {
                  View::Topology => views::topology::render(self, ui, &telemetry),
                  View::Modulation => views::modulation::render(self, ui, &telemetry),
                  View::Composer => views::composer::render(self, ui, &telemetry),
+                 View::Breeder => {
+                    let mut view = std::mem::replace(&mut self.breeding_view, views::breeder::BreederView::new());
+                    views::breeder::BreederView::show(ui, &mut view, &telemetry, self);
+                    self.breeding_view = view;
+                 }
                  _ => { ui.label("View coming soon..."); }
              }
         });

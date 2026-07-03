@@ -11,3 +11,4 @@ pub mod notifications;
 pub mod dj_studio;
 pub mod player;
 pub mod composer;
+pub mod breeder;

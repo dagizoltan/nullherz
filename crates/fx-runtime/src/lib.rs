@@ -40,6 +40,7 @@ pub struct SidecarHandle {
     pub status: SidecarStatus,
     pub restart_count: u32,
     pub failure_policy: FailurePolicy,
+    pub last_oom_events: u64,
 }
 
 pub type SidecarManager = SidecarSupervisor;
@@ -213,6 +214,7 @@ impl SidecarSupervisor {
             status: SidecarStatus::Running,
             restart_count: 0,
             failure_policy,
+            last_oom_events: 0,
         });
 
         Ok(Box::new(sidecar))
@@ -245,7 +247,10 @@ impl SidecarSupervisor {
 
             let timed_out = handle.last_heartbeat.elapsed() > std::time::Duration::from_secs(5);
 
-            if exited || timed_out {
+            // Check for OOM events via cgroups
+            let oom_happened = handle.check_oom_events();
+
+            if exited || timed_out || oom_happened {
                 if timed_out { let _ = handle.process.kill(); }
 
                 match handle.failure_policy {
@@ -332,6 +337,26 @@ impl SidecarHandle {
         if std::path::Path::new(&group_path).exists() {
             let _ = std::fs::remove_dir(&group_path);
         }
+    }
+
+    pub fn check_oom_events(&mut self) -> bool {
+        let events_path = format!("/sys/fs/cgroup/nullherz/sidecar_{}/memory.events", self.name);
+        if let Ok(content) = std::fs::read_to_string(&events_path) {
+            for line in content.lines() {
+                if line.starts_with("oom_kill ") {
+                    if let Some(count_str) = line.split_whitespace().nth(1) {
+                        if let Ok(count) = count_str.parse::<u64>() {
+                            if count > self.last_oom_events {
+                                self.last_oom_events = count;
+                                eprintln!("Sidecar {} OOM event detected! (count: {})", self.name, count);
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
     }
 }
 
