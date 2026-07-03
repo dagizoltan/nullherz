@@ -22,7 +22,7 @@
 
 | Task | Priority | Description |
 | :--- | :---: | :--- |
-| **AVX-512 Pathway** | VERIFIED | Implemented 16-wide `FloatX16` path in `simd_vec.rs` and core kernels. |
+| **AVX-512 Pathway** | VERIFIED | Implemented 16-wide `FloatX16` path in `simd_vec.rs` and core kernels. Moved state to stack locals for register optimization. |
 | **Zero-Copy Sampler** | VERIFIED | Refactored `SamplerVoice` Lagrange interpolation for direct SIMD pointer loads via `f32x4`. |
 | **Biquad Unrolling** | Medium | Implement 4x unrolled biquad kernels for the `DjIsolator` to reduce the overhead of crossover filtering. |
 | **FFT Twiddle Caching** | Low | Implement a global twiddle-factor cache in `audio-dsp` to avoid re-calculation during dynamic FFT size changes. |
