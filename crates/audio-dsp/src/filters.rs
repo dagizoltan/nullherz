@@ -205,8 +205,16 @@ pub struct SimdBiquad {
 
 impl crate::DspKernel for SimdBiquad {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
-        let num_ch = inputs.len().min(outputs.len()).min(8);
-        if num_ch == 8 {
+        let num_ch = inputs.len().min(outputs.len());
+        if num_ch >= 16 {
+             let mut in_ptrs = [std::ptr::null(); 16];
+             let mut out_ptrs = [std::ptr::null_mut(); 16];
+             for i in 0..16 {
+                 in_ptrs[i] = inputs[i].as_ptr();
+                 out_ptrs[i] = outputs[i].as_mut_ptr();
+             }
+             self.process_16_channels(in_ptrs, out_ptrs, inputs[0].len());
+        } else if num_ch >= 8 {
             let mut in_ptrs = [std::ptr::null(); 8];
             let mut out_ptrs = [std::ptr::null_mut(); 8];
             for i in 0..8 {
@@ -247,9 +255,15 @@ impl SimdBiquad {
         let mut z1 = self.z1[channel];
         let mut z2 = self.z2[channel];
         for i in 0..input.len() {
-            let out = input[i] * self.coeffs.b0 + z1;
-            z1 = input[i] * self.coeffs.b1 - out * self.coeffs.a1 + z2;
-            z2 = input[i] * self.coeffs.b2 - out * self.coeffs.a2;
+            let mut out = input[i] * self.coeffs.b0 + z1;
+            if !out.is_finite() {
+                out = 0.0;
+                z1 = 0.0;
+                z2 = 0.0;
+            } else {
+                z1 = input[i] * self.coeffs.b1 - out * self.coeffs.a1 + z2;
+                z2 = input[i] * self.coeffs.b2 - out * self.coeffs.a2;
+            }
             output[i] = out;
         }
         self.z1[channel] = z1;
@@ -276,8 +290,12 @@ impl SimdBiquad {
             let x = FloatX16::new(in_arr);
 
             let y = (x * b0) + z1;
-            z1 = ((x * b1) - (y * a1)) + z2;
-            z2 = (x * b2) - (y * a2);
+
+            // NaN Hardening for SIMD path
+            let finite_mask = y.is_finite_mask();
+            let y = finite_mask.blend(y, FloatX16::splat(0.0));
+            z1 = finite_mask.blend(((x * b1) - (y * a1)) + z2, FloatX16::splat(0.0));
+            z2 = finite_mask.blend((x * b2) - (y * a2), FloatX16::splat(0.0));
 
             let out_arr: [f32; 16] = y.into();
             for ch in 0..16 { unsafe { *outputs[ch].add(i) = out_arr[ch] }; }
@@ -314,9 +332,22 @@ impl SimdBiquad {
                 ])
             };
 
-            let y = (x * b0) + z1;
-            z1 = ((x * b1) - (y * a1)) + z2;
-            z2 = (x * b2) - (y * a2);
+            let mut y = (x * b0) + z1;
+
+            // NaN Hardening for 8-channel path
+            // We use a manual check because f32x8 finite check is not built-in to 'wide' for all targets
+            let y_arr: [f32; 8] = y.into();
+            let mut finite = true;
+            for val in &y_arr { if !val.is_finite() { finite = false; break; } }
+
+            if !finite {
+                y = f32x8::ZERO;
+                z1 = f32x8::ZERO;
+                z2 = f32x8::ZERO;
+            } else {
+                z1 = ((x * b1) - (y * a1)) + z2;
+                z2 = (x * b2) - (y * a2);
+            }
 
             let out_v: [f32; 8] = y.into();
             for (ch, &val) in out_v.iter().enumerate() {

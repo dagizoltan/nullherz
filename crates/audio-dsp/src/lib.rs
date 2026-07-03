@@ -203,6 +203,8 @@ impl Gain {
 
     pub fn set_gain(&mut self, mut gain: f32, ramp_samples: u32) {
         if !gain.is_finite() { gain = 0.0; }
+        // Denormal safeguard: Force very small gains to zero to avoid CPU spikes on non-FTZ systems.
+        if gain.abs() < 1e-15 { gain = 0.0; }
         gain = gain.clamp(-1e6, 1e6);
         self.target_gain = gain;
         if ramp_samples > 0 {
@@ -227,12 +229,16 @@ impl Gain {
                 } else {
                     current = self.target_gain;
                 }
-                output[i] = input[i] * current;
+                let mut out = input[i] * current;
+                if out.abs() < 1e-15 { out = 0.0; }
+                output[i] = out;
             }
         } else {
             current = self.target_gain;
             for i in 0..len {
-                output[i] = input[i] * current;
+                let mut out = input[i] * current;
+                if out.abs() < 1e-15 { out = 0.0; }
+                output[i] = out;
             }
         }
         self.current_gain = current;
