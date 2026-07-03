@@ -51,6 +51,9 @@ impl AnalysisWorker {
                 // Generate Sound DNA (AnaWaves Stage 1)
                 metadata.dna = self.analyze_dna(&sample.buffer, metadata.bpm, sample_rate);
 
+            // Layer 5: Atmosphere Extraction (Reverb/Spatial)
+            self.analyze_spatial(&sample.buffer, &mut metadata.dna, sample_rate);
+
                 // Update registry with enriched metadata
                 self.sample_registry.register_with_metadata(id, sample.buffer.clone(), metadata.clone());
 
@@ -300,6 +303,40 @@ impl AnalysisWorker {
         }
 
         dna
+    }
+
+    fn analyze_spatial(&self, buffer: &[f32], dna: &mut nullherz_traits::SoundDNA, sample_rate: f32) {
+        if buffer.len() < (sample_rate as usize) { return; }
+
+        // 1. Estimate Stereo Width (assuming buffer might be interleaved or we just check energy)
+        // Simplified: Heuristic based on high-frequency variance if we had multiple channels.
+        // For mono buffer, we'll assume width 1.0.
+
+        // 2. Reverb Tail Estimation (T60 approximation)
+        // Look for the decay after the last significant transient.
+        let transients = self.detect_transients(buffer, sample_rate);
+        if let Some(&last_t) = transients.last() {
+            let tail = &buffer[last_t as usize..];
+            let mut rms_max = 0.0001f32;
+            let mut rms_end = 0.0001f32;
+
+            // Max energy in tail
+            for chunk in tail.chunks(512).take(10) {
+                let rms = (chunk.iter().map(|x| x*x).sum::<f32>() / chunk.len() as f32).sqrt();
+                if rms > rms_max { rms_max = rms; }
+            }
+
+            // End energy
+            if tail.len() > 1024 {
+                 let end_chunk = &tail[tail.len()-1024..];
+                 rms_end = (end_chunk.iter().map(|x| x*x).sum::<f32>() / 1024.0).sqrt();
+            }
+
+            let decay_db = 20.0 * (rms_end / rms_max).log10();
+            if decay_db < -10.0 {
+                 dna.spatial.room_size = (decay_db.abs() / 60.0).clamp(0.0, 1.0);
+            }
+        }
     }
 
     fn detect_transients(&self, buffer: &[f32], _sample_rate: f32) -> Vec<u64> {
