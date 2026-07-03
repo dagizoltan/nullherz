@@ -380,3 +380,20 @@ pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits:
 
     child
 }
+
+pub struct Matchmaker;
+
+impl Matchmaker {
+    pub fn rank_compatibility(target: &nullherz_traits::SoundDNA, candidates: &[LibraryTrack], limit: usize) -> Vec<(u64, f32)> {
+        let mut scores: Vec<(u64, f32)> = candidates.iter()
+            .map(|track| {
+                let score = calculate_similarity(target, &track.metadata.dna);
+                (track.id, score)
+            })
+            .collect();
+
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores.truncate(limit);
+        scores
+    }
+}

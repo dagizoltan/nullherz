@@ -8,6 +8,7 @@ pub struct AnalysisWorker {
     sample_registry: Arc<SampleRegistry>,
     library: Option<Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>>,
     processed_ids: std::collections::HashSet<u64>,
+    compatibility_matrix: std::collections::HashMap<u64, Vec<(u64, f32)>>,
 }
 
 impl AnalysisWorker {
@@ -16,6 +17,7 @@ impl AnalysisWorker {
             sample_registry,
             library: None,
             processed_ids: std::collections::HashSet::new(),
+            compatibility_matrix: std::collections::HashMap::new(),
         }
     }
 
@@ -39,8 +41,14 @@ impl AnalysisWorker {
             .filter(|id| !self.processed_ids.contains(id))
             .collect();
 
-        if unprocessed_ids.is_empty() { return; }
+        if !unprocessed_ids.is_empty() {
+            self.process_batch(unprocessed_ids);
+        }
 
+        self.update_compatibility_matrix();
+    }
+
+    fn process_batch(&mut self, unprocessed_ids: Vec<u64>) {
         println!("AnalysisWorker: Processing {} new samples in batch", unprocessed_ids.len());
 
         let results: Vec<(u64, nullherz_traits::SampleMetadata, Arc<Vec<f32>>)> = unprocessed_ids.into_par_iter()
@@ -71,6 +79,23 @@ impl AnalysisWorker {
             }
             self.processed_ids.insert(id);
             println!("AnalysisWorker: Enriched metadata for ID={}", id);
+        }
+    }
+
+    fn update_compatibility_matrix(&mut self) {
+        let Some(ref lib_mutex) = self.library else { return; };
+        let tracks = {
+            let lib = lib_mutex.lock().unwrap();
+            let Ok(t) = lib.list_tracks() else { return; };
+            t
+        }; // Drop lock here
+
+        // For each track, if not in matrix or matrix is small, rank candidates
+        for track in &tracks {
+            if !self.compatibility_matrix.contains_key(&track.id) || self.compatibility_matrix[&track.id].len() < 5 {
+                let compatibility = nullherz_dna::Matchmaker::rank_compatibility(&track.metadata.dna, &tracks, 10);
+                self.compatibility_matrix.insert(track.id, compatibility);
+            }
         }
     }
 

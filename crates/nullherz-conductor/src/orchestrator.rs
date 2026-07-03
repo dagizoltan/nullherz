@@ -85,6 +85,14 @@ impl Conductor {
             });
         }
 
+        // Setup Remote Sidecar Listener (Stage 2 Distributed DSP)
+        if let Ok(_handle) = tokio::runtime::Handle::try_current() {
+            let remote_manager = self.sidecar_supervisor.remote_manager.clone();
+            tokio::spawn(async move {
+                let _ = crate::sidecar_supervisor::SidecarSupervisor::listen_for_remote_sidecars(remote_manager, "0.0.0.0:9000").await;
+            });
+        }
+
         crate::EngineContext {
             command_producer: handle.command_producer,
             telemetry_consumer: handle.telemetry_consumer,
@@ -217,6 +225,13 @@ impl Conductor {
              eprintln!("Recovered sidecar process for node {}. Re-inserting into audio graph...", node_idx);
             if let Some(ref mut prod) = self.topology_manager.topo_producer {
                 let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor { node_idx, processor });
+            }
+        }
+
+        let remote_commands = self.sidecar_supervisor.supervise(&mut self.topology_manager);
+        for ts_cmd in remote_commands {
+            if let Some(ref prod) = self.engine_coordinator.command_producer {
+                let _ = prod.push_command(ts_cmd);
             }
         }
 
