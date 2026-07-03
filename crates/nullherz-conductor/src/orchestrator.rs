@@ -68,6 +68,7 @@ impl Conductor {
         let handle = self.engine_coordinator.setup();
 
         self.mixer_bridge.bundle_producer = Some(handle.bundle_producer);
+        self.mixer_bridge.bundle_pool = handle.bundle_garbage_consumer;
         self.topology_manager.topo_producer = Some(ipc_layer::NonRtProducer::new(handle.topology_producer));
 
         // Setup MIDI Bridge SHM

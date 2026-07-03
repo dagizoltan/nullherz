@@ -8,7 +8,9 @@ pub struct BreederView {
     pub transfusion_bias_y: f32, // Rhythmic Bias
     pub target_node_idx: u32,
     pub smoothed_spectrum: [f32; 128],
+    pub smoothed_goniometer: [f32; 128],
     pub selecting_parent: Option<usize>, // 0 for A, 1 for B
+    pub telemetry_damping: f32,
 }
 
 impl BreederView {
@@ -20,7 +22,9 @@ impl BreederView {
             transfusion_bias_y: 0.5,
             target_node_idx: 150, // PersonalityInheritanceProcessor default ID
             smoothed_spectrum: [0.0; 128],
+            smoothed_goniometer: [0.0; 128],
             selecting_parent: None,
+            telemetry_damping: 0.15,
         }
     }
 
@@ -130,13 +134,19 @@ impl BreederView {
 
             // Visualizers (Real-time Feedback)
             ui.vertical(|ui| {
-                ui.label("Real-time Evolution Monitor");
+                ui.horizontal(|ui| {
+                    ui.label("Real-time Evolution Monitor");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add(egui::Slider::new(&mut state.telemetry_damping, 0.01..=0.5).text("Damping").show_value(false));
+                    });
+                });
+
                 let telemetry = app.last_telemetry.lock().unwrap();
 
                 ui.group(|ui| {
                     if let Some(t) = &*telemetry {
-                        // EMA Smoothing
-                        let alpha = 0.2;
+                        // EMA Smoothing with configurable damping
+                        let alpha = state.telemetry_damping;
                         for i in 0..128 {
                             state.smoothed_spectrum[i] = state.smoothed_spectrum[i] * (1.0 - alpha) + t.spectrum[i] * alpha;
                         }
@@ -151,7 +161,11 @@ impl BreederView {
 
                 ui.group(|ui| {
                     if let Some(t) = &*telemetry {
-                        crate::widgets::render_goniometer(ui, &t.goniometer_pts, 200.0, Color32::from_rgb(0, 255, 200));
+                        let alpha = state.telemetry_damping;
+                        for i in 0..128 {
+                            state.smoothed_goniometer[i] = state.smoothed_goniometer[i] * (1.0 - alpha) + t.goniometer_pts[i] * alpha;
+                        }
+                        crate::widgets::render_goniometer(ui, &state.smoothed_goniometer, 200.0, Color32::from_rgb(0, 255, 200));
                     } else {
                         ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
                         ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "GONIOMETER", egui::FontId::proportional(12.0), Color32::GRAY);
