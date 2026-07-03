@@ -5,6 +5,7 @@ use crate::mixer_bridge::MixerBridge;
 use crate::sidecar_supervisor::SidecarSupervisor;
 use crate::midi_mapper::MidiMapper;
 use crate::pattern_manager::PatternManager;
+use crate::clip_orchestrator::ClipOrchestrator;
 use crate::modulation_matrix::ModulationMatrix;
 use nullherz_traits::{Command, telemetry::Telemetry};
 use std::sync::Arc;
@@ -17,6 +18,7 @@ pub struct Conductor {
     pub mixer_bridge: MixerBridge,
     pub sidecar_supervisor: SidecarSupervisor,
     pub pattern_manager: PatternManager,
+    pub clip_orchestrator: ClipOrchestrator,
     pub modulation_matrix: ModulationMatrix,
     pub midi_mapper: MidiMapper,
     pub analysis_worker: Option<crate::analysis_worker::AnalysisWorker>,
@@ -46,6 +48,7 @@ impl Conductor {
             mixer_bridge: MixerBridge::new(),
             sidecar_supervisor: SidecarSupervisor::new(),
             pattern_manager: PatternManager::new(),
+            clip_orchestrator: ClipOrchestrator::new(),
             modulation_matrix: ModulationMatrix::new(),
             midi_mapper: MidiMapper::new(),
             analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
@@ -123,6 +126,11 @@ impl Conductor {
         let arrangement_commands = self.pattern_manager.tick(self.mixer_bridge.timeline.current_beat);
         if !arrangement_commands.is_empty() {
             self.apply_mixer_commands(arrangement_commands);
+        }
+
+        let clip_commands = self.clip_orchestrator.tick(self.mixer_bridge.timeline.current_beat);
+        if !clip_commands.is_empty() {
+            self.apply_mixer_commands(clip_commands);
         }
 
         if self.engine_coordinator.check_health() {
