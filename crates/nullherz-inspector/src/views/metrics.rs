@@ -47,7 +47,10 @@ pub fn render(app: &InspectorApp, ui: &mut Ui) {
                         ui.add_space(20.0);
                         ui.vertical(|ui| {
                              ui.label("Master Out (L/R)");
-                             widgets::render_vu_meter(ui, t.peak_levels[0], t.peak_levels[0], Color32::WHITE, 160.0);
+                             ui.horizontal(|ui| {
+                                 widgets::render_vu_meter(ui, t.peak_levels[0], t.peak_levels[0], Color32::WHITE, 160.0);
+                                 widgets::render_vu_meter(ui, t.peak_levels[1], t.peak_levels[1], Color32::WHITE, 160.0);
+                             });
                         });
                     } else {
                         ui.label("No phase data available.");

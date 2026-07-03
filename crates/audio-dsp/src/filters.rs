@@ -146,9 +146,15 @@ impl BiquadFilter {
         while i < len {
             unsafe {
                 let x = *input.get_unchecked(i);
-                let y = x * b0 + z1;
-                z1 = x * b1 - y * a1 + z2;
-                z2 = x * b2 - y * a2;
+                let mut y = x * b0 + z1;
+                if !y.is_finite() {
+                    y = 0.0;
+                    z1 = 0.0;
+                    z2 = 0.0;
+                } else {
+                    z1 = x * b1 - y * a1 + z2;
+                    z2 = x * b2 - y * a2;
+                }
                 *output.get_unchecked_mut(i) = y;
             }
             i += 1;
@@ -175,9 +181,15 @@ impl Filter for BiquadFilter {
             }
         }
 
-        let output = input * self.coeffs.b0 + self.z1;
-        self.z1 = input * self.coeffs.b1 - output * self.coeffs.a1 + self.z2;
-        self.z2 = input * self.coeffs.b2 - output * self.coeffs.a2;
+        let mut output = input * self.coeffs.b0 + self.z1;
+        if !output.is_finite() {
+            output = 0.0;
+            self.z1 = 0.0;
+            self.z2 = 0.0;
+        } else {
+            self.z1 = input * self.coeffs.b1 - output * self.coeffs.a1 + self.z2;
+            self.z2 = input * self.coeffs.b2 - output * self.coeffs.a2;
+        }
         output
     }
 }
@@ -244,45 +256,35 @@ impl SimdBiquad {
         self.z2[channel] = z2;
     }
 
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx512f")]
-    /// # Safety
-    /// Caller must ensure all pointers are valid for 'len' elements.
-    pub unsafe fn process_16_channels(&mut self, inputs: [*const f32; 16], outputs: [*mut f32; 16], len: usize) {
-        use std::arch::x86_64::*;
-        // SAFETY: Caller must ensure that all input and output pointers are valid for 'len' elements,
-        // and that the CPU supports AVX-512F.
-        unsafe {
+    pub fn process_16_channels(&mut self, inputs: [*const f32; 16], outputs: [*mut f32; 16], len: usize) {
+        use crate::simd_vec::*;
 
-        let b0 = _mm512_set1_ps(self.coeffs.b0);
-        let b1 = _mm512_set1_ps(self.coeffs.b1);
-        let b2 = _mm512_set1_ps(self.coeffs.b2);
-        let a1 = _mm512_set1_ps(self.coeffs.a1);
-        let a2 = _mm512_set1_ps(self.coeffs.a2);
+        let b0 = FloatX16::from(self.coeffs.b0);
+        let b1 = FloatX16::from(self.coeffs.b1);
+        let b2 = FloatX16::from(self.coeffs.b2);
+        let a1 = FloatX16::from(self.coeffs.a1);
+        let a2 = FloatX16::from(self.coeffs.a2);
 
-        let mut z1 = _mm512_loadu_ps(self.z1.as_ptr());
-        let mut z2 = _mm512_loadu_ps(self.z2.as_ptr());
+        let mut z1 = unsafe { load_f32x16_ptr(self.z1.as_ptr()) };
+        let mut z2 = unsafe { load_f32x16_ptr(self.z2.as_ptr()) };
 
         for i in 0..len {
-            let x = _mm512_setr_ps(
-                *inputs[0].add(i), *inputs[1].add(i), *inputs[2].add(i), *inputs[3].add(i),
-                *inputs[4].add(i), *inputs[5].add(i), *inputs[6].add(i), *inputs[7].add(i),
-                *inputs[8].add(i), *inputs[9].add(i), *inputs[10].add(i), *inputs[11].add(i),
-                *inputs[12].add(i), *inputs[13].add(i), *inputs[14].add(i), *inputs[15].add(i)
-            );
+            let mut in_arr = [0.0f32; 16];
+            for ch in 0..16 {
+                unsafe { in_arr[ch] = *inputs[ch].add(i) };
+            }
+            let x = FloatX16::new(in_arr);
 
-            let y = _mm512_add_ps(_mm512_mul_ps(x, b0), z1);
-            z1 = _mm512_add_ps(_mm512_sub_ps(_mm512_mul_ps(x, b1), _mm512_mul_ps(y, a1)), z2);
-            z2 = _mm512_sub_ps(_mm512_mul_ps(x, b2), _mm512_mul_ps(y, a2));
+            let y = (x * b0) + z1;
+            z1 = ((x * b1) - (y * a1)) + z2;
+            z2 = (x * b2) - (y * a2);
 
-            let mut out_v = [0.0f32; 16];
-            _mm512_storeu_ps(out_v.as_mut_ptr(), y);
-            for (ch, &val) in out_v.iter().enumerate() { *outputs.get_unchecked(ch).add(i) = val; }
+            let out_arr: [f32; 16] = y.into();
+            for ch in 0..16 { unsafe { *outputs[ch].add(i) = out_arr[ch] }; }
         }
 
-        _mm512_storeu_ps(self.z1.as_mut_ptr(), z1);
-        _mm512_storeu_ps(self.z2.as_mut_ptr(), z2);
-        }
+        unsafe { store_f32x16_ptr(self.z1.as_mut_ptr(), z1) };
+        unsafe { store_f32x16_ptr(self.z2.as_mut_ptr(), z2) };
     }
 
     pub fn process_8_channels(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {

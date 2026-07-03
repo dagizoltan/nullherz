@@ -89,6 +89,32 @@ fn main() {
             kills += 1;
         }
 
+        // 3. High-Frequency Command Flood Test
+        for i in 0..10 {
+            let _ = cmd_buffer.push_command(TimestampedCommand {
+                timestamp_samples: 0,
+                command: nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                    target_id: 10, // Sampler
+                    param_id: i % 8,
+                    value: (start_time.elapsed().as_millis() % 100) as f32 / 100.0,
+                    ramp_duration_samples: 128,
+                }),
+            });
+        }
+
+        // 4. NaN Ingestion Safety Test
+        if start_time.elapsed().as_secs() == 2 {
+            let _ = cmd_buffer.push_command(TimestampedCommand {
+                timestamp_samples: 0,
+                command: nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                    target_id: 1, // Biquad
+                    param_id: 0,
+                    value: f32::NAN,
+                    ramp_duration_samples: 0,
+                }),
+            });
+        }
+
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 
