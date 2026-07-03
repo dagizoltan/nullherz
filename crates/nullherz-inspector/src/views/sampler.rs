@@ -2,6 +2,7 @@ use egui::{Color32, Ui, Frame, Vec2, Sense, Stroke};
 use crate::InspectorApp;
 use audio_core::Telemetry;
 use egui_wgpu::wgpu;
+use std::sync::{Arc, Mutex};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     ui.horizontal(|ui| {
@@ -13,18 +14,36 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         let (rect, _response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 200.0), Sense::hover());
 
         // WGPU Accelerated Waveform rendering callback
-        if let Some(wgpu_mtx) = &app.wgpu_renderer {
+        if let (Some(wgpu_mtx), Some(wf_mtx)) = (&app.wgpu_renderer, &app.waveform_renderer) {
              let _wgpu = wgpu_mtx.lock().unwrap();
+             let mut wf = wf_mtx.lock().unwrap();
+
+             // Update peak data if we have telemetry
+             if let Some(t) = telemetry {
+                 // Use telemetry peak levels as a surrogate for waveform data
+                 wf.update_peaks(&_wgpu.queue, &t.peak_levels);
+
+                 // bit-exact scrolling based on beat position
+                 let scroll = (t.beat_position as f32 % 4.0) / 2.0 - 1.0;
+                 wf.update_globals(&_wgpu.queue, scroll, 1.0, [0.0, 1.0, 0.8, 1.0]);
+             }
 
              // Setup callback for WGPU rendering
-             struct WaveformCallback {}
+             struct WaveformCallback {
+                 renderer: Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>,
+             }
              impl egui_wgpu::CallbackTrait for WaveformCallback {
-                 fn paint<'a>(&'a self, _info: egui::PaintCallbackInfo, _render_pass: &mut wgpu::RenderPass<'a>, _resources: &egui_wgpu::CallbackResources) {
-                     // Waveform rendering logic
+                 fn paint<'a>(&'a self, _info: egui::PaintCallbackInfo, render_pass: &mut wgpu::RenderPass<'a>, _resources: &egui_wgpu::CallbackResources) {
+                     if let Ok(wf) = self.renderer.lock() {
+                         // SAFETY: The paint callback is synchronous and the render_pass doesn't outlive this call in practice
+                         // with how egui-wgpu 0.27 is structured. We transmute to satisfy the 'a lifetime required by WGPU.
+                         let wf_ref: &nullherz_ui_hal::render::waveform_renderer::WaveformRenderer = unsafe { std::mem::transmute(&*wf) };
+                         wf_ref.render(render_pass);
+                     }
                  }
              }
 
-             let callback = egui_wgpu::Callback::new_paint_callback(rect, WaveformCallback {});
+             let callback = egui_wgpu::Callback::new_paint_callback(rect, WaveformCallback { renderer: wf_mtx.clone() });
              ui.painter().add(callback);
 
              ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "GPU-ACCELERATED WAVEFORM ENGINE ACTIVE", egui::FontId::proportional(14.0), Color32::from_rgb(0, 100, 80));

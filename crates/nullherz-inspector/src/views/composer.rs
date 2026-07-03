@@ -37,15 +37,26 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         for col in 0..8 {
                             let (rect, response) = ui.allocate_exact_size(Vec2::new(60.0, 60.0), Sense::click());
 
-                            // Visual State (placeholder for actual clip data)
-                            let is_empty = true;
-                            let color = if is_empty {
-                                Color32::from_gray(30)
+                            // Visual State (mock for animation/state demonstration)
+                            let is_playing = row == 0 && col == 0;
+                            let is_starting = false;
+
+
+                            let color = if is_playing {
+                                Color32::from_rgb(0, 255, 100)
+                            } else if is_starting {
+                                // Pulsing animation logic would go here
+                                Color32::from_rgb(255, 200, 0)
                             } else {
-                                Color32::from_rgb(0, 150, 100)
+                                Color32::from_gray(30)
                             };
 
                             ui.painter().rect_filled(rect, 2.0, color);
+
+                            if is_playing {
+                                 // Add playing indicator (glow)
+                                 ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(2.0, Color32::WHITE));
+                            }
                             if response.hovered() {
                                 ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, Color32::WHITE));
                             }

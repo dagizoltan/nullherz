@@ -125,6 +125,7 @@ pub struct InspectorApp {
     pub(crate) player_queue: Vec<Track>,
     pub(crate) player_is_playing: bool,
     pub(crate) wgpu_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::wgpu_backend::WgpuRenderer>>>,
+    pub(crate) waveform_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>>,
 }
 
 impl InspectorApp {
@@ -187,6 +188,7 @@ impl InspectorApp {
             player_queue: vec![],
             player_is_playing: false,
             wgpu_renderer: None,
+            waveform_renderer: None,
         }
     }
 
@@ -326,6 +328,13 @@ fn main() -> eframe::Result<()> {
                     surface: None,
                     config: None,
                 })));
+
+                let wf_renderer = nullherz_ui_hal::render::waveform_renderer::WaveformRenderer::new(
+                    &render_state.device,
+                    render_state.target_format,
+                    1024
+                );
+                app.waveform_renderer = Some(Arc::new(Mutex::new(wf_renderer)));
             }
 
             Box::new(app)
