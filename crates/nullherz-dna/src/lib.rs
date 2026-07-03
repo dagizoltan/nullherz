@@ -16,6 +16,7 @@ pub struct LibraryTrack {
 }
 
 const TRACKS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("tracks");
+const CRATES_TABLE: TableDefinition<(&str, u64), ()> = TableDefinition::new("crates_v2");
 
 #[derive(Clone)]
 pub struct RegisteredSample {
@@ -34,6 +35,7 @@ impl LibraryDatabase {
         let write_txn = db.begin_write()?;
         {
             let _ = write_txn.open_table(TRACKS_TABLE)?;
+            let _ = write_txn.open_table(CRATES_TABLE)?;
         }
         write_txn.commit()?;
         Ok(Self { db })
@@ -77,6 +79,40 @@ impl LibraryDatabase {
             let (_id, val) = res?;
             let track: LibraryTrack = serde_json::from_slice(val.value())?;
             tracks.push(track);
+        }
+        Ok(tracks)
+    }
+
+    pub fn add_to_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(CRATES_TABLE)?;
+            table.insert((crate_name, track_id), ())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn get_tracks_in_crate(&self, crate_name: &str) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
+        let read_txn = self.db.begin_read()?;
+        let crate_table = match read_txn.open_table(CRATES_TABLE) {
+            Ok(t) => t,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+        let track_table = read_txn.open_table(TRACKS_TABLE)?;
+
+        let mut tracks = Vec::new();
+        // Use range scan for O(log N) retrieval of crate members
+        let start = (crate_name, 0);
+        let end = (crate_name, u64::MAX);
+        for res in crate_table.range(start..=end)? {
+            let (key_guard, _) = res?;
+            let (_name, track_id) = key_guard.value();
+            if let Some(val) = track_table.get(track_id)? {
+                let track: LibraryTrack = serde_json::from_slice(val.value())?;
+                tracks.push(track);
+            }
         }
         Ok(tracks)
     }
@@ -189,16 +225,92 @@ mod tests {
 
         let _ = fs::remove_file(db_path);
     }
+
+    #[test]
+    fn test_library_crating() {
+        let db_path = "test_crates.redb";
+        let _ = fs::remove_file(db_path);
+        let db = LibraryDatabase::load(db_path).unwrap();
+
+        let track = LibraryTrack {
+            id: 101,
+            path: "/test/track.wav".to_string(),
+            title: "Crate Track".to_string(),
+            artist: "Crate Artist".to_string(),
+            metadata: nullherz_traits::SampleMetadata::new_empty(),
+        };
+
+        db.save_track(&track).unwrap();
+        db.add_to_crate("Techno", 101).unwrap();
+
+        let in_crate = db.get_tracks_in_crate("Techno").unwrap();
+        assert_eq!(in_crate.len(), 1);
+        assert_eq!(in_crate[0].id, 101);
+
+        let empty_crate = db.get_tracks_in_crate("House").unwrap();
+        assert!(empty_crate.is_empty());
+
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn test_simd_dna_interpolation() {
+        use nullherz_traits::SoundDNA;
+        let mut dna_a = SoundDNA::default();
+        let mut dna_b = SoundDNA::default();
+
+        for i in 0..64 {
+            dna_a.spectral.energy_map[i] = 100;
+            dna_b.spectral.energy_map[i] = 200;
+        }
+
+        let child = transfuse_dna(&dna_a, &dna_b, 0.5);
+
+        for i in 0..64 {
+            // (100 * 0.5) + (200 * 0.5) = 150
+            assert_eq!(child.spectral.energy_map[i], 150);
+        }
+
+        let child_025 = transfuse_dna(&dna_a, &dna_b, 0.25);
+        for i in 0..64 {
+            // (100 * 0.75) + (200 * 0.25) = 75 + 50 = 125
+            assert_eq!(child_025.spectral.energy_map[i], 125);
+        }
+    }
+}
+
+pub fn interpolate_energy_map(dest: &mut [u8; 64], src_a: &[u8; 64], src_b: &[u8; 64], bias: f32) {
+    use audio_dsp::simd_vec::FloatX16;
+    let inv_bias = 1.0 - bias;
+    let v_inv_bias = FloatX16::splat(inv_bias);
+    let v_bias = FloatX16::splat(bias);
+
+    for i in (0..64).step_by(16) {
+        let mut a_vals = [0.0f32; 16];
+        let mut b_vals = [0.0f32; 16];
+        for j in 0..16 {
+            a_vals[j] = src_a[i + j] as f32;
+            b_vals[j] = src_b[i + j] as f32;
+        }
+
+        let v_a = FloatX16::new(a_vals);
+        let v_b = FloatX16::new(b_vals);
+        let v_res = (v_a * v_inv_bias) + (v_b * v_bias);
+
+        let res_arr: [f32; 16] = v_res.into();
+        for j in 0..16 {
+            dest[i + j] = res_arr[j].clamp(0.0, 255.0) as u8;
+        }
+    }
 }
 
 pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA, bias: f32) -> nullherz_traits::SoundDNA {
     let mut child = nullherz_traits::SoundDNA::default();
     let inv_bias = 1.0 - bias;
 
-    // 1. Spectral Transfusion
-    for i in 0..64 {
-        child.spectral.energy_map[i] = (dna_a.spectral.energy_map[i] as f32 * inv_bias + dna_b.spectral.energy_map[i] as f32 * bias) as u8;
-    }
+    // 1. Spectral Transfusion (SIMD Optimized)
+    interpolate_energy_map(&mut child.spectral.energy_map, &dna_a.spectral.energy_map, &dna_b.spectral.energy_map, bias);
+
     child.spectral.tilt = dna_a.spectral.tilt * inv_bias + dna_b.spectral.tilt * bias;
 
     // 2. Rhythmic Transfusion

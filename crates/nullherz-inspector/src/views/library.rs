@@ -4,24 +4,24 @@ use crate::InspectorApp;
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     ui.vertical(|ui| {
         // Breeding Lab Header
-        if app.breeding_parent_a.is_some() || app.breeding_parent_b.is_some() {
+        if app.breeding_view.parent_a_id.is_some() || app.breeding_view.parent_b_id.is_some() {
             ui.group(|ui| {
                 ui.label(RichText::new("🧬 DNA BREEDING LAB").strong().color(Color32::from_rgb(0, 255, 200)));
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(format!("PARENT A: {}", app.breeding_parent_a.map(|id| id.to_string()).unwrap_or("NONE".to_string())));
-                        if ui.button("CLEAR").clicked() { app.breeding_parent_a = None; }
+                        ui.label(format!("PARENT A: {}", app.breeding_view.parent_a_id.map(|id| id.to_string()).unwrap_or("NONE".to_string())));
+                        if ui.button("CLEAR").clicked() { app.breeding_view.parent_a_id = None; }
                     });
                     ui.add_space(20.0);
                     ui.vertical(|ui| {
-                        ui.label(format!("PARENT B: {}", app.breeding_parent_b.map(|id| id.to_string()).unwrap_or("NONE".to_string())));
-                        if ui.button("CLEAR").clicked() { app.breeding_parent_b = None; }
+                        ui.label(format!("PARENT B: {}", app.breeding_view.parent_b_id.map(|id| id.to_string()).unwrap_or("NONE".to_string())));
+                        if ui.button("CLEAR").clicked() { app.breeding_view.parent_b_id = None; }
                     });
                 });
 
-                if let (Some(_a), Some(_b)) = (app.breeding_parent_a, app.breeding_parent_b) {
+                if let (Some(_a), Some(_b)) = (app.breeding_view.parent_a_id, app.breeding_view.parent_b_id) {
                     ui.add_space(10.0);
-                    ui.add(egui::Slider::new(&mut app.breeding_bias, 0.0..=1.0).text("BIAS (A <-> B)"));
+                    ui.add(egui::Slider::new(&mut app.breeding_view.transfusion_bias_x, 0.0..=1.0).text("BIAS (A <-> B)"));
                     if ui.add(egui::Button::new("BREED CHILD DNA").fill(Color32::from_rgb(0, 100, 80))).clicked() {
                         // The actual breeding logic and registration would go here
                         // For now we simulate the action.
@@ -68,11 +68,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
                 res.context_menu(|ui| {
                     if ui.button("Set as Breeding Parent A").clicked() {
-                        app.breeding_parent_a = Some(track.id);
+                        app.breeding_view.parent_a_id = Some(track.id);
                         ui.close_menu();
                     }
                     if ui.button("Set as Breeding Parent B").clicked() {
-                        app.breeding_parent_b = Some(track.id);
+                        app.breeding_view.parent_b_id = Some(track.id);
                         ui.close_menu();
                     }
                     ui.separator();

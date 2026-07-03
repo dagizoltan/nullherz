@@ -210,16 +210,16 @@ impl PersonalityInheritanceProcessor {
     fn handle_dna_command(&mut self, cmd: &nullherz_traits::DnaCommand) {
         // Stage 2: Bit-level trait transfusion from command payload
         let bias = cmd.bias.clamp(0.0, 1.0);
+        let inv_bias = 1.0 - bias;
         let mask = cmd.layer_mask;
 
         // 1. Spectral Layer (Bytes 0-63 of payload = Energy Map)
         if mask & 1 != 0 {
             let mut new_personality = (*self.source_personality).clone();
-            for i in 0..64 {
-                let target = cmd.payload[i] as f32;
-                let current = new_personality.energy_map[i] as f32;
-                new_personality.energy_map[i] = (current * (1.0 - bias) + target * bias) as u8;
-            }
+            let mut target_map = [0u8; 64];
+            target_map.copy_from_slice(&cmd.payload[0..64]);
+
+            nullherz_dna::interpolate_energy_map(&mut new_personality.energy_map, &self.source_personality.energy_map, &target_map, bias);
             self.source_personality = Arc::new(new_personality);
         }
 
@@ -229,7 +229,34 @@ impl PersonalityInheritanceProcessor {
             for i in 0..12 {
                 let target = (cmd.payload[64 + i] as i8) as f32;
                 let current = new_rhythmic.micro_timing[i] as f32;
-                new_rhythmic.micro_timing[i] = (current * (1.0 - bias) + target * bias) as i16;
+                new_rhythmic.micro_timing[i] = (current * inv_bias + target * bias) as i16;
+            }
+            // Bytes 76-107: Rhythmic Onset Mask (4 * u64 = 32 bytes)
+            for i in 0..4 {
+                let mut target_mask = 0u64;
+                for j in 0..8 {
+                    target_mask |= (cmd.payload[76 + i * 8 + j] as u64) << (j * 8);
+                }
+                // Probabilistic bitwise merge
+                let current_mask = new_rhythmic.onset_mask[i];
+                let mut res_mask = 0u64;
+                // Simple deterministic "random" based on bias
+                let threshold = (bias * 65535.0) as u32;
+                for bit in 0..64 {
+                    let bit_curr = (current_mask >> bit) & 1;
+                    let bit_target = (target_mask >> bit) & 1;
+                    if bit_curr == bit_target {
+                        res_mask |= bit_curr << bit;
+                    } else {
+                        let hash = ((bit as u32).wrapping_mul(1103515245).wrapping_add(12345)) & 0xFFFF;
+                        if hash < threshold {
+                            res_mask |= bit_target << bit;
+                        } else {
+                            res_mask |= bit_curr << bit;
+                        }
+                    }
+                }
+                new_rhythmic.onset_mask[i] = res_mask;
             }
             self.source_rhythmic = Arc::new(new_rhythmic);
         }

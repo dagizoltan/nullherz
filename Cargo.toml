@@ -11,7 +11,7 @@ members = [
     "crates/sidecar-sdk",
     "crates/sidecar-macros",
     "crates/nullherz-inspector", "crates/nullherz-mixer", "crates/nullherz-conductor", "sidecars/nullherz-sampler", "sidecars/nullherz-broadcast", "sidecars/nullherz-midi",
-    "crates/nullherz-bench", "sidecars/nullherz-dummy",
+    "crates/nullherz-bench", "sidecars/nullherz-dummy", "sidecars/spectral-transfuser",
     "crates/nullherz-gateway",
     "crates/nullherz-topology",
     "crates/nullherz-setup",
