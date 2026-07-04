@@ -376,8 +376,9 @@ impl crate::DspKernel for DjIsolator {
     }
 
     fn set_parameter(&mut self, id: u32, value: f32, _ramp_samples: u32) {
+        if !value.is_finite() { return; }
         if id < 3 {
-            self.gains[id as usize] = value;
+            self.gains[id as usize] = value.clamp(0.0, 10.0);
         }
     }
 }

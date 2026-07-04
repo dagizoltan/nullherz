@@ -2,6 +2,7 @@ pub mod sampler;
 pub mod library;
 pub mod mastering;
 pub mod modulation;
+pub mod setup_wizard;
 pub mod topology;
 pub mod mixer;
 pub mod broadcast;

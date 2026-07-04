@@ -32,6 +32,7 @@ impl <K: DspKernel + 'static> nullherz_traits::SnapshotProvider for DspKernelPro
 
 impl <K: DspKernel + 'static> AudioProcessor for DspKernelProcessor<K> {
 fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
+        if !value.is_finite() { return; }
         self.kernel.set_parameter(param_id, value, ramp_duration_samples);
     }
     fn get_parameter(&self, param_id: u32) -> f32 {
@@ -85,6 +86,7 @@ impl <K: DspKernel + 'static> nullherz_traits::SnapshotProvider for MultiChannel
 
 impl <K: DspKernel + 'static> AudioProcessor for MultiChannelDspProcessor<K> {
 fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
+        if !value.is_finite() { return; }
         for k in &mut self.kernels {
             k.set_parameter(param_id, value, ramp_duration_samples);
         }

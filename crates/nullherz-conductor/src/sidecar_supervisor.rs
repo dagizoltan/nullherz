@@ -143,8 +143,8 @@ impl SidecarSupervisor {
                                                 let node_idx = u32::from_be_bytes(buffer[1..5].try_into().unwrap());
                                                 let block_data = &buffer[5..];
                                                 if block_data.len() == std::mem::size_of::<nullherz_traits::AudioBlock>() {
-                                                     let block: &nullherz_traits::AudioBlock = bytemuck::from_bytes(block_data);
-                                                     let _ = audio_bridge_clone.push_block(node_idx, *block);
+                                                     let block: nullherz_traits::AudioBlock = bytemuck::pod_read_unaligned(block_data);
+                                                     let _ = audio_bridge_clone.push_block(node_idx, block);
                                                 }
                                                 continue;
                                             }
@@ -215,8 +215,8 @@ impl SidecarSupervisor {
                                     let node_idx = u32::from_be_bytes(buffer[1..5].try_into().unwrap());
                                     let block_data = &buffer[5..];
                                     if block_data.len() == std::mem::size_of::<nullherz_traits::AudioBlock>() {
-                                         let block: &nullherz_traits::AudioBlock = bytemuck::from_bytes(block_data);
-                                         let _ = audio_bridge_clone.push_block(node_idx, *block);
+                                         let block: nullherz_traits::AudioBlock = bytemuck::pod_read_unaligned(block_data);
+                                         let _ = audio_bridge_clone.push_block(node_idx, block);
                                     }
                                     continue;
                                 }

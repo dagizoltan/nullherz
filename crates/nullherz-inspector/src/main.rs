@@ -43,6 +43,7 @@ pub enum View {
     Settings,
     Library,
     Breeder,
+    SetupWizard,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -240,6 +241,7 @@ impl eframe::App for InspectorApp {
                         (View::Modulation, "〰", "MOD"),
                         (View::Breeder, "🧬", "BREED"),
                         (View::Settings, "⚙", "SET"),
+                        (View::SetupWizard, "🧙", "SETUP"),
                     ];
 
                     for (view, icon, label) in nav_buttons {
@@ -321,6 +323,7 @@ impl eframe::App for InspectorApp {
                     views::breeder::BreederView::show(ui, &mut view, &telemetry, self);
                     self.breeding_view = view;
                  }
+                 View::SetupWizard => views::setup_wizard::render(self, ui),
                  _ => { ui.label("View coming soon..."); }
              }
         });
