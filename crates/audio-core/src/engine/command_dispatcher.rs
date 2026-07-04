@@ -31,11 +31,20 @@ impl CommandDispatcher {
             Command::Core(CoreCommand::CommitTopology) => {
                 Self::commit_topology(graph);
             }
+            Command::Core(CoreCommand::SetBpm(bpm)) => {
+                transport.bpm = *bpm;
+            }
             Command::Mixer(MixerCommand::Bundle { count, data }) => {
                 Self::handle_bundle_command(graph, *count, *data);
             }
             Command::Topology(TopologyCommand::AddNode { .. }) | Command::Topology(TopologyCommand::SwapProcessor { .. }) => {
                 // Ignore structural mutations in RT command loop.
+            }
+            Command::Topology(TopologyCommand::SetBypass { node_idx, enabled }) => {
+                 graph.apply_topology_mutation(nullherz_traits::TopologyMutation::LoadProcessorState {
+                     node_idx: *node_idx,
+                     state_data: std::sync::Arc::new(if *enabled { vec![1] } else { vec![0] }),
+                 });
             }
             _ => { graph.apply_command(cmd); }
         }

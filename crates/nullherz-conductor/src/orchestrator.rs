@@ -21,6 +21,7 @@ pub struct Conductor {
     pub clip_orchestrator: ClipOrchestrator,
     pub modulation_matrix: ModulationMatrix,
     pub midi_mapper: MidiMapper,
+    pub midi_clock: crate::midi_clock::MidiClockTracker,
     pub analysis_worker: Option<crate::analysis_worker::AnalysisWorker>,
     pub folder_monitor: Option<crate::folder_monitor::FolderMonitor>,
     pub library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>,
@@ -54,6 +55,7 @@ impl Conductor {
             clip_orchestrator: ClipOrchestrator::new(),
             modulation_matrix: ModulationMatrix::new(),
             midi_mapper: MidiMapper::new(),
+            midi_clock: crate::midi_clock::MidiClockTracker::new(),
             analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
             folder_monitor: Some(crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())),
             library,
@@ -92,9 +94,15 @@ impl Conductor {
                 let _ = crate::sidecar_supervisor::SidecarSupervisor::listen_for_remote_sidecars(remote_manager, "0.0.0.0:9000").await;
             });
 
-            // Start UDP Discovery Beacon
+            // Start UDP Discovery Beacon (Conductor identifying itself)
             let discovery = crate::discovery::DiscoveryBeacon::new(9000, "Conductor");
             discovery.start_broadcast();
+
+            // Start UDP Discovery Listener (Conductor finding sidecars)
+            let remote_manager = self.sidecar_supervisor.remote_manager.clone();
+            tokio::spawn(async move {
+                let _ = crate::sidecar_supervisor::SidecarSupervisor::start_discovery_listener(remote_manager, 9001).await;
+            });
         }
 
         crate::EngineContext {
@@ -153,10 +161,12 @@ impl Conductor {
                 command: *cmd,
             };
             let remote_manager = self.sidecar_supervisor.remote_manager.clone();
-            tokio::spawn(async move {
-                let mut manager = remote_manager.lock().await;
-                manager.broadcast_command(ts_cmd).await;
-            });
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let mut manager = remote_manager.lock().await;
+                    manager.broadcast_command(ts_cmd).await;
+                });
+            }
         }
 
         for cmd in commands {
@@ -186,6 +196,36 @@ impl Conductor {
 
     pub fn handle_midi_events(&mut self, events: Vec<nullherz_traits::MidiEvent>) {
         for event in events {
+            // Handle System Real-time (Clock, Start, Stop)
+            if event.status >= 0xF8 {
+                if let Some(new_bpm) = self.midi_clock.handle_event(event.status) {
+                    self.mixer_bridge.timeline.bpm = new_bpm;
+                    // Broadcast new BPM to engine
+                    if let Some(ref prod) = self.engine_coordinator.command_producer {
+                         let _ = prod.push_command(nullherz_traits::TimestampedCommand {
+                             timestamp_samples: 0,
+                             command: nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetBpm(new_bpm)),
+                         });
+                    }
+                }
+
+                if event.status == 0xFA || event.status == 0xFB {
+                     if let Some(ref prod) = self.engine_coordinator.command_producer {
+                        let _ = prod.push_command(nullherz_traits::TimestampedCommand {
+                            timestamp_samples: 0,
+                            command: nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Play),
+                        });
+                    }
+                } else if event.status == 0xFC {
+                    if let Some(ref prod) = self.engine_coordinator.command_producer {
+                        let _ = prod.push_command(nullherz_traits::TimestampedCommand {
+                            timestamp_samples: 0,
+                            command: nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop),
+                        });
+                    }
+                }
+            }
+
             let mapped_commands = self.midi_mapper.translate(&event);
             if !mapped_commands.is_empty() {
                 self.apply_mixer_commands(mapped_commands);

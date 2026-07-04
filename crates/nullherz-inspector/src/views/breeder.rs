@@ -11,6 +11,7 @@ pub struct BreederView {
     pub smoothed_goniometer: [f32; 128],
     pub selecting_parent: Option<usize>, // 0 for A, 1 for B
     pub telemetry_damping: f32,
+    pub preview_dna: [u8; 64],
 }
 
 impl BreederView {
@@ -25,6 +26,7 @@ impl BreederView {
             smoothed_goniometer: [0.0; 128],
             selecting_parent: None,
             telemetry_damping: 0.15,
+            preview_dna: [0; 64],
         }
     }
 
@@ -43,14 +45,22 @@ impl BreederView {
                 ui.separator();
 
                 egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
-                    let tracks = &app.cached_library;
+                    let mut tracks = app.cached_library.clone();
 
-                    // Reference DNA for similarity highlighting
+                    // Matchmaking Sort (Genetic Matchmaker UI)
                     let other_dna = if parent_idx == 0 {
                         state.parent_b_id.and_then(|id| app.library_db.get_track(id).ok().flatten()).map(|t| t.metadata.dna)
                     } else {
                         state.parent_a_id.and_then(|id| app.library_db.get_track(id).ok().flatten()).map(|t| t.metadata.dna)
                     };
+
+                    if let Some(ref target) = other_dna {
+                         tracks.sort_by(|a, b| {
+                             let sa = nullherz_dna::calculate_similarity(target, &a.metadata.dna);
+                             let sb = nullherz_dna::calculate_similarity(target, &b.metadata.dna);
+                             sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+                         });
+                    }
 
                     for track in tracks {
                         let similarity = other_dna.as_ref().map(|other| nullherz_dna::calculate_similarity(&track.metadata.dna, other));
@@ -58,7 +68,7 @@ impl BreederView {
                         ui.horizontal(|ui| {
                             if let Some(s) = similarity {
                                 let color = if s > 0.8 { Color32::from_rgb(0, 255, 200) } else if s > 0.5 { Color32::YELLOW } else { Color32::GRAY };
-                                ui.add(egui::ProgressBar::new(s).desired_width(40.0).fill(color));
+                                ui.add(egui::ProgressBar::new(s).desired_width(60.0).fill(color).text(format!("{:.0}%", s * 100.0)));
                             }
 
                             let label = format!("{} - {}", track.title, track.artist);
@@ -131,6 +141,34 @@ impl BreederView {
                 let handle_pos = rect.left_top() + Vec2::new(state.transfusion_bias_x * rect.width(), (1.0 - state.transfusion_bias_y) * rect.height());
                 ui.painter().circle_filled(handle_pos, 8.0, Color32::from_rgb(0, 255, 200));
                 ui.painter().circle_stroke(handle_pos, 8.0, Stroke::new(2.0, Color32::WHITE));
+            });
+
+            ui.add_space(20.0);
+
+            // Interpolated DNA Preview (Genetic Blueprint)
+            ui.vertical(|ui| {
+                ui.label("Genetic Blueprint (Interpolated DNA)");
+                let (preview_rect, _) = ui.allocate_at_least(Vec2::new(250.0, 100.0), Sense::hover());
+                ui.painter().rect_filled(preview_rect, 2.0, Color32::from_black_alpha(100));
+
+                if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
+                    if let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
+                        nullherz_dna::interpolate_energy_map(&mut state.preview_dna, &track_a.metadata.dna.spectral.energy_map, &track_b.metadata.dna.spectral.energy_map, state.transfusion_bias_x);
+
+                        let bin_width = preview_rect.width() / 64.0;
+                        for i in 0..64 {
+                            let h = (state.preview_dna[i] as f32 / 255.0) * preview_rect.height();
+                            let x = preview_rect.left() + i as f32 * bin_width;
+                            let r = egui::Rect::from_min_max(
+                                egui::pos2(x, preview_rect.bottom() - h),
+                                egui::pos2(x + bin_width - 1.0, preview_rect.bottom())
+                            );
+                            ui.painter().rect_filled(r, 0.0, Color32::from_rgb(0, 255, 200));
+                        }
+                    }
+                } else {
+                    ui.painter().text(preview_rect.center(), egui::Align2::CENTER_CENTER, "SELECT PARENTS FOR PREVIEW", egui::FontId::proportional(12.0), Color32::GRAY);
+                }
             });
 
             ui.add_space(20.0);

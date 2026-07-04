@@ -13,6 +13,13 @@ impl TcpIpcProducer {
         Ok(Self { stream: Arc::new(tokio::sync::Mutex::new(stream)) })
     }
 
+    pub fn into_inner(self) -> Result<TcpStream, Self> {
+        match Arc::try_unwrap(self.stream) {
+            Ok(mutex) => Ok(mutex.into_inner()),
+            Err(arc) => Err(Self { stream: arc }),
+        }
+    }
+
     pub async fn send_command(&self, cmd: TimestampedCommand) -> Result<(), std::io::Error> {
         let serialized = serde_json::to_vec(&cmd).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         let mut stream = self.stream.lock().await;

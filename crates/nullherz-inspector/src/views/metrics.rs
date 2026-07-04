@@ -19,6 +19,12 @@ pub fn render(app: &InspectorApp, ui: &mut Ui) {
                     ui.label(format!("Block Time: {:.2}ms", t.process_time_ns as f32 / 1_000_000.0));
                     ui.label(format!("Peak Time: {:.2}ms", t.peak_process_time_ns as f32 / 1_000_000.0));
                     ui.label(format!("X-RUNS: {}", t.xrun_count));
+
+                    ui.add_space(5.0);
+                    ui.label("System Pressure (Last Overrun)");
+                    let pressure_norm = (t.last_xrun_magnitude_ns as f32 / 1_000_000.0).clamp(0.0, 5.0) / 5.0;
+                    let color = if pressure_norm > 0.8 { Color32::RED } else if pressure_norm > 0.4 { Color32::YELLOW } else { Color32::from_rgb(0, 255, 200) };
+                    ui.add(egui::ProgressBar::new(pressure_norm).desired_width(200.0).fill(color).text(format!("{:.1}ms", t.last_xrun_magnitude_ns as f32 / 1_000_000.0)));
                 } else {
                     ui.label("Waiting for engine telemetry...");
                 }

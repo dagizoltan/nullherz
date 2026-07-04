@@ -65,6 +65,7 @@ pub enum CoreCommand {
     SetSafeMode(bool),
     RequestSnapshots,
     CommitTopology,
+    SetBpm(f32),
 }
 
 #[repr(C)]
@@ -209,6 +210,10 @@ pub enum TopologyCommand {
     SwapProcessor {
         node_idx: u32,
         processor_type_id: ProcessorTypeId,
+    },
+    SetBypass {
+        node_idx: u32,
+        enabled: bool,
     },
 }
 

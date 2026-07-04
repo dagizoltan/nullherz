@@ -10,6 +10,7 @@ pub struct Telemetry {
     pub peak_process_time_ns: u64,
     pub sample_counter: u64,
     pub xrun_count: u32,
+    pub last_xrun_magnitude_ns: u64,
     pub resource_leaks: u64,
     pub bpm: f32,
     pub beat_position: f64,
@@ -21,6 +22,8 @@ pub struct Telemetry {
     pub spectrum: [f32; 128],
     #[serde(with = "BigArray")]
     pub goniometer_pts: [f32; 128],
+    #[serde(with = "BigArray")]
+    pub dna_energy_map: [u8; 64],
     /// Row-wise active clip index (255 = none)
     pub active_clips: [u8; 8],
     /// Bitmask of clips in "Starting/Quantizing" state (Row per byte)
@@ -36,6 +39,7 @@ impl Default for Telemetry {
             peak_process_time_ns: 0,
             sample_counter: 0,
             xrun_count: 0,
+            last_xrun_magnitude_ns: 0,
             resource_leaks: 0,
             bpm: 120.0,
             beat_position: 0.0,
@@ -43,6 +47,7 @@ impl Default for Telemetry {
             peak_levels: [0.0; MAX_NODES],
             spectrum: [0.0; 128],
             goniometer_pts: [0.0; 128],
+            dna_energy_map: [0; 64],
             active_clips: [255; 8],
             starting_clips_mask: [0; 8],
         }

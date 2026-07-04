@@ -423,4 +423,9 @@ impl Matchmaker {
         scores.truncate(limit);
         scores
     }
+
+    pub fn find_best_matches(db: &LibraryDatabase, target: &nullherz_traits::SoundDNA, limit: usize) -> Result<Vec<(u64, f32)>, Box<dyn std::error::Error>> {
+        let tracks = db.list_tracks()?;
+        Ok(Self::rank_compatibility(target, &tracks, limit))
+    }
 }
