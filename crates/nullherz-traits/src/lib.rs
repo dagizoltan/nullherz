@@ -57,6 +57,16 @@ impl From<ProcessorTypeId> for u32 {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[repr(u32)]
+pub enum AudioBackendType {
+    Alsa,
+    Pipewire,
+    Jack,
+    Threaded,
+    Mock,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum CoreCommand {
@@ -66,6 +76,11 @@ pub enum CoreCommand {
     RequestSnapshots,
     CommitTopology,
     SetBpm(f32),
+    SwitchBackend(AudioBackendType),
+    #[serde(with = "serde_big_array::BigArray")]
+    LoadMidiMap([u8; 32]), // Fixed-size buffer for filename
+    #[serde(with = "serde_big_array::BigArray")]
+    SetMidiPorts([u8; 128]), // Comma-separated list or similar
 }
 
 #[repr(C)]

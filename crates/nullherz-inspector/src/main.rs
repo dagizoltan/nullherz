@@ -136,6 +136,9 @@ pub struct InspectorApp {
     pub(crate) waveform_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>>,
     pub(crate) active_connection_source: Option<(u32, u32)>, // (node_idx, output_idx)
     pub(crate) active_node_drag: Option<u32>,
+    pub(crate) visualizer_damping: f32,
+    pub(crate) damped_spectrum: [f32; 128],
+    pub(crate) damped_goniometer: [f32; 128],
 }
 
 impl InspectorApp {
@@ -205,6 +208,9 @@ impl InspectorApp {
             waveform_renderer: None,
             active_connection_source: None,
             active_node_drag: None,
+            visualizer_damping: 0.1,
+            damped_spectrum: [0.0; 128],
+            damped_goniometer: [0.0; 128],
         }
     }
 
@@ -222,6 +228,15 @@ impl InspectorApp {
 impl eframe::App for InspectorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let telemetry = self.last_telemetry.lock().unwrap().clone();
+
+        // Update Damping
+        if let Some(ref t) = telemetry {
+            let d = self.visualizer_damping.clamp(0.01, 1.0);
+            for i in 0..128 {
+                self.damped_spectrum[i] = self.damped_spectrum[i] * (1.0 - d) + t.spectrum[i] * d;
+                self.damped_goniometer[i] = self.damped_goniometer[i] * (1.0 - d) + t.goniometer_pts[i] * d;
+            }
+        }
 
         // 1. Left Sidebar (Navigation Plane)
         egui::SidePanel::left("left_sidebar")

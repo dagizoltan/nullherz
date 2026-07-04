@@ -1,0 +1,17 @@
+{
+  "name": "Default Mapping",
+  "controls": [
+    {
+      "cc_number": 7,
+      "target": { "Param": { "target_id": 0, "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    }
+  ],
+  "triggers": [
+    {
+      "note_number": 36,
+      "target": { "Command": { "Core": "Play" } }
+    }
+  ]
+}

@@ -321,13 +321,19 @@ impl SidecarSupervisor {
         let mut stalled = Vec::new();
         for handle in &self.active_sidecars {
             if handle.status == SidecarStatus::Running {
-                let timed_out = handle.last_heartbeat.elapsed() > std::time::Duration::from_millis(500);
+                let timed_out = handle.last_heartbeat.elapsed() > std::time::Duration::from_millis(200);
                 if timed_out {
                     stalled.push(handle.node_idx);
                 }
             }
         }
         stalled
+    }
+
+    pub fn mark_as_bypassed(&mut self, node_idx: u32) {
+        if let Some(handle) = self.active_sidecars.iter_mut().find(|h| h.node_idx == node_idx) {
+            handle.status = SidecarStatus::Bypassing;
+        }
     }
 }
 

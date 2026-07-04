@@ -44,6 +44,14 @@ pub struct ProcessorState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemConfig {
+    pub audio_backend: String,
+    pub midi_ports: Vec<String>,
+    pub sample_rate: u32,
+    pub block_size: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectState {
     pub nodes: Vec<NodeState>,
     pub edges: Vec<EdgeState>,
