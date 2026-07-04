@@ -113,14 +113,16 @@ The system's "Triple-Plane Model" is a masterclass in separation of concerns.
 | **Arrangement** | Song Timeline | **DONE** | Beat-aware arrangement event scheduling. |
 | | Pattern Manager | **DONE** | Dynamic orchestration of sequencer banks. |
 | **Persistence** | Session Save/Load | **DONE** | Full state serialization (Topology+Sequences).|
-| | MIDI Mapping | **IN PROGRESS**| Sidecar-based CC/Clock synchronization. |
+| | MIDI Mapping | **DONE** | Declarative JSON profiles with dynamic loading. |
+| | Hardware Calibration| **DONE** | RTL measurement and sidecar delay compensation. |
 
 ---
 
 ## 5. Technical Debt & Roadmap
-1.  **Goniometer/Spectrum Restoration:** The Breeder view now has placeholders for these; they should be fully integrated with real-time telemetry.
-2.  **Remote Sidecars:** While local sidecars are stable and OOM-hardened, the protocol plane is ready for network-transparent DSP distribution.
-3.  **DNA Batch Processing**: Implement batch DNA extraction for large folders in the `AnalysisWorker`.
+1.  **Goniometer/Spectrum Damping:** Restore high-precision feedback with configurable EMA damping filters.
+2.  **Distributed Efficiency:** Implement targeted routing and UDP return for network-transparent DSP.
+3.  **UI Geometry Caching:** Optimize Industrial widgets for lower CPU overhead using egui temporary data caching.
+4.  **DNA Batch Processing**: Implement batch DNA extraction for large folders in the `AnalysisWorker`.
 
 ---
 

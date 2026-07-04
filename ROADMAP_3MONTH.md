@@ -8,24 +8,24 @@
 ## Month 1: Stabilization & The 5 Layers of Transfusion
 *Goal: Finalize the primary control interfaces and ensure total signal reliability.*
 
-*   **MIDI Mapping System [High Priority]:**
-    *   Implement the sidecar-based MIDI bridge to support standard DJ controllers (Pioneer, Denon, Native Instruments).
-    *   Develop a declarative MIDI mapping format (JSON/YAML) for custom user configurations.
-*   **Intelligence Perfection:**
-    *   Harden the `AnalysisWorker` BPM detection with additional histogram smoothing to eliminate "double/half bpm" errors.
-    *   Stabilize Root Key detection and propagate results to the UI for harmonic mixing indicators.
-*   **Safe-Mode & Recovery:**
-    *   Implement "Soft Fallback" where a failing DSP sidecar is replaced by a low-overhead gain/bypass node instantly to maintain signal continuity.
-    *   Add automated X-RUN detection and telemetry reporting to the Conductor.
+*   **MIDI Mapping System [DONE]:**
+    *   Implemented declarative JSON mapping engine in Conductor.
+    *   Added dynamic mapping loader to Settings view.
+*   **Intelligence Perfection [DONE]:**
+    *   BPM and Root Key detection stabilized and integrated with SampleRegistry.
+    *   Implemented Smart Crate manager with range-based genetic trait filtering.
+*   **Safe-Mode & Recovery [DONE]:**
+    *   "Soft Fallback" (200ms threshold) implemented to replace failing sidecars with identity nodes.
+    *   Automated X-RUN detection and real-time telemetry reporting operational.
 
 ---
 
 ## Month 2: UI Enrichment & Evolutionary Synthesis
 *Goal: Restore legacy visualizations and implement advanced creative features.*
 
-*   **Advanced Visualizers:**
-    *   Re-integrate the high-precision Goniometer and Spectrum Analyzer as modular views in the Metrics tab.
-    *   Optimize the Wide Oscillator monitor for lower GPU overhead using simplified vertex buffers.
+*   **Advanced Visualizers [DONE]:**
+    *   Re-integrated Goniometer and Spectrum Analyzer with configurable damping filters.
+    *   Implemented industrial widget geometry caching to reduce UI overhead.
 *   **Harmonic Mixing (Key Sync) [DONE]:**
     *   Implemented the `KeySync` processor using spectral-domain bin mapping.
     *   Enabled real-time pitch shifting (+/- 12 semitones) with SIMD-optimized linear interpolation.
@@ -41,11 +41,12 @@
 *   **Library Optimization [DONE]:**
     *   Optimized `redb` queries using $O(\log N)$ composite keys for collections exceeding 100,000 entries.
     *   Implemented a "Crating" system for advanced playlist management and smart folders.
-*   **Remote Sidecar Protocol:**
-    *   Prototype network-transparent DSP distribution, allowing a second machine to handle heavy spectral processing via the IPC layer.
-*   **Public Alpha Preparation:**
-    *   Finalize the "Setup Wizard" for backend configuration (ALSA/JACK/PipeWire).
-    *   Complete the Conformance Suite for all 1st-party processors to ensure 100% reset determinism.
+*   **Remote Sidecar Protocol [DONE]:**
+    *   Implemented Type 5 (Audio Send) and Type 6 (UDP Return) for distributed DSP.
+    *   Added hardware calibration (RTL) to synchronize local and remote nodes.
+*   **Public Alpha Preparation [DONE]:**
+    *   "Setup Wizard" connected to BackendManager for real-time hardware hot-swapping.
+    *   Conformance Suite verified across all core processors.
 *   **Documentation & SDK:**
     *   Formalize the Sidecar SDK documentation to allow 3rd-party developers to build Nullherz-native plugins in Rust.
 
