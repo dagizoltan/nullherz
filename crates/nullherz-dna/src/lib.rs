@@ -22,8 +22,11 @@ const SMART_CRATES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("s
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct SmartCrateDefinition {
     pub name: String,
-    pub target_dna: nullherz_traits::SoundDNA,
+    pub target_dna: Option<nullherz_traits::SoundDNA>,
     pub threshold: f32,
+    pub spectral_tilt_range: Option<(f32, f32)>,
+    pub rhythmic_syncopation_range: Option<(f32, f32)>,
+    pub glitch_density_range: Option<(f32, f32)>,
 }
 
 #[derive(Clone)]
@@ -199,17 +202,51 @@ impl LibraryDatabase {
         let definition = self.get_smart_crate(name)?;
         if let Some(def) = definition {
             let all_tracks = self.list_tracks()?;
-            let results = Matchmaker::find_matches_above_threshold(&def.target_dna, &all_tracks, def.threshold);
-            let mut tracks = Vec::new();
-            for (id, _) in results {
-                if let Some(track) = all_tracks.iter().find(|t| t.id == id) {
-                    tracks.push(track.clone());
-                }
-            }
-            Ok(tracks)
+            Ok(SmartCrateManager::filter_tracks(&def, all_tracks))
         } else {
             Ok(Vec::new())
         }
+    }
+}
+
+pub struct SmartCrateManager;
+
+impl SmartCrateManager {
+    pub fn filter_tracks(def: &SmartCrateDefinition, tracks: Vec<LibraryTrack>) -> Vec<LibraryTrack> {
+        let mut results = tracks;
+
+        // 1. Filter by DNA Similarity if target_dna is present
+        if let Some(ref target) = def.target_dna {
+            let matched = Matchmaker::find_matches_above_threshold(target, &results, def.threshold);
+            let matched_ids: std::collections::HashSet<u64> = matched.into_iter().map(|(id, _)| id).collect();
+            results.retain(|t| matched_ids.contains(&t.id));
+        }
+
+        // 2. Filter by Spectral Tilt
+        if let Some((min, max)) = def.spectral_tilt_range {
+            results.retain(|t| {
+                let val = t.metadata.dna.spectral.tilt;
+                val >= min && val <= max
+            });
+        }
+
+        // 3. Filter by Rhythmic Syncopation
+        if let Some((min, max)) = def.rhythmic_syncopation_range {
+            results.retain(|t| {
+                let val = t.metadata.dna.rhythmic.syncopation_index;
+                val >= min && val <= max
+            });
+        }
+
+        // 4. Filter by Glitch Density
+        if let Some((min, max)) = def.glitch_density_range {
+            results.retain(|t| {
+                let val = t.metadata.dna.artifacts.glitch_density;
+                val >= min && val <= max
+            });
+        }
+
+        results
     }
 }
 
@@ -390,6 +427,40 @@ mod tests {
             // (100 * 0.75) + (200 * 0.25) = 75 + 50 = 125
             assert_eq!(child_025.spectral.energy_map[i], 125);
         }
+    }
+
+    #[test]
+    fn test_smart_crate_filtering() {
+        let mut track_a = LibraryTrack {
+            id: 1,
+            path: "a.wav".into(),
+            title: "A".into(),
+            artist: "A".into(),
+            metadata: nullherz_traits::SampleMetadata::new_empty(),
+        };
+        track_a.metadata.dna.spectral.tilt = 0.5;
+
+        let mut track_b = LibraryTrack {
+            id: 2,
+            path: "b.wav".into(),
+            title: "B".into(),
+            artist: "B".into(),
+            metadata: nullherz_traits::SampleMetadata::new_empty(),
+        };
+        track_b.metadata.dna.spectral.tilt = -0.5;
+
+        let def = SmartCrateDefinition {
+            name: "Tilt High".into(),
+            target_dna: None,
+            threshold: 0.0,
+            spectral_tilt_range: Some((0.1, 1.0)),
+            rhythmic_syncopation_range: None,
+            glitch_density_range: None,
+        };
+
+        let filtered = SmartCrateManager::filter_tracks(&def, vec![track_a.clone(), track_b.clone()]);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, 1);
     }
 }
 

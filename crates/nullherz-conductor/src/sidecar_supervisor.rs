@@ -17,12 +17,14 @@ pub struct RemoteSidecar {
     pub mirrored_samples: std::collections::HashSet<u64>,
     pub cpu_usage: f32,
     pub latency_ms: f32,
+    pub assigned_nodes: std::collections::HashSet<u32>,
 }
 
 pub struct RemoteSidecarManager {
     pub remote_nodes: Vec<RemoteSidecar>,
     pub pending_commands: Vec<TimestampedCommand>,
     pub last_broadcast_time: Instant,
+    pub node_to_sidecar: std::collections::HashMap<u32, usize>,
 }
 
 impl RemoteSidecarManager {
@@ -31,6 +33,7 @@ impl RemoteSidecarManager {
             remote_nodes: Vec::new(),
             pending_commands: Vec::new(),
             last_broadcast_time: Instant::now(),
+            node_to_sidecar: std::collections::HashMap::new(),
         }
     }
 
@@ -49,6 +52,34 @@ impl RemoteSidecarManager {
                 full_payload.extend_from_slice(&serialized);
                 let _ = writer.write_all(&full_payload).await;
             }
+        }
+    }
+
+    pub async fn send_audio_block(&mut self, node_idx: u32, block: nullherz_traits::AudioBlock) {
+        let sidecar_idx = match self.node_to_sidecar.get(&node_idx) {
+            Some(&idx) => idx,
+            None => return,
+        };
+
+        let node = match self.remote_nodes.get_mut(sidecar_idx) {
+            Some(n) => n,
+            None => return,
+        };
+
+        // Payload: [u8 type:5][u32 node_idx][AudioBlock data]
+        let mut payload = Vec::with_capacity(5 + std::mem::size_of::<nullherz_traits::AudioBlock>());
+        payload.push(5u8);
+        payload.extend_from_slice(&node_idx.to_be_bytes());
+        payload.extend_from_slice(bytemuck::bytes_of(&block));
+
+        let len = payload.len() as u32;
+
+        if let Ok(mut writer) = node.writer.try_lock() {
+            use tokio::io::AsyncWriteExt;
+            let mut full_payload = Vec::with_capacity(4 + payload.len());
+            full_payload.extend_from_slice(&len.to_be_bytes());
+            full_payload.extend_from_slice(&payload);
+            let _ = writer.write_all(&full_payload).await;
         }
     }
 
@@ -169,6 +200,7 @@ impl SidecarSupervisor {
                                         mirrored_samples: std::collections::HashSet::new(),
                                         cpu_usage: 0.0,
                                         latency_ms: 0.0,
+                                        assigned_nodes: std::collections::HashSet::new(),
                                     });
                                 }
                             }
@@ -176,6 +208,28 @@ impl SidecarSupervisor {
                     }
                 }
                 tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        });
+        Ok(())
+    }
+
+    pub async fn start_udp_return_listener(audio_bridge: Arc<IpcAudioBridge>, port: u16) -> std::io::Result<()> {
+        let socket = UdpSocket::bind(format!("0.0.0.0:{}", port))?;
+        println!("Conductor: UDP Return listening on port {}", port);
+
+        tokio::spawn(async move {
+            let mut buf = [0u8; 2048];
+            loop {
+                if let Ok((len, _addr)) = socket.recv_from(&mut buf) {
+                    if len >= 5 && buf[0] == 6 {
+                        let node_idx = u32::from_be_bytes(buf[1..5].try_into().unwrap());
+                        let block_data = &buf[5..len];
+                        if block_data.len() == std::mem::size_of::<nullherz_traits::AudioBlock>() {
+                            let block: nullherz_traits::AudioBlock = bytemuck::pod_read_unaligned(block_data);
+                            let _ = audio_bridge.push_block(node_idx, block);
+                        }
+                    }
+                }
             }
         });
         Ok(())
@@ -244,6 +298,7 @@ impl SidecarSupervisor {
                             mirrored_samples: std::collections::HashSet::new(),
                             cpu_usage: 0.0,
                             latency_ms: 0.0,
+                            assigned_nodes: std::collections::HashSet::new(),
                         });
                         println!("Conductor: Attached remote sidecar from {}", peer_addr);
                     }

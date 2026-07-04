@@ -36,6 +36,18 @@ All messages over TCP use a 4-byte Big-Endian length prefix, followed by the pay
   - `[f32: latency_ms]`
 - **Usage:** Monitoring the health and performance of remote DSP nodes.
 
+### Type 5: Remote Audio Send Block (Conductor -> Sidecar)
+- **Header Type:** `5`
+- **Header Additional:** `[u32: node_idx]`
+- **Payload:** `nullherz_traits::AudioBlock` (Binary/Pod).
+- **Usage:** Transmitting input audio blocks from local `NetworkProxySend` nodes to remote sidecars for processing.
+
+### Type 6: UDP Audio Return (Sidecar -> Conductor)
+- **Protocol:** UDP
+- **Header Additional:** `[u32: node_idx]`
+- **Payload:** `nullherz_traits::AudioBlock` (Binary/Pod).
+- **Usage:** Low-jitter return path for processed audio blocks from remote nodes.
+
 ## Type-Safety & ABI Invariants
 
 1. **Alignment:** All `AudioBlock` payloads MUST be 64-byte aligned and 1088 bytes in size (including padding).
