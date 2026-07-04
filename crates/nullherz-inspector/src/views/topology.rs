@@ -7,8 +7,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     ui.heading("System Topology");
     ui.add_space(10.0);
 
-    let painter = ui.painter();
-    let mut node_positions = std::collections::HashMap::new();
     let mut socket_positions = std::collections::HashMap::new(); // (node_idx, is_out, socket_idx) -> pos
 
     if let Some((src_node, src_out)) = app.active_connection_source {
@@ -30,8 +28,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 let node_id = ui.make_persistent_id(format!("node_{}", idx));
 
                 ui.horizontal(|ui| {
-                    let rect = ui.label(format!("[IDX:{}]", idx)).rect;
-                    node_positions.insert(idx as u32, rect.center());
+                    let _rect = ui.label(format!("[IDX:{}]", idx)).rect;
 
                     let node_label = ui.strong(&node.name);
                     if node_label.clicked() {
@@ -107,11 +104,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     });
 
     // Draw existing cables
+    let painter = ui.painter();
     for (n_idx, node) in app.graph.nodes.iter().enumerate() {
         for (in_idx, &buffer_idx) in node.inputs.iter().enumerate() {
              // In our simplified model, buffer_idx - 10 = src_node_idx
              if buffer_idx >= 10 {
-                 let src_node_idx = buffer_idx - 10;
+                 let src_node_idx = (buffer_idx - 10) as u32;
                  if let (Some(&start), Some(&end)) = (socket_positions.get(&(src_node_idx, true, 0)), socket_positions.get(&(n_idx as u32, false, in_idx as u32))) {
                      painter.line_segment([start, end], egui::Stroke::new(2.0, Color32::from_gray(150)));
                  }
