@@ -13,6 +13,7 @@ pub struct RemoteSidecar {
     pub writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
     pub last_heartbeat: Instant,
     pub is_active: bool,
+    pub mirrored_samples: std::collections::HashSet<u64>,
 }
 
 pub struct RemoteSidecarManager {
@@ -44,6 +45,38 @@ impl RemoteSidecarManager {
                 full_payload.extend_from_slice(&len.to_be_bytes());
                 full_payload.extend_from_slice(&serialized);
                 let _ = writer.write_all(&full_payload).await;
+            }
+        }
+    }
+
+    pub async fn ensure_sample_mirrored(&mut self, sample_id: u64, registry: &nullherz_dna::SampleRegistry) {
+        let sample = match registry.get(sample_id) {
+            Some(s) => s,
+            None => return,
+        };
+
+        // Binary payload: [u32 len][u8 type:2][u64 id][u32 sample_count][f32 data...]
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&2u8.to_be_bytes()); // Type: Sample Data
+        payload.extend_from_slice(&sample_id.to_be_bytes());
+        payload.extend_from_slice(&(sample.buffer.len() as u32).to_be_bytes());
+        let data_bytes = bytemuck::cast_slice(&sample.buffer);
+        payload.extend_from_slice(data_bytes);
+
+        let len = payload.len() as u32;
+
+        for node in &mut self.remote_nodes {
+            if !node.mirrored_samples.contains(&sample_id) {
+                if let Ok(mut writer) = node.writer.try_lock() {
+                    use tokio::io::AsyncWriteExt;
+                    let mut full_payload = Vec::with_capacity(4 + payload.len());
+                    full_payload.extend_from_slice(&len.to_be_bytes());
+                    full_payload.extend_from_slice(&payload);
+                    if writer.write_all(&full_payload).await.is_ok() {
+                        node.mirrored_samples.insert(sample_id);
+                        println!("Conductor: Mirrored sample {} to {}", sample_id, node.addr);
+                    }
+                }
             }
         }
     }
@@ -116,6 +149,7 @@ impl SidecarSupervisor {
                                         writer: writer_arc,
                                         last_heartbeat: Instant::now(),
                                         is_active: true,
+                                    mirrored_samples: std::collections::HashSet::new(),
                                     });
                                 }
                             }
@@ -175,6 +209,7 @@ impl SidecarSupervisor {
                             writer: writer_arc,
                             last_heartbeat: Instant::now(),
                             is_active: true,
+                            mirrored_samples: std::collections::HashSet::new(),
                         });
                         println!("Conductor: Attached remote sidecar from {}", peer_addr);
                     }

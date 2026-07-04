@@ -1,8 +1,9 @@
 use egui::{Ui, Color32, RichText};
 use crate::InspectorApp;
 use audio_core::Telemetry;
+use nullherz_traits::{Command, TopologyCommand};
 
-pub fn render(app: &InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
+pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     ui.heading("System Topology");
     ui.add_space(10.0);
 
@@ -16,10 +17,23 @@ pub fn render(app: &InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
                     ui.label(format!("[IDX:{}]", idx));
                     ui.strong(&node.name);
 
+                    ui.add_space(20.0);
+
+                    // Bypass Toggle
+                    let mut is_bypassed = false; // Note: Current InspectorApp doesn't track bypass state locally.
+                    // We'll simulate a toggle that emits the command.
+                    if ui.button("BYPASS").clicked() {
+                        let _ = app.command_sender.send(Command::Topology(TopologyCommand::SetBypass {
+                            node_idx: idx as u32,
+                            enabled: true,
+                        }));
+                    }
+
                     if let Some(t) = telemetry {
                          if idx < t.node_times_ns.len() {
                              let time = t.node_times_ns[idx];
-                             ui.label(format!("Time: {} ns", time));
+                             let color = if time > 500_000 { Color32::RED } else if time > 100_000 { Color32::YELLOW } else { Color32::from_rgb(0, 255, 200) };
+                             ui.label(RichText::new(format!("Time: {} ns", time)).color(color));
                          }
                     }
                 });

@@ -3,9 +3,25 @@ use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use futures_util::{StreamExt, SinkExt};
 use std::sync::{Arc, Mutex};
-use nullherz_traits::{TimestampedCommand};
+use nullherz_traits::{TimestampedCommand, SoundDNA};
 use ipc_layer::{Consumer, RingBuffer};
 use nullherz_traits::telemetry::Telemetry;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum GatewayRequest {
+    Matchmaking {
+        target_dna: SoundDNA,
+        limit: usize,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum GatewayResponse {
+    MatchmakingResult {
+        matches: Vec<(u64, f32)>,
+    },
+}
 
 pub fn connect_to_engine() -> Result<(ipc_layer::NonRtProducer<TimestampedCommand>, Consumer<Telemetry>, Arc<ipc_layer::MpscRingBuffer<TimestampedCommand>>, ipc_layer::Producer<Telemetry>), Box<dyn std::error::Error>> {
     // In a real nullherz deployment, the Conductor spawns the Gateway
@@ -38,7 +54,8 @@ mod tests;
 pub async fn run_gateway(
     addr: &str,
     cmd_prod: ipc_layer::NonRtProducer<TimestampedCommand>,
-    mut tel_cons: Consumer<Telemetry>
+    mut tel_cons: Consumer<Telemetry>,
+    library_db: Option<Arc<Mutex<nullherz_dna::LibraryDatabase>>>
 ) -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(addr).await?;
     println!("nullherz-gateway listening on: {}", addr);
@@ -59,7 +76,8 @@ pub async fn run_gateway(
     while let Ok((stream, _)) = listener.accept().await {
         let cmd_prod_clone = cmd_prod.clone();
         let tel_provider = Arc::clone(&broadcaster) as Arc<dyn TelemetryProvider>;
-        tokio::spawn(handle_connection(stream, cmd_prod_clone, tel_provider));
+        let lib_clone = library_db.clone();
+        tokio::spawn(handle_connection(stream, cmd_prod_clone, tel_provider, lib_clone));
     }
 
     Ok(())
@@ -69,39 +87,73 @@ pub async fn run_gateway(
 async fn handle_connection(
     stream: TcpStream,
     cmd_prod: ipc_layer::NonRtProducer<TimestampedCommand>,
-    tel_provider: Arc<dyn TelemetryProvider>
+    tel_provider: Arc<dyn TelemetryProvider>,
+    library_db: Option<Arc<Mutex<nullherz_dna::LibraryDatabase>>>
 ) {
     let ws_stream = accept_async(stream).await.expect("Error during the websocket handshake occurred");
     println!("New WebSocket connection");
 
     let (mut write, mut read) = ws_stream.split();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Message>(32);
 
-    // Spawn a task to broadcast telemetry
+    // Task 1: Receiver - Forward messages from tx channel to WebSocket write half
+    let mut write_task = tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if write.send(msg).await.is_err() { break; }
+        }
+    });
+
+    // Task 2: Telemetry Broadcaster - Push telemetry to tx channel
+    let tx_telemetry = tx.clone();
     let tel_task = tokio::spawn(async move {
         let mut last_sample_counter = 0;
         loop {
             let tel = tel_provider.get_telemetry();
-
             if let Some(t) = tel
                 && t.sample_counter != last_sample_counter {
                     if let Ok(json) = serde_json::to_string(&t) {
-                        let msg = Message::Text(json.into());
-                        if write.send(msg).await.is_err() {
-                            break;
-                        }
+                        if tx_telemetry.send(Message::Text(json.into())).await.is_err() { break; }
                     }
                     last_sample_counter = t.sample_counter;
                 }
-            tokio::time::sleep(tokio::time::Duration::from_millis(16)).await; // ~60fps
+            tokio::time::sleep(tokio::time::Duration::from_millis(16)).await;
         }
     });
 
-    // Handle incoming commands
+    // Task 3: Command & Request Handler
     while let Some(msg) = read.next().await {
         match msg {
             Ok(Message::Text(text)) => {
+                // 1. Try TimestampedCommand
                 if let Ok(cmd) = serde_json::from_str::<TimestampedCommand>(&text) {
                     let _ = cmd_prod.push_command(cmd);
+                    continue;
+                }
+
+                // 2. Try GatewayRequest (Matchmaking)
+                if let Ok(req) = serde_json::from_str::<GatewayRequest>(&text) {
+                    match req {
+                        GatewayRequest::Matchmaking { target_dna, limit } => {
+                            if let Some(ref lib_mutex) = library_db {
+                                let mut matches: Vec<(u64, f32)> = Vec::new();
+                                let mut success = false;
+                                {
+                                    let lib = lib_mutex.lock().unwrap();
+                                    if let Ok(m) = nullherz_dna::Matchmaker::find_best_matches(&lib, &target_dna, limit) {
+                                        matches = m;
+                                        success = true;
+                                    }
+                                }
+
+                                if success {
+                                    let resp = GatewayResponse::MatchmakingResult { matches };
+                                    if let Ok(json) = serde_json::to_string(&resp) {
+                                        let _ = tx.send(Message::Text(json.into())).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             Ok(Message::Close(_)) => break,
@@ -111,4 +163,5 @@ async fn handle_connection(
     }
 
     tel_task.abort();
+    write_task.abort();
 }

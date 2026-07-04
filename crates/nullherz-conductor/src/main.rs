@@ -18,9 +18,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Audio engine started.");
 
     let cmd_prod_gateway = ipc_layer::NonRtProducer::from_boxed(context.command_producer);
+    let lib_db = conductor.library.clone();
 
     let _gateway_task = tokio::spawn(async move {
-        let _ = nullherz_gateway::run_gateway("127.0.0.1:9001", cmd_prod_gateway, context.telemetry_consumer).await;
+        let _ = nullherz_gateway::run_gateway("127.0.0.1:9001", cmd_prod_gateway, context.telemetry_consumer, Some(lib_db)).await;
         println!("Gateway bridge closed.");
     });
 
