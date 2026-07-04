@@ -124,13 +124,36 @@ impl WaveformRenderer {
 
     pub fn update_peaks(&mut self, queue: &wgpu::Queue, peaks: &[f32]) {
         let mut vertices = Vec::with_capacity(peaks.len() * 2);
+        let peak_count = peaks.len();
         for (i, &peak) in peaks.iter().enumerate() {
-            let x = (i as f32 / self.max_peaks as f32) * 2.0 - 1.0;
+            let x = (i as f32 / peak_count as f32) * 2.0 - 1.0;
             vertices.push(WaveformVertex { position: [x, peak] });
             vertices.push(WaveformVertex { position: [x, -peak] });
         }
         self.num_vertices = vertices.len() as u32;
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
+    }
+
+    pub fn update_from_mip_waveform(&mut self, queue: &wgpu::Queue, mip_waveform: &nullherz_traits::MipWaveform, zoom: f32) {
+        // Simple MIP selection logic:
+        // High zoom (zoom < 0.2) -> High resolution (Level 0)
+        // Mid zoom (0.2 < zoom < 0.5) -> Mid resolution (Level 1-2)
+        // Low zoom (zoom > 0.5) -> Low resolution (Level 3-4)
+        let level_idx = if zoom < 0.1 {
+            0
+        } else if zoom < 0.2 {
+            1
+        } else if zoom < 0.4 {
+            2
+        } else if zoom < 0.8 {
+            3
+        } else {
+            4
+        };
+
+        let level_idx = level_idx.min(mip_waveform.levels.len().saturating_sub(1));
+        let peaks = &mip_waveform.levels[level_idx];
+        self.update_peaks(queue, peaks);
     }
 
     pub fn update_globals(&mut self, queue: &wgpu::Queue, scroll: f32, zoom: f32, color: [f32; 4]) {

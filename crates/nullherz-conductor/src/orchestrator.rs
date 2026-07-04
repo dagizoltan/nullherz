@@ -15,6 +15,7 @@ use nullherz_dna::SampleRegistry;
 pub struct Conductor {
     pub engine_coordinator: EngineCoordinator,
     pub topology_manager: TopologyManager,
+    pub sidecar_discovery: crate::discovery::SidecarDiscoveryService,
     pub transfusion_manager: TransfusionManager,
     pub mixer_bridge: MixerBridge,
     pub sidecar_supervisor: SidecarSupervisor,
@@ -57,6 +58,7 @@ impl Conductor {
             clip_orchestrator: ClipOrchestrator::new(),
             modulation_matrix: ModulationMatrix::new(),
             audio_bridge: Arc::new(IpcAudioBridge::new()),
+            sidecar_discovery: crate::discovery::SidecarDiscoveryService::new("plugins"),
             midi_mapper: MidiMapper::new(),
             midi_clock: crate::midi_clock::MidiClockTracker::new(),
             analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
@@ -245,6 +247,10 @@ impl Conductor {
                      let lib = self.library.lock().unwrap();
                      self.transfusion_manager.commit_breeding(parent_a_id, parent_b_id, bias, &lib);
                  }
+                 Command::Resource(nullherz_traits::ResourceCommand::CommitChaoticBreeding { parent_a_id, parent_b_id, bias, chaotic_strength }) => {
+                     let lib = self.library.lock().unwrap();
+                     self.transfusion_manager.commit_chaotic_breeding(parent_a_id, parent_b_id, bias, chaotic_strength, &lib);
+                 }
                  Command::Core(nullherz_traits::CoreCommand::SwitchBackend(backend_type)) => {
                      let _ = self.switch_backend(backend_type);
                  }
@@ -263,6 +269,46 @@ impl Conductor {
                  Command::Core(nullherz_traits::CoreCommand::CalibrateLatency) => {
                      // Prototype calibration: assume 10ms (441 samples)
                      let _ = self.update_system_config(None, None, Some(441));
+                 }
+                 Command::Core(nullherz_traits::CoreCommand::HotLoadSidecar { name, node_idx }) => {
+                     let plugin_name = String::from_utf8_lossy(&name).trim_matches(char::from(0)).to_string();
+                     let binary_path = format!("plugins/{}", plugin_name);
+                     if std::path::Path::new(&binary_path).exists() {
+                         match self.sidecar_supervisor.manager.spawn_sidecar(&plugin_name, &binary_path, node_idx, 2, fx_runtime::FailurePolicy::AutoRestart) {
+                             Ok(processor) => {
+                                 if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                                     let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor { node_idx, processor });
+                                 }
+                             }
+                             Err(e) => eprintln!("Failed to hot-load sidecar {}: {}", plugin_name, e),
+                         }
+                     } else {
+                         eprintln!("Hot-load failed: plugin binary {} not found.", binary_path);
+                     }
+                 }
+                 Command::Core(nullherz_traits::CoreCommand::ExportAudio { filename, duration_seconds }) => {
+                     let name = String::from_utf8_lossy(&filename).trim_matches(char::from(0)).to_string();
+                     eprintln!("Bounce: Offline Export requested for {}. Initializing bounce engine...", name);
+
+                     let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+                     if let Some(ref engine) = *engine_lock {
+                         // Extract current graph
+                         // SAFETY: list_children normally for debug, but we use it here to probe the graph structure
+                         // In a real implementation, we'd need a deep clone of the AudioProcessor graph.
+                         // For Stage 5 Phase C, we'll demonstrate the engine creation and rendering logic.
+                         let active_graph = engine.list_children();
+                         if !active_graph.is_empty() {
+                             // We'll create a dummy empty processor for the prototype renderer to demonstration logic
+                             let dummy_graph = Box::new(nullherz_processors::FallbackProcessor::new(0));
+                             let offline_engine = crate::bounce::OfflineRenderer::create_engine(dummy_graph);
+                             let mut renderer = crate::bounce::OfflineRenderer::new(offline_engine);
+
+                             let filename_clone = name.clone();
+                             tokio::task::spawn_blocking(move || {
+                                 let _ = renderer.bounce_to_wav(&filename_clone, duration_seconds);
+                             });
+                         }
+                     }
                  }
                  _ => final_commands.push(cmd),
              }

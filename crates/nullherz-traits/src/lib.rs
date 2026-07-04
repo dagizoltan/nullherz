@@ -82,6 +82,16 @@ pub enum CoreCommand {
     LoadMidiMap([u8; 32]), // Fixed-size buffer for filename
     #[serde(with = "serde_big_array::BigArray")]
     SetMidiPorts([u8; 128]), // Comma-separated list or similar
+    HotLoadSidecar {
+        #[serde(with = "serde_big_array::BigArray")]
+        name: [u8; 32],
+        node_idx: u32,
+    },
+    ExportAudio {
+        #[serde(with = "serde_big_array::BigArray")]
+        filename: [u8; 64],
+        duration_seconds: f32,
+    },
 }
 
 #[repr(C)]
@@ -170,6 +180,12 @@ pub enum ResourceCommand {
         parent_a_id: u64,
         parent_b_id: u64,
         bias: f32,
+    },
+    CommitChaoticBreeding {
+        parent_a_id: u64,
+        parent_b_id: u64,
+        bias: f32,
+        chaotic_strength: f32,
     },
 }
 
@@ -655,6 +671,20 @@ impl Default for SoundDNA {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct MipWaveform {
+    /// Level 0 is full resolution peaks.
+    /// Subsequent levels are downsampled by powers of 2.
+    #[serde(skip)]
+    pub levels: Vec<Arc<Vec<f32>>>,
+}
+
+impl Default for MipWaveform {
+    fn default() -> Self {
+        Self { levels: vec![] }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct SampleMetadata {
     pub bpm: f32,
     #[serde(skip)]
@@ -665,6 +695,7 @@ pub struct SampleMetadata {
     pub beat_grid_offset: u64,
     #[serde(skip)]
     pub peaks: Arc<Vec<f32>>,
+    pub mip_waveform: MipWaveform,
     pub dna: SoundDNA,
     pub midi_map: Option<MidiMap>,
 }
@@ -679,6 +710,7 @@ impl SampleMetadata {
             loop_points: None,
             beat_grid_offset: 0,
             peaks: Arc::new(Vec::new()),
+            mip_waveform: MipWaveform::default(),
             dna: SoundDNA::default(),
             midi_map: None,
         }

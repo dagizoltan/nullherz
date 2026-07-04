@@ -26,3 +26,55 @@ impl DiscoveryBeacon {
         });
     }
 }
+
+pub struct SidecarDiscoveryService {
+    pub plugins_dir: String,
+    pub known_plugins: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+}
+
+impl SidecarDiscoveryService {
+    pub fn new(plugins_dir: &str) -> Self {
+        Self {
+            plugins_dir: plugins_dir.to_string(),
+            known_plugins: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        }
+    }
+
+    pub fn start_watcher(&self) {
+        let dir = self.plugins_dir.clone();
+        let known = self.known_plugins.clone();
+
+        tokio::spawn(async move {
+            let path = std::path::Path::new(&dir);
+            if !path.exists() {
+                let _ = tokio::fs::create_dir_all(path).await;
+            }
+
+            loop {
+                if let Ok(mut entries) = tokio::fs::read_dir(&dir).await {
+                    let mut current_plugins = std::collections::HashSet::new();
+                    while let Ok(Some(entry)) = entries.next_entry().await {
+                        if let Ok(file_type) = entry.file_type().await {
+                            if file_type.is_file() {
+                                if let Some(name) = entry.file_name().to_str() {
+                                    current_plugins.insert(name.to_string());
+                                }
+                            }
+                        }
+                    }
+
+                    let mut known_lock = known.lock().unwrap();
+                    for plugin in &current_plugins {
+                        if !known_lock.contains(plugin) {
+                            println!("Discovery: Found new sidecar plugin: {}", plugin);
+                            known_lock.insert(plugin.clone());
+                        }
+                    }
+                    // Optional: remove plugins that disappeared
+                    known_lock.retain(|p| current_plugins.contains(p));
+                }
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        });
+    }
+}

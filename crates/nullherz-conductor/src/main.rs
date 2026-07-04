@@ -39,6 +39,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         monitor.start_auto_scan("tracks".to_string());
     }
 
+    conductor.sidecar_discovery.start_watcher();
+
     // Main orchestration loop
     let mut ticker = tokio::time::interval(Duration::from_millis(100));
     loop {

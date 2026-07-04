@@ -184,7 +184,9 @@ impl SidecarSupervisor {
                                             if let Some(cmd) = decoded {
                                                 let mut manager = remote_manager_clone.lock().await;
                                                 if let Some(node) = manager.remote_nodes.iter_mut().find(|n| n.addr == addr_clone) {
-                                                    node.last_heartbeat = Instant::now();
+                                                    let now = Instant::now();
+                                                    node.latency_ms = now.duration_since(node.last_heartbeat).as_secs_f32() * 1000.0;
+                                                    node.last_heartbeat = now;
                                                 }
                                                 manager.pending_commands.push(cmd);
                                             }

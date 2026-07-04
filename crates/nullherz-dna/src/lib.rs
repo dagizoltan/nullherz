@@ -547,6 +547,33 @@ pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits:
     child
 }
 
+/// Chaotic Transfusion: Implements Layer 5 "Error Rehabilitation" theory.
+/// Uses a logistic map to create non-linear trait inheritance and digital mutations.
+pub fn chaotic_transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA, bias: f32, chaotic_strength: f32) -> nullherz_traits::SoundDNA {
+    let mut child = transfuse_dna(dna_a, dna_b, bias);
+
+    // Logistic Map for chaotic bias modulation: x_{n+1} = r * x_n * (1 - x_n)
+    // r = 3.9 is in the chaotic regime
+    let r = 3.7 + (chaotic_strength * 0.29); // Scale r based on strength
+    let mut x = bias.max(0.01).min(0.99);
+
+    // Apply chaotic perturbations to spectral energy map
+    for i in 0..64 {
+        x = r * x * (1.0 - x);
+        if x > 0.8 {
+            // "Evolutionary Mutation": Randomly flip or boost bins
+            let mutation = (x * 255.0) as u8;
+            child.spectral.energy_map[i] = child.spectral.energy_map[i].wrapping_add(mutation);
+        }
+    }
+
+    // Chaotic artifact injection
+    child.artifacts.glitch_density = (child.artifacts.glitch_density + (x * chaotic_strength)).clamp(0.0, 1.0);
+    child.artifacts.noise_floor_db += x * 12.0 * chaotic_strength;
+
+    child
+}
+
 pub struct Matchmaker;
 
 impl Matchmaker {

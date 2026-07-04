@@ -71,7 +71,29 @@ impl AnalysisWorker {
                 })
             }).collect();
 
-        for (id, metadata, buffer) in results {
+        for (id, mut metadata, buffer) in results {
+            // --- WAVEFORM MIP-MAPPING GENERATION ---
+            let mut mip_levels = Vec::new();
+            let mut current_peaks = metadata.peaks.clone();
+            mip_levels.push(current_peaks.clone());
+
+            // Generate 4 additional downsampled levels (total 5)
+            for _ in 0..4 {
+                if current_peaks.len() <= 128 { break; }
+                let mut next_level = Vec::with_capacity(current_peaks.len() / 2);
+                for chunk in current_peaks.chunks(2) {
+                    if chunk.len() == 2 {
+                        next_level.push(chunk[0].max(chunk[1]));
+                    } else {
+                        next_level.push(chunk[0]);
+                    }
+                }
+                let next_arc = Arc::new(next_level);
+                mip_levels.push(next_arc.clone());
+                current_peaks = next_arc;
+            }
+            metadata.mip_waveform.levels = mip_levels;
+
             self.sample_registry.register_with_metadata(id, buffer, metadata.clone());
 
             if let Some(ref lib_mutex) = self.library {
