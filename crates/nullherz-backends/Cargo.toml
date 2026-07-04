@@ -7,3 +7,4 @@ edition = "2024"
 nullherz-traits = { path = "../nullherz-traits" }
 ipc-layer = { path = "../ipc-layer" }
 libc = "0.2"
+hound = "3.5"

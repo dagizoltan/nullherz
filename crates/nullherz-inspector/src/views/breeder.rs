@@ -240,7 +240,7 @@ impl BreederView {
             if ui.button(RichText::new("🎹 MUTATE PATTERN").strong().size(16.0)).clicked() {
                  if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
                      if let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
-                         let child_rhythmic = nullherz_dna::transfuse_dna(&track_a.metadata.dna, &track_b.metadata.dna, state.transfusion_bias_y).rhythmic;
+                         let child_rhythmic = nullherz_dna::transfuse_dna(&track_a.metadata.dna, &track_b.metadata.dna, state.transfusion_bias_y, nullherz_traits::MutationMode::Linear).rhythmic;
                          let commands = crate::views::composer::DnaSequencer::mutate_pattern(
                              &child_rhythmic,
                              &app.sequencer_grid,
@@ -289,6 +289,7 @@ impl BreederView {
                     target_id: self.target_node_idx as u64,
                     layer_mask: 3, // Spectral + Rhythmic
                     bias: 1.0, // We already interpolated in the payload
+                    mutation_mode: nullherz_traits::MutationMode::Linear,
                     payload,
                 });
 

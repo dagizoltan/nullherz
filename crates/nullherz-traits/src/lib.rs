@@ -67,7 +67,12 @@ pub enum AudioBackendType {
     Mock,
 }
 
-#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MutationMode {
+    Linear,
+    Chaotic,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum CoreCommand {
     Play,
@@ -78,10 +83,13 @@ pub enum CoreCommand {
     SetBpm(f32),
     SwitchBackend(AudioBackendType),
     CalibrateLatency,
+    RefreshPlugins,
     #[serde(with = "serde_big_array::BigArray")]
     LoadMidiMap([u8; 32]), // Fixed-size buffer for filename
     #[serde(with = "serde_big_array::BigArray")]
     SetMidiPorts([u8; 128]), // Comma-separated list or similar
+    #[serde(with = "serde_big_array::BigArray")]
+    RenderArrangement([u8; 64]), // Output filename/path
 }
 
 #[repr(C)]
@@ -188,6 +196,7 @@ pub struct DnaCommand {
     pub target_id: u64,
     pub layer_mask: u32,
     pub bias: f32,
+    pub mutation_mode: MutationMode,
     #[serde(with = "serde_big_array::BigArray")]
     pub payload: [u8; 128],
 }

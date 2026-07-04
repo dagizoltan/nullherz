@@ -57,7 +57,7 @@ impl TransfusionManager {
     pub fn commit_breeding(&self, parent_a_id: u64, parent_b_id: u64, bias: f32, library: &LibraryDatabase) {
         if let (Some(parent_a), Some(parent_b)) = (self.sample_registry.get(parent_a_id), self.sample_registry.get(parent_b_id)) {
             // 1. Breed DNA
-            let child_dna = nullherz_dna::transfuse_dna(&parent_a.metadata.dna, &parent_b.metadata.dna, bias);
+            let child_dna = nullherz_dna::transfuse_dna(&parent_a.metadata.dna, &parent_b.metadata.dna, bias, nullherz_traits::MutationMode::Linear);
 
             // 2. Interpolate Audio Buffers (Simple time-domain linear blend for now)
             let len = parent_a.buffer.len().min(parent_b.buffer.len());

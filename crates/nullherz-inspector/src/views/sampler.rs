@@ -31,6 +31,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
              // Setup callback for WGPU rendering
              struct WaveformCallback {
                  renderer: Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>,
+                 zoom: f32,
              }
              impl egui_wgpu::CallbackTrait for WaveformCallback {
                  fn paint<'a>(&'a self, _info: egui::PaintCallbackInfo, render_pass: &mut wgpu::RenderPass<'a>, _resources: &egui_wgpu::CallbackResources) {
@@ -38,12 +39,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                          // SAFETY: The paint callback is synchronous and the render_pass doesn't outlive this call in practice
                          // with how egui-wgpu 0.27 is structured. We transmute to satisfy the 'a lifetime required by WGPU.
                          let wf_ref: &nullherz_ui_hal::render::waveform_renderer::WaveformRenderer = unsafe { std::mem::transmute(&*wf) };
-                         wf_ref.render(render_pass);
+                         wf_ref.render(render_pass, self.zoom);
                      }
                  }
              }
 
-             let callback = egui_wgpu::Callback::new_paint_callback(rect, WaveformCallback { renderer: wf_mtx.clone() });
+             let callback = egui_wgpu::Callback::new_paint_callback(rect, WaveformCallback { renderer: wf_mtx.clone(), zoom: 1.0 });
              ui.painter().add(callback);
 
              ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "GPU-ACCELERATED WAVEFORM ENGINE ACTIVE", egui::FontId::proportional(14.0), Color32::from_rgb(0, 100, 80));

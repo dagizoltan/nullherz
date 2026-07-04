@@ -3,12 +3,14 @@ pub mod pipewire;
 pub mod jack;
 pub mod threaded;
 pub mod mock;
+pub mod offline;
 
 pub use alsa::AlsaBackend;
 pub use pipewire::PipewireBackend;
 pub use jack::JackBackend;
 pub use threaded::ThreadedBackend;
 pub use mock::MockBackend;
+pub use offline::OfflineBackend;
 
 
 use std::sync::{Arc, Mutex};

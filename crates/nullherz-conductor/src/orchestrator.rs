@@ -1,3 +1,4 @@
+use nullherz_backends::AudioBackend;
 use crate::engine_coordinator::EngineCoordinator;
 use crate::topology_manager::TopologyManager;
 use crate::transfusion_manager::TransfusionManager;
@@ -111,8 +112,9 @@ impl Conductor {
 
             // Start UDP Return Listener (Type 6)
             let audio_bridge = self.audio_bridge.clone();
+            let remote_manager = self.sidecar_supervisor.remote_manager.clone();
             tokio::spawn(async move {
-                let _ = crate::sidecar_supervisor::SidecarSupervisor::start_udp_return_listener(audio_bridge, 9002).await;
+                let _ = crate::sidecar_supervisor::SidecarSupervisor::start_udp_return_listener(remote_manager, audio_bridge, 9002).await;
             });
         }
 
@@ -263,6 +265,14 @@ impl Conductor {
                  Command::Core(nullherz_traits::CoreCommand::CalibrateLatency) => {
                      // Prototype calibration: assume 10ms (441 samples)
                      let _ = self.update_system_config(None, None, Some(441));
+                 }
+                 Command::Core(nullherz_traits::CoreCommand::RefreshPlugins) => {
+                     let _ = self.sidecar_supervisor.refresh_plugins();
+                 }
+                 Command::Core(nullherz_traits::CoreCommand::RenderArrangement(buffer)) => {
+                     let path = String::from_utf8_lossy(&buffer).trim_matches(char::from(0)).to_string();
+                     let mut offline = nullherz_backends::OfflineBackend::new(&path);
+                     let _ = offline.start(self.engine_coordinator.backend_manager.engine_handle.clone());
                  }
                  _ => final_commands.push(cmd),
              }

@@ -18,6 +18,8 @@ pub struct RemoteSidecar {
     pub cpu_usage: f32,
     pub latency_ms: f32,
     pub assigned_nodes: std::collections::HashSet<u32>,
+    pub jitter_buffer: std::collections::BTreeMap<u64, (u32, nullherz_traits::AudioBlock)>,
+    pub last_sequence: u64,
 }
 
 pub struct RemoteSidecarManager {
@@ -119,6 +121,7 @@ impl RemoteSidecarManager {
 pub struct SidecarSupervisor {
     pub manager: SidecarManager,
     pub remote_manager: Arc<Mutex<RemoteSidecarManager>>,
+    pub plugin_registry: fx_runtime::SidecarRegistry,
 }
 
 impl Default for SidecarSupervisor {
@@ -132,6 +135,7 @@ impl SidecarSupervisor {
         Self {
             manager: SidecarManager::new(),
             remote_manager: Arc::new(Mutex::new(RemoteSidecarManager::new())),
+            plugin_registry: fx_runtime::SidecarRegistry::default(),
         }
     }
 
@@ -201,6 +205,8 @@ impl SidecarSupervisor {
                                         cpu_usage: 0.0,
                                         latency_ms: 0.0,
                                         assigned_nodes: std::collections::HashSet::new(),
+                                        jitter_buffer: std::collections::BTreeMap::new(),
+                                        last_sequence: 0,
                                     });
                                 }
                             }
@@ -213,20 +219,41 @@ impl SidecarSupervisor {
         Ok(())
     }
 
-    pub async fn start_udp_return_listener(audio_bridge: Arc<IpcAudioBridge>, port: u16) -> std::io::Result<()> {
+    pub async fn start_udp_return_listener(remote_manager: Arc<Mutex<RemoteSidecarManager>>, audio_bridge: Arc<IpcAudioBridge>, port: u16) -> std::io::Result<()> {
         let socket = UdpSocket::bind(format!("0.0.0.0:{}", port))?;
         println!("Conductor: UDP Return listening on port {}", port);
 
         tokio::spawn(async move {
             let mut buf = [0u8; 2048];
             loop {
-                if let Ok((len, _addr)) = socket.recv_from(&mut buf) {
-                    if len >= 5 && buf[0] == 6 {
+                if let Ok((len, addr)) = socket.recv_from(&mut buf) {
+                    // Type 6: [u8 type:6][u32 node_idx][u64 sequence][AudioBlock data]
+                    if len >= 13 && buf[0] == 6 {
                         let node_idx = u32::from_be_bytes(buf[1..5].try_into().unwrap());
-                        let block_data = &buf[5..len];
+                        let sequence = u64::from_be_bytes(buf[5..13].try_into().unwrap());
+                        let block_data = &buf[13..len];
+
                         if block_data.len() == std::mem::size_of::<nullherz_traits::AudioBlock>() {
                             let block: nullherz_traits::AudioBlock = bytemuck::pod_read_unaligned(block_data);
-                            let _ = audio_bridge.push_block(node_idx, block);
+
+                            let mut manager = remote_manager.lock().await;
+                            let addr_str = addr.to_string();
+                            if let Some(node) = manager.remote_nodes.iter_mut().find(|n| addr_str.starts_with(&n.addr.split(':').next().unwrap())) {
+                                if sequence > node.last_sequence {
+                                    node.jitter_buffer.insert(sequence, (node_idx, block));
+
+                                    // Drain ready blocks
+                                    while let Some((&seq, _)) = node.jitter_buffer.first_key_value() {
+                                        if seq == node.last_sequence + 1 || node.jitter_buffer.len() > 16 {
+                                             let (_, (n_idx, b)) = node.jitter_buffer.pop_first().unwrap();
+                                             let _ = audio_bridge.push_block(n_idx, b);
+                                             node.last_sequence = seq;
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -299,6 +326,8 @@ impl SidecarSupervisor {
                             cpu_usage: 0.0,
                             latency_ms: 0.0,
                             assigned_nodes: std::collections::HashSet::new(),
+                            jitter_buffer: std::collections::BTreeMap::new(),
+                            last_sequence: 0,
                         });
                         println!("Conductor: Attached remote sidecar from {}", peer_addr);
                     }
@@ -311,6 +340,10 @@ impl SidecarSupervisor {
         });
 
         Ok(())
+    }
+
+    pub fn refresh_plugins(&mut self) -> Result<(), String> {
+        self.plugin_registry.scan_directory("plugins")
     }
 
     pub async fn broadcast_to_remote(&mut self, cmd: TimestampedCommand) {

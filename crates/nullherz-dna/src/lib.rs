@@ -415,18 +415,22 @@ mod tests {
             dna_b.spectral.energy_map[i] = 200;
         }
 
-        let child = transfuse_dna(&dna_a, &dna_b, 0.5);
+        let child = transfuse_dna(&dna_a, &dna_b, 0.5, nullherz_traits::MutationMode::Linear);
 
         for i in 0..64 {
             // (100 * 0.5) + (200 * 0.5) = 150
             assert_eq!(child.spectral.energy_map[i], 150);
         }
 
-        let child_025 = transfuse_dna(&dna_a, &dna_b, 0.25);
+        let child_025 = transfuse_dna(&dna_a, &dna_b, 0.25, nullherz_traits::MutationMode::Linear);
         for i in 0..64 {
             // (100 * 0.75) + (200 * 0.25) = 75 + 50 = 125
             assert_eq!(child_025.spectral.energy_map[i], 125);
         }
+
+        let child_chaotic = transfuse_dna(&dna_a, &dna_b, 0.5, nullherz_traits::MutationMode::Chaotic);
+        // Chaotic should be different from linear
+        assert_ne!(child_chaotic.spectral.energy_map[0], 150);
     }
 
     #[test]
@@ -489,6 +493,27 @@ pub fn interpolate_energy_map(dest: &mut [u8; 64], src_a: &[u8; 64], src_b: &[u8
     }
 }
 
+pub fn chaotic_transfuse(dest: &mut [u8; 64], src_a: &[u8; 64], src_b: &[u8; 64], bias: f32) {
+    let mut rng_state = (bias * 1000.0) as u32;
+    for i in 0..64 {
+        rng_state = rng_state.wrapping_mul(1103515245).wrapping_add(12345);
+        let jitter = (rng_state as f32 / 4294967295.0) * 0.2 - 0.1;
+        let effective_bias = (bias + jitter).clamp(0.0, 1.0);
+
+        let val_a = src_a[i] as f32;
+        let val_b = src_b[i] as f32;
+
+        // Non-linear "Chaotic" interpolation
+        let mixed = if effective_bias < 0.5 {
+            val_a * (1.0 - effective_bias * 2.0) + (val_a * val_b / 255.0) * (effective_bias * 2.0)
+        } else {
+            (val_a * val_b / 255.0) * (1.0 - (effective_bias - 0.5) * 2.0) + val_b * ((effective_bias - 0.5) * 2.0)
+        };
+
+        dest[i] = mixed.clamp(0.0, 255.0) as u8;
+    }
+}
+
 pub fn calculate_similarity(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA) -> f32 {
     let mut spectral_sim = 0.0;
     for i in 0..64 {
@@ -502,12 +527,19 @@ pub fn calculate_similarity(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_
     (spectral_sim * 0.7) + (rhythmic_sim * 0.3)
 }
 
-pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA, bias: f32) -> nullherz_traits::SoundDNA {
+pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA, bias: f32, mode: nullherz_traits::MutationMode) -> nullherz_traits::SoundDNA {
     let mut child = nullherz_traits::SoundDNA::default();
     let inv_bias = 1.0 - bias;
 
-    // 1. Spectral Transfusion (SIMD Optimized)
-    interpolate_energy_map(&mut child.spectral.energy_map, &dna_a.spectral.energy_map, &dna_b.spectral.energy_map, bias);
+    // 1. Spectral Transfusion
+    match mode {
+        nullherz_traits::MutationMode::Linear => {
+            interpolate_energy_map(&mut child.spectral.energy_map, &dna_a.spectral.energy_map, &dna_b.spectral.energy_map, bias);
+        }
+        nullherz_traits::MutationMode::Chaotic => {
+            chaotic_transfuse(&mut child.spectral.energy_map, &dna_a.spectral.energy_map, &dna_b.spectral.energy_map, bias);
+        }
+    }
 
     child.spectral.tilt = dna_a.spectral.tilt * inv_bias + dna_b.spectral.tilt * bias;
 

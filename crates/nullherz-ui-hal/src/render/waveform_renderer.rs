@@ -17,7 +17,9 @@ struct WaveformVertex {
 pub struct WaveformRenderer {
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
+    mip_buffers: [wgpu::Buffer; 3], // 0.5x, 0.25x, 0.125x
     num_vertices: u32,
+    mip_vertex_counts: [u32; 3],
     globals_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     max_peaks: usize,
@@ -112,10 +114,22 @@ impl WaveformRenderer {
             mapped_at_creation: false,
         });
 
+        let mip_buffers = std::array::from_fn(|i| {
+            let scale = 1.0 / (2.0f32.powi((i + 1) as i32));
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("Waveform MIP Buffer {}", i)),
+                size: ((max_peaks as f32 * scale) as usize * std::mem::size_of::<WaveformVertex>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
+
         Self {
             pipeline,
             vertex_buffer,
+            mip_buffers,
             num_vertices: 0,
+            mip_vertex_counts: [0; 3],
             globals_buffer,
             bind_group,
             max_peaks,
@@ -131,6 +145,23 @@ impl WaveformRenderer {
         }
         self.num_vertices = vertices.len() as u32;
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
+
+        // Update MIP levels
+        for mip in 0..3 {
+            let step = 2usize.pow((mip + 1) as u32);
+            let mut mip_vertices = Vec::new();
+            for i in (0..peaks.len()).step_by(step) {
+                let x = (i as f32 / self.max_peaks as f32) * 2.0 - 1.0;
+                let mut max_p = 0.0f32;
+                for j in 0..step {
+                    if let Some(&p) = peaks.get(i + j) { max_p = max_p.max(p); }
+                }
+                mip_vertices.push(WaveformVertex { position: [x, max_p] });
+                mip_vertices.push(WaveformVertex { position: [x, -max_p] });
+            }
+            self.mip_vertex_counts[mip] = mip_vertices.len() as u32;
+            queue.write_buffer(&self.mip_buffers[mip], 0, bytemuck::cast_slice(&mip_vertices));
+        }
     }
 
     pub fn update_globals(&mut self, queue: &wgpu::Queue, scroll: f32, zoom: f32, color: [f32; 4]) {
@@ -142,12 +173,22 @@ impl WaveformRenderer {
         queue.write_buffer(&self.globals_buffer, 0, bytemuck::cast_slice(&[globals]));
     }
 
-    pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
-        if self.num_vertices > 0 {
+    pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, zoom: f32) {
+        let (buf, count) = if zoom > 0.5 {
+            (&self.vertex_buffer, self.num_vertices)
+        } else if zoom > 0.2 {
+            (&self.mip_buffers[0], self.mip_vertex_counts[0])
+        } else if zoom > 0.05 {
+            (&self.mip_buffers[1], self.mip_vertex_counts[1])
+        } else {
+            (&self.mip_buffers[2], self.mip_vertex_counts[2])
+        };
+
+        if count > 0 {
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.draw(0..self.num_vertices, 0..1);
+            render_pass.set_vertex_buffer(0, buf.slice(..));
+            render_pass.draw(0..count, 0..1);
         }
     }
 }
