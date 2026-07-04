@@ -491,6 +491,10 @@ mod tests {
 }
 
 pub fn interpolate_energy_map(dest: &mut [u8; 64], src_a: &[u8; 64], src_b: &[u8; 64], bias: f32) {
+    interpolate_bins(dest, src_a, src_b, bias);
+}
+
+fn interpolate_bins(dest: &mut [u8; 64], src_a: &[u8; 64], src_b: &[u8; 64], bias: f32) {
     use audio_dsp::simd_vec::FloatX16;
     let inv_bias = 1.0 - bias;
     let v_inv_bias = FloatX16::splat(inv_bias);
@@ -572,6 +576,7 @@ pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits:
 
     child
 }
+
 
 /// Chaotic Transfusion: Implements Layer 5 "Error Rehabilitation" theory.
 /// Uses a logistic map to create non-linear trait inheritance and digital mutations.

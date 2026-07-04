@@ -27,15 +27,25 @@ impl JitterBuffer {
     }
 
     pub fn pop(&mut self) -> Option<AudioBlock> {
-        // --- BASIC CLOCK RECOVERY ---
-        // If the buffer is getting too full, we decrease target size slightly (speed up drain)
-        // If the buffer is too empty, we increase target size (slow down drain)
+        // --- BASIC CLOCK RECOVERY (Sample-Stuffing Proxy) ---
+        // If the buffer is getting too full, we 'speed up' by dropping an occasional block.
+        // If the buffer is too empty, we 'slow down' by duplicating the last block (zero-fill or repeat).
         let current_len = self.buffer.len();
 
         if current_len > self.target_size * 3 {
-             self.drift_accumulator += 0.1; // Speed up
+             self.drift_accumulator += 0.01;
+             if self.drift_accumulator > 1.0 {
+                 self.drift_accumulator -= 1.0;
+                 let _ = self.buffer.pop_front(); // Drop a block to catch up
+             }
         } else if current_len < self.target_size / 2 {
-             self.drift_accumulator -= 0.1; // Slow down
+             self.drift_accumulator -= 0.01;
+             if self.drift_accumulator < -1.0 {
+                 self.drift_accumulator += 1.0;
+                 if let Some(last) = self.buffer.front().cloned() {
+                     self.buffer.push_front(last); // Repeat a block to wait
+                 }
+             }
         }
 
         if current_len >= self.target_size {
@@ -101,23 +111,25 @@ impl IpcAudioBridge {
         let mut jitters = self.jitter_buffers.lock().unwrap();
         let buffer = jitters.entry(node_idx).or_insert_with(|| JitterBuffer::new(4));
         buffer.push(block);
-
-        // Periodically drain from jitter buffer to SHM return queue
-        if let Some(buffered_block) = buffer.pop() {
-            let queues = self.return_queues.lock().unwrap();
-            if let Some(producer) = queues.get(&node_idx) {
-                producer.push(buffered_block)
-            } else {
-                Err(buffered_block)
-            }
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
     pub fn pop_block(&self, node_idx: u32) -> Option<AudioBlock> {
         let mut queues = self.send_queues.lock().unwrap();
         queues.get_mut(&node_idx).and_then(|consumer| consumer.pop())
+    }
+
+    pub fn process_return_queues(&self) {
+        let mut jitters = self.jitter_buffers.lock().unwrap();
+        let queues = self.return_queues.lock().unwrap();
+
+        for (&node_idx, buffer) in jitters.iter_mut() {
+            if let Some(producer) = queues.get(&node_idx) {
+                while let Some(block) = buffer.pop() {
+                    if producer.push(block).is_err() { break; }
+                }
+            }
+        }
     }
 
     pub fn register_send_node(&self, node_idx: u32) -> Result<IpcAudioProducer, Box<dyn std::error::Error>> {

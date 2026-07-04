@@ -745,6 +745,15 @@ pub struct MidiMap {
     pub triggers: Vec<TriggerMapping>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct SidecarManifest {
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    pub processor_type_id: u32,
+    pub binary_name: String,
+}
+
 pub trait ProcessingKernel: Send {
     #[allow(clippy::too_many_arguments)]
     fn execute(
@@ -813,6 +822,12 @@ impl Default for IdAllocator { fn default() -> Self { Self::new(0, 12) } }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_mip_waveform_default() {
+        let mip = MipWaveform::default();
+        assert!(mip.levels.is_empty());
+    }
 
     #[test]
     fn test_binary_serialization() {

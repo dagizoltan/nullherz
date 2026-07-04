@@ -149,7 +149,7 @@ impl SidecarSupervisor {
         }
 
         let child = cmd.spawn()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("Failed to spawn sidecar binary {}: {}. Ensure binary exists and is executable.", binary_path, e))?;
 
         // Perform Handshake
         // In a real implementation, we would wait for the sidecar to write its handshake to SHM.

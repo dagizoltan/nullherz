@@ -29,14 +29,14 @@ impl DiscoveryBeacon {
 
 pub struct SidecarDiscoveryService {
     pub plugins_dir: String,
-    pub known_plugins: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    pub known_plugins: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, nullherz_traits::SidecarManifest>>>,
 }
 
 impl SidecarDiscoveryService {
     pub fn new(plugins_dir: &str) -> Self {
         Self {
             plugins_dir: plugins_dir.to_string(),
-            known_plugins: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            known_plugins: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         }
     }
 
@@ -52,28 +52,38 @@ impl SidecarDiscoveryService {
 
             loop {
                 if let Ok(mut entries) = tokio::fs::read_dir(&dir).await {
-                    let mut current_plugins = std::collections::HashSet::new();
+                    let mut current_manifests = std::collections::HashMap::new();
                     while let Ok(Some(entry)) = entries.next_entry().await {
-                        if let Ok(file_type) = entry.file_type().await {
-                            if file_type.is_file() {
-                                if let Some(name) = entry.file_name().to_str() {
-                                    current_plugins.insert(name.to_string());
+                        let path = entry.path();
+                        if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                            if let Ok(content) = tokio::fs::read_to_string(&path).await {
+                                if let Ok(manifest) = serde_json::from_str::<nullherz_traits::SidecarManifest>(&content) {
+                                    current_manifests.insert(manifest.name.clone(), manifest);
                                 }
                             }
                         }
                     }
 
                     let mut known_lock = known.lock().unwrap();
-                    for plugin in &current_plugins {
-                        if !known_lock.contains(plugin) {
-                            println!("Discovery: Found new sidecar plugin: {}", plugin);
-                            known_lock.insert(plugin.clone());
+                    for (name, manifest) in current_manifests {
+                        if !known_lock.contains_key(&name) {
+                            println!("Discovery: Found new sidecar plugin: {} (v{})", name, manifest.version);
+                            known_lock.insert(name, manifest);
                         }
                     }
-                    // Optional: remove plugins that disappeared
-                    known_lock.retain(|p| current_plugins.contains(p));
+                    // Clean up disappeared plugins
+                    known_lock.retain(|name, manifest| {
+                        let binary_path = std::path::Path::new(&dir).join(&manifest.binary_name);
+                        let manifest_path = std::path::Path::new(&dir).join(format!("{}.json", name));
+                        if !binary_path.exists() || !manifest_path.exists() {
+                            println!("Discovery: Sidecar plugin removed: {}", name);
+                            false
+                        } else {
+                            true
+                        }
+                    });
                 }
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
         });
     }

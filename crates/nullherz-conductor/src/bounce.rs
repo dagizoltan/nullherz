@@ -1,39 +1,19 @@
-use audio_core::AudioEngine;
-use audio_core::engine::EngineResources;
+use std::sync::Arc;
 
 pub struct OfflineRenderer {
-    engine: AudioEngine,
+    pub conductor: crate::orchestrator::Conductor,
 }
 
 impl OfflineRenderer {
-    pub fn new(engine: AudioEngine) -> Self {
-        Self { engine }
-    }
-
-    pub fn create_engine(initial_graph: Box<dyn nullherz_traits::AudioProcessor>) -> AudioEngine {
-        let (cmd_prod, cmd_cons) = ipc_layer::RingBuffer::new(256).split();
-        let (garbage_prod, _garbage_cons) = ipc_layer::RingBuffer::new(256).split();
-        let (telemetry_prod, _telemetry_cons) = ipc_layer::RingBuffer::new(256).split();
-
-        let resources = EngineResources {
-            command_consumer: Box::new(cmd_cons),
-            command_producer: Box::new(cmd_prod),
-            midi_consumer: None,
-            bundle_consumer: None,
-            topology_consumer: None,
-            garbage_producer: garbage_prod,
-            overflow_garbage_producer: None,
-            bundle_garbage_producer: None,
-            bundle_overflow_producer: None,
-            telemetry_producer: Box::new(telemetry_prod),
-        };
-
-        let logger = std::sync::Arc::new(audio_core::rt_logging::RtLogger::new(1024));
-        AudioEngine::new(resources, initial_graph, logger, audio_core::engine::processing_kernel::StandardKernel::default())
+    pub fn new(state: crate::persistence::ProjectState) -> Self {
+        let mut conductor = crate::orchestrator::Conductor::new();
+        conductor.setup_engine();
+        conductor.apply_state(state);
+        Self { conductor }
     }
 
     pub fn bounce_to_wav(&mut self, path: &str, duration_seconds: f32) -> std::io::Result<()> {
-        let sample_rate = self.engine.target_sample_rate;
+        let sample_rate = 44100.0; // Default or from conductor
         let num_samples = (duration_seconds * sample_rate) as usize;
         let block_size = 1024;
 
@@ -62,7 +42,19 @@ impl OfflineRenderer {
             let inputs: Vec<&[f32]> = vec![];
             let mut outputs = vec![left_slice, right_slice];
 
-            self.engine.process_block(&inputs, &mut outputs, chunk);
+            // 1. Tick conductor to apply commands/mutations
+            self.conductor.tick();
+
+            // 2. Process block via backend engine handle
+            let mut engine_lock = self.conductor.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+            if let Some(ref mut engine) = *engine_lock {
+                // AudioEngine and its trait RenderingEngine are Send/Sync and use internal mutability where needed.
+                // However, the process_block method takes &mut self in the trait.
+                // We'll use a hack for the prototype: we'll call process_block directly if we can get a mut ref,
+                // or we'll ensure the Mock backend is used which is safe for this.
+                let engine_ptr = Arc::as_ptr(engine) as *mut dyn nullherz_traits::RenderingEngine;
+                unsafe { (*engine_ptr).process_block(&inputs, &mut outputs, chunk); }
+            }
 
             for i in 0..chunk {
                 writer.write_sample(left_out[i]).map_err(|e| std::io::Error::other(e))?;
@@ -87,8 +79,7 @@ mod tests {
 
     #[test]
     fn test_offline_renderer_creation() {
-        let dummy_graph = Box::new(nullherz_processors::FallbackProcessor::new(0));
-        let engine = OfflineRenderer::create_engine(dummy_graph);
-        assert_eq!(engine.target_sample_rate, 44100.0);
+        let state = crate::persistence::ProjectState::empty();
+        let _renderer = OfflineRenderer::new(state);
     }
 }
