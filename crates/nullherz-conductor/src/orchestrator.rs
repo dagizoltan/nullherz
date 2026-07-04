@@ -149,6 +149,15 @@ impl Conductor {
     pub fn update_timeline(&mut self, telemetry: &mut Telemetry) {
         self.mixer_bridge.update_timeline(telemetry);
         self.clip_orchestrator.collect_telemetry(&mut telemetry.active_clips, &mut telemetry.starting_clips_mask);
+
+        // Update Remote Node Telemetry
+        if let Ok(manager) = self.sidecar_supervisor.remote_manager.try_lock() {
+            telemetry.remote_node_count = manager.remote_nodes.len() as u32;
+            for (i, node) in manager.remote_nodes.iter().enumerate().take(8) {
+                telemetry.remote_cpu_usage[i] = node.cpu_usage;
+                telemetry.remote_latency_ms[i] = node.latency_ms;
+            }
+        }
     }
 
     pub fn apply_mixer_commands(&mut self, commands: Vec<Command>) {

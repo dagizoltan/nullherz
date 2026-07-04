@@ -28,6 +28,9 @@ pub struct Telemetry {
     pub active_clips: [u8; 8],
     /// Bitmask of clips in "Starting/Quantizing" state (Row per byte)
     pub starting_clips_mask: [u8; 8],
+    pub remote_node_count: u32,
+    pub remote_cpu_usage: [f32; 8], // Support up to 8 remote nodes in telemetry
+    pub remote_latency_ms: [f32; 8],
 }
 
 pub struct TelemetryProcessor;
@@ -50,6 +53,9 @@ impl Default for Telemetry {
             dna_energy_map: [0; 64],
             active_clips: [255; 8],
             starting_clips_mask: [0; 8],
+            remote_node_count: 0,
+            remote_cpu_usage: [0.0; 8],
+            remote_latency_ms: [0.0; 8],
         }
     }
 }

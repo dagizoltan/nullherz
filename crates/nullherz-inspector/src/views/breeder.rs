@@ -225,16 +225,36 @@ impl BreederView {
         });
 
         ui.add_space(20.0);
-        if ui.button(RichText::new("🧬 EVOLVE PERMANENTLY").strong().size(16.0)).clicked() {
-            if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
-                let cmd = Command::Resource(nullherz_traits::ResourceCommand::CommitBreeding {
-                    parent_a_id: id_a,
-                    parent_b_id: id_b,
-                    bias: state.transfusion_bias_x,
-                });
-                let _ = app.command_sender.send(cmd);
+        ui.horizontal(|ui| {
+            if ui.button(RichText::new("🧬 EVOLVE PERMANENTLY").strong().size(16.0)).clicked() {
+                if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
+                    let cmd = Command::Resource(nullherz_traits::ResourceCommand::CommitBreeding {
+                        parent_a_id: id_a,
+                        parent_b_id: id_b,
+                        bias: state.transfusion_bias_x,
+                    });
+                    let _ = app.command_sender.send(cmd);
+                }
             }
-        }
+
+            if ui.button(RichText::new("🎹 MUTATE PATTERN").strong().size(16.0)).clicked() {
+                 if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
+                     if let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
+                         let child_rhythmic = nullherz_dna::transfuse_dna(&track_a.metadata.dna, &track_b.metadata.dna, state.transfusion_bias_y).rhythmic;
+                         let commands = crate::views::composer::DnaSequencer::mutate_pattern(
+                             &child_rhythmic,
+                             &app.sequencer_grid,
+                             70, // Sequencer default ID
+                             0,  // Target track 0
+                             0.2 // 20% mutation probability
+                         );
+                         for cmd in commands {
+                             let _ = app.command_sender.send(cmd);
+                         }
+                     }
+                 }
+            }
+        });
     }
 
     fn emit_dna_command(&self, app: &crate::InspectorApp) {

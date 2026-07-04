@@ -103,6 +103,9 @@ impl TelemetryFinalizer {
             dna_energy_map,
             active_clips: [255; 8],
             starting_clips_mask: [0; 8],
+            remote_node_count: 0,
+            remote_cpu_usage: [0.0; 8],
+            remote_latency_ms: [0.0; 8],
         };
         let _ = telemetry_producer.push_telemetry(telemetry.clone());
         telemetry
