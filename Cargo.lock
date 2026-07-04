@@ -2825,6 +2825,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nullherz-template"
+version = "0.1.0"
+dependencies = [
+ "ipc-layer",
+ "nullherz-traits",
+ "sidecar-sdk",
+]
+
+[[package]]
 name = "nullherz-topology"
 version = "0.1.0"
 dependencies = [
