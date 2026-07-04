@@ -462,6 +462,32 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].id, 1);
     }
+
+    #[test]
+    fn test_chaotic_transfusion_determinism() {
+        use nullherz_traits::SoundDNA;
+        let dna_a = SoundDNA::default();
+        let dna_b = SoundDNA::default();
+
+        let child_1 = chaotic_transfuse_dna(&dna_a, &dna_b, 0.5, 0.5);
+        let child_2 = chaotic_transfuse_dna(&dna_a, &dna_b, 0.5, 0.5);
+
+        assert_eq!(child_1, child_2);
+    }
+
+    #[test]
+    fn test_chaotic_transfusion_mutation() {
+        use nullherz_traits::SoundDNA;
+        let dna_a = SoundDNA::default();
+        let dna_b = SoundDNA::default();
+
+        let normal = transfuse_dna(&dna_a, &dna_b, 0.5);
+        let chaotic = chaotic_transfuse_dna(&dna_a, &dna_b, 0.5, 1.0);
+
+        // Chaotic transfusion should produce different energy maps due to mutations
+        assert_ne!(normal.spectral.energy_map, chaotic.spectral.energy_map);
+        assert!(chaotic.artifacts.glitch_density > normal.artifacts.glitch_density);
+    }
 }
 
 pub fn interpolate_energy_map(dest: &mut [u8; 64], src_a: &[u8; 64], src_b: &[u8; 64], bias: f32) {

@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use ipc_layer::{SharedMemory, ShmRingBuffer, AudioBlock, IpcAudioProducer, IpcAudioConsumer};
 use std::sync::Mutex;
 
 pub struct JitterBuffer {
-    pub buffer: Vec<AudioBlock>,
+    pub buffer: VecDeque<AudioBlock>,
     pub target_size: usize,
     pub drift_accumulator: f32,
     pub last_drain_time: std::time::Instant,
@@ -13,7 +13,7 @@ pub struct JitterBuffer {
 impl JitterBuffer {
     pub fn new(target_size: usize) -> Self {
         Self {
-            buffer: Vec::with_capacity(target_size * 8),
+            buffer: VecDeque::with_capacity(target_size * 8),
             target_size,
             drift_accumulator: 0.0,
             last_drain_time: std::time::Instant::now(),
@@ -22,7 +22,7 @@ impl JitterBuffer {
 
     pub fn push(&mut self, block: AudioBlock) {
         if self.buffer.len() < self.target_size * 8 {
-            self.buffer.push(block);
+            self.buffer.push_back(block);
         }
     }
 
@@ -39,7 +39,7 @@ impl JitterBuffer {
         }
 
         if current_len >= self.target_size {
-            Some(self.buffer.remove(0))
+            self.buffer.pop_front()
         } else {
             None
         }
@@ -146,5 +146,39 @@ impl IpcAudioBridge {
     pub fn unregister_return_node(&self, node_idx: u32) {
         self.return_queues.lock().unwrap().remove(&node_idx);
         self.shm_segments.lock().unwrap().remove(&node_idx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_jitter_buffer_flow() {
+        let mut jb = JitterBuffer::new(2);
+        let block = AudioBlock { data: [0.0; 256], len: 256, _pad: [0; 15] };
+
+        jb.push(block);
+        assert!(jb.pop().is_none()); // Should wait for target_size=2
+
+        jb.push(block);
+        let popped = jb.pop();
+        assert!(popped.is_some());
+        assert_eq!(popped.unwrap().len, 256);
+    }
+
+    #[test]
+    fn test_jitter_buffer_drift_compensation() {
+        let mut jb = JitterBuffer::new(2);
+        let block = AudioBlock { data: [0.0; 256], len: 256, _pad: [0; 15] };
+
+        // Overfill buffer to trigger drift compensation
+        for _ in 0..10 {
+            jb.push(block);
+        }
+
+        let initial_drift = jb.drift_accumulator;
+        let _ = jb.pop();
+        assert!(jb.drift_accumulator > initial_drift);
     }
 }

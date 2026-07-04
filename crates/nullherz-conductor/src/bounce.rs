@@ -80,3 +80,15 @@ impl OfflineRenderer {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_offline_renderer_creation() {
+        let dummy_graph = Box::new(nullherz_processors::FallbackProcessor::new(0));
+        let engine = OfflineRenderer::create_engine(dummy_graph);
+        assert_eq!(engine.target_sample_rate, 44100.0);
+    }
+}
