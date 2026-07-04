@@ -26,6 +26,8 @@ pub struct EdgeJson {
 pub struct GraphJson {
     pub nodes: Vec<NodeJson>,
     pub edges: Vec<EdgeJson>,
+    #[serde(default)]
+    pub node_assignments: std::collections::HashMap<u32, String>,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -338,7 +340,7 @@ fn main() -> eframe::Result<()> {
         "nullherz Studio",
         native_options,
         Box::new(|cc| {
-            let graph = GraphJson { nodes: vec![], edges: vec![] };
+            let graph = GraphJson { nodes: vec![], edges: vec![], node_assignments: std::collections::HashMap::new() };
             let mut app = InspectorApp::new(graph, cc);
 
             if let Some(render_state) = &cc.wgpu_render_state {
