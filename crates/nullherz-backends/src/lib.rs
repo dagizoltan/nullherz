@@ -12,20 +12,11 @@ pub use mock::MockBackend;
 
 
 use std::sync::{Arc, Mutex};
-use nullherz_traits::RenderingEngine;
+pub use nullherz_traits::{RenderingEngine, AudioBackendType};
 
 pub trait AudioBackend: Send {
     fn start(&mut self, engine: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>) -> Result<(), String>;
     fn stop(&mut self);
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AudioBackendType {
-    Alsa,
-    Pipewire,
-    Jack,
-    Threaded,
-    Mock,
 }
 
 pub struct BackendFactory;

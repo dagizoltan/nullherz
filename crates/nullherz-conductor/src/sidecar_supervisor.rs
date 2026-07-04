@@ -271,6 +271,7 @@ impl SidecarSupervisor {
             let fallback = Box::new(nullherz_processors::FallbackProcessor::new(node_idx as u64));
             if let Some(ref mut prod) = topology_manager.topo_producer {
                 let _ = prod.push(TopologyMutation::SwapProcessor { node_idx, processor: fallback });
+                self.manager.mark_as_bypassed(node_idx);
             }
         }
 

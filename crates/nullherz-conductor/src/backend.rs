@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
-use nullherz_traits::RenderingEngine;
-use nullherz_backends::{AudioBackend, AudioBackendType};
+use nullherz_traits::{RenderingEngine, AudioBackendType};
+use nullherz_backends::AudioBackend;
 
 pub struct BackendManager {
     pub backend: Option<Box<dyn AudioBackend>>,

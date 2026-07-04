@@ -16,6 +16,23 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
              if ui.checkbox(&mut app.quantize_enabled, "Quantize Commands").changed() {
                   let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetSafeMode(app.quantize_enabled)));
              }
+
+             ui.add_space(10.0);
+             ui.strong("Controller Mapping");
+             ui.horizontal(|ui| {
+                 // In a real app, we would scan the 'mappings/' directory.
+                 // For the Alpha demo, we'll provide these as standard options.
+                 let options = ["default", "pioneer_ddj400"];
+                 for opt in options {
+                     if ui.button(format!("Load {}", opt)).clicked() {
+                         let mut buffer = [0u8; 32];
+                         let bytes = opt.as_bytes();
+                         let len = bytes.len().min(32);
+                         buffer[..len].copy_from_slice(&bytes[..len]);
+                         let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::LoadMidiMap(buffer)));
+                     }
+                 }
+             });
         });
     });
 

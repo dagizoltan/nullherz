@@ -1,9 +1,16 @@
 use egui::{Ui, Color32, Frame};
 use crate::{InspectorApp, widgets};
 
-pub fn render(app: &InspectorApp, ui: &mut Ui) {
+pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     ui.heading("System Metrics");
-    ui.add_space(20.0);
+    ui.add_space(10.0);
+
+    ui.horizontal(|ui| {
+        ui.label("Visualizer Damping:");
+        ui.add(egui::Slider::new(&mut app.visualizer_damping, 0.01..=1.0).text(""));
+    });
+
+    ui.add_space(10.0);
 
     let telemetry = app.last_telemetry.lock().unwrap().clone();
 
@@ -35,8 +42,8 @@ pub fn render(app: &InspectorApp, ui: &mut Ui) {
             ui.add_space(10.0);
 
             Frame::none().fill(Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(12.0).show(ui, |ui| {
-                if let Some(t) = &telemetry {
-                    widgets::render_spectrum_analyzer(ui, &t.spectrum, Color32::from_rgb(0, 255, 200), 120.0);
+                if telemetry.is_some() {
+                    widgets::render_spectrum_analyzer(ui, &app.damped_spectrum, Color32::from_rgb(0, 255, 200), 120.0);
                 } else {
                     ui.label("No spectral data available.");
                 }
@@ -49,7 +56,7 @@ pub fn render(app: &InspectorApp, ui: &mut Ui) {
             Frame::none().fill(Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(12.0).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if let Some(t) = &telemetry {
-                        widgets::render_goniometer(ui, &t.goniometer_pts, 200.0, Color32::from_rgb(0, 255, 200));
+                        widgets::render_goniometer(ui, &app.damped_goniometer, 200.0, Color32::from_rgb(0, 255, 200));
                         ui.add_space(20.0);
                         ui.vertical(|ui| {
                              ui.label("Master Out (L/R)");

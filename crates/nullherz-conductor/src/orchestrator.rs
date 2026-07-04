@@ -133,7 +133,7 @@ impl Conductor {
         self.midi_consumer = Some(consumer);
     }
 
-    pub fn start_backend(&mut self, backend_type: nullherz_backends::AudioBackendType) -> Result<(), String> {
+    pub fn start_backend(&mut self, backend_type: nullherz_traits::AudioBackendType) -> Result<(), String> {
         self.engine_coordinator.backend_manager.start(backend_type)
     }
 
@@ -141,10 +141,44 @@ impl Conductor {
         self.engine_coordinator.backend_manager.stop()
     }
 
-    pub fn switch_backend(&mut self, backend_type: nullherz_backends::AudioBackendType) -> Result<(), String> {
+    pub fn switch_backend(&mut self, backend_type: nullherz_traits::AudioBackendType) -> Result<(), String> {
         self.stop_backend();
         std::thread::sleep(std::time::Duration::from_millis(50));
-        self.start_backend(backend_type)
+        let res = self.start_backend(backend_type);
+        if res.is_ok() {
+            let _ = self.update_system_config(Some(backend_type), None);
+        }
+        res
+    }
+
+    pub fn update_system_config(&self, backend_type: Option<nullherz_traits::AudioBackendType>, midi_ports: Option<Vec<String>>) -> std::io::Result<()> {
+        let path = "system_config.json";
+        let mut config = if std::path::Path::new(path).exists() {
+            let content = std::fs::read_to_string(path)?;
+            serde_json::from_str::<crate::persistence::SystemConfig>(&content).unwrap_or(crate::persistence::SystemConfig {
+                audio_backend: "Mock".to_string(),
+                midi_ports: vec![],
+                sample_rate: 44100,
+                block_size: 256,
+            })
+        } else {
+            crate::persistence::SystemConfig {
+                audio_backend: "Mock".to_string(),
+                midi_ports: vec![],
+                sample_rate: 44100,
+                block_size: 256,
+            }
+        };
+
+        if let Some(bt) = backend_type {
+            config.audio_backend = format!("{:?}", bt);
+        }
+        if let Some(ports) = midi_ports {
+            config.midi_ports = ports;
+        }
+
+        let json = serde_json::to_string_pretty(&config).map_err(|e| std::io::Error::other(e))?;
+        std::fs::write(path, json)
     }
 
     pub fn drain_garbage(&mut self) {
@@ -199,6 +233,21 @@ impl Conductor {
                  Command::Resource(nullherz_traits::ResourceCommand::CommitBreeding { parent_a_id, parent_b_id, bias }) => {
                      let lib = self.library.lock().unwrap();
                      self.transfusion_manager.commit_breeding(parent_a_id, parent_b_id, bias, &lib);
+                 }
+                 Command::Core(nullherz_traits::CoreCommand::SwitchBackend(backend_type)) => {
+                     let _ = self.switch_backend(backend_type);
+                 }
+                 Command::Core(nullherz_traits::CoreCommand::LoadMidiMap(buffer)) => {
+                     let name = String::from_utf8_lossy(&buffer).trim_matches(char::from(0)).to_string();
+                     let path = format!("mappings/{}.json", name);
+                     if let Ok(json) = std::fs::read_to_string(path) {
+                         let _ = self.midi_mapper.load_from_json(&json);
+                     }
+                 }
+                 Command::Core(nullherz_traits::CoreCommand::SetMidiPorts(buffer)) => {
+                     let ports_str = String::from_utf8_lossy(&buffer).trim_matches(char::from(0)).to_string();
+                     let ports: Vec<String> = ports_str.split(',').filter(|s| !s.is_empty()).map(|s| s.trim().to_string()).collect();
+                     let _ = self.update_system_config(None, Some(ports));
                  }
                  _ => final_commands.push(cmd),
              }

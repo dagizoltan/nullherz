@@ -14,6 +14,22 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             ui.label("Current Selection:");
             ui.label(RichText::new("ALSA (Optimized)").color(Color32::from_rgb(0, 255, 200)));
         });
+
+        ui.horizontal(|ui| {
+            if ui.button("ALSA").clicked() {
+                let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(nullherz_traits::AudioBackendType::Alsa)));
+            }
+            if ui.button("JACK").clicked() {
+                let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(nullherz_traits::AudioBackendType::Jack)));
+            }
+            if ui.button("Threaded").clicked() {
+                let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(nullherz_traits::AudioBackendType::Threaded)));
+            }
+            if ui.button("Mock").clicked() {
+                let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(nullherz_traits::AudioBackendType::Mock)));
+            }
+        });
+
         if ui.button("Scan for Backends").clicked() {
              // Bridge to nullherz-setup logic (mocked for UI)
              println!("Scanning for audio backends...");
@@ -25,6 +41,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         ui.group(|ui| {
             ui.label("• Pioneer DDJ-400 (Attached)");
             ui.label("• Generic MIDI Keyboard (Attached)");
+
+            if ui.button("BIND DETECTED PORTS").clicked() {
+                let ports = "Pioneer DDJ-400,Generic MIDI Keyboard";
+                let mut buffer = [0u8; 128];
+                let bytes = ports.as_bytes();
+                let len = bytes.len().min(128);
+                buffer[..len].copy_from_slice(&bytes[..len]);
+                let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMidiPorts(buffer)));
+            }
         });
         if ui.button("Refresh MIDI List").clicked() {
              println!("Refreshing MIDI device list...");
