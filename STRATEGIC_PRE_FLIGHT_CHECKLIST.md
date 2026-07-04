@@ -45,6 +45,9 @@ As we capture and analyze user tracks, data privacy is paramount.
 
 ## 6. Pre-Implementation Audit Items
 - [x] Finalize "Sound DNA" bit-layout (RFC Complete).
+- [x] Implement Universal Hardware Abstraction Layer (ALSA/JACK/Threaded).
+- [x] Finalize Sidecar SDK and procedural macros for 3rd-party development.
+- [x] Implement sub-200ms automated signal recovery (Soft Fallback).
 - [ ] Select initial commercial license (EULA vs GPL/MIT for sidecars).
 - [ ] Benchmark "distributed DSP" latency over local 10Gbe.
 

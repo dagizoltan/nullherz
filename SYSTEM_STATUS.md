@@ -36,9 +36,16 @@ The Nullherz engine is built upon a strict separation of concerns, ensuring that
 
 ### 2.2 Fault Tolerance & Signal Stability
 - **Sidecar Resilience**: `SidecarSupervisor` tracks `node_idx` state, ensuring failed DSP sidecars are restored to their correct topological position.
+- **Automated Soft Fallback**: Stalled heartbeats (>200ms) trigger an instant swap to a zero-overhead `FallbackProcessor` (Bypass) to maintain audio continuity.
 - **System-Wide Safe Mode**: Sidecar failures can now trigger a global "Safe Mode" via the command bus, allowing the engine to enter a known stable state.
 - **RSS Limits**: Sidecar subprocesses are now constrained by real RSS memory limits using cgroups.
 - **DSP Safety Pass**: All critical kernels (Gain, Biquad, Spectral) are hardened against non-finite float values.
+
+### 2.3 Hardware & Distributed Orchestration
+- **Universal Backend Switching**: Real-time hot-swapping between ALSA, JACK, and Threaded backends without process restarts.
+- **Latency Calibration**: Integrated RTL (Round Trip Latency) measurement routine to compensate for sidecar and hardware delays.
+- **Targeted Distributed Routing**: Protocol Type 5 (Send) and Type 6 (UDP Return) enable efficient, low-jitter offloading of heavy DSP nodes to remote machines.
+- **Thread Pinning**: RT threads are automatically pinned to performance cores via `sched_setaffinity` to maximize L3 cache locality.
 
 ---
 
@@ -60,10 +67,10 @@ The entire suite of registered processors (including `DjIsolator` and `SimdBiqua
 
 While the Nullherz engine is architecturally hardened, the transition to a "Valuable Instrument" requires bridging the gap between raw DSP and user-centric orchestration.
 
-### 4.1 DJ Performance Readiness [~85%]
-*   **Current State**: Atomic deck swaps, zero-latency mixer control, and SIMD-optimized summing are operational.
-*   **Alpha Requirement**: Implement an off-thread **Transient & BPM Analyzer**. This will populate the `SampleRegistry` with metadata (beat-grids, root keys), allowing for seamless "Sync" and "Snap" during live performance.
-*   **Alpha Requirement**: Establish a persistent **Library Database** (using a Rust-native engine like `redb`) to manage multi-gigabyte track collections with ACID safety and zero-copy performance, without impacting the RT engine's memory footprint.
+### 4.1 DJ Performance Readiness [~95%]
+*   **Current State**: Atomic deck swaps, zero-latency mixer control, SIMD-optimized summing, and real-time backend/MIDI configuration are operational.
+*   **Alpha Requirement**: [DONE] **Transient & BPM Analyzer**. Populates metadata for seamless "Sync" and "Snap".
+*   **Alpha Requirement**: [DONE] **Library Database**. `redb` backend with Smart Crate trait-based filtering is now operational.
 
 ### 4.2 Song Builder Readiness [~85%]
 *   **Current State**: Sample-accurate parameter automation, modular "Transfusion" layer, and a global Pattern Manager are operational.

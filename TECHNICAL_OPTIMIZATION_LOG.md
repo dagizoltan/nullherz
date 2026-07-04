@@ -34,7 +34,7 @@
 
 | Task | Priority | Description |
 | :--- | :---: | :--- |
-| **Ring Buffer Affinity** | High | Set CPU affinity for IPC ring buffers to pin producers/consumers to specific L3 cache domains. |
+| **Ring Buffer Affinity** | VERIFIED | Implemented thread pinning via `sched_setaffinity` in `ipc-layer`. RT threads are locked to dedicated cores to maximize L3 cache locality. |
 | **Telemetry Batching** | Medium | Batch `NodeMetrics` telemetry to reduce the frequency of atomic writes to the shared-memory status segment. |
 | **Zero-Copy Serialization**| Medium | Move `ProjectState` toward a binary format (e.g., `rkyv`) to achieve near-instant project save/load. |
 
@@ -45,7 +45,7 @@
 
 | Task | Priority | Description |
 | :--- | :--- | :--- |
-| **Widget Caching** | High | Cache `egui::Shape` primitives for knobs and faders to avoid recalculating geometry every frame. |
+| **Widget Caching** | VERIFIED | Implemented `egui::Shape` caching for industrial widgets in `nullherz-ui-hal`. Static geometry is persisted in temporary memory. |
 | **Waveform Downsampling**| Medium | Implement a multi-level waveform cache (MIP-maps) to reduce the number of points rendered in the rolling monitor. |
 | **Telemetry Throttle** | Low | Decouple UI refresh rate (60Hz) from telemetry ingestion rate (RT-frequency) using a damping filter. |
 
