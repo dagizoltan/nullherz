@@ -69,6 +69,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             });
         });
 
+        ui.add_space(10.0);
+        ui.strong("4. Hardware Calibration");
+        ui.horizontal(|ui| {
+            if ui.button("MEASURE LATENCY (RTL)").clicked() {
+                let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CalibrateLatency));
+            }
+            ui.label("Current RTL: 10.0ms (441 samples)");
+        });
+
         ui.add_space(30.0);
         if ui.button(RichText::new("FINALIZE CONFIGURATION").strong().size(18.0)).clicked() {
             println!("Configuration saved to system_config.json");

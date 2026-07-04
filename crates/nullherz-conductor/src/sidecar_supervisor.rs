@@ -52,6 +52,26 @@ impl RemoteSidecarManager {
         }
     }
 
+    pub async fn send_audio_block(&mut self, node_idx: u32, block: nullherz_traits::AudioBlock) {
+        // Payload: [u8 type:5][u32 node_idx][AudioBlock data]
+        let mut payload = Vec::with_capacity(5 + std::mem::size_of::<nullherz_traits::AudioBlock>());
+        payload.push(5u8);
+        payload.extend_from_slice(&node_idx.to_be_bytes());
+        payload.extend_from_slice(bytemuck::bytes_of(&block));
+
+        let len = payload.len() as u32;
+
+        for node in &mut self.remote_nodes {
+            if let Ok(mut writer) = node.writer.try_lock() {
+                use tokio::io::AsyncWriteExt;
+                let mut full_payload = Vec::with_capacity(4 + payload.len());
+                full_payload.extend_from_slice(&len.to_be_bytes());
+                full_payload.extend_from_slice(&payload);
+                let _ = writer.write_all(&full_payload).await;
+            }
+        }
+    }
+
     pub async fn ensure_sample_mirrored(&mut self, sample_id: u64, registry: &nullherz_dna::SampleRegistry) {
         let sample = match registry.get(sample_id) {
             Some(s) => s,

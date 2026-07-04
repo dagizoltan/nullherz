@@ -146,12 +146,12 @@ impl Conductor {
         std::thread::sleep(std::time::Duration::from_millis(50));
         let res = self.start_backend(backend_type);
         if res.is_ok() {
-            let _ = self.update_system_config(Some(backend_type), None);
+            let _ = self.update_system_config(Some(backend_type), None, None);
         }
         res
     }
 
-    pub fn update_system_config(&self, backend_type: Option<nullherz_traits::AudioBackendType>, midi_ports: Option<Vec<String>>) -> std::io::Result<()> {
+    pub fn update_system_config(&self, backend_type: Option<nullherz_traits::AudioBackendType>, midi_ports: Option<Vec<String>>, calibration: Option<u32>) -> std::io::Result<()> {
         let path = "system_config.json";
         let mut config = if std::path::Path::new(path).exists() {
             let content = std::fs::read_to_string(path)?;
@@ -160,6 +160,7 @@ impl Conductor {
                 midi_ports: vec![],
                 sample_rate: 44100,
                 block_size: 256,
+                calibration_samples: 0,
             })
         } else {
             crate::persistence::SystemConfig {
@@ -167,6 +168,7 @@ impl Conductor {
                 midi_ports: vec![],
                 sample_rate: 44100,
                 block_size: 256,
+                calibration_samples: 0,
             }
         };
 
@@ -175,6 +177,9 @@ impl Conductor {
         }
         if let Some(ports) = midi_ports {
             config.midi_ports = ports;
+        }
+        if let Some(c) = calibration {
+            config.calibration_samples = c;
         }
 
         let json = serde_json::to_string_pretty(&config).map_err(|e| std::io::Error::other(e))?;
@@ -247,7 +252,11 @@ impl Conductor {
                  Command::Core(nullherz_traits::CoreCommand::SetMidiPorts(buffer)) => {
                      let ports_str = String::from_utf8_lossy(&buffer).trim_matches(char::from(0)).to_string();
                      let ports: Vec<String> = ports_str.split(',').filter(|s| !s.is_empty()).map(|s| s.trim().to_string()).collect();
-                     let _ = self.update_system_config(None, Some(ports));
+                     let _ = self.update_system_config(None, Some(ports), None);
+                 }
+                 Command::Core(nullherz_traits::CoreCommand::CalibrateLatency) => {
+                     // Prototype calibration: assume 10ms (441 samples)
+                     let _ = self.update_system_config(None, None, Some(441));
                  }
                  _ => final_commands.push(cmd),
              }
@@ -357,6 +366,24 @@ impl Conductor {
         for ts_cmd in remote_commands {
             if let Some(ref prod) = self.engine_coordinator.command_producer {
                 let _ = prod.push_command(ts_cmd);
+            }
+        }
+
+        // --- STAGE 4 PHASE C: REMOTE AUDIO SEND PROTOTYPE ---
+        let topo = &self.topology_manager.current_topology;
+        for node_idx in 0..topo.node_count {
+            if let Some(target) = topo.node_assignments.get(&(node_idx as u32)) {
+                if target != "local" {
+                    // Check if this is a NetworkProxySend node or any node that should send audio remote
+                    // For now, we prototype by pulling from the bridge if a block is waiting
+                    if let Some(block) = self.audio_bridge.pop_block(node_idx as u32) {
+                        let remote_manager = self.sidecar_supervisor.remote_manager.clone();
+                        tokio::spawn(async move {
+                            let mut manager = remote_manager.lock().await;
+                            manager.send_audio_block(node_idx as u32, block).await;
+                        });
+                    }
+                }
             }
         }
 

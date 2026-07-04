@@ -27,10 +27,28 @@ impl SignalProcessor for MyProcessor {
 // Implement required traits...
 
 fn main() {
-    // Boilerplate for SHM attachment provided by SidecarHost
+    // Option A: Manual Host Initialization
     let mut host = unsafe { SidecarHost::new_from_args() };
     host.run(MyProcessor);
 }
+
+// Option B: Using the SidecarBuilder Macro (Recommended)
+sidecar_builder!();
+
+fn main() {
+    SidecarApp::build_and_run("my-processor", MyProcessor::new());
+}
+```
+
+## DNA Transfusion Kernels
+
+The SDK provides `DnaKernel` utilities to assist with genetic audio processing:
+
+```rust
+use sidecar_sdk::DnaKernel;
+
+// Apply spectral shaping from SoundDNA
+DnaKernel::apply_spectral_personality(&mut output, &input, &dna, 0.5);
 ```
 
 ## Real-time Safety Invariants

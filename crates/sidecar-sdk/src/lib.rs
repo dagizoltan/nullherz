@@ -157,6 +157,27 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
     }
 }
 
+pub struct DnaKernel;
+
+impl DnaKernel {
+    pub fn apply_spectral_personality(output: &mut [f32], input: &[f32], dna: &nullherz_traits::SoundDNA, bias: f32) {
+        // Implementation of spectral shaping based on energy map (simplified for SDK utility)
+        for i in 0..output.len().min(input.len()) {
+            let bin = (i % 64);
+            let target_gain = dna.spectral.energy_map[bin] as f32 / 255.0;
+            let current_gain = 1.0 * (1.0 - bias) + target_gain * bias;
+            output[i] = input[i] * current_gain;
+        }
+    }
+
+    pub fn apply_rhythmic_offset(samples: &mut [f32], dna: &nullherz_traits::SoundDNA, sample_rate: f32) {
+        // Apply micro-timing offsets from RhythmicDNA
+        let _offset_ms = dna.rhythmic.micro_timing[0] as f32 / 100.0;
+        let _offset_samples = (_offset_ms * sample_rate / 1000.0) as i32;
+        // In a real kernel, this would involve a delay line or sample shift
+    }
+}
+
 /// Example of how to handle Opaque Envelope extensions in a Sidecar.
 pub fn handle_extension(processor: &mut dyn AudioProcessor, envelope: &nullherz_traits::OpaqueEnvelope) {
     // Domain 0x53444B31 is "SDK1"

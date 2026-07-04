@@ -77,6 +77,7 @@ pub enum CoreCommand {
     CommitTopology,
     SetBpm(f32),
     SwitchBackend(AudioBackendType),
+    CalibrateLatency,
     #[serde(with = "serde_big_array::BigArray")]
     LoadMidiMap([u8; 32]), // Fixed-size buffer for filename
     #[serde(with = "serde_big_array::BigArray")]

@@ -54,3 +54,44 @@ pub fn sidecar(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     TokenStream::from(expanded)
 }
+
+#[proc_macro]
+pub fn sidecar_builder(_item: TokenStream) -> TokenStream {
+    let expanded = quote! {
+        pub struct SidecarApp;
+        impl SidecarApp {
+            pub fn build_and_run(name: &str, processor: impl audio_core::AudioProcessor + 'static) {
+                println!("Building sidecar: {}", name);
+                // Implementation mirrors 'run_as_sidecar' but provided as a standalone builder
+                let args: Vec<String> = std::env::args().collect();
+                let mut cmd_shm = "";
+                let mut sig_shm = "";
+                let mut efd_val = -1;
+                let mut channels = 2;
+
+                for i in 0..args.len() {
+                    match args[i].as_str() {
+                        "--command-shm" if i + 1 < args.len() => cmd_shm = &args[i+1],
+                        "--signal-shm" if i + 1 < args.len() => sig_shm = &args[i+1],
+                        "--event-fd" if i + 1 < args.len() => efd_val = args[i+1].parse().unwrap_or(-1),
+                        "--channels" if i + 1 < args.len() => channels = args[i+1].parse().unwrap_or(2),
+                        _ => {}
+                    }
+                }
+
+                let mut inputs = Vec::new();
+                let mut outputs = Vec::new();
+                for i in 0..args.len() {
+                    if args[i] == "--input-shm" && i + 1 < args.len() { inputs.push(args[i+1].clone()); }
+                    if args[i] == "--output-shm" && i + 1 < args.len() { outputs.push(args[i+1].clone()); }
+                }
+
+                unsafe {
+                    let mut sidecar = sidecar_sdk::SidecarHost::new(cmd_shm, sig_shm, &inputs, &outputs, efd_val);
+                    sidecar.run(processor);
+                }
+            }
+        }
+    };
+    TokenStream::from(expanded)
+}

@@ -49,6 +49,8 @@ pub struct SystemConfig {
     pub midi_ports: Vec<String>,
     pub sample_rate: u32,
     pub block_size: u32,
+    #[serde(default)]
+    pub calibration_samples: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
