@@ -32,6 +32,9 @@ impl AnalysisKernel {
         // 2. Detect BPM
         metadata.bpm = self.detect_bpm_from_transients(&transients);
 
+        // 2b. Calculate Peaks
+        metadata.peaks = Arc::new(self.calculate_peaks(buffer, 1024));
+
         // 3. DNA Analysis (Spectral)
         self.analyze_spectral(buffer, &mut dna);
 
@@ -40,6 +43,9 @@ impl AnalysisKernel {
 
         // 5. DNA Analysis (Spatial)
         self.analyze_spatial(buffer, &transients, &mut dna);
+
+        // 6. Detect Root Key
+        metadata.root_key = self.detect_root_key(buffer);
 
         (metadata, dna)
     }
@@ -97,6 +103,24 @@ impl AnalysisKernel {
             final_bpm = 120.0;
         }
         final_bpm
+    }
+
+    fn calculate_peaks(&self, buffer: &[f32], target_width: usize) -> Vec<f32> {
+        if buffer.is_empty() { return Vec::new(); }
+        let mut peaks = Vec::with_capacity(target_width);
+        let chunk_size = buffer.len() / target_width;
+        if chunk_size == 0 { return buffer.to_vec(); }
+
+        for i in 0..target_width {
+            let start = i * chunk_size;
+            let end = (start + chunk_size).min(buffer.len());
+            let mut max_val = 0.0f32;
+            for &s in &buffer[start..end] {
+                if s.abs() > max_val { max_val = s.abs(); }
+            }
+            peaks.push(max_val);
+        }
+        peaks
     }
 
     fn analyze_spectral(&mut self, buffer: &[f32], dna: &mut nullherz_traits::SoundDNA) {
@@ -181,6 +205,46 @@ impl AnalysisKernel {
                 }
             }
         }
+    }
+
+    fn detect_root_key(&mut self, buffer: &[f32]) -> Option<f32> {
+        if buffer.is_empty() { return None; }
+
+        let fft_size = 4096;
+        let fft = SimdFft::new(fft_size);
+        let mut re = AlignedBuffer::new(fft_size);
+        let mut im = AlignedBuffer::new(fft_size);
+
+        let mut chromagram = [0.0f32; 12];
+        let max_samples = buffer.len().min(self.sample_rate as usize * 2);
+        let num_windows = max_samples / fft_size;
+
+        if num_windows == 0 { return None; }
+
+        for w in 0..num_windows {
+            let offset = w * fft_size;
+            re.fill(0.0);
+            im.fill(0.0);
+            re[..fft_size].copy_from_slice(&buffer[offset..offset+fft_size]);
+
+            fft.process(&mut re, &mut im);
+
+            for bin in 1..fft_size/2 {
+                let freq = (bin as f32 * self.sample_rate) / fft_size as f32;
+                if !(20.0..=2000.0).contains(&freq) { continue; }
+
+                let mag = (re[bin]*re[bin] + im[bin]*im[bin]).sqrt();
+                let semitone = 12.0 * (freq / 440.0).log2() + 69.0;
+                let pitch_class = (semitone.round() as i32 % 12 + 12) % 12;
+                chromagram[pitch_class as usize] += mag;
+            }
+        }
+
+        let (best_note, &max_mag) = chromagram.iter().enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())?;
+
+        if max_mag < 0.1 { return None; }
+        Some(best_note as f32)
     }
 
     fn analyze_spatial(&self, buffer: &[f32], transients: &[u64], dna: &mut nullherz_traits::SoundDNA) {

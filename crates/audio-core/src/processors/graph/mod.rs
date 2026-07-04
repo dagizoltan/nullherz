@@ -92,6 +92,12 @@ impl ProcessorGraph {
 
     fn apply_mutation_internal(&mut self, mutation: TopologyMutation) {
         match mutation {
+            TopologyMutation::LoadProcessorState { node_idx, state_data } => {
+                if let Some(node) = self.nodes.get_mut(node_idx as usize) {
+                    let proc = unsafe { &mut *node.processor.get() };
+                    proc.load_state(&state_data);
+                }
+            }
             TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
                 let n_idx = node_idx as usize;
                 let i_idx = input_idx as usize;
@@ -155,12 +161,6 @@ impl ProcessorGraph {
                 let idx = node_idx as usize;
                 if idx < self.node_count {
                     unsafe { (*self.nodes[idx].processor.get()).apply_topology_mutation(TopologyMutation::UpdateMetadata { node_idx, metadata }); }
-                }
-            }
-            TopologyMutation::LoadProcessorState { node_idx, state_data } => {
-                let idx = node_idx as usize;
-                if idx < self.node_count {
-                    unsafe { (*self.nodes[idx].processor.get()).load_state(&state_data); }
                 }
             }
         }

@@ -35,7 +35,7 @@ impl TelemetryFinalizer {
 
         let elapsed_cycles = crate::get_cycles().wrapping_sub(start_cycles);
         let current_ns = (elapsed_cycles as f64 * ns_per_cycle) as u64;
-        let peak = metrics.update_peak(current_ns, sample_counter, num_samples);
+        let peak = metrics.update_peak(current_ns, transport.sample_rate, sample_counter, num_samples);
 
         // 1024-point Spectrum Analysis (AnaWaves Stage 2)
         // Optimized for RT-safety: No allocations, zero-padded input
@@ -64,6 +64,15 @@ impl TelemetryFinalizer {
         }
 
         // Goniometer decimated L/R Capture
+        let mut dna_energy_map = [0u8; 64];
+        for i in 0..64 {
+            let mut sum = 0.0;
+            for k in 0..2 {
+                sum += spectrum[i * 2 + k];
+            }
+            dna_energy_map[i] = (sum / 2.0 * 255.0).min(255.0) as u8;
+        }
+
         let mut goniometer_pts = [0.0f32; 128];
         if outputs.len() >= 2 {
             let left = &outputs[0];
@@ -83,6 +92,7 @@ impl TelemetryFinalizer {
             peak_process_time_ns: peak,
             sample_counter,
             xrun_count: xrun_count_atomic.load(Ordering::Relaxed),
+            last_xrun_magnitude_ns: metrics.last_xrun_magnitude_ns.load(Ordering::Relaxed),
             resource_leaks: metrics.resource_leaks.load(Ordering::Relaxed),
             bpm: transport.bpm,
             beat_position: transport.beat_position,
@@ -90,6 +100,7 @@ impl TelemetryFinalizer {
             peak_levels,
             spectrum,
             goniometer_pts,
+            dna_energy_map,
             active_clips: [255; 8],
             starting_clips_mask: [0; 8],
         };

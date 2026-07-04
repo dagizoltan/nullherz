@@ -3,9 +3,10 @@ use crate::topology_manager::TopologyManager;
 use nullherz_traits::{TopologyMutation, TimestampedCommand};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use ipc_layer::tcp::TcpIpcConsumer;
+use ipc_layer::tcp::{TcpIpcConsumer, TcpIpcProducer};
 use tokio::io::AsyncReadExt;
 use std::time::{Instant, Duration};
+use std::net::UdpSocket;
 
 pub struct RemoteSidecar {
     pub addr: String,
@@ -65,6 +66,66 @@ impl SidecarSupervisor {
             manager: SidecarManager::new(),
             remote_manager: Arc::new(Mutex::new(RemoteSidecarManager::new())),
         }
+    }
+
+    pub async fn start_discovery_listener(remote_manager: Arc<Mutex<RemoteSidecarManager>>, port: u16) -> std::io::Result<()> {
+        let socket = UdpSocket::bind(format!("0.0.0.0:{}", port))?;
+        socket.set_nonblocking(true)?;
+        println!("Conductor: UDP Discovery listening on port {}", port);
+
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            loop {
+                if let Ok((len, addr)) = socket.recv_from(&mut buf) {
+                    let msg = String::from_utf8_lossy(&buf[..len]);
+                    if msg.starts_with("nullherz_sidecar:") {
+                        let sidecar_port = msg.split(':').nth(1).and_then(|p| p.parse::<u16>().ok()).unwrap_or(9001);
+                        let sidecar_addr = format!("{}:{}", addr.ip(), sidecar_port);
+
+                        let mut manager = remote_manager.lock().await;
+                        if !manager.remote_nodes.iter().any(|n| n.addr == sidecar_addr) {
+                            println!("Conductor: Discovered remote sidecar at {}. Attempting to attach...", sidecar_addr);
+                            if let Ok(stream_prod) = TcpIpcProducer::connect(&sidecar_addr).await {
+                                if let Ok(stream) = stream_prod.into_inner() {
+                                    let (mut reader, writer) = stream.into_split();
+                                    let writer_arc = Arc::new(Mutex::new(writer));
+                                    let remote_manager_clone = remote_manager.clone();
+                                    let addr_clone = sidecar_addr.clone();
+
+                                    tokio::spawn(async move {
+                                        loop {
+                                            let mut len_buf = [0u8; 4];
+                                            if reader.read_exact(&mut len_buf).await.is_err() { break; }
+                                            let len = u32::from_be_bytes(len_buf) as usize;
+                                            if len > 65536 { break; }
+                                            let mut buffer = vec![0u8; len];
+                                            if reader.read_exact(&mut buffer).await.is_err() { break; }
+                                            if let Ok(cmd) = serde_json::from_slice::<TimestampedCommand>(&buffer) {
+                                                let mut manager = remote_manager_clone.lock().await;
+                                                if let Some(node) = manager.remote_nodes.iter_mut().find(|n| n.addr == addr_clone) {
+                                                    node.last_heartbeat = Instant::now();
+                                                }
+                                                manager.pending_commands.push(cmd);
+                                            }
+                                            tokio::task::yield_now().await;
+                                        }
+                                    });
+
+                                    manager.remote_nodes.push(RemoteSidecar {
+                                        addr: sidecar_addr,
+                                        writer: writer_arc,
+                                        last_heartbeat: Instant::now(),
+                                        is_active: true,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        });
+        Ok(())
     }
 
     pub async fn listen_for_remote_sidecars(remote_manager: Arc<Mutex<RemoteSidecarManager>>, addr: &str) -> std::io::Result<()> {

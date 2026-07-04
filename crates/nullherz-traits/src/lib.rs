@@ -211,6 +211,10 @@ pub enum TopologyCommand {
         node_idx: u32,
         processor_type_id: ProcessorTypeId,
     },
+    SetBypass {
+        node_idx: u32,
+        enabled: bool,
+    },
 }
 
 /// A command with an associated timestamp for deterministic execution.

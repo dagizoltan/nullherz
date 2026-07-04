@@ -94,9 +94,15 @@ impl Conductor {
                 let _ = crate::sidecar_supervisor::SidecarSupervisor::listen_for_remote_sidecars(remote_manager, "0.0.0.0:9000").await;
             });
 
-            // Start UDP Discovery Beacon
+            // Start UDP Discovery Beacon (Conductor identifying itself)
             let discovery = crate::discovery::DiscoveryBeacon::new(9000, "Conductor");
             discovery.start_broadcast();
+
+            // Start UDP Discovery Listener (Conductor finding sidecars)
+            let remote_manager = self.sidecar_supervisor.remote_manager.clone();
+            tokio::spawn(async move {
+                let _ = crate::sidecar_supervisor::SidecarSupervisor::start_discovery_listener(remote_manager, 9001).await;
+            });
         }
 
         crate::EngineContext {

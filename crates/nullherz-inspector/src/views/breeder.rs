@@ -45,14 +45,22 @@ impl BreederView {
                 ui.separator();
 
                 egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
-                    let tracks = &app.cached_library;
+                    let mut tracks = app.cached_library.clone();
 
-                    // Reference DNA for similarity highlighting
+                    // Matchmaking Sort (Genetic Matchmaker UI)
                     let other_dna = if parent_idx == 0 {
                         state.parent_b_id.and_then(|id| app.library_db.get_track(id).ok().flatten()).map(|t| t.metadata.dna)
                     } else {
                         state.parent_a_id.and_then(|id| app.library_db.get_track(id).ok().flatten()).map(|t| t.metadata.dna)
                     };
+
+                    if let Some(ref target) = other_dna {
+                         tracks.sort_by(|a, b| {
+                             let sa = nullherz_dna::calculate_similarity(target, &a.metadata.dna);
+                             let sb = nullherz_dna::calculate_similarity(target, &b.metadata.dna);
+                             sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+                         });
+                    }
 
                     for track in tracks {
                         let similarity = other_dna.as_ref().map(|other| nullherz_dna::calculate_similarity(&track.metadata.dna, other));
@@ -60,7 +68,7 @@ impl BreederView {
                         ui.horizontal(|ui| {
                             if let Some(s) = similarity {
                                 let color = if s > 0.8 { Color32::from_rgb(0, 255, 200) } else if s > 0.5 { Color32::YELLOW } else { Color32::GRAY };
-                                ui.add(egui::ProgressBar::new(s).desired_width(40.0).fill(color));
+                                ui.add(egui::ProgressBar::new(s).desired_width(60.0).fill(color).text(format!("{:.0}%", s * 100.0)));
                             }
 
                             let label = format!("{} - {}", track.title, track.artist);
