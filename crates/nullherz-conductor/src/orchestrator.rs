@@ -2,6 +2,7 @@ use crate::engine_coordinator::EngineCoordinator;
 use crate::topology_manager::TopologyManager;
 use crate::transfusion_manager::TransfusionManager;
 use crate::mixer_bridge::MixerBridge;
+use crate::ipc_audio_bridge::IpcAudioBridge;
 use crate::sidecar_supervisor::SidecarSupervisor;
 use crate::midi_mapper::MidiMapper;
 use crate::pattern_manager::PatternManager;
@@ -20,6 +21,7 @@ pub struct Conductor {
     pub pattern_manager: PatternManager,
     pub clip_orchestrator: ClipOrchestrator,
     pub modulation_matrix: ModulationMatrix,
+    pub audio_bridge: Arc<IpcAudioBridge>,
     pub midi_mapper: MidiMapper,
     pub midi_clock: crate::midi_clock::MidiClockTracker,
     pub analysis_worker: Option<crate::analysis_worker::AnalysisWorker>,
@@ -54,6 +56,7 @@ impl Conductor {
             pattern_manager: PatternManager::new(),
             clip_orchestrator: ClipOrchestrator::new(),
             modulation_matrix: ModulationMatrix::new(),
+            audio_bridge: Arc::new(IpcAudioBridge::new()),
             midi_mapper: MidiMapper::new(),
             midi_clock: crate::midi_clock::MidiClockTracker::new(),
             analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
@@ -90,8 +93,9 @@ impl Conductor {
         // Setup Remote Sidecar Listener (Stage 2 Distributed DSP)
         if let Ok(_handle) = tokio::runtime::Handle::try_current() {
             let remote_manager = self.sidecar_supervisor.remote_manager.clone();
+            let audio_bridge = self.audio_bridge.clone();
             tokio::spawn(async move {
-                let _ = crate::sidecar_supervisor::SidecarSupervisor::listen_for_remote_sidecars(remote_manager, "0.0.0.0:9000").await;
+                let _ = crate::sidecar_supervisor::SidecarSupervisor::listen_for_remote_sidecars(remote_manager, audio_bridge, "0.0.0.0:9000").await;
             });
 
             // Start UDP Discovery Beacon (Conductor identifying itself)
@@ -100,8 +104,9 @@ impl Conductor {
 
             // Start UDP Discovery Listener (Conductor finding sidecars)
             let remote_manager = self.sidecar_supervisor.remote_manager.clone();
+            let audio_bridge = self.audio_bridge.clone();
             tokio::spawn(async move {
-                let _ = crate::sidecar_supervisor::SidecarSupervisor::start_discovery_listener(remote_manager, 9001).await;
+                let _ = crate::sidecar_supervisor::SidecarSupervisor::start_discovery_listener(remote_manager, audio_bridge, 9001).await;
             });
         }
 

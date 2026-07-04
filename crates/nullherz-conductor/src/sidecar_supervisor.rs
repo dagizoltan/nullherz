@@ -1,5 +1,6 @@
 use fx_runtime::SidecarManager;
 use crate::topology_manager::TopologyManager;
+use crate::ipc_audio_bridge::IpcAudioBridge;
 use nullherz_traits::{TopologyMutation, TimestampedCommand};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -103,7 +104,7 @@ impl SidecarSupervisor {
         }
     }
 
-    pub async fn start_discovery_listener(remote_manager: Arc<Mutex<RemoteSidecarManager>>, port: u16) -> std::io::Result<()> {
+    pub async fn start_discovery_listener(remote_manager: Arc<Mutex<RemoteSidecarManager>>, audio_bridge: Arc<IpcAudioBridge>, port: u16) -> std::io::Result<()> {
         let socket = UdpSocket::bind(format!("0.0.0.0:{}", port))?;
         socket.set_nonblocking(true)?;
         println!("Conductor: UDP Discovery listening on port {}", port);
@@ -125,6 +126,7 @@ impl SidecarSupervisor {
                                     let (mut reader, writer) = stream.into_split();
                                     let writer_arc = Arc::new(Mutex::new(writer));
                                     let remote_manager_clone = remote_manager.clone();
+                                    let audio_bridge_clone = audio_bridge.clone();
                                     let addr_clone = sidecar_addr.clone();
 
                                     tokio::spawn(async move {
@@ -138,11 +140,11 @@ impl SidecarSupervisor {
 
                                             // Handle Audio Return Blocks (Type 3)
                                             if buffer.len() >= 5 && buffer[0] == 3 {
+                                                let node_idx = u32::from_be_bytes(buffer[1..5].try_into().unwrap());
                                                 let block_data = &buffer[5..];
                                                 if block_data.len() == std::mem::size_of::<nullherz_traits::AudioBlock>() {
-                                                     let _block: &nullherz_traits::AudioBlock = bytemuck::from_bytes(block_data);
-                                                     // TODO: Route this block to the local engine's NetworkProxyReceive buffer.
-                                                     // This will require an SPSC queue between the supervisor and the engine.
+                                                     let block: &nullherz_traits::AudioBlock = bytemuck::from_bytes(block_data);
+                                                     let _ = audio_bridge_clone.push_block(node_idx, *block);
                                                 }
                                                 continue;
                                             }
@@ -179,7 +181,7 @@ impl SidecarSupervisor {
         Ok(())
     }
 
-    pub async fn listen_for_remote_sidecars(remote_manager: Arc<Mutex<RemoteSidecarManager>>, addr: &str) -> std::io::Result<()> {
+    pub async fn listen_for_remote_sidecars(remote_manager: Arc<Mutex<RemoteSidecarManager>>, audio_bridge: Arc<IpcAudioBridge>, addr: &str) -> std::io::Result<()> {
         let consumer = TcpIpcConsumer::bind(addr).await?;
         println!("Conductor: Listening for remote sidecars on {}", addr);
 
@@ -189,6 +191,7 @@ impl SidecarSupervisor {
                     Ok(stream) => {
                         let peer_addr = stream.peer_addr().map(|a| a.to_string()).unwrap_or_else(|_| "unknown".to_string());
                         let remote_manager_clone = remote_manager.clone();
+                        let audio_bridge_clone = audio_bridge.clone();
                         let addr_clone = peer_addr.clone();
 
                         let (mut reader, writer) = stream.into_split();
@@ -209,9 +212,11 @@ impl SidecarSupervisor {
 
                                 // Handle Audio Return Blocks (Type 3)
                                 if buffer.len() >= 5 && buffer[0] == 3 {
+                                    let node_idx = u32::from_be_bytes(buffer[1..5].try_into().unwrap());
                                     let block_data = &buffer[5..];
                                     if block_data.len() == std::mem::size_of::<nullherz_traits::AudioBlock>() {
-                                         let _block: &nullherz_traits::AudioBlock = bytemuck::from_bytes(block_data);
+                                         let block: &nullherz_traits::AudioBlock = bytemuck::from_bytes(block_data);
+                                         let _ = audio_bridge_clone.push_block(node_idx, *block);
                                     }
                                     continue;
                                 }

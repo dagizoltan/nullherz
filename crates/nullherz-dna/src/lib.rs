@@ -412,7 +412,8 @@ pub struct Matchmaker;
 
 impl Matchmaker {
     pub fn rank_compatibility(target: &nullherz_traits::SoundDNA, candidates: &[LibraryTrack], limit: usize) -> Vec<(u64, f32)> {
-        let mut scores: Vec<(u64, f32)> = candidates.iter()
+        use rayon::prelude::*;
+        let mut scores: Vec<(u64, f32)> = candidates.par_iter()
             .map(|track| {
                 let score = calculate_similarity(target, &track.metadata.dna);
                 (track.id, score)

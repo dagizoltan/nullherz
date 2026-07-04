@@ -16,7 +16,7 @@ impl SidecarHost {
     /// # Safety
     /// All shared memory segment names must exist and be accessible by the current process.
     pub unsafe fn new(cmd_name: &str, sig_name: &str, in_names: &[String], out_names: &[String], efd: i32) -> Self {
-        let (cmd_layout, _) = ShmRingBuffer::<nullherz_traits::Command>::layout(64);
+        let (cmd_layout, _) = ShmRingBuffer::<nullherz_traits::TimestampedCommand>::layout(64);
         let shm_cmd = SharedMemory::open(cmd_name, cmd_layout.size()).unwrap();
 
         let shm_signal = SharedMemory::open(sig_name, std::mem::size_of::<ShmSignal>()).unwrap();
@@ -59,7 +59,7 @@ impl SidecarHost {
 
 pub struct SidecarContext<'a, P: AudioProcessor> {
     processor: P,
-    command_buffer: &'a ShmRingBuffer<nullherz_traits::Command>,
+    command_buffer: &'a ShmRingBuffer<nullherz_traits::TimestampedCommand>,
     #[allow(dead_code)]
     feedback_buffer: Option<&'a ShmRingBuffer<nullherz_traits::ProcessorMetadata>>,
     input_buffers: Vec<&'a ShmRingBuffer<AudioBlock>>,
@@ -77,7 +77,7 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
         shm_outputs: &'a [SharedMemory],
         event_fd: Option<EventFd>,
     ) -> Self {
-        let command_buffer = unsafe { &*(shm_cmd.ptr() as *const ShmRingBuffer<nullherz_traits::Command>) };
+        let command_buffer = unsafe { &*(shm_cmd.ptr() as *const ShmRingBuffer<nullherz_traits::TimestampedCommand>) };
         let signal = unsafe { &*(shm_signal.ptr() as *const ShmSignal) };
         let mut input_buffers = Vec::new();
         for shm in shm_inputs {
@@ -101,8 +101,8 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
 
     pub fn process_once(&mut self) {
         self.signal.pulse_heartbeat();
-        while let Some(cmd) = self.command_buffer.pop() {
-            self.processor.apply_command(&cmd);
+        while let Some(ts_cmd) = self.command_buffer.pop() {
+            self.processor.apply_command(&ts_cmd.command);
         }
 
         let mut in_blocks = [AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; 16];

@@ -7,6 +7,7 @@ pub mod midi_clock;
 pub mod analysis_kernel;
 pub mod transfusion_manager;
 pub mod mixer_bridge;
+pub mod ipc_audio_bridge;
 pub mod sidecar_supervisor;
 pub mod discovery;
 pub mod midi_mapper;

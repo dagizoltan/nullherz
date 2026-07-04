@@ -7,9 +7,18 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     ui.heading("System Topology");
     ui.add_space(10.0);
 
+    let painter = ui.painter();
+    let mut node_positions = std::collections::HashMap::new();
+    let mut socket_positions = std::collections::HashMap::new(); // (node_idx, is_out, socket_idx) -> pos
+
     if let Some((src_node, src_out)) = app.active_connection_source {
         ui.label(RichText::new(format!("DRAGGING CONNECTION FROM NODE {} OUT {}", src_node, src_out)).color(Color32::YELLOW));
         if ui.button("CANCEL").clicked() { app.active_connection_source = None; }
+    }
+
+    if let Some(src_node) = app.active_node_drag {
+        ui.label(RichText::new(format!("DRAGGING NODE {} (Release over remote card to migrate)", src_node)).color(Color32::LIGHT_BLUE));
+        if ui.button("CANCEL DRAG").clicked() { app.active_node_drag = None; }
     }
 
     ui.group(|ui| {
@@ -18,15 +27,24 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (idx, node) in app.graph.nodes.iter().enumerate() {
+                let node_id = ui.make_persistent_id(format!("node_{}", idx));
+
                 ui.horizontal(|ui| {
-                    ui.label(format!("[IDX:{}]", idx));
-                    ui.strong(&node.name);
+                    let rect = ui.label(format!("[IDX:{}]", idx)).rect;
+                    node_positions.insert(idx as u32, rect.center());
+
+                    let node_label = ui.strong(&node.name);
+                    if node_label.clicked() {
+                        app.active_node_drag = Some(idx as u32);
+                    }
 
                     ui.add_space(10.0);
 
                     // Output Sockets
                     for out_idx in 0..node.outputs.len() {
-                        if ui.button(format!("OUT {}", out_idx)).clicked() {
+                        let btn = ui.button(format!("OUT {}", out_idx));
+                        socket_positions.insert((idx as u32, true, out_idx as u32), btn.rect.center());
+                        if btn.clicked() {
                             app.active_connection_source = Some((idx as u32, out_idx as u32));
                         }
                     }
@@ -36,6 +54,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     // Input Sockets
                     for in_idx in 0..node.inputs.len() {
                         let btn = ui.button(format!("IN {}", in_idx));
+                        socket_positions.insert((idx as u32, false, in_idx as u32), btn.rect.center());
                         if btn.clicked() {
                             if let Some((src_node, _src_out)) = app.active_connection_source {
                                 // For now, we assume buffer_idx = src_node (simplification)
@@ -52,21 +71,34 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                     ui.add_space(20.0);
 
-                    // Bypass Toggle
-                    let mut is_bypassed = false; // Note: Current InspectorApp doesn't track bypass state locally.
-                    // We'll simulate a toggle that emits the command.
-                    if ui.button("BYPASS").clicked() {
-                        let _ = app.command_sender.send(Command::Topology(TopologyCommand::SetBypass {
-                            node_idx: idx as u32,
-                            enabled: true,
-                        }));
+                    // Remote Card / Hot-Swap target
+                    let remote_addr = app.graph.node_assignments.get(&(idx as u32)).cloned().unwrap_or_else(|| "local".to_string());
+                    let is_local = remote_addr == "local";
+                    let card_color = if is_local { Color32::from_gray(50) } else { Color32::from_rgb(0, 100, 200) };
+
+                    let card_resp = ui.group(|ui| {
+                        ui.label(RichText::new(&remote_addr).color(Color32::WHITE).small());
+                    }).response;
+
+                    if card_resp.clicked() {
+                        if let Some(src_node) = app.active_node_drag {
+                             if src_node != idx as u32 {
+                                 // Emit Migration Mutation
+                                 let _ = app.command_sender.send(Command::Topology(TopologyCommand::SwapProcessor {
+                                     node_idx: src_node,
+                                     processor_type_id: nullherz_traits::ProcessorTypeId(0), // Dummy/Marker for migration
+                                 }));
+                                 println!("Migrating node {} to assigned machine {}", src_node, remote_addr);
+                             }
+                             app.active_node_drag = None;
+                        }
                     }
 
                     if let Some(t) = telemetry {
                          if idx < t.node_times_ns.len() {
                              let time = t.node_times_ns[idx];
                              let color = if time > 500_000 { Color32::RED } else if time > 100_000 { Color32::YELLOW } else { Color32::from_rgb(0, 255, 200) };
-                             ui.label(RichText::new(format!("Time: {} ns", time)).color(color));
+                             ui.label(RichText::new(format!("{} ns", time)).color(color));
                          }
                     }
                 });
@@ -74,7 +106,29 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         });
     });
 
+    // Draw existing cables
+    for (n_idx, node) in app.graph.nodes.iter().enumerate() {
+        for (in_idx, &buffer_idx) in node.inputs.iter().enumerate() {
+             // In our simplified model, buffer_idx - 10 = src_node_idx
+             if buffer_idx >= 10 {
+                 let src_node_idx = buffer_idx - 10;
+                 if let (Some(&start), Some(&end)) = (socket_positions.get(&(src_node_idx, true, 0)), socket_positions.get(&(n_idx as u32, false, in_idx as u32))) {
+                     painter.line_segment([start, end], egui::Stroke::new(2.0, Color32::from_gray(150)));
+                 }
+             }
+        }
+    }
+
+    // Draw active drag cable
+    if let Some((src_node, src_out)) = app.active_connection_source {
+        if let Some(&start) = socket_positions.get(&(src_node, true, src_out)) {
+            if let Some(mouse_pos) = ui.input(|i| i.pointer.latest_pos()) {
+                painter.line_segment([start, mouse_pos], egui::Stroke::new(2.0, Color32::YELLOW));
+            }
+        }
+    }
+
     ui.add_space(20.0);
     ui.heading("Active Connections");
-    ui.label("Edge connections view coming soon.");
+    ui.label("Edge connections view enhanced with visual cables.");
 }
