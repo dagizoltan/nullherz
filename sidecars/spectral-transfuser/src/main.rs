@@ -73,7 +73,7 @@ fn main() {
         // Simple bypass/process loop for each channel
         for i in 0..args.channels {
             if let (Some(in_block), Some(out_rb)) = (unsafe { (*input_rbs[i]).pop() }, output_rbs.get(i)) {
-                let mut out_block = AudioBlock { data: [0.0; 256], len: in_block.len };
+                let mut out_block = AudioBlock { data: [0.0; 256], len: in_block.len, _pad: [0; 15] };
 
                 // For simplicity in this reference, we process blocks through the pipeline
                 pipeline.process(&in_block.data[..in_block.len as usize], &mut out_block.data[..in_block.len as usize], |re, im, n, _win, _fft| {
