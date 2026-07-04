@@ -43,6 +43,7 @@ pub enum View {
     Settings,
     Library,
     Breeder,
+    SetupWizard,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -132,6 +133,7 @@ pub struct InspectorApp {
     pub(crate) wgpu_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::wgpu_backend::WgpuRenderer>>>,
     pub(crate) waveform_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>>,
     pub(crate) active_connection_source: Option<(u32, u32)>, // (node_idx, output_idx)
+    pub(crate) active_node_drag: Option<u32>,
 }
 
 impl InspectorApp {
@@ -200,6 +202,7 @@ impl InspectorApp {
             wgpu_renderer: None,
             waveform_renderer: None,
             active_connection_source: None,
+            active_node_drag: None,
         }
     }
 
@@ -238,6 +241,7 @@ impl eframe::App for InspectorApp {
                         (View::Modulation, "〰", "MOD"),
                         (View::Breeder, "🧬", "BREED"),
                         (View::Settings, "⚙", "SET"),
+                        (View::SetupWizard, "🧙", "SETUP"),
                     ];
 
                     for (view, icon, label) in nav_buttons {
@@ -319,6 +323,7 @@ impl eframe::App for InspectorApp {
                     views::breeder::BreederView::show(ui, &mut view, &telemetry, self);
                     self.breeding_view = view;
                  }
+                 View::SetupWizard => views::setup_wizard::render(self, ui),
                  _ => { ui.label("View coming soon..."); }
              }
         });

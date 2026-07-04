@@ -205,6 +205,7 @@ impl AudioProcessor for NetworkProxySend {
 pub struct NetworkProxyReceive {
     pub listener: Option<std::net::TcpListener>,
     pub stream: Option<std::net::TcpStream>,
+    pub ipc_consumer: Option<ipc_layer::IpcAudioConsumer>,
     pub buffer: AudioBlock,
 }
 
@@ -215,6 +216,16 @@ impl NetworkProxyReceive {
         Self {
             listener,
             stream: None,
+            ipc_consumer: None,
+            buffer: AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] },
+        }
+    }
+
+    pub fn with_ipc(consumer: ipc_layer::IpcAudioConsumer) -> Self {
+        Self {
+            listener: None,
+            stream: None,
+            ipc_consumer: Some(consumer),
             buffer: AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] },
         }
     }
@@ -222,29 +233,42 @@ impl NetworkProxyReceive {
 
 impl nullherz_traits::SignalProcessor for NetworkProxyReceive {
     fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
-        if self.stream.is_none() {
-            if let Some(ref l) = self.listener {
-                if let Ok((s, _)) = l.accept() {
-                    let _ = s.set_nonblocking(true);
-                    self.stream = Some(s);
+        let mut block_received = false;
+
+        if let Some(ref mut consumer) = self.ipc_consumer {
+            if let Some(block) = consumer.pop() {
+                self.buffer = block;
+                block_received = true;
+            }
+        } else {
+            if self.stream.is_none() {
+                if let Some(ref l) = self.listener {
+                    if let Ok((s, _)) = l.accept() {
+                        let _ = s.set_nonblocking(true);
+                        self.stream = Some(s);
+                    }
+                }
+            }
+
+            if let Some(ref mut stream) = self.stream {
+                use std::io::Read;
+                if stream.read_exact(bytemuck::bytes_of_mut(&mut self.buffer)).is_ok() {
+                    block_received = true;
                 }
             }
         }
 
-        if let Some(ref mut stream) = self.stream {
-            use std::io::Read;
-            if stream.read_exact(bytemuck::bytes_of_mut(&mut self.buffer)).is_ok() {
-                use audio_dsp::simd_vec::{load_f32x16, store_f32x16};
-                for output in outputs {
-                    let len = output.len().min(self.buffer.len as usize);
-                    for i in (0..len).step_by(16) {
-                        let rem = (len - i).min(16);
-                        if rem == 16 {
-                            let v = load_f32x16(&self.buffer.data, i);
-                            store_f32x16(output, i, v);
-                        } else {
-                            output[i..i+rem].copy_from_slice(&self.buffer.data[i..i+rem]);
-                        }
+        if block_received {
+            use audio_dsp::simd_vec::{load_f32x16, store_f32x16};
+            for output in outputs {
+                let len = output.len().min(self.buffer.len as usize);
+                for i in (0..len).step_by(16) {
+                    let rem = (len - i).min(16);
+                    if rem == 16 {
+                        let v = load_f32x16(&self.buffer.data, i);
+                        store_f32x16(output, i, v);
+                    } else {
+                        output[i..i+rem].copy_from_slice(&self.buffer.data[i..i+rem]);
                     }
                 }
             }

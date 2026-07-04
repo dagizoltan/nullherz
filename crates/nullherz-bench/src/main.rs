@@ -14,20 +14,40 @@ fn main() {
     
     // 1. Start REDB 10,000 track insertion thread
     let db_thread = std::thread::spawn(move || {
-        println!("REDb Writer: Starting 10,000 track insertion...");
+        let count = 100_000;
+        println!("REDb Writer: Starting {} track insertion (synthetic DNA)...", count);
         let db = LibraryDatabase::load(db_path).unwrap();
         let start = Instant::now();
-        for i in 0..10_000 {
+        for i in 0..count {
+            let mut dna = nullherz_traits::SoundDNA::default();
+            // Fill with random-ish synthetic data
+            for j in 0..64 { dna.spectral.energy_map[j] = (i % 255) as u8; }
+            dna.rhythmic.syncopation_index = (i % 100) as f32 / 100.0;
+
             let track = LibraryTrack {
                 id: i,
                 path: format!("/fake/path/track_{}.wav", i),
                 title: format!("Stress Track {}", i),
                 artist: "DJ Stress".to_string(),
-                metadata: SampleMetadata::new_empty(),
+                metadata: SampleMetadata {
+                    dna,
+                    ..SampleMetadata::new_empty()
+                },
             };
             db.save_track(&track).unwrap();
         }
-        println!("REDb Writer: Completed 10,000 tracks in {:?}", start.elapsed());
+        println!("REDb Writer: Completed {} tracks in {:?}", count, start.elapsed());
+
+        // Test Matchmaker performance
+        let target_dna = nullherz_traits::SoundDNA::default();
+        let tracks = db.list_tracks().unwrap();
+        println!("Matchmaker: Ranking {} candidates...", tracks.len());
+        let rank_start = Instant::now();
+        let results = nullherz_dna::Matchmaker::rank_compatibility(&target_dna, &tracks, 10);
+        println!("Matchmaker: Top 10 results found in {:?} (Parallel: Rayon)", rank_start.elapsed());
+        for (id, score) in results {
+            println!("  Track ID {}: Score {:.4}", id, score);
+        }
     });
 
     // 2. Start Engine & Sidecar Supervisor

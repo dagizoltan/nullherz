@@ -40,6 +40,7 @@ impl AudioProcessor for BiquadProcessor {
 fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u32) {
+        if !value.is_finite() || value.abs() > 10.0 { return; }
         let mut coeffs = self.inner.kernels[0].target_coeffs;
         match param_id {
             0 => coeffs.b0 = value,
@@ -138,6 +139,7 @@ impl AudioProcessor for SimdBiquadProcessor {
 fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
+        if !value.is_finite() || value.abs() > 10.0 { return; }
         let mut coeffs = self.inner.coeffs;
         match param_id {
             0 => coeffs.b0 = value,

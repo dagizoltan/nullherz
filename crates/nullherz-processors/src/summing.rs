@@ -35,8 +35,9 @@ fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
             }
     }
 fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
+        if !value.is_finite() { return; }
         if param_id == 0 {
-            self.inner.set_gain(value);
+            self.inner.set_gain(value.clamp(0.0, 4.0));
         }
     }
 fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {

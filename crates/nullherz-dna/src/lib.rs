@@ -17,6 +17,14 @@ pub struct LibraryTrack {
 
 const TRACKS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("tracks");
 const CRATES_TABLE: TableDefinition<(&str, u64), ()> = TableDefinition::new("crates_v2");
+const SMART_CRATES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("smart_crates");
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct SmartCrateDefinition {
+    pub name: String,
+    pub target_dna: nullherz_traits::SoundDNA,
+    pub threshold: f32,
+}
 
 #[derive(Clone)]
 pub struct RegisteredSample {
@@ -36,6 +44,7 @@ impl LibraryDatabase {
         {
             let _ = write_txn.open_table(TRACKS_TABLE)?;
             let _ = write_txn.open_table(CRATES_TABLE)?;
+            let _ = write_txn.open_table(SMART_CRATES_TABLE)?;
         }
         write_txn.commit()?;
         Ok(Self { db })
@@ -142,6 +151,65 @@ impl LibraryDatabase {
         }
         write_txn.commit()?;
         Ok(())
+    }
+
+    pub fn save_smart_crate(&self, definition: &SmartCrateDefinition) -> Result<(), Box<dyn std::error::Error>> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(SMART_CRATES_TABLE)?;
+            let serialized = serde_json::to_vec(definition)?;
+            table.insert(definition.name.as_str(), serialized.as_slice())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn get_smart_crate(&self, name: &str) -> Result<Option<SmartCrateDefinition>, Box<dyn std::error::Error>> {
+        let read_txn = self.db.begin_read()?;
+        let table = match read_txn.open_table(SMART_CRATES_TABLE) {
+            Ok(t) => t,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        let result = table.get(name)?;
+        if let Some(guard) = result {
+            let definition: SmartCrateDefinition = serde_json::from_slice(guard.value())?;
+            return Ok(Some(definition));
+        }
+        Ok(None)
+    }
+
+    pub fn list_smart_crates(&self) -> Result<Vec<SmartCrateDefinition>, Box<dyn std::error::Error>> {
+        let read_txn = self.db.begin_read()?;
+        let table = match read_txn.open_table(SMART_CRATES_TABLE) {
+            Ok(t) => t,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+        let mut crates = Vec::new();
+        for res in table.iter()? {
+            let (_name, val) = res?;
+            let definition: SmartCrateDefinition = serde_json::from_slice(val.value())?;
+            crates.push(definition);
+        }
+        Ok(crates)
+    }
+
+    pub fn get_smart_crate_tracks(&self, name: &str) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
+        let definition = self.get_smart_crate(name)?;
+        if let Some(def) = definition {
+            let all_tracks = self.list_tracks()?;
+            let results = Matchmaker::find_matches_above_threshold(&def.target_dna, &all_tracks, def.threshold);
+            let mut tracks = Vec::new();
+            for (id, _) in results {
+                if let Some(track) = all_tracks.iter().find(|t| t.id == id) {
+                    tracks.push(track.clone());
+                }
+            }
+            Ok(tracks)
+        } else {
+            Ok(Vec::new())
+        }
     }
 }
 
@@ -412,7 +480,8 @@ pub struct Matchmaker;
 
 impl Matchmaker {
     pub fn rank_compatibility(target: &nullherz_traits::SoundDNA, candidates: &[LibraryTrack], limit: usize) -> Vec<(u64, f32)> {
-        let mut scores: Vec<(u64, f32)> = candidates.iter()
+        use rayon::prelude::*;
+        let mut scores: Vec<(u64, f32)> = candidates.par_iter()
             .map(|track| {
                 let score = calculate_similarity(target, &track.metadata.dna);
                 (track.id, score)
@@ -422,6 +491,23 @@ impl Matchmaker {
         scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scores.truncate(limit);
         scores
+    }
+
+    pub fn find_matches_above_threshold(target: &nullherz_traits::SoundDNA, candidates: &[LibraryTrack], threshold: f32) -> Vec<(u64, f32)> {
+        use rayon::prelude::*;
+        let mut results: Vec<(u64, f32)> = candidates.par_iter()
+            .filter_map(|track| {
+                let score = calculate_similarity(target, &track.metadata.dna);
+                if score >= threshold {
+                    Some((track.id, score))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results
     }
 
     pub fn find_best_matches(db: &LibraryDatabase, target: &nullherz_traits::SoundDNA, limit: usize) -> Result<Vec<(u64, f32)>, Box<dyn std::error::Error>> {

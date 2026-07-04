@@ -176,6 +176,34 @@ impl IpcMidiConsumer {
     }
 }
 
+pub struct IpcAudioConsumer {
+    pub buffer: Arc<SharedMemory>,
+    pub rb: *const ShmRingBuffer<AudioBlock>,
+}
+
+unsafe impl Send for IpcAudioConsumer {}
+
+impl IpcAudioConsumer {
+    pub fn pop(&mut self) -> Option<AudioBlock> {
+        unsafe { (*self.rb).pop() }
+    }
+}
+
+#[derive(Clone)]
+pub struct IpcAudioProducer {
+    pub buffer: Arc<SharedMemory>,
+    pub rb: *const ShmRingBuffer<AudioBlock>,
+}
+
+unsafe impl Send for IpcAudioProducer {}
+unsafe impl Sync for IpcAudioProducer {}
+
+impl IpcAudioProducer {
+    pub fn push(&self, block: AudioBlock) -> Result<(), AudioBlock> {
+        unsafe { (*self.rb).push(block) }
+    }
+}
+
 #[derive(Clone)]
 pub struct LocalMpscCommandProducer(pub Arc<MpscRingBuffer<nullherz_traits::TimestampedCommand>>);
 impl nullherz_traits::CommandProducer for LocalMpscCommandProducer {
@@ -240,6 +268,9 @@ pub struct SharedMemory {
     name: String,
     owner: bool,
 }
+
+unsafe impl Send for SharedMemory {}
+unsafe impl Sync for SharedMemory {}
 
 impl SharedMemory {
     pub fn create(name: &str, size: usize) -> Result<Self, IpcError> {

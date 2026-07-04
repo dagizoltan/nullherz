@@ -61,9 +61,11 @@ impl AudioProcessor for WavetableProcessor {
 fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
+        if !value.is_finite() { return; }
         if param_id == 0 {
+            let clamped_val = value.clamp(0.0, 20000.0);
             for ch in 0..crate::MAX_CHANNELS {
-                self.inner.set_frequency(ch, value);
+                self.inner.set_frequency(ch, clamped_val);
             }
         }
     }
