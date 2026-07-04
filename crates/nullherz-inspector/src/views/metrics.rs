@@ -63,6 +63,26 @@ pub fn render(app: &InspectorApp, ui: &mut Ui) {
                     }
                 });
             });
+
+            ui.add_space(20.0);
+            ui.strong("Remote Node Health");
+            ui.add_space(10.0);
+
+            Frame::none().fill(Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(12.0).show(ui, |ui| {
+                if let Some(t) = &telemetry {
+                    if t.remote_node_count == 0 {
+                        ui.label("No remote sidecars connected.");
+                    } else {
+                        for i in 0..(t.remote_node_count as usize).min(8) {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("Node {}:", i));
+                                ui.add(egui::ProgressBar::new(t.remote_cpu_usage[i] / 100.0).desired_width(100.0).text(format!("{:.1}% CPU", t.remote_cpu_usage[i])));
+                                ui.label(format!("{:.1}ms Latency", t.remote_latency_ms[i]));
+                            });
+                        }
+                    }
+                }
+            });
         });
     });
 }

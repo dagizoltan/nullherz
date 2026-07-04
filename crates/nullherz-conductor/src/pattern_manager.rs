@@ -91,4 +91,39 @@ impl DnaSequencer {
         // For now, we focus on the onset mask.
         commands
     }
+
+    pub fn mutate_pattern(
+        dna: &nullherz_traits::RhythmicDNA,
+        current_grid: &[[bool; 64]; 16],
+        node_idx: u32,
+        track_idx: u32,
+        mutation_probability: f32
+    ) -> Vec<nullherz_traits::Command> {
+        let mut commands = Vec::new();
+        for (i, &mask) in dna.onset_mask.iter().enumerate() {
+            for bit in 0..64 {
+                let step = (i * 64) + bit;
+                let dna_value = (mask >> bit) & 1 == 1;
+                let current_value = current_grid[track_idx as usize][step];
+
+                // Deterministic pseudo-randomness for stable evolution
+                let seed = (track_idx as u32).wrapping_mul(256).wrapping_add(step as u32);
+                let rand_val = (seed.wrapping_mul(1103515245).wrapping_add(12345) as f32) / 4294967295.0;
+
+                if rand_val < mutation_probability {
+                    if dna_value != current_value {
+                        commands.push(nullherz_traits::Command::Performance(
+                            nullherz_traits::PerformanceCommand::SetSequencerStep {
+                                node_idx,
+                                track: track_idx,
+                                step: step as u32,
+                                value: dna_value,
+                            }
+                        ));
+                    }
+                }
+            }
+        }
+        commands
+    }
 }

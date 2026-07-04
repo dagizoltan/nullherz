@@ -2760,6 +2760,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "futures-util",
+ "nullherz-conductor",
  "nullherz-dna",
  "nullherz-traits",
  "nullherz-ui-hal",

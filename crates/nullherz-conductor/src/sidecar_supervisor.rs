@@ -14,6 +14,8 @@ pub struct RemoteSidecar {
     pub last_heartbeat: Instant,
     pub is_active: bool,
     pub mirrored_samples: std::collections::HashSet<u64>,
+    pub cpu_usage: f32,
+    pub latency_ms: f32,
 }
 
 pub struct RemoteSidecarManager {
@@ -139,6 +141,8 @@ impl SidecarSupervisor {
                                                 let block_data = &buffer[5..];
                                                 if block_data.len() == std::mem::size_of::<nullherz_traits::AudioBlock>() {
                                                      let _block: &nullherz_traits::AudioBlock = bytemuck::from_bytes(block_data);
+                                                     // TODO: Route this block to the local engine's NetworkProxyReceive buffer.
+                                                     // This will require an SPSC queue between the supervisor and the engine.
                                                 }
                                                 continue;
                                             }
@@ -160,7 +164,9 @@ impl SidecarSupervisor {
                                         writer: writer_arc,
                                         last_heartbeat: Instant::now(),
                                         is_active: true,
-                                    mirrored_samples: std::collections::HashSet::new(),
+                                        mirrored_samples: std::collections::HashSet::new(),
+                                        cpu_usage: 0.0,
+                                        latency_ms: 0.0,
                                     });
                                 }
                             }
@@ -231,6 +237,8 @@ impl SidecarSupervisor {
                             last_heartbeat: Instant::now(),
                             is_active: true,
                             mirrored_samples: std::collections::HashSet::new(),
+                            cpu_usage: 0.0,
+                            latency_ms: 0.0,
                         });
                         println!("Conductor: Attached remote sidecar from {}", peer_addr);
                     }
