@@ -42,6 +42,12 @@ All messages over TCP use a 4-byte Big-Endian length prefix, followed by the pay
 - **Payload:** `nullherz_traits::AudioBlock` (Binary/Pod).
 - **Usage:** Transmitting input audio blocks from local `NetworkProxySend` nodes to remote sidecars for processing.
 
+### Type 6: UDP Audio Return (Sidecar -> Conductor)
+- **Protocol:** UDP
+- **Header Additional:** `[u32: node_idx]`
+- **Payload:** `nullherz_traits::AudioBlock` (Binary/Pod).
+- **Usage:** Low-jitter return path for processed audio blocks from remote nodes.
+
 ## Type-Safety & ABI Invariants
 
 1. **Alignment:** All `AudioBlock` payloads MUST be 64-byte aligned and 1088 bytes in size (including padding).

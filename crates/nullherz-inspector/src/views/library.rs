@@ -20,11 +20,60 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     app.library_needs_refresh = true;
                 }
             }
+
+            let smart_crates = app.library_db.list_smart_crates().unwrap_or_default();
+            for smart in smart_crates {
+                let is_selected = app.active_crate.as_deref() == Some(&smart.name);
+                if ui.selectable_label(is_selected, format!("✨ {}", smart.name)).clicked() {
+                    app.active_crate = Some(smart.name);
+                    app.library_needs_refresh = true;
+                }
+            }
+
+            ui.add_space(20.0);
+            if ui.button(RichText::new("+ SMART").small()).clicked() {
+                app.smart_crate_builder_open = !app.smart_crate_builder_open;
+            }
         });
 
         ui.separator();
 
         ui.vertical(|ui| {
+            if app.smart_crate_builder_open {
+                ui.group(|ui| {
+                    ui.label(RichText::new("🛠 SMART CRATE BUILDER").strong());
+                    ui.horizontal(|ui| {
+                        ui.label("Name:");
+                        ui.text_edit_singleline(&mut app.smart_crate_def.name);
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Spectral Tilt:");
+                        let mut min = app.smart_crate_def.spectral_tilt_range.map(|r| r.0).unwrap_or(-1.0);
+                        let mut max = app.smart_crate_def.spectral_tilt_range.map(|r| r.1).unwrap_or(1.0);
+                        ui.add(egui::Slider::new(&mut min, -1.0..=1.0).text("MIN"));
+                        ui.add(egui::Slider::new(&mut max, -1.0..=1.0).text("MAX"));
+                        app.smart_crate_def.spectral_tilt_range = Some((min, max));
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Syncopation:");
+                        let mut min = app.smart_crate_def.rhythmic_syncopation_range.map(|r| r.0).unwrap_or(0.0);
+                        let mut max = app.smart_crate_def.rhythmic_syncopation_range.map(|r| r.1).unwrap_or(1.0);
+                        ui.add(egui::Slider::new(&mut min, 0.0..=1.0).text("MIN"));
+                        ui.add(egui::Slider::new(&mut max, 0.0..=1.0).text("MAX"));
+                        app.smart_crate_def.rhythmic_syncopation_range = Some((min, max));
+                    });
+
+                    if ui.button("SAVE SMART CRATE").clicked() {
+                        let _ = app.library_db.save_smart_crate(&app.smart_crate_def);
+                        app.smart_crate_builder_open = false;
+                        app.library_needs_refresh = true;
+                    }
+                });
+                ui.add_space(10.0);
+            }
+
         // Change Tracking
         let breeding_a = app.breeding_view.parent_a_id;
         let breeding_b = app.breeding_view.parent_b_id;
@@ -77,7 +126,16 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         // Optimized Library Retrieval & Sorting
         if app.library_needs_refresh {
             let mut tracks = if let Some(ref crate_name) = app.active_crate {
-                app.library_db.get_tracks_in_crate(crate_name).unwrap_or_default()
+                // Try smart crate first
+                if let Ok(smart_tracks) = app.library_db.get_smart_crate_tracks(crate_name) {
+                    if !smart_tracks.is_empty() || app.library_db.get_smart_crate(crate_name).ok().flatten().is_some() {
+                        smart_tracks
+                    } else {
+                        app.library_db.get_tracks_in_crate(crate_name).unwrap_or_default()
+                    }
+                } else {
+                    app.library_db.get_tracks_in_crate(crate_name).unwrap_or_default()
+                }
             } else {
                 app.library_db.list_tracks().unwrap_or_default()
             };

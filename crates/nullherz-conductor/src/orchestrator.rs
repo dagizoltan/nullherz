@@ -108,6 +108,12 @@ impl Conductor {
             tokio::spawn(async move {
                 let _ = crate::sidecar_supervisor::SidecarSupervisor::start_discovery_listener(remote_manager, audio_bridge, 9001).await;
             });
+
+            // Start UDP Return Listener (Type 6)
+            let audio_bridge = self.audio_bridge.clone();
+            tokio::spawn(async move {
+                let _ = crate::sidecar_supervisor::SidecarSupervisor::start_udp_return_listener(audio_bridge, 9002).await;
+            });
         }
 
         crate::EngineContext {

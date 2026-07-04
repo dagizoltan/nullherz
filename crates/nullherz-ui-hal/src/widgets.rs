@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use egui::{Color32, Rect, Response, Sense, Stroke, Ui, Vec2, Align2, FontId, lerp, vec2};
 
 pub fn render_knob(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, label: &str, accent_color: Color32) -> Response {
@@ -19,21 +20,34 @@ pub fn render_knob(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive
         let center = rect.center();
         let radius = rect.width() / 2.0;
 
-        // Shadow
-        ui.painter().circle_filled(center + Vec2::new(0.0, 2.0), radius, Color32::from_black_alpha(80));
+        // --- GEOMETRY CACHING ---
+        // Cache static parts of the knob (Rim, Face, Shadow)
+        let cache_id = ui.make_persistent_id("knob_base_v2");
+        let shapes = ui.ctx().memory_mut(|mem| {
+            mem.data.get_temp::<Arc<Vec<egui::Shape>>>(cache_id).unwrap_or_else(|| {
+                 let mut s = Vec::new();
+                 // Shadow
+                 s.push(egui::Shape::circle_filled(center + Vec2::new(0.0, 2.0), radius, Color32::from_black_alpha(80)));
+                 // Outer Rim
+                 s.push(egui::Shape::circle_filled(center, radius, Color32::from_gray(25)));
+                 s.push(egui::Shape::circle_stroke(center, radius, Stroke::new(1.0, Color32::from_gray(50))));
+                 // Main Face
+                 let inner_radius = radius * 0.85;
+                 s.push(egui::Shape::circle_filled(center, inner_radius, Color32::from_gray(35)));
+                 s.push(egui::Shape::circle_stroke(center, inner_radius, Stroke::new(0.5, Color32::from_gray(80))));
 
-        // Outer Rim (Industrial Steel)
-        ui.painter().circle_filled(center, radius, Color32::from_gray(25));
-        ui.painter().circle_stroke(center, radius, Stroke::new(1.0, Color32::from_gray(50)));
+                 let arc = Arc::new(s);
+                 mem.data.insert_temp(cache_id, arc.clone());
+                 arc
+            })
+        });
 
-        // Main Knob Face (Aluminum Texture Simulation)
+        for shape in shapes.iter() {
+            ui.painter().add(shape.clone());
+        }
         let inner_radius = radius * 0.85;
-        ui.painter().circle_filled(center, inner_radius, Color32::from_gray(35));
 
-        // Highlights for 3D effect
-        ui.painter().circle_stroke(center, inner_radius, Stroke::new(0.5, Color32::from_gray(80)));
-
-        // Pointer
+        // Pointer (Dynamic)
         let normalized = (*value - *range.start()) / (*range.end() - *range.start());
         let angle = lerp((-135.0f32).to_radians()..=(135.0f32).to_radians(), normalized);
         let (sin, cos) = angle.sin_cos();

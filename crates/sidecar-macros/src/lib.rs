@@ -45,6 +45,7 @@ pub fn sidecar(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
 
                 unsafe {
+                    let _ = ipc_layer::pin_thread_to_core(1); // Pin sidecars to core 1 by default
                     let mut sidecar = sidecar_sdk::SidecarHost::new(cmd_shm, sig_shm, &inputs, &outputs, efd_val);
                     sidecar.run(processor);
                 }
@@ -87,6 +88,7 @@ pub fn sidecar_builder(_item: TokenStream) -> TokenStream {
                 }
 
                 unsafe {
+                    let _ = ipc_layer::pin_thread_to_core(1);
                     let mut sidecar = sidecar_sdk::SidecarHost::new(cmd_shm, sig_shm, &inputs, &outputs, efd_val);
                     sidecar.run(processor);
                 }

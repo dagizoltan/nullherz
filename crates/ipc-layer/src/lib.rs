@@ -760,6 +760,22 @@ mod tests {
     }
 }
 
+pub fn pin_thread_to_core(core_id: usize) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        use nix::sched::{sched_setaffinity, CpuSet};
+        use nix::unistd::Pid;
+        let mut cpu_set = CpuSet::new();
+        cpu_set.set(core_id).map_err(|e: nix::Error| e.to_string())?;
+        sched_setaffinity(Pid::from_raw(0), &cpu_set).map_err(|e: nix::Error| e.to_string())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = core_id;
+        Ok(())
+    }
+}
+
 pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
     thread_local! {
         static INITIALIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -771,13 +787,8 @@ pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
 
     let _ = crate::set_rt_priority(priority);
 
-    #[cfg(target_os = "linux")]
     if let Some(id) = cpu_id {
-        unsafe {
-            let mut cpuset: libc::cpu_set_t = std::mem::zeroed();
-            libc::CPU_SET(id, &mut cpuset);
-            libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &cpuset);
-        }
+        let _ = pin_thread_to_core(id);
     }
 
     #[cfg(target_arch = "x86_64")]
