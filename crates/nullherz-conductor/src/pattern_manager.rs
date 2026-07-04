@@ -67,3 +67,28 @@ impl PatternManager {
         self.reset();
     }
 }
+
+pub struct DnaSequencer;
+
+impl DnaSequencer {
+    pub fn dna_to_commands(dna: &nullherz_traits::RhythmicDNA, node_idx: u32, track_idx: u32) -> Vec<nullherz_traits::Command> {
+        let mut commands = Vec::new();
+        for (i, &mask) in dna.onset_mask.iter().enumerate() {
+            for bit in 0..64 {
+                let step = (i * 64) + bit;
+                let value = (mask >> bit) & 1 == 1;
+                commands.push(nullherz_traits::Command::Performance(
+                    nullherz_traits::PerformanceCommand::SetSequencerStep {
+                        node_idx,
+                        track: track_idx,
+                        step: step as u32,
+                        value,
+                    }
+                ));
+            }
+        }
+        // Micro-timing can be applied via parameter updates or specialized commands if the processor supports it.
+        // For now, we focus on the onset mask.
+        commands
+    }
+}

@@ -225,6 +225,26 @@ pub struct TimestampedCommand {
     pub command: Command,
 }
 
+impl TimestampedCommand {
+    pub fn to_binary(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        Ok(bincode::serialize(self)?)
+    }
+
+    pub fn from_binary(data: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(bincode::deserialize(data)?)
+    }
+}
+
+impl SoundDNA {
+    pub fn to_binary(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        Ok(bincode::serialize(self)?)
+    }
+
+    pub fn from_binary(data: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(bincode::deserialize(data)?)
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct ParameterMetadata {
@@ -278,13 +298,14 @@ pub struct CrossfadeState {
     pub total_samples: u32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct GraphTopology {
     pub routing: [NodeRouting; MAX_NODES],
     pub virtual_to_physical: [usize; MAX_NODES],
     pub plan: CompiledGraphPlan,
     pub crossfades: [Option<CrossfadeState>; 8],
     pub node_count: usize,
+    pub node_assignments: std::collections::HashMap<u32, String>, // node_idx -> "local" or sidecar addr
 }
 
 pub enum TopologyMutation {
@@ -414,10 +435,11 @@ impl SubBlockIterator {
 
 /// A SIMD-aligned audio block.
 #[repr(C, align(64))]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct AudioBlock {
     pub data: [f32; MAX_BLOCK_SIZE],
     pub len: u32,
+    pub _pad: [u32; 15], // Pad to 64-byte alignment (1024 + 4 + 60 = 1088)
 }
 
 /// A standard MIDI event representation for real-time IPC.
@@ -739,3 +761,25 @@ impl IdAllocator {
     pub fn current_buffer_id(&self) -> u32 { self.next_buffer_id.load(std::sync::atomic::Ordering::Relaxed) }
 }
 impl Default for IdAllocator { fn default() -> Self { Self::new(0, 12) } }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_binary_serialization() {
+        let cmd = TimestampedCommand {
+            timestamp_samples: 1234,
+            command: Command::Core(CoreCommand::Play),
+        };
+        let binary = cmd.to_binary().unwrap();
+        let decoded = TimestampedCommand::from_binary(&binary).unwrap();
+        assert_eq!(cmd, decoded);
+
+        let mut dna = SoundDNA::default();
+        dna.spectral.energy_map[0] = 255;
+        let dna_binary = dna.to_binary().unwrap();
+        let dna_decoded = SoundDNA::from_binary(&dna_binary).unwrap();
+        assert_eq!(dna, dna_decoded);
+    }
+}

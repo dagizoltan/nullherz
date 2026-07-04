@@ -12,7 +12,7 @@ pub struct TopologyCoordinator {
 impl TopologyCoordinator {
     pub fn new(initial_topo: GraphTopology) -> Self {
         Self {
-            topologies: Box::new([initial_topo; 2]),
+            topologies: Box::new([initial_topo.clone(), initial_topo]),
             active_idx: Arc::new(AtomicUsize::new(0)),
             needs_commit: false,
         }
@@ -30,7 +30,7 @@ impl TopologyCoordinator {
         let active = self.active_idx();
         let inactive = (active + 1) % 2;
         if !self.needs_commit {
-            self.topologies[inactive] = self.topologies[active];
+            self.topologies[inactive] = self.topologies[active].clone();
             self.needs_commit = true;
         }
         &mut self.topologies[inactive]

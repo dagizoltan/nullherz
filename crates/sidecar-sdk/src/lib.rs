@@ -105,8 +105,8 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
             self.processor.apply_command(&cmd);
         }
 
-        let mut in_blocks = [AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0 }; 16];
-        let mut out_blocks = [AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0 }; 16];
+        let mut in_blocks = [AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; 16];
+        let mut out_blocks = [AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; 16];
         let num_channels = self.input_buffers.len().min(self.output_buffers.len()).min(16);
 
         let mut available = true;

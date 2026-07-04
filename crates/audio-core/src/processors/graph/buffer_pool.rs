@@ -8,7 +8,7 @@ pub struct GraphBufferPool {
 
 impl GraphBufferPool {
     pub fn new() -> Self {
-        let empty_block = AudioBlock { data: [0.0f32; ipc_layer::MAX_BLOCK_SIZE], len: 0 };
+        let empty_block = AudioBlock { data: [0.0f32; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] };
         Self {
             buffers: Box::new([empty_block; crate::MAX_NODES]),
             crossfade_buffers: [empty_block; crate::MAX_CROSSFADE_BUFFERS],
@@ -23,7 +23,7 @@ impl GraphBufferPool {
     }
 
     pub fn clear(&mut self) {
-        let empty_block = AudioBlock { data: [0.0f32; ipc_layer::MAX_BLOCK_SIZE], len: 0 };
+        let empty_block = AudioBlock { data: [0.0f32; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] };
         self.buffers.fill(empty_block);
         self.crossfade_buffers.fill(empty_block);
         self.old_path_buffers.fill(empty_block);
