@@ -39,6 +39,7 @@ impl TopologyManager {
                 plan: Default::default(),
                 crossfades: [None; 8],
                 node_count: 0,
+                node_assignments: std::collections::HashMap::new(),
             },
         }
     }
@@ -98,7 +99,7 @@ impl TopologyManager {
                 // RT-2: Off-thread compilation
                 if let Ok(plan) = GraphCompiler::compile(&self.current_topology) {
                     self.current_topology.plan = plan;
-                    let _ = prod.push(TopologyMutation::SetTopology(Arc::new(self.current_topology)));
+                    let _ = prod.push(TopologyMutation::SetTopology(Arc::new(self.current_topology.clone())));
                     return true;
                 } else {
                     eprintln!("Off-thread compilation failed! Cycle detected?");

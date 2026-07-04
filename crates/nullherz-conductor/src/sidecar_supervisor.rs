@@ -32,7 +32,7 @@ impl RemoteSidecarManager {
     }
 
     pub async fn broadcast_command(&mut self, cmd: TimestampedCommand) {
-        let serialized = match serde_json::to_vec(&cmd) {
+        let serialized = match cmd.to_binary() {
             Ok(s) => s,
             Err(_) => return,
         };
@@ -133,7 +133,18 @@ impl SidecarSupervisor {
                                             if len > 65536 { break; }
                                             let mut buffer = vec![0u8; len];
                                             if reader.read_exact(&mut buffer).await.is_err() { break; }
-                                            if let Ok(cmd) = serde_json::from_slice::<TimestampedCommand>(&buffer) {
+
+                                            // Handle Audio Return Blocks (Type 3)
+                                            if buffer.len() >= 5 && buffer[0] == 3 {
+                                                let block_data = &buffer[5..];
+                                                if block_data.len() == std::mem::size_of::<nullherz_traits::AudioBlock>() {
+                                                     let _block: &nullherz_traits::AudioBlock = bytemuck::from_bytes(block_data);
+                                                }
+                                                continue;
+                                            }
+
+                                            let decoded = TimestampedCommand::from_binary(&buffer).ok();
+                                            if let Some(cmd) = decoded {
                                                 let mut manager = remote_manager_clone.lock().await;
                                                 if let Some(node) = manager.remote_nodes.iter_mut().find(|n| n.addr == addr_clone) {
                                                     node.last_heartbeat = Instant::now();
@@ -186,11 +197,21 @@ impl SidecarSupervisor {
 
                                 if len > 65536 { break; } // Safety limit
 
-                                // 2. Read JSON payload
+                                // 2. Read Binary payload
                                 let mut buffer = vec![0u8; len];
                                 if reader.read_exact(&mut buffer).await.is_err() { break; }
 
-                                if let Ok(cmd) = serde_json::from_slice::<TimestampedCommand>(&buffer) {
+                                // Handle Audio Return Blocks (Type 3)
+                                if buffer.len() >= 5 && buffer[0] == 3 {
+                                    let block_data = &buffer[5..];
+                                    if block_data.len() == std::mem::size_of::<nullherz_traits::AudioBlock>() {
+                                         let _block: &nullherz_traits::AudioBlock = bytemuck::from_bytes(block_data);
+                                    }
+                                    continue;
+                                }
+
+                                let decoded = TimestampedCommand::from_binary(&buffer).ok();
+                                if let Some(cmd) = decoded {
                                     let mut manager = remote_manager_clone.lock().await;
                                     // Update heartbeat if this was a Ping or any command
                                     if let Some(node) = manager.remote_nodes.iter_mut().find(|n| n.addr == addr_clone) {

@@ -127,6 +127,38 @@ impl GraphCompiler {
             return Err(AudioError::Generic("Cycle detected in graph".into()));
         }
 
+        // --- STAGE 3: NETWORK PROXY INSERTION ---
+        // Synthetic Proxy IDs start above MAX_NODES to avoid collision
+        let mut next_proxy_id = MAX_NODES;
+
+        for node_idx in 0..n {
+            let local_assignment = topo.node_assignments.get(&(node_idx as u32)).unwrap_or(&"local".to_string()).clone();
+            let routing = &topo.routing[node_idx];
+
+            for &v_out in routing.output_indices.iter().take(routing.output_count) {
+                for consumer_idx in 0..n {
+                    if consumer_idx == node_idx { continue; }
+                    let consumer_assignment = topo.node_assignments.get(&(consumer_idx as u32)).unwrap_or(&"local".to_string()).clone();
+
+                    if local_assignment != consumer_assignment {
+                        let consumer_routing = &topo.routing[consumer_idx];
+                        if consumer_routing.input_indices.iter().take(consumer_routing.input_count).any(|&v_in| v_in == v_out) {
+                            // Boundary crossed! In a real graph, we insert a proxy node into the plan.
+                            // Since CompiledGraphPlan uses fixed-size arrays, we'd need to expand it or use reserved slots.
+                            // For now, we inject a virtual stage for the transfer.
+                            if plan.num_stages < MAX_NODES - 1 {
+                                let p_idx = plan.num_stages;
+                                plan.stages[p_idx][0] = next_proxy_id; // PROXY_SEND or PROXY_RECV
+                                plan.stage_counts[p_idx] = 1;
+                                plan.num_stages += 1;
+                                next_proxy_id += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Self::verify_no_hazards(topo, &plan)?;
 
         Ok(plan)
@@ -139,6 +171,7 @@ impl GraphCompiler {
             let mut physical_reads = [false; MAX_NODES];
 
             for &n_idx in stage {
+                if n_idx >= MAX_NODES { continue; } // Skip synthetic proxy nodes for hazard check
                 let routing = &topo.routing[n_idx];
 
                 // Check for RAW/WAR/WAW hazards with OTHER nodes in the same stage.
@@ -201,6 +234,7 @@ mod tests {
                 plan: CompiledGraphPlan::default(),
                 crossfades: [None; 8],
                 node_count: 1,
+                node_assignments: std::collections::HashMap::new(),
             };
 
             for (v_out, _) in writes {
@@ -235,6 +269,7 @@ mod tests {
                 plan: CompiledGraphPlan::default(),
                 crossfades: [None; 8],
                 node_count: num_nodes,
+                node_assignments: std::collections::HashMap::new(),
             };
 
             for (src, dst) in edges {
@@ -272,6 +307,7 @@ mod tests {
             plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],
             node_count: 2,
+            node_assignments: std::collections::HashMap::new(),
         };
 
         // Node 0 writes to buffer 10
@@ -304,6 +340,7 @@ mod tests {
             plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],
             node_count: 2,
+            node_assignments: std::collections::HashMap::new(),
         };
 
         // Node 0 reads from buffer 10
@@ -326,6 +363,44 @@ mod tests {
     }
 
     #[test]
+    fn test_proxy_injection_on_boundary_cross() {
+        let mut v2p = [0usize; 64];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
+        let mut node_assignments = std::collections::HashMap::new();
+        node_assignments.insert(0, "local".to_string());
+        node_assignments.insert(1, "remote_1".to_string());
+
+        let mut topo = GraphTopology {
+            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
+            virtual_to_physical: v2p,
+            plan: CompiledGraphPlan::default(),
+            crossfades: [None; 8],
+            node_count: 2,
+            node_assignments,
+        };
+
+        // Node 0 (Local) -> Node 1 (Remote) via Buffer 10
+        topo.routing[0].output_indices[0] = 10;
+        topo.routing[0].output_count = 1;
+        topo.routing[1].input_indices[0] = 10;
+        topo.routing[1].input_count = 1;
+
+        let plan = GraphCompiler::compile(&topo).expect("Compilation failed");
+
+        // Stage 0: Node 0
+        // Stage 1: Proxy Injection (since cross-boundary)
+        // Stage 2: Node 1
+        assert!(plan.num_stages >= 2);
+        let mut proxy_detected = false;
+        for s in 0..plan.num_stages {
+            if plan.stages[s][0] >= MAX_NODES {
+                proxy_detected = true;
+            }
+        }
+        assert!(proxy_detected, "Proxy node was not injected for cross-boundary edge");
+    }
+
+    #[test]
     fn test_hazard_detection_waw() {
         let mut v2p = [0usize; 64];
         for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
@@ -335,6 +410,7 @@ mod tests {
             plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],
             node_count: 2,
+            node_assignments: std::collections::HashMap::new(),
         };
 
         // Both nodes write to buffer 10

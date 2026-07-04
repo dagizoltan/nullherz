@@ -158,8 +158,8 @@ impl ConformanceSuite {
 
         // We need to ensure the buffers we pass are actually aligned to SIMD_ALIGNMENT
         // In this test environment, we'll use AudioBlock which is already aligned.
-        let input_block = crate::AudioBlock { data: [1.0; crate::MAX_BLOCK_SIZE], len: block_size as u32 };
-        let mut output_block = crate::AudioBlock { data: [0.0; crate::MAX_BLOCK_SIZE], len: block_size as u32 };
+        let input_block = crate::AudioBlock { data: [1.0; crate::MAX_BLOCK_SIZE], len: block_size as u32, _pad: [0; 15] };
+        let mut output_block = crate::AudioBlock { data: [0.0; crate::MAX_BLOCK_SIZE], len: block_size as u32, _pad: [0; 15] };
 
         let inputs = [ &input_block.data[..] ];
         let mut outputs = [ &mut output_block.data[..] ];

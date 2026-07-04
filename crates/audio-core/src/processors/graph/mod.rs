@@ -43,6 +43,7 @@ impl ProcessorGraph {
             plan: CompiledGraphPlan::default(),
             crossfades: [None; crate::MAX_CROSSFADE_BUFFERS],
             node_count: 0,
+            node_assignments: std::collections::HashMap::new(),
         };
 
         let nodes = Box::new(std::array::from_fn(|_| ProcessorNode {
@@ -148,7 +149,7 @@ impl ProcessorGraph {
             }
             TopologyMutation::SetTopology(topo) => {
                 let inactive = (self.topology_coordinator.active_idx() + 1) % 2;
-                self.topology_coordinator.topologies[inactive] = *topo;
+                self.topology_coordinator.topologies[inactive] = topo.as_ref().clone();
                 self.topology_coordinator.needs_commit = true;
             }
             TopologyMutation::AddSource { node_idx, buffer, sample_id, metadata } => {

@@ -19,6 +19,41 @@ impl TransfusionManager {
         }
     }
 
+    pub fn rhythmic_transfusion(&self, dna_a: &nullherz_traits::RhythmicDNA, dna_b: &nullherz_traits::RhythmicDNA, bias: f32) -> nullherz_traits::RhythmicDNA {
+        let mut child = nullherz_traits::RhythmicDNA::default();
+        let inv_bias = 1.0 - bias;
+
+        for i in 0..4 {
+            let mask_a = dna_a.onset_mask[i];
+            let mask_b = dna_b.onset_mask[i];
+            let mut child_mask = 0u64;
+            for bit in 0..64 {
+                let bit_a = (mask_a >> bit) & 1;
+                let bit_b = (mask_b >> bit) & 1;
+                let prob = if bit_a == 1 && bit_b == 1 { 1.0 }
+                          else if bit_a == 1 { inv_bias }
+                          else if bit_b == 1 { bias }
+                          else { 0.0 };
+
+                // Deterministic pseudo-randomness based on bit position for consistent results
+                let seed = (i as u32).wrapping_mul(64).wrapping_add(bit as u32);
+                let rand_val = (seed.wrapping_mul(1103515245).wrapping_add(12345) as f32) / 4294967295.0;
+
+                if rand_val < prob {
+                    child_mask |= 1 << bit;
+                }
+            }
+            child.onset_mask[i] = child_mask;
+        }
+
+        child.syncopation_index = dna_a.syncopation_index * inv_bias + dna_b.syncopation_index * bias;
+        for i in 0..12 {
+            child.micro_timing[i] = (dna_a.micro_timing[i] as f32 * inv_bias + dna_b.micro_timing[i] as f32 * bias) as i16;
+        }
+
+        child
+    }
+
     pub fn commit_breeding(&self, parent_a_id: u64, parent_b_id: u64, bias: f32, library: &LibraryDatabase) {
         if let (Some(parent_a), Some(parent_b)) = (self.sample_registry.get(parent_a_id), self.sample_registry.get(parent_b_id)) {
             // 1. Breed DNA

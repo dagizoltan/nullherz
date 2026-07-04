@@ -97,7 +97,7 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &
 
         for i in 0..self.num_channels {
             if i < inputs.len() {
-                let mut block = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0 };
+                let mut block = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] };
                 let len = inputs[i].len().min(ipc_layer::MAX_BLOCK_SIZE);
                 block.data[..len].copy_from_slice(&inputs[i][..len]);
                 block.len = len as u32;
@@ -155,10 +155,124 @@ fn apply_command(&mut self, command: &nullherz_traits::Command) {
     }
 }
 
+pub struct NetworkProxySend {
+    pub stream: Option<std::net::TcpStream>,
+    pub buffer: AudioBlock,
+}
+
+impl NetworkProxySend {
+    pub fn new(addr: &str) -> Self {
+        let stream = std::net::TcpStream::connect(addr).ok();
+        if let Some(ref s) = stream { let _ = s.set_nonblocking(true); }
+        Self {
+            stream,
+            buffer: AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] },
+        }
+    }
+}
+
+impl nullherz_traits::SignalProcessor for NetworkProxySend {
+    fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
+        use audio_dsp::simd_vec::{load_f32x16, store_f32x16};
+        if let Some(ref mut stream) = self.stream {
+            for input in inputs {
+                let len = input.len().min(ipc_layer::MAX_BLOCK_SIZE);
+                // SIMD optimized copy
+                for i in (0..len).step_by(16) {
+                    let rem = (len - i).min(16);
+                    if rem == 16 {
+                        let v = load_f32x16(input, i);
+                        store_f32x16(&mut self.buffer.data, i, v);
+                    } else {
+                        self.buffer.data[i..i+rem].copy_from_slice(&input[i..i+rem]);
+                    }
+                }
+                self.buffer.len = len as u32;
+                use std::io::Write;
+                let _ = stream.write_all(bytemuck::bytes_of(&self.buffer));
+            }
+        }
+    }
+}
+
+impl nullherz_traits::MidiResponder for NetworkProxySend {}
+impl nullherz_traits::SnapshotProvider for NetworkProxySend {}
+impl AudioProcessor for NetworkProxySend {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
+pub struct NetworkProxyReceive {
+    pub listener: Option<std::net::TcpListener>,
+    pub stream: Option<std::net::TcpStream>,
+    pub buffer: AudioBlock,
+}
+
+impl NetworkProxyReceive {
+    pub fn new(port: u16) -> Self {
+        let listener = std::net::TcpListener::bind(format!("0.0.0.0:{}", port)).ok();
+        if let Some(ref l) = listener { let _ = l.set_nonblocking(true); }
+        Self {
+            listener,
+            stream: None,
+            buffer: AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] },
+        }
+    }
+}
+
+impl nullherz_traits::SignalProcessor for NetworkProxyReceive {
+    fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
+        if self.stream.is_none() {
+            if let Some(ref l) = self.listener {
+                if let Ok((s, _)) = l.accept() {
+                    let _ = s.set_nonblocking(true);
+                    self.stream = Some(s);
+                }
+            }
+        }
+
+        if let Some(ref mut stream) = self.stream {
+            use std::io::Read;
+            if stream.read_exact(bytemuck::bytes_of_mut(&mut self.buffer)).is_ok() {
+                use audio_dsp::simd_vec::{load_f32x16, store_f32x16};
+                for output in outputs {
+                    let len = output.len().min(self.buffer.len as usize);
+                    for i in (0..len).step_by(16) {
+                        let rem = (len - i).min(16);
+                        if rem == 16 {
+                            let v = load_f32x16(&self.buffer.data, i);
+                            store_f32x16(output, i, v);
+                        } else {
+                            output[i..i+rem].copy_from_slice(&self.buffer.data[i..i+rem]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl nullherz_traits::MidiResponder for NetworkProxyReceive {}
+impl nullherz_traits::SnapshotProvider for NetworkProxyReceive {}
+impl AudioProcessor for NetworkProxyReceive {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
 #[cfg(test)]
 mod tests {
     use nullherz_traits::SignalProcessor;
     use super::*;
+
+    #[test]
+    fn test_network_proxy_initialization() {
+        let send = NetworkProxySend::new("127.0.0.1:12345");
+        // Might fail to connect if nothing listening, but should not crash
+        let _ = send.buffer;
+
+        let recv = NetworkProxyReceive::new(12346);
+        assert!(recv.listener.is_some());
+    }
     use ipc_layer::AudioBlock;
     use std::sync::atomic::Ordering;
 
@@ -250,7 +364,7 @@ mod tests {
             assert!(proc.missed_deadline_count > 0);
 
             // 2. Simulate sidecar recovery: push a block and update heartbeat
-            let mut block = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 128 };
+            let mut block = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 128, _pad: [0; 15] };
             block.data[0] = 0.888; // Signature value
             let _ = (*out_ptr).push(block);
             (*sig_ptr).pulse_heartbeat();

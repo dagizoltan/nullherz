@@ -131,6 +131,7 @@ pub struct InspectorApp {
     pub(crate) breeding_view: views::breeder::BreederView,
     pub(crate) wgpu_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::wgpu_backend::WgpuRenderer>>>,
     pub(crate) waveform_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>>,
+    pub(crate) active_connection_source: Option<(u32, u32)>, // (node_idx, output_idx)
 }
 
 impl InspectorApp {
@@ -198,6 +199,7 @@ impl InspectorApp {
             breeding_view: views::breeder::BreederView::new(),
             wgpu_renderer: None,
             waveform_renderer: None,
+            active_connection_source: None,
         }
     }
 
