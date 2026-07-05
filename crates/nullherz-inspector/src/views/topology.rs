@@ -129,4 +129,41 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     ui.add_space(20.0);
     ui.heading("Active Connections");
     ui.label("Edge connections view enhanced with visual cables.");
+
+    ui.add_space(30.0);
+    ui.separator();
+    ui.heading("Sidecar Discovery");
+    ui.label(RichText::new("Detected WASM and Native Sidecars in plugins/").small().color(Color32::GRAY));
+    ui.add_space(10.0);
+
+    egui::ScrollArea::vertical().id_source("sidecar_scroll").show(ui, |ui| {
+        if app.discovered_sidecars.is_empty() {
+            ui.label(RichText::new("No sidecars detected yet.").italics().small());
+        }
+
+        for manifest in &app.discovered_sidecars {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&manifest.name).strong());
+                        ui.label(RichText::new(format!("v{} by {}", manifest.version, manifest.author)).small().color(Color32::GRAY));
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                         if ui.button("HOT-LOAD").clicked() {
+                             let mut name_buf = [0u8; 32];
+                             let bytes = manifest.name.as_bytes();
+                             let len = bytes.len().min(32);
+                             name_buf[..len].copy_from_slice(&bytes[..len]);
+
+                             let _ = app.command_sender.send(Command::Core(nullherz_traits::CoreCommand::HotLoadSidecar {
+                                 name: name_buf,
+                                 node_idx: 100, // Default for testing
+                             }));
+                         }
+                    });
+                });
+            });
+            ui.add_space(5.0);
+        }
+    });
 }

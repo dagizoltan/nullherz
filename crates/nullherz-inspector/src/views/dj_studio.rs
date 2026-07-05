@@ -114,7 +114,39 @@ fn render_deck(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option
                 }
             });
 
-            ui.add_space(8.0);
+            ui.add_space(10.0);
+
+            // Layer 6: Semantic Personality Shaping
+            ui.vertical(|ui| {
+                ui.label(RichText::new("PERSONALity").small().color(Color32::from_gray(120)));
+                ui.add_space(2.0);
+
+                let traits = [
+                    ("MET", &mut app.channel_personality_metallic[i], "metallic"),
+                    ("ORG", &mut app.channel_personality_organic[i], "organic"),
+                    ("WRM", &mut app.channel_personality_warm[i], "warm"),
+                    ("AGG", &mut app.channel_personality_aggressive[i], "aggressive"),
+                ];
+
+                for (label, val, feature) in traits {
+                    if ui.add(egui::Slider::new(val, 0.0..=1.0).text(label).show_value(false)).changed() {
+                        if let Some(track_id) = app.now_playing[i] {
+                            let mut name = [0u8; 32];
+                            let bytes = feature.as_bytes();
+                            name[..bytes.len()].copy_from_slice(bytes);
+
+                            let cmd = nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ApplyFeatureMutation {
+                                target_id: track_id, // Target the loaded sample directly
+                                feature_name: name,
+                                strength: *val,
+                            });
+                            let _ = app.command_sender.send(cmd);
+                        }
+                    }
+                }
+            });
+
+            ui.add_space(12.0);
 
             // Mixer Strip for Deck (EQ Stack)
             ui.vertical(|ui| {

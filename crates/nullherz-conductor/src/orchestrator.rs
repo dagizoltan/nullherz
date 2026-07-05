@@ -335,6 +335,15 @@ impl Conductor {
                      let commands = crate::genetic_sequencer::GeneticSequencer::evolve_pattern(&dna, node_idx, track_idx, mutation_strength);
                      self.apply_mixer_commands(commands);
                  }
+                 Command::Resource(nullherz_traits::ResourceCommand::ApplyFeatureMutation { target_id, feature_name, strength }) => {
+                     let name = String::from_utf8_lossy(&feature_name).trim_matches(char::from(0)).to_string();
+                     if let Some(mut sample) = self.transfusion_manager.sample_registry.get(target_id) {
+                         nullherz_dna::FeatureMutator::mutate(&mut sample.metadata.dna, &name, strength);
+                         // Re-register with mutated DNA
+                         self.transfusion_manager.sample_registry.register_with_metadata(target_id, sample.buffer, sample.metadata);
+                         println!("Applied Feature Mutation '{}' (strength={:.2}) to sample {}", name, strength, target_id);
+                     }
+                 }
                  _ => final_commands.push(cmd),
              }
         }
