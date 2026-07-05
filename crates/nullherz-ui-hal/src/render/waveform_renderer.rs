@@ -20,7 +20,7 @@ pub struct WaveformRenderer {
     num_vertices: u32,
     globals_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
-    max_peaks: usize,
+    _max_peaks: usize,
 }
 
 impl WaveformRenderer {
@@ -118,7 +118,7 @@ impl WaveformRenderer {
             num_vertices: 0,
             globals_buffer,
             bind_group,
-            max_peaks,
+            _max_peaks: max_peaks,
         }
     }
 

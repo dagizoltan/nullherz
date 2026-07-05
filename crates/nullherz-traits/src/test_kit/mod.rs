@@ -55,7 +55,7 @@ impl StabilityTester {
         Ok(())
     }
 
-    pub fn verify_zero_allocation(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+    pub fn verify_zero_allocation(_processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
         // Since we can't easily hook into the allocator from within a standard test
         // without custom test runners or crate-level global allocators,
         // we'll rely on architectural invariants.

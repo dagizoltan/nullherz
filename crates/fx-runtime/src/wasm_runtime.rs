@@ -1,7 +1,6 @@
 use wasmtime::*;
 use ipc_layer::{AudioBlock, ShmRingBuffer};
 use nullherz_traits::Command;
-use std::sync::Arc;
 
 pub struct WasmSidecarHost {
     pub engine: Engine,

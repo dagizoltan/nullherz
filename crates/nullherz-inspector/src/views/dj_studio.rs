@@ -62,7 +62,7 @@ fn render_deck(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option
         let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 50.0), egui::Sense::hover());
         ui.painter().rect_filled(rect, 1.0, Color32::from_rgb(10, 10, 15));
 
-        if let Some(wf_lock) = &app.waveform_renderer {
+        if let Some(_wf_lock) = &app.waveform_renderer {
              // Resolve loaded track metadata for this deck
              if let Some(ref title) = app.now_playing[i] {
                  // In a production scenario, we'd look up the track by ID/Title and pull MipWaveform
