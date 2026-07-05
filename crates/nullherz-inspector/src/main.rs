@@ -141,6 +141,7 @@ pub struct InspectorApp {
     pub(crate) visualizer_damping: f32,
     pub(crate) damped_spectrum: [f32; 128],
     pub(crate) damped_goniometer: [f32; 128],
+    pub(crate) damped_latent: [f32; 16],
 }
 
 impl InspectorApp {
@@ -222,6 +223,7 @@ impl InspectorApp {
             visualizer_damping: 0.1,
             damped_spectrum: [0.0; 128],
             damped_goniometer: [0.0; 128],
+            damped_latent: [0.0; 16],
         }
     }
 
@@ -246,6 +248,9 @@ impl eframe::App for InspectorApp {
             for i in 0..128 {
                 self.damped_spectrum[i] = self.damped_spectrum[i] * (1.0 - d) + t.spectrum[i] * d;
                 self.damped_goniometer[i] = self.damped_goniometer[i] * (1.0 - d) + t.goniometer_pts[i] * d;
+            }
+            for i in 0..16 {
+                self.damped_latent[i] = self.damped_latent[i] * (1.0 - d) + t.dna_latent_space[i] * d;
             }
         }
 

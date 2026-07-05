@@ -76,12 +76,25 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             ui.add_space(8.0);
                         }
 
-                        // Macro Button for Transfusion
-                        if ui.add_sized([30.0, 60.0], egui::Button::new("🧬")).on_hover_text("Transfuse DNA across row").clicked() {
-                             let _ = app.command_sender.send(Command::Performance(PerformanceCommand::TransfuseRow {
-                                row: row as u32,
-                            }));
-                        }
+                        // DNA Control Sidebar for Row
+                        ui.vertical(|ui| {
+                             ui.set_max_width(40.0);
+                             if ui.add_sized([35.0, 30.0], egui::Button::new("🧬")).on_hover_text("Transfuse DNA across row").clicked() {
+                                  let _ = app.command_sender.send(Command::Performance(PerformanceCommand::TransfuseRow {
+                                     row: row as u32,
+                                 }));
+                             }
+                             ui.add_space(4.0);
+                             // Evolution Slider (Mutation Strength)
+                             let mut strength = 0.0; // In a real app we'd store this per-track
+                             if ui.add(egui::Slider::new(&mut strength, 0.0..=1.0).vertical().show_value(false)).on_hover_text("Genetic Evolution Strength").changed() {
+                                  let _ = app.command_sender.send(Command::Performance(PerformanceCommand::EvolvePattern {
+                                      node_idx: row as u32, // Simplified mapping: row = node
+                                      track_idx: 0,
+                                      mutation_strength: strength,
+                                  }));
+                             }
+                        });
                     });
                     ui.add_space(8.0);
                 }

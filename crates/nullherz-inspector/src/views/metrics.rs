@@ -76,10 +76,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             ui.add_space(10.0);
 
             Frame::none().fill(Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(12.0).show(ui, |ui| {
-                if let Some(t) = &telemetry {
+                if telemetry.is_some() {
                     ui.horizontal_wrapped(|ui| {
                         for i in 0..16 {
-                            let val = t.dna_latent_space[i];
+                            let val = app.damped_latent[i];
                             let size = 15.0;
                             let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
                             let color = if val > 0.0 {
