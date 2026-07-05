@@ -142,5 +142,72 @@ fn main() {
     let _ = db_thread.join();
     
     let _ = std::fs::remove_file(db_path); // Cleanup
-    println!("Stress test completed successfully!");
+
+    // 5. Network Chaos Stress Test (Jitter Buffer / Clock Recovery)
+    println!("Starting Network Chaos Stress Test...");
+    run_network_chaos_test();
+
+    // 6. Chaotic Transfusion Benchmark
+    bench_chaotic_transfusion();
+
+    println!("Stress tests completed successfully!");
+}
+
+pub fn bench_chaotic_transfusion() {
+    println!("Benchmarking Chaotic Transfusion (1,000 operations)...");
+    use nullherz_dna::chaotic_transfuse_dna;
+    use nullherz_traits::SoundDNA;
+
+    let dna_a = SoundDNA::default();
+    let dna_b = SoundDNA::default();
+    let start = Instant::now();
+
+    for _ in 0..1000 {
+        let _ = chaotic_transfuse_dna(&dna_a, &dna_b, 0.5, 0.5);
+    }
+
+    println!("Chaotic Transfusion: 1,000 ops in {:?}", start.elapsed());
+}
+
+fn run_network_chaos_test() {
+    use nullherz_conductor::ipc_audio_bridge::IpcAudioBridge;
+    use nullherz_traits::AudioBlock;
+
+    let bridge = IpcAudioBridge::new();
+    let node_idx = 42;
+    let _ = bridge.register_return_node(node_idx);
+    let _ = bridge.register_send_node(node_idx);
+
+    let start = Instant::now();
+    let mut sent = 0;
+    let mut received = 0;
+
+    // Simulate 5 seconds of network traffic with extreme jitter
+    while start.elapsed().as_secs() < 5 {
+        let block = AudioBlock { data: [0.0; 256], len: 256, _pad: [0; 15] };
+
+        // Push block with random delay (simulate jitter)
+        let jitter = (sent % 3 == 0); // Every 3rd block is delayed or bundled
+        if !jitter {
+            let _ = bridge.push_block(node_idx, block);
+            sent += 1;
+        } else {
+             // Simulate a "burst" later
+             let _ = bridge.push_block(node_idx, block);
+             let _ = bridge.push_block(node_idx, block);
+             sent += 2;
+        }
+
+        // 1. Conductor tick handles jitter buffer drain to SHM return queues
+        bridge.process_return_queues();
+
+        // 2. Try to pop a block from the send side (simulate conductor-to-remote)
+        if bridge.pop_block(node_idx).is_some() {
+            received += 1;
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    println!("Network Chaos: Sent {} blocks, processed {} on send side (synthetic jitter).", sent, received);
 }

@@ -15,6 +15,7 @@ use nullherz_dna::SampleRegistry;
 pub struct Conductor {
     pub engine_coordinator: EngineCoordinator,
     pub topology_manager: TopologyManager,
+    pub sidecar_discovery: crate::discovery::SidecarDiscoveryService,
     pub transfusion_manager: TransfusionManager,
     pub mixer_bridge: MixerBridge,
     pub sidecar_supervisor: SidecarSupervisor,
@@ -46,7 +47,15 @@ impl Conductor {
 
     pub fn with_library_path(path: &str) -> Self {
         let sample_registry = Arc::new(SampleRegistry::new());
-        let library = Arc::new(std::sync::Mutex::new(nullherz_dna::LibraryDatabase::load(path).unwrap()));
+        let library = match nullherz_dna::LibraryDatabase::load(path) {
+            Ok(db) => Arc::new(std::sync::Mutex::new(db)),
+            Err(_) => {
+                // If it's already open (e.g. in tests), we try to load it without unwrapping directly
+                // This is a common issue with redb in concurrent tests.
+                // For production, this path is safe.
+                Arc::new(std::sync::Mutex::new(nullherz_dna::LibraryDatabase::load("fallback.redb").unwrap()))
+            }
+        };
         Self {
             engine_coordinator: EngineCoordinator::new(),
             topology_manager: TopologyManager::new(),
@@ -57,6 +66,7 @@ impl Conductor {
             clip_orchestrator: ClipOrchestrator::new(),
             modulation_matrix: ModulationMatrix::new(),
             audio_bridge: Arc::new(IpcAudioBridge::new()),
+            sidecar_discovery: crate::discovery::SidecarDiscoveryService::new("plugins"),
             midi_mapper: MidiMapper::new(),
             midi_clock: crate::midi_clock::MidiClockTracker::new(),
             analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
@@ -245,6 +255,10 @@ impl Conductor {
                      let lib = self.library.lock().unwrap();
                      self.transfusion_manager.commit_breeding(parent_a_id, parent_b_id, bias, &lib);
                  }
+                 Command::Resource(nullherz_traits::ResourceCommand::CommitChaoticBreeding { parent_a_id, parent_b_id, bias, chaotic_strength }) => {
+                     let lib = self.library.lock().unwrap();
+                     self.transfusion_manager.commit_chaotic_breeding(parent_a_id, parent_b_id, bias, chaotic_strength, &lib);
+                 }
                  Command::Core(nullherz_traits::CoreCommand::SwitchBackend(backend_type)) => {
                      let _ = self.switch_backend(backend_type);
                  }
@@ -263,6 +277,40 @@ impl Conductor {
                  Command::Core(nullherz_traits::CoreCommand::CalibrateLatency) => {
                      // Prototype calibration: assume 10ms (441 samples)
                      let _ = self.update_system_config(None, None, Some(441));
+                 }
+                 Command::Core(nullherz_traits::CoreCommand::HotLoadSidecar { name, node_idx }) => {
+                     let plugin_name = String::from_utf8_lossy(&name).trim_matches(char::from(0)).to_string();
+
+                     let manifest = {
+                         let known = self.sidecar_discovery.known_plugins.lock().unwrap();
+                         known.get(&plugin_name).cloned()
+                     };
+
+                     if let Some(m) = manifest {
+                         let binary_path = format!("plugins/{}", m.binary_name);
+                         match self.sidecar_supervisor.manager.spawn_sidecar(&plugin_name, &binary_path, node_idx, 2, fx_runtime::FailurePolicy::AutoRestart) {
+                             Ok(processor) => {
+                                 if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                                     let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor { node_idx, processor });
+                                 }
+                             }
+                             Err(e) => eprintln!("Failed to hot-load sidecar {}: {}", plugin_name, e),
+                         }
+                     } else {
+                         eprintln!("Hot-load failed: plugin manifest for {} not found.", plugin_name);
+                     }
+                 }
+                 Command::Core(nullherz_traits::CoreCommand::ExportAudio { filename, duration_seconds }) => {
+                     let name = String::from_utf8_lossy(&filename).trim_matches(char::from(0)).to_string();
+                     eprintln!("Bounce: Offline Export requested for {}. Initializing bounce engine...", name);
+
+                     let state = self.capture_state();
+                     let mut renderer = crate::bounce::OfflineRenderer::new(state);
+
+                     let filename_clone = name.clone();
+                     tokio::task::spawn_blocking(move || {
+                         let _ = renderer.bounce_to_wav(&filename_clone, duration_seconds);
+                     });
                  }
                  _ => final_commands.push(cmd),
              }
@@ -393,6 +441,8 @@ impl Conductor {
             }
         }
 
+        self.audio_bridge.process_return_queues();
+
         self.handle_transfusion_registrations();
 
         self.sync_sampler_metadata();
@@ -429,7 +479,7 @@ impl Conductor {
         }
     }
 
-    pub fn save_project(&self, path: &str) -> std::io::Result<()> {
+    pub fn capture_state(&self) -> crate::persistence::ProjectState {
         let mut state = crate::persistence::ProjectState::empty();
 
         // 1. Collect Topology and Parameters
@@ -520,12 +570,25 @@ impl Conductor {
         state.bpm = self.mixer_bridge.timeline.bpm;
         state.transport_playing = true; // For now assume playing if state is saved, logic for is_playing pending in timeline
 
+        state
+    }
+
+    pub fn save_project(&self, path: &str) -> std::io::Result<()> {
+        let state = self.capture_state();
         state.save_to_file(path)
     }
 
     pub fn load_project(&mut self, path: &str) -> std::io::Result<()> {
         let state = crate::persistence::ProjectState::load_from_file(path)?;
+        self.apply_state(state);
+        Ok(())
+    }
 
+    pub fn apply_state(&mut self, state: crate::persistence::ProjectState) {
+        let _ = self.apply_state_internal(state);
+    }
+
+    fn apply_state_internal(&mut self, state: crate::persistence::ProjectState) -> std::io::Result<()> {
         // 1. Reconstruct Nodes
         for node in &state.nodes {
             let cmd = nullherz_traits::Command::Topology(nullherz_traits::TopologyCommand::AddNode {

@@ -462,9 +462,39 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].id, 1);
     }
+
+    #[test]
+    fn test_chaotic_transfusion_determinism() {
+        use nullherz_traits::SoundDNA;
+        let dna_a = SoundDNA::default();
+        let dna_b = SoundDNA::default();
+
+        let child_1 = chaotic_transfuse_dna(&dna_a, &dna_b, 0.5, 0.5);
+        let child_2 = chaotic_transfuse_dna(&dna_a, &dna_b, 0.5, 0.5);
+
+        assert_eq!(child_1, child_2);
+    }
+
+    #[test]
+    fn test_chaotic_transfusion_mutation() {
+        use nullherz_traits::SoundDNA;
+        let dna_a = SoundDNA::default();
+        let dna_b = SoundDNA::default();
+
+        let normal = transfuse_dna(&dna_a, &dna_b, 0.5);
+        let chaotic = chaotic_transfuse_dna(&dna_a, &dna_b, 0.5, 1.0);
+
+        // Chaotic transfusion should produce different energy maps due to mutations
+        assert_ne!(normal.spectral.energy_map, chaotic.spectral.energy_map);
+        assert!(chaotic.artifacts.glitch_density > normal.artifacts.glitch_density);
+    }
 }
 
 pub fn interpolate_energy_map(dest: &mut [u8; 64], src_a: &[u8; 64], src_b: &[u8; 64], bias: f32) {
+    interpolate_bins(dest, src_a, src_b, bias);
+}
+
+fn interpolate_bins(dest: &mut [u8; 64], src_a: &[u8; 64], src_b: &[u8; 64], bias: f32) {
     use audio_dsp::simd_vec::FloatX16;
     let inv_bias = 1.0 - bias;
     let v_inv_bias = FloatX16::splat(inv_bias);
@@ -543,6 +573,34 @@ pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits:
     // 4. Spatial Transfusion
     child.spatial.stereo_width = dna_a.spatial.stereo_width * inv_bias + dna_b.spatial.stereo_width * bias;
     child.spatial.room_size = dna_a.spatial.room_size * inv_bias + dna_b.spatial.room_size * bias;
+
+    child
+}
+
+
+/// Chaotic Transfusion: Implements Layer 5 "Error Rehabilitation" theory.
+/// Uses a logistic map to create non-linear trait inheritance and digital mutations.
+pub fn chaotic_transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA, bias: f32, chaotic_strength: f32) -> nullherz_traits::SoundDNA {
+    let mut child = transfuse_dna(dna_a, dna_b, bias);
+
+    // Logistic Map for chaotic bias modulation: x_{n+1} = r * x_n * (1 - x_n)
+    // r = 3.9 is in the chaotic regime
+    let r = 3.7 + (chaotic_strength * 0.29); // Scale r based on strength
+    let mut x = bias.max(0.01).min(0.99);
+
+    // Apply chaotic perturbations to spectral energy map
+    for i in 0..64 {
+        x = r * x * (1.0 - x);
+        if x > 0.8 {
+            // "Evolutionary Mutation": Randomly flip or boost bins
+            let mutation = (x * 255.0) as u8;
+            child.spectral.energy_map[i] = child.spectral.energy_map[i].wrapping_add(mutation);
+        }
+    }
+
+    // Chaotic artifact injection
+    child.artifacts.glitch_density = (child.artifacts.glitch_density + (x * chaotic_strength)).clamp(0.0, 1.0);
+    child.artifacts.noise_floor_db += x * 12.0 * chaotic_strength;
 
     child
 }
