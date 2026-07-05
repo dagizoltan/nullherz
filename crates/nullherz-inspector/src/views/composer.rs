@@ -18,7 +18,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             // Left margin / Track Labels
             ui.vertical(|ui| {
                 ui.add_space(40.0); // Offset for header
-                for i in 0..8 {
+                for i in 0..16 {
                     ui.add_sized([80.0, 60.0], egui::Label::new(format!("TRACK {}", i + 1)));
                     ui.add_space(8.0);
                 }
@@ -28,15 +28,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             ui.vertical(|ui| {
                 // Column Headers
                 ui.horizontal(|ui| {
-                    for i in 0..8 {
+                    for i in 0..64 {
                         ui.add_sized([60.0, 30.0], egui::Label::new(format!("S{}", i + 1)));
                         ui.add_space(8.0);
                     }
                 });
 
-                for row in 0..8 {
+                for row in 0..16 {
                     ui.horizontal(|ui| {
-                        for col in 0..8 {
+                        for col in 0..64 {
                             let (rect, response) = ui.allocate_exact_size(Vec2::new(60.0, 60.0), Sense::click());
 
                             // True Visual State from Telemetry
@@ -48,14 +48,19 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 is_starting = (t.starting_clips_mask[row] >> col) & 1 == 1;
                             }
 
-                            let color = if is_playing {
+                            let mut color = if is_playing {
                                 Color32::from_rgb(0, 255, 100)
                             } else if is_starting {
-                                // Pulsing animation logic would go here
                                 Color32::from_rgb(255, 200, 0)
+                            } else if app.sequencer_grid[row][col] {
+                                Color32::from_rgb(0, 150, 255)
                             } else {
                                 Color32::from_gray(30)
                             };
+
+                            if col == app.sequencer_active_step {
+                                color = color.linear_multiply(1.5);
+                            }
 
                             ui.painter().rect_filled(rect, 2.0, color);
 
@@ -68,9 +73,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             }
 
                             if response.clicked() {
-                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::LaunchClip {
-                                    row: row as u32,
-                                    col: col as u32,
+                                let is_on = !app.sequencer_grid[row][col];
+                                app.sequencer_grid[row][col] = is_on;
+
+                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
+                                    node_idx: 70, // Sequencer default ID
+                                    track: row as u32,
+                                    step: col as u32,
+                                    value: is_on,
                                 }));
                             }
                             ui.add_space(8.0);

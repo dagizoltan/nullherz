@@ -33,7 +33,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         ui.group(|ui| {
             ui.horizontal(|ui| {
                 ui.label("CROSSFADER");
-                widgets::render_horizontal_fader(ui, &mut app.crossfader_pos, 0.0..=1.0, Color32::WHITE, ui.available_width() - 100.0, 30.0);
+                if widgets::render_horizontal_fader(ui, &mut app.crossfader_pos, 0.0..=1.0, Color32::WHITE, ui.available_width() - 100.0, 30.0).changed() {
+                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                        target_id: 20, // Crossfader default ID
+                        param_id: 0,
+                        value: app.crossfader_pos,
+                        ramp_duration_samples: 0,
+                    }));
+                }
             });
         });
     });
@@ -62,11 +69,25 @@ fn render_deck(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option
         let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 50.0), egui::Sense::hover());
         ui.painter().rect_filled(rect, 1.0, Color32::from_rgb(10, 10, 15));
 
-        if let Some(_wf_lock) = &app.waveform_renderer {
-             // Resolve loaded track metadata for this deck
-             if let Some(ref title) = app.now_playing[i] {
-                 // In a production scenario, we'd look up the track by ID/Title and pull MipWaveform
-                 // For now, we simulate the high-fidelity render call
+        if let Some(wf_lock) = &app.waveform_renderer {
+             if let Some(track_id) = app.now_playing[i] {
+                 // High-fidelity GPU waveform rendering
+                 let mut wf = wf_lock.lock().unwrap();
+                 let zoom = 1.0; // Standard view
+                 let scroll = 0.0;
+                 let color = deck_color.to_array().map(|v| v as f32 / 255.0);
+
+                 let track = app.library_db.get_track(track_id).ok().flatten();
+
+                 if let Some(ref t) = track {
+                     if let Some(wgpu) = &app.wgpu_renderer {
+                         let wgpu = wgpu.lock().unwrap();
+                         wf.update_globals(&wgpu.queue, scroll, zoom, color);
+                         wf.update_from_mip_waveform(&wgpu.queue, &t.metadata.mip_waveform, zoom);
+                     }
+                 }
+
+                 let title = track.as_ref().map(|t| t.title.as_str()).unwrap_or("UNKNOWN");
                  ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, title, egui::FontId::monospace(9.0), deck_color.gamma_multiply(0.5));
 
                  // Render playhead (Modern thin line)
@@ -97,10 +118,35 @@ fn render_deck(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option
 
             // Mixer Strip for Deck (EQ Stack)
             ui.vertical(|ui| {
-                widgets::render_knob(ui, &mut app.channel_eq_high[i], 0.0..=2.0, "HI", deck_color);
-                widgets::render_knob(ui, &mut app.channel_eq_mid[i], 0.0..=2.0, "MID", deck_color);
-                widgets::render_knob(ui, &mut app.channel_eq_low[i], 0.0..=2.0, "LOW", deck_color);
-                widgets::render_knob(ui, &mut app.channel_trims[i], 0.0..=2.0, "FLT", deck_color);
+                let deck_id = (b'A' + i as u8) as char;
+                if widgets::render_knob(ui, &mut app.channel_eq_high[i], 0.0..=2.0, "HI", deck_color).changed() {
+                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam {
+                        deck_id,
+                        param_type: nullherz_traits::DeckParamType::EqHigh,
+                        value: app.channel_eq_high[i],
+                    }));
+                }
+                if widgets::render_knob(ui, &mut app.channel_eq_mid[i], 0.0..=2.0, "MID", deck_color).changed() {
+                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam {
+                        deck_id,
+                        param_type: nullherz_traits::DeckParamType::EqMid,
+                        value: app.channel_eq_mid[i],
+                    }));
+                }
+                if widgets::render_knob(ui, &mut app.channel_eq_low[i], 0.0..=2.0, "LOW", deck_color).changed() {
+                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam {
+                        deck_id,
+                        param_type: nullherz_traits::DeckParamType::EqLow,
+                        value: app.channel_eq_low[i],
+                    }));
+                }
+                if widgets::render_knob(ui, &mut app.channel_trims[i], 0.0..=2.0, "FLT", deck_color).changed() {
+                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam {
+                        deck_id,
+                        param_type: nullherz_traits::DeckParamType::Filter,
+                        value: app.channel_trims[i],
+                    }));
+                }
             });
 
             ui.add_space(8.0);
@@ -109,7 +155,14 @@ fn render_deck(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option
             ui.horizontal(|ui| {
                 let peak = telemetry.as_ref().map(|t| t.peak_levels[i]).unwrap_or(0.0);
                 widgets::render_vu_meter(ui, peak, app.channel_peak_hold[i], deck_color, 140.0);
-                widgets::render_fader(ui, &mut app.channel_faders[i], 0.0..=1.0, deck_color, 140.0, 16.0);
+                if widgets::render_fader(ui, &mut app.channel_faders[i], 0.0..=1.0, deck_color, 140.0, 16.0).changed() {
+                    let deck_id = (b'A' + i as u8) as char;
+                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam {
+                        deck_id,
+                        param_type: nullherz_traits::DeckParamType::Gain,
+                        value: app.channel_faders[i],
+                    }));
+                }
             });
         });
     });

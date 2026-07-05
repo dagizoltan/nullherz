@@ -10,7 +10,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
              ui.strong("Global Audio");
              ui.horizontal(|ui| {
                  ui.label("BPM:");
-                 ui.add(egui::DragValue::new(&mut app.global_bpm).clamp_range(40.0..=300.0));
+                 if ui.add(egui::DragValue::new(&mut app.global_bpm).clamp_range(40.0..=300.0)).changed() {
+                     let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetBpm(app.global_bpm)));
+                 }
              });
 
              if ui.checkbox(&mut app.quantize_enabled, "Quantize Commands").changed() {
