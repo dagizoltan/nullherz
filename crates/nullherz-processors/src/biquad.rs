@@ -118,7 +118,7 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &
                 out_ptrs[i] = outputs[i].as_mut_ptr();
             }
             #[cfg(target_arch = "x86_64")]
-            unsafe { self.inner.process_16_channels(in_ptrs, out_ptrs, len); }
+            self.inner.process_16_channels(in_ptrs, out_ptrs, len);
         } else {
             for ch in 0..num_channels {
                 self.inner.process_scalar(ch, inputs[ch], outputs[ch]);

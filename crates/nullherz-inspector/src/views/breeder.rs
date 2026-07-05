@@ -11,7 +11,7 @@ pub struct BreederView {
     pub smoothed_goniometer: [f32; 128],
     pub selecting_parent: Option<usize>, // 0 for A, 1 for B
     pub telemetry_damping: f32,
-    pub preview_dna: [u8; 64],
+    pub preview_dna: [f32; 16],
 }
 
 impl BreederView {
@@ -26,7 +26,7 @@ impl BreederView {
             smoothed_goniometer: [0.0; 128],
             selecting_parent: None,
             telemetry_damping: 0.15,
-            preview_dna: [0; 64],
+            preview_dna: [0.0; 16],
         }
     }
 
@@ -153,11 +153,11 @@ impl BreederView {
 
                 if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
                     if let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
-                        nullherz_dna::interpolate_energy_map(&mut state.preview_dna, &track_a.metadata.dna.spectral.energy_map, &track_b.metadata.dna.spectral.energy_map, state.transfusion_bias_x);
+                        nullherz_dna::NeuralTransfuser::interpolate_latent(&mut state.preview_dna, &track_a.metadata.dna.spectral.latent_space, &track_b.metadata.dna.spectral.latent_space, state.transfusion_bias_x);
 
-                        let bin_width = preview_rect.width() / 64.0;
-                        for i in 0..64 {
-                            let h = (state.preview_dna[i] as f32 / 255.0) * preview_rect.height();
+                        let bin_width = preview_rect.width() / 16.0;
+                        for i in 0..16 {
+                            let h = state.preview_dna[i].clamp(0.0, 1.0) * preview_rect.height();
                             let x = preview_rect.left() + i as f32 * bin_width;
                             let r = egui::Rect::from_min_max(
                                 egui::pos2(x, preview_rect.bottom() - h),
@@ -263,9 +263,11 @@ impl BreederView {
 
                 // 1. Spectral Transfusion
                 let mut payload = [0u8; 128];
-                let mut energy_map = [0u8; 64];
-                nullherz_dna::interpolate_energy_map(&mut energy_map, &track_a.metadata.dna.spectral.energy_map, &track_b.metadata.dna.spectral.energy_map, self.transfusion_bias_x);
-                payload[0..64].copy_from_slice(&energy_map);
+                let mut latent = [0.0f32; 16];
+                nullherz_dna::NeuralTransfuser::interpolate_latent(&mut latent, &track_a.metadata.dna.spectral.latent_space, &track_b.metadata.dna.spectral.latent_space, self.transfusion_bias_x);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(latent.as_ptr() as *const u8, payload.as_mut_ptr(), 64);
+                }
 
                 // 2. Rhythmic Transfusion (Micro-timing)
                 for i in 0..12 {

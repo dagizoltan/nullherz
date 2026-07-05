@@ -25,7 +25,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (idx, node) in app.graph.nodes.iter().enumerate() {
-                let node_id = ui.make_persistent_id(format!("node_{}", idx));
+                let _node_id = ui.make_persistent_id(format!("node_{}", idx));
 
                 ui.horizontal(|ui| {
                     let _rect = ui.label(format!("[IDX:{}]", idx)).rect;
@@ -71,7 +71,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     // Remote Card / Hot-Swap target
                     let remote_addr = app.graph.node_assignments.get(&(idx as u32)).cloned().unwrap_or_else(|| "local".to_string());
                     let is_local = remote_addr == "local";
-                    let card_color = if is_local { Color32::from_gray(50) } else { Color32::from_rgb(0, 100, 200) };
+                    let _card_color = if is_local { Color32::from_gray(50) } else { Color32::from_rgb(0, 100, 200) };
 
                     let card_resp = ui.group(|ui| {
                         ui.label(RichText::new(&remote_addr).color(Color32::WHITE).small());

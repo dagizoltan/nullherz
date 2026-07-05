@@ -97,7 +97,7 @@ async fn handle_connection(
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Message>(32);
 
     // Task 1: Receiver - Forward messages from tx channel to WebSocket write half
-    let mut write_task = tokio::spawn(async move {
+    let write_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if write.send(msg).await.is_err() { break; }
         }
