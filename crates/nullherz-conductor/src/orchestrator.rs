@@ -228,57 +228,7 @@ impl Conductor {
         // 1. Intercept DJ Deck Commands and Translate them
         let mut translated_commands = Vec::new();
         for cmd in &commands {
-            match cmd {
-                Command::Performance(nullherz_traits::PerformanceCommand::LoadTrackToDeck { deck_id, sample_id }) => {
-                    if let Some(nodes) = self.mixer_manager.deck_mappings.get(deck_id) {
-                        translated_commands.push(Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
-                            granular_node_idx: nodes.sampler_id,
-                            sample_id: *sample_id,
-                        }));
-                    }
-                }
-                Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam { deck_id, param_type, value }) => {
-                    if let Some(nodes) = self.mixer_manager.deck_mappings.get(deck_id) {
-                        use nullherz_traits::DeckParamType;
-                        match param_type {
-                            DeckParamType::Gain => {
-                                translated_commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: nodes.gain_id as u64,
-                                    param_id: 0,
-                                    value: *value,
-                                    ramp_duration_samples: 128,
-                                }));
-                            }
-                            DeckParamType::EqLow => {
-                                translated_commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: nodes.isolator_id as u64,
-                                    param_id: 0,
-                                    value: *value,
-                                    ramp_duration_samples: 0,
-                                }));
-                            }
-                            DeckParamType::EqMid => {
-                                translated_commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: nodes.isolator_id as u64,
-                                    param_id: 1,
-                                    value: *value,
-                                    ramp_duration_samples: 0,
-                                }));
-                            }
-                            DeckParamType::EqHigh => {
-                                translated_commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: nodes.isolator_id as u64,
-                                    param_id: 2,
-                                    value: *value,
-                                    ramp_duration_samples: 0,
-                                }));
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                _ => translated_commands.push(*cmd),
-            }
+            translated_commands.extend(crate::mixer_orchestrator::MixerOrchestrator::translate_command(cmd, &self.mixer_manager, &self.library));
         }
 
         // Broadcast to remote nodes (Distributed Control Plane)
@@ -369,6 +319,21 @@ impl Conductor {
                      tokio::task::spawn_blocking(move || {
                          let _ = renderer.bounce_to_wav(&filename_clone, duration_seconds);
                      });
+                 }
+                 Command::Performance(nullherz_traits::PerformanceCommand::EvolvePattern { node_idx, track_idx, mutation_strength }) => {
+                     // Find the DNA of the sample currently loaded into the engine at this node index
+                     // (Heuristic: for now we assume node_idx corresponds to a Sampler that we can resolve via SampleRegistry)
+                     // In a real implementation, we'd look up the current resource ID of node_idx.
+                     // For this task, we'll try to find any DNA in the registry as a fallback.
+                     let mut dna = nullherz_traits::RhythmicDNA::default();
+                     if let Some(id) = self.transfusion_manager.sample_registry.list_ids().first() {
+                         if let Some(s) = self.transfusion_manager.sample_registry.get(*id) {
+                             dna = s.metadata.dna.rhythmic;
+                         }
+                     }
+
+                     let commands = crate::genetic_sequencer::GeneticSequencer::evolve_pattern(&dna, node_idx, track_idx, mutation_strength);
+                     self.apply_mixer_commands(commands);
                  }
                  _ => final_commands.push(cmd),
              }
@@ -481,18 +446,17 @@ impl Conductor {
             }
         }
 
-        // --- STAGE 4 PHASE C: REMOTE AUDIO SEND PROTOTYPE ---
+        // Hardened Distributed Audio Routing
         let topo = &self.topology_manager.current_topology;
         for node_idx in 0..topo.node_count {
             if let Some(target) = topo.node_assignments.get(&(node_idx as u32)) {
                 if target != "local" {
-                    // Check if this is a NetworkProxySend node or any node that should send audio remote
-                    // For now, we prototype by pulling from the bridge if a block is waiting
-                    if let Some(block) = self.audio_bridge.pop_block(node_idx as u32) {
+                    // Pull from the non-blocking IPC bridge and dispatch to the remote manager
+                    while let Some(block) = self.audio_bridge.pop_block(node_idx as u32) {
                         let remote_manager = self.sidecar_supervisor.remote_manager.clone();
                         tokio::spawn(async move {
                             let mut manager = remote_manager.lock().await;
-                            manager.send_audio_block(node_idx as u32, block).await;
+                            let _ = manager.send_audio_block(node_idx as u32, block).await;
                         });
                     }
                 }

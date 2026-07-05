@@ -170,11 +170,37 @@ impl DnaKernel {
         }
     }
 
-    pub fn apply_rhythmic_offset(samples: &mut [f32], dna: &nullherz_traits::SoundDNA, sample_rate: f32) {
-        // Apply micro-timing offsets from RhythmicDNA
-        let _offset_ms = dna.rhythmic.micro_timing[0] as f32 / 100.0;
-        let _offset_samples = (_offset_ms * sample_rate / 1000.0) as i32;
-        // In a real kernel, this would involve a delay line or sample shift
+    pub fn apply_rhythmic_offset(samples: &mut [f32], dna: &nullherz_traits::SoundDNA, sample_rate: f32, step: usize) {
+        // Apply micro-timing offsets from RhythmicDNA (Layer 3)
+        let micro_offset_ms = dna.rhythmic.micro_timing[step % 12] as f32;
+        let delay_samples = (micro_offset_ms * sample_rate * 0.001) as i32;
+
+        if delay_samples == 0 { return; }
+
+        if delay_samples > 0 {
+             // Delay the signal by shifting right
+             let shift = delay_samples as usize;
+             if shift < samples.len() {
+                 for i in (shift..samples.len()).rev() {
+                     samples[i] = samples[i - shift];
+                 }
+                 for i in 0..shift {
+                     samples[i] = 0.0;
+                 }
+             }
+        } else {
+             // Advance the signal by shifting left
+             let shift = (-delay_samples) as usize;
+             if shift < samples.len() {
+                 for i in 0..(samples.len() - shift) {
+                     samples[i] = samples[i + shift];
+                 }
+                 let end = samples.len();
+                 for i in (samples.len() - shift)..end {
+                     samples[i] = 0.0;
+                 }
+             }
+        }
     }
 }
 

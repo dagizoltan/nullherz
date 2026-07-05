@@ -47,25 +47,36 @@ fn render_deck(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.selectable_label(app.channel_sync[i], "SYNC").clicked() {
                     app.channel_sync[i] = !app.channel_sync[i];
+                    if app.channel_sync[i] {
+                         let target_deck = (b'A' + i as u8) as char;
+                         let source_deck = app.master_deck.map(|idx| (b'A' + idx as u8) as char).unwrap_or('A');
+                         let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::SyncDecks { source_deck, target_deck }));
+                    }
                 }
             });
         });
 
         ui.add_space(5.0);
 
-        // Visuals Area (Waveform / Spectrum placeholder)
+        // Visuals Area (Waveform)
         let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 60.0), egui::Sense::hover());
         ui.painter().rect_filled(rect, 2.0, Color32::from_gray(20));
-        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "WAVEFORM", egui::FontId::monospace(10.0), Color32::from_gray(50));
+
+        if let Some(_wf_lock) = &app.waveform_renderer {
+             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "WAVEFORM [ACTIVE]", egui::FontId::monospace(10.0), Color32::from_gray(100));
+        } else {
+             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "WAVEFORM [OFFLINE]", egui::FontId::monospace(10.0), Color32::from_gray(50));
+        }
 
         ui.horizontal(|ui| {
             // Controls
             ui.vertical(|ui| {
+                let deck_id = (b'A' + i as u8) as char;
                 if ui.button(RichText::new("▶").size(20.0)).clicked() {
-                     // Send play command
+                     let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id }));
                 }
                 if ui.button(RichText::new("⏸").size(20.0)).clicked() {
-                     // Send pause command
+                     let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::StopDeck { deck_id }));
                 }
             });
 

@@ -1947,6 +1947,8 @@ version = "0.1.0"
 dependencies = [
  "audio-core",
  "audio-dsp",
+ "bincode",
+ "bytemuck",
  "ipc-layer",
  "libc",
  "nullherz-processors",

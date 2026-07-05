@@ -182,6 +182,21 @@ pub enum PerformanceCommand {
         deck_id: char,
         sample_id: u64,
     },
+    SyncDecks {
+        source_deck: char,
+        target_deck: char,
+    },
+    PlayDeck {
+        deck_id: char,
+    },
+    StopDeck {
+        deck_id: char,
+    },
+    EvolvePattern {
+        node_idx: u32,
+        track_idx: u32,
+        mutation_strength: f32,
+    },
 }
 
 #[repr(C)]
