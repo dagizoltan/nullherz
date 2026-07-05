@@ -258,7 +258,14 @@ impl Conductor {
         for cmd in translated_commands {
              match cmd {
                  Command::Performance(nullherz_traits::PerformanceCommand::LaunchClip { row, col }) => {
-                     self.clip_orchestrator.launch_clip(row as usize, col as usize);
+                     if row == 0xFF {
+                         // Scene Launch: launch all clips in column 'col'
+                         for r in 0..8 {
+                             self.clip_orchestrator.launch_clip(r, col as usize);
+                         }
+                     } else {
+                         self.clip_orchestrator.launch_clip(row as usize, col as usize);
+                     }
                  }
                  Command::Performance(nullherz_traits::PerformanceCommand::TransfuseRow { row }) => {
                      let mutations = self.clip_orchestrator.transfuse_row(row as usize);
@@ -343,6 +350,15 @@ impl Conductor {
 
                      let commands = crate::genetic_sequencer::GeneticSequencer::evolve_pattern(&dna, node_idx, track_idx, mutation_strength);
                      self.apply_mixer_commands(commands);
+                 }
+                 Command::Performance(nullherz_traits::PerformanceCommand::SetTrackMute { track_idx, muted, .. }) => {
+                     println!("Conductor: Track {} Mute set to {}", track_idx, muted);
+                 }
+                 Command::Performance(nullherz_traits::PerformanceCommand::SetTrackSolo { track_idx, soloed, .. }) => {
+                     println!("Conductor: Track {} Solo set to {}", track_idx, soloed);
+                 }
+                 Command::Performance(nullherz_traits::PerformanceCommand::ClearTrackPattern { track_idx, .. }) => {
+                     println!("Conductor: Clearing Pattern for Track {}", track_idx);
                  }
                  Command::Resource(nullherz_traits::ResourceCommand::ApplyFeatureMutation { target_id, feature_name, strength }) => {
                      let name = String::from_utf8_lossy(&feature_name).trim_matches(char::from(0)).to_string();
