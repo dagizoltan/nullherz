@@ -76,6 +76,18 @@
 *   **Genetic Cloud [PLANNED]:**
     *   Implementing PeerSync protocol for federated DNA sharing.
 
+## Stage 7: Neural Frontiers & Hardware RDMA [PLANNED]
+*Goal: Categories-defining audio technology and zero-latency distribution.*
+
+*   **Timbral VAE Integration:**
+    *   Replace frequency-bin latent space with Variational Autoencoder timbral embeddings.
+    *   Implement "Feature-Aware" breeding (e.g., "inherit the grit of parent A").
+*   **RDMA Audio Path:**
+    *   Prototype zero-copy RDMA return path for distributed AudioBlocks.
+    *   Achieve sub-100 microsecond network DSP latency.
+*   **Specialized Neuro Kernels:**
+    *   Develop high-order transient-preserving saturators and FM modulators.
+
 ---
 
 **Strategic Approval:** *Lead Nullherz Architect & Senior Producer*

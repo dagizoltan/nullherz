@@ -101,6 +101,8 @@ impl WasmSidecarRunner {
         Ok(Self { host })
     }
 
+    /// Optimized process loop for WASM sidecars.
+    /// Future R&D: Implement wasm_simd128 pathways for 4x performance boost in spectral kernels.
     pub fn process(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let func = self.host.instance.get_typed_func::<(), ()>(&mut self.host.store, "process")?;
         func.call(&mut self.host.store, ())?;

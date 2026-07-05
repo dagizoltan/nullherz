@@ -573,6 +573,11 @@ impl NeuralTransfuser {
     }
 }
 
+pub trait NeuralEncoder {
+    fn encode(&self, audio: &[f32]) -> [f32; 16];
+    fn decode(&self, latent: &[f32; 16]) -> Vec<f32>;
+}
+
 pub struct FeatureMutator;
 
 impl FeatureMutator {
