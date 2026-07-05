@@ -10,3 +10,4 @@ nullherz-traits = { path = "../nullherz-traits" }
 nullherz-processors = { path = "../nullherz-processors" }
 audio-dsp = { path = "../audio-dsp" }
 ipc-layer = { path = "../ipc-layer" }
+wasmtime = "22.0"

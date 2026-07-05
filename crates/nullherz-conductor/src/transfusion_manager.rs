@@ -5,9 +5,73 @@ use audio_dsp::TransientDetector;
 
 /// Manages the registration and lifecycle of audio DNA (samples) captured by the engine.
 /// This component acts as the non-RT side of the 'Transfusion' synthesis layer.
+pub struct EvolutionaryBreeder {
+    sample_registry: Arc<SampleRegistry>,
+    library: Arc<std::sync::Mutex<LibraryDatabase>>,
+}
+
+impl EvolutionaryBreeder {
+    pub fn new(sample_registry: Arc<SampleRegistry>, library: Arc<std::sync::Mutex<LibraryDatabase>>) -> Self {
+        Self { sample_registry, library }
+    }
+
+    pub fn run_breeding_cycle(&self) {
+        let lib = self.library.lock().unwrap();
+        if let Ok(tracks) = lib.list_tracks() {
+            if tracks.len() < 2 { return; }
+
+            // Simple heuristic: pick two random tracks for breeding
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as usize;
+            let idx_a = seed % tracks.len();
+            let idx_b = (seed / tracks.len()) % tracks.len();
+
+            if idx_a != idx_b {
+                let track_a = &tracks[idx_a];
+                let track_b = &tracks[idx_b];
+
+                // Check if they are in the registry
+                if self.sample_registry.get(track_a.id).is_some() && self.sample_registry.get(track_b.id).is_some() {
+                    println!("Evolutionary Breeder: Breeding {} x {}", track_a.title, track_b.title);
+                    self.perform_breeding(track_a.id, track_b.id, &lib);
+                }
+            }
+        }
+    }
+
+    fn perform_breeding(&self, id_a: u64, id_b: u64, lib: &LibraryDatabase) {
+        if let (Some(parent_a), Some(parent_b)) = (self.sample_registry.get(id_a), self.sample_registry.get(id_b)) {
+            let bias = 0.5;
+            let child_dna = nullherz_dna::transfuse_dna(&parent_a.metadata.dna, &parent_b.metadata.dna, bias);
+
+            let len = parent_a.buffer.len().min(parent_b.buffer.len());
+            let mut child_buffer = Vec::with_capacity(len);
+            for i in 0..len {
+                child_buffer.push(parent_a.buffer[i] * 0.5 + parent_b.buffer[i] * 0.5);
+            }
+
+            let child_id = id_a ^ id_b ^ 0xECA;
+            let mut child_metadata = parent_a.metadata.clone();
+            child_metadata.dna = child_dna;
+
+            self.sample_registry.register_with_metadata(child_id, Arc::new(child_buffer), child_metadata.clone());
+
+            let track = nullherz_dna::LibraryTrack {
+                id: child_id,
+                path: format!("evolution/child_{}.wav", child_id),
+                title: format!("Evolutionary Child ({} x {})", parent_a.metadata.dna.schema_version, parent_b.metadata.dna.schema_version),
+                artist: "Evolutionary Bot".to_string(),
+                metadata: child_metadata,
+            };
+            let _ = lib.save_track(&track);
+        }
+    }
+}
+
 pub struct TransfusionManager {
     /// The global registry where captured samples are stored for use by other processors.
     pub sample_registry: Arc<SampleRegistry>,
+    pub evolutionary_breeder: Option<EvolutionaryBreeder>,
     transient_detector: TransientDetector,
 }
 
@@ -15,8 +79,14 @@ impl TransfusionManager {
     pub fn new(sample_registry: Arc<SampleRegistry>) -> Self {
         Self {
             sample_registry,
+            evolutionary_breeder: None,
             transient_detector: TransientDetector::new(1024, 0.5),
         }
+    }
+
+    pub fn with_library(mut self, library: Arc<std::sync::Mutex<LibraryDatabase>>) -> Self {
+        self.evolutionary_breeder = Some(EvolutionaryBreeder::new(self.sample_registry.clone(), library));
+        self
     }
 
     pub fn rhythmic_transfusion(&self, dna_a: &nullherz_traits::RhythmicDNA, dna_b: &nullherz_traits::RhythmicDNA, bias: f32) -> nullherz_traits::RhythmicDNA {

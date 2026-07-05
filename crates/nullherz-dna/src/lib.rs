@@ -207,6 +207,43 @@ impl LibraryDatabase {
             Ok(Vec::new())
         }
     }
+
+    pub fn sync_with_cloud(&self, sync_service: &dyn PeerSync) -> Result<(), Box<dyn std::error::Error>> {
+        let tracks = self.list_tracks()?;
+        for track in tracks {
+            sync_service.announce_dna(&track.metadata.dna);
+        }
+
+        let remote_dna = sync_service.list_peer_dna();
+        for (id, name) in remote_dna {
+            if let Some(dna) = sync_service.request_dna(id) {
+                println!("Sync: Inherited SoundDNA '{}' from cloud peer.", name);
+                // Breeding logic or library integration here...
+            }
+        }
+        Ok(())
+    }
+}
+
+pub trait PeerSync {
+    fn announce_dna(&self, dna: &nullherz_traits::SoundDNA);
+    fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA>;
+    fn list_peer_dna(&self) -> Vec<(u64, String)>;
+}
+
+pub struct DiscoveryService {
+    pub known_peers: Vec<String>,
+}
+
+impl DiscoveryService {
+    pub fn new() -> Self {
+        Self { known_peers: Vec::new() }
+    }
+
+    pub fn discover(&mut self) {
+        // Stub for P2P discovery logic (libp2p/mdns)
+        println!("P2P Discovery: Searching for peers in the genetic cloud...");
+    }
 }
 
 pub struct SmartCrateManager;
@@ -391,15 +428,15 @@ mod tests {
         let mut dna_a = SoundDNA::default();
         let mut dna_b = SoundDNA::default();
 
-        for i in 0..64 {
-            dna_a.spectral.energy_map[i] = 100;
-            dna_b.spectral.energy_map[i] = 110;
+        for i in 0..16 {
+            dna_a.spectral.latent_space[i] = 0.5;
+            dna_b.spectral.latent_space[i] = 0.55;
         }
 
         let sim = calculate_similarity(&dna_a, &dna_b);
         assert!(sim > 0.9);
 
-        for i in 0..64 { dna_b.spectral.energy_map[i] = 200; }
+        for i in 0..16 { dna_b.spectral.latent_space[i] = 1.0; }
         let sim_low = calculate_similarity(&dna_a, &dna_b);
         assert!(sim_low < sim);
     }
@@ -410,22 +447,21 @@ mod tests {
         let mut dna_a = SoundDNA::default();
         let mut dna_b = SoundDNA::default();
 
-        for i in 0..64 {
-            dna_a.spectral.energy_map[i] = 100;
-            dna_b.spectral.energy_map[i] = 200;
+        for i in 0..16 {
+            dna_a.spectral.latent_space[i] = 0.2;
+            dna_b.spectral.latent_space[i] = 0.8;
         }
 
         let child = transfuse_dna(&dna_a, &dna_b, 0.5);
 
-        for i in 0..64 {
-            // (100 * 0.5) + (200 * 0.5) = 150
-            assert_eq!(child.spectral.energy_map[i], 150);
+        for i in 0..16 {
+            assert!((child.spectral.latent_space[i] - 0.5).abs() < 0.001);
         }
 
         let child_025 = transfuse_dna(&dna_a, &dna_b, 0.25);
-        for i in 0..64 {
-            // (100 * 0.75) + (200 * 0.25) = 75 + 50 = 125
-            assert_eq!(child_025.spectral.energy_map[i], 125);
+        for i in 0..16 {
+            // (0.2 * 0.75) + (0.8 * 0.25) = 0.15 + 0.2 = 0.35
+            assert!((child_025.spectral.latent_space[i] - 0.35).abs() < 0.001);
         }
     }
 
@@ -484,48 +520,71 @@ mod tests {
         let normal = transfuse_dna(&dna_a, &dna_b, 0.5);
         let chaotic = chaotic_transfuse_dna(&dna_a, &dna_b, 0.5, 1.0);
 
-        // Chaotic transfusion should produce different energy maps due to mutations
-        assert_ne!(normal.spectral.energy_map, chaotic.spectral.energy_map);
+        // Chaotic transfusion should produce different latent spaces due to mutations
+        assert_ne!(normal.spectral.latent_space, chaotic.spectral.latent_space);
         assert!(chaotic.artifacts.glitch_density > normal.artifacts.glitch_density);
     }
 }
 
-pub fn interpolate_energy_map(dest: &mut [u8; 64], src_a: &[u8; 64], src_b: &[u8; 64], bias: f32) {
-    interpolate_bins(dest, src_a, src_b, bias);
-}
+pub struct NeuralTransfuser;
 
-fn interpolate_bins(dest: &mut [u8; 64], src_a: &[u8; 64], src_b: &[u8; 64], bias: f32) {
-    use audio_dsp::simd_vec::FloatX16;
-    let inv_bias = 1.0 - bias;
-    let v_inv_bias = FloatX16::splat(inv_bias);
-    let v_bias = FloatX16::splat(bias);
+impl NeuralTransfuser {
+    pub fn interpolate_latent(dest: &mut [f32; 16], src_a: &[f32; 16], src_b: &[f32; 16], bias: f32) {
+        use audio_dsp::simd_vec::FloatX16;
+        let v_inv_bias = FloatX16::splat(1.0 - bias);
+        let v_bias = FloatX16::splat(bias);
 
-    for i in (0..64).step_by(16) {
-        let mut a_vals = [0.0f32; 16];
-        let mut b_vals = [0.0f32; 16];
-        for j in 0..16 {
-            a_vals[j] = src_a[i + j] as f32;
-            b_vals[j] = src_b[i + j] as f32;
-        }
-
-        let v_a = FloatX16::new(a_vals);
-        let v_b = FloatX16::new(b_vals);
+        let v_a = FloatX16::new(*src_a);
+        let v_b = FloatX16::new(*src_b);
         let v_res = (v_a * v_inv_bias) + (v_b * v_bias);
 
-        let res_arr: [f32; 16] = v_res.into();
-        for j in 0..16 {
-            dest[i + j] = res_arr[j].clamp(0.0, 255.0) as u8;
+        *dest = v_res.into();
+    }
+}
+
+pub struct FeatureMutator;
+
+impl FeatureMutator {
+    pub fn mutate(dna: &mut nullherz_traits::SoundDNA, feature_name: &str, strength: f32) {
+        match feature_name {
+            "metallic" => {
+                // Metallic textures often involve high-frequency resonances.
+                // We simulate this by perturbing specific dimensions of the latent space.
+                dna.spectral.latent_space[2] += 0.2 * strength;
+                dna.spectral.latent_space[7] += 0.3 * strength;
+                dna.artifacts.glitch_density = (dna.artifacts.glitch_density + 0.1 * strength).clamp(0.0, 1.0);
+            }
+            "organic" => {
+                // Organic sounds often have smoother spectral tilts and lower glitch density.
+                dna.spectral.tilt -= 0.1 * strength;
+                dna.artifacts.glitch_density = (dna.artifacts.glitch_density - 0.2 * strength).clamp(0.0, 1.0);
+                dna.spectral.latent_space[0] += 0.1 * strength;
+            }
+            "warm" => {
+                dna.spectral.tilt -= 0.2 * strength;
+                dna.spectral.latent_space[1] += 0.15 * strength;
+            }
+            "aggressive" => {
+                dna.artifacts.noise_floor_db += 6.0 * strength;
+                dna.spectral.latent_space[5] += 0.25 * strength;
+            }
+            _ => {
+                // Default: minor random perturbation of feature vector
+                for i in 0..8 {
+                    dna.feature_vector[i] += 0.05 * strength;
+                }
+            }
         }
     }
 }
 
 pub fn calculate_similarity(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA) -> f32 {
     let mut spectral_sim = 0.0;
-    for i in 0..64 {
-        let diff = (dna_a.spectral.energy_map[i] as f32 - dna_b.spectral.energy_map[i] as f32).abs();
-        spectral_sim += 1.0 - (diff / 255.0);
+    for i in 0..16 {
+        let diff = (dna_a.spectral.latent_space[i] - dna_b.spectral.latent_space[i]).abs();
+        spectral_sim += 1.0 - diff.min(1.0);
     }
-    spectral_sim /= 64.0;
+    spectral_sim /= 16.0;
 
     let rhythmic_sim = 1.0 - (dna_a.rhythmic.syncopation_index - dna_b.rhythmic.syncopation_index).abs();
 
@@ -536,8 +595,13 @@ pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits:
     let mut child = nullherz_traits::SoundDNA::default();
     let inv_bias = 1.0 - bias;
 
-    // 1. Spectral Transfusion (SIMD Optimized)
-    interpolate_energy_map(&mut child.spectral.energy_map, &dna_a.spectral.energy_map, &dna_b.spectral.energy_map, bias);
+    // 0. Feature Vector Transfusion
+    for i in 0..8 {
+        child.feature_vector[i] = dna_a.feature_vector[i] * inv_bias + dna_b.feature_vector[i] * bias;
+    }
+
+    // 1. Spectral Transfusion (Neural/Latent SIMD Optimized)
+    NeuralTransfuser::interpolate_latent(&mut child.spectral.latent_space, &dna_a.spectral.latent_space, &dna_b.spectral.latent_space, bias);
 
     child.spectral.tilt = dna_a.spectral.tilt * inv_bias + dna_b.spectral.tilt * bias;
 
@@ -588,13 +652,12 @@ pub fn chaotic_transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz
     let r = 3.7 + (chaotic_strength * 0.29); // Scale r based on strength
     let mut x = bias.max(0.01).min(0.99);
 
-    // Apply chaotic perturbations to spectral energy map
-    for i in 0..64 {
+    // Apply chaotic perturbations to spectral latent space
+    for i in 0..16 {
         x = r * x * (1.0 - x);
         if x > 0.8 {
-            // "Evolutionary Mutation": Randomly flip or boost bins
-            let mutation = (x * 255.0) as u8;
-            child.spectral.energy_map[i] = child.spectral.energy_map[i].wrapping_add(mutation);
+            // "Evolutionary Mutation": Perturb latent dimensions
+            child.spectral.latent_space[i] += (x - 0.5) * chaotic_strength;
         }
     }
 
