@@ -48,6 +48,22 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     });
 
                     ui.horizontal(|ui| {
+                        ui.label("Reference Track:");
+                        let label = if let Some(ref dna) = app.smart_crate_def.target_dna {
+                            format!("Template Active (v{})", dna.schema_version)
+                        } else {
+                            "None (Drag/Context Set)".to_string()
+                        };
+                        ui.label(RichText::new(label).color(Color32::from_rgb(0, 255, 200)));
+                        if ui.button("CLEAR").clicked() { app.smart_crate_def.target_dna = None; }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Similarity Threshold:");
+                        ui.add(egui::Slider::new(&mut app.smart_crate_def.threshold, 0.0..=1.0).text("%"));
+                    });
+
+                    ui.horizontal(|ui| {
                         ui.label("Spectral Tilt:");
                         let mut min = app.smart_crate_def.spectral_tilt_range.map(|r| r.0).unwrap_or(-1.0);
                         let mut max = app.smart_crate_def.spectral_tilt_range.map(|r| r.1).unwrap_or(1.0);
@@ -212,6 +228,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     if ui.button("Set as Breeding Parent B").clicked() {
                         app.breeding_view.parent_b_id = Some(track.id);
                         app.library_needs_refresh = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("Use as Smart Crate Template").clicked() {
+                        app.smart_crate_def.target_dna = Some(track.metadata.dna.clone());
+                        app.smart_crate_builder_open = true;
                         ui.close_menu();
                     }
                     ui.separator();

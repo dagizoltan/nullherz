@@ -53,6 +53,7 @@ pub enum RightTab {
     Library,
     Metrics,
     Notifications,
+    GeneticCloud,
 }
 
 pub struct FxSlot {
@@ -82,6 +83,10 @@ pub struct InspectorApp {
     pub(crate) channel_eq_high: [f32; 4],
     pub(crate) channel_eq_mid: [f32; 4],
     pub(crate) channel_eq_low: [f32; 4],
+    pub(crate) channel_personality_metallic: [f32; 4],
+    pub(crate) channel_personality_organic: [f32; 4],
+    pub(crate) channel_personality_warm: [f32; 4],
+    pub(crate) channel_personality_aggressive: [f32; 4],
     pub(crate) channel_fx_slots: [Vec<FxSlot>; 4],
     pub(crate) channel_cue: [bool; 4],
     pub(crate) channel_sync: [bool; 4],
@@ -142,6 +147,7 @@ pub struct InspectorApp {
     pub(crate) damped_spectrum: [f32; 128],
     pub(crate) damped_goniometer: [f32; 128],
     pub(crate) damped_latent: [f32; 16],
+    pub(crate) discovered_sidecars: Vec<nullherz_traits::SidecarManifest>,
 }
 
 impl InspectorApp {
@@ -157,6 +163,10 @@ impl InspectorApp {
             channel_eq_high: [1.0; 4],
             channel_eq_mid: [1.0; 4],
             channel_eq_low: [1.0; 4],
+            channel_personality_metallic: [0.0; 4],
+            channel_personality_organic: [0.0; 4],
+            channel_personality_warm: [0.0; 4],
+            channel_personality_aggressive: [0.0; 4],
             channel_fx_slots: [vec![], vec![], vec![], vec![]],
             channel_cue: [false; 4],
             channel_sync: [false; 4],
@@ -224,6 +234,7 @@ impl InspectorApp {
             damped_spectrum: [0.0; 128],
             damped_goniometer: [0.0; 128],
             damped_latent: [0.0; 16],
+            discovered_sidecars: vec![],
         }
     }
 
@@ -299,6 +310,9 @@ impl eframe::App for InspectorApp {
                         if ui.selectable_label(self.active_right_tab == Some(RightTab::Library), "LIBRARY").clicked() {
                             self.active_right_tab = Some(RightTab::Library);
                         }
+                        if ui.selectable_label(self.active_right_tab == Some(RightTab::GeneticCloud), "CLOUD").clicked() {
+                            self.active_right_tab = Some(RightTab::GeneticCloud);
+                        }
                         if ui.selectable_label(self.active_right_tab == Some(RightTab::Notifications), "AI/ANALYSIS").clicked() {
                             self.active_right_tab = Some(RightTab::Notifications);
                         }
@@ -313,6 +327,7 @@ impl eframe::App for InspectorApp {
 
                     match tab {
                         RightTab::Library => views::library::render(self, ui),
+                        RightTab::GeneticCloud => views::genetic_cloud::render(self, ui),
                         RightTab::Notifications => views::notifications::render(self, ui),
                         RightTab::Metrics => views::metrics::render(self, ui),
                     }

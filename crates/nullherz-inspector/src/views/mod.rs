@@ -4,6 +4,7 @@ pub mod mastering;
 pub mod modulation;
 pub mod setup_wizard;
 pub mod topology;
+pub mod genetic_cloud;
 pub mod mixer;
 pub mod broadcast;
 pub mod settings;

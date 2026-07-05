@@ -55,12 +55,23 @@ impl SidecarDiscoveryService {
                     let mut current_manifests = std::collections::HashMap::new();
                     while let Ok(Some(entry)) = entries.next_entry().await {
                         let path = entry.path();
-                        if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                        let ext = path.extension().and_then(|s| s.to_str());
+                        if ext == Some("json") {
                             if let Ok(content) = tokio::fs::read_to_string(&path).await {
                                 if let Ok(manifest) = serde_json::from_str::<nullherz_traits::SidecarManifest>(&content) {
                                     current_manifests.insert(manifest.name.clone(), manifest);
                                 }
                             }
+                        } else if ext == Some("wasm") {
+                            // Stage 6 Universal Extensibility: Implicit manifest for WASM blobs
+                            let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown_wasm").to_string();
+                            current_manifests.insert(name.clone(), nullherz_traits::SidecarManifest {
+                                name,
+                                version: "1.0.0-wasm".to_string(),
+                                author: "Universal Extension".to_string(),
+                                processor_type_id: 200, // WASM Generic ID
+                                binary_name: path.file_name().and_then(|s| s.to_str()).unwrap_or_default().to_string(),
+                            });
                         }
                     }
 
