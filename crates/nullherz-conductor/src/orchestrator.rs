@@ -28,6 +28,7 @@ pub struct Conductor {
     pub analysis_worker: Option<crate::analysis_worker::AnalysisWorker>,
     pub folder_monitor: Option<crate::folder_monitor::FolderMonitor>,
     pub library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>,
+    pub mixer_manager: nullherz_mixer::MixerManager,
     pub midi_consumer: Option<ipc_layer::Consumer<nullherz_traits::MidiEvent>>,
     pub external_midi_consumer: Option<ipc_layer::IpcMidiConsumer>,
     midi_child: Option<std::process::Child>,
@@ -72,6 +73,7 @@ impl Conductor {
             analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
             folder_monitor: Some(crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())),
             library,
+            mixer_manager: nullherz_mixer::MixerManager::new(),
             midi_consumer: None,
             external_midi_consumer: None,
             midi_child: None,
@@ -223,6 +225,62 @@ impl Conductor {
     pub fn apply_mixer_commands(&mut self, commands: Vec<Command>) {
         let mut final_commands = Vec::new();
 
+        // 1. Intercept DJ Deck Commands and Translate them
+        let mut translated_commands = Vec::new();
+        for cmd in &commands {
+            match cmd {
+                Command::Performance(nullherz_traits::PerformanceCommand::LoadTrackToDeck { deck_id, sample_id }) => {
+                    if let Some(nodes) = self.mixer_manager.deck_mappings.get(deck_id) {
+                        translated_commands.push(Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
+                            granular_node_idx: nodes.sampler_id,
+                            sample_id: *sample_id,
+                        }));
+                    }
+                }
+                Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam { deck_id, param_type, value }) => {
+                    if let Some(nodes) = self.mixer_manager.deck_mappings.get(deck_id) {
+                        use nullherz_traits::DeckParamType;
+                        match param_type {
+                            DeckParamType::Gain => {
+                                translated_commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: nodes.gain_id as u64,
+                                    param_id: 0,
+                                    value: *value,
+                                    ramp_duration_samples: 128,
+                                }));
+                            }
+                            DeckParamType::EqLow => {
+                                translated_commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: nodes.isolator_id as u64,
+                                    param_id: 0,
+                                    value: *value,
+                                    ramp_duration_samples: 0,
+                                }));
+                            }
+                            DeckParamType::EqMid => {
+                                translated_commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: nodes.isolator_id as u64,
+                                    param_id: 1,
+                                    value: *value,
+                                    ramp_duration_samples: 0,
+                                }));
+                            }
+                            DeckParamType::EqHigh => {
+                                translated_commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: nodes.isolator_id as u64,
+                                    param_id: 2,
+                                    value: *value,
+                                    ramp_duration_samples: 0,
+                                }));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => translated_commands.push(*cmd),
+            }
+        }
+
         // Broadcast to remote nodes (Distributed Control Plane)
         for cmd in &commands {
             let ts_cmd = nullherz_traits::TimestampedCommand {
@@ -238,7 +296,7 @@ impl Conductor {
             }
         }
 
-        for cmd in commands {
+        for cmd in translated_commands {
              match cmd {
                  Command::Performance(nullherz_traits::PerformanceCommand::LaunchClip { row, col }) => {
                      self.clip_orchestrator.launch_clip(row as usize, col as usize);

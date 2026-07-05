@@ -140,14 +140,14 @@ impl AnalysisKernel {
             total_energy += magnitudes[bin];
         }
 
-        for i in 0..64 {
+        for i in 0..16 {
             let mut sum = 0.0;
-            for k in 0..8 {
-                sum += magnitudes[i * 8 + k];
+            for k in 0..32 {
+                sum += magnitudes[i * 32 + k];
             }
-            dna.spectral.energy_map[i] = if total_energy > 0.0 {
-                (sum / total_energy * 255.0 * 10.0).min(255.0) as u8
-            } else { 0 };
+            dna.spectral.latent_space[i] = if total_energy > 0.0 {
+                (sum / total_energy * 10.0).min(1.0)
+            } else { 0.0 };
         }
 
         let mut tilt_sum = 0.0;

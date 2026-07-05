@@ -59,6 +59,16 @@ impl From<ProcessorTypeId> for u32 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u32)]
+pub enum DeckParamType {
+    Gain,
+    EqLow,
+    EqMid,
+    EqHigh,
+    Filter,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[repr(u32)]
 pub enum AudioBackendType {
     Alsa,
     Pipewire,
@@ -123,6 +133,11 @@ pub enum MixerCommand {
         target_id: u64,
         param_id: u32,
     },
+    SetDeckParam {
+        deck_id: char,
+        param_type: DeckParamType,
+        value: f32,
+    },
 }
 
 #[repr(C)]
@@ -162,6 +177,10 @@ pub enum PerformanceCommand {
     },
     TransfuseRow {
         row: u32,
+    },
+    LoadTrackToDeck {
+        deck_id: char,
+        sample_id: u64,
     },
 }
 
