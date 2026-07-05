@@ -197,6 +197,20 @@ pub enum PerformanceCommand {
         track_idx: u32,
         mutation_strength: f32,
     },
+    SetTrackMute {
+        node_idx: u32,
+        track_idx: u32,
+        muted: bool,
+    },
+    SetTrackSolo {
+        node_idx: u32,
+        track_idx: u32,
+        soloed: bool,
+    },
+    ClearTrackPattern {
+        node_idx: u32,
+        track_idx: u32,
+    },
 }
 
 #[repr(C)]

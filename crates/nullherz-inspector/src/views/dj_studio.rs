@@ -214,16 +214,65 @@ fn render_deck(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option
 
             ui.add_space(8.0);
 
+            // Hot Cues & Slicing (Performance Layer)
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("HOT CUES").small().color(Color32::from_gray(100)));
+                    ui.horizontal_wrapped(|ui| {
+                        for j in 0..8 {
+                            if ui.add_sized([25.0, 20.0], egui::Button::new(format!("{}", j + 1)).fill(Color32::from_gray(40))).clicked() {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpToHotCue {
+                                    node_idx: (i as u32 * 4), // Sampler node
+                                    cue_idx: j as u32,
+                                }));
+                            }
+                        }
+                    });
+                });
+
+                ui.add_space(10.0);
+
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("SLICE").small().color(Color32::from_gray(100)));
+                    ui.horizontal(|ui| {
+                        let grids = [("1/4", 1.0), ("1/8", 0.5), ("1/16", 0.25)];
+                        for (label, _size) in grids {
+                             if ui.add_sized([30.0, 20.0], egui::Button::new(label).fill(Color32::from_gray(30))).clicked() {
+                                 // Trigger slice 0 as a demo of the grid jump
+                                 let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::TriggerSlice {
+                                     node_idx: (i as u32 * 4),
+                                     slice_idx: 0,
+                                 }));
+                             }
+                        }
+                    });
+                });
+            });
+
+            ui.add_space(10.0);
+
             // Fader & VU (Integrated Aesthetic)
             ui.horizontal(|ui| {
                 let peak = telemetry.as_ref().map(|t| t.peak_levels[i]).unwrap_or(0.0);
                 widgets::render_vu_meter(ui, peak, app.channel_peak_hold[i], deck_color, 140.0);
                 if widgets::render_fader(ui, &mut app.channel_faders[i], 0.0..=1.0, deck_color, 140.0, 16.0).changed() {
+                    let val = app.channel_faders[i];
                     let deck_id = (b'A' + i as u8) as char;
+
+                    if app.record_automation {
+                         if let Some(t) = telemetry {
+                             // Assuming standard 4-deck ID layout for prototype: Gain nodes are often base+1
+                             // In a real app we'd map this correctly.
+                             let deck_idx = i as u64;
+                             let target_id = 10 + deck_idx * 4 + 1; // Heuristic gain ID
+                             app.automation_data.entry(target_id).or_default().push((t.beat_position, val));
+                         }
+                    }
+
                     let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam {
                         deck_id,
                         param_type: nullherz_traits::DeckParamType::Gain,
-                        value: app.channel_faders[i],
+                        value: val,
                     }));
                 }
             });

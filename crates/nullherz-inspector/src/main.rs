@@ -149,6 +149,10 @@ pub struct InspectorApp {
     pub(crate) damped_latent: [f32; 16],
     pub(crate) discovered_sidecars: Vec<nullherz_traits::SidecarManifest>,
     pub(crate) personality_macro_mode: bool,
+    pub(crate) track_mutes: [bool; 16],
+    pub(crate) track_solos: [bool; 16],
+    pub(crate) record_automation: bool,
+    pub(crate) automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>, // target_id -> [(beat, value)]
 }
 
 impl InspectorApp {
@@ -237,6 +241,10 @@ impl InspectorApp {
             damped_latent: [0.0; 16],
             discovered_sidecars: vec![],
             personality_macro_mode: false,
+            track_mutes: [false; 16],
+            track_solos: [false; 16],
+            record_automation: false,
+            automation_data: std::collections::HashMap::new(),
         }
     }
 
