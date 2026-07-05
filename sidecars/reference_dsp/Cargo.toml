@@ -1,0 +1,15 @@
+[package]
+name = "reference-dsp"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "bitcrusher"
+path = "src/main.rs"
+
+[dependencies]
+nullherz-traits = { path = "../../crates/nullherz-traits" }
+sidecar-sdk = { path = "../../crates/sidecar-sdk" }
+sidecar-macros = { path = "../../crates/sidecar-macros" }
+ipc-layer = { path = "../../crates/ipc-layer" }
+audio-core = { path = "../../crates/audio-core" }

@@ -83,7 +83,7 @@ fn render_deck(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option
                      if let Some(wgpu) = &app.wgpu_renderer {
                          let wgpu = wgpu.lock().unwrap();
                          wf.update_globals(&wgpu.queue, scroll, zoom, color);
-                         wf.update_from_mip_waveform(&wgpu.queue, &t.metadata.mip_waveform, zoom);
+                         wf.update_from_mip_waveform(&wgpu.queue, &t.metadata.mip_waveform, zoom, rect.width() as u32);
                      }
                  }
 
@@ -118,27 +118,58 @@ fn render_deck(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option
 
             // Layer 6: Semantic Personality Shaping
             ui.vertical(|ui| {
-                ui.label(RichText::new("PERSONALity").small().color(Color32::from_gray(120)));
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("PERSONALity").small().color(Color32::from_gray(120)));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                         ui.checkbox(&mut app.personality_macro_mode, "🔗").on_hover_text("Global Macro Mode: Apply to all decks");
+                    });
+                });
                 ui.add_space(2.0);
 
                 let traits = [
-                    ("MET", &mut app.channel_personality_metallic[i], "metallic"),
-                    ("ORG", &mut app.channel_personality_organic[i], "organic"),
-                    ("WRM", &mut app.channel_personality_warm[i], "warm"),
-                    ("AGG", &mut app.channel_personality_aggressive[i], "aggressive"),
+                    ("MET", 0, "metallic"),
+                    ("ORG", 1, "organic"),
+                    ("WRM", 2, "warm"),
+                    ("AGG", 3, "aggressive"),
                 ];
 
-                for (label, val, feature) in traits {
+                for (label, idx, feature) in traits {
+                    let val = match idx {
+                        0 => &mut app.channel_personality_metallic[i],
+                        1 => &mut app.channel_personality_organic[i],
+                        2 => &mut app.channel_personality_warm[i],
+                        _ => &mut app.channel_personality_aggressive[i],
+                    };
+
                     if ui.add(egui::Slider::new(val, 0.0..=1.0).text(label).show_value(false)).changed() {
-                        if let Some(track_id) = app.now_playing[i] {
+                        let strength = *val;
+                        let mut targets = vec![];
+                        if app.personality_macro_mode {
+                            for deck_idx in 0..4 {
+                                if let Some(id) = app.now_playing[deck_idx] {
+                                    targets.push(id);
+                                    // Update macro-linked values visually
+                                    match idx {
+                                        0 => app.channel_personality_metallic[deck_idx] = strength,
+                                        1 => app.channel_personality_organic[deck_idx] = strength,
+                                        2 => app.channel_personality_warm[deck_idx] = strength,
+                                        _ => app.channel_personality_aggressive[deck_idx] = strength,
+                                    }
+                                }
+                            }
+                        } else if let Some(id) = app.now_playing[i] {
+                            targets.push(id);
+                        }
+
+                        for track_id in targets {
                             let mut name = [0u8; 32];
                             let bytes = feature.as_bytes();
                             name[..bytes.len()].copy_from_slice(bytes);
 
                             let cmd = nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ApplyFeatureMutation {
-                                target_id: track_id, // Target the loaded sample directly
+                                target_id: track_id,
                                 feature_name: name,
-                                strength: *val,
+                                strength,
                             });
                             let _ = app.command_sender.send(cmd);
                         }

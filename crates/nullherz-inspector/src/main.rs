@@ -148,6 +148,7 @@ pub struct InspectorApp {
     pub(crate) damped_goniometer: [f32; 128],
     pub(crate) damped_latent: [f32; 16],
     pub(crate) discovered_sidecars: Vec<nullherz_traits::SidecarManifest>,
+    pub(crate) personality_macro_mode: bool,
 }
 
 impl InspectorApp {
@@ -235,6 +236,7 @@ impl InspectorApp {
             damped_goniometer: [0.0; 128],
             damped_latent: [0.0; 16],
             discovered_sidecars: vec![],
+            personality_macro_mode: false,
         }
     }
 

@@ -30,6 +30,7 @@ impl DiscoveryBeacon {
 pub struct SidecarDiscoveryService {
     pub plugins_dir: String,
     pub known_plugins: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, nullherz_traits::SidecarManifest>>>,
+    pub library_db: Option<std::sync::Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>>,
 }
 
 impl SidecarDiscoveryService {
@@ -37,13 +38,48 @@ impl SidecarDiscoveryService {
         Self {
             plugins_dir: plugins_dir.to_string(),
             known_plugins: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            library_db: None,
         }
+    }
+
+    pub fn with_library(mut self, db: std::sync::Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>) -> Self {
+        self.library_db = Some(db);
+        self
     }
 
     pub fn start_watcher(&self) {
         let dir = self.plugins_dir.clone();
         let known = self.known_plugins.clone();
+        let lib = self.library_db.clone();
 
+        // 1. Peer Discovery & Cloud Sync Loop (Stage 6 P2P DNA)
+        if let Some(lib_db) = lib {
+            tokio::spawn(async move {
+                let mut discovery = nullherz_dna::DiscoveryService::new();
+                loop {
+                    discovery.discover();
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+
+                    let lib_lock = lib_db.lock().unwrap();
+                    // Sync local DNA templates with the cloud
+                    // Note: Mock/Stub sync service for discovery
+                    struct StubSync;
+                    impl nullherz_dna::PeerSync for StubSync {
+                        fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {}
+                        fn request_dna(&self, _id: u64) -> Option<nullherz_traits::SoundDNA> { None }
+                        fn list_peer_dna(&self) -> Vec<(u64, String)> {
+                            vec![
+                                (0xDEADBEEF, "Metallic Core Template".to_string()),
+                                (0xCAFEBABE, "Organic Sub Template".to_string()),
+                            ]
+                        }
+                    }
+                    let _ = lib_lock.sync_with_cloud(&StubSync);
+                }
+            });
+        }
+
+        // 2. Local Plugin Watcher Loop
         tokio::spawn(async move {
             let path = std::path::Path::new(&dir);
             if !path.exists() {
