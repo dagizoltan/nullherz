@@ -249,11 +249,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 });
 
                 if res.clicked() {
+                    let deck_idx = app.focused_deck;
                     let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
-                        granular_node_idx: (app.selected_deck as u32 * 4),
+                        granular_node_idx: (deck_idx as u32 * 4),
                         sample_id: track.id,
                     }));
-                    app.now_playing[app.selected_deck] = Some(track.id);
+                    app.now_playing[deck_idx] = Some(track.id);
                 }
 
                 ui.child_ui(rect, Layout::left_to_right(Align::Center)).horizontal(|ui| {
