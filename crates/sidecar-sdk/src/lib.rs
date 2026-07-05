@@ -161,10 +161,10 @@ pub struct DnaKernel;
 
 impl DnaKernel {
     pub fn apply_spectral_personality(output: &mut [f32], input: &[f32], dna: &nullherz_traits::SoundDNA, bias: f32) {
-        // Implementation of spectral shaping based on energy map (simplified for SDK utility)
+        // Implementation of spectral shaping based on latent space (simplified for SDK utility)
         for i in 0..output.len().min(input.len()) {
-            let bin = (i % 64);
-            let target_gain = dna.spectral.energy_map[bin] as f32 / 255.0;
+            let dim = i % 16;
+            let target_gain = dna.spectral.latent_space[dim].max(0.0).min(1.0);
             let current_gain = 1.0 * (1.0 - bias) + target_gain * bias;
             output[i] = input[i] * current_gain;
         }

@@ -59,7 +59,7 @@ impl Conductor {
         Self {
             engine_coordinator: EngineCoordinator::new(),
             topology_manager: TopologyManager::new(),
-            transfusion_manager: TransfusionManager::new(sample_registry.clone()),
+            transfusion_manager: TransfusionManager::new(sample_registry.clone()).with_library(library.clone()),
             mixer_bridge: MixerBridge::new(),
             sidecar_supervisor: SidecarSupervisor::new(),
             pattern_manager: PatternManager::new(),
@@ -442,6 +442,16 @@ impl Conductor {
         }
 
         self.audio_bridge.process_return_queues();
+
+        // Evolutionary Breeding Cycle (Triggered roughly every 10 seconds in the 100ms tick loop)
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        if now % 10 == 0 && self.mixer_bridge.timeline.last_breeding_secs != now {
+             self.mixer_bridge.timeline.last_breeding_secs = now;
+             if let Some(ref breeder) = self.transfusion_manager.evolutionary_breeder {
+                 breeder.run_breeding_cycle();
+             }
+        }
 
         self.handle_transfusion_registrations();
 

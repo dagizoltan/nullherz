@@ -187,6 +187,12 @@ pub enum ResourceCommand {
         bias: f32,
         chaotic_strength: f32,
     },
+    ApplyFeatureMutation {
+        target_id: u64,
+        #[serde(with = "serde_big_array::BigArray")]
+        feature_name: [u8; 32],
+        strength: f32,
+    },
 }
 
 #[repr(C)]
@@ -569,9 +575,8 @@ pub trait CommandBundleConsumer: Send {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct SpectralPersonality {
-    /// 64 x 8-bit bins representing normalized power spectrum (0-20kHz)
-    #[serde(with = "serde_big_array::BigArray")]
-    pub energy_map: [u8; 64],
+    /// 16-float latent-space representation of the spectral personality
+    pub latent_space: [f32; 16],
     /// Ratio of periodic vs aperiodic energy across 8 octaves (16 bits per octave)
     pub harmonicity: [u16; 8],
     /// Spectral slope/tilt
@@ -583,7 +588,7 @@ pub struct SpectralPersonality {
 impl Default for SpectralPersonality {
     fn default() -> Self {
         Self {
-            energy_map: [0; 64],
+            latent_space: [0.0; 16],
             harmonicity: [0; 8],
             tilt: 0.0,
             formant_peaks: [(0.0, 0, 0); 5],
@@ -652,6 +657,7 @@ impl Default for SpatialDNA {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct SoundDNA {
     pub schema_version: u16,
+    pub feature_vector: [f32; 8],
     pub spectral: SpectralPersonality,
     pub rhythmic: RhythmicDNA,
     pub artifacts: ArtifactProfile,
@@ -661,7 +667,8 @@ pub struct SoundDNA {
 impl Default for SoundDNA {
     fn default() -> Self {
         Self {
-            schema_version: 1,
+            schema_version: 6,
+            feature_vector: [0.0; 8],
             spectral: SpectralPersonality::default(),
             rhythmic: RhythmicDNA::default(),
             artifacts: ArtifactProfile::default(),
@@ -840,7 +847,7 @@ mod tests {
         assert_eq!(cmd, decoded);
 
         let mut dna = SoundDNA::default();
-        dna.spectral.energy_map[0] = 255;
+        dna.spectral.latent_space[0] = 1.0;
         let dna_binary = dna.to_binary().unwrap();
         let dna_decoded = SoundDNA::from_binary(&dna_binary).unwrap();
         assert_eq!(dna, dna_decoded);

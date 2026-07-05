@@ -4,6 +4,7 @@ pub struct Timeline {
     pub signature_num: u32,
     pub signature_den: u32,
     pub current_beat: f64,
+    pub last_breeding_secs: u64,
 }
 
 impl Default for Timeline {
@@ -14,6 +15,7 @@ impl Default for Timeline {
             signature_num: 4,
             signature_den: 4,
             current_beat: 0.0,
+            last_breeding_secs: 0,
         }
     }
 }

@@ -170,13 +170,13 @@ impl nullherz_traits::SignalProcessor for PersonalityInheritanceProcessor {
                 im[bin] *= bin_width_scale;
             }
 
-            // energy_map is 64 bins covering 0-20kHz.
-            // We map these 64 bins back to the N FFT bins.
-            let bins_per_map_entry = n / 2 / 64;
+            // latent_space is 16 dimensions representing the spectral core.
+            // We map these 16 dimensions back to the N FFT bins.
+            let bins_per_map_entry = n / 2 / 16;
             if bins_per_map_entry == 0 { return; }
 
-            for i in 0..64 {
-                let target_mag = personality.energy_map[i] as f32 / 255.0;
+            for i in 0..16 {
+                let target_mag = personality.latent_space[i].max(0.0).min(1.0);
 
                 let start_bin = i * bins_per_map_entry;
                 let end_bin = (i + 1) * bins_per_map_entry;
@@ -213,13 +213,16 @@ impl PersonalityInheritanceProcessor {
         let inv_bias = 1.0 - bias;
         let mask = cmd.layer_mask;
 
-        // 1. Spectral Layer (Bytes 0-63 of payload = Energy Map)
+        // 1. Spectral Layer (Bytes 0-63 of payload = Latent Space [f32; 16])
         if mask & 1 != 0 {
             let mut new_personality = (*self.source_personality).clone();
-            let mut target_map = [0u8; 64];
-            target_map.copy_from_slice(&cmd.payload[0..64]);
+            let mut target_latent = [0.0f32; 16];
+            unsafe {
+                let bytes = &cmd.payload[0..64];
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), target_latent.as_mut_ptr() as *mut u8, 64);
+            }
 
-            nullherz_dna::interpolate_energy_map(&mut new_personality.energy_map, &self.source_personality.energy_map, &target_map, bias);
+            nullherz_dna::NeuralTransfuser::interpolate_latent(&mut new_personality.latent_space, &self.source_personality.latent_space, &target_latent, bias);
             self.source_personality = Arc::new(new_personality);
         }
 
