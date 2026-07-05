@@ -8,7 +8,7 @@ pub fn create_dj_deck(
     fx_ids: &[u32],
     bus_assignment: char,
     config: &MixerConfig,
-) -> Vec<Command> {
+) -> (Vec<Command>, crate::DeckNodes) {
     let mut commands = Vec::new();
     println!("Creating DJ Deck: {} assigned to Bus {}", deck_id, bus_assignment);
 
@@ -56,5 +56,11 @@ pub fn create_dj_deck(
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: cue_gain_r_id, input_idx: 0, new_buffer_idx: target_r as u32 }));
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: cue_gain_r_id, output_idx: 0, new_buffer_idx: config.cue_r as u32 }));
 
-    commands
+    let nodes = crate::DeckNodes {
+        sampler_id: resample_id,
+        isolator_id: eq_id,
+        gain_id,
+    };
+
+    (commands, nodes)
 }

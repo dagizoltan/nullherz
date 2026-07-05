@@ -1,6 +1,21 @@
-# Next Session: Ecosystem Expansion & Genetic Sequencer
+# Next Session: Stage 6 Expansion & Federated Genetics
 
-**Objective**: Leverage the hardened distributed protocol and matchmaking API to build a multi-node DSP ecosystem and genetic arrangement logic.
+**Objective**: Leverage the Neural Transfusion model and WASM runtime to build a global genetic cloud and cross-platform DSP ecosystem.
+
+## Task 1: Federated P2P Genetic Cloud
+- **Gossip Protocol**: Implement the `libp2p` gossipsub logic for `PeerSync` to allow real-time SoundDNA template exchange across the network.
+- **Genetic Authority**: Implement a consensus mechanism to track the "lineage" of bred sounds across different user libraries.
+
+## Task 2: WASM SDK Optimization
+- **SHM Host Exports**: Finalize the command and audio buffer memory mapping in `wasm_runtime.rs` to allow guest plugins to read/write shared memory segments directly.
+- **SIMD for WASM**: Implement `wasm_simd128` pathways for the `DnaKernel` to ensure high-performance spectral shaping within the WebAssembly environment.
+
+## Task 3: Intelligent DJ Mixing
+- **Auto-Sync Logic**: Extend the `Conductor`'s deck loading bridge to automatically trigger `SetBpm` and `KeySync` commands based on the loaded track's metadata.
+- **Transition Macro**: Implement a "Smart Transition" command that utilizes `NeuralTransfuser` to smoothly morph the spectral personality between Deck A and Deck B during a crossfade.
+
+## Task 4: Hardware RDMA Foundation
+- **InfiniBand/RDMA**: Research and prototype the RDMA return path for `AudioBlock` transmission to achieve zero-CPU network audio distribution for high-density multi-machine setups.
 
 ## Task 1: Genetic Sequencer Evolution
 - **DNA-Aware Patterns**: Implement a "Genetic Sequencer" in `nullherz-conductor` that mutates and evolves MIDI patterns based on the loaded sample's Rhythmic DNA (using the 64-step onset mask and micro-timing profile).

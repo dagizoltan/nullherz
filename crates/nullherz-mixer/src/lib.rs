@@ -3,13 +3,22 @@ pub mod studio;
 pub mod dj;
 
 use nullherz_traits::{Command, ProcessorTypeId};
+use std::collections::HashMap;
 
 pub use common::*;
+
+#[derive(Debug, Clone, Default)]
+pub struct DeckNodes {
+    pub sampler_id: u32,
+    pub isolator_id: u32,
+    pub gain_id: u32,
+}
 
 #[derive(Default)]
 pub struct MixerManager {
     pub id_allocator: std::sync::Arc<nullherz_traits::IdAllocator>,
     pub config: MixerConfig,
+    pub deck_mappings: HashMap<char, DeckNodes>,
 }
 
 impl MixerManager {
@@ -17,6 +26,7 @@ impl MixerManager {
         Self {
             id_allocator: std::sync::Arc::new(nullherz_traits::IdAllocator::default()),
             config: MixerConfig::default(),
+            deck_mappings: HashMap::new(),
         }
     }
 
@@ -32,7 +42,9 @@ impl MixerManager {
     }
 
     pub fn create_dj_deck(&mut self, deck_id: char, fx_ids: &[u32], bus_assignment: char) -> Vec<Command> {
-        dj::create_dj_deck(&self.id_allocator, deck_id, fx_ids, bus_assignment, &self.config)
+        let (commands, nodes) = dj::create_dj_deck(&self.id_allocator, deck_id, fx_ids, bus_assignment, &self.config);
+        self.deck_mappings.insert(deck_id, nodes);
+        commands
     }
 
     pub fn create_crossfader(&mut self) -> Vec<Command> {
