@@ -25,16 +25,63 @@ impl WasmSidecarHost {
         let mut linker = Linker::new(&engine);
 
         // Define host functions for SHM access
-        linker.func_wrap("nullherz", "pop_command", |mut caller: Caller<'_, WasmState>| -> i32 {
+        linker.func_wrap("nullherz", "pop_command", |mut caller: Caller<'_, WasmState>, ptr: i32| -> i32 {
              let state = caller.data_mut();
              unsafe {
-                 if let Some(_cmd) = (*state.cmd_buffer).pop() {
-                     // In a real implementation, we'd copy the command into WASM memory
+                 if let Some(cmd) = (*state.cmd_buffer).pop() {
+                     let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
+                     let data = bincode::serialize(&cmd).unwrap();
+                     if data.len() <= 256 { // Assume guest buffer is large enough for now
+                         mem.write(&mut caller, ptr as usize, &data).unwrap();
+                         return data.len() as i32;
+                     }
                      1
                  } else {
                      0
                  }
              }
+        })?;
+
+        linker.func_wrap("nullherz", "get_audio_input", |mut caller: Caller<'_, WasmState>, channel: i32, ptr: i32| -> i32 {
+             let block = {
+                 let state = caller.data_mut();
+                 if let Some(rb_ptr) = state.audio_inputs.get(channel as usize) {
+                     unsafe { (**rb_ptr).pop() }
+                 } else {
+                     None
+                 }
+             };
+
+             if let Some(block) = block {
+                 let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
+                 let data = bytemuck::cast_slice(&block.data);
+                 mem.write(&mut caller, ptr as usize, data).unwrap();
+                 return block.len as i32;
+             }
+             0
+        })?;
+
+        linker.func_wrap("nullherz", "set_audio_output", |mut caller: Caller<'_, WasmState>, channel: i32, ptr: i32, len: i32| -> i32 {
+             let mut data = [0.0f32; 256];
+             {
+                 let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
+                 mem.read(&caller, ptr as usize, bytemuck::cast_slice_mut(&mut data)).unwrap();
+             }
+
+             let state = caller.data_mut();
+             if let Some(rb_ptr) = state.audio_outputs.get(channel as usize) {
+                 let block = AudioBlock {
+                     data,
+                     len: len as u32,
+                     _pad: [0; 15],
+                 };
+                 unsafe {
+                     if (**rb_ptr).push(block).is_ok() {
+                         return 1;
+                     }
+                 }
+             }
+             0
         })?;
 
         let mut store = Store::new(&engine, state);

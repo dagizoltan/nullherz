@@ -481,18 +481,17 @@ impl Conductor {
             }
         }
 
-        // --- STAGE 4 PHASE C: REMOTE AUDIO SEND PROTOTYPE ---
+        // Hardened Distributed Audio Routing
         let topo = &self.topology_manager.current_topology;
         for node_idx in 0..topo.node_count {
             if let Some(target) = topo.node_assignments.get(&(node_idx as u32)) {
                 if target != "local" {
-                    // Check if this is a NetworkProxySend node or any node that should send audio remote
-                    // For now, we prototype by pulling from the bridge if a block is waiting
-                    if let Some(block) = self.audio_bridge.pop_block(node_idx as u32) {
+                    // Pull from the non-blocking IPC bridge and dispatch to the remote manager
+                    while let Some(block) = self.audio_bridge.pop_block(node_idx as u32) {
                         let remote_manager = self.sidecar_supervisor.remote_manager.clone();
                         tokio::spawn(async move {
                             let mut manager = remote_manager.lock().await;
-                            manager.send_audio_block(node_idx as u32, block).await;
+                            let _ = manager.send_audio_block(node_idx as u32, block).await;
                         });
                     }
                 }

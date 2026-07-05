@@ -218,7 +218,18 @@ impl LibraryDatabase {
         for (id, name) in remote_dna {
             if let Some(dna) = sync_service.request_dna(id) {
                 println!("Sync: Inherited SoundDNA '{}' from cloud peer.", name);
-                // Breeding logic or library integration here...
+                // Store received DNA in the database
+                let track = LibraryTrack {
+                    id,
+                    path: format!("cloud/{}", id),
+                    title: name,
+                    artist: "Cloud Peer".to_string(),
+                    metadata: nullherz_traits::SampleMetadata {
+                        dna,
+                        ..nullherz_traits::SampleMetadata::new_empty()
+                    },
+                };
+                let _ = self.save_track(&track);
             }
         }
         Ok(())
@@ -241,8 +252,28 @@ impl DiscoveryService {
     }
 
     pub fn discover(&mut self) {
-        // Stub for P2P discovery logic (libp2p/mdns)
-        println!("P2P Discovery: Searching for peers in the genetic cloud...");
+        use std::net::UdpSocket;
+        let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+        socket.set_broadcast(true).unwrap();
+        let msg = b"nullherz_dna_peer";
+        let _ = socket.send_to(msg, "255.255.255.255:9001");
+        println!("P2P Discovery: Broadcasted presence to the genetic cloud.");
+    }
+
+    pub fn listen(&mut self) {
+        use std::net::UdpSocket;
+        let socket = UdpSocket::bind("0.0.0.0:9001").unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let mut buf = [0u8; 1024];
+        if let Ok((len, addr)) = socket.recv_from(&mut buf) {
+            if &buf[..len] == b"nullherz_dna_peer" {
+                let peer_addr = addr.to_string();
+                if !self.known_peers.contains(&peer_addr) {
+                    println!("P2P Discovery: Found peer at {}", peer_addr);
+                    self.known_peers.push(peer_addr);
+                }
+            }
+        }
     }
 }
 
