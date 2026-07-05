@@ -58,44 +58,58 @@ fn render_deck(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option
 
         ui.add_space(5.0);
 
-        // Visuals Area (Waveform)
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 60.0), egui::Sense::hover());
-        ui.painter().rect_filled(rect, 2.0, Color32::from_gray(20));
+        // Compact Modern Waveform
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 50.0), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 1.0, Color32::from_rgb(10, 10, 15));
 
-        if let Some(_wf_lock) = &app.waveform_renderer {
-             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "WAVEFORM [ACTIVE]", egui::FontId::monospace(10.0), Color32::from_gray(100));
+        if let Some(wf_lock) = &app.waveform_renderer {
+             // Resolve loaded track metadata for this deck
+             if let Some(ref title) = app.now_playing[i] {
+                 // In a production scenario, we'd look up the track by ID/Title and pull MipWaveform
+                 // For now, we simulate the high-fidelity render call
+                 ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, title, egui::FontId::monospace(9.0), deck_color.gamma_multiply(0.5));
+
+                 // Render playhead (Modern thin line)
+                 let playhead_x = rect.min.x + (telemetry.as_ref().map(|t| (t.beat_position % 4.0) / 4.0).unwrap_or(0.0) as f32 * rect.width());
+                 ui.painter().line_segment([egui::pos2(playhead_x, rect.min.y), egui::pos2(playhead_x, rect.max.y)], egui::Stroke::new(1.0, Color32::WHITE));
+             } else {
+                 ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "EMPTY DECK", egui::FontId::monospace(9.0), Color32::from_gray(40));
+             }
         } else {
-             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "WAVEFORM [OFFLINE]", egui::FontId::monospace(10.0), Color32::from_gray(50));
+             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "WAVEFORM OFFLINE", egui::FontId::monospace(8.0), Color32::from_gray(30));
         }
 
         ui.horizontal(|ui| {
-            // Controls
+            // High-Density Industrial Channel Strip
             ui.vertical(|ui| {
+                ui.set_min_width(40.0);
                 let deck_id = (b'A' + i as u8) as char;
-                if ui.button(RichText::new("▶").size(20.0)).clicked() {
+                if ui.add_sized([35.0, 30.0], egui::Button::new(RichText::new("▶").size(14.0)).fill(Color32::from_gray(30))).clicked() {
                      let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id }));
                 }
-                if ui.button(RichText::new("⏸").size(20.0)).clicked() {
+                ui.add_space(4.0);
+                if ui.add_sized([35.0, 30.0], egui::Button::new(RichText::new("⏸").size(14.0)).fill(Color32::from_gray(30))).clicked() {
                      let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::StopDeck { deck_id }));
                 }
             });
 
-            ui.add_space(10.0);
+            ui.add_space(8.0);
 
-            // Mixer Strip for Deck
+            // Mixer Strip for Deck (EQ Stack)
             ui.vertical(|ui| {
                 widgets::render_knob(ui, &mut app.channel_eq_high[i], 0.0..=2.0, "HI", deck_color);
                 widgets::render_knob(ui, &mut app.channel_eq_mid[i], 0.0..=2.0, "MID", deck_color);
                 widgets::render_knob(ui, &mut app.channel_eq_low[i], 0.0..=2.0, "LOW", deck_color);
+                widgets::render_knob(ui, &mut app.channel_trims[i], 0.0..=2.0, "FLT", deck_color);
             });
 
-            ui.add_space(10.0);
+            ui.add_space(8.0);
 
-            // Fader & VU
+            // Fader & VU (Integrated Aesthetic)
             ui.horizontal(|ui| {
                 let peak = telemetry.as_ref().map(|t| t.peak_levels[i]).unwrap_or(0.0);
-                widgets::render_vu_meter(ui, peak, app.channel_peak_hold[i], deck_color, 120.0);
-                widgets::render_fader(ui, &mut app.channel_faders[i], 0.0..=1.0, deck_color, 120.0, 20.0);
+                widgets::render_vu_meter(ui, peak, app.channel_peak_hold[i], deck_color, 140.0);
+                widgets::render_fader(ui, &mut app.channel_faders[i], 0.0..=1.0, deck_color, 140.0, 16.0);
             });
         });
     });
