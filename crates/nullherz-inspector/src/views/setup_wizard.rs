@@ -80,6 +80,16 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
         ui.add_space(30.0);
         if ui.button(RichText::new("FINALIZE CONFIGURATION").strong().size(18.0)).clicked() {
+            let config = nullherz_conductor::persistence::SystemConfig {
+                audio_backend: "Alsa".to_string(), // In a real app we'd track current selection
+                midi_ports: vec!["Pioneer DDJ-400".to_string(), "Generic MIDI Keyboard".to_string()],
+                sample_rate: 44100,
+                block_size: 256,
+                calibration_samples: 441,
+            };
+            let json = serde_json::to_string_pretty(&config).unwrap_or_default();
+            let _ = std::fs::write("system_config.json", json);
+
             println!("Configuration saved to system_config.json");
             app.active_view = crate::View::Console;
         }

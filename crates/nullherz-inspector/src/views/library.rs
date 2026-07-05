@@ -65,6 +65,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         app.smart_crate_def.rhythmic_syncopation_range = Some((min, max));
                     });
 
+                    ui.horizontal(|ui| {
+                        ui.label("Glitch Density:");
+                        let mut min = app.smart_crate_def.glitch_density_range.map(|r| r.0).unwrap_or(0.0);
+                        let mut max = app.smart_crate_def.glitch_density_range.map(|r| r.1).unwrap_or(1.0);
+                        ui.add(egui::Slider::new(&mut min, 0.0..=1.0).text("MIN"));
+                        ui.add(egui::Slider::new(&mut max, 0.0..=1.0).text("MAX"));
+                        app.smart_crate_def.glitch_density_range = Some((min, max));
+                    });
+
                     if ui.button("SAVE SMART CRATE").clicked() {
                         let _ = app.library_db.save_smart_crate(&app.smart_crate_def);
                         app.smart_crate_builder_open = false;
@@ -94,12 +103,17 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     });
                 });
 
-                if let (Some(_a), Some(_b)) = (app.breeding_view.parent_a_id, app.breeding_view.parent_b_id) {
+                if let (Some(id_a), Some(id_b)) = (app.breeding_view.parent_a_id, app.breeding_view.parent_b_id) {
                     ui.add_space(10.0);
                     ui.add(egui::Slider::new(&mut app.breeding_view.transfusion_bias_x, 0.0..=1.0).text("BIAS (A <-> B)"));
                     if ui.add(egui::Button::new("BREED CHILD DNA").fill(Color32::from_rgb(0, 100, 80))).clicked() {
-                        // The actual breeding logic and registration would go here
-                        // For now we simulate the action.
+                        let cmd = nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::CommitBreeding {
+                            parent_a_id: id_a,
+                            parent_b_id: id_b,
+                            bias: app.breeding_view.transfusion_bias_x,
+                        });
+                        let _ = app.command_sender.send(cmd);
+                        app.library_needs_refresh = true;
                     }
                 }
             });
@@ -207,7 +221,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                                 granular_node_idx: (deck_idx as u32 * 4),
                                 sample_id: track.id,
                             }));
-                            app.now_playing[deck_idx] = Some(title.to_string());
+                            app.now_playing[deck_idx] = Some(track.id);
                             ui.close_menu();
                         }
                     }
@@ -218,12 +232,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         granular_node_idx: (app.selected_deck as u32 * 4),
                         sample_id: track.id,
                     }));
-                    app.now_playing[app.selected_deck] = Some(title.to_string());
+                    app.now_playing[app.selected_deck] = Some(track.id);
                 }
 
                 ui.child_ui(rect, Layout::left_to_right(Align::Center)).horizontal(|ui| {
                     ui.add_space(5.0);
-                    let is_loaded = app.now_playing.iter().any(|np| np.as_deref() == Some(title));
+                    let is_loaded = app.now_playing.iter().any(|np| np.as_ref() == Some(&track.id));
                     let t_color = if is_loaded { Color32::from_rgb(0, 255, 150) } else { Color32::WHITE };
 
                     ui.label(RichText::new(format!("{} - {}", title, artist)).size(11.0).color(t_color));

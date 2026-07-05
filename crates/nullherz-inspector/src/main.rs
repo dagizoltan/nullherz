@@ -99,7 +99,7 @@ pub struct InspectorApp {
     pub(crate) master_deck: Option<usize>,
     pub(crate) pitch_range: [f32; 4],
     pub(crate) crossfader_curve: f32,
-    pub(crate) now_playing: [Option<String>; 4],
+    pub(crate) now_playing: [Option<u64>; 4],
     pub(crate) global_bpm: f32,
     pub(crate) pitch_bend: [f32; 4],
     pub(crate) macros: [f32; 8],
