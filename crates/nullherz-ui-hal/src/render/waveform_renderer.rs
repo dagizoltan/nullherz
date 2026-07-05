@@ -134,22 +134,22 @@ impl WaveformRenderer {
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
     }
 
-    pub fn update_from_mip_waveform(&mut self, queue: &wgpu::Queue, mip_waveform: &nullherz_traits::MipWaveform, zoom: f32) {
-        // Simple MIP selection logic:
-        // High zoom (zoom < 0.2) -> High resolution (Level 0)
-        // Mid zoom (0.2 < zoom < 0.5) -> Mid resolution (Level 1-2)
-        // Low zoom (zoom > 0.5) -> Low resolution (Level 3-4)
-        let level_idx = if zoom < 0.1 {
-            0
-        } else if zoom < 0.2 {
-            1
-        } else if zoom < 0.4 {
-            2
-        } else if zoom < 0.8 {
-            3
-        } else {
-            4
-        };
+    pub fn update_from_mip_waveform(&mut self, queue: &wgpu::Queue, mip_waveform: &nullherz_traits::MipWaveform, zoom: f32, display_pixel_width: u32) {
+        // Advanced LOD selection logic:
+        // We want at least 1 peak per pixel for visual fidelity.
+        // mip_waveform levels are powers of 2.
+
+        let mut level_idx = 0;
+        if display_pixel_width > 0 {
+            for (i, level) in mip_waveform.levels.iter().enumerate() {
+                level_idx = i;
+                // Number of peaks that would be visible in the current zoom/scroll window
+                let visible_peaks = (level.len() as f32 / 2.0) * zoom;
+                if visible_peaks <= (display_pixel_width as f32 * 1.5) {
+                    break;
+                }
+            }
+        }
 
         let level_idx = level_idx.min(mip_waveform.levels.len().saturating_sub(1));
         let peaks = &mip_waveform.levels[level_idx];

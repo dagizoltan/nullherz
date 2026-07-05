@@ -106,6 +106,7 @@ impl TelemetryFinalizer {
             remote_node_count: 0,
             remote_cpu_usage: [0.0; 8],
             remote_latency_ms: [0.0; 8],
+            suggestions: [(0, 0.0); 4],
         };
         let _ = telemetry_producer.push_telemetry(telemetry.clone());
         telemetry

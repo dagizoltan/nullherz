@@ -26,7 +26,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         let cloud_tracks: Vec<_> = tracks.iter().filter(|t| t.artist == "Cloud Peer").collect();
 
         if cloud_tracks.is_empty() {
-            ui.label(RichText::new("No remote templates discovered yet.").small().italics());
+            ui.label(RichText::new("No remote templates discovered yet. Ensure Conductor P2P is active.").small().italics());
         }
 
         for track in cloud_tracks {

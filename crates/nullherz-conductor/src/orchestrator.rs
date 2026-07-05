@@ -9,7 +9,7 @@ use crate::pattern_manager::PatternManager;
 use crate::clip_orchestrator::ClipOrchestrator;
 use crate::modulation_matrix::ModulationMatrix;
 use nullherz_traits::{Command, telemetry::Telemetry};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use nullherz_dna::SampleRegistry;
 
 pub struct Conductor {
@@ -33,6 +33,7 @@ pub struct Conductor {
     pub external_midi_consumer: Option<ipc_layer::IpcMidiConsumer>,
     midi_child: Option<std::process::Child>,
     midi_shm: Option<Arc<ipc_layer::SharedMemory>>,
+    pub matchmaking_suggestions: Arc<Mutex<Vec<(u64, f32)>>>,
 }
 
 impl Default for Conductor {
@@ -67,7 +68,7 @@ impl Conductor {
             clip_orchestrator: ClipOrchestrator::new(),
             modulation_matrix: ModulationMatrix::new(),
             audio_bridge: Arc::new(IpcAudioBridge::new()),
-            sidecar_discovery: crate::discovery::SidecarDiscoveryService::new("plugins"),
+            sidecar_discovery: crate::discovery::SidecarDiscoveryService::new("plugins").with_library(library.clone()),
             midi_mapper: MidiMapper::new(),
             midi_clock: crate::midi_clock::MidiClockTracker::new(),
             analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
@@ -78,6 +79,7 @@ impl Conductor {
             external_midi_consumer: None,
             midi_child: None,
             midi_shm: None,
+            matchmaking_suggestions: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -211,6 +213,13 @@ impl Conductor {
     pub fn update_timeline(&mut self, telemetry: &mut Telemetry) {
         self.mixer_bridge.update_timeline(telemetry);
         self.clip_orchestrator.collect_telemetry(&mut telemetry.active_clips, &mut telemetry.starting_clips_mask);
+
+        // Update Matchmaking Suggestions
+        if let Ok(sugg) = self.matchmaking_suggestions.try_lock() {
+            for (i, (id, score)) in sugg.iter().enumerate().take(4) {
+                telemetry.suggestions[i] = (*id, *score);
+            }
+        }
 
         // Update Remote Node Telemetry
         if let Ok(manager) = self.sidecar_supervisor.remote_manager.try_lock() {
@@ -392,6 +401,9 @@ impl Conductor {
     }
 
     pub fn tick(&mut self) {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
         // Drain Local MIDI Consumer
         if let Some(ref mut consumer) = self.midi_consumer {
             let mut events = Vec::new();
@@ -474,9 +486,35 @@ impl Conductor {
 
         self.audio_bridge.process_return_queues();
 
+        // Proactive Matchmaking Suggestions (Stage 6)
+        if now % 15 == 0 && self.mixer_bridge.timeline.last_matchmaking_secs != now {
+            self.mixer_bridge.timeline.last_matchmaking_secs = now;
+            let lib = self.library.clone();
+            let suggestions = self.matchmaking_suggestions.clone();
+
+            // Heuristic: identify master track DNA
+            // Check deck mappings in mixer manager (Deck A sampler)
+            let master_sampler_id = self.mixer_manager.deck_mappings.get(&'A').map(|d| d.sampler_id);
+
+            if let Some(_sid) = master_sampler_id {
+                // In a production app, we would look up the currently loaded sample ID for this node.
+                // For this prototype, we'll try to use the first registered ID if available.
+                if let Some(id) = self.transfusion_manager.sample_registry.list_ids().first() {
+                    let id = *id;
+                    tokio::spawn(async move {
+                        let lib_lock = lib.lock().unwrap();
+                        if let Ok(Some(track)) = lib_lock.get_track(id) {
+                            if let Ok(matches) = nullherz_dna::Matchmaker::find_best_matches(&lib_lock, &track.metadata.dna, 3) {
+                                let mut sugg_lock = suggestions.lock().unwrap();
+                                *sugg_lock = matches;
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
         // Evolutionary Breeding Cycle (Triggered roughly every 10 seconds in the 100ms tick loop)
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         if now % 10 == 0 && self.mixer_bridge.timeline.last_breeding_secs != now {
              self.mixer_bridge.timeline.last_breeding_secs = now;
              if let Some(ref breeder) = self.transfusion_manager.evolutionary_breeder {
