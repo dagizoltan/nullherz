@@ -192,6 +192,11 @@ pub enum PerformanceCommand {
     StopDeck {
         deck_id: char,
     },
+    EvolvePattern {
+        node_idx: u32,
+        track_idx: u32,
+        mutation_strength: f32,
+    },
 }
 
 #[repr(C)]

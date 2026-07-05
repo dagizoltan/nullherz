@@ -3,8 +3,11 @@ use nullherz_mixer::MixerManager;
 
 pub struct MixerOrchestrator;
 
+use nullherz_dna::LibraryDatabase;
+use std::sync::{Arc, Mutex};
+
 impl MixerOrchestrator {
-    pub fn translate_command(cmd: &Command, mixer_manager: &MixerManager) -> Vec<Command> {
+    pub fn translate_command(cmd: &Command, mixer_manager: &MixerManager, library: &Arc<Mutex<LibraryDatabase>>) -> Vec<Command> {
         let mut translated = Vec::new();
         match cmd {
             Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id, sample_id }) => {
@@ -13,6 +16,16 @@ impl MixerOrchestrator {
                         granular_node_idx: nodes.sampler_id,
                         sample_id: *sample_id,
                     }));
+
+                    // Intelligent Auto-Sync: Resolve track BPM and notify target deck
+                    if let Ok(lib) = library.lock() {
+                        if let Ok(Some(track)) = lib.get_track(*sample_id) {
+                            if track.metadata.bpm > 0.0 {
+                                translated.push(Command::Core(nullherz_traits::CoreCommand::SetBpm(track.metadata.bpm)));
+                                // Future: also emit SyncDecks if global sync is enabled
+                            }
+                        }
+                    }
                 }
             }
             Command::Mixer(MixerCommand::SetDeckParam { deck_id, param_type, value }) => {

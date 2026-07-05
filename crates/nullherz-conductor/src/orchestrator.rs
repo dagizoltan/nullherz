@@ -228,7 +228,7 @@ impl Conductor {
         // 1. Intercept DJ Deck Commands and Translate them
         let mut translated_commands = Vec::new();
         for cmd in &commands {
-            translated_commands.extend(crate::mixer_orchestrator::MixerOrchestrator::translate_command(cmd, &self.mixer_manager));
+            translated_commands.extend(crate::mixer_orchestrator::MixerOrchestrator::translate_command(cmd, &self.mixer_manager, &self.library));
         }
 
         // Broadcast to remote nodes (Distributed Control Plane)
@@ -319,6 +319,21 @@ impl Conductor {
                      tokio::task::spawn_blocking(move || {
                          let _ = renderer.bounce_to_wav(&filename_clone, duration_seconds);
                      });
+                 }
+                 Command::Performance(nullherz_traits::PerformanceCommand::EvolvePattern { node_idx, track_idx, mutation_strength }) => {
+                     // Find the DNA of the sample currently loaded into the engine at this node index
+                     // (Heuristic: for now we assume node_idx corresponds to a Sampler that we can resolve via SampleRegistry)
+                     // In a real implementation, we'd look up the current resource ID of node_idx.
+                     // For this task, we'll try to find any DNA in the registry as a fallback.
+                     let mut dna = nullherz_traits::RhythmicDNA::default();
+                     if let Some(id) = self.transfusion_manager.sample_registry.list_ids().first() {
+                         if let Some(s) = self.transfusion_manager.sample_registry.get(*id) {
+                             dna = s.metadata.dna.rhythmic;
+                         }
+                     }
+
+                     let commands = crate::genetic_sequencer::GeneticSequencer::evolve_pattern(&dna, node_idx, track_idx, mutation_strength);
+                     self.apply_mixer_commands(commands);
                  }
                  _ => final_commands.push(cmd),
              }

@@ -19,6 +19,7 @@ pub mod modulation_matrix;
 pub mod clip_orchestrator;
 pub mod bounce;
 pub mod mixer_orchestrator;
+pub mod genetic_sequencer;
 
 pub use orchestrator::Conductor;
 

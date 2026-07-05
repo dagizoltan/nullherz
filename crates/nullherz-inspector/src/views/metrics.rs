@@ -72,6 +72,30 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             });
 
             ui.add_space(20.0);
+            ui.strong("Neural Sound DNA (Latent space)");
+            ui.add_space(10.0);
+
+            Frame::none().fill(Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(12.0).show(ui, |ui| {
+                if let Some(t) = &telemetry {
+                    ui.horizontal_wrapped(|ui| {
+                        for i in 0..16 {
+                            let val = t.dna_latent_space[i];
+                            let size = 15.0;
+                            let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+                            let color = if val > 0.0 {
+                                Color32::from_rgb((val * 255.0) as u8, 100, 200)
+                            } else {
+                                Color32::from_rgb(40, 40, 50)
+                            };
+                            ui.painter().rect_filled(rect, 2.0, color);
+                        }
+                    });
+                } else {
+                    ui.label("No DNA data available.");
+                }
+            });
+
+            ui.add_space(20.0);
             ui.strong("Remote Node Health");
             ui.add_space(10.0);
 

@@ -22,8 +22,7 @@ pub struct Telemetry {
     pub spectrum: [f32; 128],
     #[serde(with = "BigArray")]
     pub goniometer_pts: [f32; 128],
-    #[serde(with = "BigArray")]
-    pub dna_energy_map: [u8; 64],
+    pub dna_latent_space: [f32; 16],
     /// Row-wise active clip index (255 = none)
     pub active_clips: [u8; 8],
     /// Bitmask of clips in "Starting/Quantizing" state (Row per byte)
@@ -50,7 +49,7 @@ impl Default for Telemetry {
             peak_levels: [0.0; MAX_NODES],
             spectrum: [0.0; 128],
             goniometer_pts: [0.0; 128],
-            dna_energy_map: [0; 64],
+            dna_latent_space: [0.0; 16],
             active_clips: [255; 8],
             starting_clips_mask: [0; 8],
             remote_node_count: 0,

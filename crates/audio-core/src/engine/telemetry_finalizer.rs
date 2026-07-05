@@ -63,14 +63,14 @@ impl TelemetryFinalizer {
             }
         }
 
-        // Goniometer decimated L/R Capture
-        let mut dna_energy_map = [0u8; 64];
-        for i in 0..64 {
+        // Stage 6: decimate spectrum to latent space representation
+        let mut dna_latent_space = [0.0f32; 16];
+        for i in 0..16 {
             let mut sum = 0.0;
-            for k in 0..2 {
-                sum += spectrum[i * 2 + k];
+            for k in 0..8 {
+                sum += spectrum[i * 8 + k];
             }
-            dna_energy_map[i] = (sum / 2.0 * 255.0).min(255.0) as u8;
+            dna_latent_space[i] = (sum / 8.0).min(1.0);
         }
 
         let mut goniometer_pts = [0.0f32; 128];
@@ -100,7 +100,7 @@ impl TelemetryFinalizer {
             peak_levels,
             spectrum,
             goniometer_pts,
-            dna_energy_map,
+            dna_latent_space,
             active_clips: [255; 8],
             starting_clips_mask: [0; 8],
             remote_node_count: 0,
