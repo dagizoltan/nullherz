@@ -12,6 +12,7 @@ pub struct DeckNodes {
     pub sampler_id: u32,
     pub isolator_id: u32,
     pub gain_id: u32,
+    pub filter_id: u32,
 }
 
 #[derive(Default)]

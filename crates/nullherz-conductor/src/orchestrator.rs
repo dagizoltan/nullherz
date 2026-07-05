@@ -228,57 +228,7 @@ impl Conductor {
         // 1. Intercept DJ Deck Commands and Translate them
         let mut translated_commands = Vec::new();
         for cmd in &commands {
-            match cmd {
-                Command::Performance(nullherz_traits::PerformanceCommand::LoadTrackToDeck { deck_id, sample_id }) => {
-                    if let Some(nodes) = self.mixer_manager.deck_mappings.get(deck_id) {
-                        translated_commands.push(Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
-                            granular_node_idx: nodes.sampler_id,
-                            sample_id: *sample_id,
-                        }));
-                    }
-                }
-                Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam { deck_id, param_type, value }) => {
-                    if let Some(nodes) = self.mixer_manager.deck_mappings.get(deck_id) {
-                        use nullherz_traits::DeckParamType;
-                        match param_type {
-                            DeckParamType::Gain => {
-                                translated_commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: nodes.gain_id as u64,
-                                    param_id: 0,
-                                    value: *value,
-                                    ramp_duration_samples: 128,
-                                }));
-                            }
-                            DeckParamType::EqLow => {
-                                translated_commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: nodes.isolator_id as u64,
-                                    param_id: 0,
-                                    value: *value,
-                                    ramp_duration_samples: 0,
-                                }));
-                            }
-                            DeckParamType::EqMid => {
-                                translated_commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: nodes.isolator_id as u64,
-                                    param_id: 1,
-                                    value: *value,
-                                    ramp_duration_samples: 0,
-                                }));
-                            }
-                            DeckParamType::EqHigh => {
-                                translated_commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: nodes.isolator_id as u64,
-                                    param_id: 2,
-                                    value: *value,
-                                    ramp_duration_samples: 0,
-                                }));
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                _ => translated_commands.push(*cmd),
-            }
+            translated_commands.extend(crate::mixer_orchestrator::MixerOrchestrator::translate_command(cmd, &self.mixer_manager));
         }
 
         // Broadcast to remote nodes (Distributed Control Plane)

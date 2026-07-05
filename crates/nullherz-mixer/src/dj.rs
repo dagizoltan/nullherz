@@ -17,11 +17,17 @@ pub fn create_dj_deck(
 
     let gain_id = id_allocator.allocate_node_id();
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: gain_id, processor_type_id: ProcessorTypeId::GAIN }));
-    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: resample_id, output_idx: 0, new_buffer_idx: id_allocator.allocate_buffer_id(1) }));
-    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: gain_id, input_idx: 0, new_buffer_idx: id_allocator.allocate_buffer_id(1) }));
+    let resample_out = id_allocator.allocate_buffer_id(1);
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: resample_id, output_idx: 0, new_buffer_idx: resample_out }));
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: gain_id, input_idx: 0, new_buffer_idx: resample_out }));
 
+    let filter_id = id_allocator.allocate_node_id();
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: filter_id, processor_type_id: ProcessorTypeId::BIQUAD }));
+    let gain_out = id_allocator.allocate_buffer_id(1);
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: gain_id, output_idx: 0, new_buffer_idx: gain_out }));
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: filter_id, input_idx: 0, new_buffer_idx: gain_out }));
 
-    let mut prev_id = gain_id;
+    let mut prev_id = filter_id;
     for &fx_type in fx_ids {
         let fx_id = id_allocator.allocate_node_id();
         let fx_buf = id_allocator.allocate_buffer_id(1);
@@ -60,6 +66,7 @@ pub fn create_dj_deck(
         sampler_id: resample_id,
         isolator_id: eq_id,
         gain_id,
+        filter_id,
     };
 
     (commands, nodes)
