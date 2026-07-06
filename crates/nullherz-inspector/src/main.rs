@@ -412,7 +412,7 @@ impl eframe::App for InspectorApp {
         egui::CentralPanel::default().show(ctx, |ui| {
              match self.active_view {
                  View::Console => views::dj_studio::render(self, ui, &telemetry),
-                 View::Player => views::player::render(self, ui),
+                 View::Player => views::player::render(self, ui, &telemetry),
                  View::Sampler => views::sampler::render(self, ui, &telemetry),
                  View::Mixer => views::mixer::render(self, ui, &telemetry),
                  View::Library => views::library::render(self, ui),
