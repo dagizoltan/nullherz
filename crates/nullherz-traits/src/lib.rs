@@ -174,7 +174,7 @@ pub enum PerformanceCommand {
         node_idx: u32,
         track: u32,
         step: u32,
-        value: bool,
+        value: f32, // Velocity 0.0 - 1.0
     },
     JumpToHotCue {
         node_idx: u32,

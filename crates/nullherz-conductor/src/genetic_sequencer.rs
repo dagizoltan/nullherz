@@ -24,9 +24,9 @@ impl GeneticSequencer {
                 let rand_val = (seed.wrapping_mul(1103515245).wrapping_add(12345) as f32) / 4294967295.0;
 
                 let value = if rand_val > strength {
-                    dna_value
+                    if dna_value { 1.0 } else { 0.0 }
                 } else {
-                    rand_val > 0.8 // Random trigger if mutating
+                    if rand_val > 0.8 { 0.8 } else { 0.0 } // Random trigger with high velocity
                 };
 
                 commands.push(Command::Performance(PerformanceCommand::SetSequencerStep {

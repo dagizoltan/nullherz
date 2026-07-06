@@ -2,14 +2,14 @@ use nullherz_traits::AudioProcessor;
 
 #[derive(Clone, Copy)]
 struct Pattern {
-    grid: [[bool; 64]; 16], // 16 tracks, 64 steps
+    grid: [[f32; 64]; 16], // 16 tracks, 64 steps (Velocity/Value)
     len: u32,
 }
 
 impl Default for Pattern {
     fn default() -> Self {
         Self {
-            grid: [[false; 64]; 16],
+            grid: [[0.0; 64]; 16],
             len: 16,
         }
     }
@@ -66,7 +66,17 @@ fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &
 
                 if let Some(host) = context.host {
                     for track in 0..16 {
-                        if pattern.grid[track][step_idx] {
+                        let velocity = pattern.grid[track][step_idx];
+                        if velocity > 0.0 {
+                            host.push_command(
+                                self.current_sample + sample_offset.min(block_len - 1),
+                                nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: (70 + track as u64), // Placeholder targeting
+                                    param_id: 0, // Gain/Velocity
+                                    value: velocity,
+                                    ramp_duration_samples: 0,
+                                }),
+                            );
                             host.push_command(
                                 self.current_sample + sample_offset.min(block_len - 1),
                                 nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Play),
@@ -126,7 +136,7 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
             data.push(p.len as u8);
             for track in 0..16 {
                 for step in 0..64 {
-                    data.push(if p.grid[track][step] { 1 } else { 0 });
+                    data.extend_from_slice(&p.grid[track][step].to_le_bytes());
                 }
             }
         }
@@ -137,7 +147,7 @@ fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
     fn load_state(&mut self, data: &[u8]) {
-        if data.len() < 1 + 16 * (1 + 16 * 64) { return; }
+        if data.len() < 1 + 16 * (1 + 16 * 64 * 4) { return; }
         self.active_pattern = data[0] as usize;
         let mut cursor = 1;
         for p in self.patterns.iter_mut() {
@@ -145,8 +155,10 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             cursor += 1;
             for track in 0..16 {
                 for step in 0..64 {
-                    p.grid[track][step] = data[cursor] == 1;
-                    cursor += 1;
+                    let mut b = [0u8; 4];
+                    b.copy_from_slice(&data[cursor..cursor+4]);
+                    p.grid[track][step] = f32::from_le_bytes(b);
+                    cursor += 4;
                 }
             }
         }
