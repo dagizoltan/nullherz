@@ -13,6 +13,10 @@ pub struct NodeJson {
     pub inputs: Vec<usize>,
     pub outputs: Vec<usize>,
     pub name: String,
+    #[serde(default)]
+    pub x: f32,
+    #[serde(default)]
+    pub y: f32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -20,6 +24,10 @@ pub struct EdgeJson {
     pub from: u32,
     pub to: u32,
     pub input_idx: u32,
+    #[serde(default)]
+    pub output_idx: u32,
+    #[serde(default)]
+    pub buffer_idx: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

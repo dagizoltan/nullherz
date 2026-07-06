@@ -167,12 +167,12 @@ pub fn render_vu_meter(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Col
     let id = ui.next_auto_id();
     let mut smoothed_peak = ui.ctx().memory_mut(|mem| *mem.data.get_temp_mut_or_default::<f32>(id));
 
-    let attack = 0.8;
-    let decay = 0.05;
+    let _attack = 0.9; // Faster attack (unused due to instant jump)
+    let decay = 0.02; // Slower quadratic-like decay
     if peak > smoothed_peak {
-        smoothed_peak = smoothed_peak * (1.0 - attack) + peak * attack;
+        smoothed_peak = peak; // Instant attack for peak tracking
     } else {
-        smoothed_peak = smoothed_peak * (1.0 - decay) + peak * decay;
+        smoothed_peak = smoothed_peak * (1.0 - decay);
     }
     ui.ctx().memory_mut(|mem| mem.data.insert_temp(id, smoothed_peak));
 

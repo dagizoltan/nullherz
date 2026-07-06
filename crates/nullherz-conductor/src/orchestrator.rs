@@ -363,6 +363,7 @@ impl Conductor {
                  Command::Core(nullherz_traits::CoreCommand::SetMasterDeck(deck_id)) => {
                      self.active_master_deck = deck_id;
                      println!("Conductor: Master Deck set to {}", deck_id);
+                     self.update_matchmaking_suggestions(0); // Trigger immediate update
                  }
                  Command::Core(nullherz_traits::CoreCommand::LoadMidiMap(buffer)) => {
                      let name = String::from_utf8_lossy(&buffer).trim_matches(char::from(0)).to_string();
