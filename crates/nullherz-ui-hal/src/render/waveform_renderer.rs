@@ -125,8 +125,11 @@ impl WaveformRenderer {
     pub fn update_peaks(&mut self, queue: &wgpu::Queue, peaks: &[f32]) {
         let mut vertices = Vec::with_capacity(peaks.len() * 2);
         let peak_count = peaks.len();
+        if peak_count == 0 { return; }
+
         for (i, &peak) in peaks.iter().enumerate() {
-            let x = (i as f32 / peak_count as f32) * 2.0 - 1.0;
+            // Normalized X in range [0, 2] instead of [-1, 1] to allow easier zooming from start
+            let x = (i as f32 / peak_count as f32) * 2.0;
             vertices.push(WaveformVertex { position: [x, peak] });
             vertices.push(WaveformVertex { position: [x, -peak] });
         }

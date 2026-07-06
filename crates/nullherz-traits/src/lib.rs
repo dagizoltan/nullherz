@@ -344,6 +344,11 @@ pub enum TopologyCommand {
         node_idx: u32,
         enabled: bool,
     },
+    SetNodePosition {
+        node_idx: u32,
+        x: f32,
+        y: f32,
+    },
 }
 
 /// A command with an associated timestamp for deterministic execution.
@@ -436,9 +441,15 @@ pub struct GraphTopology {
     pub crossfades: [Option<CrossfadeState>; 8],
     pub node_count: usize,
     pub node_assignments: std::collections::HashMap<u32, String>, // node_idx -> "local" or sidecar addr
+    pub node_positions: std::collections::HashMap<u32, (f32, f32)>,
 }
 
 pub enum TopologyMutation {
+    SetNodePosition {
+        node_idx: u32,
+        x: f32,
+        y: f32,
+    },
     UpdateEdge {
         node_idx: u32,
         input_idx: u32,

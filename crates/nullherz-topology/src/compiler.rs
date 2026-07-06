@@ -235,6 +235,7 @@ mod tests {
                 crossfades: [None; 8],
                 node_count: 1,
                 node_assignments: std::collections::HashMap::new(),
+                node_positions: std::collections::HashMap::new(),
             };
 
             for (v_out, _) in writes {
@@ -270,6 +271,7 @@ mod tests {
                 crossfades: [None; 8],
                 node_count: num_nodes,
                 node_assignments: std::collections::HashMap::new(),
+                node_positions: std::collections::HashMap::new(),
             };
 
             for (src, dst) in edges {
@@ -308,6 +310,7 @@ mod tests {
             crossfades: [None; 8],
             node_count: 2,
             node_assignments: std::collections::HashMap::new(),
+            node_positions: std::collections::HashMap::new(),
         };
 
         // Node 0 writes to buffer 10
@@ -341,6 +344,7 @@ mod tests {
             crossfades: [None; 8],
             node_count: 2,
             node_assignments: std::collections::HashMap::new(),
+            node_positions: std::collections::HashMap::new(),
         };
 
         // Node 0 reads from buffer 10
@@ -377,6 +381,7 @@ mod tests {
             crossfades: [None; 8],
             node_count: 2,
             node_assignments,
+            node_positions: std::collections::HashMap::new(),
         };
 
         // Node 0 (Local) -> Node 1 (Remote) via Buffer 10
@@ -411,6 +416,7 @@ mod tests {
             crossfades: [None; 8],
             node_count: 2,
             node_assignments: std::collections::HashMap::new(),
+            node_positions: std::collections::HashMap::new(),
         };
 
         // Both nodes write to buffer 10

@@ -40,6 +40,7 @@ impl TopologyManager {
                 crossfades: [None; 8],
                 node_count: 0,
                 node_assignments: std::collections::HashMap::new(),
+                node_positions: std::collections::HashMap::new(),
             },
         }
     }
@@ -93,6 +94,11 @@ impl TopologyManager {
                     }
                 }
                 let _ = prod.push(TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx });
+                return true;
+            }
+            Command::Topology(nullherz_traits::TopologyCommand::SetNodePosition { node_idx, x, y }) => {
+                self.current_topology.node_positions.insert(node_idx, (x, y));
+                let _ = prod.push(TopologyMutation::SetNodePosition { node_idx, x, y });
                 return true;
             }
             Command::Core(nullherz_traits::CoreCommand::CommitTopology) => {

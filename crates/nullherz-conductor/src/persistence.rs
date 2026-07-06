@@ -7,6 +7,10 @@ pub struct NodeState {
     pub id: u32,
     pub type_id: u32,
     pub params: Vec<(u32, f32)>,
+    #[serde(default)]
+    pub x: f32,
+    #[serde(default)]
+    pub y: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -111,10 +115,13 @@ impl ProjectState {
                         params.push((p_id, child.get_parameter(p_id)));
                     }
 
+                    let (x, y) = topo.node_positions.get(&node_idx).cloned().unwrap_or((0.0, 0.0));
                     state.nodes.push(NodeState {
                         id: node_idx,
                         type_id,
                         params,
+                        x,
+                        y,
                     });
 
                     let state_data = child.serialize_state();
@@ -249,5 +256,17 @@ impl ProjectState {
     pub fn load_from_file(path: &str) -> std::io::Result<Self> {
         let content = std::fs::read_to_string(path)?;
         serde_json::from_str(&content).map_err(|e| std::io::Error::other(e))
+    }
+
+    pub fn save_to_rkyv(&self, path: &str) -> std::io::Result<()> {
+        let bytes = rkyv::to_bytes::<_, 1024>(self).map_err(|e| std::io::Error::other(format!("rkyv serialize error: {}", e)))?;
+        std::fs::write(path, bytes)
+    }
+
+    pub fn load_from_rkyv(path: &str) -> std::io::Result<Self> {
+        let bytes = std::fs::read(path)?;
+        let archived = unsafe { rkyv::archived_root::<Self>(&bytes[..]) };
+        let deserialized: Self = rkyv::Deserialize::<Self, _>::deserialize(archived, &mut rkyv::Infallible).map_err(|e| std::io::Error::other(format!("rkyv deserialize error: {}", e)))?;
+        Ok(deserialized)
     }
 }

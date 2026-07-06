@@ -14,6 +14,8 @@ fn test_project_persistence_roundtrip() {
         id: 0,
         type_id: ProcessorTypeId::SAMPLER.into(),
         params: vec![(1, 1.0)],
+        x: 100.0,
+        y: 200.0,
     });
     state.processor_states.push(ProcessorState {
         node_idx: 1,
