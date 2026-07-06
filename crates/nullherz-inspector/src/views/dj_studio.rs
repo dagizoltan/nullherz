@@ -208,7 +208,7 @@ fn render_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
             ui.painter().line_segment([egui::pos2(playhead_x, rect.min.y), egui::pos2(playhead_x, rect.max.y)], egui::Stroke::new(1.0, Color32::WHITE));
         } else {
             // Enhanced EMPTY DECK visualization
-            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "EMPTY DECK", egui::FontId::monospace(12.0).strong(), Color32::from_gray(60));
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "EMPTY DECK", egui::FontId::monospace(12.0), Color32::from_gray(60));
             // Render a dashed border for the empty zone
             ui.painter().rect_stroke(rect.shrink(2.0), 2.0, Stroke::new(1.0, Color32::from_gray(30)));
         }
