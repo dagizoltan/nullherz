@@ -9,6 +9,7 @@ pub struct BreederView {
     pub target_node_idx: u32,
     pub selecting_parent: Option<usize>, // 0 for A, 1 for B
     pub preview_dna: [f32; 16],
+    pub smoothed_goniometer: [f32; 128],
 }
 
 impl BreederView {
@@ -21,6 +22,7 @@ impl BreederView {
             target_node_idx: 150, // PersonalityInheritanceProcessor default ID
             selecting_parent: None,
             preview_dna: [0.0; 16],
+            smoothed_goniometer: [0.0; 128],
         }
     }
 
@@ -186,9 +188,12 @@ impl BreederView {
 
                 ui.group(|ui| {
                     if let Some(t) = &*telemetry {
-                        let alpha = state.telemetry_damping;
+                        let alpha = app.visualizer_damping.clamp(0.01, 1.0);
+                        let decay = alpha * 0.5;
                         for i in 0..128 {
-                            state.smoothed_goniometer[i] = state.smoothed_goniometer[i] * (1.0 - alpha) + t.goniometer_pts[i] * alpha;
+                            let target = t.goniometer_pts[i];
+                            let a = if target.abs() > state.smoothed_goniometer[i].abs() { alpha } else { decay };
+                            state.smoothed_goniometer[i] = state.smoothed_goniometer[i] * (1.0 - a) + target * a;
                         }
                         crate::widgets::render_goniometer(ui, &state.smoothed_goniometer, 200.0, Color32::from_rgb(0, 255, 200));
                     } else {
