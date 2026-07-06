@@ -2,14 +2,16 @@ use std::sync::Arc;
 use nullherz_traits::{Command, PerformanceCommand, SoundDNA, TopologyMutation};
 use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub enum ClipState {
     Stopped,
     Starting,
     Playing,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub struct Clip {
     pub name: String,
     pub sequencer_pattern_idx: Option<u32>,
@@ -19,7 +21,8 @@ pub struct Clip {
     pub state: ClipState,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub struct ClipGrid {
     pub clips: Vec<Vec<Option<Clip>>>, // [Row][Column]
 }

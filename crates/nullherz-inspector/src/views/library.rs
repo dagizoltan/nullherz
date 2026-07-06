@@ -14,7 +14,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
             let crates = app.library_db.list_crates().unwrap_or_default();
             for crate_name in crates {
-                let is_selected = app.active_crate.as_deref() == Some(&crate_name);
+                let is_selected = app.active_crate.as_deref() == Some(crate_name.as_str());
                 if ui.selectable_label(is_selected, &crate_name).clicked() {
                     app.active_crate = Some(crate_name);
                     app.library_needs_refresh = true;
@@ -23,7 +23,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
             let smart_crates = app.library_db.list_smart_crates().unwrap_or_default();
             for smart in smart_crates {
-                let is_selected = app.active_crate.as_deref() == Some(&smart.name);
+                let is_selected = app.active_crate.as_deref() == Some(smart.name.as_str());
                 if ui.selectable_label(is_selected, format!("✨ {}", smart.name)).clicked() {
                     app.active_crate = Some(smart.name);
                     app.library_needs_refresh = true;

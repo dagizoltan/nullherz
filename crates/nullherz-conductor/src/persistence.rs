@@ -1,21 +1,24 @@
 use serde::{Serialize, Deserialize};
 use serde_with::serde_as;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub struct NodeState {
     pub id: u32,
     pub type_id: u32,
     pub params: Vec<(u32, f32)>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub struct EdgeState {
     pub node_idx: u32,
     pub input_idx: u32,
     pub buffer_idx: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub struct OutputEdgeState {
     pub node_idx: u32,
     pub output_idx: u32,
@@ -23,21 +26,24 @@ pub struct OutputEdgeState {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub struct SequencerPatternState {
     #[serde_as(as = "[[_; 64]; 16]")]
     pub grid: [[bool; 64]; 16],
     pub len: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub struct SequencerNodeState {
     pub node_idx: u32,
     pub patterns: Vec<SequencerPatternState>,
     pub active_pattern: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub struct ProcessorState {
     pub node_idx: u32,
     pub state_data: Vec<u8>,
@@ -53,7 +59,8 @@ pub struct SystemConfig {
     pub calibration_samples: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub struct ProjectState {
     pub active_master_deck: char,
     pub nodes: Vec<NodeState>,

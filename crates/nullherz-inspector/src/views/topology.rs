@@ -1,4 +1,4 @@
-use egui::{Ui, Color32, RichText};
+use egui::{Ui, Color32, RichText, Sense};
 use crate::InspectorApp;
 use audio_core::Telemetry;
 use nullherz_traits::{Command, TopologyCommand};
@@ -20,108 +20,93 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     }
 
     ui.group(|ui| {
-        ui.label(RichText::new("REAL-TIME NODE GRAPH").color(Color32::from_gray(100)));
+        ui.label(RichText::new("REAL-TIME NODE GRAPH (Spatial View)").color(Color32::from_gray(100)));
         ui.add_space(10.0);
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (idx, node) in app.graph.nodes.iter().enumerate() {
-                let _node_id = ui.make_persistent_id(format!("node_{}", idx));
+        let (canvas_rect, _response) = ui.allocate_at_least(egui::vec2(ui.available_width(), 400.0), Sense::hover());
+        ui.painter().rect_filled(canvas_rect, 4.0, Color32::from_gray(30));
 
+        for (idx, node) in app.graph.nodes.iter_mut().enumerate() {
+            let node_id = ui.make_persistent_id(format!("node_spatial_{}", idx));
+
+            // Hardened: Grid-based initial layout if coordinates are zero
+            if node.x == 0.0 && node.y == 0.0 {
+                node.x = 50.0 + (idx % 4) as f32 * 200.0;
+                node.y = 50.0 + (idx / 4) as f32 * 120.0;
+            }
+
+            let node_pos = canvas_rect.min + egui::vec2(node.x, node.y);
+            let node_size = egui::vec2(160.0, 80.0);
+            let node_rect = egui::Rect::from_min_size(node_pos, node_size);
+
+            let node_resp = ui.interact(node_rect, node_id, Sense::drag());
+            if node_resp.dragged() {
+                node.x += node_resp.drag_delta().x;
+                node.y += node_resp.drag_delta().y;
+            }
+
+            // Draw Node Card
+            ui.painter().rect_filled(node_rect, 4.0, Color32::from_gray(50));
+            ui.painter().rect_stroke(node_rect, 4.0, egui::Stroke::new(1.0, Color32::from_gray(80)));
+
+            // Node Header
+            let header_rect = egui::Rect::from_min_size(node_pos, egui::vec2(node_size.x, 20.0));
+            ui.painter().rect_filled(header_rect, 4.0, Color32::from_gray(40));
+            ui.painter().text(header_rect.center(), egui::Align2::CENTER_CENTER, &node.name, egui::FontId::proportional(12.0), Color32::WHITE);
+
+            // Sockets
+            ui.allocate_ui_at_rect(node_rect, |ui| {
+                ui.add_space(25.0);
                 ui.horizontal(|ui| {
-                    let _rect = ui.label(format!("[IDX:{}]", idx)).rect;
+                    // Inputs
+                    ui.vertical(|ui| {
+                        for in_idx in 0..node.inputs.len() {
+                            let is_occupied = app.graph.edges.iter().any(|e| e.to == idx as u32 && e.input_idx == in_idx as u32);
+                            let btn_resp = ui.button(RichText::new(format!("IN {}", in_idx)).color(if is_occupied { Color32::from_rgb(0, 255, 200) } else { Color32::GRAY }).small());
+                            socket_positions.insert((idx as u32, false, in_idx as u32), btn_resp.rect.center());
 
-                    let node_label = ui.strong(&node.name);
-                    if node_label.clicked() {
-                        app.active_node_drag = Some(idx as u32);
-                    }
+                            if btn_resp.clicked() || (ui.input(|i| i.pointer.any_released()) && btn_resp.hovered()) {
+                                if let Some((src_node, src_out)) = app.active_connection_source {
+                                    let buffer_idx = app.graph.edges.iter()
+                                        .find(|e| e.from == src_node && e.output_idx == src_out)
+                                        .map(|e| e.buffer_idx)
+                                        .unwrap_or(src_node + 10);
 
-                    ui.add_space(10.0);
-
-                    // Output Sockets
-                    for out_idx in 0..node.outputs.len() {
-                        let btn = ui.button(format!("OUT {}", out_idx));
-                        socket_positions.insert((idx as u32, true, out_idx as u32), btn.rect.center());
-                        if btn.clicked() {
-                            app.active_connection_source = Some((idx as u32, out_idx as u32));
-                        }
-                    }
-
-                    ui.add_space(10.0);
-
-                    // Input Sockets
-                    for in_idx in 0..node.inputs.len() {
-                        let is_occupied = app.graph.edges.iter().any(|e| e.to == idx as u32 && e.input_idx == in_idx as u32);
-                        let btn_resp = ui.button(RichText::new(format!("IN {}", in_idx)).color(if is_occupied { Color32::from_rgb(0, 255, 200) } else { Color32::GRAY }));
-                        socket_positions.insert((idx as u32, false, in_idx as u32), btn_resp.rect.center());
-
-                        // Disconnect Action
-                        if is_occupied {
-                             btn_resp.context_menu(|ui| {
-                                 if ui.button("Disconnect").clicked() {
-                                     let _ = app.command_sender.send(Command::Topology(TopologyCommand::UpdateEdge {
-                                         node_idx: idx as u32,
-                                         input_idx: in_idx as u32,
-                                         new_buffer_idx: 0, // Reset to silent buffer
-                                     }));
-                                     ui.close_menu();
-                                 }
-                             });
-                        }
-
-                        // Interactive Edge Drop: Detect mouse release over socket while dragging
-                        if btn_resp.clicked() || (ui.input(|i| i.pointer.any_released()) && btn_resp.hovered()) {
-                            if let Some((src_node, _src_out)) = app.active_connection_source {
-                                // Hardened: Buffer resolution derived from GraphTopology routing
-                                let buffer_idx = app.graph.edges.iter()
-                                    .find(|e| e.from == src_node)
-                                    .map(|e| e.from + 10) // Fallback to heuristic if not found
-                                    .unwrap_or(src_node + 10);
-
-                                let _ = app.command_sender.send(Command::Topology(TopologyCommand::UpdateEdge {
-                                    node_idx: idx as u32,
-                                    input_idx: in_idx as u32,
-                                    new_buffer_idx: buffer_idx,
-                                }));
-                                app.active_connection_source = None;
+                                    let _ = app.command_sender.send(Command::Topology(TopologyCommand::UpdateEdge {
+                                        node_idx: idx as u32,
+                                        input_idx: in_idx as u32,
+                                        new_buffer_idx: buffer_idx,
+                                    }));
+                                    app.active_connection_source = None;
+                                }
                             }
                         }
-                    }
+                    });
 
-                    ui.add_space(20.0);
-
-                    // Remote Card / Hot-Swap target
-                    let remote_addr = app.graph.node_assignments.get(&(idx as u32)).cloned().unwrap_or_else(|| "local".to_string());
-                    let is_local = remote_addr == "local";
-                    let _card_color = if is_local { Color32::from_gray(50) } else { Color32::from_rgb(0, 100, 200) };
-
-                    let card_resp = ui.group(|ui| {
-                        ui.label(RichText::new(&remote_addr).color(Color32::WHITE).small());
-                    }).response;
-
-                    if card_resp.clicked() {
-                        if let Some(src_node) = app.active_node_drag {
-                             if src_node != idx as u32 {
-                                 // Emit Migration Mutation
-                                 let _ = app.command_sender.send(Command::Topology(TopologyCommand::SwapProcessor {
-                                     node_idx: src_node,
-                                     processor_type_id: nullherz_traits::ProcessorTypeId(0), // Dummy/Marker for migration
-                                 }));
-                                 println!("Migrating node {} to assigned machine {}", src_node, remote_addr);
-                             }
-                             app.active_node_drag = None;
-                        }
-                    }
-
-                    if let Some(t) = telemetry {
-                         if idx < t.node_times_ns.len() {
-                             let time = t.node_times_ns[idx];
-                             let color = if time > 500_000 { Color32::RED } else if time > 100_000 { Color32::YELLOW } else { Color32::from_rgb(0, 255, 200) };
-                             ui.label(RichText::new(format!("{} ns", time)).color(color));
-                         }
-                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                        // Outputs
+                        ui.vertical(|ui| {
+                            for out_idx in 0..node.outputs.len() {
+                                let btn = ui.button(RichText::new(format!("OUT {}", out_idx)).small());
+                                socket_positions.insert((idx as u32, true, out_idx as u32), btn.rect.center());
+                                if btn.clicked() {
+                                    app.active_connection_source = Some((idx as u32, out_idx as u32));
+                                }
+                            }
+                        });
+                    });
                 });
+            });
+
+            // CPU/Telemetry
+            if let Some(t) = telemetry {
+                 if idx < t.node_times_ns.len() {
+                     let time = t.node_times_ns[idx];
+                     let color = if time > 500_000 { Color32::RED } else if time > 100_000 { Color32::YELLOW } else { Color32::from_rgb(0, 255, 200) };
+                     ui.painter().text(node_rect.left_bottom() + egui::vec2(5.0, -5.0), egui::Align2::LEFT_BOTTOM, format!("{} ns", time), egui::FontId::proportional(9.0), color);
+                 }
             }
-        });
+        }
     });
 
     // Draw existing cables (Based on Edge Definitions)

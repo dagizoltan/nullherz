@@ -114,17 +114,21 @@ impl BreederView {
         ui.add_space(30.0);
 
         ui.horizontal(|ui| {
-            // 2D Transfusion Pad
+            // 2D Transfusion Pad (Industrial XY Pad)
             ui.vertical(|ui| {
                 ui.label("Transfusion Pad (X: Spectral, Y: Rhythmic)");
                 let (rect, response) = ui.allocate_at_least(Vec2::splat(250.0), Sense::drag());
 
                 ui.painter().rect_filled(rect, 4.0, Color32::from_black_alpha(150));
-                ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_rgb(0, 255, 200)));
+                ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_gray(80)));
 
-                // Grid lines
-                ui.painter().line_segment([rect.center_top(), rect.center_bottom()], Stroke::new(0.5, Color32::DARK_GRAY));
-                ui.painter().line_segment([rect.left_center(), rect.right_center()], Stroke::new(0.5, Color32::DARK_GRAY));
+                // Grid lines (Industrial Look)
+                for i in 1..4 {
+                    let x = rect.left() + i as f32 * (rect.width() / 4.0);
+                    ui.painter().vline(x, rect.y_range(), Stroke::new(0.5, Color32::from_gray(50)));
+                    let y = rect.top() + i as f32 * (rect.height() / 4.0);
+                    ui.painter().hline(rect.x_range(), y, Stroke::new(0.5, Color32::from_gray(50)));
+                }
 
                 if response.dragged() {
                     let pos = response.interact_pointer_pos().unwrap();

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use nullherz_traits::Command;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub struct ModMapping {
     pub target_id: u64,
     pub param_id: u32,
@@ -9,7 +10,8 @@ pub struct ModMapping {
     pub ramp_duration_samples: u32,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub struct ModulationMatrix {
     pub mappings: HashMap<u32, Vec<ModMapping>>,
 }
