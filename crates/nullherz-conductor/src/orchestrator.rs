@@ -604,7 +604,19 @@ impl Conductor {
         if let Some(ref engine) = *engine_lock {
             for child in engine.list_children() {
                 if let Some(id) = child.resource_id() {
-                    if let Some(sample) = self.transfusion_manager.sample_registry.get(id) {
+                    // Reconcile with LibraryDatabase for persistent metadata updates
+                    let lib_lock = self.library.lock().unwrap();
+                    if let Ok(Some(track)) = lib_lock.get_track(id) {
+                         if let Some(m) = child.metadata() {
+                            if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                                let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
+                                    node_idx: m.processor_id as u32,
+                                    metadata: Arc::new(track.metadata),
+                                });
+                            }
+                        }
+                    } else if let Some(sample) = self.transfusion_manager.sample_registry.get(id) {
+                        // Fallback to transient registry if not in persistent library
                         if let Some(m) = child.metadata() {
                             if let Some(ref mut prod) = self.topology_manager.topo_producer {
                                 let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {

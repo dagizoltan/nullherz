@@ -138,6 +138,7 @@ pub struct InspectorApp {
     pub(crate) track_solos: [bool; 16],
     pub(crate) record_automation: bool,
     pub(crate) automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>, // target_id -> [(beat, value)]
+    pub(crate) sampler_waveform_zoom: f32,
 }
 
 impl InspectorApp {
@@ -213,6 +214,7 @@ impl InspectorApp {
             track_solos: [false; 16],
             record_automation: false,
             automation_data: std::collections::HashMap::new(),
+            sampler_waveform_zoom: 1.0,
         }
     }
 

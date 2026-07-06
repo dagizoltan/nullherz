@@ -138,9 +138,20 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
             voice.process_block(render_slice);
         }
 
-        // Copy the rendered result to all output channels.
+        // Production Hardening: Use SIMD for multi-channel output distribution if possible
+        // (Ensuring 64-byte alignment safety via audio-dsp primitives)
+        use audio_dsp::simd_vec::{load_f32x8, store_f32x8};
         for output in outputs.iter_mut() {
-            output.copy_from_slice(render_slice);
+            let mut i = 0;
+            while i + 8 <= num_samples {
+                let v = load_f32x8(render_slice, i);
+                store_f32x8(*output, i, v);
+                i += 8;
+            }
+            while i < num_samples {
+                output[i] = render_slice[i];
+                i += 1;
+            }
         }
     }
 }
