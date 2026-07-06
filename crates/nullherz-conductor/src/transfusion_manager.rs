@@ -20,20 +20,35 @@ impl EvolutionaryBreeder {
         if let Ok(tracks) = lib.list_tracks() {
             if tracks.len() < 2 { return; }
 
-            // Simple heuristic: pick two random tracks for breeding
+            // Intelligent Matchmaking: Select parents with a 'genetic sweet-spot'
+            // We want parents that are similar enough to be compatible, but different enough to mutate.
             use std::time::{SystemTime, UNIX_EPOCH};
             let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as usize;
             let idx_a = seed % tracks.len();
-            let idx_b = (seed / tracks.len()) % tracks.len();
+            let track_a = &tracks[idx_a];
 
-            if idx_a != idx_b {
-                let track_a = &tracks[idx_a];
-                let track_b = &tracks[idx_b];
+            // Rank all tracks by compatibility to track_a
+            let compatibility = nullherz_dna::Matchmaker::rank_compatibility(&track_a.metadata.dna, &tracks, tracks.len());
 
-                // Check if they are in the registry
+            // Find a partner in the "Genetic Variance" sweet-spot (0.4 - 0.7 similarity)
+            let partner = compatibility.iter()
+                .find(|(id, score)| *id != track_a.id && **score >= 0.4 && **score <= 0.7);
+
+            if let Some((id_b, score)) = partner {
+                let track_b = tracks.iter().find(|t| t.id == *id_b).unwrap();
                 if self.sample_registry.get(track_a.id).is_some() && self.sample_registry.get(track_b.id).is_some() {
-                    println!("Evolutionary Breeder: Breeding {} x {}", track_a.title, track_b.title);
+                    println!("Evolutionary Breeder: Intelligent Match (score={:.2}) -> Breeding {} x {}", score, track_a.title, track_b.title);
                     self.perform_breeding(track_a.id, track_b.id, &lib);
+                }
+            } else {
+                // Fallback to random if no sweet-spot partner found
+                let idx_b = (seed / tracks.len()) % tracks.len();
+                if idx_a != idx_b {
+                    let track_b = &tracks[idx_b];
+                    if self.sample_registry.get(track_a.id).is_some() && self.sample_registry.get(track_b.id).is_some() {
+                        println!("Evolutionary Breeder: Fallback Match -> Breeding {} x {}", track_a.title, track_b.title);
+                        self.perform_breeding(track_a.id, track_b.id, &lib);
+                    }
                 }
             }
         }

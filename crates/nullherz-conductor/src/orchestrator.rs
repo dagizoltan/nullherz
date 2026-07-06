@@ -643,18 +643,21 @@ impl Conductor {
 
     pub fn save_project(&self, path: &str) -> std::io::Result<()> {
         let state = self.capture_state();
-        if path.ends_with(".rkyv") {
-            state.save_to_rkyv(path)
-        } else {
+        // Standardized: Prioritize .rkyv for zero-copy performance unless JSON explicitly requested
+        if path.ends_with(".json") {
             state.save_to_file(path)
+        } else {
+            let rkyv_path = if path.ends_with(".rkyv") { path.to_string() } else { format!("{}.rkyv", path) };
+            state.save_to_rkyv(&rkyv_path)
         }
     }
 
     pub fn load_project(&mut self, path: &str) -> std::io::Result<()> {
-        let state = if path.ends_with(".rkyv") {
-            crate::persistence::ProjectState::load_from_rkyv(path)?
-        } else {
+        let state = if path.ends_with(".json") {
             crate::persistence::ProjectState::load_from_file(path)?
+        } else {
+            let rkyv_path = if path.ends_with(".rkyv") { path.to_string() } else { format!("{}.rkyv", path) };
+            crate::persistence::ProjectState::load_from_rkyv(&rkyv_path)?
         };
         self.apply_state(state);
         Ok(())

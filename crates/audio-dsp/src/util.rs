@@ -174,3 +174,33 @@ impl TransientDetector {
         self.detect_onset(re, im) > self.threshold
     }
 }
+
+/// Utility for generating multi-level waveform representations (MIP-mapping).
+pub struct WaveformProcessor;
+
+impl WaveformProcessor {
+    /// Generates power-of-2 downsampled levels of a peak buffer using a 3-tap weighted filter.
+    pub fn generate_mip_levels(peaks: &[f32], num_levels: usize) -> Vec<Vec<f32>> {
+        let mut mip_levels = Vec::with_capacity(num_levels);
+        mip_levels.push(peaks.to_vec());
+
+        for _ in 1..num_levels {
+            let last_level = mip_levels.last().unwrap();
+            if last_level.len() <= 128 {
+                break;
+            }
+            let mut next_level = Vec::with_capacity(last_level.len() / 2);
+            for i in (0..last_level.len()).step_by(2) {
+                let prev = if i > 0 { last_level[i - 1] } else { last_level[i] };
+                let curr = last_level[i];
+                let next = if i + 1 < last_level.len() { last_level[i + 1] } else { curr };
+
+                // Multi-tap weighted average (0.25, 0.5, 0.25) for smooth downsampling
+                let avg = (prev * 0.25) + (curr * 0.5) + (next * 0.25);
+                next_level.push(avg);
+            }
+            mip_levels.push(next_level);
+        }
+        mip_levels
+    }
+}
