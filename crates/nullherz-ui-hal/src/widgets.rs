@@ -163,7 +163,8 @@ pub fn render_vu_meter(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Col
     }
 
     // High-Precision Ballistics (Asymmetrical: Fast Attack, Quadratic Decay)
-    let id = ui.make_persistent_id("vu_ballistics");
+    // Hardened: Unique ID per widget instance to prevent ballistics cross-talk
+    let id = ui.next_auto_id();
     let mut smoothed_peak = ui.ctx().memory_mut(|mem| *mem.data.get_temp_mut_or_default::<f32>(id));
 
     let attack = 0.8;

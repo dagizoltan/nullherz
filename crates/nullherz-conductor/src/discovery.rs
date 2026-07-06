@@ -48,11 +48,12 @@ impl SidecarDiscoveryService {
     }
 
     pub fn start_watcher(&self) {
-        let dir = self.plugins_dir.clone();
-        let known = self.known_plugins.clone();
-        let lib = self.library_db.clone();
+        self.start_p2p_sync();
+        self.start_local_watcher();
+    }
 
-        // 1. Peer Discovery & Cloud Sync Loop (Stage 6 P2P DNA)
+    fn start_p2p_sync(&self) {
+        let lib = self.library_db.clone();
         if let Some(lib_db) = lib {
             tokio::spawn(async move {
                 let mut discovery = nullherz_dna::DiscoveryService::new();
@@ -78,8 +79,11 @@ impl SidecarDiscoveryService {
                 }
             });
         }
+    }
 
-        // 2. Local Plugin Watcher Loop
+    fn start_local_watcher(&self) {
+        let dir = self.plugins_dir.clone();
+        let known = self.known_plugins.clone();
         tokio::spawn(async move {
             let path = std::path::Path::new(&dir);
             if !path.exists() {
@@ -121,9 +125,13 @@ impl SidecarDiscoveryService {
                     // Clean up disappeared plugins
                     known_lock.retain(|name, manifest| {
                         let binary_path = std::path::Path::new(&dir).join(&manifest.binary_name);
+                        // WASM plugins might not have a .json manifest
+                        let is_wasm = manifest.version.contains("wasm");
                         let manifest_path = std::path::Path::new(&dir).join(format!("{}.json", name));
-                        if !binary_path.exists() || !manifest_path.exists() {
-                            println!("Discovery: Sidecar plugin removed: {}", name);
+
+                        let exists = binary_path.exists() && (is_wasm || manifest_path.exists());
+                        if !exists {
+                            println!("Discovery: Sidecar plugin removed: {} (binary: {:?})", name, binary_path);
                             false
                         } else {
                             true

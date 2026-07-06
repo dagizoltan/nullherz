@@ -605,28 +605,28 @@ impl FeatureMutator {
             "metallic" => {
                 // Metallic textures often involve high-frequency resonances.
                 // We simulate this by perturbing specific dimensions of the latent space.
-                dna.spectral.latent_space[2] += 0.2 * strength;
-                dna.spectral.latent_space[7] += 0.3 * strength;
+                dna.spectral.latent_space[2] = (dna.spectral.latent_space[2] + 0.2 * strength).clamp(0.0, 1.0);
+                dna.spectral.latent_space[7] = (dna.spectral.latent_space[7] + 0.3 * strength).clamp(0.0, 1.0);
                 dna.artifacts.glitch_density = (dna.artifacts.glitch_density + 0.1 * strength).clamp(0.0, 1.0);
             }
             "organic" => {
                 // Organic sounds often have smoother spectral tilts and lower glitch density.
-                dna.spectral.tilt -= 0.1 * strength;
+                dna.spectral.tilt = (dna.spectral.tilt - 0.1 * strength).clamp(-1.0, 1.0);
                 dna.artifacts.glitch_density = (dna.artifacts.glitch_density - 0.2 * strength).clamp(0.0, 1.0);
-                dna.spectral.latent_space[0] += 0.1 * strength;
+                dna.spectral.latent_space[0] = (dna.spectral.latent_space[0] + 0.1 * strength).clamp(0.0, 1.0);
             }
             "warm" => {
-                dna.spectral.tilt -= 0.2 * strength;
-                dna.spectral.latent_space[1] += 0.15 * strength;
+                dna.spectral.tilt = (dna.spectral.tilt - 0.2 * strength).clamp(-1.0, 1.0);
+                dna.spectral.latent_space[1] = (dna.spectral.latent_space[1] + 0.15 * strength).clamp(0.0, 1.0);
             }
             "aggressive" => {
-                dna.artifacts.noise_floor_db += 6.0 * strength;
-                dna.spectral.latent_space[5] += 0.25 * strength;
+                dna.artifacts.noise_floor_db = (dna.artifacts.noise_floor_db + 6.0 * strength).clamp(-96.0, 12.0);
+                dna.spectral.latent_space[5] = (dna.spectral.latent_space[5] + 0.25 * strength).clamp(0.0, 1.0);
             }
             _ => {
                 // Default: minor random perturbation of feature vector
                 for i in 0..8 {
-                    dna.feature_vector[i] += 0.05 * strength;
+                    dna.feature_vector[i] = (dna.feature_vector[i] + 0.05 * strength).clamp(0.0, 1.0);
                 }
             }
         }
