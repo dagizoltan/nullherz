@@ -67,19 +67,7 @@ impl SidecarDiscoveryService {
 
                     let lib_lock = lib_db.lock().unwrap();
 
-                    struct CloudPeerSync { peers: Vec<String> }
-                    impl nullherz_dna::PeerSync for CloudPeerSync {
-                        fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {}
-                        fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA> {
-                            // Stage 6: Deterministic mock for discovered peers
-                            if id == 0xDEADBEEF { Some(nullherz_traits::SoundDNA::default()) } else { None }
-                        }
-                        fn list_peer_dna(&self) -> Vec<(u64, String)> {
-                            self.peers.iter().map(|p| (0xDEADBEEF, format!("DNA Template from {}", p))).collect()
-                        }
-                    }
-
-                    let sync = CloudPeerSync { peers };
+                    let sync = nullherz_dna::CloudPeerSync { peers };
                     let _ = lib_lock.sync_with_cloud(&sync);
                 }
             });

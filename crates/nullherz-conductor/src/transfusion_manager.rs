@@ -32,7 +32,7 @@ impl EvolutionaryBreeder {
 
             // Find a partner in the "Genetic Variance" sweet-spot (0.4 - 0.7 similarity)
             let partner = compatibility.iter()
-                .find(|(id, score)| *id != track_a.id && **score >= 0.4 && **score <= 0.7);
+                .find(|(id, score)| *id != track_a.id && *score >= 0.4 && *score <= 0.7);
 
             if let Some((id_b, score)) = partner {
                 let track_b = tracks.iter().find(|t| t.id == *id_b).unwrap();
