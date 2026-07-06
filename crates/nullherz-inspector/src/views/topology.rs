@@ -67,10 +67,20 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     ui.vertical(|ui| {
                         for in_idx in 0..node.inputs.len() {
                             let is_occupied = app.graph.edges.iter().any(|e| e.to == idx as u32 && e.input_idx == in_idx as u32);
-                            let btn_resp = ui.button(RichText::new(format!("IN {}", in_idx)).color(if is_occupied { Color32::from_rgb(0, 255, 200) } else { Color32::GRAY }).small());
+                            let btn_resp = ui.add(egui::Button::new(RichText::new(format!("IN {}", in_idx))
+                                .color(if is_occupied { Color32::from_rgb(0, 255, 200) } else { Color32::GRAY })
+                                .small()))
+                                .on_hover_text("Right-click to disconnect");
+
                             socket_positions.insert((idx as u32, false, in_idx as u32), btn_resp.rect.center());
 
-                            if btn_resp.clicked() || (ui.input(|i| i.pointer.any_released()) && btn_resp.hovered()) {
+                            if btn_resp.secondary_clicked() {
+                                let _ = app.command_sender.send(Command::Topology(TopologyCommand::UpdateEdge {
+                                    node_idx: idx as u32,
+                                    input_idx: in_idx as u32,
+                                    new_buffer_idx: 0, // Disconnect to silent buffer
+                                }));
+                            } else if btn_resp.clicked() || (ui.input(|i| i.pointer.any_released()) && btn_resp.hovered()) {
                                 if let Some((src_node, src_out)) = app.active_connection_source {
                                     let buffer_idx = app.graph.edges.iter()
                                         .find(|e| e.from == src_node && e.output_idx == src_out)
@@ -117,7 +127,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     // Draw existing cables (Based on Edge Definitions)
     let painter = ui.painter();
     for edge in &app.graph.edges {
-        let start_key = (edge.from, true, 0); // Assuming primary output for now
+        let start_key = (edge.from, true, edge.output_idx);
         let end_key = (edge.to, false, edge.input_idx);
 
         if let (Some(&start), Some(&end)) = (socket_positions.get(&start_key), socket_positions.get(&end_key)) {

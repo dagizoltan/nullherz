@@ -216,20 +216,21 @@ impl LibraryDatabase {
 
         let remote_dna = sync_service.list_peer_dna();
         for (id, name) in remote_dna {
-            if let Some(dna) = sync_service.request_dna(id) {
-                println!("Sync: Inherited SoundDNA '{}' from cloud peer.", name);
-                // Store received DNA in the database
-                let track = LibraryTrack {
-                    id,
-                    path: format!("cloud/{}", id),
-                    title: name,
-                    artist: "Cloud Peer".to_string(),
-                    metadata: nullherz_traits::SampleMetadata {
-                        dna,
-                        ..nullherz_traits::SampleMetadata::new_empty()
-                    },
-                };
-                let _ = self.save_track(&track);
+            if self.get_track(id)?.is_none() {
+                if let Some(dna) = sync_service.request_dna(id) {
+                    println!("Sync: Inherited SoundDNA '{}' from cloud peer.", name);
+                    let track = LibraryTrack {
+                        id,
+                        path: format!("cloud://{}", id),
+                        title: name,
+                        artist: "Cloud Peer".to_string(),
+                        metadata: nullherz_traits::SampleMetadata {
+                            dna,
+                            ..nullherz_traits::SampleMetadata::new_empty()
+                        },
+                    };
+                    self.save_track(&track)?;
+                }
             }
         }
         Ok(())
@@ -443,6 +444,33 @@ mod tests {
         assert_eq!(list[0], track);
 
         let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn test_sync_with_cloud_persistence() {
+        let db_path = "test_sync.redb";
+        let _ = std::fs::remove_file(db_path);
+        let db = LibraryDatabase::load(db_path).unwrap();
+
+        struct MockSync;
+        impl PeerSync for MockSync {
+            fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {}
+            fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA> {
+                if id == 0xABC { Some(nullherz_traits::SoundDNA::default()) } else { None }
+            }
+            fn list_peer_dna(&self) -> Vec<(u64, String)> {
+                vec![(0xABC, "Cloud Track".to_string())]
+            }
+        }
+
+        db.sync_with_cloud(&MockSync).unwrap();
+
+        let track = db.get_track(0xABC).unwrap().expect("Track should be persisted after sync");
+        assert_eq!(track.title, "Cloud Track");
+        assert_eq!(track.artist, "Cloud Peer");
+        assert!(track.path.contains("cloud://"));
+
+        let _ = std::fs::remove_file(db_path);
     }
 
     #[test]
