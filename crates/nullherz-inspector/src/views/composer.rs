@@ -56,23 +56,33 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
             // Grid
             ui.vertical(|ui| {
+                let cell_size = 60.0;
+                let spacing = 8.0;
+
                 // Column Headers (Scene Launchers)
                 ui.horizontal(|ui| {
                     for i in 0..64 {
-                        ui.vertical(|ui| {
-                            if ui.add_sized([60.0, 20.0], egui::Button::new(format!("S{}", i + 1)).fill(Color32::from_gray(40))).clicked() {
-                                // Scene Launch: trigger all active clips in this column
-                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::LaunchClip { row: 0xFF, col: i as u32 }));
-                            }
-                        });
-                        ui.add_space(8.0);
+                        let (rect, response) = ui.allocate_exact_size(Vec2::new(cell_size, 20.0), Sense::click());
+                        if ui.is_rect_visible(rect) {
+                             if ui.add_sized([cell_size, 20.0], egui::Button::new(format!("S{}", i + 1)).fill(Color32::from_gray(40))).clicked() {
+                                 // Scene Launch: trigger all active clips in this column
+                                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::LaunchClip { row: 0xFF, col: i as u32 }));
+                             }
+                        }
+                        ui.add_space(spacing);
                     }
                 });
 
                 for row in 0..16 {
                     ui.horizontal(|ui| {
                         for col in 0..64 {
-                            let (rect, response) = ui.allocate_exact_size(Vec2::new(60.0, 60.0), Sense::click());
+                            let (rect, response) = ui.allocate_exact_size(Vec2::new(cell_size, cell_size), Sense::click());
+
+                            // Optimized: Only render visible cells (Spatial Culling)
+                            if !ui.is_rect_visible(rect) {
+                                ui.add_space(spacing);
+                                continue;
+                            }
 
                             // True Visual State from Telemetry
                             let mut is_playing = false;
@@ -118,7 +128,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     value: is_on,
                                 }));
                             }
-                            ui.add_space(8.0);
+                            ui.add_space(spacing);
                         }
 
                         // DNA Control Sidebar for Row
