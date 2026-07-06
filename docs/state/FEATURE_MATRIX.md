@@ -69,7 +69,9 @@
 | **GPU Waveform Rendering** | 🔶 | WGPU-based renderer with LOD selection. MIP-mapping implementation active. |
 | **Liquid Visual Damping** | ✅ | Asymmetrical inertia for Spectrum and Goniometer visualizers. |
 | **DJ Console Layout** | 🔶 | 4-deck layout functional. Ergonomics and component modularity in progress. |
-| **Interactive Topology** | 🧪 | Read-only graph view. Edge connection editing is planned. |
+| **Sequencer Grid** | 🔶 | 16x64 grid with DNA-aware pattern mutation and row transfusion. |
+| **DNA Breeding UI** | 🔶 | 2D Transfusion Pad with genetic similarity-ranked matchmaking. |
+| **Interactive Topology** | 🧪 | Cable visualization active (heuristic). Migration/Edit in progress. |
 
 ---
 

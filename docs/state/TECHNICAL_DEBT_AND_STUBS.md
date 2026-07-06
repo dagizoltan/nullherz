@@ -58,6 +58,19 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 - **Ergonomic Inconsistency**: DNA/Personality traits use standard `egui::Slider` while frequency bands use industrial `knobs`.
 - **Metadata Omission**: Deck headers do not currently display BPM or Root Key from `SampleMetadata`, forcing users to rely on the global telemetry header.
 
+### `crates/nullherz-inspector/src/views/sampler.rs`
+- **WGPU Callback Lifetime Safety**: Use of `std::mem::transmute` in `WaveformCallback` to satisfy WGPU 'a lifetimes is a potential UB risk if the renderer is dropped while the pass is active. Requires a safer resource management pattern.
+
+### `crates/nullherz-inspector/src/views/composer.rs`
+- **Monolithic Grid Loop**: Renders 16x64 (1024) interactive rectangles in a single flat loop. Needs a batched mesh approach or sub-grid culling to maintain UI performance at 60fps as session complexity grows.
+
+### `crates/nullherz-inspector/src/views/topology.rs`
+- **Simplified Cable Model**: Connection cables assume `buffer_idx = node_idx + 10`. This logic is brittle and breaks if the topology uses arbitrary buffer indices. Requires proper `GraphTopology` traversal.
+
+### `crates/nullherz-inspector/src/views/breeder.rs`
+- **Manual Command Packing**: `emit_dna_command` uses `unsafe` `ptr::copy_nonoverlapping` to pack SoundDNA into the 128-byte `DnaCommand` payload. Requires a zero-allocation `CommandBuilder` utility in `nullherz-traits` to eliminate `unsafe` and manual offsets.
+- **Local Visualization Smoothing**: `smoothed_goniometer` is stored locally in `BreederView` instead of utilizing the shared `nullherz-ui-hal` ballistics, leading to inconsistent visual damping.
+
 ---
 
 ## 7. Strategic Documentation
