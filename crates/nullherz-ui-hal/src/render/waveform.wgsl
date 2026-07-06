@@ -22,8 +22,9 @@ fn vs_main(
 ) -> VertexOutput {
     var out: VertexOutput;
 
-    // Apply horizontal scroll and zoom
-    let x = (model.position.x - globals.scroll_offset) * globals.zoom;
+    // Apply horizontal scroll and zoom.
+    // Shift coordinate system so it starts at -1 (left edge of clip space)
+    let x = (model.position.x - globals.scroll_offset) * globals.zoom - 1.0;
     out.clip_position = vec4<f32>(x, model.position.y, 0.0, 1.0);
 
     // Simple color based on height for now

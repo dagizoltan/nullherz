@@ -625,11 +625,19 @@ impl Conductor {
 
     pub fn save_project(&self, path: &str) -> std::io::Result<()> {
         let state = self.capture_state();
-        state.save_to_file(path)
+        if path.ends_with(".rkyv") {
+            state.save_to_rkyv(path)
+        } else {
+            state.save_to_file(path)
+        }
     }
 
     pub fn load_project(&mut self, path: &str) -> std::io::Result<()> {
-        let state = crate::persistence::ProjectState::load_from_file(path)?;
+        let state = if path.ends_with(".rkyv") {
+            crate::persistence::ProjectState::load_from_rkyv(path)?
+        } else {
+            crate::persistence::ProjectState::load_from_file(path)?
+        };
         self.apply_state(state);
         Ok(())
     }

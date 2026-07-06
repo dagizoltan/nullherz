@@ -13,25 +13,9 @@ impl SpectralProcessor {
 impl nullherz_traits::SignalProcessor for SpectralProcessor {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
-
-        let in_len = inputs[0].len();
-        let out_len = outputs[0].len();
-
-        // Hardened: handle mismatched buffer boundaries using dynamic stack-allocated surrogates
-        // supporting blocks up to 1024 samples (standard for most backends)
-        if in_len == out_len && in_len <= 1024 {
-            self.inner.process_overlap_add(inputs[0], outputs[0]);
-        } else {
-            let mut padded_in = [0.0f32; 1024];
-            let len = in_len.min(1024);
-            padded_in[..len].copy_from_slice(&inputs[0][..len]);
-
-            let mut temp_out = [0.0f32; 1024];
-            self.inner.process_overlap_add(&padded_in[..1024], &mut temp_out[..1024]);
-
-            let out_copy_len = out_len.min(1024);
-            outputs[0][..out_copy_len].copy_from_slice(&temp_out[..out_copy_len]);
-        }
+        // Underlying audio-dsp::SpectralPipeline handles arbitrary input lengths
+        // by buffering internally. We directly pass the slices.
+        self.inner.process_overlap_add(inputs[0], outputs[0]);
     }
 }
 

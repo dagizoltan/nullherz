@@ -43,6 +43,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             if node_resp.dragged() {
                 node.x += node_resp.drag_delta().x;
                 node.y += node_resp.drag_delta().y;
+                let _ = app.command_sender.send(Command::Topology(TopologyCommand::SetNodePosition {
+                    node_idx: idx as u32,
+                    x: node.x,
+                    y: node.y,
+                }));
             }
 
             // Draw Node Card

@@ -44,6 +44,7 @@ impl ProcessorGraph {
             crossfades: [None; crate::MAX_CROSSFADE_BUFFERS],
             node_count: 0,
             node_assignments: std::collections::HashMap::new(),
+            node_positions: std::collections::HashMap::new(),
         };
 
         let nodes = Box::new(std::array::from_fn(|_| ProcessorNode {
@@ -163,6 +164,12 @@ impl ProcessorGraph {
                 if idx < self.node_count {
                     unsafe { (*self.nodes[idx].processor.get()).apply_topology_mutation(TopologyMutation::UpdateMetadata { node_idx, metadata }); }
                 }
+            }
+            TopologyMutation::SetNodePosition { node_idx, x, y } => {
+                let inactive = (self.topology_coordinator.active_idx() + 1) % 2;
+                self.topology_coordinator.topologies[inactive].node_positions.insert(node_idx, (x, y));
+                // Ensure active topology also has it if no commit is pending
+                self.topology_coordinator.topologies[self.topology_coordinator.active_idx()].node_positions.insert(node_idx, (x, y));
             }
         }
     }
