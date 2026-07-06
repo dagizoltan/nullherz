@@ -222,6 +222,7 @@ impl Conductor {
                 telemetry.suggestions[i] = (*id, *score);
             }
         }
+        telemetry.active_master_deck = self.active_master_deck;
 
         // Update Remote Node Telemetry
         if let Ok(manager) = self.sidecar_supervisor.remote_manager.try_lock() {

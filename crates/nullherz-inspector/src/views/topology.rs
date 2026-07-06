@@ -116,6 +116,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         let end_key = (edge.to, false, edge.input_idx);
 
         if let (Some(&start), Some(&end)) = (socket_positions.get(&start_key), socket_positions.get(&end_key)) {
+            // Hardened: Real-time cable coloring based on signal level
+            let level = telemetry.as_ref().map(|t| t.peak_levels[edge.from as usize]).unwrap_or(0.0);
+            let color = if level > 1.0 { Color32::from_rgb(255, 50, 50) } else if level > 0.01 { Color32::from_rgb(0, 255, 200) } else { Color32::from_gray(80) };
+
             // Cubic Bezier for industrial cable look
             let cp1 = start + egui::vec2(50.0, 0.0);
             let cp2 = end - egui::vec2(50.0, 0.0);
@@ -123,7 +127,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 points: [start, cp1, cp2, end],
                 closed: false,
                 fill: Color32::TRANSPARENT,
-                stroke: egui::Stroke::new(2.0, Color32::from_gray(120)),
+                stroke: egui::Stroke::new(2.0, color),
             }));
         }
     }

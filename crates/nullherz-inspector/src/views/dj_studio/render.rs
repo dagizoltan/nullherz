@@ -2,6 +2,8 @@ use egui::{Ui, Color32, RichText, Vec2, Frame, Margin, Rounding, Stroke};
 use crate::{InspectorApp, widgets};
 use audio_core::Telemetry;
 
+use super::{mixer, dna};
+
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     ScrollArea::vertical().show(ui, |ui| {
         render_header(ui, telemetry);
@@ -66,9 +68,9 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
                     ui.add_space(10.0);
                     render_deck_performance(app, ui, i);
                     ui.add_space(10.0);
-                    render_deck_dna_panel(app, ui, i);
+                    dna::render_deck_dna_panel(app, ui, i);
                     ui.add_space(10.0);
-                    render_deck_mixer(app, ui, i, deck_color);
+                    mixer::render_deck_mixer(app, ui, i, deck_color);
                 });
             });
         });
@@ -140,76 +142,6 @@ fn render_deck_performance(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
                     }));
                 }
             }
-        });
-    });
-}
-
-fn render_deck_dna_panel(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
-    ui.vertical(|ui| {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("DNA").small().color(Color32::from_gray(100)));
-            ui.checkbox(&mut app.personality_macro_mode, "🔗");
-        });
-
-        let traits = [
-            ("METALLIC", 0, "metallic"),
-            ("ORGANIC", 1, "organic"),
-            ("WARM", 2, "warm"),
-            ("AGGRESSIVE", 3, "aggressive"),
-        ];
-
-        let deck_color = InspectorApp::deck_color(i);
-
-        ui.horizontal_wrapped(|ui| {
-            for (label, idx, feature) in traits {
-                ui.vertical(|ui| {
-                    ui.set_max_width(45.0);
-                    let val = match idx {
-                        0 => &mut app.channel_personality_metallic[i],
-                        1 => &mut app.channel_personality_organic[i],
-                        2 => &mut app.channel_personality_warm[i],
-                        _ => &mut app.channel_personality_aggressive[i],
-                    };
-
-                    if widgets::render_knob(ui, val, 0.0..=1.0, "", deck_color).changed() {
-                        let strength = *val;
-                        emit_personality_mutation(app, i, idx, feature, strength);
-                    }
-                    ui.label(RichText::new(label).size(7.0).color(Color32::GRAY));
-                });
-                ui.add_space(2.0);
-            }
-        });
-    });
-}
-
-fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_color: Color32) {
-    ui.vertical(|ui| {
-        ui.set_min_width(80.0);
-        let deck_id = (b'A' + i as u8) as char;
-
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                if widgets::render_knob(ui, &mut app.channel_eq_high[i], 0.0..=2.0, "HI", deck_color).changed() {
-                    send_deck_param(app, deck_id, nullherz_traits::DeckParamType::EqHigh, app.channel_eq_high[i]);
-                }
-                if widgets::render_knob(ui, &mut app.channel_eq_mid[i], 0.0..=2.0, "MID", deck_color).changed() {
-                    send_deck_param(app, deck_id, nullherz_traits::DeckParamType::EqMid, app.channel_eq_mid[i]);
-                }
-                if widgets::render_knob(ui, &mut app.channel_eq_low[i], 0.0..=2.0, "LOW", deck_color).changed() {
-                    send_deck_param(app, deck_id, nullherz_traits::DeckParamType::EqLow, app.channel_eq_low[i]);
-                }
-            });
-
-            ui.add_space(5.0);
-
-            ui.horizontal(|ui| {
-                let peak = app.damped_peaks[i];
-                widgets::render_vu_meter(ui, peak, app.channel_peak_hold[i], deck_color, 120.0);
-                if widgets::render_fader(ui, &mut app.channel_faders[i], 0.0..=1.0, deck_color, 120.0, 16.0).changed() {
-                    send_deck_param(app, deck_id, nullherz_traits::DeckParamType::Gain, app.channel_faders[i]);
-                }
-            });
         });
     });
 }
@@ -288,44 +220,5 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option
         });
 }
 
-fn emit_personality_mutation(app: &mut InspectorApp, deck_idx: usize, trait_idx: usize, feature: &str, strength: f32) {
-    let mut targets = vec![];
-    if app.personality_macro_mode {
-        for i in 0..4 {
-            if let Some(id) = app.now_playing[i] {
-                targets.push(id);
-                match trait_idx {
-                    0 => app.channel_personality_metallic[i] = strength,
-                    1 => app.channel_personality_organic[i] = strength,
-                    2 => app.channel_personality_warm[i] = strength,
-                    _ => app.channel_personality_aggressive[i] = strength,
-                }
-            }
-        }
-    } else if let Some(id) = app.now_playing[deck_idx] {
-        targets.push(id);
-    }
-
-    for track_id in targets {
-        let mut name = [0u8; 32];
-        let bytes = feature.as_bytes();
-        name[..bytes.len()].copy_from_slice(bytes);
-
-        let cmd = nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ApplyFeatureMutation {
-            target_id: track_id,
-            feature_name: name,
-            strength,
-        });
-        let _ = app.command_sender.send(cmd);
-    }
-}
-
-fn send_deck_param(app: &InspectorApp, deck_id: char, param_type: nullherz_traits::DeckParamType, value: f32) {
-    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam {
-        deck_id,
-        param_type,
-        value,
-    }));
-}
 
 use egui::ScrollArea;

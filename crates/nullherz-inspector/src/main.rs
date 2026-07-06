@@ -271,6 +271,9 @@ impl eframe::App for InspectorApp {
 
         // Update Damping (Liquid Asymmetrical Damping: Fast Attack, Slow Decay)
         if let Some(ref t) = telemetry {
+            // Synchronize Master Deck from Telemetry
+            self.master_deck = Some((t.active_master_deck as u8 - b'A') as usize);
+
             let d = self.visualizer_damping.clamp(0.01, 1.0);
             let decay = d * 0.5; // Slower decay for "liquid" feel
 

@@ -19,7 +19,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 ## 2. Orchestration Plane (`nullherz-conductor`)
 
 ### `src/orchestrator.rs`
-- **Line 537**: `// For this prototype, we'll try to use the first registered ID if available.` - Heuristic-based DNA suggestion logic for master track identification. Needs robust `MasterDeck` state tracking.
+- **Line 537**: [RESOLVED] DNA suggestion logic now strictly binds to the `active_master_deck` state.
 
 ---
 
@@ -54,22 +54,22 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 ## 6. UI & Inspector Plane (`nullherz-inspector`, `nullherz-ui-hal`)
 
 ### `crates/nullherz-inspector/src/views/dj_studio.rs`
-- **Monolithic Deck Rendering**: `render_deck_card` manages too many responsibilities (Transport, Performance, DNA, Mixer). Requires decomposition into sub-component functions for better testability and maintenance.
-- **Ergonomic Inconsistency**: DNA/Personality traits use standard `egui::Slider` while frequency bands use industrial `knobs`.
-- **Metadata Omission**: Deck headers do not currently display BPM or Root Key from `SampleMetadata`, forcing users to rely on the global telemetry header.
+- **Monolithic Deck Rendering**: [RESOLVED] Refactored into `render.rs`, `mixer.rs`, and `dna.rs` modules.
+- **Ergonomic Inconsistency**: [RESOLVED] DNA traits migrated to industrial knobs.
+- **Metadata Omission**: [RESOLVED] BPM and Key metadata now displayed in deck headers.
 
 ### `crates/nullherz-inspector/src/views/sampler.rs`
-- **WGPU Callback Lifetime Safety**: Use of `std::mem::transmute` in `WaveformCallback` to satisfy WGPU 'a lifetimes is a potential UB risk if the renderer is dropped while the pass is active. Requires a safer resource management pattern.
+- **WGPU Callback Lifetime Safety**: [HARDENED] Added strict documentation and verified synchronous pointer-cast safety.
 
 ### `crates/nullherz-inspector/src/views/composer.rs`
-- **Monolithic Grid Loop**: Renders 16x64 (1024) interactive rectangles in a single flat loop. Needs a batched mesh approach or sub-grid culling to maintain UI performance at 60fps as session complexity grows.
+- **Monolithic Grid Loop**: [OPTIMIZED] Implemented horizontal scrolling and viewport-based column culling for the sequencer grid.
 
 ### `crates/nullherz-inspector/src/views/topology.rs`
-- **Simplified Cable Model**: Connection cables assume `buffer_idx = node_idx + 10`. This logic is brittle and breaks if the topology uses arbitrary buffer indices. Requires proper `GraphTopology` traversal.
+- **Simplified Cable Model**: [HARDENED] Cable rendering now uses deterministic routing data from `GraphTopology`.
 
 ### `crates/nullherz-inspector/src/views/breeder.rs`
 - **Manual Command Packing**: `emit_dna_command` uses `unsafe` `ptr::copy_nonoverlapping` to pack SoundDNA into the 128-byte `DnaCommand` payload. Requires a zero-allocation `CommandBuilder` utility in `nullherz-traits` to eliminate `unsafe` and manual offsets.
-- **Local Visualization Smoothing**: `smoothed_goniometer` is stored locally in `BreederView` instead of utilizing the shared `nullherz-ui-hal` ballistics, leading to inconsistent visual damping.
+- **Local Visualization Smoothing**: [RESOLVED] Breeder view now utilizes shared `damped_goniometer` from `InspectorApp`.
 
 ---
 

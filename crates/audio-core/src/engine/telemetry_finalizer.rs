@@ -107,6 +107,7 @@ impl TelemetryFinalizer {
             remote_cpu_usage: [0.0; 8],
             remote_latency_ms: [0.0; 8],
             suggestions: [(0, 0.0); 4],
+            active_master_deck: 'A',
         };
         let _ = telemetry_producer.push_telemetry(telemetry.clone());
         telemetry

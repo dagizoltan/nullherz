@@ -83,6 +83,12 @@ impl MixerOrchestrator {
             Command::Performance(PerformanceCommand::StopDeck { deck_id: _ }) => {
                 // Future: individual deck stop trigger
             }
+            Command::Performance(PerformanceCommand::SetSequencerStep { .. }) |
+            Command::Performance(PerformanceCommand::JumpToHotCue { .. }) |
+            Command::Performance(PerformanceCommand::EvolvePattern { .. }) |
+            Command::Performance(PerformanceCommand::ClearTrackPattern { .. }) => {
+                translated.push(*cmd);
+            }
             _ => translated.push(*cmd),
         }
         translated

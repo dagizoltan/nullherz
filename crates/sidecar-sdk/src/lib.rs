@@ -142,7 +142,8 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
     pub fn run_loop(&mut self) {
         loop {
             if let Some(efd) = &self.event_fd {
-                let count = efd.wait();
+                // Hardened: handle potential EventFD counter overflow or starvation
+                let count = efd.wait().min(32); // Process at most 32 blocks per wakeup to prevent starvation
                 for _ in 0..count {
                     self.process_once();
                 }
