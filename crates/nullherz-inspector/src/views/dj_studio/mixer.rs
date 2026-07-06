@@ -1,6 +1,5 @@
-use egui::{Ui, Color32, RichText, Frame, Margin, Rounding, Stroke};
+use egui::{Ui, Color32};
 use crate::{InspectorApp, widgets};
-use audio_core::Telemetry;
 
 pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_color: Color32) {
     ui.vertical(|ui| {

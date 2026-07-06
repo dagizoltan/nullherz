@@ -1,8 +1,8 @@
-use egui::{Ui, Color32, RichText, Vec2, Frame, Margin, Rounding, Stroke};
+use egui::{Ui, Color32, RichText, Frame, Margin, Rounding, Stroke};
 use crate::{InspectorApp, widgets};
 use audio_core::Telemetry;
 
-use super::{mixer, dna};
+use super::{mixer, dna, transport, performance, waveform};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     ScrollArea::vertical().show(ui, |ui| {
@@ -58,15 +58,15 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
         ui.vertical(|ui| {
             render_deck_header(app, ui, i, deck_color, is_focused);
             ui.add_space(8.0);
-            render_deck_waveform_zone(app, ui, i, telemetry, deck_color);
+            waveform::render_deck_waveform_zone(app, ui, i, telemetry, deck_color);
             ui.add_space(12.0);
 
             ui.horizontal_top(|ui| {
                 ui.scope(|ui| {
                     ui.set_min_height(180.0);
-                    render_deck_transport(app, ui, i);
+                    transport::render_deck_transport(app, ui, i);
                     ui.add_space(10.0);
-                    render_deck_performance(app, ui, i);
+                    performance::render_deck_performance(app, ui, i);
                     ui.add_space(10.0);
                     dna::render_deck_dna_panel(app, ui, i);
                     ui.add_space(10.0);
@@ -111,76 +111,7 @@ fn render_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_color:
     });
 }
 
-fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>, deck_color: Color32) {
-    render_waveform_zone(app, ui, i, telemetry, deck_color);
-}
 
-fn render_deck_transport(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
-    ui.vertical(|ui| {
-        ui.set_min_width(50.0);
-        let deck_id = (b'A' + i as u8) as char;
-        if ui.add_sized([45.0, 40.0], egui::Button::new(RichText::new("▶").size(18.0)).fill(Color32::from_gray(35))).clicked() {
-            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id }));
-        }
-        ui.add_space(6.0);
-        if ui.add_sized([45.0, 40.0], egui::Button::new(RichText::new("⏸").size(18.0)).fill(Color32::from_gray(35))).clicked() {
-            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::StopDeck { deck_id }));
-        }
-    });
-}
-
-fn render_deck_performance(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
-    ui.vertical(|ui| {
-        ui.label(RichText::new("PERFORM").small().color(Color32::from_gray(100)));
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::splat(2.0);
-            for j in 0..8 {
-                if ui.add_sized([28.0, 24.0], egui::Button::new(format!("{}", j + 1)).fill(Color32::from_gray(30))).clicked() {
-                    let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpToHotCue {
-                        node_idx: (i as u32 * 4),
-                        cue_idx: j as u32,
-                    }));
-                }
-            }
-        });
-    });
-}
-
-fn render_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>, deck_color: Color32) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 60.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(10, 10, 15));
-
-    if let Some(wf_lock) = &app.waveform_renderer {
-        if let Some(track_id) = app.now_playing[i] {
-            let mut wf = wf_lock.lock().unwrap();
-            let zoom = 1.0;
-            let scroll = 0.0;
-            let color = deck_color.to_array().map(|v| v as f32 / 255.0);
-
-            let track = app.library_db.get_track(track_id).ok().flatten();
-
-            if let Some(ref t) = track {
-                if let Some(wgpu) = &app.wgpu_renderer {
-                    let wgpu = wgpu.lock().unwrap();
-                    wf.update_globals(&wgpu.queue, scroll, zoom, color);
-                    wf.update_from_mip_waveform(&wgpu.queue, &t.metadata.mip_waveform, zoom, rect.width() as u32);
-                }
-            }
-
-            let title = track.as_ref().map(|t| t.title.as_str()).unwrap_or("LOADING...");
-            ui.painter().text(rect.left_top() + Vec2::new(5.0, 5.0), egui::Align2::LEFT_TOP, title, egui::FontId::monospace(10.0), deck_color.gamma_multiply(0.8));
-
-            // Render playhead
-            let playhead_x = rect.min.x + (telemetry.as_ref().map(|t| (t.beat_position % 4.0) / 4.0).unwrap_or(0.0) as f32 * rect.width());
-            ui.painter().line_segment([egui::pos2(playhead_x, rect.min.y), egui::pos2(playhead_x, rect.max.y)], egui::Stroke::new(1.0, Color32::WHITE));
-        } else {
-            // Enhanced EMPTY DECK visualization
-            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "EMPTY DECK", egui::FontId::monospace(12.0), Color32::from_gray(60));
-            // Render a dashed border for the empty zone
-            ui.painter().rect_stroke(rect.shrink(2.0), 2.0, Stroke::new(1.0, Color32::from_gray(30)));
-        }
-    }
-}
 
 fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     Frame::group(ui.style())

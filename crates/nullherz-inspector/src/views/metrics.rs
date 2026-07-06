@@ -55,7 +55,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
             Frame::none().fill(Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(12.0).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if let Some(t) = &telemetry {
+                    if let Some(_t) = &telemetry {
                         widgets::render_goniometer(ui, &app.damped_goniometer, 200.0, Color32::from_rgb(0, 255, 200));
                         ui.add_space(20.0);
                         ui.vertical(|ui| {
