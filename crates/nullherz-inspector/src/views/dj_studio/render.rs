@@ -113,14 +113,14 @@ fn render_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_color:
 
 
 
-fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
+fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
     Frame::group(ui.style())
         .fill(Color32::from_rgb(20, 20, 25))
         .inner_margin(Margin::same(15.0))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(RichText::new("MASTER").strong());
+                    ui.label(RichText::new("MASTER OUT").strong());
                     ui.add_space(5.0);
                     ui.horizontal(|ui| {
                         let peak = (app.damped_master_peaks[0] + app.damped_master_peaks[1]) * 0.5;
@@ -132,18 +132,24 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option
                 ui.add_space(30.0);
 
                 ui.vertical(|ui| {
-                    ui.set_min_width(ui.available_width() - 50.0);
-                    ui.centered_and_justified(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new("CROSSFADER").small().color(Color32::GRAY));
-                            if widgets::render_horizontal_fader(ui, &mut app.crossfader_pos, 0.0..=1.0, Color32::WHITE, ui.available_width(), 35.0).changed() {
-                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: 20,
-                                    param_id: 0,
-                                    value: app.crossfader_pos,
-                                    ramp_duration_samples: 0,
-                                }));
-                            }
+                    ui.set_min_width(ui.available_width() - 80.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new("CROSSFADER").small().color(Color32::GRAY));
+                        if widgets::render_horizontal_fader(ui, &mut app.crossfader_pos, 0.0..=1.0, Color32::WHITE, ui.available_width(), 35.0).changed() {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                target_id: 20,
+                                param_id: 0,
+                                value: app.crossfader_pos,
+                                ramp_duration_samples: 0,
+                            }));
+                        }
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.label(RichText::new("A").small().color(Color32::from_gray(100)));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(RichText::new("B").small().color(Color32::from_gray(100)));
+                            });
                         });
                     });
                 });

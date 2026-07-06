@@ -44,10 +44,10 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 - **Line 32**: [RESOLVED] `bincode::serialize(&cmd)` refactored to `serialize_into` with a stack-allocated buffer.
 
 ### `sidecar-macros/src/lib.rs`
-- **Line 21**: `// Simplified parsing for macro prototype` - Sidecar initialization relies on manual CLI argument iteration. Needs a formal attribute parser for robust SHM and EventFD configuration.
+- **Line 21**: [RESOLVED] CLI argument parsing refactored to a structured iterator-based matcher for robust SHM and EventFD extraction.
 
 ### `sidecar-sdk/src/lib.rs`
-- **Line 175**: [STRATEGY DEFINED] `apply_rhythmic_offset` utilizes `apply_rhythmic_grid` delay line logic. Needs verification against sub-sample accuracy requirements.
+- **Line 175**: [RESOLVED] `apply_rhythmic_offset` implements sub-sample accurate jitter using linear interpolation.
 
 ---
 
@@ -77,6 +77,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 
 ### Persistence & Serialization
 - **Zero-Copy Migration**: `ProjectState` currently uses Bincode/JSON which requires full deserialization. Transition to `rkyv` is required for zero-copy session loading on the audio thread.
+- **Modular Persistence**: [RESOLVED] Persistence logic fully decoupled from the main Conductor orchestrator.
 
 ### UI Architecture
 - **Component Decomposition**: [RESOLVED] Monolithic UI views (DJ Studio) refactored into modular sub-modules (`render`, `mixer`, `dna`, etc.) and specialized widgets.
@@ -84,6 +85,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 - **Grid Performance**: [OPTIMIZED] Sequencer grid now utilizes spatial culling and horizontal scrolling for high-density performance.
 - **Dynamic Modulation**: [HARDENED] Modulation matrix now dynamically resolves targets from the active signal graph with per-macro scaling knobs.
 - **Genetic Visualization**: [ENHANCED] Library view now features SoundDNA trait sparklines for rapid genetic profiling.
+- **Interaction Hardening**: [RESOLVED] Topology view now supports interactive disconnects.
 
 ---
 

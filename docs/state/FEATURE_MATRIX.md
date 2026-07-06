@@ -26,7 +26,7 @@
 | **Lock-Free Command Bus** | ✅ | SPSC/MPSC RingBuffer for zero-allocation control passing. |
 | **Broadcaster Telemetry** | ✅ | Multi-client telemetry streaming via `nullherz-gateway`. |
 | **SIMD Alignment** | ✅ | 64-byte alignment enforced for all `AudioBlock` and DSP kernels. |
-| **Modular Hierarchy** | 🔶 | Command sets split into Core/Mixer/Perf. Needs opaque envelope refinement. |
+| **Modular Hierarchy** | ✅ | Command sets split into Core/Mixer/Perf with decoupled translation logic. |
 | **Zero-Allocation Serialization**| ✅ | `bincode::serialize_into` used on audio hot-paths for guest-host IPC. |
 | **rkyv Integration** | 💤 | Proposed for zero-copy project persistence. |
 
@@ -69,7 +69,7 @@
 | **GPU Waveform Rendering** | 🔶 | WGPU-based renderer with LOD selection. MIP-mapping implementation active. |
 | **Liquid Visual Damping** | ✅ | Asymmetrical inertia for Spectrum and Goniometer visualizers. |
 | **DJ Console Layout** | 🔶 | 4-deck layout functional. Ergonomics and component modularity in progress. |
-| **Sequencer Grid** | 🔶 | 16x64 grid with DNA-aware pattern mutation and row transfusion. |
+| **Sequencer Grid** | ✅ | High-performance 16x64 grid with spatial culling and scrolling. |
 | **DNA Breeding UI** | 🔶 | 2D Transfusion Pad with genetic similarity-ranked matchmaking. |
 | **Interactive Topology** | 🧪 | Cable visualization active (heuristic). Migration/Edit in progress. |
 
@@ -80,8 +80,8 @@
 | Feature | Status | Description |
 | :--- | :---: | :--- |
 | **WASM Sidecar Host** | ✅ | `wasmtime` integration with RT-hardened host functions. |
-| **Sidecar SDK V2** | 🔶 | Triple-Plane isolation SDK. Rhythmic offset strategy defined. |
-| **Sidecar Macros** | 🧪 | Prototype attribute macros for SHM attachment. Parsing is heuristic. |
+| **Sidecar SDK V2** | ✅ | Triple-Plane isolation SDK. Hardened sub-sample rhythmic jitter implemented. |
+| **Sidecar Macros** | ✅ | Hardened attribute macros with structured argument parsing. |
 | **Universal Extensibility** | ✅ | Lock-free IPC bridge for both local subprocess and WASM guests. |
 | **wasm_simd128 Paths** | 💤 | Planned for high-performance spectral kernels in WASM. |
 

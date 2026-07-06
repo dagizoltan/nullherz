@@ -199,30 +199,29 @@ impl DnaKernel {
     }
 
     /// RhythmicGrid: High-performance micro-timing utility for sidecars.
-    /// Applies rhythmic jitter to an entire audio block using a 1024-sample delay line.
+    /// Applies rhythmic jitter to an entire audio block using linear interpolation for sub-sample accuracy.
     pub fn apply_rhythmic_grid(samples: &mut [f32], dna: &nullherz_traits::SoundDNA, sample_rate: f32, step: usize) {
         let micro_offset_ms = dna.rhythmic.micro_timing[step % 12] as f32;
-        let delay_samples = (micro_offset_ms * sample_rate * 0.001) as i32;
+        let delay_samples_f = micro_offset_ms * sample_rate * 0.001;
 
-        if delay_samples == 0 { return; }
+        if delay_samples_f.abs() < 0.001 { return; }
 
-        // Use a stack-allocated buffer for the delay line to remain RT-safe
         let mut buffer = [0.0f32; 1024];
         let len = samples.len().min(1024);
         buffer[..len].copy_from_slice(&samples[..len]);
 
-        if delay_samples > 0 {
-            let shift = delay_samples.min(1024) as usize;
-            samples[..shift].fill(0.0);
-            if len > shift {
-                samples[shift..len].copy_from_slice(&buffer[..len - shift]);
-            }
-        } else {
-            let shift = (-delay_samples).min(1024) as usize;
-            if len > shift {
-                samples[..len - shift].copy_from_slice(&buffer[shift..len]);
-                samples[len - shift..len].fill(0.0);
-            }
+        let int_delay = delay_samples_f.floor() as i32;
+        let frac = delay_samples_f - delay_samples_f.floor();
+
+        for i in 0..len {
+            let read_pos = i as i32 - int_delay;
+            let sample = if read_pos >= 1 && read_pos < len as i32 {
+                // Linear Interpolation: y = y0 * (1 - frac) + y1 * frac
+                buffer[read_pos as usize - 1] * frac + buffer[read_pos as usize] * (1.0 - frac)
+            } else {
+                0.0
+            };
+            samples[i] = sample;
         }
     }
 

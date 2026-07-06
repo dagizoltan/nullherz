@@ -270,9 +270,7 @@ impl DnaCommand {
         let mut payload = [0u8; 128];
 
         // 1. Spectral (0-63)
-        unsafe {
-            std::ptr::copy_nonoverlapping(latent.as_ptr() as *const u8, payload.as_mut_ptr(), 64);
-        }
+        payload[..64].copy_from_slice(bytemuck::cast_slice(latent));
 
         // 2. Rhythmic Micro-timing (64-75)
         for i in 0..12 {

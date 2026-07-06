@@ -19,14 +19,22 @@ pub fn sidecar(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
 
                 // Hardened: structured argument parsing for SHM and EventFD
-                let cmd_shm = args.iter().position(|a| a == "--command-shm")
-                    .and_then(|i| args.get(i + 1)).map(|s| s.as_str()).unwrap_or("");
-                let sig_shm = args.iter().position(|a| a == "--signal-shm")
-                    .and_then(|i| args.get(i + 1)).map(|s| s.as_str()).unwrap_or("");
-                let efd_val = args.iter().position(|a| a == "--event-fd")
-                    .and_then(|i| args.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(0);
-                let channels = args.iter().position(|a| a == "--channels")
-                    .and_then(|i| args.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let mut cmd_shm = "";
+                let mut sig_shm = "";
+                let mut efd_val = -1;
+                let mut channels = 2;
+
+                let mut i = 0;
+                while i < args.len() {
+                    match args[i].as_str() {
+                        "--command-shm" => { if let Some(val) = args.get(i + 1) { cmd_shm = val; i += 1; } }
+                        "--signal-shm" => { if let Some(val) = args.get(i + 1) { sig_shm = val; i += 1; } }
+                        "--event-fd" => { if let Some(val) = args.get(i + 1) { efd_val = val.parse().unwrap_or(-1); i += 1; } }
+                        "--channels" => { if let Some(val) = args.get(i + 1) { channels = val.parse().unwrap_or(2); i += 1; } }
+                        _ => {}
+                    }
+                    i += 1;
+                }
 
                 println!("Sidecar {} started with {} channels", stringify!(#name), channels);
 
