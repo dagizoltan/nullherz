@@ -6,22 +6,23 @@ use audio_core::Telemetry;
 use super::{mixer, dna, transport, performance, waveform};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
-    ScrollArea::vertical().show(ui, |ui| {
+    ScrollArea::vertical().id_source("console_scroll").show(ui, |ui| {
         render_header(ui, telemetry);
-        ui.add_space(15.0);
-
-        // 4-Deck Modular Grid
-        ui.columns(2, |cols| {
-            render_deck_card(app, &mut cols[0], 0, telemetry);
-            render_deck_card(app, &mut cols[1], 1, telemetry);
-        });
-
         ui.add_space(10.0);
 
-        ui.columns(2, |cols| {
-            render_deck_card(app, &mut cols[0], 2, telemetry);
-            render_deck_card(app, &mut cols[1], 3, telemetry);
-        });
+        // 4-Deck Modular Grid
+        egui::Grid::new("deck_grid")
+            .num_columns(2)
+            .spacing([12.0, 12.0])
+            .min_col_width(ui.available_width() * 0.48)
+            .show(ui, |ui| {
+                render_deck_card(app, ui, 0, telemetry);
+                render_deck_card(app, ui, 1, telemetry);
+                ui.end_row();
+                render_deck_card(app, ui, 2, telemetry);
+                render_deck_card(app, ui, 3, telemetry);
+                ui.end_row();
+            });
 
         ui.add_space(20.0);
         render_master_section(app, ui, telemetry);
@@ -64,13 +65,13 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
 
             ui.horizontal_top(|ui| {
                 ui.scope(|ui| {
-                    ui.set_min_height(180.0);
+                    ui.set_min_height(160.0);
                     transport::render_deck_transport(app, ui, i);
-                    ui.add_space(10.0);
+                    ui.add_space(12.0);
                     performance::render_deck_performance(app, ui, i);
-                    ui.add_space(10.0);
+                    ui.add_space(12.0);
                     dna::render_deck_dna_panel(app, ui, i);
-                    ui.add_space(10.0);
+                    ui.add_space(12.0);
                     mixer::render_deck_mixer(app, ui, i, deck_color);
                 });
             });
@@ -117,26 +118,15 @@ fn render_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_color:
 fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
     Frame::group(ui.style())
         .fill(Color32::from_rgb(20, 20, 25))
-        .inner_margin(Margin::same(15.0))
+        .inner_margin(Margin::same(12.0))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_centered(|ui| {
+                // Crossfader
                 ui.vertical(|ui| {
-                    ui.label(RichText::new("MASTER OUT").strong());
-                    ui.add_space(5.0);
-                    ui.horizontal(|ui| {
-                        let peak = (app.damped_master_peaks[0] + app.damped_master_peaks[1]) * 0.5;
-                        widgets::render_vu_meter(ui, peak, app.master_peak_hold, Color32::WHITE, 140.0);
-                        widgets::render_fader(ui, &mut app.master_gain, 0.0..=1.5, Color32::WHITE, 140.0, 20.0);
-                    });
-                });
-
-                ui.add_space(30.0);
-
-                ui.vertical(|ui| {
-                    ui.set_min_width(ui.available_width() - 80.0);
+                    ui.set_width(ui.available_width() - 140.0);
                     ui.vertical_centered(|ui| {
                         ui.label(RichText::new("CROSSFADER").small().color(Color32::GRAY));
-                        if widgets::render_horizontal_fader(ui, &mut app.crossfader_pos, 0.0..=1.0, Color32::WHITE, ui.available_width(), 35.0).changed() {
+                        if widgets::render_horizontal_fader(ui, &mut app.crossfader_pos, 0.0..=1.0, Color32::WHITE, ui.available_width(), 32.0).changed() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                 target_id: 20,
                                 param_id: 0,
@@ -146,12 +136,24 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
                         }
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
-                            ui.set_min_width(ui.available_width());
                             ui.label(RichText::new("A").small().color(Color32::from_gray(100)));
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 ui.label(RichText::new("B").small().color(Color32::from_gray(100)));
                             });
                         });
+                    });
+                });
+
+                ui.add_space(20.0);
+
+                // Master Out
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("MASTER").strong());
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        let peak = (app.damped_master_peaks[0] + app.damped_master_peaks[1]) * 0.5;
+                        widgets::render_vu_meter(ui, peak, app.master_peak_hold, Color32::WHITE, 120.0);
+                        widgets::render_fader(ui, &mut app.master_gain, 0.0..=1.5, Color32::WHITE, 120.0, 18.0);
                     });
                 });
             });
