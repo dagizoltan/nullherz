@@ -34,7 +34,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 ## 4. Execution Plane (`audio-dsp`, `nullherz-processors`)
 
 ### `nullherz-processors/src/spectral.rs`
-- **Line 16**: `// For prototype, we ensure lengths match.` - Fixed-length processing assumes input/output alignment. Missing zero-padding or resampling for mismatched buffer boundaries.
+- **Line 16**: [STRATEGY DEFINED] Handle mismatched buffer boundaries via zero-padding surrogate (prototype implemented). Needs hardening for arbitrary block sizes beyond 256 samples.
 
 ---
 
@@ -47,7 +47,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 - **Line 21**: `// Simplified parsing for macro prototype` - Sidecar initialization relies on manual CLI argument iteration. Needs a formal attribute parser for robust SHM and EventFD configuration.
 
 ### `sidecar-sdk/src/lib.rs`
-- **Line 175**: `// In a real kernel, this would involve a delay line or sample shift` - `apply_rhythmic_offset` is a stub.
+- **Line 175**: [STRATEGY DEFINED] `apply_rhythmic_offset` utilizes `apply_rhythmic_grid` delay line logic. Needs verification against sub-sample accuracy requirements.
 
 ---
 
@@ -73,7 +73,17 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 
 ---
 
-## 7. Strategic Documentation
+## 7. Strategic Technical Debt
+
+### Persistence & Serialization
+- **Zero-Copy Migration**: `ProjectState` currently uses Bincode/JSON which requires full deserialization. Transition to `rkyv` is required for zero-copy session loading on the audio thread.
+
+### UI Architecture
+- **Component Decomposition**: `dj_studio.rs` remains monolithic. Requires extraction of `DeckHeader`, `WaveformZone`, and `MixerStrip` into independent, testable components.
+
+---
+
+## 8. Strategic Documentation
 
 ### `NEXT_SESSION_PROMPT.md`
 - **Line 18**: `- **InfiniBand/RDMA**: Research and prototype...` - RDMA networking remains a research task.
