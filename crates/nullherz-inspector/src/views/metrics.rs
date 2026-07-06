@@ -1,4 +1,4 @@
-use egui::{Ui, Color32, Frame, Margin, Rounding, Stroke, RichText};
+use egui::{Ui, Color32, Frame, Margin, Rounding, Stroke, RichText, Sense};
 use crate::{InspectorApp, widgets};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
@@ -16,9 +16,21 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     let load = (t.process_time_ns as f32 / 1_000_000.0) / (256.0 / 44100.0 * 1000.0) * 100.0;
                     ui.label(format!("Engine Load: {:.1}%", load));
                     ui.label(format!("X-RUNS: {}", t.xrun_count));
+                    ui.label(format!("Resource Leaks: {}", t.resource_leaks));
 
                     let pressure_norm = (t.last_xrun_magnitude_ns as f32 / 1_000_000.0).clamp(0.0, 5.0) / 5.0;
                     ui.add(egui::ProgressBar::new(pressure_norm).fill(Color32::from_rgb(0, 255, 200)).text("PRESSURE"));
+
+                    ui.add_space(5.0);
+                    ui.label(RichText::new("NODE PERFORMANCE BREAKDOWN").small().color(Color32::GRAY));
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), Sense::hover());
+                    let node_w = rect.width() / 64.0;
+                    for i in 0..64 {
+                        let time = t.node_times_ns[i] as f32 / 100_000.0; // Scaled
+                        let h = time.clamp(1.0, 30.0);
+                        let r = egui::Rect::from_min_max(egui::pos2(rect.left() + i as f32 * node_w, rect.bottom() - h), egui::pos2(rect.left() + (i+1) as f32 * node_w - 1.0, rect.bottom()));
+                        ui.painter().rect_filled(r, 0.0, Color32::from_rgb(0, 100, 255));
+                    }
                 } else {
                     ui.label("No Telemetry Connection");
                 }

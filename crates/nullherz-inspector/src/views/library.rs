@@ -64,6 +64,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
             // Track List
             render_track_list(app, ui);
+
+            if let Some(track_id) = app.selected_library_track {
+                ui.add_space(10.0);
+                ui.separator();
+                render_track_inspector(app, ui, track_id);
+            }
         });
     });
 }
@@ -90,6 +96,46 @@ fn render_smart_crate_builder(app: &mut InspectorApp, ui: &mut Ui) {
             }
         });
     });
+}
+
+fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
+    if let Ok(Some(track)) = app.library_db.get_track(track_id) {
+        Frame::group(ui.style()).fill(Color32::from_rgb(15, 15, 20)).show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.heading(RichText::new(&track.title).size(14.0).strong());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button("❌").clicked() { app.selected_library_track = None; }
+                    });
+                });
+                ui.label(RichText::new(&track.artist).color(Color32::from_gray(150)));
+                ui.add_space(8.0);
+
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("GENETIC PROFILE").small().strong().color(Color32::from_rgb(0, 255, 200)));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button("▶ PREVIEW").clicked() {
+                             // Mock preview logic
+                        }
+                    });
+                });
+
+                egui::Grid::new("dna_inspector_grid").num_columns(2).spacing([20.0, 4.0]).show(ui, |ui| {
+                    ui.label("Spectral Tilt:");
+                    ui.add(egui::ProgressBar::new((track.metadata.dna.spectral.tilt + 1.0) / 2.0).fill(Color32::from_rgb(0, 200, 255)));
+                    ui.end_row();
+
+                    ui.label("Syncopation:");
+                    ui.add(egui::ProgressBar::new(track.metadata.dna.rhythmic.syncopation_index).fill(Color32::from_rgb(0, 255, 150)));
+                    ui.end_row();
+
+                    ui.label("Glitch Density:");
+                    ui.add(egui::ProgressBar::new(track.metadata.dna.artifacts.glitch_density).fill(Color32::from_rgb(255, 100, 0)));
+                    ui.end_row();
+                });
+            });
+        });
+    }
 }
 
 fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
@@ -151,6 +197,10 @@ fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
             });
 
             if res.clicked() {
+                app.selected_library_track = Some(track.id);
+            }
+
+            if res.double_clicked() {
                 let deck_idx = app.focused_deck;
                 let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
                     granular_node_idx: (deck_idx as u32 * 4),

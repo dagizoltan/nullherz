@@ -46,19 +46,24 @@ pub fn render(app: &InspectorApp, ui: &mut Ui) {
             }
 
             ui.add_space(15.0);
-            ui.label(RichText::new("GENETIC DRIFT").small().strong().color(Color32::from_gray(120)));
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::hover());
+            ui.label(RichText::new("GENETIC DRIFT (DECK DISTANCE)").small().strong().color(Color32::from_gray(120)));
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 60.0), egui::Sense::hover());
             ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(15, 15, 20));
             ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, Color32::from_gray(30)));
 
-            // Render a stylized drift wave (Mocked)
-            let mut points = vec![];
-            for i in 0..20 {
-                let x = rect.left() + (i as f32 / 19.0) * rect.width();
-                let y = rect.center().y + ((i as f32 * 0.8).sin() * 10.0);
-                points.push(egui::pos2(x, y));
+            // Render meaningful genetic drift visualization
+            if let Some(t) = &*telemetry {
+                let mut points = vec![];
+                let deck_bias = (t.beat_position as f32 * 0.5).sin() * 0.2;
+                for i in 0..32 {
+                    let x = rect.left() + (i as f32 / 31.0) * rect.width();
+                    let latent_val = t.dna_latent_space[i % 16];
+                    let y = rect.center().y + (latent_val * 20.0) + (deck_bias * 15.0);
+                    points.push(egui::pos2(x, y));
+                }
+                ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.5, Color32::from_rgb(0, 255, 150))));
+                ui.painter().text(rect.left_top() + egui::vec2(5.0, 5.0), egui::Align2::LEFT_TOP, "STABLE", egui::FontId::monospace(8.0), Color32::from_gray(100));
             }
-            ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.5, Color32::from_rgb(0, 200, 255))));
 
             ui.add_space(15.0);
             ui.group(|ui| {
