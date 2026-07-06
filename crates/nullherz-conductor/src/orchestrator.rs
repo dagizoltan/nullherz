@@ -465,6 +465,15 @@ impl Conductor {
                  Command::Performance(nullherz_traits::PerformanceCommand::ClearTrackPattern { track_idx, .. }) => {
                      println!("Conductor: Clearing Pattern for Track {}", track_idx);
                  }
+                 Command::Resource(nullherz_traits::ResourceCommand::RegisterCapture { capture_node_idx, sample_id }) => {
+                     // Non-RT: Pull snapshot from engine and register in registry
+                     if let Ok(engine_lock) = self.engine_coordinator.backend_manager.engine_handle.lock() {
+                        if let Some(ref engine) = *engine_lock {
+                            // Find specific child or pull all
+                            self.transfusion_manager.poll_snapshots(engine.as_ref());
+                        }
+                     }
+                 }
                  Command::Resource(nullherz_traits::ResourceCommand::ApplyFeatureMutation { target_id, feature_name, strength }) => {
                      let name = String::from_utf8_lossy(&feature_name).trim_matches(char::from(0)).to_string();
                      if let Some(mut sample) = self.transfusion_manager.sample_registry.get(target_id) {

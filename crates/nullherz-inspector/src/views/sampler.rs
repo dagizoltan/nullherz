@@ -40,10 +40,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
              impl egui_wgpu::CallbackTrait for WaveformCallback {
                  fn paint<'a>(&'a self, _info: egui::PaintCallbackInfo, render_pass: &mut wgpu::RenderPass<'a>, _resources: &egui_wgpu::CallbackResources) {
                      if let Ok(wf) = self.renderer.lock() {
-                         // SAFETY: egui-wgpu 0.27 requires the RenderPass to have 'a lifetime.
-                         // The mutex guard 'wf' outlives the render_pass call within this paint() block.
-                         // We use a pointer-cast to satisfy the 'a requirement, ensuring the reference
-                         // remains valid for the duration of the pass.
                          let wf_ptr: *const nullherz_ui_hal::render::waveform_renderer::WaveformRenderer = &*wf;
                          unsafe {
                              (*wf_ptr).render(render_pass);
@@ -74,40 +70,122 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     });
 
     ui.add_space(20.0);
-    ui.horizontal(|ui| {
-        ui.heading("Loop Slicer");
-        if ui.checkbox(&mut app.sampler_slicer_mode, "ENABLE").changed() {
-             let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                target_id: 100,
-                param_id: 3,
-                value: if app.sampler_slicer_mode { 1.0 } else { 0.0 },
-                ramp_duration_samples: 0,
-            }));
-        }
-    });
-
-    if app.sampler_slicer_mode {
-        ui.add_space(10.0);
-        ui.group(|ui| {
-            ui.label(RichText::new("PERFORMANCE SLICE PADS").small().color(Color32::from_gray(100)));
-            egui::Grid::new("slicer_pads").spacing([10.0, 10.0]).show(ui, |ui| {
-                for row in 0..2 {
-                    for col in 0..8 {
-                        let idx = row * 8 + col;
-                        let btn = egui::Button::new(RichText::new(format!("{}", idx + 1)).strong())
-                            .min_size(Vec2::splat(45.0))
-                            .fill(Color32::from_gray(40));
-
-                        if ui.add(btn).clicked() {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::TriggerSlice {
-                                node_idx: 100,
-                                slice_idx: idx as u32,
+    ui.horizontal_top(|ui| {
+        ui.vertical(|ui| {
+            ui.heading("Capture & Recording");
+            ui.add_space(10.0);
+            Frame::group(ui.style()).show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Input Gain");
+                        let mut gain = 1.0;
+                        if ui.add(egui::Slider::new(&mut gain, 0.0..=4.0)).changed() {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                target_id: 110,
+                                param_id: 0,
+                                value: gain,
+                                ramp_duration_samples: 0,
                             }));
                         }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Monitor");
+                        let mut monitor = 0.0;
+                        if ui.add(egui::Slider::new(&mut monitor, 0.0..=1.0)).changed() {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                target_id: 110,
+                                param_id: 1,
+                                value: monitor,
+                                ramp_duration_samples: 0,
+                            }));
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        let mut stereo = true;
+                        if ui.checkbox(&mut stereo, "Stereo").changed() {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                target_id: 110,
+                                param_id: 2,
+                                value: if stereo { 1.0 } else { 0.0 },
+                                ramp_duration_samples: 0,
+                            }));
+                        }
+
+                        if ui.button("RESET BUFFER").clicked() {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                target_id: 110,
+                                param_id: 4,
+                                value: 1.0,
+                                ramp_duration_samples: 0,
+                            }));
+                        }
+                    });
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        let is_rec = false;
+                        if ui.add(egui::Button::new(RichText::new("● RECORD").color(if is_rec { Color32::RED } else { Color32::from_rgb(150, 0, 0) })).min_size(Vec2::new(100.0, 30.0))).clicked() {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                target_id: 110,
+                                param_id: 3,
+                                value: 1.0,
+                                ramp_duration_samples: 0,
+                            }));
+                        }
+                        if ui.button("STOP").clicked() {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                target_id: 110,
+                                param_id: 3,
+                                value: 0.0,
+                                ramp_duration_samples: 0,
+                            }));
+                        }
+                    });
+                    ui.add_space(10.0);
+                    if ui.button("COMMIT TO LIBRARY").clicked() {
+                        let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::RegisterCapture {
+                            capture_node_idx: 110,
+                            sample_id: 0, // Placeholder or generated
+                        }));
                     }
-                    ui.end_row();
-                }
+                });
             });
         });
-    }
+
+        ui.add_space(30.0);
+
+        ui.vertical(|ui| {
+            ui.heading("Loop Slicer");
+            ui.add_space(10.0);
+            if ui.checkbox(&mut app.sampler_slicer_mode, "ENABLE SLICER").changed() {
+                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                    target_id: 100,
+                    param_id: 3,
+                    value: if app.sampler_slicer_mode { 1.0 } else { 0.0 },
+                    ramp_duration_samples: 0,
+                }));
+            }
+            ui.add_space(10.0);
+            ui.group(|ui| {
+                ui.label(RichText::new("PERFORMANCE SLICE PADS").small().color(Color32::from_gray(100)));
+                egui::Grid::new("slicer_pads").spacing([10.0, 10.0]).show(ui, |ui| {
+                    for row in 0..2 {
+                        for col in 0..8 {
+                            let idx = row * 8 + col;
+                            let btn = egui::Button::new(RichText::new(format!("{}", idx + 1)).strong())
+                                .min_size(Vec2::splat(45.0))
+                                .fill(Color32::from_gray(40));
+
+                            if ui.add(btn).clicked() {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::TriggerSlice {
+                                    node_idx: 100,
+                                    slice_idx: idx as u32,
+                                }));
+                            }
+                        }
+                        ui.end_row();
+                    }
+                });
+            });
+        });
+    });
 }
