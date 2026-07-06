@@ -342,14 +342,21 @@ impl Conductor {
                      });
                  }
                  Command::Performance(nullherz_traits::PerformanceCommand::EvolvePattern { node_idx, track_idx, mutation_strength }) => {
-                     // Find the DNA of the sample currently loaded into the engine at this node index
-                     // (Heuristic: for now we assume node_idx corresponds to a Sampler that we can resolve via SampleRegistry)
-                     // In a real implementation, we'd look up the current resource ID of node_idx.
-                     // For this task, we'll try to find any DNA in the registry as a fallback.
+                     // Precisely resolve DNA for the specified node_idx
                      let mut dna = nullherz_traits::RhythmicDNA::default();
-                     if let Some(id) = self.transfusion_manager.sample_registry.list_ids().first() {
-                         if let Some(s) = self.transfusion_manager.sample_registry.get(*id) {
-                             dna = s.metadata.dna.rhythmic;
+                     {
+                         let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+                         if let Some(ref engine) = *engine_lock {
+                             // Find the child with matching processor_id
+                             let resource_id = engine.list_children().iter()
+                                 .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(node_idx))
+                                 .and_then(|c| c.resource_id());
+
+                             if let Some(rid) = resource_id {
+                                 if let Some(s) = self.transfusion_manager.sample_registry.get(rid) {
+                                     dna = s.metadata.dna.rhythmic;
+                                 }
+                             }
                          }
                      }
 
