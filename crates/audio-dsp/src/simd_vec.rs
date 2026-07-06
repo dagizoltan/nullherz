@@ -143,12 +143,12 @@ impl std::ops::Add for FloatX16 {
         { Self { val: self.val + rhs.val } }
         #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
         {
-            Self { parts: [
-                self.parts[0] + rhs.parts[0],
-                self.parts[1] + rhs.parts[1],
-                self.parts[2] + rhs.parts[2],
-                self.parts[3] + rhs.parts[3],
-            ]}
+            use std::arch::wasm32::*;
+            let mut res = [f32x4::default(); 4];
+            for i in 0..4 {
+                res[i] = f32x4_add(self.parts[i], rhs.parts[i]);
+            }
+            Self { parts: res }
         }
         #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
         { Self { low: self.low + rhs.low, high: self.high + rhs.high } }
@@ -162,12 +162,12 @@ impl std::ops::Sub for FloatX16 {
         { Self { val: self.val - rhs.val } }
         #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
         {
-            Self { parts: [
-                self.parts[0] - rhs.parts[0],
-                self.parts[1] - rhs.parts[1],
-                self.parts[2] - rhs.parts[2],
-                self.parts[3] - rhs.parts[3],
-            ]}
+            use std::arch::wasm32::*;
+            let mut res = [f32x4::default(); 4];
+            for i in 0..4 {
+                res[i] = f32x4_sub(self.parts[i], rhs.parts[i]);
+            }
+            Self { parts: res }
         }
         #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
         { Self { low: self.low - rhs.low, high: self.high - rhs.high } }
@@ -181,12 +181,12 @@ impl std::ops::Mul for FloatX16 {
         { Self { val: self.val * rhs.val } }
         #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
         {
-            Self { parts: [
-                self.parts[0] * rhs.parts[0],
-                self.parts[1] * rhs.parts[1],
-                self.parts[2] * rhs.parts[2],
-                self.parts[3] * rhs.parts[3],
-            ]}
+            use std::arch::wasm32::*;
+            let mut res = [f32x4::default(); 4];
+            for i in 0..4 {
+                res[i] = f32x4_mul(self.parts[i], rhs.parts[i]);
+            }
+            Self { parts: res }
         }
         #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
         { Self { low: self.low * rhs.low, high: self.high * rhs.high } }

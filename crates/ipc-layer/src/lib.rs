@@ -320,6 +320,12 @@ impl SharedMemory {
     }
 }
 
+impl AsRef<[u8]> for SharedMemory {
+    fn as_ref(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.size) }
+    }
+}
+
 impl Drop for SharedMemory {
     fn drop(&mut self) {
         unsafe {
