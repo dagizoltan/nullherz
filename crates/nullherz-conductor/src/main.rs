@@ -14,7 +14,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     conductor.set_midi_consumer(midi_sidecar_cons);
 
     // Start the backend (defaulting to threaded for safety in sandbox)
-    conductor.start_backend(nullherz_backends::AudioBackendType::Threaded)?;
+    if let Err(e) = conductor.start_backend(nullherz_backends::AudioBackendType::Threaded) {
+        eprintln!("CRITICAL: Failed to start audio backend: {}", e);
+        return Err(e.into());
+    }
     println!("Audio engine started.");
 
     let cmd_prod_gateway = ipc_layer::NonRtProducer::from_boxed(context.command_producer);

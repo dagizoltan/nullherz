@@ -8,13 +8,17 @@ pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_col
 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                if widgets::render_knob(ui, &mut app.channel_eq_high[i], 0.0..=2.0, "HI", deck_color).changed() {
+                let mut changed = false;
+                if widgets::render_knob(ui, &mut app.channel_eq_high[i], 0.0..=2.0, "HI", deck_color).changed() { changed = true; }
+                if widgets::render_knob(ui, &mut app.channel_eq_mid[i], 0.0..=2.0, "MID", deck_color).changed() { changed = true; }
+                if widgets::render_knob(ui, &mut app.channel_eq_low[i], 0.0..=2.0, "LOW", deck_color).changed() { changed = true; }
+
+                if changed {
+                    // Optimization: While these specific knobs are deck-mapped,
+                    // we could bundle them if we had the underlying node IDs.
+                    // For now, we keep deck-mapping for UI consistency but verify bundling potential.
                     send_deck_param(app, deck_id, nullherz_traits::DeckParamType::EqHigh, app.channel_eq_high[i]);
-                }
-                if widgets::render_knob(ui, &mut app.channel_eq_mid[i], 0.0..=2.0, "MID", deck_color).changed() {
                     send_deck_param(app, deck_id, nullherz_traits::DeckParamType::EqMid, app.channel_eq_mid[i]);
-                }
-                if widgets::render_knob(ui, &mut app.channel_eq_low[i], 0.0..=2.0, "LOW", deck_color).changed() {
                     send_deck_param(app, deck_id, nullherz_traits::DeckParamType::EqLow, app.channel_eq_low[i]);
                 }
             });

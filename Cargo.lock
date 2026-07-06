@@ -2609,6 +2609,7 @@ dependencies = [
 name = "ipc-layer"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "bytemuck",
  "libc",
  "nix 0.29.0",

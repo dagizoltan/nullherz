@@ -1,3 +1,4 @@
+use nullherz_dna::GeneticLibrary;
 use egui::{Ui, Color32, RichText};
 use crate::InspectorApp;
 
