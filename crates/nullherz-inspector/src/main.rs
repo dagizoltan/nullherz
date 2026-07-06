@@ -43,16 +43,19 @@ pub enum View {
     Player,
     Console,
     Composer,
-    Tools,
-    Mastering,
+    Editor,
+    Sampler,
+    Breeder,
     Broadcast,
     Topology,
-    Sampler,
+    Account,
+    Settings,
+    // Secondary/Legacy Views
+    Tools,
+    Mastering,
     Modulation,
     Mixer,
-    Settings,
     Library,
-    Breeder,
     SetupWizard,
 }
 
@@ -283,23 +286,26 @@ impl eframe::App for InspectorApp {
                     ui.label(egui::RichText::new("Ω").size(24.0).color(egui::Color32::from_rgb(0, 255, 200)));
                     ui.add_space(20.0);
 
-                    let nav_buttons = [
-                        (View::Console, "📻", "LIVE"),
-                        (View::Player, "💿", "PLAYER"),
-                        (View::Composer, "🎹", "BUILD"),
-                        (View::Sampler, "🎤", "SAMPL"),
-                        (View::Mixer, "🎚", "MIX"),
-                        (View::Topology, "🕸", "NODE"),
-                        (View::Modulation, "〰", "MOD"),
-                        (View::Breeder, "🧬", "BREED"),
-                        (View::Mastering, "🎛", "MASTER"),
-                        (View::Broadcast, "📡", "B-CAST"),
-                        (View::Settings, "⚙", "SET"),
-                        (View::SetupWizard, "🧙", "SETUP"),
+                    let top_nav = [
+                        (View::Player, "💿", "MEDIA PLAYER"),
+                        (View::Console, "📻", "DJ CONSOLE"),
+                        (View::Composer, "🎹", "COMPOSER"),
+                        (View::Editor, "✂", "EDITOR"),
+                        (View::Sampler, "🎤", "SAMPLER"),
+                        (View::Breeder, "🧬", "DNA BREEDER"),
+                        (View::Broadcast, "📡", "BROADCAST"),
                     ];
 
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for (view, icon, label) in nav_buttons {
+                    let bottom_nav = [
+                        (View::Topology, "🕸", "TOPOLOGY"),
+                        (View::Account, "👤", "ACCOUNT"),
+                        (View::Settings, "⚙", "SETTINGS"),
+                    ];
+
+                    // Bottom Navigation pinned to bottom
+                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                        ui.add_space(10.0);
+                        for (view, icon, label) in bottom_nav.into_iter().rev() {
                             let is_selected = self.active_view == view;
                             let bg_color = if is_selected { egui::Color32::from_gray(50) } else { egui::Color32::TRANSPARENT };
 
@@ -308,6 +314,23 @@ impl eframe::App for InspectorApp {
                             }
                             ui.add_space(10.0);
                         }
+
+                        ui.separator();
+
+                        // Top Navigation in a scroll area to take remaining space
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                            egui::ScrollArea::vertical().id_source("nav_scroll").show(ui, |ui| {
+                                for (view, icon, label) in top_nav {
+                                    let is_selected = self.active_view == view;
+                                    let bg_color = if is_selected { egui::Color32::from_gray(50) } else { egui::Color32::TRANSPARENT };
+
+                                    if ui.add(egui::Button::new(egui::RichText::new(icon).size(20.0)).fill(bg_color).min_size(egui::vec2(50.0, 50.0))).on_hover_text(label).clicked() {
+                                        self.active_view = view;
+                                    }
+                                    ui.add_space(10.0);
+                                }
+                            });
+                        });
                     });
                 });
             });
@@ -359,9 +382,26 @@ impl eframe::App for InspectorApp {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.active_right_tab.is_none() {
-                        if ui.button("📂 LIBRARY").clicked() { self.active_right_tab = Some(RightTab::Library); }
+                    // Right Sidebar Tab Buttons
+                    let tabs = [
+                        (RightTab::Library, "📂", "LIBRARY"),
+                        (RightTab::GeneticCloud, "☁", "GENETIC CLOUD"),
+                        (RightTab::Notifications, "🔔", "NOTIFICATIONS"),
+                        (RightTab::Metrics, "📊", "METRICS"),
+                    ];
+
+                    for (tab, icon, label) in tabs.into_iter().rev() {
+                        let is_selected = self.active_right_tab == Some(tab);
+                        let bg_color = if is_selected { egui::Color32::from_gray(50) } else { egui::Color32::TRANSPARENT };
+                        if ui.add(egui::Button::new(egui::RichText::new(icon).size(16.0)).fill(bg_color)).on_hover_text(label).clicked() {
+                            if self.active_right_tab == Some(tab) {
+                                self.active_right_tab = None;
+                            } else {
+                                self.active_right_tab = Some(tab);
+                            }
+                        }
                     }
+
                     ui.separator();
                     ui.toggle_value(&mut self.is_streaming, "📡 BROADCAST");
                 });
@@ -379,6 +419,8 @@ impl eframe::App for InspectorApp {
                  View::Topology => views::topology::render(self, ui, &telemetry),
                  View::Modulation => views::modulation::render(self, ui, &telemetry),
                  View::Composer => views::composer::render(self, ui, &telemetry),
+                 View::Editor => views::editor::render(self, ui),
+                 View::Account => views::account::render(self, ui),
                  View::Breeder => {
                     let mut view = std::mem::replace(&mut self.breeding_view, views::breeder::BreederView::new());
                     views::breeder::BreederView::show(ui, &mut view, &telemetry, self);
