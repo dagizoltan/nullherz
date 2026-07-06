@@ -147,6 +147,25 @@ pub enum MixerCommand {
     },
 }
 
+impl MixerCommand {
+    /// Zero-allocation utility to pack up to 8 parameter updates into a single bundle.
+    pub fn pack_bundle(updates: &[(u64, u32, f32)]) -> Self {
+        let mut data = [0u8; 128];
+        let count = updates.len().min(8);
+        for i in 0..count {
+            let (target_id, param_id, value) = updates[i];
+            let offset = i * 16;
+            data[offset..offset + 8].copy_from_slice(&target_id.to_le_bytes());
+            data[offset + 8..offset + 12].copy_from_slice(&param_id.to_le_bytes());
+            data[offset + 12..offset + 16].copy_from_slice(&value.to_le_bytes());
+        }
+        Self::Bundle {
+            count: count as u32,
+            data,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]

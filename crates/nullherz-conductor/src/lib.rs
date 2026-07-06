@@ -21,6 +21,7 @@ pub mod bounce;
 pub mod mixer_orchestrator;
 pub mod genetic_sequencer;
 
+pub use nullherz_dna::GeneticLibrary;
 pub use orchestrator::Conductor;
 
 pub struct EngineContext {

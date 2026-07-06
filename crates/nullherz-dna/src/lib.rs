@@ -35,8 +35,58 @@ pub struct RegisteredSample {
     pub metadata: nullherz_traits::SampleMetadata,
 }
 
+pub trait GeneticLibrary: Send + Sync {
+    fn get_track(&self, id: u64) -> Result<Option<LibraryTrack>, Box<dyn std::error::Error>>;
+    fn list_tracks(&self) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>>;
+    fn save_track(&self, track: &LibraryTrack) -> Result<(), Box<dyn std::error::Error>>;
+}
+
 pub struct LibraryDatabase {
     db: Database,
+}
+
+impl GeneticLibrary for LibraryDatabase {
+    fn get_track(&self, id: u64) -> Result<Option<LibraryTrack>, Box<dyn std::error::Error>> {
+        let read_txn = self.db.begin_read()?;
+        let table = match read_txn.open_table(TRACKS_TABLE) {
+            Ok(t) => t,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        let result = table.get(id)?;
+        if let Some(guard) = result {
+            let track: LibraryTrack = serde_json::from_slice(guard.value())?;
+            return Ok(Some(track));
+        }
+        Ok(None)
+    }
+
+    fn list_tracks(&self) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
+        let read_txn = self.db.begin_read()?;
+        let table = match read_txn.open_table(TRACKS_TABLE) {
+            Ok(t) => t,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+        let mut tracks = Vec::new();
+        for res in table.iter()? {
+            let (_id, val) = res?;
+            let track: LibraryTrack = serde_json::from_slice(val.value())?;
+            tracks.push(track);
+        }
+        Ok(tracks)
+    }
+
+    fn save_track(&self, track: &LibraryTrack) -> Result<(), Box<dyn std::error::Error>> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TRACKS_TABLE)?;
+            let serialized = serde_json::to_vec(track)?;
+            table.insert(track.id, serialized.as_slice())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
 }
 
 impl LibraryDatabase {
@@ -53,47 +103,6 @@ impl LibraryDatabase {
         Ok(Self { db })
     }
 
-    pub fn save_track(&self, track: &LibraryTrack) -> Result<(), Box<dyn std::error::Error>> {
-        let write_txn = self.db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(TRACKS_TABLE)?;
-            let serialized = serde_json::to_vec(track)?;
-            table.insert(track.id, serialized.as_slice())?;
-        }
-        write_txn.commit()?;
-        Ok(())
-    }
-
-    pub fn get_track(&self, id: u64) -> Result<Option<LibraryTrack>, Box<dyn std::error::Error>> {
-        let read_txn = self.db.begin_read()?;
-        let table = match read_txn.open_table(TRACKS_TABLE) {
-            Ok(t) => t,
-            Err(TableError::TableDoesNotExist(_)) => return Ok(None),
-            Err(e) => return Err(e.into()),
-        };
-        let result = table.get(id)?;
-        if let Some(guard) = result {
-            let track: LibraryTrack = serde_json::from_slice(guard.value())?;
-            return Ok(Some(track));
-        }
-        Ok(None)
-    }
-
-    pub fn list_tracks(&self) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
-        let read_txn = self.db.begin_read()?;
-        let table = match read_txn.open_table(TRACKS_TABLE) {
-            Ok(t) => t,
-            Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
-            Err(e) => return Err(e.into()),
-        };
-        let mut tracks = Vec::new();
-        for res in table.iter()? {
-            let (_id, val) = res?;
-            let track: LibraryTrack = serde_json::from_slice(val.value())?;
-            tracks.push(track);
-        }
-        Ok(tracks)
-    }
 
     pub fn add_to_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>> {
         let write_txn = self.db.begin_write()?;
