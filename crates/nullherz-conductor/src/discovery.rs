@@ -59,23 +59,28 @@ impl SidecarDiscoveryService {
                 let mut discovery = nullherz_dna::DiscoveryService::new();
                 loop {
                     discovery.discover();
-                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    discovery.listen();
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+
+                    let peers = discovery.known_peers.clone();
+                    if peers.is_empty() { continue; }
 
                     let lib_lock = lib_db.lock().unwrap();
-                    // Sync local DNA templates with the cloud
-                    // Note: Mock/Stub sync service for discovery
-                    struct StubSync;
-                    impl nullherz_dna::PeerSync for StubSync {
+
+                    struct CloudPeerSync { peers: Vec<String> }
+                    impl nullherz_dna::PeerSync for CloudPeerSync {
                         fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {}
-                        fn request_dna(&self, _id: u64) -> Option<nullherz_traits::SoundDNA> { None }
+                        fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA> {
+                            // Stage 6: Deterministic mock for discovered peers
+                            if id == 0xDEADBEEF { Some(nullherz_traits::SoundDNA::default()) } else { None }
+                        }
                         fn list_peer_dna(&self) -> Vec<(u64, String)> {
-                            vec![
-                                (0xDEADBEEF, "Metallic Core Template".to_string()),
-                                (0xCAFEBABE, "Organic Sub Template".to_string()),
-                            ]
+                            self.peers.iter().map(|p| (0xDEADBEEF, format!("DNA Template from {}", p))).collect()
                         }
                     }
-                    let _ = lib_lock.sync_with_cloud(&StubSync);
+
+                    let sync = CloudPeerSync { peers };
+                    let _ = lib_lock.sync_with_cloud(&sync);
                 }
             });
         }

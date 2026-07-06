@@ -35,8 +35,58 @@ pub struct RegisteredSample {
     pub metadata: nullherz_traits::SampleMetadata,
 }
 
+pub trait GeneticLibrary: Send + Sync {
+    fn get_track(&self, id: u64) -> Result<Option<LibraryTrack>, Box<dyn std::error::Error>>;
+    fn list_tracks(&self) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>>;
+    fn save_track(&self, track: &LibraryTrack) -> Result<(), Box<dyn std::error::Error>>;
+}
+
 pub struct LibraryDatabase {
     db: Database,
+}
+
+impl GeneticLibrary for LibraryDatabase {
+    fn get_track(&self, id: u64) -> Result<Option<LibraryTrack>, Box<dyn std::error::Error>> {
+        let read_txn = self.db.begin_read()?;
+        let table = match read_txn.open_table(TRACKS_TABLE) {
+            Ok(t) => t,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        let result = table.get(id)?;
+        if let Some(guard) = result {
+            let track: LibraryTrack = serde_json::from_slice(guard.value())?;
+            return Ok(Some(track));
+        }
+        Ok(None)
+    }
+
+    fn list_tracks(&self) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
+        let read_txn = self.db.begin_read()?;
+        let table = match read_txn.open_table(TRACKS_TABLE) {
+            Ok(t) => t,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+        let mut tracks = Vec::new();
+        for res in table.iter()? {
+            let (_id, val) = res?;
+            let track: LibraryTrack = serde_json::from_slice(val.value())?;
+            tracks.push(track);
+        }
+        Ok(tracks)
+    }
+
+    fn save_track(&self, track: &LibraryTrack) -> Result<(), Box<dyn std::error::Error>> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TRACKS_TABLE)?;
+            let serialized = serde_json::to_vec(track)?;
+            table.insert(track.id, serialized.as_slice())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
 }
 
 impl LibraryDatabase {
@@ -53,47 +103,6 @@ impl LibraryDatabase {
         Ok(Self { db })
     }
 
-    pub fn save_track(&self, track: &LibraryTrack) -> Result<(), Box<dyn std::error::Error>> {
-        let write_txn = self.db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(TRACKS_TABLE)?;
-            let serialized = serde_json::to_vec(track)?;
-            table.insert(track.id, serialized.as_slice())?;
-        }
-        write_txn.commit()?;
-        Ok(())
-    }
-
-    pub fn get_track(&self, id: u64) -> Result<Option<LibraryTrack>, Box<dyn std::error::Error>> {
-        let read_txn = self.db.begin_read()?;
-        let table = match read_txn.open_table(TRACKS_TABLE) {
-            Ok(t) => t,
-            Err(TableError::TableDoesNotExist(_)) => return Ok(None),
-            Err(e) => return Err(e.into()),
-        };
-        let result = table.get(id)?;
-        if let Some(guard) = result {
-            let track: LibraryTrack = serde_json::from_slice(guard.value())?;
-            return Ok(Some(track));
-        }
-        Ok(None)
-    }
-
-    pub fn list_tracks(&self) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
-        let read_txn = self.db.begin_read()?;
-        let table = match read_txn.open_table(TRACKS_TABLE) {
-            Ok(t) => t,
-            Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
-            Err(e) => return Err(e.into()),
-        };
-        let mut tracks = Vec::new();
-        for res in table.iter()? {
-            let (_id, val) = res?;
-            let track: LibraryTrack = serde_json::from_slice(val.value())?;
-            tracks.push(track);
-        }
-        Ok(tracks)
-    }
 
     pub fn add_to_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>> {
         let write_txn = self.db.begin_write()?;
@@ -216,20 +225,21 @@ impl LibraryDatabase {
 
         let remote_dna = sync_service.list_peer_dna();
         for (id, name) in remote_dna {
-            if let Some(dna) = sync_service.request_dna(id) {
-                println!("Sync: Inherited SoundDNA '{}' from cloud peer.", name);
-                // Store received DNA in the database
-                let track = LibraryTrack {
-                    id,
-                    path: format!("cloud/{}", id),
-                    title: name,
-                    artist: "Cloud Peer".to_string(),
-                    metadata: nullherz_traits::SampleMetadata {
-                        dna,
-                        ..nullherz_traits::SampleMetadata::new_empty()
-                    },
-                };
-                let _ = self.save_track(&track);
+            if self.get_track(id)?.is_none() {
+                if let Some(dna) = sync_service.request_dna(id) {
+                    println!("Sync: Inherited SoundDNA '{}' from cloud peer.", name);
+                    let track = LibraryTrack {
+                        id,
+                        path: format!("cloud://{}", id),
+                        title: name,
+                        artist: "Cloud Peer".to_string(),
+                        metadata: nullherz_traits::SampleMetadata {
+                            dna,
+                            ..nullherz_traits::SampleMetadata::new_empty()
+                        },
+                    };
+                    self.save_track(&track)?;
+                }
             }
         }
         Ok(())
@@ -443,6 +453,33 @@ mod tests {
         assert_eq!(list[0], track);
 
         let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn test_sync_with_cloud_persistence() {
+        let db_path = "test_sync.redb";
+        let _ = std::fs::remove_file(db_path);
+        let db = LibraryDatabase::load(db_path).unwrap();
+
+        struct MockSync;
+        impl PeerSync for MockSync {
+            fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {}
+            fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA> {
+                if id == 0xABC { Some(nullherz_traits::SoundDNA::default()) } else { None }
+            }
+            fn list_peer_dna(&self) -> Vec<(u64, String)> {
+                vec![(0xABC, "Cloud Track".to_string())]
+            }
+        }
+
+        db.sync_with_cloud(&MockSync).unwrap();
+
+        let track = db.get_track(0xABC).unwrap().expect("Track should be persisted after sync");
+        assert_eq!(track.title, "Cloud Track");
+        assert_eq!(track.artist, "Cloud Peer");
+        assert!(track.path.contains("cloud://"));
+
+        let _ = std::fs::remove_file(db_path);
     }
 
     #[test]

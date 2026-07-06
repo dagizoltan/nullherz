@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use nullherz_dna::SampleRegistry;
+use nullherz_dna::{SampleRegistry, GeneticLibrary};
 use std::time::Duration;
 use rayon::prelude::*;
 use std::cell::RefCell;

@@ -3,7 +3,7 @@ use nullherz_mixer::MixerManager;
 
 pub struct MixerOrchestrator;
 
-use nullherz_dna::LibraryDatabase;
+use nullherz_dna::{LibraryDatabase, GeneticLibrary};
 use std::sync::{Arc, Mutex};
 
 impl MixerOrchestrator {

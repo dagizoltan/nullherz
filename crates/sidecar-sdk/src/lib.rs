@@ -85,8 +85,14 @@ impl SidecarHost<NativeMemoryMapper> {
      }
 }
 
+/// Interface for handling sidecar-specific extensions (Opaque Envelopes).
+pub trait SidecarExtensionHandler: Send {
+    fn handle_extension(&mut self, processor: &mut dyn AudioProcessor, envelope: &nullherz_traits::OpaqueEnvelope);
+}
+
 pub struct SidecarContext<'a, P: AudioProcessor> {
     processor: P,
+    extension_handler: Option<Box<dyn SidecarExtensionHandler>>,
     command_buffer: &'a ShmRingBuffer<nullherz_traits::TimestampedCommand>,
     #[allow(dead_code)]
     feedback_buffer: Option<&'a ShmRingBuffer<nullherz_traits::ProcessorMetadata>>,
@@ -130,6 +136,7 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
 
         Self {
             processor,
+            extension_handler: None,
             command_buffer,
             feedback_buffer: None,
             input_buffers,
@@ -139,10 +146,24 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
         }
     }
 
+    pub fn with_extension_handler(mut self, handler: Box<dyn SidecarExtensionHandler>) -> Self {
+        self.extension_handler = Some(handler);
+        self
+    }
+
     pub fn process_once(&mut self) {
         self.signal.pulse_heartbeat();
         while let Some(ts_cmd) = self.command_buffer.pop() {
-            self.processor.apply_command(&ts_cmd.command);
+            match &ts_cmd.command {
+                nullherz_traits::Command::Extension(envelope) => {
+                    if let Some(handler) = &mut self.extension_handler {
+                        handler.handle_extension(&mut self.processor, envelope);
+                    } else {
+                        self.processor.apply_command(&ts_cmd.command);
+                    }
+                }
+                _ => self.processor.apply_command(&ts_cmd.command),
+            }
         }
 
         let mut in_blocks = [AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; 16];

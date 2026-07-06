@@ -10,7 +10,7 @@ use crate::clip_orchestrator::ClipOrchestrator;
 use crate::modulation_matrix::ModulationMatrix;
 use nullherz_traits::{Command, telemetry::Telemetry};
 use std::sync::{Arc, Mutex};
-use nullherz_dna::SampleRegistry;
+use nullherz_dna::{SampleRegistry, GeneticLibrary};
 
 pub struct Conductor {
     pub engine_coordinator: EngineCoordinator,
@@ -261,21 +261,24 @@ impl Conductor {
             // Resolve the resource_id (sample_id) currently loaded in the master sampler
             let mut current_sample_id = None;
             {
-                let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
-                if let Some(ref engine) = *engine_lock {
-                    current_sample_id = engine.list_children().iter()
-                        .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(sampler_node_idx))
-                        .and_then(|c| c.resource_id());
+                if let Ok(engine_lock) = self.engine_coordinator.backend_manager.engine_handle.lock() {
+                    if let Some(ref engine) = *engine_lock {
+                        current_sample_id = engine.list_children().iter()
+                            .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(sampler_node_idx))
+                            .and_then(|c| c.resource_id());
+                    }
                 }
             }
 
             if let Some(id) = current_sample_id {
                 tokio::spawn(async move {
-                    let lib_lock = lib.lock().unwrap();
-                    if let Ok(Some(track)) = lib_lock.get_track(id) {
-                        if let Ok(matches) = nullherz_dna::Matchmaker::find_best_matches(&lib_lock, &track.metadata.dna, 3) {
-                            let mut sugg_lock = suggestions.lock().unwrap();
-                            *sugg_lock = matches;
+                    if let Ok(lib_lock) = lib.lock() {
+                        if let Ok(Some(track)) = lib_lock.get_track(id) {
+                            if let Ok(matches) = nullherz_dna::Matchmaker::find_best_matches(&lib_lock, &track.metadata.dna, 3) {
+                                if let Ok(mut sugg_lock) = suggestions.lock() {
+                                    *sugg_lock = matches;
+                                }
+                            }
                         }
                     }
                 });
@@ -379,8 +382,8 @@ impl Conductor {
                  }
                  Command::Core(nullherz_traits::CoreCommand::CalibrateLatency) => {
                      let sample_rate = {
-                         let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
-                         engine_lock.as_ref().map(|e| e.target_sample_rate()).unwrap_or(44100.0)
+                         let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock();
+                         engine_lock.ok().and_then(|lock| lock.as_ref().map(|e| e.target_sample_rate())).unwrap_or(44100.0)
                      };
                      // Hardened calibration: 10ms based on actual sample rate
                      let samples = (sample_rate * 0.01) as u32;
@@ -390,8 +393,8 @@ impl Conductor {
                      let plugin_name = String::from_utf8_lossy(&name).trim_matches(char::from(0)).to_string();
 
                      let manifest = {
-                         let known = self.sidecar_discovery.known_plugins.lock().unwrap();
-                         known.get(&plugin_name).cloned()
+                         let known = self.sidecar_discovery.known_plugins.lock();
+                         known.ok().and_then(|lock| lock.get(&plugin_name).cloned())
                      };
 
                      if let Some(m) = manifest {
@@ -424,16 +427,17 @@ impl Conductor {
                      // Precisely resolve DNA for the specified node_idx
                      let mut dna = nullherz_traits::RhythmicDNA::default();
                      {
-                         let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
-                         if let Some(ref engine) = *engine_lock {
-                             // Find the child with matching processor_id
-                             let resource_id = engine.list_children().iter()
-                                 .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(node_idx))
-                                 .and_then(|c| c.resource_id());
+                         if let Ok(engine_lock) = self.engine_coordinator.backend_manager.engine_handle.lock() {
+                             if let Some(ref engine) = *engine_lock {
+                                 // Find the child with matching processor_id
+                                 let resource_id = engine.list_children().iter()
+                                     .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(node_idx))
+                                     .and_then(|c| c.resource_id());
 
-                             if let Some(rid) = resource_id {
-                                 if let Some(s) = self.transfusion_manager.sample_registry.get(rid) {
-                                     dna = s.metadata.dna.rhythmic;
+                                 if let Some(rid) = resource_id {
+                                     if let Some(s) = self.transfusion_manager.sample_registry.get(rid) {
+                                         dna = s.metadata.dna.rhythmic;
+                                     }
                                  }
                              }
                          }
@@ -509,7 +513,7 @@ impl Conductor {
 
     pub fn tick(&mut self) {
         use std::time::{SystemTime, UNIX_EPOCH};
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
 
         // Drain Local MIDI Consumer
         if let Some(ref mut consumer) = self.midi_consumer {
@@ -593,36 +597,38 @@ impl Conductor {
     }
 
     fn handle_transfusion_registrations(&mut self) {
-        let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
-        if let Some(ref engine) = *engine_lock {
-            self.transfusion_manager.poll_snapshots(engine.as_ref());
+        if let Ok(engine_lock) = self.engine_coordinator.backend_manager.engine_handle.lock() {
+            if let Some(ref engine) = *engine_lock {
+                self.transfusion_manager.poll_snapshots(engine.as_ref());
+            }
         }
     }
 
     fn sync_sampler_metadata(&mut self) {
-        let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
-        if let Some(ref engine) = *engine_lock {
-            for child in engine.list_children() {
-                if let Some(id) = child.resource_id() {
-                    // Reconcile with LibraryDatabase for persistent metadata updates
-                    let lib_lock = self.library.lock().unwrap();
-                    if let Ok(Some(track)) = lib_lock.get_track(id) {
-                         if let Some(m) = child.metadata() {
-                            if let Some(ref mut prod) = self.topology_manager.topo_producer {
-                                let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
-                                    node_idx: m.processor_id as u32,
-                                    metadata: Arc::new(track.metadata),
-                                });
+        if let Ok(engine_lock) = self.engine_coordinator.backend_manager.engine_handle.lock() {
+            if let Some(ref engine) = *engine_lock {
+                for child in engine.list_children() {
+                    if let Some(id) = child.resource_id() {
+                        // Reconcile with LibraryDatabase for persistent metadata updates
+                        let lib_lock = if let Ok(l) = self.library.lock() { l } else { continue; };
+                        if let Ok(Some(track)) = lib_lock.get_track(id) {
+                            if let Some(m) = child.metadata() {
+                                if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                                    let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
+                                        node_idx: m.processor_id as u32,
+                                        metadata: Arc::new(track.metadata),
+                                    });
+                                }
                             }
-                        }
-                    } else if let Some(sample) = self.transfusion_manager.sample_registry.get(id) {
-                        // Fallback to transient registry if not in persistent library
-                        if let Some(m) = child.metadata() {
-                            if let Some(ref mut prod) = self.topology_manager.topo_producer {
-                                let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
-                                    node_idx: m.processor_id as u32,
-                                    metadata: Arc::new(sample.metadata),
-                                });
+                        } else if let Some(sample) = self.transfusion_manager.sample_registry.get(id) {
+                            // Fallback to transient registry if not in persistent library
+                            if let Some(m) = child.metadata() {
+                                if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                                    let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
+                                        node_idx: m.processor_id as u32,
+                                        metadata: Arc::new(sample.metadata),
+                                    });
+                                }
                             }
                         }
                     }

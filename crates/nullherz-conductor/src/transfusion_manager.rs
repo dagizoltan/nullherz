@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use nullherz_dna::{SampleRegistry, LibraryDatabase};
+use nullherz_dna::{SampleRegistry, LibraryDatabase, GeneticLibrary};
 use nullherz_traits::{RenderingEngine, SampleMetadata};
 use audio_dsp::TransientDetector;
 
