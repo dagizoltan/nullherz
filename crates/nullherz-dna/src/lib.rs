@@ -244,33 +244,52 @@ pub trait PeerSync {
 
 pub struct DiscoveryService {
     pub known_peers: Vec<String>,
+    mdns: Option<mdns_sd::ServiceDaemon>,
+    service_type: &'static str,
 }
 
 impl DiscoveryService {
     pub fn new() -> Self {
-        Self { known_peers: Vec::new() }
+        Self {
+            known_peers: Vec::new(),
+            mdns: mdns_sd::ServiceDaemon::new().ok(),
+            service_type: "_nullherz-dna._udp.local.",
+        }
     }
 
+    /// Announces presence to the genetic cloud via mDNS
     pub fn discover(&mut self) {
-        use std::net::UdpSocket;
-        let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
-        socket.set_broadcast(true).unwrap();
-        let msg = b"nullherz_dna_peer";
-        let _ = socket.send_to(msg, "255.255.255.255:9001");
-        println!("P2P Discovery: Broadcasted presence to the genetic cloud.");
+        if let Some(mdns) = &self.mdns {
+            let hostname = gethostname::gethostname().to_string_lossy().to_string();
+            let service_info = mdns_sd::ServiceInfo::new(
+                self.service_type,
+                &hostname,
+                &format!("{}.local.", hostname),
+                "0.0.0.0",
+                9001,
+                None,
+            ).expect("Failed to create mDNS service info");
+
+            mdns.register(service_info).expect("Failed to register mDNS service");
+            println!("P2P Discovery: Announced '{}' to the genetic cloud via mDNS.", hostname);
+        }
     }
 
+    /// Listens for new peers in the local genetic cloud
     pub fn listen(&mut self) {
-        use std::net::UdpSocket;
-        let socket = UdpSocket::bind("0.0.0.0:9001").unwrap();
-        socket.set_nonblocking(true).unwrap();
-        let mut buf = [0u8; 1024];
-        if let Ok((len, addr)) = socket.recv_from(&mut buf) {
-            if &buf[..len] == b"nullherz_dna_peer" {
-                let peer_addr = addr.to_string();
-                if !self.known_peers.contains(&peer_addr) {
-                    println!("P2P Discovery: Found peer at {}", peer_addr);
-                    self.known_peers.push(peer_addr);
+        if let Some(mdns) = &self.mdns {
+            if let Ok(browser) = mdns.browse(self.service_type) {
+                while let Ok(event) = browser.recv_timeout(std::time::Duration::from_millis(10)) {
+                    if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
+                        let addr = info.get_addresses().iter().next()
+                            .map(|a| format!("{}:{}", a, info.get_port()))
+                            .unwrap_or_else(|| "unknown".to_string());
+
+                        if !self.known_peers.contains(&addr) {
+                            println!("P2P Discovery: Found peer '{}' at {}", info.get_fullname(), addr);
+                            self.known_peers.push(addr);
+                        }
+                    }
                 }
             }
         }

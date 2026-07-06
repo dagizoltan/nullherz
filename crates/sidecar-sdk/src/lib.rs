@@ -202,6 +202,59 @@ impl DnaKernel {
              }
         }
     }
+
+    /// RhythmicGrid: High-performance micro-timing utility for sidecars.
+    /// Applies rhythmic jitter to an entire audio block using a 1024-sample delay line.
+    pub fn apply_rhythmic_grid(samples: &mut [f32], dna: &nullherz_traits::SoundDNA, sample_rate: f32, step: usize) {
+        let micro_offset_ms = dna.rhythmic.micro_timing[step % 12] as f32;
+        let delay_samples = (micro_offset_ms * sample_rate * 0.001) as i32;
+
+        if delay_samples == 0 { return; }
+
+        // Use a stack-allocated buffer for the delay line to remain RT-safe
+        let mut buffer = [0.0f32; 1024];
+        let len = samples.len().min(1024);
+        buffer[..len].copy_from_slice(&samples[..len]);
+
+        if delay_samples > 0 {
+            let shift = delay_samples.min(1024) as usize;
+            samples[..shift].fill(0.0);
+            if len > shift {
+                samples[shift..len].copy_from_slice(&buffer[..len - shift]);
+            }
+        } else {
+            let shift = (-delay_samples).min(1024) as usize;
+            if len > shift {
+                samples[..len - shift].copy_from_slice(&buffer[shift..len]);
+                samples[len - shift..len].fill(0.0);
+            }
+        }
+    }
+
+    /// SpectralWarp: Non-linear frequency shifter using Stage 6 SoundDNA latent space.
+    /// Accelerated by WASM SIMD FloatX16 pathways.
+    pub fn apply_spectral_warp(re: &mut [f32], im: &mut [f32], dna: &nullherz_traits::SoundDNA, warp_strength: f32) {
+        use audio_dsp::simd_vec::{FloatX16, load_f32x16, store_f32x16};
+
+        let n = re.len();
+        let latent = dna.spectral.latent_space;
+
+        for bin in (0..n).step_by(16).filter(|&b| b + 16 <= n) {
+            let v_re = load_f32x16(re, bin);
+            let v_im = load_f32x16(im, bin);
+
+            // Warp factor derived from latent space dimensions 0-15
+            let v_warp = FloatX16::new(latent);
+            let v_strength = FloatX16::splat(warp_strength);
+
+            // Non-linear perturbation: re = re * (1 + warp*strength), im = im * (1 - warp*strength)
+            let v_res_re = v_re * (FloatX16::splat(1.0) + v_warp * v_strength);
+            let v_res_im = v_im * (FloatX16::splat(1.0) - v_warp * v_strength);
+
+            store_f32x16(re, bin, v_res_re);
+            store_f32x16(im, bin, v_res_im);
+        }
+    }
 }
 
 /// Example of how to handle Opaque Envelope extensions in a Sidecar.

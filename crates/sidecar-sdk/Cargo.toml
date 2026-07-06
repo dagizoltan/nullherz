@@ -7,3 +7,4 @@ edition = "2024"
 ipc-layer = { path = "../ipc-layer" }
 nullherz-traits = { path = "../nullherz-traits" }
 audio-core = { path = "../audio-core" }
+audio-dsp = { path = "../audio-dsp" }

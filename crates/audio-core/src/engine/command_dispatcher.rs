@@ -71,9 +71,12 @@ impl CommandDispatcher {
         graph.apply_command(&Command::Core(CoreCommand::CommitTopology));
     }
 
-    fn handle_bundle_command(graph: &mut dyn AudioProcessor, count: u32, data: [u64; 12]) {
-        for cmd in nullherz_traits::Command::unpack_bundle(count, data) {
-            graph.apply_command(&cmd);
+    fn handle_bundle_command(graph: &mut dyn AudioProcessor, count: u32, data: [u8; 128]) {
+        let cmd = nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::Bundle { count, data });
+        if let Some(iter) = cmd.bundle_iter() {
+            for sub_cmd in iter {
+                graph.apply_command(&sub_cmd);
+            }
         }
     }
 }

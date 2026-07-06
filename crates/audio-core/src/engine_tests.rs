@@ -306,10 +306,10 @@ fn apply_command(&mut self, cmd: &Command) {
         let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn AudioProcessor>>::new(1024).split();
 
         // Create a bundle with one command
-        let mut bundle_data = [0u64; 12];
-        bundle_data[0] = proc_id;
-        bundle_data[1] = 0; // param_id
-        bundle_data[2] = 0.5f32.to_bits() as u64;
+        let mut bundle_data = [0u8; 128];
+        bundle_data[0..8].copy_from_slice(&proc_id.to_le_bytes());
+        bundle_data[8..12].copy_from_slice(&0u32.to_le_bytes()); // param_id
+        bundle_data[12..16].copy_from_slice(&0.5f32.to_le_bytes());
 
         let _ = cmd_buffer.push(TimestampedCommand {
             timestamp_samples: 0,
