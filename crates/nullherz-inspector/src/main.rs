@@ -269,21 +269,34 @@ impl eframe::App for InspectorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let telemetry = self.last_telemetry.lock().unwrap().clone();
 
-        // Update Damping
+        // Update Damping (Liquid Asymmetrical Damping: Fast Attack, Slow Decay)
         if let Some(ref t) = telemetry {
             let d = self.visualizer_damping.clamp(0.01, 1.0);
+            let decay = d * 0.5; // Slower decay for "liquid" feel
+
             for i in 0..128 {
-                self.damped_spectrum[i] = self.damped_spectrum[i] * (1.0 - d) + t.spectrum[i] * d;
-                self.damped_goniometer[i] = self.damped_goniometer[i] * (1.0 - d) + t.goniometer_pts[i] * d;
+                let target_spec = t.spectrum[i];
+                let alpha = if target_spec > self.damped_spectrum[i] { d } else { decay };
+                self.damped_spectrum[i] = self.damped_spectrum[i] * (1.0 - alpha) + target_spec * alpha;
+
+                let target_gonio = t.goniometer_pts[i];
+                let alpha_g = if target_gonio.abs() > self.damped_goniometer[i].abs() { d } else { decay };
+                self.damped_goniometer[i] = self.damped_goniometer[i] * (1.0 - alpha_g) + target_gonio * alpha_g;
             }
             for i in 0..16 {
-                self.damped_latent[i] = self.damped_latent[i] * (1.0 - d) + t.dna_latent_space[i] * d;
+                let target_latent = t.dna_latent_space[i];
+                let alpha_l = if target_latent.abs() > self.damped_latent[i].abs() { d } else { decay };
+                self.damped_latent[i] = self.damped_latent[i] * (1.0 - alpha_l) + target_latent * alpha_l;
             }
             for i in 0..4 {
-                self.damped_peaks[i] = self.damped_peaks[i] * (1.0 - d) + t.peak_levels[i] * d;
+                let target_peak = t.peak_levels[i];
+                let alpha_p = if target_peak > self.damped_peaks[i] { 1.0 } else { decay * 0.5 }; // Near-instant attack for peaks
+                self.damped_peaks[i] = self.damped_peaks[i] * (1.0 - alpha_p) + target_peak * alpha_p;
             }
             for i in 0..2 {
-                self.damped_master_peaks[i] = self.damped_master_peaks[i] * (1.0 - d) + t.peak_levels[i] * d; // Simplified master mapping
+                let target_m_peak = t.peak_levels[i]; // Simplified master mapping
+                let alpha_mp = if target_m_peak > self.damped_master_peaks[i] { 1.0 } else { decay * 0.5 };
+                self.damped_master_peaks[i] = self.damped_master_peaks[i] * (1.0 - alpha_mp) + target_m_peak * alpha_mp;
             }
         }
 

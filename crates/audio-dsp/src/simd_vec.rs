@@ -55,15 +55,17 @@ pub unsafe fn load_f32x4_ptr(ptr: *const f32) -> FloatX4 {
     f32x4::new(arr)
 }
 
-/// A 16-wide f32 SIMD type, supporting AVX-512 where available.
+/// A 16-wide f32 SIMD type, supporting AVX-512 or WASM SIMD128 (via 4x f32x4) where available.
 /// Future infrastructure for AnaWaves Layer 2 (Spectral Personality) high-density operations.
 #[derive(Clone, Copy)]
 pub struct FloatX16 {
     #[cfg(target_feature = "avx512f")]
     pub(crate) val: wide::f32x16,
-    #[cfg(not(target_feature = "avx512f"))]
+    #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
+    pub(crate) parts: [f32x4; 4],
+    #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
     pub(crate) low: f32x8,
-    #[cfg(not(target_feature = "avx512f"))]
+    #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
     pub(crate) high: f32x8,
 }
 
@@ -71,7 +73,18 @@ impl FloatX16 {
     pub fn new(data: [f32; 16]) -> Self {
         #[cfg(target_feature = "avx512f")]
         { Self { val: wide::f32x16::from(data) } }
-        #[cfg(not(target_feature = "avx512f"))]
+        #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            Self {
+                parts: [
+                    f32x4::new([data[0], data[1], data[2], data[3]]),
+                    f32x4::new([data[4], data[5], data[6], data[7]]),
+                    f32x4::new([data[8], data[9], data[10], data[11]]),
+                    f32x4::new([data[12], data[13], data[14], data[15]]),
+                ]
+            }
+        }
+        #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
         {
             Self {
                 low: f32x8::new([data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]]),
@@ -83,7 +96,9 @@ impl FloatX16 {
     pub fn splat(val: f32) -> Self {
         #[cfg(target_feature = "avx512f")]
         { Self { val: wide::f32x16::from(val) } }
-        #[cfg(not(target_feature = "avx512f"))]
+        #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
+        { Self { parts: [f32x4::from(val); 4] } }
+        #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
         { Self { low: f32x8::from(val), high: f32x8::from(val) } }
     }
 }
@@ -98,7 +113,18 @@ impl From<FloatX16> for [f32; 16] {
     fn from(val: FloatX16) -> Self {
         #[cfg(target_feature = "avx512f")]
         { val.val.into() }
-        #[cfg(not(target_feature = "avx512f"))]
+        #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            let p0: [f32; 4] = val.parts[0].into();
+            let p1: [f32; 4] = val.parts[1].into();
+            let p2: [f32; 4] = val.parts[2].into();
+            let p3: [f32; 4] = val.parts[3].into();
+            [
+                p0[0], p0[1], p0[2], p0[3], p1[0], p1[1], p1[2], p1[3],
+                p2[0], p2[1], p2[2], p2[3], p3[0], p3[1], p3[2], p3[3]
+            ]
+        }
+        #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
         {
             let low: [f32; 8] = val.low.into();
             let high: [f32; 8] = val.high.into();
@@ -115,7 +141,16 @@ impl std::ops::Add for FloatX16 {
     fn add(self, rhs: Self) -> Self {
         #[cfg(target_feature = "avx512f")]
         { Self { val: self.val + rhs.val } }
-        #[cfg(not(target_feature = "avx512f"))]
+        #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            Self { parts: [
+                self.parts[0] + rhs.parts[0],
+                self.parts[1] + rhs.parts[1],
+                self.parts[2] + rhs.parts[2],
+                self.parts[3] + rhs.parts[3],
+            ]}
+        }
+        #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
         { Self { low: self.low + rhs.low, high: self.high + rhs.high } }
     }
 }
@@ -125,7 +160,16 @@ impl std::ops::Sub for FloatX16 {
     fn sub(self, rhs: Self) -> Self {
         #[cfg(target_feature = "avx512f")]
         { Self { val: self.val - rhs.val } }
-        #[cfg(not(target_feature = "avx512f"))]
+        #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            Self { parts: [
+                self.parts[0] - rhs.parts[0],
+                self.parts[1] - rhs.parts[1],
+                self.parts[2] - rhs.parts[2],
+                self.parts[3] - rhs.parts[3],
+            ]}
+        }
+        #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
         { Self { low: self.low - rhs.low, high: self.high - rhs.high } }
     }
 }
@@ -135,7 +179,16 @@ impl std::ops::Mul for FloatX16 {
     fn mul(self, rhs: Self) -> Self {
         #[cfg(target_feature = "avx512f")]
         { Self { val: self.val * rhs.val } }
-        #[cfg(not(target_feature = "avx512f"))]
+        #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            Self { parts: [
+                self.parts[0] * rhs.parts[0],
+                self.parts[1] * rhs.parts[1],
+                self.parts[2] * rhs.parts[2],
+                self.parts[3] * rhs.parts[3],
+            ]}
+        }
+        #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
         { Self { low: self.low * rhs.low, high: self.high * rhs.high } }
     }
 }
@@ -155,7 +208,16 @@ impl FloatX16 {
             }
             Self::new(res)
         }
-        #[cfg(not(target_feature = "avx512f"))]
+        #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            Self { parts: [
+                self.parts[0].blend(on_true.parts[0], on_false.parts[0]),
+                self.parts[1].blend(on_true.parts[1], on_false.parts[1]),
+                self.parts[2].blend(on_true.parts[2], on_false.parts[2]),
+                self.parts[3].blend(on_true.parts[3], on_false.parts[3]),
+            ]}
+        }
+        #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
         {
              Self {
                  low: self.low.blend(on_true.low, on_false.low),
@@ -175,7 +237,20 @@ impl FloatX16 {
             }
             Self::new(res)
         }
-        #[cfg(not(target_feature = "avx512f"))]
+        #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            let mut res = [f32x4::default(); 4];
+            for i in 0..4 {
+                let mut part_res = [0.0f32; 4];
+                let a: [f32; 4] = self.parts[i].into();
+                for j in 0..4 {
+                    if a[j].is_finite() { part_res[j] = f32::from_bits(0xFFFFFFFF); }
+                }
+                res[i] = f32x4::new(part_res);
+            }
+            Self { parts: res }
+        }
+        #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
         {
             let mut l_res = [0.0f32; 8];
             let mut h_res = [0.0f32; 8];
@@ -201,7 +276,18 @@ pub fn load_f32x16(data: &[f32], offset: usize) -> FloatX16 {
         arr.copy_from_slice(&data[offset..offset+16]);
         FloatX16::new(arr)
     }
-    #[cfg(not(target_feature = "avx512f"))]
+    #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        FloatX16 {
+            parts: [
+                load_f32x4(data, offset),
+                load_f32x4(data, offset + 4),
+                load_f32x4(data, offset + 8),
+                load_f32x4(data, offset + 12),
+            ]
+        }
+    }
+    #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
     {
         FloatX16 {
             low: load_f32x8(data, offset),

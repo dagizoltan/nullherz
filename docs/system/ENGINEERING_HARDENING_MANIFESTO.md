@@ -9,6 +9,10 @@ Every line of code in the execution plane must obey these laws. No exceptions.
 
 ### 1.1 The Law of Zero Allocation
 The audio thread (Real-Time path) shall never perform a heap allocation. This includes `Vec::push`, `Box::new`, `Arc::new`, or any implicit allocation within 3rd-party crates.
+
+#### 1.1.1 Zero-Allocation Guest-Host Communication
+WASM host functions and Sidecar IPC bridges must utilize stack-allocated buffers and non-allocating serialization (e.g., `bincode::serialize_into` with a pre-allocated `[u8]` slice).
+*   **Hardening Goal:** Eliminate `bincode::serialize` (which returns a `Vec<u8>`) from all `fx-runtime` host functions.
 *   **Hardening Goal:** Implement a build-time or runtime lint to detect unexpected allocations in the `process()` path.
 
 ### 1.2 The Law of Bit-Exact Reset
