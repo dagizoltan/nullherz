@@ -17,10 +17,10 @@ pub fn render_deck_dna_panel(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
 
         let deck_color = InspectorApp::deck_color(i);
 
-        ui.horizontal_wrapped(|ui| {
+        egui::Grid::new(format!("dna_grid_{}", i)).num_columns(2).spacing([4.0, 4.0]).show(ui, |ui| {
             for (label, idx, feature) in traits {
                 ui.vertical(|ui| {
-                    ui.set_max_width(45.0);
+                    ui.set_max_width(32.0);
                     let val = match idx {
                         0 => &mut app.channel_personality_metallic[i],
                         1 => &mut app.channel_personality_organic[i],
@@ -32,9 +32,9 @@ pub fn render_deck_dna_panel(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
                         let strength = *val;
                         emit_personality_mutation(app, i, idx, feature, strength);
                     }
-                    ui.label(RichText::new(label).size(7.0).color(Color32::GRAY));
+                    ui.label(RichText::new(label).size(6.0).color(Color32::from_gray(100)));
                 });
-                ui.add_space(2.0);
+                if idx % 2 == 1 { ui.end_row(); }
             }
         });
     });
