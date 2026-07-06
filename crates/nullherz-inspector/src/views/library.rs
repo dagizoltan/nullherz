@@ -1,5 +1,6 @@
 use egui::{Color32, RichText, Ui, ScrollArea, Layout, Align, Stroke};
 use crate::InspectorApp;
+use nullherz_dna::GeneticLibrary;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     ui.horizontal(|ui| {

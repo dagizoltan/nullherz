@@ -39,6 +39,10 @@ pub trait GeneticLibrary: Send + Sync {
     fn get_track(&self, id: u64) -> Result<Option<LibraryTrack>, Box<dyn std::error::Error>>;
     fn list_tracks(&self) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>>;
     fn save_track(&self, track: &LibraryTrack) -> Result<(), Box<dyn std::error::Error>>;
+    fn add_to_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>>;
+    fn remove_from_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>>;
+    fn list_crates(&self) -> Result<Vec<String>, Box<dyn std::error::Error>>;
+    fn get_tracks_in_crate(&self, crate_name: &str) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>>;
 }
 
 pub struct LibraryDatabase {
@@ -87,6 +91,66 @@ impl GeneticLibrary for LibraryDatabase {
         write_txn.commit()?;
         Ok(())
     }
+
+    fn add_to_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(CRATES_TABLE)?;
+            table.insert((crate_name, track_id), ())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    fn remove_from_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(CRATES_TABLE)?;
+            table.remove((crate_name, track_id))?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    fn list_crates(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        let read_txn = self.db.begin_read()?;
+        let table = match read_txn.open_table(CRATES_TABLE) {
+            Ok(t) => t,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+
+        let mut crate_names = std::collections::HashSet::new();
+        for res in table.iter()? {
+            let (key_guard, _) = res?;
+            let (name, _) = key_guard.value();
+            crate_names.insert(name.to_string());
+        }
+        Ok(crate_names.into_iter().collect())
+    }
+
+    fn get_tracks_in_crate(&self, crate_name: &str) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
+        let read_txn = self.db.begin_read()?;
+        let crate_table = match read_txn.open_table(CRATES_TABLE) {
+            Ok(t) => t,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+        let track_table = read_txn.open_table(TRACKS_TABLE)?;
+
+        let mut tracks = Vec::new();
+        let start = (crate_name, 0);
+        let end = (crate_name, u64::MAX);
+        for res in crate_table.range(start..=end)? {
+            let (key_guard, _) = res?;
+            let (_name, track_id) = key_guard.value();
+            if let Some(val) = track_table.get(track_id)? {
+                let track: LibraryTrack = serde_json::from_slice(val.value())?;
+                tracks.push(track);
+            }
+        }
+        Ok(tracks)
+    }
 }
 
 impl LibraryDatabase {
@@ -104,66 +168,6 @@ impl LibraryDatabase {
     }
 
 
-    pub fn add_to_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>> {
-        let write_txn = self.db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(CRATES_TABLE)?;
-            table.insert((crate_name, track_id), ())?;
-        }
-        write_txn.commit()?;
-        Ok(())
-    }
-
-    pub fn get_tracks_in_crate(&self, crate_name: &str) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
-        let read_txn = self.db.begin_read()?;
-        let crate_table = match read_txn.open_table(CRATES_TABLE) {
-            Ok(t) => t,
-            Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
-            Err(e) => return Err(e.into()),
-        };
-        let track_table = read_txn.open_table(TRACKS_TABLE)?;
-
-        let mut tracks = Vec::new();
-        // Use range scan for O(log N) retrieval of crate members
-        let start = (crate_name, 0);
-        let end = (crate_name, u64::MAX);
-        for res in crate_table.range(start..=end)? {
-            let (key_guard, _) = res?;
-            let (_name, track_id) = key_guard.value();
-            if let Some(val) = track_table.get(track_id)? {
-                let track: LibraryTrack = serde_json::from_slice(val.value())?;
-                tracks.push(track);
-            }
-        }
-        Ok(tracks)
-    }
-
-    pub fn list_crates(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let read_txn = self.db.begin_read()?;
-        let table = match read_txn.open_table(CRATES_TABLE) {
-            Ok(t) => t,
-            Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
-            Err(e) => return Err(e.into()),
-        };
-
-        let mut crate_names = std::collections::HashSet::new();
-        for res in table.iter()? {
-            let (key_guard, _) = res?;
-            let (name, _) = key_guard.value();
-            crate_names.insert(name.to_string());
-        }
-        Ok(crate_names.into_iter().collect())
-    }
-
-    pub fn remove_from_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>> {
-        let write_txn = self.db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(CRATES_TABLE)?;
-            table.remove((crate_name, track_id))?;
-        }
-        write_txn.commit()?;
-        Ok(())
-    }
 
     pub fn save_smart_crate(&self, definition: &SmartCrateDefinition) -> Result<(), Box<dyn std::error::Error>> {
         let write_txn = self.db.begin_write()?;

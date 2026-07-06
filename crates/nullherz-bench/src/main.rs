@@ -1,3 +1,4 @@
+use nullherz_dna::GeneticLibrary;
 use nullherz_traits::TimestampedCommand;
 use nullherz_mixer::MixerManager;
 use nullherz_conductor::Conductor;

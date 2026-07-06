@@ -161,7 +161,10 @@ impl InspectorApp {
             quantize_enabled: true,
             master_gain: 1.0,
             crossfader_pos: 0.5,
-            library_db: nullherz_dna::LibraryDatabase::load("library.redb").unwrap(),
+            library_db: nullherz_dna::LibraryDatabase::load("library.redb").unwrap_or_else(|e| {
+                eprintln!("Warning: Failed to load library.redb ({}). Using transient storage.", e);
+                nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to create transient library")
+            }),
             active_crate: None,
             search_query: String::new(),
             is_streaming: false,

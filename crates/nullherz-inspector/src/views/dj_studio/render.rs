@@ -1,3 +1,4 @@
+use nullherz_dna::GeneticLibrary;
 use egui::{Ui, Color32, RichText, Frame, Margin, Rounding, Stroke};
 use crate::{InspectorApp, widgets};
 use audio_core::Telemetry;

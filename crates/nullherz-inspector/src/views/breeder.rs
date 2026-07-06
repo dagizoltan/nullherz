@@ -1,5 +1,6 @@
 use egui::{Ui, Vec2, Color32, Stroke, Sense, RichText};
 use nullherz_traits::{Command, DnaCommand};
+use nullherz_dna::GeneticLibrary;
 
 pub struct BreederView {
     pub parent_a_id: Option<u64>,
