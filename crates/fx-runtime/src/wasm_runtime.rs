@@ -29,11 +29,18 @@ impl WasmSidecarHost {
              unsafe {
                  if let Some(cmd) = (*state.cmd_buffer).pop() {
                      let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
-                     let data = bincode::serialize(&cmd).unwrap();
 
-                     if data.len() <= max_len as usize {
-                         if mem.write(&mut caller, ptr as usize, &data).is_ok() {
-                             return data.len() as i32;
+                     // Hardened: Zero-allocation serialization using a stack buffer.
+                     let mut buf = [0u8; 512];
+                     let mut cursor = std::io::Cursor::new(&mut buf[..]);
+                     if bincode::serialize_into(&mut cursor, &cmd).is_ok() {
+                         let len = cursor.position() as usize;
+                         let data = &buf[..len];
+
+                         if data.len() <= max_len as usize {
+                             if mem.write(&mut caller, ptr as usize, data).is_ok() {
+                                 return data.len() as i32;
+                             }
                          }
                      }
                      -1 // Error: buffer too small or write failed
