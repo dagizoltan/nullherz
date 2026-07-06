@@ -50,8 +50,23 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                     // Input Sockets
                     for in_idx in 0..node.inputs.len() {
-                        let btn_resp = ui.button(format!("IN {}", in_idx));
+                        let is_occupied = app.graph.edges.iter().any(|e| e.to == idx as u32 && e.input_idx == in_idx as u32);
+                        let btn_resp = ui.button(RichText::new(format!("IN {}", in_idx)).color(if is_occupied { Color32::from_rgb(0, 255, 200) } else { Color32::GRAY }));
                         socket_positions.insert((idx as u32, false, in_idx as u32), btn_resp.rect.center());
+
+                        // Disconnect Action
+                        if is_occupied {
+                             btn_resp.context_menu(|ui| {
+                                 if ui.button("Disconnect").clicked() {
+                                     let _ = app.command_sender.send(Command::Topology(TopologyCommand::UpdateEdge {
+                                         node_idx: idx as u32,
+                                         input_idx: in_idx as u32,
+                                         new_buffer_idx: 0, // Reset to silent buffer
+                                     }));
+                                     ui.close_menu();
+                                 }
+                             });
+                        }
 
                         // Interactive Edge Drop: Detect mouse release over socket while dragging
                         if btn_resp.clicked() || (ui.input(|i| i.pointer.any_released()) && btn_resp.hovered()) {

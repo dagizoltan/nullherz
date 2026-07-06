@@ -82,12 +82,23 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 - **Component Decomposition**: [RESOLVED] Monolithic UI views (DJ Studio) refactored into modular sub-modules (`render`, `mixer`, `dna`, etc.) and specialized widgets.
 - **Topology Routing**: [HARDENED] Cable rendering and buffer resolution now synchronized with `GraphTopology` routing, featuring real-time signal-aware coloring.
 - **Grid Performance**: [OPTIMIZED] Sequencer grid now utilizes spatial culling and horizontal scrolling for high-density performance.
-- **Dynamic Modulation**: [RESOLVED] Modulation matrix now dynamically resolves targets from the active signal graph.
+- **Dynamic Modulation**: [HARDENED] Modulation matrix now dynamically resolves targets from the active signal graph with per-macro scaling knobs.
 - **Genetic Visualization**: [ENHANCED] Library view now features SoundDNA trait sparklines for rapid genetic profiling.
 
 ---
 
-## 8. Strategic Documentation
+## 8. Strategic Technical Debt (Stage 2)
+
+### Distributed Networking
+- **Jitter Resilience**: [HARDENED] Jitter Buffer now implements aggressive clock recovery.
+- **Service Isolation**: [RESOLVED] Sidecar discovery split into independent watcher and P2P sync tasks.
+
+### Intelligence Plane
+- **DNA Mutation Safety**: [HARDENED] `FeatureMutator` implemented with strict latent space clamping.
+
+---
+
+## 9. Strategic Documentation
 
 ### `NEXT_SESSION_PROMPT.md`
 - **Line 18**: `- **InfiniBand/RDMA**: Research and prototype...` - RDMA networking remains a research task.

@@ -90,6 +90,21 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         app.smart_crate_def.glitch_density_range = Some((min, max));
                     });
 
+                    // Live Preview in Builder
+                    ui.add_space(5.0);
+                    ui.label(RichText::new("PREVIEW MATCHES").small().color(Color32::GRAY));
+                    let preview_tracks = nullherz_dna::SmartCrateManager::filter_tracks(&app.smart_crate_def, app.cached_library.clone());
+                    ui.label(format!("Matches: {} tracks", preview_tracks.len()));
+                    if preview_tracks.len() > 0 {
+                        ui.horizontal_wrapped(|ui| {
+                            for t in preview_tracks.iter().take(5) {
+                                ui.label(RichText::new(&t.title).small().color(Color32::from_rgb(0, 255, 150)));
+                            }
+                            if preview_tracks.len() > 5 { ui.label("..."); }
+                        });
+                    }
+
+                    ui.add_space(5.0);
                     if ui.button("SAVE SMART CRATE").clicked() {
                         let _ = app.library_db.save_smart_crate(&app.smart_crate_def);
                         app.smart_crate_builder_open = false;

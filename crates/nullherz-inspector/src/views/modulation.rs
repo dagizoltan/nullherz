@@ -54,27 +54,20 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
                 ui.add_sized([120.0, 25.0], egui::Label::new(name));
 
                 for macro_id in 0..8 {
-                    // Logic to check if mapping exists would go here.
-                    // For now, toggle-able checkboxes to add/remove mappings.
-                    let mut is_mapped = false;
-
-                    if ui.add_sized([40.0, 25.0], egui::Checkbox::without_text(&mut is_mapped)).clicked() {
-                        if is_mapped {
-                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::AddModMapping {
+                    // Hardened: Mini-knob for scaling control
+                    let mut scaling = 1.0;
+                    ui.vertical(|ui| {
+                        ui.set_max_width(40.0);
+                        if crate::widgets::render_knob(ui, &mut scaling, -1.0..=1.0, "", Color32::from_gray(100)).changed() {
+                             let _ = app.command_sender.send(Command::Mixer(MixerCommand::AddModMapping {
                                 macro_id,
                                 target_id: node_id,
                                 param_id,
-                                scaling: 1.0,
+                                scaling,
                                 ramp_duration_samples: 0,
                             }));
-                        } else {
-                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::RemoveModMapping {
-                                macro_id,
-                                target_id: node_id,
-                                param_id,
-                            }));
                         }
-                    }
+                    });
                 }
             });
             }

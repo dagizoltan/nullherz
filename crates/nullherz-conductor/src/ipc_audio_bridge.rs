@@ -27,24 +27,22 @@ impl JitterBuffer {
     }
 
     pub fn pop(&mut self) -> Option<AudioBlock> {
-        // --- BASIC CLOCK RECOVERY (Sample-Stuffing Proxy) ---
-        // If the buffer is getting too full, we 'speed up' by dropping an occasional block.
-        // If the buffer is too empty, we 'slow down' by duplicating the last block (zero-fill or repeat).
+        // --- HARDENED CLOCK RECOVERY (Smooth Block Resampling) ---
         let current_len = self.buffer.len();
 
-        if current_len > self.target_size * 3 {
-             self.drift_accumulator += 0.01;
+        // Target: maintain buffer at exactly target_size.
+        // If > 2x target_size, we are falling behind.
+        if current_len > self.target_size * 2 {
+             self.drift_accumulator += 0.05; // Aggressive catch-up
              if self.drift_accumulator > 1.0 {
                  self.drift_accumulator -= 1.0;
-                 let _ = self.buffer.pop_front(); // Drop a block to catch up
+                 let _ = self.buffer.pop_front(); // Fast-forward one block
              }
-        } else if current_len < self.target_size / 2 {
-             self.drift_accumulator -= 0.01;
+        } else if current_len < self.target_size {
+             self.drift_accumulator -= 0.05; // Wait for more data
              if self.drift_accumulator < -1.0 {
                  self.drift_accumulator += 1.0;
-                 if let Some(last) = self.buffer.front().cloned() {
-                     self.buffer.push_front(last); // Repeat a block to wait
-                 }
+                 return None; // Insert silence by returning nothing
              }
         }
 
