@@ -1,4 +1,4 @@
-use egui::{Ui, Color32, RichText, Sense};
+use egui::{Ui, Color32, RichText, Sense, Vec2};
 use crate::InspectorApp;
 use audio_core::Telemetry;
 use nullherz_traits::{Command, TopologyCommand};
@@ -59,54 +59,63 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             ui.painter().rect_filled(header_rect, 4.0, Color32::from_gray(40));
             ui.painter().text(header_rect.center(), egui::Align2::CENTER_CENTER, &node.name, egui::FontId::proportional(12.0), Color32::WHITE);
 
-            // Sockets
-            ui.allocate_ui_at_rect(node_rect, |ui| {
-                ui.add_space(25.0);
-                ui.horizontal(|ui| {
-                    // Inputs
-                    ui.vertical(|ui| {
-                        for in_idx in 0..node.inputs.len() {
-                            let is_occupied = app.graph.edges.iter().any(|e| e.to == idx as u32 && e.input_idx == in_idx as u32);
-                            let btn_resp = ui.add(egui::Button::new(RichText::new(format!("IN {}", in_idx))
-                                .color(if is_occupied { Color32::from_rgb(0, 255, 200) } else { Color32::GRAY })
-                                .small()))
-                                .on_hover_text("Right-click to disconnect");
+            // Industrial Sockets (Circular)
+            let socket_radius = 5.0;
 
-                            socket_positions.insert((idx as u32, false, in_idx as u32), btn_resp.rect.center());
+            // Inputs (Left Side)
+            for (in_idx, _) in node.inputs.iter().enumerate() {
+                let y = node_pos.y + 35.0 + (in_idx as f32 * 18.0);
+                let socket_pos = egui::pos2(node_pos.x, y);
+                socket_positions.insert((idx as u32, false, in_idx as u32), socket_pos);
 
-                            if btn_resp.secondary_clicked() {
-                                let _ = app.command_sender.send(Command::Topology(TopologyCommand::Disconnect {
-                                    node_idx: idx as u32,
-                                    input_idx: in_idx as u32,
-                                }));
-                            } else if btn_resp.clicked() || (ui.input(|i| i.pointer.any_released()) && btn_resp.hovered()) {
-                                if let Some((src_node, src_out)) = app.active_connection_source {
-                                    let _ = app.command_sender.send(Command::Topology(TopologyCommand::Connect {
-                                        src_node_idx: src_node,
-                                        src_output_idx: src_out,
-                                        dst_node_idx: idx as u32,
-                                        dst_input_idx: in_idx as u32,
-                                    }));
-                                    app.active_connection_source = None;
-                                }
-                            }
+                let is_occupied = app.graph.edges.iter().any(|e| e.to == idx as u32 && e.input_idx == in_idx as u32);
+                let color = if is_occupied { Color32::from_rgb(0, 255, 200) } else { Color32::from_gray(80) };
+
+                let socket_rect = egui::Rect::from_center_size(socket_pos, Vec2::splat(socket_radius * 2.5));
+                let socket_resp = ui.interact(socket_rect, node_id.with(("in", in_idx)), Sense::click());
+
+                ui.painter().circle_filled(socket_pos, socket_radius, color);
+                ui.painter().circle_stroke(socket_pos, socket_radius, egui::Stroke::new(1.0, Color32::WHITE));
+
+                if socket_resp.hovered() {
+                    ui.painter().circle_stroke(socket_pos, socket_radius + 2.0, egui::Stroke::new(1.0, Color32::YELLOW));
+                    if ui.input(|i| i.pointer.any_released()) {
+                        if let Some((src_node, src_out)) = app.active_connection_source {
+                            let _ = app.command_sender.send(Command::Topology(TopologyCommand::Connect {
+                                src_node_idx: src_node,
+                                src_output_idx: src_out,
+                                dst_node_idx: idx as u32,
+                                dst_input_idx: in_idx as u32,
+                            }));
+                            app.active_connection_source = None;
                         }
-                    });
+                    }
+                }
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                        // Outputs
-                        ui.vertical(|ui| {
-                            for out_idx in 0..node.outputs.len() {
-                                let btn = ui.button(RichText::new(format!("OUT {}", out_idx)).small());
-                                socket_positions.insert((idx as u32, true, out_idx as u32), btn.rect.center());
-                                if btn.clicked() {
-                                    app.active_connection_source = Some((idx as u32, out_idx as u32));
-                                }
-                            }
-                        });
-                    });
-                });
-            });
+                if socket_resp.secondary_clicked() {
+                    let _ = app.command_sender.send(Command::Topology(TopologyCommand::Disconnect {
+                        node_idx: idx as u32,
+                        input_idx: in_idx as u32,
+                    }));
+                }
+            }
+
+            // Outputs (Right Side)
+            for (out_idx, _) in node.outputs.iter().enumerate() {
+                let y = node_pos.y + 35.0 + (out_idx as f32 * 18.0);
+                let socket_pos = egui::pos2(node_pos.x + node_size.x, y);
+                socket_positions.insert((idx as u32, true, out_idx as u32), socket_pos);
+
+                let socket_rect = egui::Rect::from_center_size(socket_pos, Vec2::splat(socket_radius * 2.5));
+                let socket_resp = ui.interact(socket_rect, node_id.with(("out", out_idx)), Sense::click());
+
+                ui.painter().circle_filled(socket_pos, socket_radius, Color32::from_gray(100));
+                ui.painter().circle_stroke(socket_pos, socket_radius, egui::Stroke::new(1.0, Color32::WHITE));
+
+                if socket_resp.clicked() {
+                    app.active_connection_source = Some((idx as u32, out_idx as u32));
+                }
+            }
 
             // CPU/Telemetry
             if let Some(t) = telemetry {
@@ -121,24 +130,35 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
     // Draw existing cables (Based on Edge Definitions)
     let painter = ui.painter();
+    let time = ui.input(|i| i.time);
+
     for edge in &app.graph.edges {
         let start_key = (edge.from, true, edge.output_idx);
         let end_key = (edge.to, false, edge.input_idx);
 
         if let (Some(&start), Some(&end)) = (socket_positions.get(&start_key), socket_positions.get(&end_key)) {
-            // Hardened: Real-time cable coloring based on signal level
             let level = telemetry.as_ref().map(|t| t.peak_levels[edge.from as usize]).unwrap_or(0.0);
-            let color = if level > 1.0 { Color32::from_rgb(255, 50, 50) } else if level > 0.01 { Color32::from_rgb(0, 255, 200) } else { Color32::from_gray(80) };
+            let base_color = if level > 1.0 { Color32::from_rgb(255, 50, 50) } else if level > 0.01 { Color32::from_rgb(0, 255, 200) } else { Color32::from_gray(80) };
 
-            // Cubic Bezier for industrial cable look
-            let cp1 = start + egui::vec2(50.0, 0.0);
-            let cp2 = end - egui::vec2(50.0, 0.0);
-            painter.add(egui::Shape::CubicBezier(egui::epaint::CubicBezierShape {
+            let cp1 = start + egui::vec2(60.0, 0.0);
+            let cp2 = end - egui::vec2(60.0, 0.0);
+            let bezier = egui::epaint::CubicBezierShape {
                 points: [start, cp1, cp2, end],
                 closed: false,
                 fill: Color32::TRANSPARENT,
-                stroke: egui::Stroke::new(2.0, color),
-            }));
+                stroke: egui::Stroke::new(2.0, base_color),
+            };
+            painter.add(egui::Shape::CubicBezier(bezier));
+
+            // Signal Flow Animation (Moving dashes)
+            if level > 0.01 {
+                let dash_count = 3;
+                for j in 0..dash_count {
+                    let t_offset = (time as f32 * 0.5 + (j as f32 / dash_count as f32)) % 1.0;
+                    let p = bezier.sample(t_offset);
+                    painter.circle_filled(p, 2.0, Color32::WHITE.gamma_multiply(0.8));
+                }
+            }
         }
     }
 

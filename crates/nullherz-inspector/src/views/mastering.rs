@@ -2,10 +2,12 @@ use egui::{Ui, Color32, Frame};
 use crate::{InspectorApp, widgets};
 use audio_core::Telemetry;
 
-pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
+pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     ui.heading("Precision Mastering");
     ui.add_space(20.0);
 
+    ui.horizontal_top(|ui| {
+        ui.set_min_width(400.0);
     Frame::none().fill(Color32::from_rgb(20, 20, 24)).rounding(4.0).inner_margin(15.0).show(ui, |ui| {
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
@@ -24,5 +26,26 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
                 }
             });
         });
+    });
+
+    ui.add_space(20.0);
+
+    ui.vertical(|ui| {
+        ui.strong("Final Stage Analysis");
+        ui.add_space(10.0);
+        if let Some(t) = telemetry {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Phase/Goniometer");
+                    widgets::render_goniometer(ui, &t.goniometer_pts, 250.0, Color32::from_rgb(0, 255, 200));
+                });
+                ui.add_space(30.0);
+                ui.vertical(|ui| {
+                    ui.label("Master Spectrum");
+                    widgets::render_spectrum_analyzer(ui, &t.spectrum, Color32::from_rgb(0, 255, 200), 120.0);
+                });
+            });
+        }
+    });
     });
 }
