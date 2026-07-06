@@ -14,3 +14,5 @@ pub mod dj_studio;
 pub mod player;
 pub mod composer;
 pub mod breeder;
+pub mod editor;
+pub mod account;
