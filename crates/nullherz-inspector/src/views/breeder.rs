@@ -148,27 +148,37 @@ impl BreederView {
 
             // Interpolated DNA Preview (Genetic Blueprint)
             ui.vertical(|ui| {
-                ui.label("Genetic Blueprint (Interpolated DNA)");
-                let (preview_rect, _) = ui.allocate_at_least(Vec2::new(250.0, 100.0), Sense::hover());
-                ui.painter().rect_filled(preview_rect, 2.0, Color32::from_black_alpha(100));
+                ui.label("Genetic Blueprint (Latent Space Preview)");
+                let (preview_rect, _) = ui.allocate_at_least(Vec2::new(300.0, 150.0), Sense::hover());
+                ui.painter().rect_filled(preview_rect, 2.0, Color32::from_rgb(15, 15, 20));
+                ui.painter().rect_stroke(preview_rect, 2.0, Stroke::new(1.0, Color32::from_gray(40)));
 
                 if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
                     if let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
                         nullherz_dna::NeuralTransfuser::interpolate_latent(&mut state.preview_dna, &track_a.metadata.dna.spectral.latent_space, &track_b.metadata.dna.spectral.latent_space, state.transfusion_bias_x);
 
                         let bin_width = preview_rect.width() / 16.0;
+                        let spacing = 2.0;
                         for i in 0..16 {
-                            let h = state.preview_dna[i].clamp(0.0, 1.0) * preview_rect.height();
+                            let val = state.preview_dna[i];
+                            let h = val.abs().clamp(0.01, 1.0) * (preview_rect.height() / 2.0);
                             let x = preview_rect.left() + i as f32 * bin_width;
-                            let r = egui::Rect::from_min_max(
-                                egui::pos2(x, preview_rect.bottom() - h),
-                                egui::pos2(x + bin_width - 1.0, preview_rect.bottom())
-                            );
-                            ui.painter().rect_filled(r, 0.0, Color32::from_rgb(0, 255, 200));
+
+                            // Draw Bipolar Bar Chart (Stage 6 Latent Space is often centered)
+                            let center_y = preview_rect.center().y;
+                            let r = if val >= 0.0 {
+                                egui::Rect::from_min_max(egui::pos2(x + spacing, center_y - h), egui::pos2(x + bin_width - spacing, center_y))
+                            } else {
+                                egui::Rect::from_min_max(egui::pos2(x + spacing, center_y), egui::pos2(x + bin_width - spacing, center_y + h))
+                            };
+
+                            let color = if i < 8 { Color32::from_rgb(0, 200, 255) } else { Color32::from_rgb(255, 100, 0) };
+                            ui.painter().rect_filled(r, 1.0, color.gamma_multiply(0.8));
                         }
+                        ui.painter().hline(preview_rect.x_range(), preview_rect.center().y, Stroke::new(1.0, Color32::from_gray(60)));
                     }
                 } else {
-                    ui.painter().text(preview_rect.center(), egui::Align2::CENTER_CENTER, "SELECT PARENTS FOR PREVIEW", egui::FontId::proportional(12.0), Color32::GRAY);
+                    ui.painter().text(preview_rect.center(), egui::Align2::CENTER_CENTER, "SELECT PARENTS TO VIEW GENETIC BLUEPRINT", egui::FontId::monospace(10.0), Color32::GRAY);
                 }
             });
 

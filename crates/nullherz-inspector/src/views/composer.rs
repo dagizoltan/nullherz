@@ -1,4 +1,4 @@
-use egui::{Ui, ScrollArea, Color32, Vec2, Sense, RichText};
+use egui::{Ui, ScrollArea, Color32, Vec2, Sense, RichText, Stroke};
 pub use nullherz_conductor::pattern_manager::DnaSequencer;
 use crate::InspectorApp;
 use audio_core::Telemetry;
@@ -20,7 +20,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         if ui.button("CLEAR ALL PATTERNS").clicked() {
             for i in 0..16 {
                  let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: 70, track_idx: i as u32 }));
-                 app.sequencer_grid[i].fill(false);
+                 app.sequencer_grid[i].fill(0.0);
             }
         }
     });
@@ -45,7 +45,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackSolo { node_idx: 70, track_idx: i as u32, soloed: app.track_solos[i] }));
                             }
                             if ui.button("C").on_hover_text("Clear").clicked() {
-                                app.sequencer_grid[i].fill(false);
+                                app.sequencer_grid[i].fill(0.0);
                                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: 70, track_idx: i as u32 }));
                             }
                         });
@@ -65,11 +65,28 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     let start_col = ((view_rect.left() - start_x) / (cell_size + spacing)).floor().max(0.0) as usize;
                     let end_col = ((view_rect.right() - start_x) / (cell_size + spacing)).ceil().min(64.0) as usize;
 
+                    // Timeline Ruler
+                    ui.horizontal(|ui| {
+                        ui.add_space(start_col as f32 * (cell_size + spacing));
+                        for i in start_col..end_col {
+                            let is_bar = i % 4 == 0;
+                            let text = if is_bar { format!("{}", (i / 4) + 1) } else { "".to_string() };
+                            let (rect, _) = ui.allocate_exact_size(Vec2::new(cell_size, 20.0), Sense::hover());
+
+                            if is_bar {
+                                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::monospace(12.0), Color32::from_gray(180));
+                            }
+                            ui.painter().hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, if is_bar { Color32::from_gray(100) } else { Color32::from_gray(50) }));
+                            ui.add_space(spacing);
+                        }
+                        ui.add_space((64 - end_col) as f32 * (cell_size + spacing));
+                    });
+
                     // Column Headers (Scene Launchers)
                     ui.horizontal(|ui| {
                         ui.add_space(start_col as f32 * (cell_size + spacing));
                         for i in start_col..end_col {
-                            if ui.add_sized([cell_size, 20.0], egui::Button::new(format!("S{}", i + 1)).fill(Color32::from_gray(40))).clicked() {
+                            if ui.add_sized([cell_size, 22.0], egui::Button::new(RichText::new(format!("S{}", i + 1)).small()).fill(Color32::from_gray(40))).clicked() {
                                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::LaunchClip { row: 0xFF, col: i as u32 }));
                             }
                             ui.add_space(spacing);
@@ -96,12 +113,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     is_starting = (t.starting_clips_mask[row] >> col) & 1 == 1;
                                 }
 
+                                let velocity = app.sequencer_grid[row][col];
                                 let mut color = if is_playing {
                                     Color32::from_rgb(0, 255, 100)
                                 } else if is_starting {
                                     Color32::from_rgb(255, 200, 0)
-                                } else if app.sequencer_grid[row][col] {
-                                    Color32::from_rgb(0, 150, 255)
+                                } else if velocity > 0.0 {
+                                    Color32::from_rgb(0, 150, 255).gamma_multiply(velocity.clamp(0.3, 1.0))
                                 } else {
                                     Color32::from_gray(30)
                                 };
@@ -120,13 +138,26 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 }
 
                                 if response.clicked() {
-                                    let is_on = !app.sequencer_grid[row][col];
-                                    app.sequencer_grid[row][col] = is_on;
+                                    let is_on = app.sequencer_grid[row][col] == 0.0;
+                                    let val = if is_on { 1.0 } else { 0.0 };
+                                    app.sequencer_grid[row][col] = val;
                                     let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
                                         node_idx: 70,
                                         track: row as u32,
                                         step: col as u32,
-                                        value: is_on,
+                                        value: val,
+                                    }));
+                                }
+
+                                if response.dragged() {
+                                    let delta = response.drag_delta().y * -0.01;
+                                    let new_val = (app.sequencer_grid[row][col] + delta).clamp(0.01, 1.0);
+                                    app.sequencer_grid[row][col] = new_val;
+                                    let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
+                                        node_idx: 70,
+                                        track: row as u32,
+                                        step: col as u32,
+                                        value: new_val,
                                     }));
                                 }
                                 ui.add_space(spacing);

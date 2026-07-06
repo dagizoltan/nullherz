@@ -78,7 +78,7 @@ impl DnaSequencer {
         for (i, &mask) in dna.onset_mask.iter().enumerate() {
             for bit in 0..64 {
                 let step = (i * 64) + bit;
-                let value = (mask >> bit) & 1 == 1;
+                let value = if (mask >> bit) & 1 == 1 { 1.0 } else { 0.0 };
                 commands.push(nullherz_traits::Command::Performance(
                     nullherz_traits::PerformanceCommand::SetSequencerStep {
                         node_idx,
@@ -96,7 +96,7 @@ impl DnaSequencer {
 
     pub fn mutate_pattern(
         dna: &nullherz_traits::RhythmicDNA,
-        current_grid: &[[bool; 64]; 16],
+        current_grid: &[[f32; 64]; 16],
         node_idx: u32,
         track_idx: u32,
         mutation_probability: f32
@@ -105,7 +105,7 @@ impl DnaSequencer {
         for (i, &mask) in dna.onset_mask.iter().enumerate() {
             for bit in 0..64 {
                 let step = (i * 64) + bit;
-                let dna_value = (mask >> bit) & 1 == 1;
+                let dna_value = if (mask >> bit) & 1 == 1 { 1.0 } else { 0.0 };
                 let current_value = current_grid[track_idx as usize][step];
 
                 // Deterministic pseudo-randomness for stable evolution
@@ -113,7 +113,7 @@ impl DnaSequencer {
                 let rand_val = (seed.wrapping_mul(1103515245).wrapping_add(12345) as f32) / 4294967295.0;
 
                 if rand_val < mutation_probability {
-                    if dna_value != current_value {
+                    if (dna_value > 0.0) != (current_value > 0.0) {
                         commands.push(nullherz_traits::Command::Performance(
                             nullherz_traits::PerformanceCommand::SetSequencerStep {
                                 node_idx,
