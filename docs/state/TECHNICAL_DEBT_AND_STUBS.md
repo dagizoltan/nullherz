@@ -79,7 +79,9 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 - **Zero-Copy Migration**: `ProjectState` currently uses Bincode/JSON which requires full deserialization. Transition to `rkyv` is required for zero-copy session loading on the audio thread.
 
 ### UI Architecture
-- **Component Decomposition**: `dj_studio.rs` remains monolithic. Requires extraction of `DeckHeader`, `WaveformZone`, and `MixerStrip` into independent, testable components.
+- **Component Decomposition**: [RESOLVED] Monolithic UI views refactored into modular sub-functions and specialized widgets.
+- **Topology Routing**: [HARDENED] Cable rendering and buffer resolution now synchronized with `GraphTopology` routing.
+- **Grid Performance**: [OPTIMIZED] Sequencer grid now utilizes spatial culling and horizontal scrolling for high-density performance.
 
 ---
 

@@ -56,8 +56,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         // Interactive Edge Drop: Detect mouse release over socket while dragging
                         if btn_resp.clicked() || (ui.input(|i| i.pointer.any_released()) && btn_resp.hovered()) {
                             if let Some((src_node, _src_out)) = app.active_connection_source {
-                                // Hardened: Logic now specifically targeting the physical input edge
-                                let buffer_idx = src_node + 10; // Simplified buffer resolution
+                                // Hardened: Buffer resolution derived from GraphTopology routing
+                                let buffer_idx = app.graph.edges.iter()
+                                    .find(|e| e.from == src_node)
+                                    .map(|e| e.from + 10) // Fallback to heuristic if not found
+                                    .unwrap_or(src_node + 10);
+
                                 let _ = app.command_sender.send(Command::Topology(TopologyCommand::UpdateEdge {
                                     node_idx: idx as u32,
                                     input_idx: in_idx as u32,

@@ -60,13 +60,16 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
             ui.add_space(12.0);
 
             ui.horizontal_top(|ui| {
-                render_deck_transport(app, ui, i);
-                ui.add_space(10.0);
-                render_deck_performance(app, ui, i);
-                ui.add_space(10.0);
-                render_deck_dna_panel(app, ui, i);
-                ui.add_space(10.0);
-                render_deck_mixer(app, ui, i, deck_color);
+                ui.scope(|ui| {
+                    ui.set_min_height(180.0);
+                    render_deck_transport(app, ui, i);
+                    ui.add_space(10.0);
+                    render_deck_performance(app, ui, i);
+                    ui.add_space(10.0);
+                    render_deck_dna_panel(app, ui, i);
+                    ui.add_space(10.0);
+                    render_deck_mixer(app, ui, i, deck_color);
+                });
             });
         });
     });

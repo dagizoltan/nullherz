@@ -35,11 +35,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
              impl egui_wgpu::CallbackTrait for WaveformCallback {
                  fn paint<'a>(&'a self, _info: egui::PaintCallbackInfo, render_pass: &mut wgpu::RenderPass<'a>, _resources: &egui_wgpu::CallbackResources) {
                      if let Ok(wf) = self.renderer.lock() {
-                         // SAFETY: egui-wgpu 0.27 requires 'a for the duration of the render pass.
-                         // Since we are inside the paint call, and wf is locked, it's valid for this frame.
-                         // Using a pointer-cast to extend the lifetime of the locked Guard's reference
-                         // to match the RenderPass's requirements. This is safe because the Guard
-                         // outlives the RenderPass in this synchronous context.
+                         // SAFETY: egui-wgpu 0.27 requires the RenderPass to have 'a lifetime.
+                         // The mutex guard 'wf' outlives the render_pass call within this paint() block.
+                         // We use a pointer-cast to satisfy the 'a requirement, ensuring the reference
+                         // remains valid for the duration of the pass.
                          let wf_ptr: *const nullherz_ui_hal::render::waveform_renderer::WaveformRenderer = &*wf;
                          unsafe {
                              (*wf_ptr).render(render_pass);
