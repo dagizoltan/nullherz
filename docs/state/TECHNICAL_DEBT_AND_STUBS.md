@@ -51,7 +51,16 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 
 ---
 
-## 6. Strategic Documentation
+## 6. UI & Inspector Plane (`nullherz-inspector`, `nullherz-ui-hal`)
+
+### `crates/nullherz-inspector/src/views/dj_studio.rs`
+- **Monolithic Deck Rendering**: `render_deck_card` manages too many responsibilities (Transport, Performance, DNA, Mixer). Requires decomposition into sub-component functions for better testability and maintenance.
+- **Ergonomic Inconsistency**: DNA/Personality traits use standard `egui::Slider` while frequency bands use industrial `knobs`.
+- **Metadata Omission**: Deck headers do not currently display BPM or Root Key from `SampleMetadata`, forcing users to rely on the global telemetry header.
+
+---
+
+## 7. Strategic Documentation
 
 ### `NEXT_SESSION_PROMPT.md`
 - **Line 18**: `- **InfiniBand/RDMA**: Research and prototype...` - RDMA networking remains a research task.

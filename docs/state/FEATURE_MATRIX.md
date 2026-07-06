@@ -68,6 +68,7 @@
 | **Asymmetrical Ballistics** | ✅ | High-precision meter smoothing (Fast Attack, Quadratic Decay). |
 | **GPU Waveform Rendering** | 🔶 | WGPU-based renderer with LOD selection. MIP-mapping implementation active. |
 | **Liquid Visual Damping** | ✅ | Asymmetrical inertia for Spectrum and Goniometer visualizers. |
+| **DJ Console Layout** | 🔶 | 4-deck layout functional. Ergonomics and component modularity in progress. |
 | **Interactive Topology** | 🧪 | Read-only graph view. Edge connection editing is planned. |
 
 ---
