@@ -24,19 +24,21 @@ impl WasmSidecarHost {
         let mut linker = Linker::new(&engine);
 
         // Define host functions for SHM access
-        linker.func_wrap("nullherz", "pop_command", |mut caller: Caller<'_, WasmState>, ptr: i32| -> i32 {
+        linker.func_wrap("nullherz", "pop_command", |mut caller: Caller<'_, WasmState>, ptr: i32, max_len: i32| -> i32 {
              let state = caller.data_mut();
              unsafe {
                  if let Some(cmd) = (*state.cmd_buffer).pop() {
                      let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
                      let data = bincode::serialize(&cmd).unwrap();
-                     if data.len() <= 256 { // Assume guest buffer is large enough for now
-                         mem.write(&mut caller, ptr as usize, &data).unwrap();
-                         return data.len() as i32;
+
+                     if data.len() <= max_len as usize {
+                         if mem.write(&mut caller, ptr as usize, &data).is_ok() {
+                             return data.len() as i32;
+                         }
                      }
-                     1
+                     -1 // Error: buffer too small or write failed
                  } else {
-                     0
+                     0 // No commands waiting
                  }
              }
         })?;

@@ -166,7 +166,7 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
                         ui.add_space(5.0);
 
                         ui.horizontal(|ui| {
-                            let peak = telemetry.as_ref().map(|t| t.peak_levels[i]).unwrap_or(0.0);
+                            let peak = app.damped_peaks[i];
                             widgets::render_vu_meter(ui, peak, app.channel_peak_hold[i], deck_color, 120.0);
                             if widgets::render_fader(ui, &mut app.channel_faders[i], 0.0..=1.0, deck_color, 120.0, 16.0).changed() {
                                 send_deck_param(app, deck_id, nullherz_traits::DeckParamType::Gain, app.channel_faders[i]);
@@ -225,7 +225,7 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option
                     ui.label(RichText::new("MASTER").strong());
                     ui.add_space(5.0);
                     ui.horizontal(|ui| {
-                        let peak = telemetry.as_ref().map(|t| (t.peak_levels[0] + t.peak_levels[1]) * 0.5).unwrap_or(0.0);
+                        let peak = (app.damped_master_peaks[0] + app.damped_master_peaks[1]) * 0.5;
                         widgets::render_vu_meter(ui, peak, app.master_peak_hold, Color32::WHITE, 140.0);
                         widgets::render_fader(ui, &mut app.master_gain, 0.0..=1.5, Color32::WHITE, 140.0, 20.0);
                     });
