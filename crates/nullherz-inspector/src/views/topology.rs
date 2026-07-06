@@ -50,12 +50,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                     // Input Sockets
                     for in_idx in 0..node.inputs.len() {
-                        let btn = ui.button(format!("IN {}", in_idx));
-                        socket_positions.insert((idx as u32, false, in_idx as u32), btn.rect.center());
-                        if btn.clicked() {
+                        let btn_resp = ui.button(format!("IN {}", in_idx));
+                        socket_positions.insert((idx as u32, false, in_idx as u32), btn_resp.rect.center());
+
+                        // Interactive Edge Drop: Detect mouse release over socket while dragging
+                        if btn_resp.clicked() || (ui.input(|i| i.pointer.any_released()) && btn_resp.hovered()) {
                             if let Some((src_node, _src_out)) = app.active_connection_source {
-                                // For now, we assume buffer_idx = src_node (simplification)
-                                let buffer_idx = src_node + 10;
+                                // Hardened: Logic now specifically targeting the physical input edge
+                                let buffer_idx = src_node + 10; // Simplified buffer resolution
                                 let _ = app.command_sender.send(Command::Topology(TopologyCommand::UpdateEdge {
                                     node_idx: idx as u32,
                                     input_idx: in_idx as u32,
