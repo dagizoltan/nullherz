@@ -48,6 +48,12 @@ All messages over TCP use a 4-byte Big-Endian length prefix, followed by the pay
 - **Payload:** `nullherz_traits::AudioBlock` (Binary/Pod).
 - **Usage:** Low-jitter return path for processed audio blocks from remote nodes.
 
+### Type 7: RDMA Zero-Copy Return (Experimental)
+- **Protocol:** RoCE v2 / InfiniBand
+- **Mechanism:** Direct Memory Access via `RdmaBridge`.
+- **Payload:** Memory-mapped `AudioBlock` segments.
+- **Usage:** Near-zero CPU overhead return path for extreme-density multi-machine DSP environments.
+
 ## Type-Safety & ABI Invariants
 
 1. **Alignment:** All `AudioBlock` payloads MUST be 64-byte aligned and 1088 bytes in size (including padding).

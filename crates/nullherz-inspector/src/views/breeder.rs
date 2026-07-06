@@ -7,10 +7,7 @@ pub struct BreederView {
     pub transfusion_bias_x: f32, // Spectral Bias
     pub transfusion_bias_y: f32, // Rhythmic Bias
     pub target_node_idx: u32,
-    pub smoothed_spectrum: [f32; 128],
-    pub smoothed_goniometer: [f32; 128],
     pub selecting_parent: Option<usize>, // 0 for A, 1 for B
-    pub telemetry_damping: f32,
     pub preview_dna: [f32; 16],
 }
 
@@ -22,17 +19,14 @@ impl BreederView {
             transfusion_bias_x: 0.5,
             transfusion_bias_y: 0.5,
             target_node_idx: 150, // PersonalityInheritanceProcessor default ID
-            smoothed_spectrum: [0.0; 128],
-            smoothed_goniometer: [0.0; 128],
             selecting_parent: None,
-            telemetry_damping: 0.15,
             preview_dna: [0.0; 16],
         }
     }
 
-    pub fn show(ui: &mut Ui, state: &mut BreederView, _app_telemetry: &Option<audio_core::Telemetry>, app: &mut crate::InspectorApp) {
+    pub fn show(ui: &mut Ui, state: &mut BreederView, telemetry: &Option<audio_core::Telemetry>, app: &mut crate::InspectorApp) {
         ui.heading("DNA Breeder");
-        ui.separator();
+        ui.add_space(10.0);
 
         if let Some(parent_idx) = state.selecting_parent {
             egui::Window::new(format!("Select Parent {}", if parent_idx == 0 { "A" } else { "B" }))
@@ -177,21 +171,11 @@ impl BreederView {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     ui.label("Real-time Evolution Monitor");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add(egui::Slider::new(&mut state.telemetry_damping, 0.01..=0.5).text("Damping").show_value(false));
-                    });
                 });
 
-                let telemetry = app.last_telemetry.lock().unwrap();
-
                 ui.group(|ui| {
-                    if let Some(t) = &*telemetry {
-                        // EMA Smoothing with configurable damping
-                        let alpha = state.telemetry_damping;
-                        for i in 0..128 {
-                            state.smoothed_spectrum[i] = state.smoothed_spectrum[i] * (1.0 - alpha) + t.spectrum[i] * alpha;
-                        }
-                        crate::widgets::render_spectrum_analyzer(ui, &state.smoothed_spectrum, Color32::from_rgb(0, 255, 200), 100.0);
+                    if telemetry.is_some() {
+                        crate::widgets::render_spectrum_analyzer(ui, &app.damped_spectrum, Color32::from_rgb(0, 255, 200), 100.0);
                     } else {
                         ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
                         ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "NO SIGNAL", egui::FontId::proportional(12.0), Color32::GRAY);

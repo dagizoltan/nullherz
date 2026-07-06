@@ -147,6 +147,8 @@ pub struct InspectorApp {
     pub(crate) damped_spectrum: [f32; 128],
     pub(crate) damped_goniometer: [f32; 128],
     pub(crate) damped_latent: [f32; 16],
+    pub(crate) damped_peaks: [f32; 4],
+    pub(crate) damped_master_peaks: [f32; 2],
     pub(crate) discovered_sidecars: Vec<nullherz_traits::SidecarManifest>,
     pub(crate) personality_macro_mode: bool,
     pub(crate) focused_deck: usize,
@@ -240,6 +242,8 @@ impl InspectorApp {
             damped_spectrum: [0.0; 128],
             damped_goniometer: [0.0; 128],
             damped_latent: [0.0; 16],
+            damped_peaks: [0.0; 4],
+            damped_master_peaks: [0.0; 2],
             discovered_sidecars: vec![],
             personality_macro_mode: false,
             focused_deck: 0,
@@ -274,6 +278,12 @@ impl eframe::App for InspectorApp {
             }
             for i in 0..16 {
                 self.damped_latent[i] = self.damped_latent[i] * (1.0 - d) + t.dna_latent_space[i] * d;
+            }
+            for i in 0..4 {
+                self.damped_peaks[i] = self.damped_peaks[i] * (1.0 - d) + t.peak_levels[i] * d;
+            }
+            for i in 0..2 {
+                self.damped_master_peaks[i] = self.damped_master_peaks[i] * (1.0 - d) + t.peak_levels[i] * d; // Simplified master mapping
             }
         }
 

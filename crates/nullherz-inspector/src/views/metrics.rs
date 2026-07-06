@@ -61,8 +61,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         ui.vertical(|ui| {
                              ui.label("Master Out (L/R)");
                              ui.horizontal(|ui| {
-                                 widgets::render_vu_meter(ui, t.peak_levels[0], t.peak_levels[0], Color32::WHITE, 160.0);
-                                 widgets::render_vu_meter(ui, t.peak_levels[1], t.peak_levels[1], Color32::WHITE, 160.0);
+                                 widgets::render_vu_meter(ui, app.damped_master_peaks[0], app.damped_master_peaks[0], Color32::WHITE, 160.0);
+                                 widgets::render_vu_meter(ui, app.damped_master_peaks[1], app.damped_master_peaks[1], Color32::WHITE, 160.0);
                              });
                         });
                     } else {

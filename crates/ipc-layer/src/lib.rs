@@ -811,3 +811,26 @@ pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
 
     INITIALIZED.with(|i| i.set(true));
 }
+
+/// Prototype for zero-copy RDMA distribution.
+/// This will facilitate high-density DSP offloading in Stage 7.
+pub struct RdmaBridge {
+    pub is_connected: bool,
+}
+
+impl RdmaBridge {
+    pub fn new() -> Self {
+        Self { is_connected: false }
+    }
+
+    pub fn push_block_zero_copy(&self, _node_idx: u32, _block: &AudioBlock) -> Result<(), String> {
+        // Implementation pending: libibverbs / rdma-core integration
+        Err("RDMA implementation pending Stage 7 finalization".to_string())
+    }
+}
+
+impl Default for RdmaBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
