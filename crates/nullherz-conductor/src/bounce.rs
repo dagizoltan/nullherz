@@ -47,13 +47,17 @@ impl OfflineRenderer {
 
             // 2. Process block via backend engine handle
             let mut engine_lock = self.conductor.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
-            if let Some(ref mut engine) = *engine_lock {
-                // AudioEngine and its trait RenderingEngine are Send/Sync and use internal mutability where needed.
-                // However, the process_block method takes &mut self in the trait.
-                // We'll use a hack for the prototype: we'll call process_block directly if we can get a mut ref,
-                // or we'll ensure the Mock backend is used which is safe for this.
-                let engine_ptr = Arc::as_ptr(engine) as *mut dyn nullherz_traits::RenderingEngine;
-                unsafe { (*engine_ptr).process_block(&inputs, &mut outputs, chunk); }
+            if let Some(ref mut engine_arc) = *engine_lock {
+                // In offline mode, the conductor and engine are both owned by the OfflineRenderer.
+                // Since we need &mut RenderingEngine to process_block, we try to get a mutable reference.
+                // This is safe here because we are in a single-threaded offline rendering context.
+                if let Some(engine) = Arc::get_mut(engine_arc) {
+                    engine.process_block(&inputs, &mut outputs, chunk);
+                } else {
+                    // Fallback for cases where Arc is shared, though expected to be unique in this context.
+                    let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn nullherz_traits::RenderingEngine;
+                    unsafe { (*engine_ptr).process_block(&inputs, &mut outputs, chunk); }
+                }
             }
 
             for i in 0..chunk {

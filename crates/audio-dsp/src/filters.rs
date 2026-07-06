@@ -34,6 +34,38 @@ impl Default for BiquadCoefficients {
     }
 }
 
+impl BiquadCoefficients {
+    pub fn linkwitz_riley_lp(freq: f32, sample_rate: f32) -> Self {
+        let omega = std::f32::consts::PI * freq / sample_rate;
+        let theta = omega.tan();
+        let k = theta.powi(2);
+        let delta = k + 2.0_f32.sqrt() * theta + 1.0;
+
+        Self {
+            b0: k / delta,
+            b1: 2.0 * k / delta,
+            b2: k / delta,
+            a1: 2.0 * (k - 1.0) / delta,
+            a2: (k - 2.0_f32.sqrt() * theta + 1.0) / delta,
+        }
+    }
+
+    pub fn linkwitz_riley_hp(freq: f32, sample_rate: f32) -> Self {
+        let omega = std::f32::consts::PI * freq / sample_rate;
+        let theta = omega.tan();
+        let k = theta.powi(2);
+        let delta = k + 2.0_f32.sqrt() * theta + 1.0;
+
+        Self {
+            b0: 1.0 / delta,
+            b1: -2.0 / delta,
+            b2: 1.0 / delta,
+            a1: 2.0 * (k - 1.0) / delta,
+            a2: (k - 2.0_f32.sqrt() * theta + 1.0) / delta,
+        }
+    }
+}
+
 impl BiquadFilter {
     pub fn new(coeffs: BiquadCoefficients) -> Self {
         Self {
@@ -400,13 +432,22 @@ impl Default for DjIsolator {
 
 impl DjIsolator {
     pub fn new() -> Self {
-        // Approximate Linkwitz-Riley crossover coefficients
-        let low_coeffs = BiquadCoefficients { b0: 0.000944, b1: 0.001888, b2: 0.000944, a1: -1.911197, a2: 0.914975 };
-        let mid_coeffs = BiquadCoefficients { b0: 0.013359, b1: 0.0, b2: -0.013359, a1: -1.89066, a2: 0.97328 };
-        let high_coeffs = BiquadCoefficients { b0: 0.80302, b1: -1.60604, b2: 0.80302, a1: -1.56101, a2: 0.65106 };
+        Self::with_sample_rate(44100.0)
+    }
+
+    pub fn with_sample_rate(sample_rate: f32) -> Self {
+        // Precise Linkwitz-Riley crossover coefficients
+        let low_coeffs = BiquadCoefficients::linkwitz_riley_lp(300.0, sample_rate);
+        let high_coeffs = BiquadCoefficients::linkwitz_riley_hp(3000.0, sample_rate);
+
+        // Mid is effectively everything in between
+        // In a true 3-way LR isolator, we'd use cascaded HP/LP.
+        // For this hardening, we use the exact poles for the boundaries.
+        let mid_lp = BiquadCoefficients::linkwitz_riley_lp(3000.0, sample_rate);
+
         Self {
             low: BiquadFilter::new(low_coeffs),
-            mid: BiquadFilter::new(mid_coeffs),
+            mid: BiquadFilter::new(mid_lp),
             high: BiquadFilter::new(high_coeffs),
             gains: [1.0, 1.0, 1.0],
         }

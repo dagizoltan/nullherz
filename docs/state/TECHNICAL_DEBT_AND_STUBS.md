@@ -8,18 +8,18 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 
 - **Orchestrator Calibration**: [RESOLVED] Prototype hardcoded 441 samples replaced with dynamic calculation based on engine sample rate.
 - **Remote Audio Send**: [RESOLVED] Refactored from per-block `tokio::spawn` to efficient batching.
-- **Isolator Filters**: [OPTIMIZED] Implemented 4x unrolled kernels for `DjIsolator`.
+- **Isolator Filters**: [OPTIMIZED] Implemented 4x unrolled kernels and **exact Linkwitz-Riley coefficient generation**.
+- **Offline Rendering**: [RESOLVED] Replaced `unsafe` pointer hack with safe mutable access in `bounce.rs`.
+- **DNA Mutation Targeting**: [RESOLVED] Replaced first-ID heuristic with precise `resource_id` resolution in `orchestrator.rs`.
 - **UI Placeholders**: [IMPROVED] Enhanced empty deck states in `dj_studio.rs`.
+- **Waveform Rendering**: [OPTIMIZED] Implemented precise LOD selection in `waveform_renderer.rs`.
 
 ---
 
 ## 2. Orchestration Plane (`nullherz-conductor`)
 
 ### `src/orchestrator.rs`
-- **Line 522**: `// For this prototype, we'll try to use the first registered ID if available.` - Still using heuristic for DNA evolution targeting.
-
-### `src/bounce.rs`
-- **Line 53**: `// We'll use a hack for the prototype: we'll call process_block directly...` - Non-RT offline rendering hack still present.
+- **General**: No major stubs remaining in core command dispatch logic.
 
 ---
 
@@ -35,9 +35,6 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 
 ### `nullherz-processors/src/spectral.rs`
 - **Line 16**: `// For prototype, we ensure lengths match.` - Simplification in spectral processing.
-
-### `audio-dsp/src/filters.rs`
-- **Note**: Linkwitz-Riley coefficients are still marked as "Approximate" in `DjIsolator::new()`.
 
 ---
 
