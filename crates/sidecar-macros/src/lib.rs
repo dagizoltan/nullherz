@@ -18,21 +18,15 @@ pub fn sidecar(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     return;
                 }
 
-                // Simplified parsing for macro prototype
-                let mut cmd_shm = "";
-                let mut sig_shm = "";
-                let mut efd_val = 0;
-                let mut channels = 0;
-
-                for i in 0..args.len() {
-                    match args[i].as_str() {
-                        "--command-shm" if i + 1 < args.len() => cmd_shm = &args[i+1],
-                        "--signal-shm" if i + 1 < args.len() => sig_shm = &args[i+1],
-                        "--event-fd" if i + 1 < args.len() => efd_val = args[i+1].parse().unwrap_or(0),
-                        "--channels" if i + 1 < args.len() => channels = args[i+1].parse().unwrap_or(0),
-                        _ => {}
-                    }
-                }
+                // Hardened: structured argument parsing for SHM and EventFD
+                let cmd_shm = args.iter().position(|a| a == "--command-shm")
+                    .and_then(|i| args.get(i + 1)).map(|s| s.as_str()).unwrap_or("");
+                let sig_shm = args.iter().position(|a| a == "--signal-shm")
+                    .and_then(|i| args.get(i + 1)).map(|s| s.as_str()).unwrap_or("");
+                let efd_val = args.iter().position(|a| a == "--event-fd")
+                    .and_then(|i| args.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let channels = args.iter().position(|a| a == "--channels")
+                    .and_then(|i| args.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(0);
 
                 println!("Sidecar {} started with {} channels", stringify!(#name), channels);
 
@@ -65,20 +59,15 @@ pub fn sidecar_builder(_item: TokenStream) -> TokenStream {
                 println!("Building sidecar: {}", name);
                 // Implementation mirrors 'run_as_sidecar' but provided as a standalone builder
                 let args: Vec<String> = std::env::args().collect();
-                let mut cmd_shm = "";
-                let mut sig_shm = "";
-                let mut efd_val = -1;
-                let mut channels = 2;
-
-                for i in 0..args.len() {
-                    match args[i].as_str() {
-                        "--command-shm" if i + 1 < args.len() => cmd_shm = &args[i+1],
-                        "--signal-shm" if i + 1 < args.len() => sig_shm = &args[i+1],
-                        "--event-fd" if i + 1 < args.len() => efd_val = args[i+1].parse().unwrap_or(-1),
-                        "--channels" if i + 1 < args.len() => channels = args[i+1].parse().unwrap_or(2),
-                        _ => {}
-                    }
-                }
+                // Hardened: structured argument parsing
+                let cmd_shm = args.iter().position(|a| a == "--command-shm")
+                    .and_then(|i| args.get(i + 1)).map(|s| s.as_str()).unwrap_or("");
+                let sig_shm = args.iter().position(|a| a == "--signal-shm")
+                    .and_then(|i| args.get(i + 1)).map(|s| s.as_str()).unwrap_or("");
+                let efd_val = args.iter().position(|a| a == "--event-fd")
+                    .and_then(|i| args.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(-1);
+                let channels = args.iter().position(|a| a == "--channels")
+                    .and_then(|i| args.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(2);
 
                 let mut inputs = Vec::new();
                 let mut outputs = Vec::new();

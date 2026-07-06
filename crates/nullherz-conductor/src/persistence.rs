@@ -55,6 +55,7 @@ pub struct SystemConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectState {
+    pub active_master_deck: char,
     pub nodes: Vec<NodeState>,
     pub edges: Vec<EdgeState>,
     pub output_edges: Vec<OutputEdgeState>,
@@ -70,6 +71,7 @@ pub struct ProjectState {
 impl ProjectState {
     pub fn empty() -> Self {
         Self {
+            active_master_deck: 'A',
             nodes: Vec::new(),
             edges: Vec::new(),
             output_edges: Vec::new(),
