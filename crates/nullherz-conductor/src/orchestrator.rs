@@ -212,6 +212,41 @@ impl Conductor {
         self.engine_coordinator.drain_garbage();
     }
 
+    fn process_distributed_audio(&mut self) {
+        let topo = &self.topology_manager.current_topology;
+        for node_idx in 0..topo.node_count {
+            if let Some(target) = topo.node_assignments.get(&(node_idx as u32)) {
+                if target != "local" {
+                    let mut blocks = Vec::with_capacity(4);
+                    while let Some(block) = self.audio_bridge.pop_block(node_idx as u32) {
+                        blocks.push(block);
+                    }
+
+                    if !blocks.is_empty() {
+                        let remote_manager = self.sidecar_supervisor.remote_manager.clone();
+                        let node_idx_u32 = node_idx as u32;
+                        tokio::spawn(async move {
+                            let mut manager = remote_manager.lock().await;
+                            for block in blocks {
+                                let _ = manager.send_audio_block(node_idx_u32, block).await;
+                            }
+                        });
+                    }
+                }
+            }
+        }
+        self.audio_bridge.process_return_queues();
+    }
+
+    fn process_evolutionary_breeding(&mut self, now: u64) {
+        if now % 10 == 0 && self.mixer_bridge.timeline.last_breeding_secs != now {
+             self.mixer_bridge.timeline.last_breeding_secs = now;
+             if let Some(ref breeder) = self.transfusion_manager.evolutionary_breeder {
+                 breeder.run_breeding_cycle();
+             }
+        }
+    }
+
     fn update_matchmaking_suggestions(&mut self, now: u64) {
         self.mixer_bridge.timeline.last_matchmaking_secs = now;
         let lib = self.library.clone();
@@ -536,45 +571,14 @@ impl Conductor {
             }
         }
 
-        // Hardened Distributed Audio Routing
-        let topo = &self.topology_manager.current_topology;
-        for node_idx in 0..topo.node_count {
-            if let Some(target) = topo.node_assignments.get(&(node_idx as u32)) {
-                if target != "local" {
-                    // Batch pull from the non-blocking IPC bridge and dispatch to the remote manager in a single task
-                    let mut blocks = Vec::with_capacity(4);
-                    while let Some(block) = self.audio_bridge.pop_block(node_idx as u32) {
-                        blocks.push(block);
-                    }
-
-                    if !blocks.is_empty() {
-                        let remote_manager = self.sidecar_supervisor.remote_manager.clone();
-                        let node_idx_u32 = node_idx as u32;
-                        tokio::spawn(async move {
-                            let mut manager = remote_manager.lock().await;
-                            for block in blocks {
-                                let _ = manager.send_audio_block(node_idx_u32, block).await;
-                            }
-                        });
-                    }
-                }
-            }
-        }
-
-        self.audio_bridge.process_return_queues();
+        self.process_distributed_audio();
 
         // Proactive Matchmaking Suggestions (Stage 6)
         if now % 15 == 0 && self.mixer_bridge.timeline.last_matchmaking_secs != now {
             self.update_matchmaking_suggestions(now);
         }
 
-        // Evolutionary Breeding Cycle (Triggered roughly every 10 seconds in the 100ms tick loop)
-        if now % 10 == 0 && self.mixer_bridge.timeline.last_breeding_secs != now {
-             self.mixer_bridge.timeline.last_breeding_secs = now;
-             if let Some(ref breeder) = self.transfusion_manager.evolutionary_breeder {
-                 breeder.run_breeding_cycle();
-             }
-        }
+        self.process_evolutionary_breeding(now);
 
         self.handle_transfusion_registrations();
 
