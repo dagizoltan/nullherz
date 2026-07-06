@@ -187,15 +187,8 @@ impl BreederView {
                 ui.add_space(10.0);
 
                 ui.group(|ui| {
-                    if let Some(t) = &*telemetry {
-                        let alpha = app.visualizer_damping.clamp(0.01, 1.0);
-                        let decay = alpha * 0.5;
-                        for i in 0..128 {
-                            let target = t.goniometer_pts[i];
-                            let a = if target.abs() > state.smoothed_goniometer[i].abs() { alpha } else { decay };
-                            state.smoothed_goniometer[i] = state.smoothed_goniometer[i] * (1.0 - a) + target * a;
-                        }
-                        crate::widgets::render_goniometer(ui, &state.smoothed_goniometer, 200.0, Color32::from_rgb(0, 255, 200));
+                    if telemetry.is_some() {
+                        crate::widgets::render_goniometer(ui, &app.damped_goniometer, 200.0, Color32::from_rgb(0, 255, 200));
                     } else {
                         ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
                         ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "GONIOMETER", egui::FontId::proportional(12.0), Color32::GRAY);

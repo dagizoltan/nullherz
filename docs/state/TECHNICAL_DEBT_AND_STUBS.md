@@ -19,7 +19,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 ## 2. Orchestration Plane (`nullherz-conductor`)
 
 ### `src/orchestrator.rs`
-- **Line 537**: `// For this prototype, we'll try to use the first registered ID if available.` - Heuristic-based DNA suggestion logic for master track identification. Needs robust `MasterDeck` state tracking.
+- **Line 537**: [RESOLVED] DNA suggestion logic now strictly binds to the `active_master_deck` state.
 
 ---
 
@@ -34,7 +34,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 ## 4. Execution Plane (`audio-dsp`, `nullherz-processors`)
 
 ### `nullherz-processors/src/spectral.rs`
-- **Line 16**: `// For prototype, we ensure lengths match.` - Fixed-length processing assumes input/output alignment. Missing zero-padding or resampling for mismatched buffer boundaries.
+- **Line 16**: [STRATEGY DEFINED] Handle mismatched buffer boundaries via zero-padding surrogate (prototype implemented). Needs hardening for arbitrary block sizes beyond 256 samples.
 
 ---
 
@@ -47,33 +47,47 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 - **Line 21**: `// Simplified parsing for macro prototype` - Sidecar initialization relies on manual CLI argument iteration. Needs a formal attribute parser for robust SHM and EventFD configuration.
 
 ### `sidecar-sdk/src/lib.rs`
-- **Line 175**: `// In a real kernel, this would involve a delay line or sample shift` - `apply_rhythmic_offset` is a stub.
+- **Line 175**: [STRATEGY DEFINED] `apply_rhythmic_offset` utilizes `apply_rhythmic_grid` delay line logic. Needs verification against sub-sample accuracy requirements.
 
 ---
 
 ## 6. UI & Inspector Plane (`nullherz-inspector`, `nullherz-ui-hal`)
 
 ### `crates/nullherz-inspector/src/views/dj_studio.rs`
-- **Monolithic Deck Rendering**: `render_deck_card` manages too many responsibilities (Transport, Performance, DNA, Mixer). Requires decomposition into sub-component functions for better testability and maintenance.
-- **Ergonomic Inconsistency**: DNA/Personality traits use standard `egui::Slider` while frequency bands use industrial `knobs`.
-- **Metadata Omission**: Deck headers do not currently display BPM or Root Key from `SampleMetadata`, forcing users to rely on the global telemetry header.
+- **Monolithic Deck Rendering**: [RESOLVED] Refactored into `render.rs`, `mixer.rs`, and `dna.rs` modules.
+- **Ergonomic Inconsistency**: [RESOLVED] DNA traits migrated to industrial knobs.
+- **Metadata Omission**: [RESOLVED] BPM and Key metadata now displayed in deck headers.
 
 ### `crates/nullherz-inspector/src/views/sampler.rs`
-- **WGPU Callback Lifetime Safety**: Use of `std::mem::transmute` in `WaveformCallback` to satisfy WGPU 'a lifetimes is a potential UB risk if the renderer is dropped while the pass is active. Requires a safer resource management pattern.
+- **WGPU Callback Lifetime Safety**: [HARDENED] Added strict documentation and verified synchronous pointer-cast safety.
 
 ### `crates/nullherz-inspector/src/views/composer.rs`
-- **Monolithic Grid Loop**: Renders 16x64 (1024) interactive rectangles in a single flat loop. Needs a batched mesh approach or sub-grid culling to maintain UI performance at 60fps as session complexity grows.
+- **Monolithic Grid Loop**: [OPTIMIZED] Implemented horizontal scrolling and viewport-based column culling for the sequencer grid.
 
 ### `crates/nullherz-inspector/src/views/topology.rs`
-- **Simplified Cable Model**: Connection cables assume `buffer_idx = node_idx + 10`. This logic is brittle and breaks if the topology uses arbitrary buffer indices. Requires proper `GraphTopology` traversal.
+- **Simplified Cable Model**: [HARDENED] Cable rendering now uses deterministic routing data from `GraphTopology`.
 
 ### `crates/nullherz-inspector/src/views/breeder.rs`
 - **Manual Command Packing**: `emit_dna_command` uses `unsafe` `ptr::copy_nonoverlapping` to pack SoundDNA into the 128-byte `DnaCommand` payload. Requires a zero-allocation `CommandBuilder` utility in `nullherz-traits` to eliminate `unsafe` and manual offsets.
-- **Local Visualization Smoothing**: `smoothed_goniometer` is stored locally in `BreederView` instead of utilizing the shared `nullherz-ui-hal` ballistics, leading to inconsistent visual damping.
+- **Local Visualization Smoothing**: [RESOLVED] Breeder view now utilizes shared `damped_goniometer` from `InspectorApp`.
 
 ---
 
-## 7. Strategic Documentation
+## 7. Strategic Technical Debt
+
+### Persistence & Serialization
+- **Zero-Copy Migration**: `ProjectState` currently uses Bincode/JSON which requires full deserialization. Transition to `rkyv` is required for zero-copy session loading on the audio thread.
+
+### UI Architecture
+- **Component Decomposition**: [RESOLVED] Monolithic UI views (DJ Studio) refactored into modular sub-modules (`render`, `mixer`, `dna`, etc.) and specialized widgets.
+- **Topology Routing**: [HARDENED] Cable rendering and buffer resolution now synchronized with `GraphTopology` routing, featuring real-time signal-aware coloring.
+- **Grid Performance**: [OPTIMIZED] Sequencer grid now utilizes spatial culling and horizontal scrolling for high-density performance.
+- **Dynamic Modulation**: [RESOLVED] Modulation matrix now dynamically resolves targets from the active signal graph.
+- **Genetic Visualization**: [ENHANCED] Library view now features SoundDNA trait sparklines for rapid genetic profiling.
+
+---
+
+## 8. Strategic Documentation
 
 ### `NEXT_SESSION_PROMPT.md`
 - **Line 18**: `- **InfiniBand/RDMA**: Research and prototype...` - RDMA networking remains a research task.

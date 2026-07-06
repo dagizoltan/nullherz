@@ -263,6 +263,24 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     let t_color = if is_loaded { Color32::from_rgb(0, 255, 150) } else { Color32::WHITE };
 
                     ui.label(RichText::new(format!("{} - {}", title, artist)).size(11.0).color(t_color));
+
+                    // SoundDNA Trait Visualizers (Sparklines)
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 2.0;
+                        let tilt = (track.metadata.dna.spectral.tilt + 1.0) / 2.0;
+                        let sync = track.metadata.dna.rhythmic.syncopation_index;
+                        let glitch = track.metadata.dna.artifacts.glitch_density;
+
+                        for (val, color) in [(tilt, Color32::from_rgb(0, 200, 255)), (sync, Color32::from_rgb(0, 255, 150)), (glitch, Color32::from_rgb(255, 100, 0))] {
+                            let (r, _) = ui.allocate_at_least(egui::vec2(15.0, 10.0), egui::Sense::hover());
+                            ui.painter().rect_filled(r, 1.0, Color32::from_gray(30));
+                            let h = r.height() * val.clamp(0.0, 1.0);
+                            let bar_r = egui::Rect::from_min_max(egui::pos2(r.left(), r.bottom() - h), r.max);
+                            ui.painter().rect_filled(bar_r, 1.0, color);
+                        }
+                    });
+
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add_space(5.0);
                         ui.label(RichText::new(format!("{:.0}", bpm)).color(Color32::from_gray(80)).size(10.0));

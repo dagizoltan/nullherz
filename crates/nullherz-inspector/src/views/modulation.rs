@@ -44,16 +44,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
     ui.separator();
 
     egui::ScrollArea::vertical().show(ui, |ui| {
-        // Mock targets for demonstration
-        let targets = [
-            (150, 0, "Transfusion Bias"),
-            (150, 1, "Rhythmic Bias"),
-            (150, 2, "Artifact Bias"),
-            (150, 3, "Spatial Bias"),
-            (200, 0, "Master Filter"),
-        ];
-
-        for (node_id, param_id, name) in targets {
+        // Dynamic targets from graph topology
+        for (idx, node) in app.graph.nodes.iter().enumerate() {
+            let node_id = idx as u64;
+            // Simplified: exposing the first 4 parameters of each node for modulation
+            for param_id in 0..4 {
+                let name = format!("{}:P{}", node.name, param_id);
             ui.horizontal(|ui| {
                 ui.add_sized([120.0, 25.0], egui::Label::new(name));
 
@@ -81,6 +77,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
                     }
                 }
             });
+            }
         }
     });
 

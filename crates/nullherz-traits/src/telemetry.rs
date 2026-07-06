@@ -32,6 +32,7 @@ pub struct Telemetry {
     pub remote_latency_ms: [f32; 8],
     /// Proactive matchmaking suggestions: (Sample ID, Similarity Score)
     pub suggestions: [(u64, f32); 4],
+    pub active_master_deck: char,
 }
 
 pub struct TelemetryProcessor;
@@ -58,6 +59,7 @@ impl Default for Telemetry {
             remote_cpu_usage: [0.0; 8],
             remote_latency_ms: [0.0; 8],
             suggestions: [(0, 0.0); 4],
+            active_master_deck: 'A',
         }
     }
 }

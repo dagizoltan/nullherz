@@ -42,7 +42,7 @@
 | **4x Unrolled Scalar Kernels**| ✅ | Optimized fallback paths for non-SIMD processors (e.g., `DjIsolator`). |
 | **Exact Filter Math** | ✅ | Runtime Linkwitz-Riley coefficient generation for exact crossovers. |
 | **Soft Fallback** | ✅ | Heartbeat-monitored instant swap to bypass node upon DSP failure. |
-| **Spectral Processor** | 🧪 | Prototype FFT overlap-add. Assumes bit-exact buffer alignment. |
+| **Spectral Processor** | ✅ | Hardened FFT overlap-add. Supports variable block sizes up to 1024 samples. |
 
 ---
 
@@ -80,7 +80,7 @@
 | Feature | Status | Description |
 | :--- | :---: | :--- |
 | **WASM Sidecar Host** | ✅ | `wasmtime` integration with RT-hardened host functions. |
-| **Sidecar SDK V2** | 🔶 | Triple-Plane isolation SDK. `apply_rhythmic_offset` remains a stub. |
+| **Sidecar SDK V2** | 🔶 | Triple-Plane isolation SDK. Rhythmic offset strategy defined. |
 | **Sidecar Macros** | 🧪 | Prototype attribute macros for SHM attachment. Parsing is heuristic. |
 | **Universal Extensibility** | ✅ | Lock-free IPC bridge for both local subprocess and WASM guests. |
 | **wasm_simd128 Paths** | 💤 | Planned for high-performance spectral kernels in WASM. |

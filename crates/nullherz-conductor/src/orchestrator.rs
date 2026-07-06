@@ -212,6 +212,40 @@ impl Conductor {
         self.engine_coordinator.drain_garbage();
     }
 
+    fn update_matchmaking_suggestions(&mut self, now: u64) {
+        self.mixer_bridge.timeline.last_matchmaking_secs = now;
+        let lib = self.library.clone();
+        let suggestions = self.matchmaking_suggestions.clone();
+
+        // identify master track DNA using active_master_deck
+        let master_sampler_id = self.mixer_manager.deck_mappings.get(&self.active_master_deck).map(|d| d.sampler_id);
+
+        if let Some(sampler_node_idx) = master_sampler_id {
+            // Resolve the resource_id (sample_id) currently loaded in the master sampler
+            let mut current_sample_id = None;
+            {
+                let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+                if let Some(ref engine) = *engine_lock {
+                    current_sample_id = engine.list_children().iter()
+                        .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(sampler_node_idx))
+                        .and_then(|c| c.resource_id());
+                }
+            }
+
+            if let Some(id) = current_sample_id {
+                tokio::spawn(async move {
+                    let lib_lock = lib.lock().unwrap();
+                    if let Ok(Some(track)) = lib_lock.get_track(id) {
+                        if let Ok(matches) = nullherz_dna::Matchmaker::find_best_matches(&lib_lock, &track.metadata.dna, 3) {
+                            let mut sugg_lock = suggestions.lock().unwrap();
+                            *sugg_lock = matches;
+                        }
+                    }
+                });
+            }
+        }
+    }
+
     pub fn update_timeline(&mut self, telemetry: &mut Telemetry) {
         self.mixer_bridge.update_timeline(telemetry);
         self.clip_orchestrator.collect_telemetry(&mut telemetry.active_clips, &mut telemetry.starting_clips_mask);
@@ -222,6 +256,7 @@ impl Conductor {
                 telemetry.suggestions[i] = (*id, *score);
             }
         }
+        telemetry.active_master_deck = self.active_master_deck;
 
         // Update Remote Node Telemetry
         if let Ok(manager) = self.sidecar_supervisor.remote_manager.try_lock() {
@@ -530,37 +565,7 @@ impl Conductor {
 
         // Proactive Matchmaking Suggestions (Stage 6)
         if now % 15 == 0 && self.mixer_bridge.timeline.last_matchmaking_secs != now {
-            self.mixer_bridge.timeline.last_matchmaking_secs = now;
-            let lib = self.library.clone();
-            let suggestions = self.matchmaking_suggestions.clone();
-
-            // Hardened: identify master track DNA using active_master_deck
-            let master_sampler_id = self.mixer_manager.deck_mappings.get(&self.active_master_deck).map(|d| d.sampler_id);
-
-            if let Some(sampler_node_idx) = master_sampler_id {
-                // Resolve the resource_id (sample_id) currently loaded in the master sampler
-                let mut current_sample_id = None;
-                {
-                    let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
-                    if let Some(ref engine) = *engine_lock {
-                        current_sample_id = engine.list_children().iter()
-                            .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(sampler_node_idx))
-                            .and_then(|c| c.resource_id());
-                    }
-                }
-
-                if let Some(id) = current_sample_id {
-                    tokio::spawn(async move {
-                        let lib_lock = lib.lock().unwrap();
-                        if let Ok(Some(track)) = lib_lock.get_track(id) {
-                            if let Ok(matches) = nullherz_dna::Matchmaker::find_best_matches(&lib_lock, &track.metadata.dna, 3) {
-                                let mut sugg_lock = suggestions.lock().unwrap();
-                                *sugg_lock = matches;
-                            }
-                        }
-                    });
-                }
-            }
+            self.update_matchmaking_suggestions(now);
         }
 
         // Evolutionary Breeding Cycle (Triggered roughly every 10 seconds in the 100ms tick loop)
