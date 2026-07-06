@@ -56,7 +56,6 @@ pub enum View {
     Modulation,
     Mixer,
     Library,
-    SetupWizard,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -65,6 +64,15 @@ pub enum RightTab {
     Metrics,
     Notifications,
     GeneticCloud,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum SettingsTab {
+    General,
+    Audio,
+    Midi,
+    Network,
+    Calibration,
 }
 
 
@@ -143,6 +151,7 @@ pub struct InspectorApp {
     pub(crate) record_automation: bool,
     pub(crate) automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>, // target_id -> [(beat, value)]
     pub(crate) sampler_waveform_zoom: f32,
+    pub(crate) active_settings_tab: SettingsTab,
 }
 
 impl InspectorApp {
@@ -223,6 +232,7 @@ impl InspectorApp {
             record_automation: false,
             automation_data: std::collections::HashMap::new(),
             sampler_waveform_zoom: 1.0,
+            active_settings_tab: SettingsTab::General,
         }
     }
 
@@ -429,7 +439,6 @@ impl eframe::App for InspectorApp {
                  View::Mastering => views::mastering::render(self, ui, &telemetry),
                  View::Broadcast => views::broadcast::render(self, ui),
                  View::Settings => views::settings::render(self, ui),
-                 View::SetupWizard => views::setup_wizard::render(self, ui),
                  _ => { ui.label("View coming soon..."); }
              }
         });

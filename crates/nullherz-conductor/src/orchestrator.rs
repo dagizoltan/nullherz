@@ -465,7 +465,7 @@ impl Conductor {
                  Command::Performance(nullherz_traits::PerformanceCommand::ClearTrackPattern { track_idx, .. }) => {
                      println!("Conductor: Clearing Pattern for Track {}", track_idx);
                  }
-                 Command::Resource(nullherz_traits::ResourceCommand::RegisterCapture { capture_node_idx, sample_id }) => {
+                 Command::Resource(nullherz_traits::ResourceCommand::RegisterCapture { .. }) => {
                      // Non-RT: Pull snapshot from engine and register in registry
                      if let Ok(engine_lock) = self.engine_coordinator.backend_manager.engine_handle.lock() {
                         if let Some(ref engine) = *engine_lock {
