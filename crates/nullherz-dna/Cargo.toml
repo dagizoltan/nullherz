@@ -11,3 +11,5 @@ nullherz-traits = { path = "../nullherz-traits" }
 audio-dsp = { path = "../audio-dsp" }
 redb = "2.1"
 rayon = "1.10"
+mdns-sd = "0.11"
+gethostname = "0.4"

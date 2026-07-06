@@ -115,7 +115,8 @@ pub enum MixerCommand {
     },
     Bundle {
         count: u32,
-        data: [u64; 12],
+        #[serde(with = "serde_big_array::BigArray")]
+        data: [u8; 128],
     },
     SetMacro {
         macro_id: u32,
@@ -847,14 +848,45 @@ pub trait RenderingController: Send + Sync {
     fn set_pending_graph(&self, graph: Box<dyn AudioProcessor>);
 }
 
+pub struct BundleIterator<'a> {
+    data: &'a [u8; 128],
+    count: usize,
+    index: usize,
+}
+
+impl<'a> Iterator for BundleIterator<'a> {
+    type Item = Command;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.count || self.index >= 8 { return None; }
+        let offset = self.index * 16;
+        let target_id = u64::from_le_bytes(self.data[offset..offset+8].try_into().unwrap());
+        let param_id = u32::from_le_bytes(self.data[offset+8..offset+12].try_into().unwrap());
+        let value = f32::from_le_bytes(self.data[offset+12..offset+16].try_into().unwrap());
+        self.index += 1;
+        Some(Command::Mixer(MixerCommand::SetParam {
+            target_id,
+            param_id,
+            value,
+            ramp_duration_samples: 0
+        }))
+    }
+}
+
 impl Command {
-    pub fn unpack_bundle(count: u32, data: [u64; 12]) -> Vec<Command> {
-        let mut commands = Vec::with_capacity((count as usize).min(4));
-        for i in 0..(count as usize).min(4) {
-            let target_id = data[i * 3];
-            let param_id = data[i * 3 + 1] as u32;
-            let value = f32::from_bits(data[i * 3 + 2] as u32);
-            commands.push(Command::Mixer(MixerCommand::SetParam { target_id, param_id, value, ramp_duration_samples: 0 }));
+    pub fn bundle_iter(&self) -> Option<BundleIterator<'_>> {
+        if let Command::Mixer(MixerCommand::Bundle { count, data }) = self {
+            Some(BundleIterator { data, count: *count as usize, index: 0 })
+        } else {
+            None
+        }
+    }
+
+    #[deprecated(note = "Use bundle_iter instead to avoid allocation")]
+    pub fn unpack_bundle(count: u32, data: [u8; 128]) -> Vec<Command> {
+        let mut commands = Vec::with_capacity(count as usize);
+        let iter = BundleIterator { data: &data, count: count as usize, index: 0 };
+        for cmd in iter {
+            commands.push(cmd);
         }
         commands
     }

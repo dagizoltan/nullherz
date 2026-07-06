@@ -27,7 +27,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 
 ### `nullherz-dna/src/lib.rs`
 - **Line 219**: `// Breeding logic or library integration here...` - Missing implementation for inherited DNA.
-- **Line 244**: `// Stub for P2P discovery logic (libp2p/mdns)` - Current UDP broadcast implementation is a skeleton. Needs migration to `libp2p` or `mdns`.
+- **Line 261**: [RESOLVED] Skeleton UDP broadcast replaced with robust `mdns-sd` discovery service.
 
 ---
 
@@ -41,7 +41,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 ## 5. Sidecar & Runtime (`fx-runtime`, `sidecar-sdk`, `sidecar-macros`)
 
 ### `fx-runtime/src/wasm_runtime.rs`
-- **Line 32**: `bincode::serialize(&cmd)` performs a heap allocation on the audio hot-path. Needs refactoring to `serialize_into` with a stack-allocated buffer.
+- **Line 32**: [RESOLVED] `bincode::serialize(&cmd)` refactored to `serialize_into` with a stack-allocated buffer.
 
 ### `sidecar-macros/src/lib.rs`
 - **Line 21**: `// Simplified parsing for macro prototype` - Macro DSL parsing is not robust.

@@ -40,12 +40,20 @@ impl ModulationMatrix {
     pub fn expand_macro(&self, macro_id: u32, value: f32) -> Vec<Command> {
         let mut expanded = Vec::new();
         if let Some(mappings) = self.mappings.get(&macro_id) {
-            for mapping in mappings {
-                expanded.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                    target_id: mapping.target_id,
-                    param_id: mapping.param_id,
-                    value: value * mapping.scaling,
-                    ramp_duration_samples: mapping.ramp_duration_samples,
+            // Pack into bundles of 8 commands each for atomic execution
+            for chunk in mappings.chunks(8) {
+                let mut data = [0u8; 128];
+                let count = chunk.len();
+                for (i, mapping) in chunk.iter().enumerate() {
+                    let offset = i * 16;
+                    let val = value * mapping.scaling;
+                    data[offset..offset+8].copy_from_slice(&mapping.target_id.to_le_bytes());
+                    data[offset+8..offset+12].copy_from_slice(&mapping.param_id.to_le_bytes());
+                    data[offset+12..offset+16].copy_from_slice(&val.to_le_bytes());
+                }
+                expanded.push(Command::Mixer(nullherz_traits::MixerCommand::Bundle {
+                    count: count as u32,
+                    data,
                 }));
             }
         }

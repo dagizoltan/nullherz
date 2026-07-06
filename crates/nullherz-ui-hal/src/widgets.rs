@@ -162,13 +162,26 @@ pub fn render_vu_meter(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Col
         }
     }
 
-    // Level
-    let level_h = (peak * (height / 1.2)).min(height);
+    // High-Precision Ballistics (Asymmetrical: Fast Attack, Quadratic Decay)
+    let id = ui.make_persistent_id("vu_ballistics");
+    let mut smoothed_peak = ui.ctx().memory_mut(|mem| *mem.data.get_temp_mut_or_default::<f32>(id));
+
+    let attack = 0.8;
+    let decay = 0.05;
+    if peak > smoothed_peak {
+        smoothed_peak = smoothed_peak * (1.0 - attack) + peak * attack;
+    } else {
+        smoothed_peak = smoothed_peak * (1.0 - decay) + peak * decay;
+    }
+    ui.ctx().memory_mut(|mem| mem.data.insert_temp(id, smoothed_peak));
+
+    // Level Rendering
+    let level_h = (smoothed_peak * (height / 1.2)).min(height);
     let level_rect = Rect::from_min_size(rect.max - Vec2::new(width, level_h), Vec2::new(width, level_h));
 
-    let color = if peak > 1.0 {
+    let color = if smoothed_peak > 1.0 {
         Color32::from_rgb(255, 50, 50) // Clipping
-    } else if peak > 0.707 {
+    } else if smoothed_peak > 0.707 {
         Color32::from_rgb(255, 200, 0) // Warm
     } else {
         accent_color
@@ -176,7 +189,7 @@ pub fn render_vu_meter(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Col
 
     ui.painter().rect_filled(level_rect, 0.0, color);
 
-    // Peak Hold
+    // Peak Hold (Digital ballistic)
     let ph_h = (peak_hold * (height / 1.2)).min(height);
     let ph_y = rect.max.y - ph_h;
     if ph_y >= rect.min.y {

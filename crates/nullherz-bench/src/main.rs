@@ -21,7 +21,7 @@ fn main() {
         for i in 0..count {
             let mut dna = nullherz_traits::SoundDNA::default();
             // Fill with random-ish synthetic data
-            for j in 0..64 { dna.spectral.energy_map[j] = (i % 255) as u8; }
+            for j in 0..16 { dna.spectral.latent_space[j] = (i % 100) as f32 / 100.0; }
             dna.rhythmic.syncopation_index = (i % 100) as f32 / 100.0;
 
             let track = LibraryTrack {
