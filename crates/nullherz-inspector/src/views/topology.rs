@@ -75,22 +75,17 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             socket_positions.insert((idx as u32, false, in_idx as u32), btn_resp.rect.center());
 
                             if btn_resp.secondary_clicked() {
-                                let _ = app.command_sender.send(Command::Topology(TopologyCommand::UpdateEdge {
+                                let _ = app.command_sender.send(Command::Topology(TopologyCommand::Disconnect {
                                     node_idx: idx as u32,
                                     input_idx: in_idx as u32,
-                                    new_buffer_idx: 0, // Disconnect to silent buffer
                                 }));
                             } else if btn_resp.clicked() || (ui.input(|i| i.pointer.any_released()) && btn_resp.hovered()) {
                                 if let Some((src_node, src_out)) = app.active_connection_source {
-                                    let buffer_idx = app.graph.edges.iter()
-                                        .find(|e| e.from == src_node && e.output_idx == src_out)
-                                        .map(|e| e.buffer_idx)
-                                        .unwrap_or(src_node + 10);
-
-                                    let _ = app.command_sender.send(Command::Topology(TopologyCommand::UpdateEdge {
-                                        node_idx: idx as u32,
-                                        input_idx: in_idx as u32,
-                                        new_buffer_idx: buffer_idx,
+                                    let _ = app.command_sender.send(Command::Topology(TopologyCommand::Connect {
+                                        src_node_idx: src_node,
+                                        src_output_idx: src_out,
+                                        dst_node_idx: idx as u32,
+                                        dst_input_idx: in_idx as u32,
                                     }));
                                     app.active_connection_source = None;
                                 }

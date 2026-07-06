@@ -87,6 +87,7 @@ pub struct TransfusionManager {
     /// The global registry where captured samples are stored for use by other processors.
     pub sample_registry: Arc<SampleRegistry>,
     pub evolutionary_breeder: Option<EvolutionaryBreeder>,
+    pub discovery_service: Option<Arc<std::sync::Mutex<nullherz_dna::DiscoveryService>>>,
     transient_detector: TransientDetector,
 }
 
@@ -95,6 +96,7 @@ impl TransfusionManager {
         Self {
             sample_registry,
             evolutionary_breeder: None,
+            discovery_service: None,
             transient_detector: TransientDetector::new(1024, 0.5),
         }
     }
@@ -141,6 +143,13 @@ impl TransfusionManager {
 
     pub fn commit_breeding(&self, parent_a_id: u64, parent_b_id: u64, bias: f32, library: &LibraryDatabase) {
         if let (Some(parent_a), Some(parent_b)) = (self.sample_registry.get(parent_a_id), self.sample_registry.get(parent_b_id)) {
+            // 0. Trigger federated announcement if possible
+            if let Some(ref discovery) = self.discovery_service {
+                 if let Ok(discovery) = discovery.lock() {
+                     discovery.announce_push(parent_a_id ^ parent_b_id); // Heuristic ID for now
+                 }
+            }
+
             // 1. Breed DNA
             let child_dna = nullherz_dna::transfuse_dna(&parent_a.metadata.dna, &parent_b.metadata.dna, bias);
 

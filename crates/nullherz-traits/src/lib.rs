@@ -368,6 +368,16 @@ pub enum TopologyCommand {
         x: f32,
         y: f32,
     },
+    Connect {
+        src_node_idx: u32,
+        src_output_idx: u32,
+        dst_node_idx: u32,
+        dst_input_idx: u32,
+    },
+    Disconnect {
+        node_idx: u32,
+        input_idx: u32,
+    },
 }
 
 /// A command with an associated timestamp for deterministic execution.

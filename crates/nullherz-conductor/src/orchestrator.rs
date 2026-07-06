@@ -61,17 +61,23 @@ impl Conductor {
                 Arc::new(std::sync::Mutex::new(nullherz_dna::LibraryDatabase::load(&fallback_path).unwrap()))
             }
         };
+        let mut sidecar_discovery = crate::discovery::SidecarDiscoveryService::new("plugins").with_library(library.clone());
+        let dna_discovery = sidecar_discovery.dna_discovery.clone();
+
+        let mut transfusion_manager = TransfusionManager::new(sample_registry.clone()).with_library(library.clone());
+        transfusion_manager.discovery_service = Some(dna_discovery);
+
         Self {
             engine_coordinator: EngineCoordinator::new(),
             topology_manager: TopologyManager::new(),
-            transfusion_manager: TransfusionManager::new(sample_registry.clone()).with_library(library.clone()),
+            transfusion_manager,
             mixer_bridge: MixerBridge::new(),
             sidecar_supervisor: SidecarSupervisor::new(),
             pattern_manager: PatternManager::new(),
             clip_orchestrator: ClipOrchestrator::new(),
             modulation_matrix: ModulationMatrix::new(),
             audio_bridge: Arc::new(IpcAudioBridge::new()),
-            sidecar_discovery: crate::discovery::SidecarDiscoveryService::new("plugins").with_library(library.clone()),
+            sidecar_discovery,
             midi_mapper: MidiMapper::new(),
             midi_clock: crate::midi_clock::MidiClockTracker::new(),
             analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
@@ -132,6 +138,10 @@ impl Conductor {
             tokio::spawn(async move {
                 let _ = crate::sidecar_supervisor::SidecarSupervisor::start_udp_return_listener(audio_bridge, 9002).await;
             });
+
+            // Start Federated DNA Server (TCP pull)
+            let lib = self.library.clone();
+            let _ = nullherz_dna::DnaServer::start(lib, 9003);
         }
 
         crate::EngineContext {
