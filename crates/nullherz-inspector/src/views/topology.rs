@@ -122,11 +122,18 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         }
     }
 
-    // Draw active drag cable
+    // Draw active drag cable (Cubic Bezier for consistency)
     if let Some((src_node, src_out)) = app.active_connection_source {
         if let Some(&start) = socket_positions.get(&(src_node, true, src_out)) {
             if let Some(mouse_pos) = ui.input(|i| i.pointer.latest_pos()) {
-                painter.line_segment([start, mouse_pos], egui::Stroke::new(2.0, Color32::YELLOW));
+                let cp1 = start + egui::vec2(50.0, 0.0);
+                let cp2 = mouse_pos - egui::vec2(50.0, 0.0);
+                painter.add(egui::Shape::CubicBezier(egui::epaint::CubicBezierShape {
+                    points: [start, cp1, cp2, mouse_pos],
+                    closed: false,
+                    fill: Color32::TRANSPARENT,
+                    stroke: egui::Stroke::new(2.0, Color32::YELLOW),
+                }));
             }
         }
     }
