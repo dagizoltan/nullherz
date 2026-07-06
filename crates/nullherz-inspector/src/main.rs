@@ -270,25 +270,30 @@ impl eframe::App for InspectorApp {
 
                     let nav_buttons = [
                         (View::Console, "📻", "LIVE"),
+                        (View::Player, "💿", "PLAYER"),
                         (View::Composer, "🎹", "BUILD"),
                         (View::Sampler, "🎤", "SAMPL"),
                         (View::Mixer, "🎚", "MIX"),
                         (View::Topology, "🕸", "NODE"),
                         (View::Modulation, "〰", "MOD"),
                         (View::Breeder, "🧬", "BREED"),
+                        (View::Mastering, "🎛", "MASTER"),
+                        (View::Broadcast, "📡", "B-CAST"),
                         (View::Settings, "⚙", "SET"),
                         (View::SetupWizard, "🧙", "SETUP"),
                     ];
 
-                    for (view, icon, label) in nav_buttons {
-                        let is_selected = self.active_view == view;
-                        let bg_color = if is_selected { egui::Color32::from_gray(50) } else { egui::Color32::TRANSPARENT };
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for (view, icon, label) in nav_buttons {
+                            let is_selected = self.active_view == view;
+                            let bg_color = if is_selected { egui::Color32::from_gray(50) } else { egui::Color32::TRANSPARENT };
 
-                        if ui.add(egui::Button::new(egui::RichText::new(icon).size(20.0)).fill(bg_color).min_size(egui::vec2(50.0, 50.0))).on_hover_text(label).clicked() {
-                            self.active_view = view;
+                            if ui.add(egui::Button::new(egui::RichText::new(icon).size(20.0)).fill(bg_color).min_size(egui::vec2(50.0, 50.0))).on_hover_text(label).clicked() {
+                                self.active_view = view;
+                            }
+                            ui.add_space(10.0);
                         }
-                        ui.add_space(10.0);
-                    }
+                    });
                 });
             });
 
@@ -352,6 +357,7 @@ impl eframe::App for InspectorApp {
         egui::CentralPanel::default().show(ctx, |ui| {
              match self.active_view {
                  View::Console => views::dj_studio::render(self, ui, &telemetry),
+                 View::Player => views::player::render(self, ui),
                  View::Sampler => views::sampler::render(self, ui, &telemetry),
                  View::Mixer => views::mixer::render(self, ui, &telemetry),
                  View::Library => views::library::render(self, ui),
@@ -363,6 +369,9 @@ impl eframe::App for InspectorApp {
                     views::breeder::BreederView::show(ui, &mut view, &telemetry, self);
                     self.breeding_view = view;
                  }
+                 View::Mastering => views::mastering::render(self, ui, &telemetry),
+                 View::Broadcast => views::broadcast::render(self, ui),
+                 View::Settings => views::settings::render(self, ui),
                  View::SetupWizard => views::setup_wizard::render(self, ui),
                  _ => { ui.label("View coming soon..."); }
              }

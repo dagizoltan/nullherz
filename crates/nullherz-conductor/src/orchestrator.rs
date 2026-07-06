@@ -53,10 +53,12 @@ impl Conductor {
         let library = match nullherz_dna::LibraryDatabase::load(path) {
             Ok(db) => Arc::new(std::sync::Mutex::new(db)),
             Err(_) => {
-                // If it's already open (e.g. in tests), we try to load it without unwrapping directly
-                // This is a common issue with redb in concurrent tests.
-                // For production, this path is safe.
-                Arc::new(std::sync::Mutex::new(nullherz_dna::LibraryDatabase::load("fallback.redb").unwrap()))
+                // If it's already open (e.g. in tests), we load it with a unique path
+                // to avoid concurrent database access/locking collisions in tests.
+                static FALLBACK_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+                let count = FALLBACK_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let fallback_path = format!("fallback_{}_{}.redb", std::process::id(), count);
+                Arc::new(std::sync::Mutex::new(nullherz_dna::LibraryDatabase::load(&fallback_path).unwrap()))
             }
         };
         Self {
