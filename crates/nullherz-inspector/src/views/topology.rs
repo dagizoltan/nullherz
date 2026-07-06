@@ -103,17 +103,22 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         });
     });
 
-    // Draw existing cables
+    // Draw existing cables (Based on Edge Definitions)
     let painter = ui.painter();
-    for (n_idx, node) in app.graph.nodes.iter().enumerate() {
-        for (in_idx, &buffer_idx) in node.inputs.iter().enumerate() {
-             // In our simplified model, buffer_idx - 10 = src_node_idx
-             if buffer_idx >= 10 {
-                 let src_node_idx = (buffer_idx - 10) as u32;
-                 if let (Some(&start), Some(&end)) = (socket_positions.get(&(src_node_idx, true, 0)), socket_positions.get(&(n_idx as u32, false, in_idx as u32))) {
-                     painter.line_segment([start, end], egui::Stroke::new(2.0, Color32::from_gray(150)));
-                 }
-             }
+    for edge in &app.graph.edges {
+        let start_key = (edge.from, true, 0); // Assuming primary output for now
+        let end_key = (edge.to, false, edge.input_idx);
+
+        if let (Some(&start), Some(&end)) = (socket_positions.get(&start_key), socket_positions.get(&end_key)) {
+            // Cubic Bezier for industrial cable look
+            let cp1 = start + egui::vec2(50.0, 0.0);
+            let cp2 = end - egui::vec2(50.0, 0.0);
+            painter.add(egui::Shape::CubicBezier(egui::epaint::CubicBezierShape {
+                points: [start, cp1, cp2, end],
+                closed: false,
+                fill: Color32::TRANSPARENT,
+                stroke: egui::Stroke::new(2.0, Color32::from_gray(120)),
+            }));
         }
     }
 

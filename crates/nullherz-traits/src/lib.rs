@@ -263,6 +263,38 @@ pub struct DnaCommand {
     pub payload: [u8; 128],
 }
 
+impl DnaCommand {
+    /// Zero-allocation, type-safe builder for DNA transfusion payloads.
+    pub fn pack_transfusion(target_id: u64, latent: &[f32; 16], micro_timing: &[i16; 12], onset_mask: &[u64; 4]) -> Self {
+        let mut payload = [0u8; 128];
+
+        // 1. Spectral (0-63)
+        unsafe {
+            std::ptr::copy_nonoverlapping(latent.as_ptr() as *const u8, payload.as_mut_ptr(), 64);
+        }
+
+        // 2. Rhythmic Micro-timing (64-75)
+        for i in 0..12 {
+            payload[64 + i] = (micro_timing[i] as i8) as u8;
+        }
+
+        // 3. Rhythmic Onset Mask (76-107)
+        for i in 0..4 {
+            let mask = onset_mask[i];
+            for j in 0..8 {
+                payload[76 + i * 8 + j] = ((mask >> (j * 8)) & 0xFF) as u8;
+            }
+        }
+
+        Self {
+            target_id,
+            layer_mask: 3, // Spectral + Rhythmic
+            bias: 1.0,
+            payload,
+        }
+    }
+}
+
 /// Represents an action to be performed by the audio engine.
 /// Refactored into a modular hierarchy to ensure ABI stability and decoupling.
 #[repr(C)]

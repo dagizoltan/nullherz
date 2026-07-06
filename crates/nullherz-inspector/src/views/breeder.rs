@@ -251,37 +251,32 @@ impl BreederView {
             if let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
 
                 // 1. Spectral Transfusion
-                let mut payload = [0u8; 128];
                 let mut latent = [0.0f32; 16];
                 nullherz_dna::NeuralTransfuser::interpolate_latent(&mut latent, &track_a.metadata.dna.spectral.latent_space, &track_b.metadata.dna.spectral.latent_space, self.transfusion_bias_x);
-                unsafe {
-                    std::ptr::copy_nonoverlapping(latent.as_ptr() as *const u8, payload.as_mut_ptr(), 64);
-                }
 
                 // 2. Rhythmic Transfusion (Micro-timing)
+                let mut micro_timing = [0i16; 12];
                 for i in 0..12 {
                     let val_a = track_a.metadata.dna.rhythmic.micro_timing[i] as f32;
                     let val_b = track_b.metadata.dna.rhythmic.micro_timing[i] as f32;
-                    payload[64 + i] = (val_a * (1.0 - self.transfusion_bias_y) + val_b * self.transfusion_bias_y) as i8 as u8;
+                    micro_timing[i] = (val_a * (1.0 - self.transfusion_bias_y) + val_b * self.transfusion_bias_y) as i16;
                 }
 
                 // 3. Rhythmic Transfusion (Onset Mask)
+                let mut onset_mask = [0u64; 4];
                 for i in 0..4 {
                     let mask_a = track_a.metadata.dna.rhythmic.onset_mask[i];
                     let mask_b = track_b.metadata.dna.rhythmic.onset_mask[i];
-                    // Pack into payload (bytes 76-107)
-                    let res_mask = if self.transfusion_bias_y > 0.5 { mask_b } else { mask_a };
-                    for j in 0..8 {
-                        payload[76 + i * 8 + j] = ((res_mask >> (j * 8)) & 0xFF) as u8;
-                    }
+                    onset_mask[i] = if self.transfusion_bias_y > 0.5 { mask_b } else { mask_a };
                 }
 
-                let cmd = Command::Dna(DnaCommand {
-                    target_id: self.target_node_idx as u64,
-                    layer_mask: 3, // Spectral + Rhythmic
-                    bias: 1.0, // We already interpolated in the payload
-                    payload,
-                });
+                // Hardened: Utilizing type-safe builder to eliminate unsafe byte-packing
+                let cmd = Command::Dna(DnaCommand::pack_transfusion(
+                    self.target_node_idx as u64,
+                    &latent,
+                    &micro_timing,
+                    &onset_mask
+                ));
 
                 let _ = app.command_sender.send(cmd);
             }
