@@ -79,6 +79,13 @@ fn render_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_color:
             app.focused_deck = i;
         }
 
+        // Master Deck Toggle
+        let is_master = app.master_deck == Some(i);
+        if ui.selectable_label(is_master, RichText::new("M").strong().color(if is_master { deck_color } else { Color32::GRAY })).clicked() {
+             app.master_deck = Some(i);
+             let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMasterDeck(deck_id_label)));
+        }
+
         // Display BPM and Key from metadata if track is loaded
         if let Some(track_id) = app.now_playing[i] {
             if let Ok(Some(track)) = app.library_db.get_track(track_id) {

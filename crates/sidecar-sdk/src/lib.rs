@@ -161,11 +161,33 @@ pub struct DnaKernel;
 
 impl DnaKernel {
     pub fn apply_spectral_personality(output: &mut [f32], input: &[f32], dna: &nullherz_traits::SoundDNA, bias: f32) {
-        // Implementation of spectral shaping based on latent space (simplified for SDK utility)
-        for i in 0..output.len().min(input.len()) {
+        use audio_dsp::simd_vec::{FloatX16, load_f32x16, store_f32x16};
+
+        let n = output.len().min(input.len());
+        let latent = dna.spectral.latent_space;
+
+        // Target gain derived from latent space, clamped to [0, 1]
+        let mut target_arr = [0.0f32; 16];
+        for i in 0..16 { target_arr[i] = latent[i].max(0.0).min(1.0); }
+
+        let v_target = FloatX16::new(target_arr);
+        let v_bias = FloatX16::splat(bias);
+        let v_inv_bias = FloatX16::splat(1.0 - bias);
+
+        // current_gain = (1.0 * (1.0 - bias)) + (target_gain * bias)
+        let v_gain = v_inv_bias + (v_target * v_bias);
+
+        for bin in (0..n).step_by(16).filter(|&b| b + 16 <= n) {
+            let v_in = load_f32x16(input, bin);
+            let v_out = v_in * v_gain;
+            store_f32x16(output, bin, v_out);
+        }
+
+        // Scalar fallback for remaining samples
+        for i in (n - (n % 16))..n {
             let dim = i % 16;
-            let target_gain = dna.spectral.latent_space[dim].max(0.0).min(1.0);
-            let current_gain = 1.0 * (1.0 - bias) + target_gain * bias;
+            let target_gain = latent[dim].max(0.0).min(1.0);
+            let current_gain = (1.0 - bias) + (target_gain * bias);
             output[i] = input[i] * current_gain;
         }
     }
