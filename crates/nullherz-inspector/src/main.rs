@@ -152,6 +152,11 @@ pub struct InspectorApp {
     pub(crate) automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>, // target_id -> [(beat, value)]
     pub(crate) sampler_waveform_zoom: f32,
     pub(crate) active_settings_tab: SettingsTab,
+    pub(crate) sampler_input_gain: f32,
+    pub(crate) sampler_monitor_level: f32,
+    pub(crate) sampler_is_recording: bool,
+    pub(crate) sampler_is_stereo: bool,
+    pub(crate) sampler_input_source: usize, // 0: Master, 1-4: Decks, 5: External
 }
 
 impl InspectorApp {
@@ -233,6 +238,11 @@ impl InspectorApp {
             automation_data: std::collections::HashMap::new(),
             sampler_waveform_zoom: 1.0,
             active_settings_tab: SettingsTab::General,
+            sampler_input_gain: 1.0,
+            sampler_monitor_level: 0.0,
+            sampler_is_recording: false,
+            sampler_is_stereo: true,
+            sampler_input_source: 0,
         }
     }
 
