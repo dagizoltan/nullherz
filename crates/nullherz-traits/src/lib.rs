@@ -86,6 +86,7 @@ pub enum CoreCommand {
     RequestSnapshots,
     CommitTopology,
     SetBpm(f32),
+    SetMasterDeck(char),
     SwitchBackend(AudioBackendType),
     CalibrateLatency,
     #[serde(with = "serde_big_array::BigArray")]

@@ -34,6 +34,7 @@ pub struct Conductor {
     midi_child: Option<std::process::Child>,
     midi_shm: Option<Arc<ipc_layer::SharedMemory>>,
     pub matchmaking_suggestions: Arc<Mutex<Vec<(u64, f32)>>>,
+    pub active_master_deck: char,
 }
 
 impl Default for Conductor {
@@ -80,6 +81,7 @@ impl Conductor {
             midi_child: None,
             midi_shm: None,
             matchmaking_suggestions: Arc::new(Mutex::new(Vec::new())),
+            active_master_deck: 'A',
         }
     }
 
@@ -285,6 +287,10 @@ impl Conductor {
                  }
                  Command::Core(nullherz_traits::CoreCommand::SwitchBackend(backend_type)) => {
                      let _ = self.switch_backend(backend_type);
+                 }
+                 Command::Core(nullherz_traits::CoreCommand::SetMasterDeck(deck_id)) => {
+                     self.active_master_deck = deck_id;
+                     println!("Conductor: Master Deck set to {}", deck_id);
                  }
                  Command::Core(nullherz_traits::CoreCommand::LoadMidiMap(buffer)) => {
                      let name = String::from_utf8_lossy(&buffer).trim_matches(char::from(0)).to_string();
@@ -528,15 +534,22 @@ impl Conductor {
             let lib = self.library.clone();
             let suggestions = self.matchmaking_suggestions.clone();
 
-            // Heuristic: identify master track DNA
-            // Check deck mappings in mixer manager (Deck A sampler)
-            let master_sampler_id = self.mixer_manager.deck_mappings.get(&'A').map(|d| d.sampler_id);
+            // Hardened: identify master track DNA using active_master_deck
+            let master_sampler_id = self.mixer_manager.deck_mappings.get(&self.active_master_deck).map(|d| d.sampler_id);
 
-            if let Some(_sid) = master_sampler_id {
-                // In a production app, we would look up the currently loaded sample ID for this node.
-                // For this prototype, we'll try to use the first registered ID if available.
-                if let Some(id) = self.transfusion_manager.sample_registry.list_ids().first() {
-                    let id = *id;
+            if let Some(sampler_node_idx) = master_sampler_id {
+                // Resolve the resource_id (sample_id) currently loaded in the master sampler
+                let mut current_sample_id = None;
+                {
+                    let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+                    if let Some(ref engine) = *engine_lock {
+                        current_sample_id = engine.list_children().iter()
+                            .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(sampler_node_idx))
+                            .and_then(|c| c.resource_id());
+                    }
+                }
+
+                if let Some(id) = current_sample_id {
                     tokio::spawn(async move {
                         let lib_lock = lib.lock().unwrap();
                         if let Ok(Some(track)) = lib_lock.get_track(id) {
@@ -685,6 +698,9 @@ impl Conductor {
         state.bpm = self.mixer_bridge.timeline.bpm;
         state.transport_playing = true; // For now assume playing if state is saved, logic for is_playing pending in timeline
 
+        // 6. Master Deck State
+        state.active_master_deck = self.active_master_deck;
+
         state
     }
 
@@ -762,7 +778,10 @@ impl Conductor {
         // 5. Reconstruct Arrangement
         self.pattern_manager.set_arrangement(state.arrangement);
 
-        // 6. Transport State
+        // 6. Reconstruct Master Deck
+        self.active_master_deck = state.active_master_deck;
+
+        // 7. Transport State
         if let Some(ref mut prod) = self.engine_coordinator.command_producer {
             let _ = prod.push_command(nullherz_traits::TimestampedCommand {
                 timestamp_samples: 0,
