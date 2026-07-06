@@ -42,7 +42,7 @@
 | **4x Unrolled Scalar Kernels**| ✅ | Optimized fallback paths for non-SIMD processors (e.g., `DjIsolator`). |
 | **Exact Filter Math** | ✅ | Runtime Linkwitz-Riley coefficient generation for exact crossovers. |
 | **Soft Fallback** | ✅ | Heartbeat-monitored instant swap to bypass node upon DSP failure. |
-| **Spectral Processor** | 🧪 | Prototype FFT overlap-add. Alignment strategy defined, hardening in progress. |
+| **Spectral Processor** | ✅ | Hardened FFT overlap-add. Supports variable block sizes up to 1024 samples. |
 
 ---
 
