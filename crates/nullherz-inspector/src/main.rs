@@ -368,7 +368,7 @@ impl eframe::App for InspectorApp {
                         if ui.selectable_label(self.active_right_tab == Some(RightTab::GeneticCloud), "CLOUD").clicked() {
                             self.active_right_tab = Some(RightTab::GeneticCloud);
                         }
-                        if ui.selectable_label(self.active_right_tab == Some(RightTab::Notifications), "AI/ANALYSIS").clicked() {
+                        if ui.selectable_label(self.active_right_tab == Some(RightTab::Notifications), "AI & INSIGHTS").clicked() {
                             self.active_right_tab = Some(RightTab::Notifications);
                         }
                         if ui.selectable_label(self.active_right_tab == Some(RightTab::Metrics), "SYSTEM").clicked() {
@@ -406,7 +406,7 @@ impl eframe::App for InspectorApp {
                     let tabs = [
                         (RightTab::Library, "📂", "LIBRARY"),
                         (RightTab::GeneticCloud, "☁", "GENETIC CLOUD"),
-                        (RightTab::Notifications, "🔔", "NOTIFICATIONS"),
+                        (RightTab::Notifications, "🧠", "AI & INSIGHTS"),
                         (RightTab::Metrics, "📊", "METRICS"),
                     ];
 
