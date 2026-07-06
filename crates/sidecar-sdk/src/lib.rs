@@ -3,38 +3,59 @@ pub use nullherz_traits::{AudioProcessor, ProcessContext};
 
 use ipc_layer::SharedMemory;
 
+/// High-level abstraction for memory mapping providers (e.g. native SHM, virtio, etc.)
+pub trait MemoryMapper {
+    type Mapping: AsRef<[u8]>;
+    fn open(&self, name: &str, size: usize) -> Result<Self::Mapping, String>;
+    fn ptr(&self, mapping: &Self::Mapping) -> *mut u8;
+}
+
+/// Default native shared memory implementation.
+pub struct NativeMemoryMapper;
+impl MemoryMapper for NativeMemoryMapper {
+    type Mapping = SharedMemory;
+    fn open(&self, name: &str, size: usize) -> Result<Self::Mapping, String> {
+        SharedMemory::open(name, size).map_err(|e| e.to_string())
+    }
+    fn ptr(&self, mapping: &Self::Mapping) -> *mut u8 {
+        mapping.ptr()
+    }
+}
+
 /// A sidecar DSP process context.
-pub struct SidecarHost {
-    shm_cmd: SharedMemory,
-    shm_signal: SharedMemory,
-    shm_inputs: Vec<SharedMemory>,
-    shm_outputs: Vec<SharedMemory>,
+pub struct SidecarHost<M: MemoryMapper = NativeMemoryMapper> {
+    mapper: M,
+    shm_cmd: M::Mapping,
+    shm_signal: M::Mapping,
+    shm_inputs: Vec<M::Mapping>,
+    shm_outputs: Vec<M::Mapping>,
     event_fd: Option<EventFd>,
 }
 
-impl SidecarHost {
+impl<M: MemoryMapper> SidecarHost<M> {
     /// # Safety
-    /// All shared memory segment names must exist and be accessible by the current process.
-    pub unsafe fn new(cmd_name: &str, sig_name: &str, in_names: &[String], out_names: &[String], efd: i32) -> Self {
+    /// All shared memory segment names must exist and be accessible by the current process via the mapper.
+    pub unsafe fn new_with_mapper(mapper: M, cmd_name: &str, sig_name: &str, in_names: &[String], out_names: &[String], efd: i32) -> Self {
         let (cmd_layout, _) = ShmRingBuffer::<nullherz_traits::TimestampedCommand>::layout(64);
-        let shm_cmd = SharedMemory::open(cmd_name, cmd_layout.size()).unwrap();
+        let shm_cmd = mapper.open(cmd_name, cmd_layout.size()).expect("Failed to open cmd SHM");
 
-        let shm_signal = SharedMemory::open(sig_name, std::mem::size_of::<ShmSignal>()).unwrap();
+        let shm_signal = mapper.open(sig_name, std::mem::size_of::<ShmSignal>()).expect("Failed to open signal SHM");
 
         let (audio_layout, _) = ShmRingBuffer::<AudioBlock>::layout(16);
         let mut shm_inputs = Vec::new();
         for name in in_names {
-            shm_inputs.push(SharedMemory::open(name, audio_layout.size()).unwrap());
+            shm_inputs.push(mapper.open(name, audio_layout.size()).expect("Failed to open input SHM"));
         }
 
         let mut shm_outputs = Vec::new();
         for name in out_names {
-            shm_outputs.push(SharedMemory::open(name, audio_layout.size()).unwrap());
+            shm_outputs.push(mapper.open(name, audio_layout.size()).expect("Failed to open output SHM"));
         }
 
         let event_fd = if efd >= 0 { Some(EventFd::from_raw(efd)) } else { None };
 
         Self {
+            mapper,
             shm_cmd,
             shm_signal,
             shm_inputs,
@@ -44,7 +65,8 @@ impl SidecarHost {
     }
 
     pub fn run(&mut self, processor: impl AudioProcessor) {
-        let mut context = SidecarContext::new(
+        let mut context = SidecarContext::new_with_mapper(
+            &self.mapper,
             processor,
             &self.shm_cmd,
             &self.shm_signal,
@@ -55,6 +77,12 @@ impl SidecarHost {
 
         context.run_loop();
     }
+}
+
+impl SidecarHost<NativeMemoryMapper> {
+     pub unsafe fn new(cmd_name: &str, sig_name: &str, in_names: &[String], out_names: &[String], efd: i32) -> Self {
+         unsafe { Self::new_with_mapper(NativeMemoryMapper, cmd_name, sig_name, in_names, out_names, efd) }
+     }
 }
 
 pub struct SidecarContext<'a, P: AudioProcessor> {
@@ -77,15 +105,27 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
         shm_outputs: &'a [SharedMemory],
         event_fd: Option<EventFd>,
     ) -> Self {
-        let command_buffer = unsafe { &*(shm_cmd.ptr() as *const ShmRingBuffer<nullherz_traits::TimestampedCommand>) };
-        let signal = unsafe { &*(shm_signal.ptr() as *const ShmSignal) };
+        Self::new_with_mapper(&NativeMemoryMapper, processor, shm_cmd, shm_signal, shm_inputs, shm_outputs, event_fd)
+    }
+
+    pub fn new_with_mapper<M: MemoryMapper>(
+        mapper: &M,
+        processor: P,
+        shm_cmd: &'a M::Mapping,
+        shm_signal: &'a M::Mapping,
+        shm_inputs: &'a [M::Mapping],
+        shm_outputs: &'a [M::Mapping],
+        event_fd: Option<EventFd>,
+    ) -> Self {
+        let command_buffer = unsafe { &*(mapper.ptr(shm_cmd) as *const ShmRingBuffer<nullherz_traits::TimestampedCommand>) };
+        let signal = unsafe { &*(mapper.ptr(shm_signal) as *const ShmSignal) };
         let mut input_buffers = Vec::new();
         for shm in shm_inputs {
-            input_buffers.push(unsafe { &*(shm.ptr() as *const ShmRingBuffer<AudioBlock>) });
+            input_buffers.push(unsafe { &*(mapper.ptr(shm) as *const ShmRingBuffer<AudioBlock>) });
         }
         let mut output_buffers = Vec::new();
         for shm in shm_outputs {
-            output_buffers.push(unsafe { &*(shm.ptr() as *const ShmRingBuffer<AudioBlock>) });
+            output_buffers.push(unsafe { &*(mapper.ptr(shm) as *const ShmRingBuffer<AudioBlock>) });
         }
 
         Self {

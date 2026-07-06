@@ -634,16 +634,40 @@ impl FeatureMutator {
 }
 
 pub fn calculate_similarity(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA) -> f32 {
-    let mut spectral_sim = 0.0;
-    for i in 0..16 {
-        let diff = (dna_a.spectral.latent_space[i] - dna_b.spectral.latent_space[i]).abs();
-        spectral_sim += 1.0 - diff.min(1.0);
+    // Stage 6 Intelligent Similarity: Weighted combination of Latent Distance and Feature Correlation
+
+    // 1. Spectral Latent Similarity (SIMD Optimized Euclidean Distance)
+    use audio_dsp::simd_vec::FloatX16;
+    let v_a = FloatX16::new(dna_a.spectral.latent_space);
+    let v_b = FloatX16::new(dna_b.spectral.latent_space);
+    let v_diff = v_a - v_b;
+    let v_sq = v_diff * v_diff;
+
+    let sq_arr: [f32; 16] = v_sq.into();
+    let sum_sq: f32 = sq_arr.iter().sum();
+    let dist = sum_sq.sqrt();
+    // Normalize distance (max distance in 16D unit cube is 4.0)
+    let spectral_sim = (1.0 - (dist / 4.0)).max(0.0);
+
+    // 2. Feature Vector Correlation (Cosine-like)
+    let mut feature_dot = 0.0;
+    let mut mag_a = 0.0;
+    let mut mag_b = 0.0;
+    for i in 0..8 {
+        feature_dot += dna_a.feature_vector[i] * dna_b.feature_vector[i];
+        mag_a += dna_a.feature_vector[i] * dna_a.feature_vector[i];
+        mag_b += dna_b.feature_vector[i] * dna_b.feature_vector[i];
     }
-    spectral_sim /= 16.0;
+    let feature_sim = if mag_a > 0.0 && mag_b > 0.0 {
+        feature_dot / (mag_a.sqrt() * mag_b.sqrt())
+    } else {
+        1.0 // Both empty vectors are "similar"
+    };
 
     let rhythmic_sim = 1.0 - (dna_a.rhythmic.syncopation_index - dna_b.rhythmic.syncopation_index).abs();
 
-    (spectral_sim * 0.7) + (rhythmic_sim * 0.3)
+    // Weighted final score
+    (spectral_sim * 0.5) + (feature_sim * 0.3) + (rhythmic_sim * 0.2)
 }
 
 pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA, bias: f32) -> nullherz_traits::SoundDNA {
