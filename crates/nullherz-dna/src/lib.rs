@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicPtr, Ordering};
 use redb::{Database, TableDefinition, ReadableTable, TableError};
@@ -256,6 +257,60 @@ pub trait PeerSync {
     fn list_peer_dna(&self) -> Vec<(u64, String)>;
 }
 
+/// Functional implementation of PeerSync using simple TCP exchange.
+pub struct CloudPeerSync {
+    pub peers: Vec<String>,
+}
+
+impl PeerSync for CloudPeerSync {
+    fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {
+        // In a full Gossip protocol, this would broadcast to all peers.
+        // For now, we focus on pull-based sync.
+    }
+
+    fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA> {
+        for peer in &self.peers {
+            if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
+                &peer.parse().ok()?,
+                std::time::Duration::from_millis(500)
+            ) {
+                let req = format!("GET DNA {}\n", id);
+                let _ = stream.write_all(req.as_bytes());
+                let mut buffer = Vec::new();
+                let _ = stream.read_to_end(&mut buffer);
+                if let Ok(dna) = serde_json::from_slice(&buffer) {
+                    return Some(dna);
+                }
+            }
+        }
+        None
+    }
+
+    fn list_peer_dna(&self) -> Vec<(u64, String)> {
+        let mut all_dna = Vec::new();
+        for peer in &self.peers {
+            let addr = match peer.parse() {
+                Ok(a) => a,
+                Err(_) => continue,
+            };
+
+            if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
+                &addr,
+                std::time::Duration::from_millis(500)
+            ) {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(1000)));
+                let _ = stream.write_all(b"LIST\n");
+                let mut buffer = Vec::new();
+                let _ = stream.read_to_end(&mut buffer);
+                if let Ok(list) = serde_json::from_slice::<Vec<(u64, String)>>(&buffer) {
+                    all_dna.extend(list);
+                }
+            }
+        }
+        all_dna
+    }
+}
+
 pub struct DiscoveryService {
     pub known_peers: Vec<String>,
     mdns: Option<mdns_sd::ServiceDaemon>,
@@ -307,6 +362,63 @@ impl DiscoveryService {
                 }
             }
         }
+    }
+
+    /// Proactively announces a new SoundDNA availability to known peers.
+    pub fn announce_push(&self, dna_id: u64) {
+        for peer in &self.known_peers {
+            if let Ok(addr) = peer.parse::<std::net::SocketAddr>() {
+                if let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100)) {
+                    let msg = format!("NEW_DNA {}\n", dna_id);
+                    let _ = stream.write_all(msg.as_bytes());
+                }
+            }
+        }
+    }
+}
+
+pub struct DnaServer;
+
+impl DnaServer {
+    pub fn start(lib: Arc<Mutex<LibraryDatabase>>, port: u16) -> std::io::Result<()> {
+        let listener = std::net::TcpListener::bind(format!("0.0.0.0:{}", port))?;
+        println!("DNA Server listening on port {}", port);
+
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                if let Ok(mut stream) = stream {
+                    let lib_clone = lib.clone();
+                    std::thread::spawn(move || {
+                        let mut reader = BufReader::new(&stream);
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).is_ok() {
+                            let parts: Vec<&str> = line.trim().split_whitespace().collect();
+                            match parts.as_slice() {
+                                ["LIST"] => {
+                                    if let Ok(lib) = lib_clone.lock() {
+                                        if let Ok(tracks) = lib.list_tracks() {
+                                            let list: Vec<(u64, String)> = tracks.into_iter().map(|t| (t.id, t.title)).collect();
+                                            let _ = serde_json::to_writer(&mut stream, &list);
+                                        }
+                                    }
+                                }
+                                ["GET", "DNA", id_str] => {
+                                    if let Ok(id) = id_str.parse::<u64>() {
+                                        if let Ok(lib) = lib_clone.lock() {
+                                            if let Ok(Some(track)) = lib.get_track(id) {
+                                                let _ = serde_json::to_writer(&mut stream, &track.metadata.dna);
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    });
+                }
+            }
+        });
+        Ok(())
     }
 }
 

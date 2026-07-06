@@ -56,8 +56,8 @@ impl ProcessorFactory for SummingFactory {
 
 pub struct SpectralFactory;
 impl ProcessorFactory for SpectralFactory {
-    fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        Some(Box::new(SpectralProcessor::new(1024)))
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(SpectralProcessor::new(node_idx as u64, 1024)))
     }
     fn name(&self) -> &'static str { "Spectral" }
 }

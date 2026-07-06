@@ -65,11 +65,27 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &
 
         self.pipeline.process(carrier, output, |re, im, n, _window, _fft| {
             if has_mod {
-                for i in 0..n {
+                use audio_dsp::simd_vec::*;
+                let v_one = FloatX16::splat(1.0);
+                let v_morph = FloatX16::splat(morph);
+                let mut i = 0;
+                while i + 16 <= n {
+                    let v_re = load_f32x16(re, i);
+                    let v_im = load_f32x16(im, i);
+                    let v_m_mag = load_f32x16(env_ref, i);
+
+                    let v_scale = v_one + (v_m_mag - v_one) * v_morph;
+
+                    store_f32x16(re, i, v_re * v_scale);
+                    store_f32x16(im, i, v_im * v_scale);
+                    i += 16;
+                }
+                while i < n {
                     let m_mag = env_ref[i];
                     let scale = 1.0 + (m_mag - 1.0) * morph;
                     re[i] *= scale;
                     im[i] *= scale;
+                    i += 1;
                 }
             }
         });

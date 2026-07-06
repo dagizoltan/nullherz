@@ -10,6 +10,7 @@ pub struct TopologyManager {
     pub current_sample_rate: f32,
     pub current_topology: GraphTopology,
     pub active_node_types: std::collections::HashMap<u32, u32>,
+    pub id_allocator: nullherz_traits::IdAllocator,
 }
 
 impl Default for TopologyManager {
@@ -28,6 +29,7 @@ impl TopologyManager {
             topo_producer: None,
             current_sample_rate: 44100.0,
             active_node_types: std::collections::HashMap::new(),
+            id_allocator: nullherz_traits::IdAllocator::new(100, 100),
             current_topology: GraphTopology {
                 routing: [NodeRouting {
                     input_indices: [0; nullherz_traits::MAX_CHANNELS],
@@ -95,6 +97,40 @@ impl TopologyManager {
                 }
                 let _ = prod.push(TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx });
                 return true;
+            }
+            Command::Topology(nullherz_traits::TopologyCommand::Connect { src_node_idx, src_output_idx, dst_node_idx, dst_input_idx }) => {
+                // Find existing buffer if output already connected
+                let mut buffer_idx = 0;
+                let src_n = src_node_idx as usize;
+                let src_o = src_output_idx as usize;
+                if src_n < nullherz_traits::MAX_NODES && src_o < nullherz_traits::MAX_CHANNELS {
+                    if src_o < self.current_topology.routing[src_n].output_count {
+                         buffer_idx = self.current_topology.routing[src_n].output_indices[src_o] as u32;
+                    }
+                }
+
+                if buffer_idx == 0 {
+                    buffer_idx = self.id_allocator.allocate_buffer_id(1);
+                }
+
+                self.handle_topology_command(&Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge {
+                    node_idx: src_node_idx,
+                    output_idx: src_output_idx,
+                    new_buffer_idx: buffer_idx,
+                }));
+                self.handle_topology_command(&Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge {
+                    node_idx: dst_node_idx,
+                    input_idx: dst_input_idx,
+                    new_buffer_idx: buffer_idx,
+                }));
+                return true;
+            }
+            Command::Topology(nullherz_traits::TopologyCommand::Disconnect { node_idx, input_idx }) => {
+                 return self.handle_topology_command(&Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge {
+                    node_idx,
+                    input_idx,
+                    new_buffer_idx: 0,
+                }));
             }
             Command::Topology(nullherz_traits::TopologyCommand::SetNodePosition { node_idx, x, y }) => {
                 self.current_topology.node_positions.insert(node_idx, (x, y));

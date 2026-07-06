@@ -31,6 +31,7 @@ pub struct SidecarDiscoveryService {
     pub plugins_dir: String,
     pub known_plugins: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, nullherz_traits::SidecarManifest>>>,
     pub library_db: Option<std::sync::Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>>,
+    pub dna_discovery: std::sync::Arc<std::sync::Mutex<nullherz_dna::DiscoveryService>>,
 }
 
 impl SidecarDiscoveryService {
@@ -39,6 +40,7 @@ impl SidecarDiscoveryService {
             plugins_dir: plugins_dir.to_string(),
             known_plugins: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             library_db: None,
+            dna_discovery: std::sync::Arc::new(std::sync::Mutex::new(nullherz_dna::DiscoveryService::new())),
         }
     }
 
@@ -54,32 +56,24 @@ impl SidecarDiscoveryService {
 
     fn start_p2p_sync(&self) {
         let lib = self.library_db.clone();
+        let discovery_mutex = self.dna_discovery.clone();
         if let Some(lib_db) = lib {
             tokio::spawn(async move {
-                let mut discovery = nullherz_dna::DiscoveryService::new();
                 loop {
-                    discovery.discover();
-                    discovery.listen();
+                    let peers = {
+                        let mut discovery = discovery_mutex.lock().unwrap();
+                        discovery.discover();
+                        discovery.listen();
+                        discovery.known_peers.clone()
+                    };
                     tokio::time::sleep(Duration::from_secs(5)).await;
 
-                    let peers = discovery.known_peers.clone();
+                    if peers.is_empty() { continue; }
                     if peers.is_empty() { continue; }
 
                     let lib_lock = lib_db.lock().unwrap();
 
-                    struct CloudPeerSync { peers: Vec<String> }
-                    impl nullherz_dna::PeerSync for CloudPeerSync {
-                        fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {}
-                        fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA> {
-                            // Stage 6: Deterministic mock for discovered peers
-                            if id == 0xDEADBEEF { Some(nullherz_traits::SoundDNA::default()) } else { None }
-                        }
-                        fn list_peer_dna(&self) -> Vec<(u64, String)> {
-                            self.peers.iter().map(|p| (0xDEADBEEF, format!("DNA Template from {}", p))).collect()
-                        }
-                    }
-
-                    let sync = CloudPeerSync { peers };
+                    let sync = nullherz_dna::CloudPeerSync { peers };
                     let _ = lib_lock.sync_with_cloud(&sync);
                 }
             });
