@@ -366,7 +366,7 @@ impl SimdBiquad {
 impl crate::DspKernel for DjIsolator {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         if inputs.is_empty() || outputs.is_empty() { return; }
-        self.process_block(inputs[0], outputs[0]);
+        self.process_block_unrolled(inputs[0], outputs[0]);
     }
 
     fn reset(&mut self) {
@@ -410,6 +410,78 @@ impl DjIsolator {
             high: BiquadFilter::new(high_coeffs),
             gains: [1.0, 1.0, 1.0],
         }
+    }
+
+    /// Processes a block of audio using 4x unrolled scalar kernels.
+    pub fn process_block_unrolled(&mut self, input: &[f32], output: &mut [f32]) {
+        let len = input.len();
+        if len == 0 { return; }
+
+        if self.low.ramp_duration > 0 || self.mid.ramp_duration > 0 || self.high.ramp_duration > 0 {
+            self.process_block(input, output);
+            return;
+        }
+
+        let mut l_z1 = self.low.z1; let mut l_z2 = self.low.z2;
+        let l_b0 = self.low.coeffs.b0; let l_b1 = self.low.coeffs.b1; let l_b2 = self.low.coeffs.b2;
+        let l_a1 = self.low.coeffs.a1; let l_a2 = self.low.coeffs.a2;
+        let g_l = self.gains[0];
+
+        let mut m_z1 = self.mid.z1; let mut m_z2 = self.mid.z2;
+        let m_b0 = self.mid.coeffs.b0; let m_b1 = self.mid.coeffs.b1; let m_b2 = self.mid.coeffs.b2;
+        let m_a1 = self.mid.coeffs.a1; let m_a2 = self.mid.coeffs.a2;
+        let g_m = self.gains[1];
+
+        let mut h_z1 = self.high.z1; let mut h_z2 = self.high.z2;
+        let h_b0 = self.high.coeffs.b0; let h_b1 = self.high.coeffs.b1; let h_b2 = self.high.coeffs.b2;
+        let h_a1 = self.high.coeffs.a1; let h_a2 = self.high.coeffs.a2;
+        let g_h = self.gains[2];
+
+        let mut i = 0;
+        while i + 4 <= len {
+            unsafe {
+                for k in 0..4 {
+                    let s = *input.get_unchecked(i + k);
+
+                    let l = s * l_b0 + l_z1;
+                    l_z1 = s * l_b1 - l * l_a1 + l_z2;
+                    l_z2 = s * l_b2 - l * l_a2;
+
+                    let m = s * m_b0 + m_z1;
+                    m_z1 = s * m_b1 - m * m_a1 + m_z2;
+                    m_z2 = s * m_b2 - m * m_a2;
+
+                    let h = s * h_b0 + h_z1;
+                    h_z1 = s * h_b1 - h * h_a1 + h_z2;
+                    h_z2 = s * h_b2 - h * h_a2;
+
+                    *output.get_unchecked_mut(i + k) = l * g_l + m * g_m + h * g_h;
+                }
+            }
+            i += 4;
+        }
+
+        while i < len {
+            let s = input[i];
+            let l = s * l_b0 + l_z1;
+            l_z1 = s * l_b1 - l * l_a1 + l_z2;
+            l_z2 = s * l_b2 - l * l_a2;
+
+            let m = s * m_b0 + m_z1;
+            m_z1 = s * m_b1 - m * m_a1 + m_z2;
+            m_z2 = s * m_b2 - m * m_a2;
+
+            let h = s * h_b0 + h_z1;
+            h_z1 = s * h_b1 - h * h_a1 + h_z2;
+            h_z2 = s * h_b2 - h * h_a2;
+
+            output[i] = l * g_l + m * g_m + h * g_h;
+            i += 1;
+        }
+
+        self.low.z1 = l_z1; self.low.z2 = l_z2;
+        self.mid.z1 = m_z1; self.mid.z2 = m_z2;
+        self.high.z1 = h_z1; self.high.z2 = h_z2;
     }
 
     pub fn process_block(&mut self, input: &[f32], output: &mut [f32]) {

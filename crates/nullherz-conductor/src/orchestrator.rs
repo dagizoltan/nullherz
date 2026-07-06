@@ -299,8 +299,13 @@ impl Conductor {
                      let _ = self.update_system_config(None, Some(ports), None);
                  }
                  Command::Core(nullherz_traits::CoreCommand::CalibrateLatency) => {
-                     // Prototype calibration: assume 10ms (441 samples)
-                     let _ = self.update_system_config(None, None, Some(441));
+                     let sample_rate = {
+                         let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+                         engine_lock.as_ref().map(|e| e.target_sample_rate()).unwrap_or(44100.0)
+                     };
+                     // Hardened calibration: 10ms based on actual sample rate
+                     let samples = (sample_rate * 0.01) as u32;
+                     let _ = self.update_system_config(None, None, Some(samples));
                  }
                  Command::Core(nullherz_traits::CoreCommand::HotLoadSidecar { name, node_idx }) => {
                      let plugin_name = String::from_utf8_lossy(&name).trim_matches(char::from(0)).to_string();
@@ -488,12 +493,20 @@ impl Conductor {
         for node_idx in 0..topo.node_count {
             if let Some(target) = topo.node_assignments.get(&(node_idx as u32)) {
                 if target != "local" {
-                    // Pull from the non-blocking IPC bridge and dispatch to the remote manager
+                    // Batch pull from the non-blocking IPC bridge and dispatch to the remote manager in a single task
+                    let mut blocks = Vec::with_capacity(4);
                     while let Some(block) = self.audio_bridge.pop_block(node_idx as u32) {
+                        blocks.push(block);
+                    }
+
+                    if !blocks.is_empty() {
                         let remote_manager = self.sidecar_supervisor.remote_manager.clone();
+                        let node_idx_u32 = node_idx as u32;
                         tokio::spawn(async move {
                             let mut manager = remote_manager.lock().await;
-                            let _ = manager.send_audio_block(node_idx as u32, block).await;
+                            for block in blocks {
+                                let _ = manager.send_audio_block(node_idx_u32, block).await;
+                            }
                         });
                     }
                 }
