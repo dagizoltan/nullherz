@@ -1,60 +1,71 @@
 use nullherz_dna::GeneticLibrary;
-use egui::{Ui, ScrollArea, Color32, RichText};
+use egui::{Ui, ScrollArea, Color32, RichText, Frame, Margin};
 use crate::InspectorApp;
 
 pub fn render(app: &InspectorApp, ui: &mut Ui) {
-    ui.heading(RichText::new("AI ANALYSIS").strong().color(Color32::from_rgb(0, 255, 200)));
+    ui.heading(RichText::new("AI & INSIGHTS").strong().color(Color32::from_rgb(0, 255, 200)));
     ui.add_space(10.0);
 
     let telemetry = app.last_telemetry.lock().unwrap();
 
-    ScrollArea::vertical().show(ui, |ui| {
+    ScrollArea::vertical().id_source("ai_scroll").show(ui, |ui| {
         ui.vertical(|ui| {
-            // AI Suggestions Section
-            ui.group(|ui| {
-                ui.label(RichText::new("TRANSFUSION SUGGESTIONS").strong());
-                ui.separator();
+            // High Confidence Suggestions
+            ui.label(RichText::new("HIGH CONFIDENCE MATCHES").small().strong().color(Color32::from_rgb(0, 255, 150)));
+            ui.add_space(5.0);
 
-                if let Some(t) = &*telemetry {
-                    let mut has_suggestions = false;
-                    for (id, score) in t.suggestions {
-                        if id == 0 { continue; }
-                        has_suggestions = true;
+            if let Some(t) = &*telemetry {
+                let mut has_suggestions = false;
+                for (id, score) in t.suggestions {
+                    if id == 0 || score < 0.7 { continue; }
+                    has_suggestions = true;
 
-                        let track = app.library_db.get_track(id).ok().flatten();
-                        let title = track.as_ref().map(|tr| tr.title.as_str()).unwrap_or("Unknown");
+                    let track = app.library_db.get_track(id).ok().flatten();
+                    let title = track.as_ref().map(|tr| tr.title.as_str()).unwrap_or("Unknown");
 
-                        ui.vertical(|ui| {
-                            ui.label(format!("Match: {} ({:.0}%)", title, score * 100.0));
-                            ui.label(RichText::new("High genetic compatibility detected. Try a 50% Transfusion?").size(9.0).color(Color32::GRAY));
-                            ui.horizontal(|ui| {
-                                if ui.button(RichText::new("LOAD TO DECK B").small()).clicked() {
-                                    let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
-                                        granular_node_idx: 4, // Deck B
-                                        sample_id: id,
+                    Frame::group(ui.style()).fill(Color32::from_rgb(20, 25, 22)).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(format!("{} ({:.0}%)", title, score * 100.0));
+                                ui.label(RichText::new("Perfect candidate for spectral transfusion.").size(9.0).color(Color32::GRAY));
+                            });
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button("LOAD").clicked() {
+                                     let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
+                                        granular_node_idx: 4, sample_id: id,
                                     }));
                                 }
                             });
                         });
-                        ui.add_space(8.0);
-                    }
-                    if !has_suggestions {
-                        ui.label(RichText::new("Analyzing library for matches...").small().italics());
-                    }
-                } else {
-                    ui.label(RichText::new("Connect engine for AI insights.").small().italics());
+                    });
+                    ui.add_space(5.0);
                 }
-            });
+                if !has_suggestions {
+                    ui.label(RichText::new("No high-confidence matches found.").small().italics().color(Color32::from_gray(100)));
+                }
+            }
 
-            ui.add_space(10.0);
+            ui.add_space(15.0);
+            ui.label(RichText::new("GENETIC DRIFT").small().strong().color(Color32::from_gray(120)));
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::hover());
+            ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(15, 15, 20));
+            ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, Color32::from_gray(30)));
 
-            // System Logs Section
+            // Render a stylized drift wave (Mocked)
+            let mut points = vec![];
+            for i in 0..20 {
+                let x = rect.left() + (i as f32 / 19.0) * rect.width();
+                let y = rect.center().y + ((i as f32 * 0.8).sin() * 10.0);
+                points.push(egui::pos2(x, y));
+            }
+            ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.5, Color32::from_rgb(0, 200, 255))));
+
+            ui.add_space(15.0);
             ui.group(|ui| {
                 ui.label(RichText::new("SYSTEM EVENTS").strong());
                 ui.separator();
                 ui.label("• Sidecar #1: Performance stable.");
-                ui.label("• AnalysisWorker: Registry updated.");
-                ui.label(RichText::new("• Warning: X-RUN detected in block 1042").color(Color32::KHAKI));
+                ui.label("• Cloud Sync: 4 new templates discovered.");
             });
         });
     });
