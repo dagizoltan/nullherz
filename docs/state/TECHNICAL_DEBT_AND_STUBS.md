@@ -19,7 +19,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 ## 2. Orchestration Plane (`nullherz-conductor`)
 
 ### `src/orchestrator.rs`
-- **General**: No major stubs remaining in core command dispatch logic.
+- **Line 537**: `// For this prototype, we'll try to use the first registered ID if available.` - Heuristic-based DNA suggestion logic for master track identification. Needs robust `MasterDeck` state tracking.
 
 ---
 
@@ -34,7 +34,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 ## 4. Execution Plane (`audio-dsp`, `nullherz-processors`)
 
 ### `nullherz-processors/src/spectral.rs`
-- **Line 16**: `// For prototype, we ensure lengths match.` - Simplification in spectral processing.
+- **Line 16**: `// For prototype, we ensure lengths match.` - Fixed-length processing assumes input/output alignment. Missing zero-padding or resampling for mismatched buffer boundaries.
 
 ---
 
@@ -44,7 +44,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 - **Line 32**: [RESOLVED] `bincode::serialize(&cmd)` refactored to `serialize_into` with a stack-allocated buffer.
 
 ### `sidecar-macros/src/lib.rs`
-- **Line 21**: `// Simplified parsing for macro prototype` - Macro DSL parsing is not robust.
+- **Line 21**: `// Simplified parsing for macro prototype` - Sidecar initialization relies on manual CLI argument iteration. Needs a formal attribute parser for robust SHM and EventFD configuration.
 
 ### `sidecar-sdk/src/lib.rs`
 - **Line 175**: `// In a real kernel, this would involve a delay line or sample shift` - `apply_rhythmic_offset` is a stub.
