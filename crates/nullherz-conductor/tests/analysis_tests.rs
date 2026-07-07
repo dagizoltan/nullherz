@@ -29,6 +29,9 @@ async fn test_analysis_pipeline() {
             path: "mock.wav".to_string(),
             title: "Mock Track".to_string(),
             artist: "Mock Artist".to_string(),
+            album: "Mock Album".to_string(),
+            genre: "Mock Genre".to_string(),
+            energy_level: 0.5,
             metadata: SampleMetadata::new_empty(),
         }).unwrap();
     }

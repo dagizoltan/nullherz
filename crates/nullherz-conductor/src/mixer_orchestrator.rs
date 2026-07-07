@@ -24,6 +24,23 @@ impl MixerOrchestrator {
                                 translated.push(Command::Core(nullherz_traits::CoreCommand::SetBpm(track.metadata.bpm)));
                                 // Future: also emit SyncDecks if global sync is enabled
                             }
+
+                            // Harmonic Auto-Sync: Align to Master Deck Key
+                            if let Some(track_key) = track.metadata.root_key {
+                                // For now, assume master key is C (0.0). In production, this would resolve from active_master_deck.
+                                let master_key = 0.0f32;
+                                let mut diff = master_key - track_key;
+                                while diff > 6.0 { diff -= 12.0; }
+                                while diff < -6.0 { diff += 12.0; }
+
+                                translated.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: nodes.keysync_id as u64,
+                                    param_id: 0,
+                                    value: diff,
+                                    ramp_duration_samples: 1024,
+                                }));
+                                println!("MixerOrchestrator: Harmonic Sync: Shifted Deck {} by {} semitones", deck_id, diff);
+                            }
                         }
                     }
                 }

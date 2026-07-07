@@ -13,6 +13,9 @@ pub struct LibraryTrack {
     pub path: String,
     pub title: String,
     pub artist: String,
+    pub album: String,
+    pub genre: String,
+    pub energy_level: f32,
     pub metadata: nullherz_traits::SampleMetadata,
 }
 
@@ -28,6 +31,10 @@ pub struct SmartCrateDefinition {
     pub spectral_tilt_range: Option<(f32, f32)>,
     pub rhythmic_syncopation_range: Option<(f32, f32)>,
     pub glitch_density_range: Option<(f32, f32)>,
+    pub genre: Option<String>,
+    pub bpm_range: Option<(f32, f32)>,
+    pub energy_range: Option<(f32, f32)>,
+    pub root_key: Option<f32>,
 }
 
 #[derive(Clone)]
@@ -44,6 +51,7 @@ pub trait GeneticLibrary: Send + Sync {
     fn remove_from_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>>;
     fn list_crates(&self) -> Result<Vec<String>, Box<dyn std::error::Error>>;
     fn get_tracks_in_crate(&self, crate_name: &str) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>>;
+    fn query_tracks(&self, genre: Option<&str>, min_bpm: Option<f32>, max_bpm: Option<f32>, root_key: Option<f32>) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>>;
 }
 
 pub struct LibraryDatabase {
@@ -152,6 +160,26 @@ impl GeneticLibrary for LibraryDatabase {
         }
         Ok(tracks)
     }
+
+    fn query_tracks(&self, genre: Option<&str>, min_bpm: Option<f32>, max_bpm: Option<f32>, root_key: Option<f32>) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
+        let all_tracks = self.list_tracks()?;
+        let results = all_tracks.into_iter().filter(|t| {
+            if let Some(g) = genre {
+                if t.genre != g { return false; }
+            }
+            if let Some(min) = min_bpm {
+                if t.metadata.bpm < min { return false; }
+            }
+            if let Some(max) = max_bpm {
+                if t.metadata.bpm > max { return false; }
+            }
+            if let Some(key) = root_key {
+                if t.metadata.root_key != Some(key) { return false; }
+            }
+            true
+        }).collect();
+        Ok(results)
+    }
 }
 
 impl LibraryDatabase {
@@ -238,6 +266,9 @@ impl LibraryDatabase {
                         path: format!("cloud://{}", id),
                         title: name,
                         artist: "Cloud Peer".to_string(),
+                        album: "Unknown".to_string(),
+                        genre: "Unknown".to_string(),
+                        energy_level: 0.5,
                         metadata: nullherz_traits::SampleMetadata {
                             dna,
                             ..nullherz_traits::SampleMetadata::new_empty()
@@ -473,6 +504,26 @@ impl SmartCrateManager {
             });
         }
 
+        // 5. Filter by Genre
+        if let Some(ref genre) = def.genre {
+            results.retain(|t| t.genre == *genre);
+        }
+
+        // 6. Filter by BPM range
+        if let Some((min, max)) = def.bpm_range {
+            results.retain(|t| t.metadata.bpm >= min && t.metadata.bpm <= max);
+        }
+
+        // 7. Filter by Energy level
+        if let Some((min, max)) = def.energy_range {
+            results.retain(|t| t.energy_level >= min && t.energy_level <= max);
+        }
+
+        // 8. Filter by Root Key
+        if let Some(key) = def.root_key {
+            results.retain(|t| t.metadata.root_key == Some(key));
+        }
+
         results
     }
 }
@@ -570,6 +621,9 @@ mod tests {
             path: "/test/path.wav".to_string(),
             title: "Test Track".to_string(),
             artist: "Test Artist".to_string(),
+            album: "Test Album".to_string(),
+            genre: "Test Genre".to_string(),
+            energy_level: 0.8,
             metadata: nullherz_traits::SampleMetadata::new_empty(),
         };
 
@@ -623,6 +677,9 @@ mod tests {
             path: "/test/track.wav".to_string(),
             title: "Crate Track".to_string(),
             artist: "Crate Artist".to_string(),
+            album: "Crate Album".to_string(),
+            genre: "Techno".to_string(),
+            energy_level: 0.9,
             metadata: nullherz_traits::SampleMetadata::new_empty(),
         };
 
@@ -689,6 +746,9 @@ mod tests {
             path: "a.wav".into(),
             title: "A".into(),
             artist: "A".into(),
+            album: "A".into(),
+            genre: "A".into(),
+            energy_level: 0.5,
             metadata: nullherz_traits::SampleMetadata::new_empty(),
         };
         track_a.metadata.dna.spectral.tilt = 0.5;
@@ -698,6 +758,9 @@ mod tests {
             path: "b.wav".into(),
             title: "B".into(),
             artist: "B".into(),
+            album: "B".into(),
+            genre: "B".into(),
+            energy_level: 0.5,
             metadata: nullherz_traits::SampleMetadata::new_empty(),
         };
         track_b.metadata.dna.spectral.tilt = -0.5;
@@ -709,6 +772,54 @@ mod tests {
             spectral_tilt_range: Some((0.1, 1.0)),
             rhythmic_syncopation_range: None,
             glitch_density_range: None,
+            genre: None,
+            bpm_range: None,
+            energy_range: None,
+            root_key: None,
+        };
+
+        let filtered = SmartCrateManager::filter_tracks(&def, vec![track_a.clone(), track_b.clone()]);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, 1);
+    }
+
+    #[test]
+    fn test_smart_crate_genre_and_bpm() {
+        let mut track_a = LibraryTrack {
+            id: 1,
+            path: "a.wav".into(),
+            title: "A".into(),
+            artist: "A".into(),
+            album: "A".into(),
+            genre: "Techno".into(),
+            energy_level: 0.5,
+            metadata: nullherz_traits::SampleMetadata::new_empty(),
+        };
+        track_a.metadata.bpm = 130.0;
+
+        let mut track_b = LibraryTrack {
+            id: 2,
+            path: "b.wav".into(),
+            title: "B".into(),
+            artist: "B".into(),
+            album: "B".into(),
+            genre: "House".into(),
+            energy_level: 0.5,
+            metadata: nullherz_traits::SampleMetadata::new_empty(),
+        };
+        track_b.metadata.bpm = 124.0;
+
+        let def = SmartCrateDefinition {
+            name: "Techno Fast".into(),
+            target_dna: None,
+            threshold: 0.0,
+            spectral_tilt_range: None,
+            rhythmic_syncopation_range: None,
+            glitch_density_range: None,
+            genre: Some("Techno".into()),
+            bpm_range: Some((128.0, 140.0)),
+            energy_range: None,
+            root_key: None,
         };
 
         let filtered = SmartCrateManager::filter_tracks(&def, vec![track_a.clone(), track_b.clone()]);

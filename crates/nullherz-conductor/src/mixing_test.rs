@@ -47,13 +47,23 @@ mod tests {
         let tracks = conductor.library.lock().unwrap().list_tracks().unwrap();
         assert!(tracks.len() >= 2, "Expected at least 2 tracks, found {}", tracks.len());
 
-        let track_a_id = tracks.iter().find(|t| t.title == "track_a.wav").unwrap().id;
-        let track_b_id = tracks.iter().find(|t| t.title == "track_b.wav").unwrap().id;
+        let mut track_a = tracks.iter().find(|t| t.title == "track_a.wav").unwrap().clone();
+        let mut track_b = tracks.iter().find(|t| t.title == "track_b.wav").unwrap().clone();
+
+        // Setup root keys for harmonic sync testing (C and F)
+        track_a.metadata.root_key = Some(0.0);
+        track_b.metadata.root_key = Some(5.0);
+
+        {
+            let lib = conductor.library.lock().unwrap();
+            lib.save_track(&track_a).unwrap();
+            lib.save_track(&track_b).unwrap();
+        }
 
         // 3. Load tracks to decks
         conductor.apply_mixer_commands(vec![
-            Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id: "A".chars().next().unwrap(), sample_id: track_a_id }),
-            Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id: "B".chars().next().unwrap(), sample_id: track_b_id }),
+            Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id: 'A', sample_id: track_a.id }),
+            Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id: 'B', sample_id: track_b.id }),
         ]);
 
         // 4. Play decks

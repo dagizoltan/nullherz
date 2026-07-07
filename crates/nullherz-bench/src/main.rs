@@ -30,6 +30,9 @@ fn main() {
                 path: format!("/fake/path/track_{}.wav", i),
                 title: format!("Stress Track {}", i),
                 artist: "DJ Stress".to_string(),
+                album: "Stress Test".to_string(),
+                genre: "Industrial".to_string(),
+                energy_level: 0.9,
                 metadata: SampleMetadata {
                     dna,
                     ..SampleMetadata::new_empty()
