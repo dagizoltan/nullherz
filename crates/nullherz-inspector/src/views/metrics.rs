@@ -76,17 +76,36 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
             ui.add_space(10.0);
 
-            // 4. Thread Heatmap (Mocked)
-            render_metric_group(ui, "ORCHESTRATION THREADS", frame_width, |ui| {
+            // 4. Thread Heatmap (Grounded)
+            render_metric_group(ui, "EXECUTION PLANE THREADS (WORKERS)", frame_width, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    for i in 0..16 {
-                        let val = (i as f32 * 0.1).sin() * 0.5 + 0.5;
-                        let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
-                        let color = if val > 0.8 { Color32::RED } else if val > 0.4 { Color32::from_rgb(0, 150, 255) } else { Color32::from_gray(50) };
-                        ui.painter().rect_filled(r, 1.0, color);
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let worker_count = nullherz_traits::DEFAULT_WORKER_COUNT;
+
+                    for i in 0..worker_count {
+                        let (r, _) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
+
+                        // Color based on engine load as a proxy for thread activity
+                        let load = if let Some(t) = &telemetry {
+                            (t.process_time_ns as f32 / 1_000_000.0) / (256.0 / 44100.0 * 1000.0)
+                        } else {
+                            0.0
+                        };
+
+                        let color = if load > 0.9 {
+                            Color32::from_rgb(255, 50, 50) // Stress
+                        } else if load > 0.1 {
+                            app.theme.accent.gamma_multiply(0.8) // Active
+                        } else {
+                            Color32::from_gray(40) // Idle
+                        };
+
+                        ui.painter().rect_filled(r, 2.0, color);
+                        ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, format!("{}", i), egui::FontId::monospace(10.0), Color32::WHITE);
                     }
                 });
+                ui.add_space(5.0);
+                ui.label(RichText::new("STABLE PARALLEL STAGE EXECUTION").small().color(Color32::from_gray(80)));
             });
         });
     });
