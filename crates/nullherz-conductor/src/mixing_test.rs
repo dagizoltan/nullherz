@@ -13,17 +13,34 @@ mod tests {
         let bootstrap_commands = mixer.create_4channel_mixer();
         conductor.apply_mixer_commands(bootstrap_commands);
 
-        // 2. Scan and Register tracks
-        let tracks_path = if std::path::Path::new("tracks").exists() {
-            "tracks"
-        } else if std::path::Path::new("../../tracks").exists() {
-            "../../tracks"
-        } else {
-            panic!("Could not find tracks directory in {} or ../../tracks", std::env::current_dir().unwrap().display());
-        };
+        // 2. Ensure test tracks exist and Scan
+        let test_tracks_dir = "test_tracks_mixing";
+        std::fs::create_dir_all(test_tracks_dir).unwrap();
+
+        let track_a_path = format!("{}/track_a.wav", test_tracks_dir);
+        let track_b_path = format!("{}/track_b.wav", test_tracks_dir);
+
+        {
+            let spec = hound::WavSpec {
+                channels: 1,
+                sample_rate: 44100,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            };
+            let mut writer_a = hound::WavWriter::create(&track_a_path, spec).unwrap();
+            for t in 0..44100 {
+                let val = (t as f32 * 440.0 * 2.0 * std::f32::consts::PI / 44100.0).sin();
+                writer_a.write_sample((val * 32767.0) as i16).unwrap();
+            }
+            let mut writer_b = hound::WavWriter::create(&track_b_path, spec).unwrap();
+            for t in 0..44100 {
+                let val = if (t % 200) < 100 { 0.5f32 } else { -0.5f32 };
+                writer_b.write_sample((val * 32767.0) as i16).unwrap();
+            }
+        }
 
         if let Some(ref monitor) = conductor.folder_monitor {
-            monitor.scan_folder(tracks_path);
+            monitor.scan_folder(test_tracks_dir);
         }
 
         // Wait a bit for registration to complete (it's synchronous in scan_folder)
@@ -58,5 +75,6 @@ mod tests {
 
         // Clean up
         let _ = std::fs::remove_file("test_mixing.redb");
+        let _ = std::fs::remove_dir_all(test_tracks_dir);
     }
 }
