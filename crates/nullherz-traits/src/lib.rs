@@ -471,6 +471,7 @@ pub struct GraphTopology {
     pub node_count: usize,
     pub node_assignments: std::collections::HashMap<u32, String>, // node_idx -> "local" or sidecar addr
     pub node_positions: std::collections::HashMap<u32, (f32, f32)>,
+    pub bypass_states: std::collections::HashSet<u32>,
 }
 
 pub enum TopologyMutation {
@@ -506,6 +507,10 @@ pub enum TopologyMutation {
     UpdateMetadata {
         node_idx: u32,
         metadata: Arc<SampleMetadata>,
+    },
+    SetBypass {
+        node_idx: u32,
+        enabled: bool,
     },
     LoadProcessorState {
         node_idx: u32,

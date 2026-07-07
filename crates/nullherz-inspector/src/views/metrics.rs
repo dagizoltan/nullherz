@@ -55,7 +55,28 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
             ui.add_space(10.0);
 
-            // 3. Thread Heatmap (Mocked)
+            // 3. Distributed Execution Section
+            render_metric_group(ui, "DISTRIBUTED EXECUTION (REMOTE NODES)", frame_width, |ui| {
+                if let Some(t) = &telemetry {
+                    if t.remote_node_count == 0 {
+                        ui.label(RichText::new("No remote nodes attached.").italics().small().color(Color32::GRAY));
+                    } else {
+                        for i in 0..(t.remote_node_count as usize).min(8) {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("Node {}", i));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui.label(format!("{:.1}ms", t.remote_latency_ms[i]));
+                                    ui.add(egui::ProgressBar::new(t.remote_cpu_usage[i] / 100.0).desired_width(100.0).text(format!("{:.1}%", t.remote_cpu_usage[i])));
+                                });
+                            });
+                        }
+                    }
+                }
+            });
+
+            ui.add_space(10.0);
+
+            // 4. Thread Heatmap (Mocked)
             render_metric_group(ui, "ORCHESTRATION THREADS", frame_width, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;

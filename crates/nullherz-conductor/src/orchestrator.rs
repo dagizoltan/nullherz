@@ -64,8 +64,9 @@ impl Conductor {
         let sidecar_discovery = crate::discovery::SidecarDiscoveryService::new("plugins").with_library(library.clone());
         let dna_discovery = sidecar_discovery.dna_discovery.clone();
 
-        let mut transfusion_manager = TransfusionManager::new(sample_registry.clone()).with_library(library.clone());
+        let mut transfusion_manager = TransfusionManager::new(sample_registry.clone());
         transfusion_manager.discovery_service = Some(dna_discovery);
+        transfusion_manager = transfusion_manager.with_library(library.clone());
 
         Self {
             engine_coordinator: EngineCoordinator::new(),
@@ -483,6 +484,33 @@ impl Conductor {
             }
             nullherz_traits::PerformanceCommand::ClearTrackPattern { track_idx, .. } => {
                 println!("Conductor: Clearing Pattern for Track {}", track_idx);
+                true
+            }
+            nullherz_traits::PerformanceCommand::SyncDecks { source_deck, .. } => {
+                let sampler_id = self.mixer_manager.deck_mappings.get(&source_deck).map(|d| d.sampler_id);
+                if let Some(node_idx) = sampler_id {
+                    let mut target_bpm = 0.0;
+                    {
+                        if let Ok(engine_lock) = self.engine_coordinator.backend_manager.engine_handle.lock() {
+                            if let Some(ref engine) = *engine_lock {
+                                let resource_id = engine.list_children().iter()
+                                    .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(node_idx))
+                                    .and_then(|c| c.resource_id());
+
+                                if let Some(rid) = resource_id {
+                                    if let Ok(lib) = self.library.lock() {
+                                        if let Ok(Some(track)) = lib.get_track(rid) {
+                                            target_bpm = track.metadata.bpm;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if target_bpm > 0.0 {
+                        self.apply_mixer_commands(vec![nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetBpm(target_bpm))]);
+                    }
+                }
                 true
             }
             _ => false,

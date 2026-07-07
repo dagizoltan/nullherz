@@ -43,6 +43,7 @@ impl TopologyManager {
                 node_count: 0,
                 node_assignments: std::collections::HashMap::new(),
                 node_positions: std::collections::HashMap::new(),
+                bypass_states: std::collections::HashSet::new(),
             },
         }
     }
@@ -131,6 +132,15 @@ impl TopologyManager {
                     input_idx,
                     new_buffer_idx: 0,
                 }));
+            }
+            Command::Topology(nullherz_traits::TopologyCommand::SetBypass { node_idx, enabled }) => {
+                if enabled {
+                    self.current_topology.bypass_states.insert(node_idx);
+                } else {
+                    self.current_topology.bypass_states.remove(&node_idx);
+                }
+                let _ = prod.push(TopologyMutation::SetBypass { node_idx, enabled });
+                return true;
             }
             Command::Topology(nullherz_traits::TopologyCommand::SetNodePosition { node_idx, x, y }) => {
                 self.current_topology.node_positions.insert(node_idx, (x, y));

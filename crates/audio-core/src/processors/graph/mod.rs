@@ -45,6 +45,7 @@ impl ProcessorGraph {
             node_count: 0,
             node_assignments: std::collections::HashMap::new(),
             node_positions: std::collections::HashMap::new(),
+            bypass_states: std::collections::HashSet::new(),
         };
 
         let nodes = Box::new(std::array::from_fn(|_| ProcessorNode {
@@ -170,6 +171,16 @@ impl ProcessorGraph {
                 self.topology_coordinator.topologies[inactive].node_positions.insert(node_idx, (x, y));
                 // Ensure active topology also has it if no commit is pending
                 self.topology_coordinator.topologies[self.topology_coordinator.active_idx()].node_positions.insert(node_idx, (x, y));
+            }
+            TopologyMutation::SetBypass { node_idx, enabled } => {
+                let inactive = (self.topology_coordinator.active_idx() + 1) % 2;
+                if enabled {
+                    self.topology_coordinator.topologies[inactive].bypass_states.insert(node_idx);
+                    self.topology_coordinator.topologies[self.topology_coordinator.active_idx()].bypass_states.insert(node_idx);
+                } else {
+                    self.topology_coordinator.topologies[inactive].bypass_states.remove(&node_idx);
+                    self.topology_coordinator.topologies[self.topology_coordinator.active_idx()].bypass_states.remove(&node_idx);
+                }
             }
         }
     }
@@ -524,6 +535,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             transport: None,
             host_ptr: None,
             is_last_sub_block: false,
+            is_bypassed: false,
         });
         pool.worker_wake_fds[0].notify();
         let target = start_count + 1;
@@ -546,6 +558,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             transport: None,
             host_ptr: None,
             is_last_sub_block: false,
+            is_bypassed: false,
         });
         pool.worker_wake_fds[0].notify();
         let target_2 = start_count_2 + 1;
