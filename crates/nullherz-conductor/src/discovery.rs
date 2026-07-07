@@ -78,7 +78,7 @@ impl SidecarDiscoveryService {
                         d.trusted_peers.clone()
                     };
 
-                    let sync = nullherz_dna::CloudPeerSync { peers, trusted_peers };
+                    let sync = nullherz_dna::CloudPeerSync { peers, trusted_peers, peer_signatures: std::collections::HashMap::new() };
                     let _ = lib_lock.sync_with_cloud(&sync);
                 }
             });

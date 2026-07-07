@@ -6,6 +6,7 @@ mod topology_types;
 mod executor;
 mod topology_coordinator;
 mod buffer_pool;
+mod verification;
 
 pub use node::{ProcessorNode, DummyProcessor};
 pub use pool::{TaskPool, Job};

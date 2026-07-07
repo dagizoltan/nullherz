@@ -52,6 +52,8 @@ pub trait GeneticLibrary: Send + Sync {
     fn list_crates(&self) -> Result<Vec<String>, Box<dyn std::error::Error>>;
     fn get_tracks_in_crate(&self, crate_name: &str) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>>;
     fn query_tracks(&self, genre: Option<&str>, min_bpm: Option<f32>, max_bpm: Option<f32>, root_key: Option<f32>) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>>;
+    /// Proactively suggests tracks from the library that are genetically similar to the provided DNA.
+    fn suggest_matches(&self, target_dna: &nullherz_traits::SoundDNA, limit: usize) -> Result<Vec<(u64, f32)>, Box<dyn std::error::Error>>;
 }
 
 pub struct LibraryDatabase {
@@ -180,6 +182,10 @@ impl GeneticLibrary for LibraryDatabase {
         }).collect();
         Ok(results)
     }
+
+    fn suggest_matches(&self, target_dna: &nullherz_traits::SoundDNA, limit: usize) -> Result<Vec<(u64, f32)>, Box<dyn std::error::Error>> {
+        Matchmaker::find_best_matches(self, target_dna, limit)
+    }
 }
 
 impl LibraryDatabase {
@@ -286,18 +292,39 @@ pub trait PeerSync {
     fn announce_dna(&self, dna: &nullherz_traits::SoundDNA);
     fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA>;
     fn list_peer_dna(&self) -> Vec<(u64, String)>;
+    /// Gossip-based metadata exchange: share known DNA identifiers with peers.
+    fn gossip_metadata(&self, known_ids: &[(u64, String)]);
 }
 
 /// Functional implementation of PeerSync using simple TCP exchange.
 pub struct CloudPeerSync {
     pub peers: Vec<String>,
     pub trusted_peers: std::collections::HashSet<String>,
+    /// Mock for cryptographic signatures: peer_addr -> signature
+    pub peer_signatures: HashMap<String, [u8; 64]>,
 }
 
 impl PeerSync for CloudPeerSync {
     fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {
         // In a full Gossip protocol, this would broadcast to all peers.
-        // For now, we focus on pull-based sync.
+    }
+
+    fn gossip_metadata(&self, known_ids: &[(u64, String)]) {
+        for peer in &self.peers {
+            let addr = match peer.parse() {
+                Ok(a) => a,
+                Err(_) => continue,
+            };
+            if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
+                &addr,
+                std::time::Duration::from_millis(100)
+            ) {
+                if let Ok(payload) = serde_json::to_string(known_ids) {
+                    let msg = format!("GOSSIP {}\n", payload);
+                    let _ = stream.write_all(msg.as_bytes());
+                }
+            }
+        }
     }
 
     fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA> {
@@ -414,8 +441,32 @@ impl DiscoveryService {
         for peer in &self.known_peers {
             if let Ok(addr) = peer.parse::<std::net::SocketAddr>() {
                 if let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100)) {
+                    // AUDIT: In production, this NEW_DNA message must be cryptographically signed.
                     let msg = format!("NEW_DNA {}\n", dna_id);
                     let _ = stream.write_all(msg.as_bytes());
+                }
+            }
+        }
+    }
+
+    /// Performs a Gossip cycle with a random subset of known peers.
+    pub fn gossip_cycle(&self, lib: &LibraryDatabase) {
+        if let Ok(tracks) = lib.list_tracks() {
+            let metadata: Vec<(u64, String)> = tracks.into_iter().map(|t| (t.id, t.title)).collect();
+            // Select a random peer (simplified)
+            if let Some(peer) = self.known_peers.first() {
+                let addr = match peer.parse() {
+                    Ok(a) => a,
+                    Err(_) => return,
+                };
+                if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
+                    &addr,
+                    std::time::Duration::from_millis(200)
+                ) {
+                    if let Ok(payload) = serde_json::to_string(&metadata) {
+                        let msg = format!("GOSSIP {}\n", payload);
+                        let _ = stream.write_all(msg.as_bytes());
+                    }
                 }
             }
         }
@@ -445,6 +496,12 @@ impl DnaServer {
                                             let list: Vec<(u64, String)> = tracks.into_iter().map(|t| (t.id, t.title)).collect();
                                             let _ = serde_json::to_writer(&mut stream, &list);
                                         }
+                                    }
+                                }
+                                ["GOSSIP", payload] => {
+                                    if let Ok(remote_metadata) = serde_json::from_str::<Vec<(u64, String)>>(payload) {
+                                        println!("DNA Server: Received gossip payload with {} entries.", remote_metadata.len());
+                                        // In a real implementation, this would trigger pull-based sync for unknown IDs.
                                     }
                                 }
                                 ["GET", "DNA", id_str] => {
@@ -525,6 +582,22 @@ impl SmartCrateManager {
         }
 
         results
+    }
+
+    /// Automatically generates a smart crate based on "energy-level-matching" to a seed track.
+    pub fn generate_energy_matched_crate(seed_track: &LibraryTrack, _all_tracks: Vec<LibraryTrack>, threshold: f32) -> SmartCrateDefinition {
+        SmartCrateDefinition {
+            name: format!("Energy Match: {}", seed_track.title),
+            target_dna: Some(seed_track.metadata.dna.clone()),
+            threshold,
+            spectral_tilt_range: None,
+            rhythmic_syncopation_range: None,
+            glitch_density_range: None,
+            genre: Some(seed_track.genre.clone()),
+            bpm_range: Some((seed_track.metadata.bpm - 5.0, seed_track.metadata.bpm + 5.0)),
+            energy_range: Some((seed_track.energy_level - 0.2, seed_track.energy_level + 0.2)),
+            root_key: seed_track.metadata.root_key,
+        }
     }
 }
 
@@ -654,6 +727,7 @@ mod tests {
             fn list_peer_dna(&self) -> Vec<(u64, String)> {
                 vec![(0xABC, "Cloud Track".to_string())]
             }
+            fn gossip_metadata(&self, _known_ids: &[(u64, String)]) {}
         }
 
         db.sync_with_cloud(&MockSync).unwrap();
@@ -927,15 +1001,22 @@ pub fn calculate_similarity(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_
     // Normalize distance (max distance in 16D unit cube is 4.0)
     let spectral_sim = (1.0 - (dist / 4.0)).max(0.0);
 
-    // 2. Feature Vector Correlation (Cosine-like)
-    let mut feature_dot = 0.0;
-    let mut mag_a = 0.0;
-    let mut mag_b = 0.0;
-    for i in 0..8 {
-        feature_dot += dna_a.feature_vector[i] * dna_b.feature_vector[i];
-        mag_a += dna_a.feature_vector[i] * dna_a.feature_vector[i];
-        mag_b += dna_b.feature_vector[i] * dna_b.feature_vector[i];
-    }
+    // 2. Feature Vector Correlation (Cosine-like) - SIMD Optimized
+    use audio_dsp::simd_vec::load_f32x8;
+    let v_fv_a = load_f32x8(&dna_a.feature_vector, 0);
+    let v_fv_b = load_f32x8(&dna_b.feature_vector, 0);
+
+    let v_dot = v_fv_a * v_fv_b;
+    let v_mag_a = v_fv_a * v_fv_a;
+    let v_mag_b = v_fv_b * v_fv_b;
+
+    let dot_arr: [f32; 8] = v_dot.into();
+    let mag_a_arr: [f32; 8] = v_mag_a.into();
+    let mag_b_arr: [f32; 8] = v_mag_b.into();
+
+    let feature_dot: f32 = dot_arr.iter().sum();
+    let mag_a: f32 = mag_a_arr.iter().sum();
+    let mag_b: f32 = mag_b_arr.iter().sum();
     let feature_sim = if mag_a > 0.0 && mag_b > 0.0 {
         feature_dot / (mag_a.sqrt() * mag_b.sqrt())
     } else {
@@ -952,10 +1033,14 @@ pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits:
     let mut child = nullherz_traits::SoundDNA::default();
     let inv_bias = 1.0 - bias;
 
-    // 0. Feature Vector Transfusion
-    for i in 0..8 {
-        child.feature_vector[i] = dna_a.feature_vector[i] * inv_bias + dna_b.feature_vector[i] * bias;
-    }
+    // 0. Feature Vector Transfusion - SIMD Optimized
+    use audio_dsp::simd_vec::{FloatX8, load_f32x8, store_f32x8};
+    let v_inv_bias_8 = FloatX8::from(inv_bias);
+    let v_bias_8 = FloatX8::from(bias);
+    let v_fv_a = load_f32x8(&dna_a.feature_vector, 0);
+    let v_fv_b = load_f32x8(&dna_b.feature_vector, 0);
+    let v_fv_res = (v_fv_a * v_inv_bias_8) + (v_fv_b * v_bias_8);
+    store_f32x8(&mut child.feature_vector, 0, v_fv_res);
 
     // 1. Spectral Transfusion (Neural/Latent SIMD Optimized)
     NeuralTransfuser::interpolate_latent(&mut child.spectral.latent_space, &dna_a.spectral.latent_space, &dna_b.spectral.latent_space, bias);

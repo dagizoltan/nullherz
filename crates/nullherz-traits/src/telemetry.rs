@@ -27,6 +27,10 @@ pub struct Telemetry {
     pub active_clips: [u8; 8],
     /// Bitmask of clips in "Starting/Quantizing" state (Row per byte)
     pub starting_clips_mask: [u8; 8],
+    /// System monotonic clock time in nanoseconds.
+    pub system_time_ns: u64,
+    /// Device-specific hardware clock time in nanoseconds.
+    pub device_time_ns: u64,
     pub remote_node_count: u32,
     pub remote_cpu_usage: [f32; 8], // Support up to 8 remote nodes in telemetry
     pub remote_latency_ms: [f32; 8],
@@ -57,6 +61,8 @@ impl Default for Telemetry {
             dna_latent_space: [0.0; 16],
             active_clips: [255; 8],
             starting_clips_mask: [0; 8],
+            system_time_ns: 0,
+            device_time_ns: 0,
             remote_node_count: 0,
             remote_cpu_usage: [0.0; 8],
             remote_latency_ms: [0.0; 8],

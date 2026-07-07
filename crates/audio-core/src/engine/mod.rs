@@ -175,6 +175,8 @@ impl<K: ProcessingKernel> AudioEngine<K> {
                 is_playing: false,
                 sample_rate: 44100.0,
                 absolute_samples: 0,
+                system_time_ns: 0,
+                device_time_ns: 0,
             },
             target_sample_rate: 44100.0,
             logger,

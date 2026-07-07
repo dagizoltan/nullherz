@@ -254,6 +254,22 @@ impl SpectralProcessor {
         use crate::simd_vec::*;
         let n = re.len();
         let mut i = 0;
+        while i + 16 <= n {
+            let v_hr = load_f32x16(hr, i);
+            let v_hi = load_f32x16(hi, i);
+            let v_ir = load_f32x16(ir, i);
+            let v_ii = load_f32x16(ii, i);
+
+            let v_re = load_f32x16(re, i);
+            let v_im = load_f32x16(im, i);
+
+            let res_re = v_re + (v_hr * v_ir - v_hi * v_ii);
+            let res_im = v_im + (v_hr * v_ii + v_hi * v_ir);
+
+            store_f32x16(re, i, res_re);
+            store_f32x16(im, i, res_im);
+            i += 16;
+        }
         while i + 8 <= n {
             let v_hr = load_f32x8(hr, i);
             let v_hi = load_f32x8(hi, i);
@@ -269,6 +285,20 @@ impl SpectralProcessor {
             store_f32x8(re, i, res_re);
             store_f32x8(im, i, res_im);
             i += 8;
+        }
+        while i + 4 <= n {
+            let mut v_re = load_f32x4(re, i);
+            let mut v_im = load_f32x4(im, i);
+            let v_hr = load_f32x4(hr, i);
+            let v_hi = load_f32x4(hi, i);
+            let v_ir = load_f32x4(ir, i);
+            let v_ii = load_f32x4(ii, i);
+
+            complex_mul_accumulate_wasm_simd(&mut v_re, &mut v_im, v_hr, v_hi, v_ir, v_ii);
+
+            store_f32x4(re, i, v_re);
+            store_f32x4(im, i, v_im);
+            i += 4;
         }
         while i < n {
             re[i] += hr[i] * ir[i] - hi[i] * ii[i];

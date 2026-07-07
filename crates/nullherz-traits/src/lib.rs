@@ -18,6 +18,10 @@ pub struct Transport {
     pub is_playing: bool,
     pub sample_rate: f32,
     pub absolute_samples: u64,
+    /// System monotonic clock time in nanoseconds.
+    pub system_time_ns: u64,
+    /// Device-specific hardware clock time in nanoseconds (e.g. from PTP).
+    pub device_time_ns: u64,
 }
 
 #[repr(transparent)]
@@ -721,6 +725,57 @@ pub trait TopologyMutationConsumer: Send {
 
 pub trait CommandBundleConsumer: Send {
     fn pop(&mut self) -> Option<Vec<Command>>;
+}
+
+/// Provides access to high-precision hardware and system clocks.
+/// Used for PTP (IEEE 1588) synchronization across distributed units.
+pub trait ClockProvider: Send + Sync {
+    /// Returns the current system monotonic time in nanoseconds.
+    fn get_system_time_ns(&self) -> u64;
+    /// Returns the synchronized hardware clock time in nanoseconds.
+    fn get_device_time_ns(&self) -> u64;
+    /// Returns the current estimated clock jitter in nanoseconds.
+    fn get_estimated_jitter_ns(&self) -> u64;
+    /// Calibrates the local clock against a remote master.
+    fn synchronize_with_master(&self, master_time_ns: u64, round_trip_delay_ns: u64);
+}
+
+/// A standard implementation of ClockProvider using std::time::Instant.
+/// Note: For Production Beta, this should be extended with so_timestamping
+/// on Linux to support true PTP/IEEE 1588 hardware clock discipline.
+pub struct SystemClockProvider {
+    start_time: std::time::Instant,
+}
+
+impl SystemClockProvider {
+    pub fn new() -> Self {
+        Self { start_time: std::time::Instant::now() }
+    }
+}
+
+impl Default for SystemClockProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ClockProvider for SystemClockProvider {
+    fn get_system_time_ns(&self) -> u64 {
+        self.start_time.elapsed().as_nanos() as u64
+    }
+
+    fn get_device_time_ns(&self) -> u64 {
+        // Fallback to system time until so_timestamping is integrated
+        self.get_system_time_ns()
+    }
+
+    fn get_estimated_jitter_ns(&self) -> u64 {
+        0 // Baseline jitter
+    }
+
+    fn synchronize_with_master(&self, _master_time_ns: u64, _round_trip_delay_ns: u64) {
+        // Placeholder for PTP sync logic
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

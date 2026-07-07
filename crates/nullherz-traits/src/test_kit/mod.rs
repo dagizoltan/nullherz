@@ -723,6 +723,8 @@ impl VirtualClockHost {
                 is_playing: true,
                 sample_rate: 44100.0,
                 absolute_samples: 0,
+                system_time_ns: 0,
+                device_time_ns: 0,
             },
             sample_counter: 0,
         }
