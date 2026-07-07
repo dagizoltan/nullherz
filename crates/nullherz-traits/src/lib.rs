@@ -378,6 +378,11 @@ pub enum TopologyCommand {
         node_idx: u32,
         input_idx: u32,
     },
+    MigrateNode {
+        node_idx: u32,
+        #[serde(with = "serde_big_array::BigArray")]
+        destination: [u8; 32],
+    },
 }
 
 /// A command with an associated timestamp for deterministic execution.

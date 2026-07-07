@@ -106,8 +106,10 @@ fn render_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_color:
         }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.selectable_label(app.channel_sync[i], "SYNC").clicked() {
-                app.channel_sync[i] = !app.channel_sync[i];
+            let is_sync = app.channel_sync[i];
+            let sync_color = if is_sync { Color32::from_rgb(0, 255, 200) } else { Color32::GRAY };
+            if ui.selectable_label(is_sync, RichText::new("SYNC").color(sync_color)).clicked() {
+                app.channel_sync[i] = !is_sync;
             }
         });
     });

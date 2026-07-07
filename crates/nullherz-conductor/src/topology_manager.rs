@@ -147,6 +147,13 @@ impl TopologyManager {
                 let _ = prod.push(TopologyMutation::SetNodePosition { node_idx, x, y });
                 return true;
             }
+            Command::Topology(nullherz_traits::TopologyCommand::MigrateNode { node_idx, destination }) => {
+                let dest = String::from_utf8_lossy(&destination).trim_matches(char::from(0)).to_string();
+                self.current_topology.node_assignments.insert(node_idx, dest);
+                // Trigger topology commit to update proxy nodes
+                self.handle_topology_command(&Command::Core(nullherz_traits::CoreCommand::CommitTopology));
+                return true;
+            }
             Command::Core(nullherz_traits::CoreCommand::CommitTopology) => {
                 // RT-2: Off-thread compilation
                 if let Ok(plan) = GraphCompiler::compile(&self.current_topology) {
