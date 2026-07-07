@@ -25,3 +25,4 @@ bincode = "1.3"
 nullherz-gateway = { path = "../nullherz-gateway" }
 audio-dsp = { path = "../audio-dsp" }
 rayon = "1.10"
+walkdir = "2.5"

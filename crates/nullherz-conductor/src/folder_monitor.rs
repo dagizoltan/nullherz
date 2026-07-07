@@ -21,15 +21,13 @@ impl FolderMonitor {
         let path = Path::new(path);
         if !path.is_dir() { return; }
 
-        if let Ok(entries) = std::fs::read_dir(path) {
-            for entry in entries.flatten() {
-                let file_path = entry.path();
-                if file_path.is_file()
-                    && let Some(ext) = file_path.extension()
-                        && ext == "wav" {
-                            self.load_and_register(file_path.to_str().unwrap());
-                        }
-            }
+        for entry in walkdir::WalkDir::new(path).into_iter().flatten() {
+            let file_path = entry.path();
+            if file_path.is_file()
+                && let Some(ext) = file_path.extension()
+                    && ext == "wav" {
+                        self.load_and_register(file_path.to_str().unwrap());
+                    }
         }
     }
 

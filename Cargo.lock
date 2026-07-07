@@ -3149,6 +3149,7 @@ dependencies = [
  "serde_with",
  "smallvec",
  "tokio",
+ "walkdir",
 ]
 
 [[package]]
