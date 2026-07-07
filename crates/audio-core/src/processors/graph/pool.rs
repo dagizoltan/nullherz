@@ -20,6 +20,7 @@ pub struct Job {
     pub transport: Option<crate::Transport>,
     pub host_ptr: Option<*const dyn nullherz_traits::Host>,
     pub is_last_sub_block: bool,
+    pub is_bypassed: bool,
 }
 
 unsafe impl Send for Job {}
@@ -125,7 +126,20 @@ impl TaskPool {
                             is_last_sub_block: job.is_last_sub_block,
                         };
                         // SAFETY: node.processor is an UnsafeCell. Access is synchronized via topological stage fencing.
-                        unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
+                        if job.is_bypassed {
+                            if input_count > 0 {
+                                let input = node_inputs_storage[0];
+                                for output in node_outputs_reconstructed.iter_mut().take(output_count) {
+                                    output.copy_from_slice(input);
+                                }
+                            } else {
+                                for output in node_outputs_reconstructed.iter_mut().take(output_count) {
+                                    output.fill(0.0);
+                                }
+                            }
+                        } else {
+                            unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
+                        }
 
                         let elapsed = crate::get_cycles().wrapping_sub(start);
                         // SAFETY: telemetry_ptr is guaranteed valid for the engine lifetime.

@@ -8,11 +8,12 @@ use audio_dsp::TransientDetector;
 pub struct EvolutionaryBreeder {
     sample_registry: Arc<SampleRegistry>,
     library: Arc<std::sync::Mutex<LibraryDatabase>>,
+    discovery_service: Option<Arc<std::sync::Mutex<nullherz_dna::DiscoveryService>>>,
 }
 
 impl EvolutionaryBreeder {
     pub fn new(sample_registry: Arc<SampleRegistry>, library: Arc<std::sync::Mutex<LibraryDatabase>>) -> Self {
-        Self { sample_registry, library }
+        Self { sample_registry, library, discovery_service: None }
     }
 
     pub fn run_breeding_cycle(&self) {
@@ -81,6 +82,12 @@ impl EvolutionaryBreeder {
 
             self.sample_registry.register_with_metadata(child_id, Arc::new(child_buffer), child_metadata.clone());
 
+            if let Some(ref discovery) = self.discovery_service {
+                if let Ok(discovery) = discovery.lock() {
+                    discovery.announce_push(child_id);
+                }
+            }
+
             let track = nullherz_dna::LibraryTrack {
                 id: child_id,
                 path: format!("evolution/child_{}.wav", child_id),
@@ -116,7 +123,9 @@ impl TransfusionManager {
     }
 
     pub fn with_library(mut self, library: Arc<std::sync::Mutex<LibraryDatabase>>) -> Self {
-        self.evolutionary_breeder = Some(EvolutionaryBreeder::new(self.sample_registry.clone(), library));
+        let mut breeder = EvolutionaryBreeder::new(self.sample_registry.clone(), library);
+        breeder.discovery_service = self.discovery_service.clone();
+        self.evolutionary_breeder = Some(breeder);
         self
     }
 
@@ -264,6 +273,12 @@ impl TransfusionManager {
 
             self.sample_registry.register_with_metadata(sample_id, snapshot, metadata);
             eprintln!("Registered new transfusion source with metadata: ID={}", sample_id);
+
+            if let Some(ref discovery) = self.discovery_service {
+                if let Ok(discovery) = discovery.lock() {
+                    discovery.announce_push(sample_id);
+                }
+            }
 
             // Also notify the topology manager to update the processor if it's currently active.
             // This is a bit of a hack for now, as we'd ideally want a more structured way to update sources.

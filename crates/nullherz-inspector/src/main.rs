@@ -158,6 +158,7 @@ pub struct InspectorApp {
     pub(crate) sampler_is_stereo: bool,
     pub(crate) sampler_input_source: usize, // 0: Master, 1-4: Decks, 5: External
     pub(crate) selected_library_track: Option<u64>,
+    pub(crate) bypassed_nodes: std::collections::HashSet<u32>,
 }
 
 impl InspectorApp {
@@ -245,6 +246,7 @@ impl InspectorApp {
             sampler_is_stereo: true,
             sampler_input_source: 0,
             selected_library_track: None,
+            bypassed_nodes: std::collections::HashSet::new(),
         }
     }
 

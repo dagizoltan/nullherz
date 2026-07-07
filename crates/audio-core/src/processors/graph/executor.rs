@@ -86,6 +86,7 @@ impl GraphExecutor {
                     *resolved_out = topo.virtual_to_physical[v_idx];
                 }
 
+                let is_bypassed = topo.bypass_states.contains(&(n_idx as u32));
                 let job = Job {
                     node_ptr: &nodes[n_idx] as *const _,
                     num_samples,
@@ -101,6 +102,7 @@ impl GraphExecutor {
                     transport: transport.copied(),
                     host_ptr: host.map(|h| h as *const dyn nullherz_traits::Host),
                     is_last_sub_block,
+                    is_bypassed,
                 };
                 let _ = pool.push_job(worker_idx, Box::new(job));
             }
@@ -141,7 +143,20 @@ impl GraphExecutor {
                 let start = crate::get_cycles();
 
                 let mut inner_context = nullherz_traits::ProcessContext { transport, host, sub_block_offset: offset, is_last_sub_block };
-                unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
+                if topo.bypass_states.contains(&(n_idx as u32)) {
+                    if input_count > 0 {
+                        let input = node_inputs_storage[0];
+                        for output in node_outputs_reconstructed.iter_mut().take(output_count) {
+                            output.copy_from_slice(input);
+                        }
+                    } else {
+                        for output in node_outputs_reconstructed.iter_mut().take(output_count) {
+                            output.fill(0.0);
+                        }
+                    }
+                } else {
+                    unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
+                }
 
                 let elapsed = crate::get_cycles().wrapping_sub(start);
                 telemetry_node_times_cycles[n_idx].store(elapsed, Ordering::Relaxed);

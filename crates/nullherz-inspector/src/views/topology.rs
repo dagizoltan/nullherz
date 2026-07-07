@@ -57,7 +57,29 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             // Node Header
             let header_rect = egui::Rect::from_min_size(node_pos, egui::vec2(node_size.x, 20.0));
             ui.painter().rect_filled(header_rect, 4.0, Color32::from_gray(40));
-            ui.painter().text(header_rect.center(), egui::Align2::CENTER_CENTER, &node.name, egui::FontId::proportional(12.0), Color32::WHITE);
+            ui.painter().text(header_rect.left_center() + egui::vec2(5.0, 0.0), egui::Align2::LEFT_CENTER, &node.name, egui::FontId::proportional(11.0), Color32::WHITE);
+
+            // Bypass Toggle in header
+            let bypass_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(25.0, 0.0), egui::vec2(40.0, 14.0));
+            let bypass_id = node_id.with("bypass");
+            let bypassed = app.bypassed_nodes.contains(&(idx as u32));
+
+            let bypass_resp = ui.interact(bypass_rect, bypass_id, Sense::click());
+            if bypass_resp.clicked() {
+                let new_state = !bypassed;
+                if new_state {
+                    app.bypassed_nodes.insert(idx as u32);
+                } else {
+                    app.bypassed_nodes.remove(&(idx as u32));
+                }
+                let _ = app.command_sender.send(Command::Topology(TopologyCommand::SetBypass {
+                    node_idx: idx as u32,
+                    enabled: new_state,
+                }));
+            }
+            let bypass_color = if bypassed { Color32::from_rgb(255, 100, 0) } else { Color32::from_gray(60) };
+            ui.painter().rect_filled(bypass_rect, 2.0, bypass_color);
+            ui.painter().text(bypass_rect.center(), egui::Align2::CENTER_CENTER, "BYP", egui::FontId::monospace(9.0), Color32::WHITE);
 
             // Industrial Sockets (Circular)
             let socket_radius = 5.0;
@@ -149,6 +171,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 stroke: egui::Stroke::new(2.0, base_color),
             };
             painter.add(egui::Shape::CubicBezier(bezier));
+
+            // Buffer Index Label
+            painter.text(start + egui::vec2(10.0, -10.0), egui::Align2::LEFT_BOTTOM, format!("B{}", edge.buffer_idx), egui::FontId::monospace(9.0), Color32::from_gray(150));
 
             // Signal Flow Animation (Moving dashes)
             if level > 0.01 {
