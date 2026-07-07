@@ -512,7 +512,7 @@ impl DiscoveryService {
 pub struct DnaServer;
 
 impl DnaServer {
-    pub fn start(lib: Arc<Mutex<LibraryDatabase>>, port: u16) -> std::io::Result<()> {
+    pub fn start(lib: Arc<Mutex<LibraryDatabase>>, port: u16, signing_key: Option<[u8; 32]>) -> std::io::Result<()> {
         let listener = std::net::TcpListener::bind(format!("0.0.0.0:{}", port))?;
         println!("DNA Server listening on port {}", port);
 
@@ -540,15 +540,32 @@ impl DnaServer {
                                         // In a real implementation, this would trigger pull-based sync for unknown IDs.
                                     }
                                 }
+                                ["HANDSHAKE", pk_hex] => {
+                                    println!("DNA Server: Peer handshake with public key {}", pk_hex);
+                                    let resp = signing_key.map(|k| hex::encode(&k[..])).unwrap_or_else(|| "none".to_string());
+                                    let _ = stream.write_all(format!("IDENTITY {}\n", resp).as_bytes());
+                                }
                                 ["GET", "DNA", id_str] => {
                                     if let Ok(id) = id_str.parse::<u64>() {
                                         if let Ok(lib) = lib_clone.lock() {
                                             if let Ok(Some(track)) = lib.get_track(id) {
-                                                // Production Beta: Sign DNA payload if secret key is found (mock for now)
+                                                // Production Beta: Sign DNA payload if secret key is found
+                                                use ed25519_dalek::{Signer, SigningKey};
+                                                let mut signature = [0u8; 64];
+                                                let mut pub_key = [0u8; 32];
+
+                                                if let Some(sk_bytes) = signing_key {
+                                                    let sk = SigningKey::from_bytes(&sk_bytes);
+                                                    let dna_bytes = serde_json::to_vec(&track.metadata.dna).unwrap_or_default();
+                                                    let sig = sk.sign(&dna_bytes);
+                                                    signature = sig.to_bytes();
+                                                    pub_key = sk.verifying_key().to_bytes();
+                                                }
+
                                                 let signed = SignedSoundDna {
                                                     dna: track.metadata.dna,
-                                                    signature: [0u8; 64],
-                                                    signer_public_key: [0u8; 32],
+                                                    signature,
+                                                    signer_public_key: pub_key,
                                                 };
                                                 let _ = serde_json::to_writer(&mut stream, &signed);
                                             }
@@ -1010,6 +1027,64 @@ impl NeuralTransfuser {
 pub trait NeuralEncoder {
     fn encode(&self, audio: &[f32]) -> [f32; 16];
     fn decode(&self, latent: &[f32; 16]) -> Vec<f32>;
+}
+
+/// Standard Stage 6 Neural Encoder using SIMD-optimized feature extraction.
+pub struct StandardNeuralEncoder {
+    /// Projection matrix for latent space reduction (mocked)
+    pub projection: [[f32; 128]; 16],
+}
+
+impl NeuralEncoder for StandardNeuralEncoder {
+    fn encode(&self, audio: &[f32]) -> [f32; 16] {
+        use audio_dsp::simd_vec::{FloatX8, load_f32x8};
+        let mut latent = [0.0f32; 16];
+
+        // 1. Decimate audio to 128 feature bins (simplified)
+        let mut features = [0.0f32; 128];
+        let step = audio.len() / 128;
+        if step > 0 {
+            for i in 0..128 {
+                features[i] = audio[i * step].abs();
+            }
+        }
+
+        // 2. Linear projection to 16-dim latent space using SIMD
+        for i in 0..16 {
+            let mut sum = 0.0f32;
+            let proj_row = &self.projection[i];
+
+            let mut j = 0;
+            while j + 8 <= 128 {
+                let v_feat = load_f32x8(&features, j);
+                let v_proj = load_f32x8(proj_row, j);
+                let v_res = v_feat * v_proj;
+                let arr: [f32; 8] = v_res.into();
+                sum += arr.iter().sum::<f32>();
+                j += 8;
+            }
+            latent[i] = sum.tanh();
+        }
+
+        latent
+    }
+
+    fn decode(&self, _latent: &[f32; 16]) -> Vec<f32> {
+        // Generative reconstruction (Stage 7)
+        Vec::new()
+    }
+}
+
+impl Default for StandardNeuralEncoder {
+    fn default() -> Self {
+        let mut projection = [[0.0f32; 128]; 16];
+        for i in 0..16 {
+            for j in 0..128 {
+                projection[i][j] = ((i * j) as f32).sin() * 0.1;
+            }
+        }
+        Self { projection }
+    }
 }
 
 pub struct FeatureMutator;

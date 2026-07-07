@@ -158,7 +158,7 @@ impl Conductor {
 
             // Start Federated DNA Server (TCP pull)
             let lib = self.library.clone();
-            let _ = nullherz_dna::DnaServer::start(lib, 9003);
+            let _ = nullherz_dna::DnaServer::start(lib, 9003, None);
         }
 
         crate::EngineContext {

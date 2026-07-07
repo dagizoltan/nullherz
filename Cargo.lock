@@ -3240,6 +3240,7 @@ dependencies = [
  "audio-dsp",
  "ed25519-dalek",
  "gethostname 0.4.3",
+ "hex",
  "mdns-sd",
  "nullherz-traits",
  "rayon",
