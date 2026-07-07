@@ -6,8 +6,9 @@ use audio_core::Telemetry;
 use super::{mixer, dna, transport, performance, waveform};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
+    let theme = app.theme;
     ScrollArea::vertical().id_source("console_scroll").show(ui, |ui| {
-        render_header(ui, telemetry);
+        render_header(ui, telemetry, &theme);
         ui.add_space(10.0);
 
         // 4-Deck Modular Grid
@@ -29,17 +30,17 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     });
 }
 
-fn render_header(ui: &mut Ui, telemetry: &Option<Telemetry>) {
+fn render_header(ui: &mut Ui, telemetry: &Option<Telemetry>, theme: &nullherz_ui_hal::Theme) {
     ui.horizontal(|ui| {
         Frame::none()
-            .fill(Color32::from_rgb(20, 20, 25))
+            .fill(theme.bg_dark)
             .rounding(Rounding::same(4.0))
             .inner_margin(Margin::same(8.0))
             .show(ui, |ui| {
-                ui.heading(RichText::new("LIVE CONSOLE").strong().color(Color32::WHITE).size(18.0));
+                ui.heading(RichText::new("LIVE CONSOLE").strong().color(theme.text_primary).size(18.0));
                 ui.add_space(20.0);
                 if let Some(t) = telemetry {
-                    ui.label(RichText::new(format!("{:.1}", t.bpm)).monospace().color(Color32::from_rgb(0, 255, 200)).size(16.0));
+                    ui.label(RichText::new(format!("{:.1}", t.bpm)).monospace().color(theme.accent).size(16.0));
                     ui.label(RichText::new("BPM").small().color(Color32::GRAY));
                 }
             });
@@ -54,24 +55,24 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
         .fill(Color32::from_rgb(15, 15, 20))
         .stroke(Stroke::new(1.0, if is_focused { deck_color } else { Color32::from_gray(30) }))
         .rounding(Rounding::same(6.0))
-        .inner_margin(Margin::same(10.0));
+        .inner_margin(Margin::same(6.0));
 
     frame.show(ui, |ui| {
         ui.vertical(|ui| {
             render_deck_header(app, ui, i, deck_color, is_focused);
-            ui.add_space(8.0);
+            ui.add_space(6.0);
             waveform::render_deck_waveform_zone(app, ui, i, telemetry, deck_color);
-            ui.add_space(12.0);
+            ui.add_space(8.0);
 
             ui.horizontal_top(|ui| {
                 ui.scope(|ui| {
                     ui.set_min_height(160.0);
                     transport::render_deck_transport(app, ui, i);
-                    ui.add_space(12.0);
+                    ui.add_space(8.0);
                     performance::render_deck_performance(app, ui, i);
-                    ui.add_space(12.0);
+                    ui.add_space(8.0);
                     dna::render_deck_dna_panel(app, ui, i);
-                    ui.add_space(12.0);
+                    ui.add_space(8.0);
                     mixer::render_deck_mixer(app, ui, i, deck_color);
                 });
             });
@@ -107,7 +108,7 @@ fn render_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_color:
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let is_sync = app.channel_sync[i];
-            let sync_color = if is_sync { Color32::from_rgb(0, 255, 200) } else { Color32::GRAY };
+            let sync_color = if is_sync { app.theme.accent } else { Color32::GRAY };
             if ui.selectable_label(is_sync, RichText::new("SYNC").color(sync_color)).clicked() {
                 app.channel_sync[i] = !is_sync;
             }

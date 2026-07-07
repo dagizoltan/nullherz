@@ -159,6 +159,8 @@ pub struct InspectorApp {
     pub(crate) sampler_input_source: usize, // 0: Master, 1-4: Decks, 5: External
     pub(crate) selected_library_track: Option<u64>,
     pub(crate) bypassed_nodes: std::collections::HashSet<u32>,
+    pub(crate) theme: nullherz_ui_hal::Theme,
+    pub(crate) last_update_time: f64,
 }
 
 impl InspectorApp {
@@ -184,7 +186,7 @@ impl InspectorApp {
             crossfader_pos: 0.5,
             library_db: nullherz_dna::LibraryDatabase::load("library.redb").unwrap_or_else(|e| {
                 eprintln!("Warning: Failed to load library.redb ({}). Using transient storage.", e);
-                nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to create transient library")
+                nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase")
             }),
             active_crate: None,
             search_query: String::new(),
@@ -251,6 +253,14 @@ impl InspectorApp {
             sampler_input_source: 0,
             selected_library_track: None,
             bypassed_nodes: std::collections::HashSet::new(),
+            theme: nullherz_ui_hal::Theme {
+                accent: egui::Color32::from_rgb(0, 255, 200), // #00FFC8-ish
+                bg_dark: egui::Color32::from_rgb(10, 10, 12), // #0A0A0C
+                bg_med: egui::Color32::from_rgb(30, 30, 30),  // #1E1E1E
+                text_primary: egui::Color32::WHITE,
+                socket_color: egui::Color32::from_gray(80),
+            },
+            last_update_time: 0.0,
         }
     }
 
@@ -267,7 +277,18 @@ impl InspectorApp {
 
 impl eframe::App for InspectorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let telemetry = self.last_telemetry.lock().unwrap().clone();
+        let current_time = ctx.input(|i| i.time);
+        let is_focused = ctx.input(|i| i.focused);
+
+        // Background Throttling: Skip telemetry processing if unfocused and updated recently (<100ms)
+        let should_process = is_focused || (current_time - self.last_update_time) > 0.1;
+
+        let telemetry = if should_process {
+            self.last_update_time = current_time;
+            self.last_telemetry.lock().ok().and_then(|t| t.clone())
+        } else {
+            None
+        };
 
         // Update Damping (Liquid Asymmetrical Damping: Fast Attack, Slow Decay)
         if let Some(ref t) = telemetry {
@@ -277,29 +298,30 @@ impl eframe::App for InspectorApp {
             let d = self.visualizer_damping.clamp(0.01, 1.0);
             let decay = d * 0.5; // Slower decay for "liquid" feel
 
+            // Optimized damping using Lerp formula: current + (target - current) * alpha
             for i in 0..128 {
                 let target_spec = t.spectrum[i];
                 let alpha = if target_spec > self.damped_spectrum[i] { d } else { decay };
-                self.damped_spectrum[i] = self.damped_spectrum[i] * (1.0 - alpha) + target_spec * alpha;
+                self.damped_spectrum[i] += (target_spec - self.damped_spectrum[i]) * alpha;
 
                 let target_gonio = t.goniometer_pts[i];
                 let alpha_g = if target_gonio.abs() > self.damped_goniometer[i].abs() { d } else { decay };
-                self.damped_goniometer[i] = self.damped_goniometer[i] * (1.0 - alpha_g) + target_gonio * alpha_g;
+                self.damped_goniometer[i] += (target_gonio - self.damped_goniometer[i]) * alpha_g;
             }
             for i in 0..16 {
                 let target_latent = t.dna_latent_space[i];
                 let alpha_l = if target_latent.abs() > self.damped_latent[i].abs() { d } else { decay };
-                self.damped_latent[i] = self.damped_latent[i] * (1.0 - alpha_l) + target_latent * alpha_l;
+                self.damped_latent[i] += (target_latent - self.damped_latent[i]) * alpha_l;
             }
             for i in 0..4 {
                 let target_peak = t.peak_levels[i];
-                let alpha_p = if target_peak > self.damped_peaks[i] { 1.0 } else { decay * 0.5 }; // Near-instant attack for peaks
-                self.damped_peaks[i] = self.damped_peaks[i] * (1.0 - alpha_p) + target_peak * alpha_p;
+                let alpha_p = if target_peak > self.damped_peaks[i] { 1.0 } else { decay * 0.5 };
+                self.damped_peaks[i] += (target_peak - self.damped_peaks[i]) * alpha_p;
             }
             for i in 0..2 {
-                let target_m_peak = t.peak_levels[i]; // Simplified master mapping
+                let target_m_peak = t.peak_levels[i];
                 let alpha_mp = if target_m_peak > self.damped_master_peaks[i] { 1.0 } else { decay * 0.5 };
-                self.damped_master_peaks[i] = self.damped_master_peaks[i] * (1.0 - alpha_mp) + target_m_peak * alpha_mp;
+                self.damped_master_peaks[i] += (target_m_peak - self.damped_master_peaks[i]) * alpha_mp;
             }
         }
 

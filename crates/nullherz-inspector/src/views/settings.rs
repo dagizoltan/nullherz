@@ -133,7 +133,7 @@ fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
         ui.add_space(10.0);
 
         ui.horizontal(|ui| {
-            if ui.button(RichText::new("● START CALIBRATION").color(Color32::from_rgb(0, 255, 200))).clicked() {
+            if ui.button(RichText::new("● START CALIBRATION").color(app.theme.accent)).clicked() {
                 let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CalibrateLatency));
             }
 

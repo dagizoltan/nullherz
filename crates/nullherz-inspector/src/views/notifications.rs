@@ -3,7 +3,7 @@ use egui::{Ui, ScrollArea, Color32, RichText, Frame, Margin};
 use crate::InspectorApp;
 
 pub fn render(app: &InspectorApp, ui: &mut Ui) {
-    ui.heading(RichText::new("AI & INSIGHTS").strong().color(Color32::from_rgb(0, 255, 200)));
+    ui.heading(RichText::new("AI & INSIGHTS").strong().color(app.theme.accent));
     ui.add_space(10.0);
 
     let telemetry = app.last_telemetry.lock().unwrap();

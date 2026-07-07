@@ -1,6 +1,6 @@
 use nullherz_dna::GeneticLibrary;
 use egui::{Color32, Ui, Frame, Vec2, Sense, Stroke, RichText, Margin};
-use crate::InspectorApp;
+use crate::{InspectorApp, widgets};
 use audio_core::Telemetry;
 use egui_wgpu::wgpu;
 use std::sync::{Arc, Mutex};
@@ -35,7 +35,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
              if let Some(t) = telemetry {
                  let scroll = (t.beat_position as f32 % 4.0) / 4.0 * 2.0;
-                 wf.update_globals(&_wgpu.queue, scroll, app.sampler_waveform_zoom, [0.0, 1.0, 0.8, 1.0]);
+                 let color = app.theme.accent.to_array().map(|v| v as f32 / 255.0);
+                 wf.update_globals(&_wgpu.queue, scroll, app.sampler_waveform_zoom, color);
              }
 
              struct WaveformCallback {
@@ -56,7 +57,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         if let Some(t) = telemetry {
             let playhead_x = rect.left() + (t.beat_position as f32 % 4.0) / 4.0 * rect.width();
-            ui.painter().line_segment([egui::pos2(playhead_x, rect.top()), egui::pos2(playhead_x, rect.bottom())], Stroke::new(1.5, Color32::from_rgb(0, 255, 200)));
+            ui.painter().line_segment([egui::pos2(playhead_x, rect.top()), egui::pos2(playhead_x, rect.bottom())], Stroke::new(1.5, app.theme.accent));
         }
     });
 
@@ -118,11 +119,17 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     ui.end_row();
 
                     ui.label("Input Gain");
-                    if ui.add(egui::Slider::new(&mut app.sampler_input_gain, 0.0..=4.0)).changed() {
-                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                            target_id: 110, param_id: 0, value: app.sampler_input_gain, ramp_duration_samples: 0,
-                        }));
-                    }
+                    ui.horizontal(|ui| {
+                        if ui.add(egui::Slider::new(&mut app.sampler_input_gain, 0.0..=4.0)).changed() {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                target_id: 110, param_id: 0, value: app.sampler_input_gain, ramp_duration_samples: 0,
+                            }));
+                        }
+                        if let Some(t) = telemetry {
+                            let level = t.peak_levels.get(app.sampler_input_source).cloned().unwrap_or(0.0);
+                            widgets::render_vu_meter(ui, level, app.channel_peak_hold[0], app.theme.accent, 20.0);
+                        }
+                    });
                     ui.end_row();
 
                     ui.label("Monitor");
@@ -166,7 +173,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(RichText::new("COMMIT").strong().color(Color32::from_rgb(0, 255, 200))).clicked() {
+                        if ui.button(RichText::new("COMMIT").strong().color(app.theme.accent)).clicked() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::RegisterCapture {
                                 capture_node_idx: 110, sample_id: 0,
                             }));

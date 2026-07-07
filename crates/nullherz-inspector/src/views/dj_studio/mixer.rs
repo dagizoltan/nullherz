@@ -40,9 +40,10 @@ pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_col
 }
 
 fn send_deck_param(app: &InspectorApp, deck_id: char, param_type: nullherz_traits::DeckParamType, value: f32) {
+    let clamped_value = value.clamp(0.0, 2.0);
     let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam {
         deck_id,
         param_type,
-        value,
+        value: clamped_value,
     }));
 }
