@@ -112,7 +112,7 @@ fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
                 ui.add_space(8.0);
 
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("GENETIC PROFILE").small().strong().color(Color32::from_rgb(0, 255, 200)));
+                    ui.label(RichText::new("GENETIC PROFILE").small().strong().color(app.theme.accent));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.button("▶ PREVIEW").clicked() {
                              // Mock preview logic

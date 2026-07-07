@@ -8,7 +8,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     ui.horizontal(|ui| {
         ui.heading("Track Composer");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-             ui.label(egui::RichText::new("QUANTIZED: 1 BAR").color(Color32::from_rgb(0, 255, 200)).size(10.0));
+             ui.label(egui::RichText::new("QUANTIZED: 1 BAR").color(app.theme.accent).size(10.0));
         });
     });
     ui.add_space(20.0);
@@ -40,7 +40,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             let pulse = (time * 5.0).sin() as f32 * 0.5 + 0.5;
                             let is_evolving = i % 4 == 0; // Mock condition: track 1, 5, 9, 13 are "evolving"
                             let label_color = if is_evolving {
-                                Color32::from_rgb(0, 255, 200).gamma_multiply(0.5 + pulse * 0.5)
+                                app.theme.accent.gamma_multiply(0.5 + pulse * 0.5)
                             } else {
                                 Color32::WHITE
                             };

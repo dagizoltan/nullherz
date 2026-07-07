@@ -64,7 +64,7 @@ impl BreederView {
 
                         ui.horizontal(|ui| {
                             if let Some(s) = similarity {
-                                let color = if s > 0.8 { Color32::from_rgb(0, 255, 200) } else if s > 0.5 { Color32::YELLOW } else { Color32::GRAY };
+                                let color = if s > 0.8 { app.theme.accent } else if s > 0.5 { Color32::YELLOW } else { Color32::GRAY };
                                 ui.add(egui::ProgressBar::new(s).desired_width(60.0).fill(color).text(format!("{:.0}%", s * 100.0)));
                             }
 
@@ -140,7 +140,7 @@ impl BreederView {
                 }
 
                 let handle_pos = rect.left_top() + Vec2::new(state.transfusion_bias_x * rect.width(), (1.0 - state.transfusion_bias_y) * rect.height());
-                ui.painter().circle_filled(handle_pos, 8.0, Color32::from_rgb(0, 255, 200));
+                ui.painter().circle_filled(handle_pos, 8.0, app.theme.accent);
                 ui.painter().circle_stroke(handle_pos, 8.0, Stroke::new(2.0, Color32::WHITE));
             });
 
@@ -192,7 +192,7 @@ impl BreederView {
 
                 ui.group(|ui| {
                     if telemetry.is_some() {
-                        crate::widgets::render_spectrum_analyzer(ui, &app.damped_spectrum, Color32::from_rgb(0, 255, 200), 100.0);
+                        crate::widgets::render_spectrum_analyzer(ui, &app.damped_spectrum, app.theme.accent, 100.0);
                     } else {
                         ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
                         ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "NO SIGNAL", egui::FontId::proportional(12.0), Color32::GRAY);
@@ -203,7 +203,7 @@ impl BreederView {
 
                 ui.group(|ui| {
                     if telemetry.is_some() {
-                        crate::widgets::render_goniometer(ui, &app.damped_goniometer, 200.0, Color32::from_rgb(0, 255, 200));
+                        crate::widgets::render_goniometer(ui, &app.damped_goniometer, 200.0, app.theme.accent);
                     } else {
                         ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
                         ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "GONIOMETER", egui::FontId::proportional(12.0), Color32::GRAY);

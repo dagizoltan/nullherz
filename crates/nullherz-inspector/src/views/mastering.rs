@@ -15,13 +15,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             });
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if widgets::render_knob(ui, &mut app.mastering_eq_low, 0.0..=2.0, "LOW", Color32::from_rgb(0, 255, 200)).changed() {
+                if widgets::render_knob(ui, &mut app.mastering_eq_low, 0.0..=2.0, "LOW", app.theme.accent).changed() {
                     let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id: 19, param_id: 0, value: app.mastering_eq_low, ramp_duration_samples: 128 }));
                 }
-                if widgets::render_knob(ui, &mut app.mastering_eq_mid, 0.0..=2.0, "MID", Color32::from_rgb(0, 255, 200)).changed() {
+                if widgets::render_knob(ui, &mut app.mastering_eq_mid, 0.0..=2.0, "MID", app.theme.accent).changed() {
                     let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id: 19, param_id: 1, value: app.mastering_eq_mid, ramp_duration_samples: 128 }));
                 }
-                if widgets::render_knob(ui, &mut app.mastering_eq_high, 0.0..=2.0, "HIGH", Color32::from_rgb(0, 255, 200)).changed() {
+                if widgets::render_knob(ui, &mut app.mastering_eq_high, 0.0..=2.0, "HIGH", app.theme.accent).changed() {
                     let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id: 19, param_id: 2, value: app.mastering_eq_high, ramp_duration_samples: 128 }));
                 }
             });
@@ -37,12 +37,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.label("Phase/Goniometer");
-                    widgets::render_goniometer(ui, &t.goniometer_pts, 250.0, Color32::from_rgb(0, 255, 200));
+                    widgets::render_goniometer(ui, &t.goniometer_pts, 250.0, app.theme.accent);
                 });
                 ui.add_space(30.0);
                 ui.vertical(|ui| {
                     ui.label("Master Spectrum");
-                    widgets::render_spectrum_analyzer(ui, &t.spectrum, Color32::from_rgb(0, 255, 200), 120.0);
+                    widgets::render_spectrum_analyzer(ui, &t.spectrum, app.theme.accent, 120.0);
                 });
             });
         }

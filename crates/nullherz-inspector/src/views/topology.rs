@@ -62,7 +62,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             // Host Assignment Badge
             let host_assignment = app.graph.node_assignments.get(&(idx as u32)).map(|s| s.as_str()).unwrap_or("local");
             let host_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(75.0, 0.0), egui::vec2(50.0, 14.0));
-            let host_color = if host_assignment == "local" { Color32::from_rgb(0, 150, 255) } else { Color32::from_rgb(0, 255, 200) };
+            let host_color = if host_assignment == "local" { Color32::from_rgb(0, 150, 255) } else { app.theme.accent };
 
             let host_resp = ui.interact(host_rect, node_id.with("host_migrate"), Sense::click());
             if host_resp.clicked() {
@@ -101,7 +101,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             ui.painter().text(bypass_rect.center(), egui::Align2::CENTER_CENTER, "BYP", egui::FontId::monospace(9.0), Color32::WHITE);
 
             // Industrial Sockets (Circular)
-            let socket_radius = 5.0;
+            let socket_radius = 6.0;
 
             // Inputs (Left Side)
             for (in_idx, _) in node.inputs.iter().enumerate() {
@@ -110,7 +110,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 socket_positions.insert((idx as u32, false, in_idx as u32), socket_pos);
 
                 let is_occupied = app.graph.edges.iter().any(|e| e.to == idx as u32 && e.input_idx == in_idx as u32);
-                let mut color = if is_occupied { Color32::from_rgb(0, 255, 200) } else { Color32::from_gray(80) };
+                let mut color = if is_occupied { app.theme.accent } else { app.theme.socket_color };
 
                 let is_compatible = app.active_connection_source.is_some();
                 let stroke = if is_compatible {
@@ -169,7 +169,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             if let Some(t) = telemetry {
                  if idx < t.node_times_ns.len() {
                      let time = t.node_times_ns[idx];
-                     let color = if time > 500_000 { Color32::RED } else if time > 100_000 { Color32::YELLOW } else { Color32::from_rgb(0, 255, 200) };
+                     let color = if time > 500_000 { Color32::RED } else if time > 100_000 { Color32::YELLOW } else { app.theme.accent };
                      ui.painter().text(node_rect.left_bottom() + egui::vec2(5.0, -5.0), egui::Align2::LEFT_BOTTOM, format!("{} ns", time), egui::FontId::proportional(9.0), color);
                  }
             }
@@ -186,15 +186,16 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         if let (Some(&start), Some(&end)) = (socket_positions.get(&start_key), socket_positions.get(&end_key)) {
             let level = telemetry.as_ref().map(|t| t.peak_levels[edge.from as usize]).unwrap_or(0.0);
-            let base_color = if level > 1.0 { Color32::from_rgb(255, 50, 50) } else if level > 0.01 { Color32::from_rgb(0, 255, 200) } else { Color32::from_gray(80) };
+            let base_color = if level > 1.0 { Color32::from_rgb(255, 50, 50) } else if level > 0.01 { app.theme.accent } else { Color32::from_gray(80) };
 
             let cp1 = start + egui::vec2(60.0, 0.0);
             let cp2 = end - egui::vec2(60.0, 0.0);
+            let glow = if level > 0.01 { ui.input(|i| (i.time.cos() * 0.15 + 0.85) as f32) } else { 1.0 };
             let bezier = egui::epaint::CubicBezierShape {
                 points: [start, cp1, cp2, end],
                 closed: false,
                 fill: Color32::TRANSPARENT,
-                stroke: egui::Stroke::new(2.0, base_color),
+                stroke: egui::Stroke::new(2.0, base_color.gamma_multiply(glow)),
             };
             painter.add(egui::Shape::CubicBezier(bezier));
 

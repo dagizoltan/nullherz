@@ -3,7 +3,7 @@ use egui::{Ui, Color32, RichText, Frame, Margin};
 use crate::InspectorApp;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
-    ui.label(RichText::new("GENETIC CLOUD").strong().color(Color32::from_rgb(0, 255, 200)));
+    ui.label(RichText::new("GENETIC CLOUD").strong().color(app.theme.accent));
     ui.add_space(10.0);
 
     // 1. Peer Registry

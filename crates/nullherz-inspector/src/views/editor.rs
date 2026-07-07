@@ -36,7 +36,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
                 // Call into the GPU painter (this would be handled by egui::PaintCallback in a real integration)
                 // For the purpose of the UI logic, we assume the renderer is bound to the rect.
-                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "[ WAVEFORM VIEWPORT ]", egui::FontId::monospace(14.0), Color32::from_rgb(0, 255, 200).gamma_multiply(0.3));
+                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "[ WAVEFORM VIEWPORT ]", egui::FontId::monospace(14.0), app.theme.accent.gamma_multiply(0.3));
             }
 
             ui.add_space(20.0);

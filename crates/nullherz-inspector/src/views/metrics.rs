@@ -19,7 +19,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     ui.label(format!("Resource Leaks: {}", t.resource_leaks));
 
                     let pressure_norm = (t.last_xrun_magnitude_ns as f32 / 1_000_000.0).clamp(0.0, 5.0) / 5.0;
-                    ui.add(egui::ProgressBar::new(pressure_norm).fill(Color32::from_rgb(0, 255, 200)).text("PRESSURE"));
+                    ui.add(egui::ProgressBar::new(pressure_norm).fill(app.theme.accent).text("PRESSURE"));
 
                     ui.add_space(5.0);
                     ui.label(RichText::new("NODE PERFORMANCE BREAKDOWN").small().color(Color32::GRAY));
@@ -41,7 +41,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             // 2. Analysis Section
             render_metric_group(ui, "SPECTRAL DOMAIN", frame_width, |ui| {
                 if telemetry.is_some() {
-                    widgets::render_spectrum_analyzer(ui, &app.damped_spectrum, Color32::from_rgb(0, 255, 200), 100.0);
+                    widgets::render_spectrum_analyzer(ui, &app.damped_spectrum, app.theme.accent, 100.0);
                 }
             });
 
@@ -49,7 +49,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
             render_metric_group(ui, "PHASE & CORRELATION", frame_width, |ui| {
                 if telemetry.is_some() {
-                    widgets::render_goniometer(ui, &app.damped_goniometer, 180.0, Color32::from_rgb(0, 255, 200));
+                    widgets::render_goniometer(ui, &app.damped_goniometer, 180.0, app.theme.accent);
                 }
             });
 

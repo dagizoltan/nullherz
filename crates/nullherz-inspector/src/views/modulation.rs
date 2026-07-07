@@ -37,7 +37,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
     ui.horizontal(|ui| {
         ui.add_sized([140.0, 20.0], egui::Label::new(RichText::new("MODULATION TARGET").small().strong()));
         for i in 0..8 {
-            ui.add_sized([45.0, 20.0], egui::Label::new(RichText::new(format!("MACRO {}", i + 1)).small().color(Color32::from_rgb(0, 255, 200))));
+            ui.add_sized([45.0, 20.0], egui::Label::new(RichText::new(format!("MACRO {}", i + 1)).small().color(app.theme.accent)));
         }
     });
 
@@ -86,7 +86,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
         for i in 0..8 {
             ui.vertical(|ui| {
                 let prev_val = app.macros[i];
-                crate::widgets::render_knob(ui, &mut app.macros[i], 0.0..=1.0, &format!("M{}", i+1), Color32::from_rgb(0, 255, 200));
+                crate::widgets::render_knob(ui, &mut app.macros[i], 0.0..=1.0, &format!("M{}", i+1), app.theme.accent);
                 if app.macros[i] != prev_val {
                     let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetMacro {
                         macro_id: i as u32,
