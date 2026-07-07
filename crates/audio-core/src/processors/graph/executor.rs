@@ -67,8 +67,22 @@ impl GraphExecutor {
             let start_count = pool.current_completion_count();
             let num_nodes = stage.len();
 
-            for (i, &n_idx) in stage.iter().enumerate() {
-                let worker_idx = i % pool.num_workers();
+            let mut worker_costs = [0u64; 64];
+            let num_workers = pool.num_workers().min(64);
+
+            for &n_idx in stage {
+                let mut worker_idx = 0;
+                let mut min_cost = u64::MAX;
+                for w in 0..num_workers {
+                    if worker_costs[w] < min_cost {
+                        min_cost = worker_costs[w];
+                        worker_idx = w;
+                    }
+                }
+
+                let cost = telemetry_node_times_cycles[n_idx].load(Ordering::Relaxed);
+                worker_costs[worker_idx] += cost.max(100); // Minimum weight to prevent lopsidedness on zero-telemetry
+
                 let routing = &topo.routing[n_idx];
                 let mut resolved_inputs = [0usize; crate::MAX_CHANNELS];
                 let mut resolved_outputs = [0usize; crate::MAX_CHANNELS];

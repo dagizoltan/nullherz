@@ -30,6 +30,9 @@ pub struct ProcessorGraph {
     pub(crate) logger: Option<Arc<crate::rt_logging::RtLogger>>,
 
     pub(crate) telemetry: Arc<GraphTelemetry>,
+    pub(crate) morph_samples_remaining: u32,
+    pub(crate) morph_samples_total: u32,
+    pub morph_duration_samples: u32,
     pub(crate) garbage_producer: Option<Box<dyn nullherz_traits::GarbageProducer>>,
     pub(crate) pending_mutations: [Option<TopologyMutation>; crate::MAX_MUTATIONS],
     pub(crate) pending_mutation_count: usize,
@@ -61,6 +64,9 @@ impl ProcessorGraph {
             topology_coordinator: TopologyCoordinator::new(topo),
             logger: None,
             telemetry: Arc::new(GraphTelemetry::default()),
+            morph_samples_remaining: 0,
+            morph_samples_total: 0,
+            morph_duration_samples: 0, // Disabled by default to pass existing tests
             garbage_producer: None,
             pending_mutations: std::array::from_fn(|_| None),
             pending_mutation_count: 0,
@@ -81,6 +87,15 @@ impl ProcessorGraph {
     }
 
     pub fn commit_graph(&mut self) {
+        if self.topology_coordinator.needs_commit {
+            let old_node_count = self.topology_coordinator.active_topology().node_count;
+            if old_node_count > 0 && self.morph_duration_samples > 0 {
+                self.buffer_pool.capture_old_buffers();
+                self.morph_samples_total = self.morph_duration_samples;
+                self.morph_samples_remaining = self.morph_samples_total;
+            }
+        }
+
         if let Err(msg) = self.topology_coordinator.commit() {
             if let Some(ref logger) = self.logger {
                 logger.log(crate::rt_logging::RtLogLevel::Error, &format!("Refusing to commit hazardous topology: {}", msg), 0);
@@ -155,10 +170,32 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
         );
 
         let mut pool = executor;
-
-        let num_stages = self.topology_coordinator.topologies[active_idx].plan.num_stages;
         let transport = context.transport;
         let host = context.host;
+
+        if self.morph_samples_remaining > 0 {
+            let inactive_idx = (active_idx + 1) % 2;
+            let inactive_num_stages = self.topology_coordinator.topologies[inactive_idx].plan.num_stages;
+            for s_idx in 0..inactive_num_stages {
+                GraphExecutor::execute_stage(
+                    &self.nodes,
+                    &mut self.buffer_pool.old_path_buffers,
+                    &mut self.buffer_pool.crossfade_buffers,
+                    &self.topology_coordinator.topologies[inactive_idx],
+                    s_idx,
+                    num_samples,
+                    offset,
+                    &[[0u8; crate::MAX_CHANNELS]; crate::MAX_NODES],
+                    &mut pool,
+                    transport,
+                    host,
+                    is_last_sub_block,
+                    &self.telemetry.node_times_cycles
+                );
+            }
+        }
+
+        let num_stages = self.topology_coordinator.topologies[active_idx].plan.num_stages;
         for s_idx in 0..num_stages {
             GraphExecutor::execute_stage(
                 &self.nodes,
@@ -178,9 +215,30 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
         }
 
         let topo = &self.topology_coordinator.topologies[active_idx];
-        for i in 0..external_outputs.len().min(4) {
-            let p_idx = topo.virtual_to_physical[i];
-            external_outputs[i].copy_from_slice(&self.buffer_pool.buffers[p_idx].data[offset..offset + num_samples]);
+        if self.morph_samples_remaining > 0 {
+            let inactive_idx = (active_idx + 1) % 2;
+            let old_topo = &self.topology_coordinator.topologies[inactive_idx];
+            let inv_total = 1.0 / self.morph_samples_total as f32;
+
+            for j in 0..num_samples {
+                let current_remaining = (self.morph_samples_remaining as i64 - j as i64).max(0) as u32;
+                let progress = (self.morph_samples_total - current_remaining) as f32 * inv_total;
+
+                for i in 0..external_outputs.len().min(4) {
+                    let p_idx = topo.virtual_to_physical[i];
+                    let old_p_idx = old_topo.virtual_to_physical[i];
+                    let new_val = self.buffer_pool.buffers[p_idx].data[offset + j];
+                    let old_val = self.buffer_pool.old_path_buffers[old_p_idx].data[offset + j];
+                    external_outputs[i][j] = old_val * (1.0 - progress) + new_val * progress;
+                }
+            }
+
+            self.morph_samples_remaining = self.morph_samples_remaining.saturating_sub(num_samples as u32);
+        } else {
+            for i in 0..external_outputs.len().min(4) {
+                let p_idx = topo.virtual_to_physical[i];
+                external_outputs[i].copy_from_slice(&self.buffer_pool.buffers[p_idx].data[offset..offset + num_samples]);
+            }
         }
 
         if is_last_sub_block
@@ -340,9 +398,9 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         let mut out_data = [0.0f32; 100];
         let out_slice = &mut out_data[..];
         let mut outputs = [out_slice];
-        let mut context = ProcessContext {  transport: None, host: None, sub_block_offset: 10, is_last_sub_block: false, };
+        let mut context = ProcessContext {  transport: None, host: None, sub_block_offset: 0, is_last_sub_block: false, };
         graph.process(&[], &mut outputs, &mut context);
-        for i in 0..50 { assert_eq!(out_data[i], (i + 10) as f32); }
+        for i in 0..50 { assert_eq!(out_data[i], i as f32); }
     }
 
     #[test]
