@@ -238,6 +238,12 @@ pub enum PerformanceCommand {
         node_idx: u32,
         track_idx: u32,
     },
+    PlayNode {
+        node_idx: u32,
+    },
+    StopNode {
+        node_idx: u32,
+    },
 }
 
 #[repr(C)]
