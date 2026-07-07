@@ -37,8 +37,15 @@ impl nullherz_traits::ParallelExecutor for TaskPool {
         self.worker_producers[worker_idx].push(*job).map_err(|j| Box::new(j) as Box<dyn std::any::Any + Send>)
     }
     fn wait_for_completion(&mut self, target_count: usize) {
+        let mut spins = 0;
         while self.completion.load(Ordering::Acquire) < target_count {
-            self.completion_fd.wait();
+            if spins < crate::SPIN_LIMIT {
+                std::hint::spin_loop();
+                spins += 1;
+            } else {
+                self.completion_fd.wait();
+                spins = 0;
+            }
         }
     }
     fn current_completion_count(&self) -> usize {
@@ -80,7 +87,23 @@ impl TaskPool {
             let handle = thread::spawn(move || {
                 ipc_layer::setup_rt_thread(85, Some(i + 1)); // Pin workers to cores 1..N
                 while running_worker.load(Ordering::Relaxed) {
-                    if let Some(job) = cons.pop() {
+                    let mut job_opt = cons.pop();
+                    if job_opt.is_none() {
+                        let mut spins = 0;
+                        while spins < crate::SPIN_LIMIT {
+                            job_opt = cons.pop();
+                            if job_opt.is_some() { break; }
+                            std::hint::spin_loop();
+                            spins += 1;
+                        }
+                    }
+
+                    if job_opt.is_none() {
+                        let _ = worker_wake_fd.wait();
+                        job_opt = cons.pop();
+                    }
+
+                    if let Some(job) = job_opt {
                         // SAFETY: job.node_ptr is guaranteed to be valid for the duration of the job execution.
                         let node = unsafe { &*job.node_ptr };
                         let num_samples = job.num_samples;
@@ -147,8 +170,6 @@ impl TaskPool {
 
                         completion_worker.fetch_add(1, Ordering::Release);
                         completion_fd_worker.notify();
-                    } else {
-                        let _ = worker_wake_fd.wait();
                     }
                 }
             });

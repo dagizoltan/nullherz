@@ -132,7 +132,7 @@ pub struct InspectorApp {
     pub(crate) library_needs_refresh: bool,
     pub(crate) breeding_view: views::breeder::BreederView,
     pub(crate) wgpu_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::wgpu_backend::WgpuRenderer>>>,
-    pub(crate) waveform_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>>,
+    pub(crate) waveform_renderer: Option<Arc<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>,
     pub(crate) active_connection_source: Option<(u32, u32)>, // (node_idx, output_idx)
     pub(crate) active_node_drag: Option<u32>,
     pub(crate) smart_crate_builder_open: bool,
@@ -511,7 +511,7 @@ fn main() -> eframe::Result<()> {
                     render_state.target_format,
                     1024
                 );
-                app.waveform_renderer = Some(Arc::new(Mutex::new(wf_renderer)));
+                app.waveform_renderer = Some(Arc::new(wf_renderer));
             }
 
             Box::new(app)

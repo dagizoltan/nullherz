@@ -22,8 +22,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(10, 10, 15));
             ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_gray(50)));
 
-            if let Some(wf_lock) = &app.waveform_renderer {
-                let mut wf = wf_lock.lock().unwrap();
+            if let Some(wf) = &app.waveform_renderer {
                 let zoom = app.sampler_waveform_zoom;
                 let scroll = 0.0;
                 let color = [0.0, 1.0, 0.8, 1.0]; // Teal theme

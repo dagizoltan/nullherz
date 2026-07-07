@@ -14,10 +14,12 @@ struct WaveformVertex {
     position: [f32; 2],
 }
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 pub struct WaveformRenderer {
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
-    num_vertices: u32,
+    num_vertices: AtomicU32,
     globals_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     _max_peaks: usize,
@@ -115,14 +117,14 @@ impl WaveformRenderer {
         Self {
             pipeline,
             vertex_buffer,
-            num_vertices: 0,
+            num_vertices: AtomicU32::new(0),
             globals_buffer,
             bind_group,
             _max_peaks: max_peaks,
         }
     }
 
-    pub fn update_peaks(&mut self, queue: &wgpu::Queue, peaks: &[f32]) {
+    pub fn update_peaks(&self, queue: &wgpu::Queue, peaks: &[f32]) {
         let mut vertices = Vec::with_capacity(peaks.len() * 2);
         let peak_count = peaks.len();
         if peak_count == 0 { return; }
@@ -133,11 +135,11 @@ impl WaveformRenderer {
             vertices.push(WaveformVertex { position: [x, peak] });
             vertices.push(WaveformVertex { position: [x, -peak] });
         }
-        self.num_vertices = vertices.len() as u32;
+        self.num_vertices.store(vertices.len() as u32, Ordering::Release);
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
     }
 
-    pub fn update_from_mip_waveform(&mut self, queue: &wgpu::Queue, mip_waveform: &nullherz_traits::MipWaveform, zoom: f32, display_pixel_width: u32) {
+    pub fn update_from_mip_waveform(&self, queue: &wgpu::Queue, mip_waveform: &nullherz_traits::MipWaveform, zoom: f32, display_pixel_width: u32) {
         // Advanced LOD selection logic:
         // We aim for approximately 2 peaks per display pixel for optimal visual density
         // without overloading the GPU with redundant geometry.
@@ -162,7 +164,7 @@ impl WaveformRenderer {
         }
     }
 
-    pub fn update_globals(&mut self, queue: &wgpu::Queue, scroll: f32, zoom: f32, color: [f32; 4]) {
+    pub fn update_globals(&self, queue: &wgpu::Queue, scroll: f32, zoom: f32, color: [f32; 4]) {
         let globals = WaveformGlobals {
             scroll_offset: scroll,
             zoom,
@@ -172,11 +174,12 @@ impl WaveformRenderer {
     }
 
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
-        if self.num_vertices > 0 {
+        let num_vertices = self.num_vertices.load(Ordering::Acquire);
+        if num_vertices > 0 {
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.draw(0..self.num_vertices, 0..1);
+            render_pass.draw(0..num_vertices, 0..1);
         }
     }
 }

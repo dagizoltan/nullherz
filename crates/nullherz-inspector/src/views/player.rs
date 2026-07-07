@@ -22,9 +22,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             // Waveform Display
             let (rect, _response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 220.0), Sense::hover());
 
-            if let (Some(wgpu_mtx), Some(wf_mtx)) = (&app.wgpu_renderer, &app.waveform_renderer) {
+            if let (Some(wgpu_mtx), Some(wf)) = (&app.wgpu_renderer, &app.waveform_renderer) {
                 let _wgpu = wgpu_mtx.lock().unwrap();
-                let mut wf = wf_mtx.lock().unwrap();
 
                 // Use a dedicated 'Player' deck or focused deck for visualization
                 let deck_idx = app.focused_deck;
@@ -44,17 +43,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 }
 
                 struct WaveformCallback {
-                    renderer: Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>,
+                    renderer: Arc<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>,
                 }
                 impl egui_wgpu::CallbackTrait for WaveformCallback {
                     fn paint<'a>(&'a self, _info: egui::PaintCallbackInfo, render_pass: &mut wgpu::RenderPass<'a>, _resources: &egui_wgpu::CallbackResources) {
-                        if let Ok(wf) = self.renderer.lock() {
-                            let wf_ptr: *const nullherz_ui_hal::render::waveform_renderer::WaveformRenderer = &*wf;
-                            unsafe { (*wf_ptr).render(render_pass); }
-                        }
+                        self.renderer.render(render_pass);
                     }
                 }
-                let callback = egui_wgpu::Callback::new_paint_callback(rect, WaveformCallback { renderer: wf_mtx.clone() });
+                let callback = egui_wgpu::Callback::new_paint_callback(rect, WaveformCallback { renderer: wf.clone() });
                 ui.painter().add(callback);
             }
 

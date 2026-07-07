@@ -18,6 +18,8 @@ pub use nullherz_traits::{
     MAX_CROSSFADE_BUFFERS, MAX_MUTATIONS, DEFAULT_WORKER_COUNT, MAX_COMMANDS_PER_BLOCK
 };
 
+pub const SPIN_LIMIT: usize = 1000;
+
 #[inline(always)]
 pub fn get_cycles() -> u64 {
     #[cfg(target_arch = "x86_64")]
