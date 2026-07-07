@@ -106,6 +106,8 @@ impl TelemetryFinalizer {
             remote_node_count: 0,
             remote_cpu_usage: [0.0; 8],
             remote_latency_ms: [0.0; 8],
+            calibration_samples: 0,
+            sample_rate: transport.sample_rate,
             suggestions: [(0, 0.0); 4],
             active_master_deck: 'A',
         };

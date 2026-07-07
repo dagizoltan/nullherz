@@ -6,6 +6,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("nullherz-conductor starting...");
 
     let mut conductor = Conductor::new();
+    let _ = conductor.load_system_config();
     let context = conductor.setup_engine();
 
     // --- MIDI SIDECAR BRIDGE SETUP ---

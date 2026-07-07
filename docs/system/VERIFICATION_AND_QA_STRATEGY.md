@@ -38,4 +38,14 @@ Manual audits for heap allocations in `process()` are error-prone.
 
 ---
 
+## 6. Current Coverage Status (Audit: 2026-07-07)
+
+| Verification Method | Status | Details |
+|---------------------|--------|---------|
+| **Kani Proofs** | [PARTIAL] | 3 proofs implemented in `ipc-layer` (SPSC, MPSC, ShmSignal). |
+| **Cargo-Fuzz** | [PARTIAL] | Baseline template created for `GainProcessor`. Processor-wide coverage pending. |
+| **CI Workflow** | [PARTIAL] | Minimal workspace testing (`cargo test`) implemented. Benchmarking not yet integrated. |
+| **Zero-Alloc Lint** | [PLANNED] | Statically enforced via manual audit only. |
+| **Playwright** | [PLANNED] | Not yet implemented. |
+
 **QA Invariant:** *It is better to have one mathematically verified kernel than ten un-hardened features.*

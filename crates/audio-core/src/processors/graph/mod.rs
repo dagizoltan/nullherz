@@ -358,16 +358,9 @@ fn apply_command(&mut self, command: &nullherz_traits::Command) {
                 }
             }
             Command::Core(CoreCommand::CommitTopology) => {
-                // First apply all buffered mutations to the inactive topology
-                for i in 0..self.pending_mutation_count {
-                    if let Some(m) = self.pending_mutations[i].take() {
-                        self.apply_mutation_internal(m);
-                    }
-                }
-                self.pending_mutation_count = 0;
-
-                self.calculate_stages();
-                self.commit_graph();
+                // AUDIT: CommitTopology must never be executed on the RT thread.
+                // It is handled off-thread by TopologyManager, which pushes a
+                // TopologyMutation::SetTopology for an O(1) Arc swap.
             }
             Command::Mixer(MixerCommand::Bundle { .. }) => {
                 // BUG-07: ProcessorGraph must not broadcast the Bundle itself,
@@ -511,6 +504,19 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         for i in 0..128 {
             assert_eq!(out_data[i], i as f32);
         }
+    }
+
+    #[test]
+    fn test_rt_topology_commit_is_no_op() {
+        let mut graph = ProcessorGraph::new();
+        // Manually increment node count to simulate a populated graph
+        graph.node_count = 1;
+
+        // Sending CommitTopology to RT apply_command should NOT trigger calculate_stages
+        // (which would set plan.num_stages > 0 if it worked, but here it should be a no-op)
+        graph.apply_command(&nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology));
+
+        assert_eq!(graph.topology_coordinator.active_topology().plan.num_stages, 0, "RT CommitTopology must be a no-op");
     }
 
     #[test]

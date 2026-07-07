@@ -16,8 +16,8 @@ To win the market, Nullherz must provide an immediate creative "high."
 
 ## 2. DNA Schema Versioning (SemVer for Sound)
 As the `SpectralPersonality` and `RhythmicDNA` schemas evolve, old samples must still sound correct.
-*   **Versioned Traits:** Sound DNA will include a `schema_version` field.
-*   **Backwards Compatibility:** The DSP library will include "Legacy Transfusion" kernels to ensure a project created in 2026 sounds identical in 2030.
+*   **Versioned Traits:** Sound DNA includes a `schema_version` field (currently v6) to track genetic evolution.
+*   **Backwards Compatibility:** [PARTIAL] The system is designed to support "Legacy Transfusion" kernels; however, as of 2026-07-07, only the v6 kernel is active. Future versions will require explicit legacy kernel paths to ensure bit-identical reproduction.
 
 ---
 
