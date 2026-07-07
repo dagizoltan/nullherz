@@ -1,0 +1,16 @@
+[package]
+name = "nullherz-processors-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[dependencies]
+libfuzzer-sys = "0.4"
+nullherz-processors = { path = ".." }
+nullherz-traits = { path = "../../nullherz-traits" }
+
+[[bin]]
+name = "gain_fuzz"
+path = "fuzz_targets/gain_fuzz.rs"
+test = false
+doc = false

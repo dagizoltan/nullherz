@@ -13,7 +13,7 @@ We will use the Eatbrain partnership as the primary vehicle for social proof in 
 
 ## 2. The Sidecar Marketplace (Genetic Traits)
 Nullherz wins when third parties contribute to the ecosystem.
-*   **AnaWaves DNA Store:** A platform where users can trade or sell **AnaWaves Genetic Traits** (Spectral Personality files and Rhythmic DNA masks).
+*   **AnaWaves DNA Store:** A platform where users can trade or sell **AnaWaves Genetic Traits** (Spectral Personality files and Rhythmic DNA masks). Note: Early versions of the P2P sync protocol are limited to trusted/paired peers in a closed studio environment; public-facing trade will require the "Signed DNA" security layer scheduled for Stage 7.
 *   **Rust Sidecar SDK:** Provide a one-command "Project Template" (`cargo generate nullherz-sidecar`) to lower the barrier for Rust developers to build high-performance DSP plugins.
 
 ---

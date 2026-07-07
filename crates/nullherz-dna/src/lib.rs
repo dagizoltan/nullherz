@@ -260,6 +260,7 @@ pub trait PeerSync {
 /// Functional implementation of PeerSync using simple TCP exchange.
 pub struct CloudPeerSync {
     pub peers: Vec<String>,
+    pub trusted_peers: std::collections::HashSet<String>,
 }
 
 impl PeerSync for CloudPeerSync {
@@ -270,6 +271,12 @@ impl PeerSync for CloudPeerSync {
 
     fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA> {
         for peer in &self.peers {
+            // AUDIT-FIX: Only request DNA from peers in the trusted allow-list.
+            // This prevents unauthenticated DNA transfusion from untrusted network nodes.
+            // In production, this should be backed by cryptographic signing.
+            if !self.trusted_peers.contains(peer) {
+                continue;
+            }
             if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
                 &peer.parse().ok()?,
                 std::time::Duration::from_millis(500)
@@ -313,14 +320,21 @@ impl PeerSync for CloudPeerSync {
 
 pub struct DiscoveryService {
     pub known_peers: Vec<String>,
+    pub trusted_peers: std::collections::HashSet<String>,
     mdns: Option<mdns_sd::ServiceDaemon>,
     service_type: &'static str,
 }
 
 impl DiscoveryService {
     pub fn new() -> Self {
+        let mut trusted_peers = std::collections::HashSet::new();
+        // Default trusted peers for local development and testing
+        trusted_peers.insert("127.0.0.1:9003".to_string());
+        trusted_peers.insert("localhost:9003".to_string());
+
         Self {
             known_peers: Vec::new(),
+            trusted_peers,
             mdns: mdns_sd::ServiceDaemon::new().ok(),
             service_type: "_nullherz-dna._udp.local.",
         }

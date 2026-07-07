@@ -26,7 +26,7 @@ Nullherz occupies a unique position in the audio software market: it is a hybrid
 | **RT Safety** | High | Medium | High | High | **Hardened (No-Alloc)**|
 | **Memory Model**| Manual/Arc | Manual | Manual | Manual | **Memory-Safe (Rust)**|
 | **Parallelism** | Coarse | Single-Threaded | Stage-Based | Multi-Server | **Fine-Grained SIMD** |
-| **Jitter Floor** | < 1ms | ~2-5ms | < 1ms | < 0.1ms | **< 0.05ms (Atomic)** |
+| **Jitter Floor** | < 1ms | ~2-5ms | < 1ms | < 0.1ms | **Sub-ms (Design Target)** [1] |
 | **Plugin Isolation**| None (Crashes) | None | Sandbox (v11+) | External Process | **Sidecar SDK (cgroups)**|
 | **Modulation** | Fixed | Scriptable | Clip-Based | Dynamic | **Modulation Matrix** |
 
@@ -76,5 +76,7 @@ By leveraging `wide` and `simd_vec`, Nullherz achieves performance that surpasse
 | **Mobile/Embedded**| iPad Apps | Rust's target portability allows same-core on ARM/x86. |
 
 ---
+
+[1] **Jitter Floor:** While designed for sub-0.05ms jitter via atomic topology swaps and lock-free IPC, formal benchmarks on production-grade hardware are pending.
 
 **Comparison Integrity:** *Maintained by the Nullherz Engineering & Product Strategy Team.*

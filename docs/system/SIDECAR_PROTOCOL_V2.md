@@ -59,3 +59,8 @@ All messages over TCP use a 4-byte Big-Endian length prefix, followed by the pay
 1. **Alignment:** All `AudioBlock` payloads MUST be 64-byte aligned and 1088 bytes in size (including padding).
 2. **Serialization:** All non-Pod types MUST be serialized using `bincode` with standard configuration.
 3. **Real-time Safety:** Message handlers in the Conductor MUST NOT allocate on the audio thread. Type 3 blocks are routed through pre-allocated SPSC queues.
+
+## Security & Isolation
+
+- **P2P DNA Sync:** As of 2026-07-07, P2P DNA sync via `CloudPeerSync` is limited to trusted/paired peers in a closed studio LAN. Unauthenticated DNA pulls from unknown network nodes are prohibited by an allow-list in the `DiscoveryService`. Currently, only localhost (127.0.0.1:9003) is trusted by default for testing.
+- **Remote Execution:** Sidecar processes are isolated via cgroups and restricted memory limits. Protocol level authentication for remote sidecars is planned for Stage 7.

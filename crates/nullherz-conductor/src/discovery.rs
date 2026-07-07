@@ -73,7 +73,12 @@ impl SidecarDiscoveryService {
 
                     let lib_lock = lib_db.lock().unwrap();
 
-                    let sync = nullherz_dna::CloudPeerSync { peers };
+                    let trusted_peers = {
+                        let d = discovery_mutex.lock().unwrap();
+                        d.trusted_peers.clone()
+                    };
+
+                    let sync = nullherz_dna::CloudPeerSync { peers, trusted_peers };
                     let _ = lib_lock.sync_with_cloud(&sync);
                 }
             });

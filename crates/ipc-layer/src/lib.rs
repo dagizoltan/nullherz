@@ -680,6 +680,19 @@ mod proofs {
             kani::assert(popped == Some(val), "Popped value must match pushed value");
         }
     }
+
+    #[kani::proof]
+    fn prove_shm_signal_atomic_ordering() {
+        let signal = ShmSignal::new();
+        kani::assert(!signal.check_and_clear(), "Initial flag must be false");
+        signal.notify();
+        kani::assert(signal.check_and_clear(), "Flag must be true after notify");
+        kani::assert(!signal.check_and_clear(), "Flag must be cleared after check");
+
+        let initial_heartbeat = signal.get_heartbeat();
+        signal.pulse_heartbeat();
+        kani::assert(signal.get_heartbeat() == initial_heartbeat + 1, "Heartbeat must increment");
+    }
 }
 
 #[cfg(test)]

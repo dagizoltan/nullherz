@@ -72,8 +72,8 @@ impl ProcessorFactory for WavetableFactory {
 
 pub struct ModulationFactory;
 impl ProcessorFactory for ModulationFactory {
-    fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        Some(Box::new(ModulationProcessor::new(0, 0, 1.0, 0.0)))
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(ModulationProcessor::new(node_idx as u64, 0, 0, 1.0, 0.0)))
     }
     fn name(&self) -> &'static str { "Modulation" }
 }

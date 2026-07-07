@@ -136,11 +136,28 @@ fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
             if ui.button(RichText::new("● START CALIBRATION").color(Color32::from_rgb(0, 255, 200))).clicked() {
                 let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CalibrateLatency));
             }
-            ui.label("Current RTL: 10.0ms (441 samples)");
+
+            if let Some(t) = app.last_telemetry.lock().unwrap().as_ref() {
+                if t.calibration_samples > 0 {
+                    let ms = (t.calibration_samples as f32 / (t.sample_rate / 1000.0));
+                    ui.label(format!("Current RTL: {:.1}ms ({} samples)", ms, t.calibration_samples));
+                } else {
+                    ui.label("Current RTL: Not Calibrated");
+                }
+            } else {
+                ui.label("Current RTL: --");
+            }
         });
 
         ui.add_space(20.0);
         if ui.button(RichText::new("SAVE SYSTEM CONFIG").strong()).clicked() {
+             // AUDIT-FIX: We must NOT send CommitTopology directly to the command bus,
+             // as that might bypass Conductor and hit the RT thread.
+             // Instead, we send it and rely on Conductor::apply_mixer_commands -> handle_core_command
+             // to NOT forward it if it handled it.
+             // Conductor currently doesn't handle CommitTopology in handle_core_command,
+             // it passes it to mixer_bridge.apply_mixer_commands which calls topology_manager.handle_topology_command.
+             // TopologyManager::handle_topology_command DOES handle CommitTopology off-thread.
              let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology));
              println!("System configuration persisted.");
         }

@@ -35,6 +35,7 @@ pub struct Conductor {
     midi_shm: Option<Arc<ipc_layer::SharedMemory>>,
     pub matchmaking_suggestions: Arc<Mutex<Vec<(u64, f32)>>>,
     pub active_master_deck: char,
+    pub calibration_samples: u32,
 }
 
 impl Default for Conductor {
@@ -91,6 +92,7 @@ impl Conductor {
             midi_shm: None,
             matchmaking_suggestions: Arc::new(Mutex::new(Vec::new())),
             active_master_deck: 'A',
+            calibration_samples: 0,
         }
     }
 
@@ -186,7 +188,18 @@ impl Conductor {
         res
     }
 
-    pub fn update_system_config(&self, backend_type: Option<nullherz_traits::AudioBackendType>, midi_ports: Option<Vec<String>>, calibration: Option<u32>) -> std::io::Result<()> {
+    pub fn load_system_config(&mut self) -> std::io::Result<()> {
+        let path = "system_config.json";
+        if std::path::Path::new(path).exists() {
+            let content = std::fs::read_to_string(path)?;
+            if let Ok(config) = serde_json::from_str::<crate::persistence::SystemConfig>(&content) {
+                self.calibration_samples = config.calibration_samples;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn update_system_config(&mut self, backend_type: Option<nullherz_traits::AudioBackendType>, midi_ports: Option<Vec<String>>, calibration: Option<u32>) -> std::io::Result<()> {
         let path = "system_config.json";
         let mut config = if std::path::Path::new(path).exists() {
             let content = std::fs::read_to_string(path)?;
@@ -215,6 +228,7 @@ impl Conductor {
         }
         if let Some(c) = calibration {
             config.calibration_samples = c;
+            self.calibration_samples = c;
         }
 
         let json = serde_json::to_string_pretty(&config).map_err(|e| std::io::Error::other(e))?;
@@ -317,6 +331,9 @@ impl Conductor {
                 telemetry.remote_latency_ms[i] = node.latency_ms;
             }
         }
+
+        // Update Calibration Telemetry from cached state
+        telemetry.calibration_samples = self.calibration_samples;
     }
 
     pub fn apply_mixer_commands(&mut self, commands: Vec<Command>) {
@@ -394,6 +411,7 @@ impl Conductor {
                 };
                 // Hardened calibration: 10ms based on actual sample rate
                 let samples = (sample_rate * 0.01) as u32;
+                self.calibration_samples = samples;
                 let _ = self.update_system_config(None, None, Some(samples));
                 true
             }

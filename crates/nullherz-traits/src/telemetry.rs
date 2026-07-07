@@ -30,6 +30,8 @@ pub struct Telemetry {
     pub remote_node_count: u32,
     pub remote_cpu_usage: [f32; 8], // Support up to 8 remote nodes in telemetry
     pub remote_latency_ms: [f32; 8],
+    pub calibration_samples: u32,
+    pub sample_rate: f32,
     /// Proactive matchmaking suggestions: (Sample ID, Similarity Score)
     pub suggestions: [(u64, f32); 4],
     pub active_master_deck: char,
@@ -58,6 +60,8 @@ impl Default for Telemetry {
             remote_node_count: 0,
             remote_cpu_usage: [0.0; 8],
             remote_latency_ms: [0.0; 8],
+            calibration_samples: 0,
+            sample_rate: 44100.0,
             suggestions: [(0, 0.0); 4],
             active_master_deck: 'A',
         }

@@ -1,8 +1,8 @@
 # Nullherz System Architecture: Lead Architect's Comprehensive Report
 
 **Author:** Senior Lead Audio & Rust Systems Architect
-**Status:** PRODUCTION READY / HARDENED / DECOUPLED
-**Date:** June 20, 2026
+**Status:** HARDENED ALPHA (Active Development)
+**Date:** 2026-07-07
 
 ---
 
@@ -12,7 +12,7 @@ The Nullherz engine is built upon a strict separation of concerns, ensuring that
 
 ### 1.1 The Orchestration Plane (`nullherz-conductor`)
 *   **Responsibility**: Lifecycle management, declarative topology reconciliation, and global resource coordination.
-*   **Off-Thread Compilation**: `TopologyManager` now performs expensive topological analysis (Kahn's algorithm) off the audio thread, injecting pre-compiled `GraphTopology` structures via the `SetTopology` mutation.
+*   **Off-Thread Compilation**: [VERIFIED] `TopologyManager` performs expensive topological analysis (Kahn's algorithm) off the audio thread (`crates/nullherz-conductor/src/topology_manager.rs:141`). Off-thread compilation is enforced for all commit paths; `ProcessorGraph::apply_command` in `audio-core` has been audited to remove the synchronous `calculate_stages` path.
 *   **Decoupling**: Interacts with the execution plane exclusively through `RenderingEngine` and `RenderingController` trait objects.
 
 ### 1.2 The Protocol Plane (`ipc-layer`, `nullherz-traits`)
@@ -22,17 +22,17 @@ The Nullherz engine is built upon a strict separation of concerns, ensuring that
 
 ### 1.3 The Execution Plane (`audio-core`, `audio-dsp`)
 *   **Responsibility**: Low-latency, bit-exact audio processing.
-*   **Static Graph Execution**: The `ProcessorGraph` acts as a lightweight VM. By utilizing `SetTopology`, structural shifts are O(1) pointer swaps, guaranteeing zero-jitter transitions even for complex graphs.
+*   **Static Graph Execution**: [VERIFIED] The `ProcessorGraph` acts as a lightweight VM. Structural shifts are O(1) pointer swaps via `SetTopology` (`crates/audio-core/src/processors/graph/mod.rs:114`), ensuring zero-jitter transitions. A regression test `test_rt_topology_commit_is_no_op` ensures the RT thread cannot be stalled by accidental topology recalculations.
 
 ---
 
 ## 2. Advanced Core Invariants
 
 ### 2.1 Real-Time Safety & Performance
-- **Lock-Free Sample Access**: `SampleRegistry` refactored to use an atomic-swap pattern, ensuring the RT thread never blocks on a `RwLock` during transfusion sourcing.
-- **Zero Heap Allocation**: No `Vec::new`, `Vec::push`, or `Arc::new` occur on the audio thread.
-- **CPU Hardening**: FTZ/DAZ enabled globally to prevent denormal-induced CPU spikes.
-- **Atomic Topology**: Structural shifts (AddNode/SwapProcessor) are now fully buffered and committed atomically, preventing temporary signal graph inconsistencies.
+- **Lock-Free Sample Access**: [VERIFIED] `SampleRegistry` uses an atomic-swap pattern (`crates/nullherz-dna/src/lib.rs:567`).
+- **Zero Heap Allocation**: [PARTIAL] Audit of audio hot-paths indicates zero-allocation for core processors, but broad system-wide verification is pending a custom allocator/linter check.
+- **CPU Hardening**: [VERIFIED] FTZ/DAZ enabled globally (`crates/ipc-layer/src/lib.rs:619`).
+- **Atomic Topology**: [VERIFIED] Structural shifts are buffered and committed via `TopologyManager` off-thread.
 
 ### 2.2 Fault Tolerance & Signal Stability
 - **Sidecar Resilience**: `SidecarSupervisor` tracks `node_idx` state, ensuring failed DSP sidecars are restored to their correct topological position.
@@ -80,8 +80,22 @@ While the Nullherz engine is architecturally hardened, the transition to a "Valu
 
 ---
 
-## 5. Conclusion
+## 5. Subsystem Readiness Matrix
 
-The Nullherz engine is now fully decoupled and real-time hardened. It achieves total isolation between hardware backends and processing logic, while ensuring that control-plane complexity never leaks into the high-priority signal path.
+| Subsystem | Readiness | Evidence |
+|-----------|-----------|----------|
+| **Core Engine** | Hardened Alpha | `crates/audio-core/src/integration_tests.rs` |
+| **Topology Manager** | Hardened Alpha | `crates/nullherz-conductor/src/topology_manager.rs` |
+| **Mixer Console** | Active | `crates/nullherz-mixer/src/dj.rs` |
+| **Genetic Cloud** | Prototype | [PARTIAL] Lacks cryptographic auth; limited to Studio LAN. |
+| **Sequencer / Composer** | Active | `crates/nullherz-processors/src/sequencer.rs` |
+| **Persistence** | Active | `crates/nullherz-conductor/src/persistence.rs` (rkyv verified) |
+| **Modulation Matrix** | Active | `crates/nullherz-processors/src/modulation.rs` (addressable) |
 
-**Architecture Status:** PRODUCTION-READY.
+---
+
+## 6. Conclusion
+
+The Nullherz engine is now in a **Hardened Alpha** state. It achieves significant isolation between management and execution planes. While core DSP and orchestration paths are real-time safe and tested, secondary systems (P2P Cloud) and verification coverage (Kani/Fuzzing) remain in active development.
+
+**Architecture Status:** HARDENED ALPHA.

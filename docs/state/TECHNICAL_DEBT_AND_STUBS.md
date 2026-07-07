@@ -6,20 +6,30 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 
 ## 1. Resolved Items (Hardened)
 
-- **Orchestrator Calibration**: [RESOLVED] Prototype hardcoded 441 samples replaced with dynamic calculation based on engine sample rate.
+- **Orchestrator Calibration**: [RESOLVED] Dynamic calculation based on engine sample rate implemented (`crates/nullherz-conductor/src/orchestrator.rs:252`) and bound to live UI (`crates/nullherz-inspector/src/views/settings.rs:140`).
 - **Remote Audio Send**: [RESOLVED] Refactored from per-block `tokio::spawn` to efficient batching.
 - **Isolator Filters**: [OPTIMIZED] Implemented 4x unrolled kernels and **exact Linkwitz-Riley coefficient generation**.
 - **Offline Rendering**: [RESOLVED] Replaced `unsafe` pointer hack with safe mutable access in `bounce.rs`.
-- **DNA Mutation Targeting**: [RESOLVED] Replaced first-ID heuristic with precise `resource_id` resolution in `orchestrator.rs`.
+- **DNA Mutation Targeting**: [RESOLVED] Replaced first-ID heuristic with precise `resource_id` resolution in `orchestrator.rs:434`.
 - **UI Placeholders**: [IMPROVED] Enhanced empty deck states in `dj_studio.rs`.
 - **Waveform Rendering**: [OPTIMIZED] Implemented precise LOD selection in `waveform_renderer.rs`.
 
 ---
 
-## 2. Orchestration Plane (`nullherz-conductor`)
+## 2. UI & Telemetry Inconsistencies
+
+- **Hardcoded Telemetry Strings**: [PARTIAL] Several views still display hardcoded mock data instead of live telemetry.
+    - `crates/nullherz-inspector/src/views/account.rs`: Dominant trait calculation is mocked based on library average, not live signal.
+    - `crates/nullherz-inspector/src/views/account.rs`: "Node-7742 (Mastering Grade)" identity is a hardcoded string.
+    - `crates/nullherz-inspector/src/views/metrics.rs`: "ORCHESTRATION THREADS" heatmap is entirely mocked using a sine wave.
+    - `crates/nullherz-inspector/src/views/breeder.rs`: "Visual Transfusion Progress Bar" may not be tied to actual kernel progress if multi-block.
+
+---
+
+## 3. Orchestration Plane (`nullherz-conductor`)
 
 ### `src/orchestrator.rs`
-- **Line 537**: [RESOLVED] DNA suggestion logic now strictly binds to the `active_master_deck` state.
+- **Line 537**: [RESOLVED] DNA suggestion logic strictly binds to the `active_master_deck` state. [VERIFIED] (`crates/nullherz-conductor/src/orchestrator.rs:206`).
 
 ---
 
@@ -27,7 +37,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 
 ### `nullherz-dna/src/lib.rs`
 - **Line 219**: `// Breeding logic or library integration here...` - Missing implementation for inherited DNA.
-- **Line 261**: [RESOLVED] Skeleton UDP broadcast replaced with robust `mdns-sd` discovery service.
+- **Line 261**: [RESOLVED] Skeleton UDP broadcast replaced with robust `mdns-sd` discovery service. (`crates/nullherz-dna/src/lib.rs:320`).
 
 ---
 
@@ -76,7 +86,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 ## 7. Strategic Technical Debt
 
 ### Persistence & Serialization
-- **Zero-Copy Migration**: `ProjectState` currently uses Bincode/JSON which requires full deserialization. Transition to `rkyv` is required for zero-copy session loading on the audio thread.
+- **Zero-Copy Migration**: [RESOLVED] `ProjectState` and core traits now derive `rkyv::Archive` with `check_bytes` validation for high-performance orchestration (`crates/nullherz-conductor/src/persistence.rs:104`).
 - **Modular Persistence**: [RESOLVED] Persistence logic fully decoupled from the main Conductor orchestrator.
 
 ### UI Architecture
