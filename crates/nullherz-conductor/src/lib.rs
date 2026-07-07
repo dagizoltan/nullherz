@@ -1,6 +1,7 @@
 pub mod timeline;
 pub mod backend;
 pub mod orchestrator;
+pub mod wav;
 pub mod engine_coordinator;
 pub mod topology_manager;
 pub mod midi_clock;

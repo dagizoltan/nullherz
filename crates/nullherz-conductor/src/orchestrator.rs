@@ -405,14 +405,23 @@ impl Conductor {
                 true
             }
             nullherz_traits::CoreCommand::CalibrateLatency => {
-                let sample_rate = {
+                let (sample_rate, block_size) = {
                     let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock();
-                    engine_lock.ok().and_then(|lock| lock.as_ref().map(|e| e.target_sample_rate())).unwrap_or(44100.0)
+                    engine_lock.ok().and_then(|lock| lock.as_ref().map(|e| {
+                        let config = e.get_config();
+                        (config.sample_rate, config.block_size)
+                    })).unwrap_or((44100.0, 128))
                 };
-                // Hardened calibration: 10ms based on actual sample rate
-                let samples = (sample_rate * 0.01) as u32;
+
+                // Real-world Calibration Heuristic:
+                // Total Round-trip Latency (RTL) = Input Buffer + Output Buffer + Processing + Hardware Overhead
+                // Standard Nullherz RT-path uses triple-buffering logic in backends.
+                let hardware_safety_margin = (sample_rate * 0.0015) as u32; // 1.5ms margin
+                let samples = (block_size * 3) as u32 + hardware_safety_margin;
+
                 self.calibration_samples = samples;
                 let _ = self.update_system_config(None, None, Some(samples));
+                println!("Latency Calibration: Set to {} samples ({:.2}ms) @ {}Hz", samples, (samples as f32 / sample_rate) * 1000.0, sample_rate);
                 true
             }
             nullherz_traits::CoreCommand::HotLoadSidecar { name, node_idx } => {

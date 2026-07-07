@@ -236,6 +236,11 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
     }
     let num_channels = spa_buf.n_datas.min(16) as usize;
     let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
+    let mut in_refs_storage: [&[f32]; 16] = std::array::from_fn(|_| &[][..]);
+
+    // BE-HACK: For now, we assume Pipewire might give us a single buffer or separate ones.
+    // If we're an output stream (default), we only have output buffers.
+    // In a full duplex Pipewire client, we'd have multiple ports.
 
     for (i, out_ref) in out_refs_storage.iter_mut().enumerate().take(num_channels) {
         let data = unsafe { &*spa_buf.datas.add(i) };
@@ -256,13 +261,9 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
     if let Some(ref handle) = backend.engine_handle {
         #[allow(clippy::collapsible_if)]
         if let Some(ref engine_arc) = *handle.lock().unwrap() {
-            // SAFETY: We need a &mut reference for process_block.
-            // In a real system, the backend would be the sole owner of the engine's
-            // processing context, or we'd use internal mutability.
-            // For now, we'll use a hack or ensure only one thread ever calls this.
             let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
             unsafe {
-                (*engine_ptr).process_block(&[], &mut out_refs_storage[..num_channels], num_samples);
+                (*engine_ptr).process_block(&in_refs_storage[..num_channels], &mut out_refs_storage[..num_channels], num_samples);
             }
         }
     }

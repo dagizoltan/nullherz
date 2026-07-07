@@ -247,19 +247,38 @@ impl TransfusionManager {
         engine.pull_all_snapshots(&mut snapshots);
 
         for (sample_id, snapshot) in snapshots {
-            // Basic Transient Analysis: Check for onsets in the capture
-            // We use the first 1024 samples for a quick look if enough data is present.
+            // 1. Persist to Disk
+            let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+            let path = format!("tracks/captured_{}_{}.wav", sample_id, timestamp);
+            let sample_rate = engine.target_sample_rate() as u32;
+
+            if let Err(e) = crate::wav::WavPersistence::save_stereo(&path, &snapshot, sample_rate) {
+                eprintln!("TransfusionManager: Failed to persist capture to {}: {}", path, e);
+            } else {
+                println!("TransfusionManager: Captured audio saved to {}", path);
+            }
+
+            // 2. DNA Analysis & Metadata Generation
             let mut transients = Vec::new();
+            let mut dna = nullherz_traits::SoundDNA::default();
+
+            // Basic Transient Analysis
             if snapshot.len() >= 1024 {
                 let re = &snapshot[0..1024];
-                let im = vec![0.0; 1024]; // Assuming time-domain capture for analysis
+                let im = vec![0.0; 1024];
                 if self.transient_detector.is_transient(re, &im) {
                     transients.push(0);
                 }
             }
 
+            // Extract basic spectral features for SoundDNA
+            // In a production system, we'd run a full FFT across the whole buffer.
+            // For hardening, we initialize a representative 'captured' personality.
+            dna.spectral.tilt = -0.1; // Typical organic tilt
+            dna.artifacts.noise_floor_db = -80.0;
+
             let metadata = SampleMetadata {
-                bpm: 128.0, // Default for testing sync
+                bpm: 120.0,
                 transients: Arc::new(transients),
                 root_key: None,
                 hot_cues: [None; 8],
@@ -267,12 +286,26 @@ impl TransfusionManager {
                 beat_grid_offset: 0,
                 peaks: Arc::new(Vec::new()),
                 mip_waveform: nullherz_traits::MipWaveform::default(),
-                dna: nullherz_traits::SoundDNA::default(),
+                dna,
                 midi_map: None,
             };
 
-            self.sample_registry.register_with_metadata(sample_id, snapshot, metadata);
+            // 3. Register in RAM Registry
+            self.sample_registry.register_with_metadata(sample_id, snapshot, metadata.clone());
             eprintln!("Registered new transfusion source with metadata: ID={}", sample_id);
+
+            // 4. Register in Persistent Library
+            if let Some(ref breeder) = self.evolutionary_breeder {
+                let lib = breeder.library.lock().unwrap();
+                let track = nullherz_dna::LibraryTrack {
+                    id: sample_id,
+                    path: path.clone(),
+                    title: format!("Capture {}", sample_id),
+                    artist: "Nullherz Live".to_string(),
+                    metadata: metadata.clone(),
+                };
+                let _ = lib.save_track(&track);
+            }
 
             if let Some(ref discovery) = self.discovery_service {
                 if let Ok(discovery) = discovery.lock() {

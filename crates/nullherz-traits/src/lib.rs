@@ -946,6 +946,8 @@ pub trait RenderingEngine: Send + Sync {
     fn set_config(&mut self, config: AudioConfig);
     /// Returns the target sample rate configured for the engine.
     fn target_sample_rate(&self) -> f32;
+    /// Returns the current audio configuration.
+    fn get_config(&self) -> AudioConfig;
     /// Pulls all available snapshots from the signal graph for registration.
     fn pull_all_snapshots(&self, target: &mut Vec<(u64, Arc<Vec<f32>>)>);
     /// Returns a list of all currently active child processors.

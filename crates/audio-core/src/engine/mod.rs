@@ -90,6 +90,7 @@ pub struct AudioEngine<K: ProcessingKernel = StandardKernel> {
     pub pool: Option<Box<dyn nullherz_traits::ParallelExecutor>>,
     pub transport: nullherz_traits::Transport,
     pub target_sample_rate: f32,
+    pub current_block_size: usize,
     pub logger: Arc<RtLogger>,
 
     // Pre-allocated FFT resources for RT-safe spectrum analysis
@@ -109,6 +110,13 @@ impl<K: ProcessingKernel> nullherz_traits::RenderingEngine for AudioEngine<K> {
 
     fn target_sample_rate(&self) -> f32 {
         self.target_sample_rate
+    }
+
+    fn get_config(&self) -> nullherz_traits::AudioConfig {
+        nullherz_traits::AudioConfig {
+            sample_rate: self.target_sample_rate,
+            block_size: self.current_block_size,
+        }
     }
 
     fn pull_all_snapshots(&self, target: &mut Vec<(u64, Arc<Vec<f32>>)>) {
@@ -175,6 +183,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
                 absolute_samples: 0,
             },
             target_sample_rate: 44100.0,
+            current_block_size: 128,
             logger,
             fft_plan: audio_dsp::SimdFft::new(1024),
             fft_re: audio_dsp::AlignedBuffer::new(1024),
@@ -193,6 +202,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
 
     pub fn set_config(&mut self, config: nullherz_traits::AudioConfig) {
         self.target_sample_rate = config.sample_rate;
+        self.current_block_size = config.block_size;
         self.transport.sample_rate = config.sample_rate;
         // SAFETY: We have &mut self here.
         let graph = unsafe { self.graph_manager.get_active_graph_mut() };

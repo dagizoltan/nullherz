@@ -83,25 +83,34 @@ unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_
         None => return 0,
     };
 
-    let mut out_ptrs: [*mut f32; 16] = [std::ptr::null_mut(); 16];
-    let num_ports = backend.ports.len().min(16);
-    for (i, out_ptr) in out_ptrs.iter_mut().enumerate().take(num_ports) {
-        *out_ptr = unsafe { (jack.jack_port_get_buffer)(backend.ports[i], nframes) } as *mut f32;
+    let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
+    let mut in_refs_storage: [&[f32]; 16] = std::array::from_fn(|_| &[][..]);
+
+    let mut out_count = 0;
+    let mut in_count = 0;
+
+    // Hardened Buffer Recovery: Support up to 16 ports with safety checks
+    // Assuming out_1, out_2 are first, then in_1, in_2 as registered in start()
+    for (i, &port) in backend.ports.iter().enumerate().take(16) {
+        if port.is_null() { continue; }
+        let buf = unsafe { (jack.jack_port_get_buffer)(port, nframes) };
+        if buf.is_null() { continue; }
+
+        if i < 2 { // Outputs
+            out_refs_storage[out_count] = unsafe { std::slice::from_raw_parts_mut(buf as *mut f32, nframes as usize) };
+            out_count += 1;
+        } else { // Inputs
+            in_refs_storage[in_count] = unsafe { std::slice::from_raw_parts(buf as *const f32, nframes as usize) };
+            in_count += 1;
+        }
     }
 
     if let Some(ref handle) = backend.engine_handle {
         #[allow(clippy::collapsible_if)]
         if let Some(ref engine_arc) = *handle.lock().unwrap() {
-            let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|i| {
-                if i < num_ports {
-                    unsafe { std::slice::from_raw_parts_mut(out_ptrs[i], nframes as usize) }
-                } else {
-                    &mut []
-                }
-            });
             let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
             unsafe {
-                (*engine_ptr).process_block(&[], &mut out_refs_storage[..num_ports], nframes as usize);
+                (*engine_ptr).process_block(&in_refs_storage[..in_count], &mut out_refs_storage[..out_count], nframes as usize);
             }
         }
     }
@@ -120,7 +129,9 @@ impl AudioBackend for JackBackend {
 
             let out1 = (inner.lib.as_ref().unwrap().jack_port_register)(inner.client, c"out_1".as_ptr(), c"32 bit float mono audio".as_ptr(), 2, 0);
             let out2 = (inner.lib.as_ref().unwrap().jack_port_register)(inner.client, c"out_2".as_ptr(), c"32 bit float mono audio".as_ptr(), 2, 0);
-            inner.ports = vec![out1, out2];
+    let in1 = (inner.lib.as_ref().unwrap().jack_port_register)(inner.client, c"in_1".as_ptr(), c"32 bit float mono audio".as_ptr(), 1, 0);
+    let in2 = (inner.lib.as_ref().unwrap().jack_port_register)(inner.client, c"in_2".as_ptr(), c"32 bit float mono audio".as_ptr(), 1, 0);
+    inner.ports = vec![out1, out2, in1, in2];
 
             inner.engine_handle = Some(engine_handle);
             let ptr = inner as *mut _ as *mut _;
