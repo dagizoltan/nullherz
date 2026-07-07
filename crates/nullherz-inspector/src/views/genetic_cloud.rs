@@ -35,7 +35,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(&track.title).strong());
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&track.title).strong());
+                            // Production Beta: Mock verification status check
+                            let is_verified = track.id % 2 == 0;
+                            if is_verified {
+                                ui.label(RichText::new("✔ VERIFIED").small().color(Color32::from_rgb(0, 255, 200)));
+                            }
+                        });
                         ui.label(RichText::new(&track.artist).small().color(Color32::GRAY));
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

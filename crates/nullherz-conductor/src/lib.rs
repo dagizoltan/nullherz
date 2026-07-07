@@ -2,6 +2,7 @@ pub mod timeline;
 pub mod backend;
 pub mod orchestrator;
 pub mod engine_coordinator;
+pub mod ptp_engine;
 pub mod topology_manager;
 pub mod midi_clock;
 pub mod analysis_kernel;

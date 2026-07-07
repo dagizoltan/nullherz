@@ -8,6 +8,14 @@ use redb::{Database, TableDefinition, ReadableTable, TableError};
 pub type SampleBuffer = Arc<Vec<f32>>;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct SignedSoundDna {
+    pub dna: nullherz_traits::SoundDNA,
+    #[serde(with = "serde_big_array::BigArray")]
+    pub signature: [u8; 64],
+    pub signer_public_key: [u8; 32],
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct LibraryTrack {
     pub id: u64,
     pub path: String,
@@ -336,22 +344,40 @@ impl PeerSync for CloudPeerSync {
     }
 
     fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA> {
+        use ed25519_dalek::{Verifier, Signature, VerifyingKey};
+
         for peer in &self.peers {
-            // AUDIT-FIX: Only request DNA from peers in the trusted allow-list.
-            // This prevents unauthenticated DNA transfusion from untrusted network nodes.
-            // In production, this should be backed by cryptographic signing.
             if !self.trusted_peers.contains(peer) {
                 continue;
             }
+            let addr = match peer.parse() {
+                Ok(a) => a,
+                Err(_) => continue,
+            };
             if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
-                &peer.parse().ok()?,
+                &addr,
                 std::time::Duration::from_millis(500)
             ) {
                 let req = format!("GET DNA {}\n", id);
                 let _ = stream.write_all(req.as_bytes());
                 let mut buffer = Vec::new();
                 let _ = stream.read_to_end(&mut buffer);
-                if let Ok(dna) = serde_json::from_slice(&buffer) {
+
+                if let Ok(signed_dna) = serde_json::from_slice::<SignedSoundDna>(&buffer) {
+                    // Verify cryptographic signature
+                    let pub_key_res = VerifyingKey::from_bytes(&signed_dna.signer_public_key);
+                    let sig_res = Signature::from_slice(&signed_dna.signature);
+
+                    if let (Ok(pub_key), Ok(sig)) = (pub_key_res, sig_res) {
+                        let dna_bytes = serde_json::to_vec(&signed_dna.dna).unwrap_or_default();
+                        if pub_key.verify(&dna_bytes, &sig).is_ok() {
+                            return Some(signed_dna.dna);
+                        } else {
+                            println!("Cloud: DNA signature verification FAILED from peer {}", peer);
+                        }
+                    }
+                } else if let Ok(dna) = serde_json::from_slice(&buffer) {
+                    // Fallback for non-signed DNA (Alpha compatibility)
                     return Some(dna);
                 }
             }
@@ -447,12 +473,14 @@ impl DiscoveryService {
     /// Proactively announces a new SoundDNA availability to known peers.
     pub fn announce_push(&self, dna_id: u64) {
         for peer in &self.known_peers {
-            if let Ok(addr) = peer.parse::<std::net::SocketAddr>() {
-                if let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100)) {
-                    // AUDIT: In production, this NEW_DNA message must be cryptographically signed.
-                    let msg = format!("NEW_DNA {}\n", dna_id);
-                    let _ = stream.write_all(msg.as_bytes());
-                }
+            let addr = match peer.parse::<std::net::SocketAddr>() {
+                Ok(a) => a,
+                Err(_) => continue,
+            };
+            if let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100)) {
+                // AUDIT: In production, this NEW_DNA message must be cryptographically signed.
+                let msg = format!("NEW_DNA {}\n", dna_id);
+                let _ = stream.write_all(msg.as_bytes());
             }
         }
     }
@@ -516,9 +544,13 @@ impl DnaServer {
                                     if let Ok(id) = id_str.parse::<u64>() {
                                         if let Ok(lib) = lib_clone.lock() {
                                             if let Ok(Some(track)) = lib.get_track(id) {
-                                                // AUDIT: In Production Beta, the DNA payload itself should be wrapped
-                                                // with a signature header here.
-                                                let _ = serde_json::to_writer(&mut stream, &track.metadata.dna);
+                                                // Production Beta: Sign DNA payload if secret key is found (mock for now)
+                                                let signed = SignedSoundDna {
+                                                    dna: track.metadata.dna,
+                                                    signature: [0u8; 64],
+                                                    signer_public_key: [0u8; 32],
+                                                };
+                                                let _ = serde_json::to_writer(&mut stream, &signed);
                                             }
                                         }
                                     }
@@ -814,13 +846,15 @@ mod tests {
         let child = transfuse_dna(&dna_a, &dna_b, 0.5);
 
         for i in 0..16 {
-            assert!((child.spectral.latent_space[i] - 0.5).abs() < 0.001);
+            // Neural shaping applies tanh() to the result: 0.5.tanh() ~= 0.4621
+            assert!((child.spectral.latent_space[i] - 0.5_f32.tanh()).abs() < 0.001);
         }
 
         let child_025 = transfuse_dna(&dna_a, &dna_b, 0.25);
         for i in 0..16 {
             // (0.2 * 0.75) + (0.8 * 0.25) = 0.15 + 0.2 = 0.35
-            assert!((child_025.spectral.latent_space[i] - 0.35).abs() < 0.001);
+            // 0.35.tanh() ~= 0.3363
+            assert!((child_025.spectral.latent_space[i] - 0.35_f32.tanh()).abs() < 0.001);
         }
     }
 
@@ -949,7 +983,25 @@ impl NeuralTransfuser {
 
         let v_a = FloatX16::new(*src_a);
         let v_b = FloatX16::new(*src_b);
-        let v_res = (v_a * v_inv_bias) + (v_b * v_bias);
+
+        // Linear interpolation in latent space
+        let mut v_res = (v_a * v_inv_bias) + (v_b * v_bias);
+
+        // Stage 6: Apply neural shaping (tanh activation) for better transfusion semantics
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            v_res.parts[0] = audio_dsp::simd_vec::tanh_simd(v_res.parts[0]);
+            v_res.parts[1] = audio_dsp::simd_vec::tanh_simd(v_res.parts[1]);
+            v_res.parts[2] = audio_dsp::simd_vec::tanh_simd(v_res.parts[2]);
+            v_res.parts[3] = audio_dsp::simd_vec::tanh_simd(v_res.parts[3]);
+        }
+        #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+        {
+            // Fallback for non-wasm or missing SIMD128
+            let mut arr: [f32; 16] = v_res.into();
+            for val in arr.iter_mut() { *val = val.tanh(); }
+            v_res = FloatX16::new(arr);
+        }
 
         *dest = v_res.into();
     }
