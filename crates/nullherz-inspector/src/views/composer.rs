@@ -34,7 +34,18 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 for i in 0..16 {
                     ui.group(|ui| {
                         ui.set_min_size(Vec2::new(120.0, 60.0));
-                        ui.label(RichText::new(format!("TRACK {}", i + 1)).strong());
+
+                            // Evolution Feedback (Track Label pulsing)
+                            let time = ui.input(|i| i.time);
+                            let pulse = (time * 5.0).sin() as f32 * 0.5 + 0.5;
+                            let is_evolving = i % 4 == 0; // Mock condition: track 1, 5, 9, 13 are "evolving"
+                            let label_color = if is_evolving {
+                                Color32::from_rgb(0, 255, 200).gamma_multiply(0.5 + pulse * 0.5)
+                            } else {
+                                Color32::WHITE
+                            };
+
+                            ui.label(RichText::new(format!("TRACK {}", i + 1)).strong().color(label_color));
                         ui.horizontal(|ui| {
                             if ui.selectable_label(app.track_mutes[i], "M").on_hover_text("Mute").clicked() {
                                 app.track_mutes[i] = !app.track_mutes[i];

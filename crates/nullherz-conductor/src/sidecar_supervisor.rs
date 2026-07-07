@@ -15,6 +15,7 @@ pub struct RemoteSidecar {
     pub last_heartbeat: Instant,
     pub is_active: bool,
     pub mirrored_samples: std::collections::HashSet<u64>,
+    pub pending_mirrored_samples: std::collections::HashSet<u64>,
     pub cpu_usage: f32,
     pub latency_ms: f32,
     pub assigned_nodes: std::collections::HashSet<u32>,
@@ -100,7 +101,8 @@ impl RemoteSidecarManager {
         let len = payload.len() as u32;
 
         for node in &mut self.remote_nodes {
-            if !node.mirrored_samples.contains(&sample_id) {
+            if !node.mirrored_samples.contains(&sample_id) && !node.pending_mirrored_samples.contains(&sample_id) {
+                node.pending_mirrored_samples.insert(sample_id);
                 if let Ok(mut writer) = node.writer.try_lock() {
                     use tokio::io::AsyncWriteExt;
                     let mut full_payload = Vec::with_capacity(4 + payload.len());
@@ -200,6 +202,7 @@ impl SidecarSupervisor {
                                         last_heartbeat: Instant::now(),
                                         is_active: true,
                                         mirrored_samples: std::collections::HashSet::new(),
+                                        pending_mirrored_samples: std::collections::HashSet::new(),
                                         cpu_usage: 0.0,
                                         latency_ms: 0.0,
                                         assigned_nodes: std::collections::HashSet::new(),
@@ -298,6 +301,7 @@ impl SidecarSupervisor {
                             last_heartbeat: Instant::now(),
                             is_active: true,
                             mirrored_samples: std::collections::HashSet::new(),
+                            pending_mirrored_samples: std::collections::HashSet::new(),
                             cpu_usage: 0.0,
                             latency_ms: 0.0,
                             assigned_nodes: std::collections::HashSet::new(),

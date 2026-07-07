@@ -23,10 +23,13 @@ impl GeneticSequencer {
                 let seed = node_idx.wrapping_mul(100) + track_idx.wrapping_mul(10) + step as u32;
                 let rand_val = (seed.wrapping_mul(1103515245).wrapping_add(12345) as f32) / 4294967295.0;
 
+                let micro_bias = (dna.micro_timing[step % 12] as f32 / 128.0).clamp(-0.2, 0.2);
+                let base_velocity = if dna_value { 0.8 } else { 0.0 };
+
                 let value = if rand_val > strength {
-                    if dna_value { 1.0 } else { 0.0 }
+                    if dna_value { (base_velocity + micro_bias).clamp(0.1, 1.0) } else { 0.0 }
                 } else {
-                    if rand_val > 0.8 { 0.8 } else { 0.0 } // Random trigger with high velocity
+                    if rand_val > 0.8 { (0.7 + micro_bias).clamp(0.1, 1.0) } else { 0.0 }
                 };
 
                 commands.push(Command::Performance(PerformanceCommand::SetSequencerStep {

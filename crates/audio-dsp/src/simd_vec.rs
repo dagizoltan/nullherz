@@ -193,6 +193,25 @@ impl std::ops::Mul for FloatX16 {
     }
 }
 
+impl std::ops::Div for FloatX16 {
+    type Output = Self;
+    fn div(self, rhs: Self) -> Self {
+        #[cfg(target_feature = "avx512f")]
+        { Self { val: self.val / rhs.val } }
+        #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            use std::arch::wasm32::*;
+            let mut res = [f32x4::default(); 4];
+            for i in 0..4 {
+                res[i] = f32x4_div(self.parts[i], rhs.parts[i]);
+            }
+            Self { parts: res }
+        }
+        #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
+        { Self { low: self.low / rhs.low, high: self.high / rhs.high } }
+    }
+}
+
 impl FloatX16 {
     pub fn blend(self, on_true: Self, on_false: Self) -> Self {
         #[cfg(target_feature = "avx512f")]
@@ -224,6 +243,40 @@ impl FloatX16 {
                  high: self.high.blend(on_true.high, on_false.high),
              }
         }
+    }
+
+    pub fn abs(self) -> Self {
+        #[cfg(target_feature = "avx512f")]
+        { Self { val: self.val.abs() } }
+        #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            use std::arch::wasm32::*;
+            Self { parts: [
+                f32x4_abs(self.parts[0]),
+                f32x4_abs(self.parts[1]),
+                f32x4_abs(self.parts[2]),
+                f32x4_abs(self.parts[3]),
+            ]}
+        }
+        #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
+        { Self { low: self.low.abs(), high: self.high.abs() } }
+    }
+
+    pub fn sqrt(self) -> Self {
+        #[cfg(target_feature = "avx512f")]
+        { Self { val: self.val.sqrt() } }
+        #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            use std::arch::wasm32::*;
+            Self { parts: [
+                f32x4_sqrt(self.parts[0]),
+                f32x4_sqrt(self.parts[1]),
+                f32x4_sqrt(self.parts[2]),
+                f32x4_sqrt(self.parts[3]),
+            ]}
+        }
+        #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
+        { Self { low: self.low.sqrt(), high: self.high.sqrt() } }
     }
 
     /// Lane-wise check for finite values. Returns a mask (all bits set for true).

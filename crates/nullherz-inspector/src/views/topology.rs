@@ -59,6 +59,25 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             ui.painter().rect_filled(header_rect, 4.0, Color32::from_gray(40));
             ui.painter().text(header_rect.left_center() + egui::vec2(5.0, 0.0), egui::Align2::LEFT_CENTER, &node.name, egui::FontId::proportional(11.0), Color32::WHITE);
 
+            // Host Assignment Badge
+            let host_assignment = app.graph.node_assignments.get(&(idx as u32)).map(|s| s.as_str()).unwrap_or("local");
+            let host_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(75.0, 0.0), egui::vec2(50.0, 14.0));
+            let host_color = if host_assignment == "local" { Color32::from_rgb(0, 150, 255) } else { Color32::from_rgb(0, 255, 200) };
+
+            let host_resp = ui.interact(host_rect, node_id.with("host_migrate"), Sense::click());
+            if host_resp.clicked() {
+                 let next_host = if host_assignment == "local" { "remote_1" } else { "local" };
+                 let mut dest_buf = [0u8; 32];
+                 let bytes = next_host.as_bytes();
+                 dest_buf[..bytes.len()].copy_from_slice(bytes);
+                 let _ = app.command_sender.send(Command::Topology(TopologyCommand::MigrateNode {
+                     node_idx: idx as u32,
+                     destination: dest_buf,
+                 }));
+            }
+            ui.painter().rect_filled(host_rect, 2.0, host_color.gamma_multiply(0.3));
+            ui.painter().text(host_rect.center(), egui::Align2::CENTER_CENTER, host_assignment.to_uppercase(), egui::FontId::monospace(8.0), host_color);
+
             // Bypass Toggle in header
             let bypass_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(25.0, 0.0), egui::vec2(40.0, 14.0));
             let bypass_id = node_id.with("bypass");
@@ -91,13 +110,20 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 socket_positions.insert((idx as u32, false, in_idx as u32), socket_pos);
 
                 let is_occupied = app.graph.edges.iter().any(|e| e.to == idx as u32 && e.input_idx == in_idx as u32);
-                let color = if is_occupied { Color32::from_rgb(0, 255, 200) } else { Color32::from_gray(80) };
+                let mut color = if is_occupied { Color32::from_rgb(0, 255, 200) } else { Color32::from_gray(80) };
+
+                let is_compatible = app.active_connection_source.is_some();
+                let stroke = if is_compatible {
+                    egui::Stroke::new(2.0, Color32::from_rgb(255, 215, 0)) // Gold stroke for compatible inputs
+                } else {
+                    egui::Stroke::new(1.0, Color32::WHITE)
+                };
 
                 let socket_rect = egui::Rect::from_center_size(socket_pos, Vec2::splat(socket_radius * 2.5));
                 let socket_resp = ui.interact(socket_rect, node_id.with(("in", in_idx)), Sense::click());
 
                 ui.painter().circle_filled(socket_pos, socket_radius, color);
-                ui.painter().circle_stroke(socket_pos, socket_radius, egui::Stroke::new(1.0, Color32::WHITE));
+                ui.painter().circle_stroke(socket_pos, socket_radius, stroke);
 
                 if socket_resp.hovered() {
                     ui.painter().circle_stroke(socket_pos, socket_radius + 2.0, egui::Stroke::new(1.0, Color32::YELLOW));
