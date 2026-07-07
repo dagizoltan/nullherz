@@ -1,92 +1,50 @@
-# Nullherz: 3-Month Strategic Roadmap
+# Nullherz: 3-Month Strategic Roadmap (Updated July 2026)
 
 **Timeline:** July 2026 – September 2026
-**Focus:** Stability, UI Maturity, and Market Readiness
+**Focus:** Stability, Federated Intelligence, and Production Scale
 
 ---
 
-## Month 1: Stabilization & The 5 Layers of Transfusion
+## Month 1: Stabilization & The 5 Layers of Transfusion [COMPLETED]
 *Goal: Finalize the primary control interfaces and ensure total signal reliability.*
 
-*   **MIDI Mapping System [DONE]:**
-    *   Implemented declarative JSON mapping engine in Conductor.
-    *   Added dynamic mapping loader to Settings view.
-*   **Intelligence Perfection [DONE]:**
-    *   BPM and Root Key detection stabilized and integrated with SampleRegistry.
-    *   Implemented Smart Crate manager with range-based genetic trait filtering.
-*   **Safe-Mode & Recovery [DONE]:**
-    *   "Soft Fallback" (200ms threshold) implemented to replace failing sidecars with identity nodes.
-    *   Automated X-RUN detection and real-time telemetry reporting operational.
+*   **MIDI Mapping System [DONE]:** Implemented declarative JSON mapping engine.
+*   **Intelligence Perfection [DONE]:** BPM and Root Key detection stabilized and integrated.
+*   **Safe-Mode & Recovery [DONE]:** "Soft Fallback" and X-RUN detection operational.
+*   **Core Hardening [DONE]**: Formal verification of Graph Executor and Wasm-SIMD integration.
 
 ---
 
-## Month 2: UI Enrichment & Evolutionary Synthesis
-*Goal: Restore legacy visualizations and implement advanced creative features.*
+## Month 2: Federated Intelligence & DNA Discovery [IN PROGRESS]
+*Goal: Scale the genetic ecosystem beyond the local machine.*
 
-*   **Advanced Visualizers [DONE]:**
-    *   Re-integrated Goniometer and Spectrum Analyzer with configurable damping filters.
-    *   Implemented industrial widget geometry caching to reduce UI overhead.
-*   **Harmonic Mixing (Key Sync) [DONE]:**
-    *   Implemented the `KeySync` processor using spectral-domain bin mapping.
-    *   Enabled real-time pitch shifting (+/- 12 semitones) with SIMD-optimized linear interpolation.
-*   **Advanced Looping & Slicing [DONE]:**
-    *   Introduced "Beat Jump" functionality via `JumpByBeats` command.
-    *   Implemented a "Loop Slicer" mode in `SamplerProcessor` for instant MPC-style remixing.
+*   **Federated P2P Genetic Cloud [PLANNED]:**
+    *   Implement `libp2p` gossipsub for real-time SoundDNA exchange.
+    *   Integrate mDNS/TCP sync triggers into the UI.
+*   **Genetic Sequencer [PLANNED]:**
+    *   DNA-aware MIDI pattern mutation based on rhythmic genetic markers.
+    *   "Inheritance" of grooves between sequencer tracks.
+*   **WASM SDK Maturity [PLANNED]:**
+    *   Finalize SHM host exports for 3rd-party plugin developers.
 
 ---
 
 ## Month 3: Ecosystem & Scale (Infrastructure for Growth)
 *Goal: Scale the library and prepare for distributed processing.*
 
-*   **Library Optimization [DONE]:**
-    *   Optimized `redb` queries using $O(\log N)$ composite keys for collections exceeding 100,000 entries.
-    *   Implemented a "Crating" system for advanced playlist management and smart folders.
-*   **Remote Sidecar Protocol [DONE]:**
-    *   Implemented Type 5 (Audio Send) and Type 6 (UDP Return) for distributed DSP.
-    *   Added hardware calibration (RTL) to synchronize local and remote nodes.
-*   **Public Alpha Preparation [DONE]:**
-    *   "Setup Wizard" connected to BackendManager for real-time hardware hot-swapping.
-    *   Conformance Suite verified across all core processors.
-*   **Documentation & SDK:**
-    *   Formalize the Sidecar SDK documentation to allow 3rd-party developers to build Nullherz-native plugins in Rust.
+*   **Library Optimization [DONE]:** Optimized `redb` queries for >100k entries.
+*   **Remote Sidecar Protocol [DONE]:** Type 5 (Send) and Type 6 (UDP Return) operational.
+*   **Public Alpha Preparation [DONE]:** Setup Wizard and Conformance Suite verified.
+*   **RDMA Audio Path [RESEARCH]**: Prototype zero-copy RDMA return path for sub-100 microsecond network DSP.
 
 ---
 
 ## Milestone Summary
 | Month | Primary Objective | Key Deliverable |
 | :--- | :--- | :--- |
-| **Month 1** | Control Reliability | **Universal MIDI Mapping Engine** |
-| **Month 2** | Creative Maturity | **Harmonic Engine (Key Sync)** |
-| **Month 3** | Scalability | **Ecosystem SDK & High-Scale Library** |
-| **Stage 6** | Evolution | **Neural Transfusion & WASM Plugins** |
-
----
-
-## Stage 6: Evolutionary Intelligence [IN PROGRESS]
-*Goal: Transition to a global genetic ecosystem.*
-
-*   **Neural Transfusion [DONE]:**
-    *   Transitioned SoundDNA to 16-dimensional latent space embeddings.
-    *   Implemented SIMD-optimized NeuralTransfuser.
-*   **DJ Mixing Integration [DONE]:**
-    *   Implemented logical deck addressing (A-D) and high-level mixer commands.
-    *   Integrated Library-to-Deck loading bridge in Conductor.
-*   **Universal Extensibility [DONE]:**
-    *   Implemented WASM sidecar runtime foundation in fx-runtime.
-*   **Genetic Cloud [PLANNED]:**
-    *   Implementing PeerSync protocol for federated DNA sharing.
-
-## Stage 7: Neural Frontiers & Hardware RDMA [PLANNED]
-*Goal: Categories-defining audio technology and zero-latency distribution.*
-
-*   **Timbral VAE Integration:**
-    *   Replace frequency-bin latent space with Variational Autoencoder timbral embeddings.
-    *   Implement "Feature-Aware" breeding (e.g., "inherit the grit of parent A").
-*   **RDMA Audio Path:**
-    *   Prototype zero-copy RDMA return path for distributed AudioBlocks.
-    *   Achieve sub-100 microsecond network DSP latency.
-*   **Specialized Neuro Kernels:**
-    *   Develop high-order transient-preserving saturators and FM modulators.
+| **Month 1** | Core Hardening | **Verified Graph Executor** |
+| **Month 2** | Federated Intelligence | **Genetic Cloud (GossipSync)** |
+| **Month 3** | Scalability | **Ecosystem SDK & RDMA Prototype** |
 
 ---
 
