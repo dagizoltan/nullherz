@@ -294,6 +294,8 @@ pub trait PeerSync {
     fn list_peer_dna(&self) -> Vec<(u64, String)>;
     /// Gossip-based metadata exchange: share known DNA identifiers with peers.
     fn gossip_metadata(&self, known_ids: &[(u64, String)]);
+    /// Returns the public key of this node for signature verification.
+    fn get_public_key(&self) -> [u8; 32];
 }
 
 /// Functional implementation of PeerSync using simple TCP exchange.
@@ -302,11 +304,17 @@ pub struct CloudPeerSync {
     pub trusted_peers: std::collections::HashSet<String>,
     /// Mock for cryptographic signatures: peer_addr -> signature
     pub peer_signatures: HashMap<String, [u8; 64]>,
+    /// Node's own signing key
+    pub signing_key: Option<[u8; 32]>,
 }
 
 impl PeerSync for CloudPeerSync {
     fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {
         // In a full Gossip protocol, this would broadcast to all peers.
+    }
+
+    fn get_public_key(&self) -> [u8; 32] {
+        [0u8; 32] // Placeholder
     }
 
     fn gossip_metadata(&self, known_ids: &[(u64, String)]) {
@@ -508,6 +516,8 @@ impl DnaServer {
                                     if let Ok(id) = id_str.parse::<u64>() {
                                         if let Ok(lib) = lib_clone.lock() {
                                             if let Ok(Some(track)) = lib.get_track(id) {
+                                                // AUDIT: In Production Beta, the DNA payload itself should be wrapped
+                                                // with a signature header here.
                                                 let _ = serde_json::to_writer(&mut stream, &track.metadata.dna);
                                             }
                                         }
@@ -728,6 +738,7 @@ mod tests {
                 vec![(0xABC, "Cloud Track".to_string())]
             }
             fn gossip_metadata(&self, _known_ids: &[(u64, String)]) {}
+            fn get_public_key(&self) -> [u8; 32] { [0u8; 32] }
         }
 
         db.sync_with_cloud(&MockSync).unwrap();

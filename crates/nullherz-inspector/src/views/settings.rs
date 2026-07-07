@@ -150,6 +150,27 @@ fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
         });
 
         ui.add_space(20.0);
+        ui.strong("Distributed Clock Discipline (PTP/IEEE 1588)");
+        Frame::group(ui.style()).show(ui, |ui| {
+            if let Some(t) = app.last_telemetry.lock().unwrap().as_ref() {
+                ui.horizontal(|ui| {
+                    ui.label("Sync Status:");
+                    if t.clock_jitter_ns < 1000 {
+                        ui.label(RichText::new("● LOCKED").color(Color32::GREEN));
+                    } else {
+                        ui.label(RichText::new("○ SEEKING").color(Color32::YELLOW));
+                    }
+                });
+                ui.label(format!("System Time: {} ns", t.system_time_ns));
+                ui.label(format!("Device Time: {} ns", t.device_time_ns));
+                ui.label(format!("Jitter: {} ns", t.clock_jitter_ns));
+                ui.label(format!("Offset: {} ns", (t.device_time_ns as i64 - t.system_time_ns as i64)));
+            } else {
+                ui.label("No clock telemetry available.");
+            }
+        });
+
+        ui.add_space(20.0);
         if ui.button(RichText::new("SAVE SYSTEM CONFIG").strong()).clicked() {
              // AUDIT-FIX: We must NOT send CommitTopology directly to the command bus,
              // as that might bypass Conductor and hit the RT thread.

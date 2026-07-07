@@ -117,6 +117,12 @@ fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
                         if ui.button("▶ PREVIEW").clicked() {
                              // Mock preview logic
                         }
+                        if ui.button("⚡ ENERGY MATCH").on_hover_text("Generate smart crate with similar energy").clicked() {
+                            let tracks = app.library_db.list_tracks().unwrap_or_default();
+                            let new_crate = nullherz_dna::SmartCrateManager::generate_energy_matched_crate(&track, tracks, 0.7);
+                            let _ = app.library_db.save_smart_crate(&new_crate);
+                            app.library_needs_refresh = true;
+                        }
                     });
                 });
 

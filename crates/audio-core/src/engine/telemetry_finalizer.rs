@@ -105,6 +105,7 @@ impl TelemetryFinalizer {
             starting_clips_mask: [0; 8],
             system_time_ns: transport.system_time_ns,
             device_time_ns: transport.device_time_ns,
+            clock_jitter_ns: 0, // Should be populated by Engine if available
             remote_node_count: 0,
             remote_cpu_usage: [0.0; 8],
             remote_latency_ms: [0.0; 8],

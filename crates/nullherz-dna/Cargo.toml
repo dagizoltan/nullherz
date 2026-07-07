@@ -13,3 +13,4 @@ redb = "2.1"
 rayon = "1.10"
 mdns-sd = "0.11"
 gethostname = "0.4"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }

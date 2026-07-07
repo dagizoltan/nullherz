@@ -778,6 +778,67 @@ impl ClockProvider for SystemClockProvider {
     }
 }
 
+/// A high-precision ClockProvider using Linux SO_TIMESTAMPING.
+pub struct PtpClockProvider {
+    _socket_fd: std::os::unix::io::RawFd,
+    offset_ns: std::sync::atomic::AtomicI64,
+}
+
+impl PtpClockProvider {
+    pub fn new(_interface: &str) -> std::io::Result<Self> {
+        use nix::sys::socket::*;
+        use std::os::unix::io::AsRawFd;
+
+        let fd = socket(AddressFamily::Inet, SockType::Datagram, SockFlag::empty(), None)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        // Enable hardware and software timestamping
+        let flags = TimestampingFlag::SOF_TIMESTAMPING_TX_HARDWARE
+            | TimestampingFlag::SOF_TIMESTAMPING_TX_SOFTWARE
+            | TimestampingFlag::SOF_TIMESTAMPING_RX_HARDWARE
+            | TimestampingFlag::SOF_TIMESTAMPING_RX_SOFTWARE
+            | TimestampingFlag::SOF_TIMESTAMPING_RAW_HARDWARE;
+
+        setsockopt(&fd, sockopt::Timestamping, &flags)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        // Bind to interface (simplified for PTP example)
+        let addr = std::net::SocketAddrV4::new(std::net::Ipv4Addr::new(0,0,0,0), 319);
+        bind(fd.as_raw_fd(), &nix::sys::socket::SockaddrIn::from(addr)).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        Ok(Self {
+            _socket_fd: fd.as_raw_fd(),
+            offset_ns: std::sync::atomic::AtomicI64::new(0),
+        })
+    }
+}
+
+impl ClockProvider for PtpClockProvider {
+    fn get_system_time_ns(&self) -> u64 {
+        let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts); }
+        (ts.tv_sec as u64 * 1_000_000_000) + ts.tv_nsec as u64
+    }
+
+    fn get_device_time_ns(&self) -> u64 {
+        let sys = self.get_system_time_ns();
+        let offset = self.offset_ns.load(std::sync::atomic::Ordering::Relaxed);
+        (sys as i64 + offset) as u64
+    }
+
+    fn get_estimated_jitter_ns(&self) -> u64 {
+        // In a real PTP stack, this would be calculated from the variance of offsets
+        500
+    }
+
+    fn synchronize_with_master(&self, master_time_ns: u64, round_trip_delay_ns: u64) {
+        let local_time = self.get_system_time_ns();
+        // Basic PTP offset calculation: master_time + delay - local_arrival
+        let new_offset = (master_time_ns as i64 + (round_trip_delay_ns / 2) as i64) - local_time as i64;
+        self.offset_ns.store(new_offset, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]
 pub struct SpectralPersonality {
