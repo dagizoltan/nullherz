@@ -10,7 +10,7 @@ pub struct BreederView {
     pub target_node_idx: u32,
     pub selecting_parent: Option<usize>, // 0 for A, 1 for B
     pub preview_dna: [f32; 16],
-    pub smoothed_goniometer: [f32; 128],
+    pub _smoothed_goniometer: [f32; 128],
 }
 
 impl BreederView {
@@ -23,7 +23,7 @@ impl BreederView {
             target_node_idx: 150, // PersonalityInheritanceProcessor default ID
             selecting_parent: None,
             preview_dna: [0.0; 16],
-            smoothed_goniometer: [0.0; 128],
+            _smoothed_goniometer: [0.0; 128],
         }
     }
 

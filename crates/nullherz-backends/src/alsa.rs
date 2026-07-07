@@ -139,12 +139,10 @@ impl AudioBackend for AlsaBackend {
 
                 if let Some(ref engine_arc) = engine_arc_opt {
                      let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-                     unsafe {
-                         (*engine_ptr).set_config(nullherz_traits::AudioConfig {
-                            sample_rate: rate as f32,
-                            block_size: period_size as usize,
-                        });
-                     }
+                     (*engine_ptr).set_config(nullherz_traits::AudioConfig {
+                        sample_rate: rate as f32,
+                        block_size: period_size as usize,
+                    });
                 }
 
                 let mut outputs_raw = [[0.0f32; ipc_layer::MAX_BLOCK_SIZE]; 2];
@@ -159,9 +157,7 @@ impl AudioBackend for AlsaBackend {
                         // SAFETY: We have a local Arc clone, and RenderingEngine is Send/Sync.
                         // We are the sole processor on this thread.
                         let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-                        unsafe {
-                            (*engine_ptr).process_block(&[], &mut out_refs, actual_period);
-                        }
+                        (*engine_ptr).process_block(&[], &mut out_refs, actual_period);
                     } else {
                         outputs_raw[0].fill(0.0);
                         outputs_raw[1].fill(0.0);
