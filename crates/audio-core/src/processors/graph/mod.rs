@@ -26,6 +26,7 @@ pub struct ProcessorGraph {
     pub node_count: usize,
     pub(crate) buffer_pool: GraphBufferPool,
     pub(crate) topology_coordinator: TopologyCoordinator,
+    pub(crate) logger: Option<Arc<crate::rt_logging::RtLogger>>,
 
     pub(crate) telemetry: Arc<GraphTelemetry>,
     pub(crate) garbage_producer: Option<Box<dyn nullherz_traits::GarbageProducer>>,
@@ -57,6 +58,7 @@ impl ProcessorGraph {
             node_count: 0,
             buffer_pool: GraphBufferPool::new(),
             topology_coordinator: TopologyCoordinator::new(topo),
+            logger: None,
             telemetry: Arc::new(GraphTelemetry::default()),
             garbage_producer: None,
             pending_mutations: std::array::from_fn(|_| None),
@@ -79,7 +81,11 @@ impl ProcessorGraph {
 
     pub fn commit_graph(&mut self) {
         if let Err(msg) = self.topology_coordinator.commit() {
-            eprintln!("CRITICAL: Refusing to commit hazardous topology: {}", msg);
+            if let Some(ref logger) = self.logger {
+                logger.log(crate::rt_logging::RtLogLevel::Error, &format!("Refusing to commit hazardous topology: {}", msg), 0);
+            } else {
+                eprintln!("CRITICAL: Refusing to commit hazardous topology: {}", msg);
+            }
         }
 
         // Drain pending mutations if crossfades finished

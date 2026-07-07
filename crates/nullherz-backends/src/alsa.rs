@@ -109,9 +109,12 @@ impl AudioBackend for AlsaBackend {
                 (alsa.snd_pcm_hw_params_set_channels)(pcm, hw_params, 2);
 
                 let mut target_rate = 44100u32;
+                let mut engine_arc_opt = None;
                 {
-                    if let Some(ref engine) = *engine_handle.lock().unwrap() {
+                    let lock = engine_handle.lock().unwrap();
+                    if let Some(ref engine) = *lock {
                         target_rate = engine.target_sample_rate() as u32;
+                        engine_arc_opt = Some(engine.clone());
                     }
                 }
 
@@ -134,14 +137,14 @@ impl AudioBackend for AlsaBackend {
                 (alsa.snd_pcm_hw_params_free)(hw_params);
                 (alsa.snd_pcm_prepare)(pcm);
 
-                {
-                    if let Some(ref engine_arc) = *engine_handle.lock().unwrap() {
-                         let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-                             (*engine_ptr).set_config(nullherz_traits::AudioConfig {
-                                sample_rate: rate as f32,
-                                block_size: period_size as usize,
-                            });
-                    }
+                if let Some(ref engine_arc) = engine_arc_opt {
+                     let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
+                     unsafe {
+                         (*engine_ptr).set_config(nullherz_traits::AudioConfig {
+                            sample_rate: rate as f32,
+                            block_size: period_size as usize,
+                        });
+                     }
                 }
 
                 let mut outputs_raw = [[0.0f32; ipc_layer::MAX_BLOCK_SIZE]; 2];
@@ -150,16 +153,18 @@ impl AudioBackend for AlsaBackend {
 
                 let actual_period = period_size as usize;
                 while running.load(Ordering::SeqCst) {
-                    {
-                        if let Some(ref engine_arc) = *engine_handle.lock().unwrap() {
-                            let (ch1, ch2) = outputs_raw.split_at_mut(1);
-                            let mut out_refs = [&mut ch1[0][..actual_period], &mut ch2[0][..actual_period]];
-                            let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-                                (*engine_ptr).process_block(&[], &mut out_refs, actual_period);
-                        } else {
-                            outputs_raw[0].fill(0.0);
-                            outputs_raw[1].fill(0.0);
+                    if let Some(ref engine_arc) = engine_arc_opt {
+                        let (ch1, ch2) = outputs_raw.split_at_mut(1);
+                        let mut out_refs = [&mut ch1[0][..actual_period], &mut ch2[0][..actual_period]];
+                        // SAFETY: We have a local Arc clone, and RenderingEngine is Send/Sync.
+                        // We are the sole processor on this thread.
+                        let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
+                        unsafe {
+                            (*engine_ptr).process_block(&[], &mut out_refs, actual_period);
                         }
+                    } else {
+                        outputs_raw[0].fill(0.0);
+                        outputs_raw[1].fill(0.0);
                     }
 
                     let written = if is_float {

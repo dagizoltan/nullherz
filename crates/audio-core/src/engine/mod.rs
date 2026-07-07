@@ -59,6 +59,7 @@ pub struct EngineResources {
     pub bundle_garbage_producer: Option<Producer<Vec<nullherz_traits::Command>>>,
     pub bundle_overflow_producer: Option<Producer<Vec<nullherz_traits::Command>>>,
     pub telemetry_producer: Box<dyn nullherz_traits::TelemetryProducer>,
+    pub worker_count: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -141,6 +142,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
         kernel: K,
     ) -> Self {
         let command_producer = dyn_clone::clone_box(&*resources.command_producer);
+        let worker_count = resources.worker_count.unwrap_or(nullherz_traits::DEFAULT_WORKER_COUNT);
         Self {
             command_producer: dyn_clone::clone_box(&*command_producer),
             command_consumer: resources.command_consumer,
@@ -166,7 +168,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             metrics: EngineMetrics::new(),
             health_signal: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             host: Some(EngineHost { command_producer }),
-            pool: Some(Box::new(TaskPool::new(nullherz_traits::DEFAULT_WORKER_COUNT))),
+            pool: Some(Box::new(TaskPool::new(worker_count))),
             transport: nullherz_traits::Transport {
                 bpm: 120.0,
                 beat_position: 0.0,

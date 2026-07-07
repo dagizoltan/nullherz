@@ -88,6 +88,7 @@ impl EngineBuilder {
             bundle_garbage_producer: Some(bundle_garbage_prod),
             bundle_overflow_producer: Some(bundle_overflow_prod),
             telemetry_producer: Box::new(tel_prod),
+            worker_count: None,
         };
 
         let engine = AudioEngine::new(

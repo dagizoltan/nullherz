@@ -11,6 +11,7 @@ struct JackBackendInner {
     client: *mut std::ffi::c_void,
     ports: Vec<*mut std::ffi::c_void>,
     engine_handle: Option<Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>>,
+    engine_arc: Option<Arc<dyn RenderingEngine>>,
     lib: Option<JackLib>,
 }
 
@@ -30,6 +31,7 @@ impl JackBackend {
                 client: std::ptr::null_mut(),
                 ports: Vec::new(),
                 engine_handle: None,
+                engine_arc: None,
                 lib: None,
             })
         }
@@ -89,20 +91,17 @@ unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_
         *out_ptr = unsafe { (jack.jack_port_get_buffer)(backend.ports[i], nframes) } as *mut f32;
     }
 
-    if let Some(ref handle) = backend.engine_handle {
-        #[allow(clippy::collapsible_if)]
-        if let Some(ref engine_arc) = *handle.lock().unwrap() {
-            let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|i| {
-                if i < num_ports {
-                    unsafe { std::slice::from_raw_parts_mut(out_ptrs[i], nframes as usize) }
-                } else {
-                    &mut []
-                }
-            });
-            let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-            unsafe {
-                (*engine_ptr).process_block(&[], &mut out_refs_storage[..num_ports], nframes as usize);
+    if let Some(ref engine_arc) = backend.engine_arc {
+        let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|i| {
+            if i < num_ports {
+                unsafe { std::slice::from_raw_parts_mut(out_ptrs[i], nframes as usize) }
+            } else {
+                &mut []
             }
+        });
+        let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
+        unsafe {
+            (*engine_ptr).process_block(&[], &mut out_refs_storage[..num_ports], nframes as usize);
         }
     }
     0
@@ -122,7 +121,8 @@ impl AudioBackend for JackBackend {
             let out2 = (inner.lib.as_ref().unwrap().jack_port_register)(inner.client, c"out_2".as_ptr(), c"32 bit float mono audio".as_ptr(), 2, 0);
             inner.ports = vec![out1, out2];
 
-            inner.engine_handle = Some(engine_handle);
+            inner.engine_handle = Some(engine_handle.clone());
+            inner.engine_arc = engine_handle.lock().unwrap().clone();
             let ptr = inner as *mut _ as *mut _;
             (inner.lib.as_ref().unwrap().jack_set_process_callback)(inner.client, jack_process_callback, ptr);
             (inner.lib.as_ref().unwrap().jack_activate)(inner.client);

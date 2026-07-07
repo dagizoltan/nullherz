@@ -53,6 +53,7 @@ mod tests {
                 bundle_garbage_producer: None,
                 bundle_overflow_producer: None,
                 telemetry_producer: Box::new(tel_prod),
+            worker_count: None,
             };
             let mut engine = AudioEngine::new(
                 resources,
@@ -96,6 +97,7 @@ mod tests {
             bundle_garbage_producer: None,
             bundle_overflow_producer: None,
             telemetry_producer: Box::new(tel_prod),
+            worker_count: None,
         };
         let mut engine = AudioEngine::new(
             resources,
@@ -146,6 +148,7 @@ mod tests {
                 bundle_garbage_producer: None,
                 bundle_overflow_producer: None,
                 telemetry_producer: Box::new(tel_prod),
+            worker_count: None,
             };
             let mut engine = AudioEngine::new(
                 resources,
@@ -202,6 +205,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             bundle_garbage_producer: None,
             bundle_overflow_producer: None,
             telemetry_producer: Box::new(tel_prod),
+            worker_count: None,
         };
         let mut engine = AudioEngine::new(
             resources,
@@ -256,6 +260,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             bundle_garbage_producer: None,
             bundle_overflow_producer: None,
             telemetry_producer: Box::new(tel_prod),
+            worker_count: None,
         };
         let mut engine = AudioEngine::new(
             resources,
@@ -327,6 +332,7 @@ fn apply_command(&mut self, cmd: &Command) {
             bundle_garbage_producer: None,
             bundle_overflow_producer: None,
             telemetry_producer: Box::new(tel_prod),
+            worker_count: None,
         };
 
         let mut engine = AudioEngine::new(

@@ -75,7 +75,8 @@ impl SamplerProcessor {
             let samples_per_beat = (sample_rate * 60.0 / bpm.max(1.0)) as f64;
             let offset = slice_idx as f32 * self.slice_grid_beats * samples_per_beat as f32;
 
-            voice.trigger_at(self.sample_buffer.clone(), self.playback_rate, 1.0, offset, beat_pos);
+            // RT-HARDENING: Use buffer_ref instead of clone to avoid atomic overhead in the hot path
+            voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, offset, beat_pos);
         }
     }
 }
@@ -284,7 +285,7 @@ impl SamplerProcessor {
             Command::Performance(PerformanceCommand::PlayNode { .. }) => {
                 if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
                     let beat_pos = context.and_then(|c| c.transport).map(|t| t.beat_position).unwrap_or(0.0);
-                    voice.trigger_at(self.sample_buffer.clone(), self.playback_rate, 1.0, 0.0, beat_pos);
+                    voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, 0.0, beat_pos);
                 }
             }
             Command::Performance(PerformanceCommand::StopNode { .. }) => {

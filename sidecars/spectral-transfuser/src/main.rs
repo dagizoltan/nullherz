@@ -1,6 +1,6 @@
 use clap::Parser;
 use ipc_layer::{SharedMemory, ShmRingBuffer, ShmSignal, EventFd, AudioBlock};
-use nullherz_traits::{Command, DnaCommand, TimestampedCommand};
+use nullherz_traits::{Command, TimestampedCommand};
 use audio_dsp::spectral::SpectralPipeline;
 use audio_dsp::simd_vec::{FloatX16, load_f32x16, store_f32x16};
 
