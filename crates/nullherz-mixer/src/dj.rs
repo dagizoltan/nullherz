@@ -15,11 +15,17 @@ pub fn create_dj_deck(
     let resample_id = id_allocator.allocate_node_id();
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: resample_id, processor_type_id: ProcessorTypeId::SAMPLER }));
 
-    let gain_id = id_allocator.allocate_node_id();
-    commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: gain_id, processor_type_id: ProcessorTypeId::GAIN }));
+    let keysync_id = id_allocator.allocate_node_id();
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: keysync_id, processor_type_id: ProcessorTypeId::KEY_SYNC }));
     let resample_out = id_allocator.allocate_buffer_id(1);
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: resample_id, output_idx: 0, new_buffer_idx: resample_out }));
-    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: gain_id, input_idx: 0, new_buffer_idx: resample_out }));
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: keysync_id, input_idx: 0, new_buffer_idx: resample_out }));
+
+    let gain_id = id_allocator.allocate_node_id();
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: gain_id, processor_type_id: ProcessorTypeId::GAIN }));
+    let keysync_out = id_allocator.allocate_buffer_id(1);
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: keysync_id, output_idx: 0, new_buffer_idx: keysync_out }));
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: gain_id, input_idx: 0, new_buffer_idx: keysync_out }));
 
     let filter_id = id_allocator.allocate_node_id();
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: filter_id, processor_type_id: ProcessorTypeId::BIQUAD }));
@@ -67,6 +73,7 @@ pub fn create_dj_deck(
         isolator_id: eq_id,
         gain_id,
         filter_id,
+        keysync_id,
     };
 
     (commands, nodes)

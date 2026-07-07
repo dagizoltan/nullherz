@@ -69,6 +69,9 @@ impl FolderMonitor {
             path: path.to_string(),
             title: Path::new(path).file_name().unwrap().to_str().unwrap().to_string(),
             artist: "Unknown".to_string(),
+            album: "Unknown".to_string(),
+            genre: "Unknown".to_string(),
+            energy_level: 0.5,
             metadata: SampleMetadata::new_empty(),
         };
 

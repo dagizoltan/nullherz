@@ -97,6 +97,9 @@ impl EvolutionaryBreeder {
                     format!("Evolutionary Child ({} x {})", parent_a.metadata.dna.schema_version, parent_b.metadata.dna.schema_version)
                 },
                 artist: "Evolutionary Bot".to_string(),
+                album: "Evolutionary Collection".to_string(),
+                genre: "Algorithmic".to_string(),
+                energy_level: 0.5,
                 metadata: child_metadata,
             };
             let _ = lib.save_track(&track);
@@ -199,6 +202,9 @@ impl TransfusionManager {
                 path: format!("breeding/child_{}.wav", child_id),
                 title: format!("Child of {} x {}", parent_a_id, parent_b_id),
                 artist: "AnaWaves Breeder".to_string(),
+                album: "Breeding Lab".to_string(),
+                genre: "Hybrid".to_string(),
+                energy_level: 0.5,
                 metadata: child_metadata,
             };
             let _ = library.save_track(&track);
@@ -234,6 +240,9 @@ impl TransfusionManager {
                 path: format!("breeding/chaotic_child_{}.wav", child_id),
                 title: format!("Chaotic Child of {} x {}", parent_a_id, parent_b_id),
                 artist: "AnaWaves Breeder".to_string(),
+                album: "Breeding Lab".to_string(),
+                genre: "Experimental".to_string(),
+                energy_level: 0.8,
                 metadata: child_metadata,
             };
             let _ = library.save_track(&track);
