@@ -1,4 +1,4 @@
-use nullherz_traits::AudioProcessor;
+use nullherz_traits::{AudioProcessor, SignalProcessor};
 use audio_dsp::SamplerVoice;
 
 #[derive(Debug)]
@@ -280,6 +280,15 @@ impl SamplerProcessor {
                     voice.loop_start = start_samples;
                     voice.loop_end = end_samples;
                 }
+            }
+            Command::Performance(PerformanceCommand::PlayNode { .. }) => {
+                if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
+                    let beat_pos = context.and_then(|c| c.transport).map(|t| t.beat_position).unwrap_or(0.0);
+                    voice.trigger_at(self.sample_buffer.clone(), self.playback_rate, 1.0, 0.0, beat_pos);
+                }
+            }
+            Command::Performance(PerformanceCommand::StopNode { .. }) => {
+                self.reset();
             }
             Command::Performance(PerformanceCommand::SetSlipMode { node_idx: _, enabled }) => {
                 for voice in self.voices.iter_mut() {

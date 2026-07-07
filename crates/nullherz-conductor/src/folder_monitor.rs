@@ -39,9 +39,23 @@ impl FolderMonitor {
 
         // High-Quality WAV Loader for Alpha
         let buffer = if let Ok(mut reader) = hound::WavReader::open(path) {
-            let samples: Vec<f32> = reader.samples::<f32>().map(|s| s.unwrap_or(0.0)).collect();
-            Arc::new(samples)
+            let spec = reader.spec();
+            match (spec.sample_format, spec.bits_per_sample) {
+                (hound::SampleFormat::Float, 32) => {
+                    let samples: Vec<f32> = reader.samples::<f32>().map(|s| s.unwrap_or(0.0)).collect();
+                    Arc::new(samples)
+                }
+                (hound::SampleFormat::Int, 16) => {
+                    let samples: Vec<f32> = reader.samples::<i16>().map(|s| s.unwrap_or(0) as f32 / 32768.0).collect();
+                    Arc::new(samples)
+                }
+                _ => {
+                    eprintln!("FolderMonitor: Unsupported WAV format ({:?}, {} bits)", spec.sample_format, spec.bits_per_sample);
+                    Arc::new(vec![0.0f32; 44100 * 5])
+                }
+            }
         } else {
+            eprintln!("FolderMonitor: Failed to open WAV file: {}", path);
             Arc::new(vec![0.0f32; 44100 * 5]) // Fallback to silent buffer
         };
 

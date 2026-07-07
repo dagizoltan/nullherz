@@ -77,11 +77,15 @@ impl MixerOrchestrator {
             Command::Performance(PerformanceCommand::SyncDecks { source_deck: _, target_deck: _ }) => {
                 // Future: implementation for BPM/Phase sync logic
             }
-            Command::Performance(PerformanceCommand::PlayDeck { deck_id: _ }) => {
-                // Future: individual deck play trigger
+            Command::Performance(PerformanceCommand::PlayDeck { deck_id }) => {
+                if let Some(nodes) = mixer_manager.deck_mappings.get(deck_id) {
+                    translated.push(Command::Performance(PerformanceCommand::PlayNode { node_idx: nodes.sampler_id }));
+                }
             }
-            Command::Performance(PerformanceCommand::StopDeck { deck_id: _ }) => {
-                // Future: individual deck stop trigger
+            Command::Performance(PerformanceCommand::StopDeck { deck_id }) => {
+                if let Some(nodes) = mixer_manager.deck_mappings.get(deck_id) {
+                    translated.push(Command::Performance(PerformanceCommand::StopNode { node_idx: nodes.sampler_id }));
+                }
             }
             Command::Performance(PerformanceCommand::SetSequencerStep { .. }) |
             Command::Performance(PerformanceCommand::JumpToHotCue { .. }) |

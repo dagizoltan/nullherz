@@ -15,6 +15,8 @@ pub mod analysis_worker;
 pub mod folder_monitor;
 pub mod persistence;
 pub mod pattern_manager;
+#[cfg(test)]
+mod mixing_test;
 pub mod modulation_matrix;
 pub mod clip_orchestrator;
 pub mod bounce;
