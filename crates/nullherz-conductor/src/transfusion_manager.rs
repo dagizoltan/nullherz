@@ -57,7 +57,17 @@ impl EvolutionaryBreeder {
     fn perform_breeding(&self, id_a: u64, id_b: u64, lib: &LibraryDatabase) {
         if let (Some(parent_a), Some(parent_b)) = (self.sample_registry.get(id_a), self.sample_registry.get(id_b)) {
             let bias = 0.5;
-            let child_dna = nullherz_dna::transfuse_dna(&parent_a.metadata.dna, &parent_b.metadata.dna, bias);
+
+            // Chaotic Mutation Hardening: 20% chance of chaotic transfusion in automated cycles
+            let mutation_rate = 0.2;
+            let use_chaotic = (id_a ^ id_b) % 100 < (mutation_rate * 100.0) as u64;
+
+            let child_dna = if use_chaotic {
+                println!("Evolutionary Breeder: Triggering Chaotic Mutation!");
+                nullherz_dna::chaotic_transfuse_dna(&parent_a.metadata.dna, &parent_b.metadata.dna, bias, 0.5)
+            } else {
+                nullherz_dna::transfuse_dna(&parent_a.metadata.dna, &parent_b.metadata.dna, bias)
+            };
 
             let len = parent_a.buffer.len().min(parent_b.buffer.len());
             let mut child_buffer = Vec::with_capacity(len);
@@ -74,7 +84,11 @@ impl EvolutionaryBreeder {
             let track = nullherz_dna::LibraryTrack {
                 id: child_id,
                 path: format!("evolution/child_{}.wav", child_id),
-                title: format!("Evolutionary Child ({} x {})", parent_a.metadata.dna.schema_version, parent_b.metadata.dna.schema_version),
+                title: if use_chaotic {
+                    format!("Chaotic Child ({} x {})", parent_a.metadata.dna.schema_version, parent_b.metadata.dna.schema_version)
+                } else {
+                    format!("Evolutionary Child ({} x {})", parent_a.metadata.dna.schema_version, parent_b.metadata.dna.schema_version)
+                },
                 artist: "Evolutionary Bot".to_string(),
                 metadata: child_metadata,
             };

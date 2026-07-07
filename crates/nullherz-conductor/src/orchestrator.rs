@@ -61,7 +61,7 @@ impl Conductor {
                 Arc::new(std::sync::Mutex::new(nullherz_dna::LibraryDatabase::load(&fallback_path).unwrap()))
             }
         };
-        let mut sidecar_discovery = crate::discovery::SidecarDiscoveryService::new("plugins").with_library(library.clone());
+        let sidecar_discovery = crate::discovery::SidecarDiscoveryService::new("plugins").with_library(library.clone());
         let dna_discovery = sidecar_discovery.dna_discovery.clone();
 
         let mut transfusion_manager = TransfusionManager::new(sample_registry.clone()).with_library(library.clone());
@@ -343,152 +343,196 @@ impl Conductor {
         }
 
         for cmd in translated_commands {
-             match cmd {
-                 Command::Performance(nullherz_traits::PerformanceCommand::LaunchClip { row, col }) => {
-                     if row == 0xFF {
-                         // Scene Launch: launch all clips in column 'col'
-                         for r in 0..8 {
-                             self.clip_orchestrator.launch_clip(r, col as usize);
-                         }
-                     } else {
-                         self.clip_orchestrator.launch_clip(row as usize, col as usize);
-                     }
-                 }
-                 Command::Performance(nullherz_traits::PerformanceCommand::TransfuseRow { row }) => {
-                     let mutations = self.clip_orchestrator.transfuse_row(row as usize);
-                     for m in mutations {
-                         if let Some(ref mut prod) = self.topology_manager.topo_producer {
-                             let _ = prod.push(m);
-                         }
-                     }
-                 }
-                 Command::Resource(nullherz_traits::ResourceCommand::CommitBreeding { parent_a_id, parent_b_id, bias }) => {
-                     let lib = self.library.lock().unwrap();
-                     self.transfusion_manager.commit_breeding(parent_a_id, parent_b_id, bias, &lib);
-                 }
-                 Command::Resource(nullherz_traits::ResourceCommand::CommitChaoticBreeding { parent_a_id, parent_b_id, bias, chaotic_strength }) => {
-                     let lib = self.library.lock().unwrap();
-                     self.transfusion_manager.commit_chaotic_breeding(parent_a_id, parent_b_id, bias, chaotic_strength, &lib);
-                 }
-                 Command::Core(nullherz_traits::CoreCommand::SwitchBackend(backend_type)) => {
-                     let _ = self.switch_backend(backend_type);
-                 }
-                 Command::Core(nullherz_traits::CoreCommand::SetMasterDeck(deck_id)) => {
-                     self.active_master_deck = deck_id;
-                     println!("Conductor: Master Deck set to {}", deck_id);
-                     self.update_matchmaking_suggestions(0); // Trigger immediate update
-                 }
-                 Command::Core(nullherz_traits::CoreCommand::LoadMidiMap(buffer)) => {
-                     let name = String::from_utf8_lossy(&buffer).trim_matches(char::from(0)).to_string();
-                     let path = format!("mappings/{}.json", name);
-                     if let Ok(json) = std::fs::read_to_string(path) {
-                         let _ = self.midi_mapper.load_from_json(&json);
-                     }
-                 }
-                 Command::Core(nullherz_traits::CoreCommand::SetMidiPorts(buffer)) => {
-                     let ports_str = String::from_utf8_lossy(&buffer).trim_matches(char::from(0)).to_string();
-                     let ports: Vec<String> = ports_str.split(',').filter(|s| !s.is_empty()).map(|s| s.trim().to_string()).collect();
-                     let _ = self.update_system_config(None, Some(ports), None);
-                 }
-                 Command::Core(nullherz_traits::CoreCommand::CalibrateLatency) => {
-                     let sample_rate = {
-                         let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock();
-                         engine_lock.ok().and_then(|lock| lock.as_ref().map(|e| e.target_sample_rate())).unwrap_or(44100.0)
-                     };
-                     // Hardened calibration: 10ms based on actual sample rate
-                     let samples = (sample_rate * 0.01) as u32;
-                     let _ = self.update_system_config(None, None, Some(samples));
-                 }
-                 Command::Core(nullherz_traits::CoreCommand::HotLoadSidecar { name, node_idx }) => {
-                     let plugin_name = String::from_utf8_lossy(&name).trim_matches(char::from(0)).to_string();
+            let handled = match cmd {
+                Command::Core(core_cmd) => self.handle_core_command(core_cmd),
+                Command::Performance(perf_cmd) => self.handle_performance_command(perf_cmd),
+                Command::Resource(res_cmd) => self.handle_resource_command(res_cmd),
+                Command::Dna(dna_cmd) => self.handle_dna_command(dna_cmd),
+                _ => false,
+            };
 
-                     let manifest = {
-                         let known = self.sidecar_discovery.known_plugins.lock();
-                         known.ok().and_then(|lock| lock.get(&plugin_name).cloned())
-                     };
-
-                     if let Some(m) = manifest {
-                         let binary_path = format!("plugins/{}", m.binary_name);
-                         match self.sidecar_supervisor.manager.spawn_sidecar(&plugin_name, &binary_path, node_idx, 2, fx_runtime::FailurePolicy::AutoRestart) {
-                             Ok(processor) => {
-                                 if let Some(ref mut prod) = self.topology_manager.topo_producer {
-                                     let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor { node_idx, processor });
-                                 }
-                             }
-                             Err(e) => eprintln!("Failed to hot-load sidecar {}: {}", plugin_name, e),
-                         }
-                     } else {
-                         eprintln!("Hot-load failed: plugin manifest for {} not found.", plugin_name);
-                     }
-                 }
-                 Command::Core(nullherz_traits::CoreCommand::ExportAudio { filename, duration_seconds }) => {
-                     let name = String::from_utf8_lossy(&filename).trim_matches(char::from(0)).to_string();
-                     eprintln!("Bounce: Offline Export requested for {}. Initializing bounce engine...", name);
-
-                     let state = self.capture_state();
-                     let mut renderer = crate::bounce::OfflineRenderer::new(state);
-
-                     let filename_clone = name.clone();
-                     tokio::task::spawn_blocking(move || {
-                         let _ = renderer.bounce_to_wav(&filename_clone, duration_seconds);
-                     });
-                 }
-                 Command::Performance(nullherz_traits::PerformanceCommand::EvolvePattern { node_idx, track_idx, mutation_strength }) => {
-                     // Precisely resolve DNA for the specified node_idx
-                     let mut dna = nullherz_traits::RhythmicDNA::default();
-                     {
-                         if let Ok(engine_lock) = self.engine_coordinator.backend_manager.engine_handle.lock() {
-                             if let Some(ref engine) = *engine_lock {
-                                 // Find the child with matching processor_id
-                                 let resource_id = engine.list_children().iter()
-                                     .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(node_idx))
-                                     .and_then(|c| c.resource_id());
-
-                                 if let Some(rid) = resource_id {
-                                     if let Some(s) = self.transfusion_manager.sample_registry.get(rid) {
-                                         dna = s.metadata.dna.rhythmic;
-                                     }
-                                 }
-                             }
-                         }
-                     }
-
-                     let commands = crate::genetic_sequencer::GeneticSequencer::evolve_pattern(&dna, node_idx, track_idx, mutation_strength);
-                     self.apply_mixer_commands(commands);
-                 }
-                 Command::Performance(nullherz_traits::PerformanceCommand::SetTrackMute { track_idx, muted, .. }) => {
-                     println!("Conductor: Track {} Mute set to {}", track_idx, muted);
-                 }
-                 Command::Performance(nullherz_traits::PerformanceCommand::SetTrackSolo { track_idx, soloed, .. }) => {
-                     println!("Conductor: Track {} Solo set to {}", track_idx, soloed);
-                 }
-                 Command::Performance(nullherz_traits::PerformanceCommand::ClearTrackPattern { track_idx, .. }) => {
-                     println!("Conductor: Clearing Pattern for Track {}", track_idx);
-                 }
-                 Command::Resource(nullherz_traits::ResourceCommand::RegisterCapture { .. }) => {
-                     // Non-RT: Pull snapshot from engine and register in registry
-                     if let Ok(engine_lock) = self.engine_coordinator.backend_manager.engine_handle.lock() {
-                        if let Some(ref engine) = *engine_lock {
-                            // Find specific child or pull all
-                            self.transfusion_manager.poll_snapshots(engine.as_ref());
-                        }
-                     }
-                 }
-                 Command::Resource(nullherz_traits::ResourceCommand::ApplyFeatureMutation { target_id, feature_name, strength }) => {
-                     let name = String::from_utf8_lossy(&feature_name).trim_matches(char::from(0)).to_string();
-                     if let Some(mut sample) = self.transfusion_manager.sample_registry.get(target_id) {
-                         nullherz_dna::FeatureMutator::mutate(&mut sample.metadata.dna, &name, strength);
-                         // Re-register with mutated DNA
-                         self.transfusion_manager.sample_registry.register_with_metadata(target_id, sample.buffer, sample.metadata);
-                         println!("Applied Feature Mutation '{}' (strength={:.2}) to sample {}", name, strength, target_id);
-                     }
-                 }
-                 _ => final_commands.push(cmd),
-             }
+            if !handled {
+                final_commands.push(cmd);
+            }
         }
         if !final_commands.is_empty() {
             self.mixer_bridge.apply_mixer_commands(final_commands, &mut self.topology_manager, &mut self.modulation_matrix);
         }
+    }
+
+    fn handle_core_command(&mut self, cmd: nullherz_traits::CoreCommand) -> bool {
+        match cmd {
+            nullherz_traits::CoreCommand::SwitchBackend(backend_type) => {
+                let _ = self.switch_backend(backend_type);
+                true
+            }
+            nullherz_traits::CoreCommand::SetMasterDeck(deck_id) => {
+                self.active_master_deck = deck_id;
+                println!("Conductor: Master Deck set to {}", deck_id);
+                self.update_matchmaking_suggestions(0); // Trigger immediate update
+                true
+            }
+            nullherz_traits::CoreCommand::LoadMidiMap(buffer) => {
+                let name = String::from_utf8_lossy(&buffer).trim_matches(char::from(0)).to_string();
+                let path = format!("mappings/{}.json", name);
+                if let Ok(json) = std::fs::read_to_string(path) {
+                    let _ = self.midi_mapper.load_from_json(&json);
+                }
+                true
+            }
+            nullherz_traits::CoreCommand::SetMidiPorts(buffer) => {
+                let ports_str = String::from_utf8_lossy(&buffer).trim_matches(char::from(0)).to_string();
+                let ports: Vec<String> = ports_str.split(',').filter(|s| !s.is_empty()).map(|s| s.trim().to_string()).collect();
+                let _ = self.update_system_config(None, Some(ports), None);
+                true
+            }
+            nullherz_traits::CoreCommand::CalibrateLatency => {
+                let sample_rate = {
+                    let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock();
+                    engine_lock.ok().and_then(|lock| lock.as_ref().map(|e| e.target_sample_rate())).unwrap_or(44100.0)
+                };
+                // Hardened calibration: 10ms based on actual sample rate
+                let samples = (sample_rate * 0.01) as u32;
+                let _ = self.update_system_config(None, None, Some(samples));
+                true
+            }
+            nullherz_traits::CoreCommand::HotLoadSidecar { name, node_idx } => {
+                let plugin_name = String::from_utf8_lossy(&name).trim_matches(char::from(0)).to_string();
+                let manifest = {
+                    let known = self.sidecar_discovery.known_plugins.lock();
+                    known.ok().and_then(|lock| lock.get(&plugin_name).cloned())
+                };
+                if let Some(m) = manifest {
+                    let binary_path = format!("plugins/{}", m.binary_name);
+                    match self.sidecar_supervisor.manager.spawn_sidecar(&plugin_name, &binary_path, node_idx, 2, fx_runtime::FailurePolicy::AutoRestart) {
+                        Ok(processor) => {
+                            if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                                let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor { node_idx, processor });
+                            }
+                        }
+                        Err(e) => eprintln!("Failed to hot-load sidecar {}: {}", plugin_name, e),
+                    }
+                } else {
+                    eprintln!("Hot-load failed: plugin manifest for {} not found.", plugin_name);
+                }
+                true
+            }
+            nullherz_traits::CoreCommand::ExportAudio { filename, duration_seconds } => {
+                let name = String::from_utf8_lossy(&filename).trim_matches(char::from(0)).to_string();
+                eprintln!("Bounce: Offline Export requested for {}. Initializing bounce engine...", name);
+                let state = self.capture_state();
+                let mut renderer = crate::bounce::OfflineRenderer::new(state);
+                let filename_clone = name.clone();
+                tokio::task::spawn_blocking(move || {
+                    let _ = renderer.bounce_to_wav(&filename_clone, duration_seconds);
+                });
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_performance_command(&mut self, cmd: nullherz_traits::PerformanceCommand) -> bool {
+        match cmd {
+            nullherz_traits::PerformanceCommand::LaunchClip { row, col } => {
+                if row == 0xFF {
+                    for r in 0..8 {
+                        self.clip_orchestrator.launch_clip(r, col as usize);
+                    }
+                } else {
+                    self.clip_orchestrator.launch_clip(row as usize, col as usize);
+                }
+                true
+            }
+            nullherz_traits::PerformanceCommand::TransfuseRow { row } => {
+                let mutations = self.clip_orchestrator.transfuse_row(row as usize);
+                for m in mutations {
+                    if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                        let _ = prod.push(m);
+                    }
+                }
+                true
+            }
+            nullherz_traits::PerformanceCommand::EvolvePattern { node_idx, track_idx, mutation_strength } => {
+                let mut dna = nullherz_traits::RhythmicDNA::default();
+                {
+                    if let Ok(engine_lock) = self.engine_coordinator.backend_manager.engine_handle.lock() {
+                        if let Some(ref engine) = *engine_lock {
+                            let resource_id = engine.list_children().iter()
+                                .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(node_idx))
+                                .and_then(|c| c.resource_id());
+                            if let Some(rid) = resource_id {
+                                if let Some(s) = self.transfusion_manager.sample_registry.get(rid) {
+                                    dna = s.metadata.dna.rhythmic;
+                                }
+                            }
+                        }
+                    }
+                }
+                let commands = crate::genetic_sequencer::GeneticSequencer::evolve_pattern(&dna, node_idx, track_idx, mutation_strength);
+                self.apply_mixer_commands(commands);
+                true
+            }
+            nullherz_traits::PerformanceCommand::SetTrackMute { track_idx, muted, .. } => {
+                println!("Conductor: Track {} Mute set to {}", track_idx, muted);
+                true
+            }
+            nullherz_traits::PerformanceCommand::SetTrackSolo { track_idx, soloed, .. } => {
+                println!("Conductor: Track {} Solo set to {}", track_idx, soloed);
+                true
+            }
+            nullherz_traits::PerformanceCommand::ClearTrackPattern { track_idx, .. } => {
+                println!("Conductor: Clearing Pattern for Track {}", track_idx);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_resource_command(&mut self, cmd: nullherz_traits::ResourceCommand) -> bool {
+        match cmd {
+            nullherz_traits::ResourceCommand::CommitBreeding { parent_a_id, parent_b_id, bias } => {
+                let lib = self.library.lock().unwrap();
+                self.transfusion_manager.commit_breeding(parent_a_id, parent_b_id, bias, &lib);
+                true
+            }
+            nullherz_traits::ResourceCommand::CommitChaoticBreeding { parent_a_id, parent_b_id, bias, chaotic_strength } => {
+                let lib = self.library.lock().unwrap();
+                self.transfusion_manager.commit_chaotic_breeding(parent_a_id, parent_b_id, bias, chaotic_strength, &lib);
+                true
+            }
+            nullherz_traits::ResourceCommand::RegisterCapture { .. } => {
+                if let Ok(engine_lock) = self.engine_coordinator.backend_manager.engine_handle.lock() {
+                   if let Some(ref engine) = *engine_lock {
+                       self.transfusion_manager.poll_snapshots(engine.as_ref());
+                   }
+                }
+                true
+            }
+            nullherz_traits::ResourceCommand::ApplyFeatureMutation { target_id, feature_name, strength } => {
+                let name = String::from_utf8_lossy(&feature_name).trim_matches(char::from(0)).to_string();
+                if let Some(mut sample) = self.transfusion_manager.sample_registry.get(target_id) {
+                    nullherz_dna::FeatureMutator::mutate(&mut sample.metadata.dna, &name, strength);
+                    self.transfusion_manager.sample_registry.register_with_metadata(target_id, sample.buffer, sample.metadata);
+                    println!("Applied Feature Mutation '{}' (strength={:.2}) to sample {}", name, strength, target_id);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_dna_command(&mut self, cmd: nullherz_traits::DnaCommand) -> bool {
+        // DNA commands are typically dispatched to the execution plane (TopologyMutation)
+        // or handled by the transfusion manager if they involve registration.
+        if let Some(ref mut prod) = self.engine_coordinator.command_producer {
+            let _ = prod.push_command(nullherz_traits::TimestampedCommand {
+                timestamp_samples: 0,
+                command: nullherz_traits::Command::Dna(cmd),
+            });
+            return true;
+        }
+        false
     }
 
     pub fn handle_midi_events(&mut self, events: Vec<nullherz_traits::MidiEvent>) {
