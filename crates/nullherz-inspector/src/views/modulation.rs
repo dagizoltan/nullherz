@@ -35,42 +35,48 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
 
     // Matrix Header
     ui.horizontal(|ui| {
-        ui.add_sized([120.0, 20.0], egui::Label::new("MACRO SOURCE"));
+        ui.add_sized([140.0, 20.0], egui::Label::new(RichText::new("MODULATION TARGET").small().strong()));
         for i in 0..8 {
-            ui.add_sized([40.0, 20.0], egui::Label::new(format!("M{}", i + 1)));
+            ui.add_sized([45.0, 20.0], egui::Label::new(RichText::new(format!("MACRO {}", i + 1)).small().color(Color32::from_rgb(0, 255, 200))));
         }
     });
 
     ui.separator();
 
-    egui::ScrollArea::vertical().show(ui, |ui| {
+    egui::ScrollArea::vertical().id_source("mod_matrix_scroll").show(ui, |ui| {
         // Dynamic targets from graph topology
         for (idx, node) in app.graph.nodes.iter().enumerate() {
             let node_id = idx as u64;
-            // Simplified: exposing the first 4 parameters of each node for modulation
-            for param_id in 0..4 {
-                let name = format!("{}:P{}", node.name, param_id);
-            ui.horizontal(|ui| {
-                ui.add_sized([120.0, 25.0], egui::Label::new(name));
+            // High-visibility grouping per node
+            ui.group(|ui| {
+                ui.label(RichText::new(&node.name).strong().color(Color32::WHITE));
+                ui.add_space(4.0);
 
-                for macro_id in 0..8 {
-                    // Hardened: Mini-knob for scaling control
-                    let mut scaling = 1.0;
-                    ui.vertical(|ui| {
-                        ui.set_max_width(40.0);
-                        if crate::widgets::render_knob(ui, &mut scaling, -1.0..=1.0, "", Color32::from_gray(100)).changed() {
-                             let _ = app.command_sender.send(Command::Mixer(MixerCommand::AddModMapping {
-                                macro_id,
-                                target_id: node_id,
-                                param_id,
-                                scaling,
-                                ramp_duration_samples: 0,
-                            }));
+                for param_id in 0..4 {
+                    let name = format!("Param {}", param_id);
+                    ui.horizontal(|ui| {
+                        ui.add_sized([120.0, 25.0], egui::Label::new(RichText::new(name).small().color(Color32::from_gray(180))));
+
+                        for macro_id in 0..8 {
+                            // Hardened: Mini-knob for scaling control
+                            let mut scaling = 0.0; // In a real app we'd fetch this from the modulation matrix state
+                            ui.vertical(|ui| {
+                                ui.set_max_width(45.0);
+                                if crate::widgets::render_knob(ui, &mut scaling, -1.0..=1.0, "", Color32::from_gray(120)).changed() {
+                                     let _ = app.command_sender.send(Command::Mixer(MixerCommand::AddModMapping {
+                                        macro_id: macro_id as u32,
+                                        target_id: node_id,
+                                        param_id,
+                                        scaling,
+                                        ramp_duration_samples: 0,
+                                    }));
+                                }
+                            });
                         }
                     });
                 }
             });
-            }
+            ui.add_space(8.0);
         }
     });
 
