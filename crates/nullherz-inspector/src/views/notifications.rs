@@ -1,5 +1,5 @@
 use nullherz_dna::GeneticLibrary;
-use egui::{Ui, ScrollArea, Color32, RichText, Frame, Margin};
+use egui::{Ui, ScrollArea, Color32, RichText, Frame};
 use crate::InspectorApp;
 
 pub fn render(app: &InspectorApp, ui: &mut Ui) {

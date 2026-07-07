@@ -66,6 +66,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             bundle_garbage_producer: None,
             bundle_overflow_producer: None,
             telemetry_producer: Box::new(tel_prod),
+            worker_count: None,
         };
 
         let mut engine = AudioEngine::new(
@@ -116,6 +117,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             bundle_garbage_producer: None,
             bundle_overflow_producer: None,
             telemetry_producer: Box::new(tel_prod),
+            worker_count: None,
         };
 
         let mut engine = AudioEngine::new(

@@ -110,7 +110,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 socket_positions.insert((idx as u32, false, in_idx as u32), socket_pos);
 
                 let is_occupied = app.graph.edges.iter().any(|e| e.to == idx as u32 && e.input_idx == in_idx as u32);
-                let mut color = if is_occupied { app.theme.accent } else { app.theme.socket_color };
+                let color = if is_occupied { app.theme.accent } else { app.theme.socket_color };
 
                 let is_compatible = app.active_connection_source.is_some();
                 let stroke = if is_compatible {

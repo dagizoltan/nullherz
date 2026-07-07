@@ -139,7 +139,7 @@ fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
 
             if let Some(t) = app.last_telemetry.lock().unwrap().as_ref() {
                 if t.calibration_samples > 0 {
-                    let ms = (t.calibration_samples as f32 / (t.sample_rate / 1000.0));
+                    let ms = t.calibration_samples as f32 / (t.sample_rate / 1000.0) ;
                     ui.label(format!("Current RTL: {:.1}ms ({} samples)", ms, t.calibration_samples));
                 } else {
                     ui.label("Current RTL: Not Calibrated");

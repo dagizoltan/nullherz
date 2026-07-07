@@ -191,7 +191,7 @@ fn run_network_chaos_test() {
         let block = AudioBlock { data: [0.0; 256], len: 256, _pad: [0; 15] };
 
         // Push block with random delay (simulate jitter)
-        let jitter = (sent % 3 == 0); // Every 3rd block is delayed or bundled
+        let jitter = sent % 3 == 0 ; // Every 3rd block is delayed or bundled
         if !jitter {
             let _ = bridge.push_block(node_idx, block);
             sent += 1;

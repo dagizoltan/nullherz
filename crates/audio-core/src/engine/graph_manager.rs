@@ -23,11 +23,12 @@ pub struct GraphManager {
 
 impl GraphManager {
     pub fn new(
-        initial_graph: Box<dyn AudioProcessor>,
+        mut initial_graph: Box<dyn AudioProcessor>,
         garbage_producer: Producer<Box<dyn AudioProcessor>>,
         overflow_garbage_producer: Option<Producer<Box<dyn AudioProcessor>>>,
         logger: Arc<RtLogger>,
     ) -> Self {
+        initial_graph.as_any_mut().downcast_mut::<crate::processors::ProcessorGraph>().map(|g| g.logger = Some(logger.clone()));
         Self {
             active_graph: AtomicPtr::new(Box::into_raw(Box::new(initial_graph))),
             pending_graph: AtomicPtr::new(std::ptr::null_mut()),
@@ -90,7 +91,8 @@ impl GraphManager {
         unsafe { &mut **graph_ptr }
     }
 
-    pub fn set_pending_graph(&self, graph: Box<dyn AudioProcessor>) {
+    pub fn set_pending_graph(&self, mut graph: Box<dyn AudioProcessor>) {
+        graph.as_any_mut().downcast_mut::<crate::processors::ProcessorGraph>().map(|g| g.logger = Some(self.logger.clone()));
         let ptr = Box::into_raw(Box::new(graph));
         let old = self.pending_graph.swap(ptr, Ordering::AcqRel);
         if !old.is_null() {

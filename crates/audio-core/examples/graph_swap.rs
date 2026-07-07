@@ -21,6 +21,7 @@ fn main() {
         bundle_garbage_producer: None,
         bundle_overflow_producer: None,
         telemetry_producer: Box::new(tel_prod),
+        worker_count: None,
     };
 
     let engine = AudioEngine::new(

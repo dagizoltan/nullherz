@@ -33,7 +33,7 @@ impl nullherz_traits::ParallelExecutor for TaskPool {
         self.worker_producers.len()
     }
 
-    unsafe fn push_job_raw(&mut self, worker_idx: usize, data: *const u8, size: usize, exec_fn: fn(*const u8)) -> bool {
+    unsafe fn push_job_raw(&mut self, worker_idx: usize, data: *const u8, size: usize, _exec_fn: fn(*const u8)) -> bool {
         // Validation: In this hardened implementation, we only support Job type for now
         // but we respect the exec_fn if we were to support multiple job types.
         if size != std::mem::size_of::<Job>() { return false; }

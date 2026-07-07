@@ -72,6 +72,7 @@ pub struct PipewireBackendInner {
     context: *mut std::ffi::c_void,
     stream: *mut std::ffi::c_void,
     engine_handle: Option<Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>>,
+    engine_arc: Option<Arc<dyn RenderingEngine>>,
     lib: Option<PwLib>,
     events: Option<Box<PwStreamEvents>>,
     listener: [u64; 8],
@@ -95,6 +96,7 @@ impl PipewireBackend {
                 context: std::ptr::null_mut(),
                 stream: std::ptr::null_mut(),
                 engine_handle: None,
+                engine_arc: None,
                 lib: None,
                 events: None,
                 listener: [0; 8],
@@ -253,17 +255,14 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
         }
     }
 
-    if let Some(ref handle) = backend.engine_handle {
-        #[allow(clippy::collapsible_if)]
-        if let Some(ref engine_arc) = *handle.lock().unwrap() {
-            // SAFETY: We need a &mut reference for process_block.
-            // In a real system, the backend would be the sole owner of the engine's
-            // processing context, or we'd use internal mutability.
-            // For now, we'll use a hack or ensure only one thread ever calls this.
-            let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-            unsafe {
-                (*engine_ptr).process_block(&[], &mut out_refs_storage[..num_channels], num_samples);
-            }
+    if let Some(ref engine_arc) = backend.engine_arc {
+        // SAFETY: We need a &mut reference for process_block.
+        // In a real system, the backend would be the sole owner of the engine's
+        // processing context, or we'd use internal mutability.
+        // For now, we'll use a hack or ensure only one thread ever calls this.
+        let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
+        unsafe {
+            (*engine_ptr).process_block(&[], &mut out_refs_storage[..num_channels], num_samples);
         }
     }
 
@@ -316,7 +315,8 @@ impl AudioBackend for PipewireBackend {
                 }
             }
 
-            inner.engine_handle = Some(engine_handle);
+            inner.engine_handle = Some(engine_handle.clone());
+            inner.engine_arc = engine_handle.lock().unwrap().clone();
             inner.running.store(true, Ordering::SeqCst);
 
             let pw = inner.lib.as_ref().unwrap();

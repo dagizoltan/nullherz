@@ -407,6 +407,25 @@ impl SamplerVoice {
         self.is_active = true;
     }
 
+    /// RT-Safe variant that avoids atomic increment of the Arc if possible.
+    pub fn trigger_at_ref(&mut self, buffer: &std::sync::Arc<Vec<f32>>, playback_rate: f32, velocity: f32, offset: f32, beat: f64) {
+        // Only clone if the buffer actually changed
+        let needs_clone = match &self.buffer {
+            Some(existing) => !std::sync::Arc::ptr_eq(existing, buffer),
+            None => true,
+        };
+
+        if needs_clone {
+            self.buffer = Some(buffer.clone());
+        }
+        self.play_head = offset;
+        self.trigger_offset = offset;
+        self.trigger_beat = beat;
+        self.playback_rate = playback_rate;
+        self.velocity = velocity;
+        self.is_active = true;
+    }
+
     pub fn process_scalar_frame(&mut self) -> f32 {
         if !self.is_active { return 0.0; }
         let Some(buffer) = &self.buffer else { return 0.0; };
