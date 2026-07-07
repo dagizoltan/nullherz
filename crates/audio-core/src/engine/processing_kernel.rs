@@ -25,16 +25,18 @@ impl ProcessingKernel for StandardKernel {
 
         let mut sub_block_iter = SubBlockIterator::new(num_samples, ipc_layer::MAX_BLOCK_SIZE);
 
-        while sub_block_iter.current_offset < num_samples {
-            let cmd = if let Some(pending) = pending_command.take() { Some(pending) } else {
-                if commands_processed < nullherz_traits::MAX_COMMANDS_PER_BLOCK { command_consumer.pop_command() } else { None }
-            };
+        let mut cmd = pending_command.take();
 
-            if let Some(cmd) = cmd {
-                if cmd.timestamp_samples < block_end_sample {
+        while sub_block_iter.current_offset < num_samples {
+            if cmd.is_none() && commands_processed < nullherz_traits::MAX_COMMANDS_PER_BLOCK {
+                cmd = command_consumer.pop_command();
+            }
+
+            if let Some(c) = cmd.take() {
+                if c.timestamp_samples < block_end_sample {
                     commands_processed += 1;
-                    let cmd_offset = if cmd.timestamp_samples > block_start_sample {
-                        (cmd.timestamp_samples - block_start_sample) as usize
+                    let cmd_offset = if c.timestamp_samples > block_start_sample {
+                        (c.timestamp_samples - block_start_sample) as usize
                     } else {
                         sub_block_iter.current_offset
                     };
@@ -43,9 +45,25 @@ impl ProcessingKernel for StandardKernel {
                         Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
                     }
 
-                    CommandDispatcher::handle_single_command(transport, graph, &cmd.command);
+                    CommandDispatcher::handle_single_command(transport, graph, &c.command);
+
+                    // Batch processing: Drain all commands with the same timestamp to minimize sub-block fragmentation
+                    loop {
+                        if commands_processed >= nullherz_traits::MAX_COMMANDS_PER_BLOCK { break; }
+                        if let Some(next_cmd) = command_consumer.pop_command() {
+                            if next_cmd.timestamp_samples == c.timestamp_samples {
+                                CommandDispatcher::handle_single_command(transport, graph, &next_cmd.command);
+                                commands_processed += 1;
+                            } else {
+                                cmd = Some(next_cmd);
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
                 } else {
-                    *pending_command = Some(cmd);
+                    *pending_command = Some(c);
                     while let Some(sb) = sub_block_iter.next_chunk() {
                         Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
                     }
@@ -55,6 +73,10 @@ impl ProcessingKernel for StandardKernel {
                     Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
                 }
             }
+        }
+
+        if let Some(remaining) = cmd {
+            *pending_command = Some(remaining);
         }
     }
 }

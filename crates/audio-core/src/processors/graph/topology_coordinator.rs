@@ -65,4 +65,98 @@ impl TopologyCoordinator {
     pub fn has_active_crossfades(&self) -> bool {
         self.active_topology().crossfades.iter().any(|x| x.is_some())
     }
+
+    pub fn apply_mutation(&mut self, mutation: crate::processors::TopologyMutation, nodes: &mut [super::node::ProcessorNode; crate::MAX_NODES], node_count: &mut usize, garbage_producer: &Option<Box<dyn nullherz_traits::GarbageProducer>>) {
+        use crate::processors::TopologyMutation;
+        match mutation {
+            TopologyMutation::LoadProcessorState { node_idx, state_data } => {
+                if let Some(node) = nodes.get_mut(node_idx as usize) {
+                    let proc = unsafe { &mut *node.processor.get() };
+                    proc.load_state(&state_data);
+                }
+            }
+            TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
+                let n_idx = node_idx as usize;
+                let i_idx = input_idx as usize;
+                if n_idx < crate::MAX_NODES && i_idx < crate::MAX_CHANNELS {
+                    let topo = self.inactive_topology_mut();
+                    topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
+                    if i_idx >= topo.routing[n_idx].input_count {
+                        topo.routing[n_idx].input_count = i_idx + 1;
+                    }
+                }
+            }
+            TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
+                let n_idx = node_idx as usize;
+                let o_idx = output_idx as usize;
+                if n_idx < crate::MAX_NODES && o_idx < crate::MAX_CHANNELS {
+                    let topo = self.inactive_topology_mut();
+                    topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
+                    if o_idx >= topo.routing[n_idx].output_count {
+                        topo.routing[n_idx].output_count = o_idx + 1;
+                    }
+                }
+            }
+            TopologyMutation::SwapProcessor { node_idx, mut processor } => {
+                let n_idx = node_idx as usize;
+                if n_idx < crate::MAX_NODES {
+                    if let Some(prod) = garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
+                    let old_proc = unsafe { std::ptr::replace(nodes[n_idx].processor.get(), processor) };
+                    if let Some(prod) = garbage_producer {
+                        let mut cloned = dyn_clone::clone_box(&**prod);
+                        if let Err(leaked) = cloned.push_processor(old_proc) { std::mem::forget(leaked); }
+                    } else { std::mem::forget(old_proc); }
+                }
+            }
+            TopologyMutation::AddNode { node_idx, mut processor } => {
+                let idx = node_idx as usize;
+                if idx < crate::MAX_NODES {
+                    if let Some(prod) = garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
+                    let old_proc = unsafe { std::ptr::replace(nodes[idx].processor.get(), processor) };
+                    if let Some(prod) = garbage_producer {
+                        let mut cloned = dyn_clone::clone_box(&**prod);
+                        if let Err(leaked) = cloned.push_processor(old_proc) { std::mem::forget(leaked); }
+                    } else { std::mem::forget(old_proc); }
+
+                    if idx >= *node_count { *node_count = idx + 1; }
+                    let topo = self.inactive_topology_mut();
+                    topo.routing[idx].input_count = 0;
+                    topo.routing[idx].output_count = 0;
+                    if idx >= topo.node_count { topo.node_count = idx + 1; }
+                }
+            }
+            TopologyMutation::SetTopology(topo) => {
+                let inactive = (self.active_idx() + 1) % 2;
+                self.topologies[inactive] = topo.as_ref().clone();
+                self.needs_commit = true;
+            }
+            TopologyMutation::AddSource { node_idx, buffer, sample_id, metadata } => {
+                let idx = node_idx as usize;
+                if idx < *node_count {
+                    unsafe { (*nodes[idx].processor.get()).apply_topology_mutation(TopologyMutation::AddSource { node_idx, buffer, sample_id, metadata }); }
+                }
+            }
+            TopologyMutation::UpdateMetadata { node_idx, metadata } => {
+                let idx = node_idx as usize;
+                if idx < *node_count {
+                    unsafe { (*nodes[idx].processor.get()).apply_topology_mutation(TopologyMutation::UpdateMetadata { node_idx, metadata }); }
+                }
+            }
+            TopologyMutation::SetNodePosition { node_idx, x, y } => {
+                let inactive = (self.active_idx() + 1) % 2;
+                self.topologies[inactive].node_positions.insert(node_idx, (x, y));
+                self.topologies[self.active_idx()].node_positions.insert(node_idx, (x, y));
+            }
+            TopologyMutation::SetBypass { node_idx, enabled } => {
+                let inactive = (self.active_idx() + 1) % 2;
+                if enabled {
+                    self.topologies[inactive].bypass_states.insert(node_idx);
+                    self.topologies[self.active_idx()].bypass_states.insert(node_idx);
+                } else {
+                    self.topologies[inactive].bypass_states.remove(&node_idx);
+                    self.topologies[self.active_idx()].bypass_states.remove(&node_idx);
+                }
+            }
+        }
+    }
 }
