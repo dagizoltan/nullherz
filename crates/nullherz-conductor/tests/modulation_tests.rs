@@ -11,7 +11,7 @@ fn test_modulation_matrix_expansion() {
     assert_eq!(commands.len(), 1); // Grouped into 1 bundle
 
     match &commands[0] {
-        Command::Mixer(MixerCommand::Bundle { count, data }) => {
+        Command::Mixer(nullherz_traits::MixerCommand::Bundle { count, .. }) => {
             assert_eq!(*count, 2);
             let sub_cmds: Vec<_> = commands[0].bundle_iter().unwrap().collect();
             assert_eq!(sub_cmds.len(), 2);

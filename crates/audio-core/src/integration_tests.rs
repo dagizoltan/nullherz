@@ -2,7 +2,7 @@
 mod integration_tests {
     use crate::{AudioEngine, ProcessorGraph};
     use crate::engine::processing_kernel::StandardKernel;
-    use nullherz_traits::{AudioProcessor, test_kit::{TestHost, MockProcessor}, ProcessorTypeId, GarbageProducer};
+    use nullherz_traits::{AudioProcessor, test_kit::{TestHost, MockProcessor}, };
     use nullherz_processors::ProcessorRegistry;
     use ipc_layer::RingBuffer;
     use std::sync::Arc;
@@ -87,7 +87,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
     #[test]
     fn test_complete_engine_cycle_with_registry() {
-        let registry = ProcessorRegistry::new();
+        let _registry = ProcessorRegistry::new();
         let _host = TestHost::new();
 
         // 1. Setup Engine components
