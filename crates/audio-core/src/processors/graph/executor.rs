@@ -104,7 +104,7 @@ impl GraphExecutor {
                     is_last_sub_block,
                     is_bypassed,
                 };
-                let _ = pool.push_job(worker_idx, Box::new(job));
+                unsafe { pool.push_job_raw(worker_idx, &job as *const _ as *const u8, std::mem::size_of::<Job>(), |_| {}); }
             }
 
             pool.notify_workers();

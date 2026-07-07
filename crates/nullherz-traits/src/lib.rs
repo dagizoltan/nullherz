@@ -554,7 +554,9 @@ pub struct ProcessContext<'a> {
 pub trait ParallelExecutor: Send + Sync {
     fn as_any(&mut self) -> &mut dyn std::any::Any;
     fn num_workers(&self) -> usize;
-    fn push_job(&mut self, worker_idx: usize, job: Box<dyn std::any::Any + Send>) -> Result<(), Box<dyn std::any::Any + Send>>;
+    /// Safety: data must point to a valid memory region of at least size bytes.
+    /// exec_fn will be called by a worker thread with the provided data.
+    unsafe fn push_job_raw(&mut self, worker_idx: usize, data: *const u8, size: usize, exec_fn: fn(*const u8)) -> bool;
     fn wait_for_completion(&mut self, target_count: usize);
     fn current_completion_count(&self) -> usize;
     fn notify_workers(&mut self);

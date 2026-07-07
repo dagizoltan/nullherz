@@ -86,102 +86,10 @@ impl ProcessorGraph {
         if !self.topology_coordinator.has_active_crossfades() {
             for i in 0..self.pending_mutation_count {
                 if let Some(m) = self.pending_mutations[i].take() {
-                    self.apply_mutation_internal(m);
+                    self.topology_coordinator.apply_mutation(m, self.nodes.as_mut(), &mut self.node_count, &self.garbage_producer);
                 }
             }
             self.pending_mutation_count = 0;
-        }
-    }
-
-    fn apply_mutation_internal(&mut self, mutation: TopologyMutation) {
-        match mutation {
-            TopologyMutation::LoadProcessorState { node_idx, state_data } => {
-                if let Some(node) = self.nodes.get_mut(node_idx as usize) {
-                    let proc = unsafe { &mut *node.processor.get() };
-                    proc.load_state(&state_data);
-                }
-            }
-            TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
-                let n_idx = node_idx as usize;
-                let i_idx = input_idx as usize;
-                if n_idx < crate::MAX_NODES && i_idx < crate::MAX_CHANNELS {
-                    let topo = self.inactive_topology_mut();
-                    topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
-                    if i_idx >= topo.routing[n_idx].input_count {
-                        topo.routing[n_idx].input_count = i_idx + 1;
-                    }
-                }
-            }
-            TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
-                let n_idx = node_idx as usize;
-                let o_idx = output_idx as usize;
-                if n_idx < crate::MAX_NODES && o_idx < crate::MAX_CHANNELS {
-                    let topo = self.inactive_topology_mut();
-                    topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
-                    if o_idx >= topo.routing[n_idx].output_count {
-                        topo.routing[n_idx].output_count = o_idx + 1;
-                    }
-                }
-            }
-            TopologyMutation::SwapProcessor { node_idx, mut processor } => {
-                let n_idx = node_idx as usize;
-                if n_idx < crate::MAX_NODES {
-                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
-                    let old_proc = unsafe { std::ptr::replace(self.nodes[n_idx].processor.get(), processor) };
-                    if let Some(ref mut prod) = self.garbage_producer {
-                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
-                    } else { std::mem::forget(old_proc); }
-                }
-            }
-            TopologyMutation::AddNode { node_idx, mut processor } => {
-                let idx = node_idx as usize;
-                if idx < crate::MAX_NODES {
-                    if let Some(ref prod) = self.garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
-                    let old_proc = unsafe { std::ptr::replace(self.nodes[idx].processor.get(), processor) };
-                    if let Some(ref mut prod) = self.garbage_producer {
-                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
-                    } else { std::mem::forget(old_proc); }
-
-                    if idx >= self.node_count { self.node_count = idx + 1; }
-                    let topo = self.inactive_topology_mut();
-                    topo.routing[idx].input_count = 0;
-                    topo.routing[idx].output_count = 0;
-                    if idx >= topo.node_count { topo.node_count = idx + 1; }
-                }
-            }
-            TopologyMutation::SetTopology(topo) => {
-                let inactive = (self.topology_coordinator.active_idx() + 1) % 2;
-                self.topology_coordinator.topologies[inactive] = topo.as_ref().clone();
-                self.topology_coordinator.needs_commit = true;
-            }
-            TopologyMutation::AddSource { node_idx, buffer, sample_id, metadata } => {
-                let idx = node_idx as usize;
-                if idx < self.node_count {
-                    unsafe { (*self.nodes[idx].processor.get()).apply_topology_mutation(TopologyMutation::AddSource { node_idx, buffer, sample_id, metadata }); }
-                }
-            }
-            TopologyMutation::UpdateMetadata { node_idx, metadata } => {
-                let idx = node_idx as usize;
-                if idx < self.node_count {
-                    unsafe { (*self.nodes[idx].processor.get()).apply_topology_mutation(TopologyMutation::UpdateMetadata { node_idx, metadata }); }
-                }
-            }
-            TopologyMutation::SetNodePosition { node_idx, x, y } => {
-                let inactive = (self.topology_coordinator.active_idx() + 1) % 2;
-                self.topology_coordinator.topologies[inactive].node_positions.insert(node_idx, (x, y));
-                // Ensure active topology also has it if no commit is pending
-                self.topology_coordinator.topologies[self.topology_coordinator.active_idx()].node_positions.insert(node_idx, (x, y));
-            }
-            TopologyMutation::SetBypass { node_idx, enabled } => {
-                let inactive = (self.topology_coordinator.active_idx() + 1) % 2;
-                if enabled {
-                    self.topology_coordinator.topologies[inactive].bypass_states.insert(node_idx);
-                    self.topology_coordinator.topologies[self.topology_coordinator.active_idx()].bypass_states.insert(node_idx);
-                } else {
-                    self.topology_coordinator.topologies[inactive].bypass_states.remove(&node_idx);
-                    self.topology_coordinator.topologies[self.topology_coordinator.active_idx()].bypass_states.remove(&node_idx);
-                }
-            }
         }
     }
 

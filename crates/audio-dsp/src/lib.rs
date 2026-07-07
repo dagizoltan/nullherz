@@ -8,6 +8,7 @@ pub use filters::*;
 pub use oscillators::*;
 pub use spectral::{SpectralPipeline, SpectralProcessor, SpectralWindowShape};
 pub use util::*;
+use wide::CmpLt;
 
 pub trait DspKernel: Send + Clone {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]);
@@ -222,6 +223,7 @@ impl Gain {
         let mut current = self.current_gain;
 
         if self.ramp_remaining > 0 {
+            // Ramped gain: mostly scalar due to sequential nature, but can be vectorized in segments
             for i in 0..len {
                 if self.ramp_remaining > 0 {
                     current += self.ramp_step;
@@ -229,16 +231,32 @@ impl Gain {
                 } else {
                     current = self.target_gain;
                 }
-                let mut out = input[i] * current;
-                if out.abs() < 1e-15 { out = 0.0; }
-                output[i] = out;
+                let out = input[i] * current;
+                output[i] = if out.abs() < 1e-15 { 0.0 } else { out };
             }
         } else {
+            // Static gain: Highly vectorizable
+            use crate::simd_vec::*;
             current = self.target_gain;
-            for i in 0..len {
-                let mut out = input[i] * current;
-                if out.abs() < 1e-15 { out = 0.0; }
-                output[i] = out;
+            let v_gain = FloatX8::from(current);
+            let v_zero = FloatX8::from(0.0);
+            let v_eps = FloatX8::from(1e-15);
+
+            let mut i = 0;
+            while i + 8 <= len {
+                let v_in = load_f32x8(input, i);
+                let v_out = v_in * v_gain;
+                // Denormal safeguard: if abs < eps, force to zero
+                // wide uses cmp_gt, cmp_lt etc instead of .lt() which returns a mask
+                let mask = v_out.abs().cmp_lt(v_eps);
+                let v_out_clean = mask.blend(v_zero, v_out);
+                store_f32x8(output, i, v_out_clean);
+                i += 8;
+            }
+            while i < len {
+                let out = input[i] * current;
+                output[i] = if out.abs() < 1e-15 { 0.0 } else { out };
+                i += 1;
             }
         }
         self.current_gain = current;

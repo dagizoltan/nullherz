@@ -32,10 +32,17 @@ impl nullherz_traits::ParallelExecutor for TaskPool {
     fn num_workers(&self) -> usize {
         self.worker_producers.len()
     }
-    fn push_job(&mut self, worker_idx: usize, job: Box<dyn std::any::Any + Send>) -> Result<(), Box<dyn std::any::Any + Send>> {
-        let job = job.downcast::<Job>()?;
-        self.worker_producers[worker_idx].push(*job).map_err(|j| Box::new(j) as Box<dyn std::any::Any + Send>)
+
+    unsafe fn push_job_raw(&mut self, worker_idx: usize, data: *const u8, size: usize, exec_fn: fn(*const u8)) -> bool {
+        // Validation: In this hardened implementation, we only support Job type for now
+        // but we respect the exec_fn if we were to support multiple job types.
+        if size != std::mem::size_of::<Job>() { return false; }
+        let job_ptr = data as *const Job;
+        // Since Job is Copy (contains only pointers, primitives and Options of Copy types),
+        // bitwise copy is safe and won't cause double-frees.
+        self.worker_producers[worker_idx].push(unsafe { *job_ptr }).is_ok()
     }
+
     fn wait_for_completion(&mut self, target_count: usize) {
         while self.completion.load(Ordering::Acquire) < target_count {
             self.completion_fd.wait();

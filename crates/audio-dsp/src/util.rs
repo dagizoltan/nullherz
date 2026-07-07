@@ -74,6 +74,13 @@ impl LagrangeResampler {
 
         c3*fraction*fraction*fraction + c2*fraction*fraction + c1*fraction + c0
     }
+
+    pub fn process_block_resampling(&mut self, input: &[f32], output: &mut [f32], fractions: &[f32]) {
+        let len = output.len().min(input.len()).min(fractions.len());
+        for i in 0..len {
+            output[i] = self.process_sample(input[i], fractions[i]);
+        }
+    }
 }
 
 /// Calculates a sliding window magnitude average for spectral envelope extraction.
