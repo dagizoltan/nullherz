@@ -212,6 +212,26 @@ impl std::ops::Div for FloatX16 {
     }
 }
 
+/// Helper to ensure WASM SIMD128 (4-wide) optimized paths are clear and utilized.
+#[inline(always)]
+pub fn complex_mul_accumulate_wasm_simd(re: &mut f32x4, im: &mut f32x4, hr: f32x4, hi: f32x4, ir: f32x4, ii: f32x4) {
+    *re = *re + (hr * ir - hi * ii);
+    *im = *im + (hr * ii + hi * ir);
+}
+
+/// SIMD-optimized tanh approximation for neural activation.
+pub fn tanh_simd(x: f32x4) -> f32x4 {
+    let x2 = x * x;
+    let a = x * (f32x4::from(1.0) + f32x4::from(0.12317192) * x2);
+    let b = f32x4::from(1.0) + f32x4::from(0.4565311) * x2 + f32x4::from(0.01524316) * x2 * x2;
+    a / b
+}
+
+/// SIMD-optimized sigmoid approximation.
+pub fn sigmoid_simd(x: f32x4) -> f32x4 {
+    f32x4::from(0.5) + f32x4::from(0.5) * tanh_simd(x * f32x4::from(0.5))
+}
+
 impl FloatX16 {
     pub fn blend(self, on_true: Self, on_false: Self) -> Self {
         #[cfg(target_feature = "avx512f")]

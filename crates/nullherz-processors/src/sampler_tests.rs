@@ -40,6 +40,8 @@ fn test_sampler_sync_logic() {
         is_playing: true,
         sample_rate,
         absolute_samples: 0,
+        system_time_ns: 0,
+        device_time_ns: 0,
     };
 
     let mut outputs = [ &mut [0.0f32; 256][..] ];

@@ -38,6 +38,8 @@ fn test_sampler_slicer_offsets() {
         is_playing: true,
         sample_rate,
         absolute_samples: 44100,
+        system_time_ns: 0,
+        device_time_ns: 0,
     };
 
     let context = ProcessContext {
@@ -101,6 +103,8 @@ fn test_sampler_slicer_phase_lock() {
         is_playing: true,
         sample_rate,
         absolute_samples: 44100,
+        system_time_ns: 0,
+        device_time_ns: 0,
     };
 
     let mut context = ProcessContext {

@@ -36,6 +36,7 @@ pub struct Conductor {
     pub matchmaking_suggestions: Arc<Mutex<Vec<(u64, f32)>>>,
     pub active_master_deck: char,
     pub calibration_samples: u32,
+    pub ptp_clock: Option<Arc<nullherz_traits::PtpClockProvider>>,
 }
 
 impl Default for Conductor {
@@ -93,10 +94,23 @@ impl Conductor {
             matchmaking_suggestions: Arc::new(Mutex::new(Vec::new())),
             active_master_deck: 'A',
             calibration_samples: 0,
+            ptp_clock: None,
         }
     }
 
     pub fn setup_engine(&mut self) -> crate::EngineContext {
+        // Initialize PTP Clock if on Linux
+        #[cfg(target_os = "linux")]
+        if let Ok(clock) = nullherz_traits::PtpClockProvider::new("eth0") {
+            let clock_arc = Arc::new(clock);
+            self.ptp_clock = Some(clock_arc.clone());
+
+            // Start PTP Engine
+            if let Ok(ptp) = crate::ptp_engine::PtpEngine::new(clock_arc as Arc<dyn nullherz_traits::ClockProvider>, 319, false) {
+                std::thread::spawn(move || ptp.run_loop());
+            }
+        }
+
         let handle = self.engine_coordinator.setup();
 
         self.mixer_bridge.bundle_producer = Some(handle.bundle_producer);
@@ -144,7 +158,7 @@ impl Conductor {
 
             // Start Federated DNA Server (TCP pull)
             let lib = self.library.clone();
-            let _ = nullherz_dna::DnaServer::start(lib, 9003);
+            let _ = nullherz_dna::DnaServer::start(lib, 9003, None);
         }
 
         crate::EngineContext {

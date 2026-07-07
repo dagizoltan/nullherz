@@ -8,6 +8,7 @@ pub struct JitterBuffer {
     pub target_size: usize,
     pub drift_accumulator: f32,
     pub last_drain_time: std::time::Instant,
+    pub clock: Option<Arc<dyn nullherz_traits::ClockProvider>>,
 }
 
 impl JitterBuffer {
@@ -17,6 +18,7 @@ impl JitterBuffer {
             target_size,
             drift_accumulator: 0.0,
             last_drain_time: std::time::Instant::now(),
+            clock: None,
         }
     }
 
@@ -27,19 +29,26 @@ impl JitterBuffer {
     }
 
     pub fn pop(&mut self) -> Option<AudioBlock> {
-        // --- HARDENED CLOCK RECOVERY (Smooth Block Resampling) ---
+        // --- HARDENED CLOCK RECOVERY (Disciplined drift compensation) ---
         let current_len = self.buffer.len();
+
+        let mut drift_adjustment = 0.05;
+        if let Some(ref clock) = self.clock {
+            let jitter = clock.get_estimated_jitter_ns();
+            // If jitter is high, slow down adjustments to avoid oscillation
+            if jitter > 10_000 { drift_adjustment = 0.01; }
+        }
 
         // Target: maintain buffer at exactly target_size.
         // If > 2x target_size, we are falling behind.
         if current_len > self.target_size * 2 {
-             self.drift_accumulator += 0.05; // Aggressive catch-up
+             self.drift_accumulator += drift_adjustment;
              if self.drift_accumulator > 1.0 {
                  self.drift_accumulator -= 1.0;
                  let _ = self.buffer.pop_front(); // Fast-forward one block
              }
         } else if current_len < self.target_size {
-             self.drift_accumulator -= 0.05; // Wait for more data
+             self.drift_accumulator -= drift_adjustment;
              if self.drift_accumulator < -1.0 {
                  self.drift_accumulator += 1.0;
                  return None; // Insert silence by returning nothing
@@ -112,6 +121,13 @@ impl IpcAudioBridge {
         Ok(())
     }
 
+    pub fn set_clock(&self, node_idx: u32, clock: Arc<dyn nullherz_traits::ClockProvider>) {
+        let mut jitters = self.jitter_buffers.lock().unwrap();
+        if let Some(buffer) = jitters.get_mut(&node_idx) {
+            buffer.clock = Some(clock);
+        }
+    }
+
     pub fn pop_block(&self, node_idx: u32) -> Option<AudioBlock> {
         let mut queues = self.send_queues.lock().unwrap();
         queues.get_mut(&node_idx).and_then(|consumer| consumer.pop())
@@ -156,6 +172,33 @@ impl IpcAudioBridge {
     pub fn unregister_return_node(&self, node_idx: u32) {
         self.return_queues.lock().unwrap().remove(&node_idx);
         self.shm_segments.lock().unwrap().remove(&node_idx);
+    }
+}
+
+#[cfg(all(feature = "kani-verify", kani))]
+mod verification {
+    use super::*;
+    use ipc_layer::AudioBlock;
+
+    #[kani::proof]
+    #[kani::unwind(10)]
+    pub fn prove_jitter_buffer_no_panic() {
+        let mut jb = JitterBuffer::new(2);
+        let block = AudioBlock { data: [0.0; 256], len: 256, _pad: [0; 15] };
+
+        // Symbols for symbolic execution
+        let num_pushes: usize = kani::any_where(|&n: &usize| n < 10);
+        let num_pops: usize = kani::any_where(|&n: &usize| n < 10);
+
+        for _ in 0..num_pushes {
+            jb.push(block);
+        }
+
+        for _ in 0..num_pops {
+            jb.pop();
+        }
+
+        kani::assert(jb.target_size == 2, "Target size must remain constant");
     }
 }
 

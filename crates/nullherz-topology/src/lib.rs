@@ -1,5 +1,40 @@
 pub mod compiler;
 pub use compiler::GraphCompiler;
+
+#[cfg(all(feature = "kani-verify", kani))]
+mod verification {
+    use super::*;
+    use nullherz_traits::{GraphTopology, NodeRouting, CompiledGraphPlan};
+
+    #[kani::proof]
+    #[kani::unwind(3)]
+    pub fn prove_hazard_verification_detects_overlaps() {
+        let mut topo = GraphTopology::default();
+        topo.node_count = 2;
+        for i in 0..64 { topo.virtual_to_physical[i] = i; }
+
+        // Symbolic shared physical buffer
+        let shared_p_idx = kani::any_where(|&idx: &usize| idx < 64);
+
+        // Node 0 writes to shared_p_idx
+        topo.routing[0].output_indices[0] = shared_p_idx;
+        topo.routing[0].output_count = 1;
+
+        // Node 1 reads from shared_p_idx
+        topo.routing[1].input_indices[0] = shared_p_idx;
+        topo.routing[1].input_count = 1;
+
+        // Construct a hazardous single-stage plan
+        let mut plan = CompiledGraphPlan::default();
+        plan.num_stages = 1;
+        plan.stage_counts[0] = 2;
+        plan.stages[0][0] = 0;
+        plan.stages[0][1] = 1;
+
+        let result = GraphCompiler::verify_no_hazards(&topo, &plan);
+        kani::assert(result.is_err(), "Must detect RAW hazard for concurrent access to same buffer");
+    }
+}
 use nullherz_traits::{ProcessorTypeId, MAX_NODES, MAX_CHANNELS};
 use serde_big_array::BigArray;
 

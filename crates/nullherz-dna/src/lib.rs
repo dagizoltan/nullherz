@@ -8,6 +8,14 @@ use redb::{Database, TableDefinition, ReadableTable, TableError};
 pub type SampleBuffer = Arc<Vec<f32>>;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct SignedSoundDna {
+    pub dna: nullherz_traits::SoundDNA,
+    #[serde(with = "serde_big_array::BigArray")]
+    pub signature: [u8; 64],
+    pub signer_public_key: [u8; 32],
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct LibraryTrack {
     pub id: u64,
     pub path: String,
@@ -52,6 +60,8 @@ pub trait GeneticLibrary: Send + Sync {
     fn list_crates(&self) -> Result<Vec<String>, Box<dyn std::error::Error>>;
     fn get_tracks_in_crate(&self, crate_name: &str) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>>;
     fn query_tracks(&self, genre: Option<&str>, min_bpm: Option<f32>, max_bpm: Option<f32>, root_key: Option<f32>) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>>;
+    /// Proactively suggests tracks from the library that are genetically similar to the provided DNA.
+    fn suggest_matches(&self, target_dna: &nullherz_traits::SoundDNA, limit: usize) -> Result<Vec<(u64, f32)>, Box<dyn std::error::Error>>;
 }
 
 pub struct LibraryDatabase {
@@ -180,6 +190,10 @@ impl GeneticLibrary for LibraryDatabase {
         }).collect();
         Ok(results)
     }
+
+    fn suggest_matches(&self, target_dna: &nullherz_traits::SoundDNA, limit: usize) -> Result<Vec<(u64, f32)>, Box<dyn std::error::Error>> {
+        Matchmaker::find_best_matches(self, target_dna, limit)
+    }
 }
 
 impl LibraryDatabase {
@@ -286,37 +300,84 @@ pub trait PeerSync {
     fn announce_dna(&self, dna: &nullherz_traits::SoundDNA);
     fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA>;
     fn list_peer_dna(&self) -> Vec<(u64, String)>;
+    /// Gossip-based metadata exchange: share known DNA identifiers with peers.
+    fn gossip_metadata(&self, known_ids: &[(u64, String)]);
+    /// Returns the public key of this node for signature verification.
+    fn get_public_key(&self) -> [u8; 32];
 }
 
 /// Functional implementation of PeerSync using simple TCP exchange.
 pub struct CloudPeerSync {
     pub peers: Vec<String>,
     pub trusted_peers: std::collections::HashSet<String>,
+    /// Mock for cryptographic signatures: peer_addr -> signature
+    pub peer_signatures: HashMap<String, [u8; 64]>,
+    /// Node's own signing key
+    pub signing_key: Option<[u8; 32]>,
 }
 
 impl PeerSync for CloudPeerSync {
     fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {
         // In a full Gossip protocol, this would broadcast to all peers.
-        // For now, we focus on pull-based sync.
+    }
+
+    fn get_public_key(&self) -> [u8; 32] {
+        [0u8; 32] // Placeholder
+    }
+
+    fn gossip_metadata(&self, known_ids: &[(u64, String)]) {
+        for peer in &self.peers {
+            let addr = match peer.parse() {
+                Ok(a) => a,
+                Err(_) => continue,
+            };
+            if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
+                &addr,
+                std::time::Duration::from_millis(100)
+            ) {
+                if let Ok(payload) = serde_json::to_string(known_ids) {
+                    let msg = format!("GOSSIP {}\n", payload);
+                    let _ = stream.write_all(msg.as_bytes());
+                }
+            }
+        }
     }
 
     fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA> {
+        use ed25519_dalek::{Verifier, Signature, VerifyingKey};
+
         for peer in &self.peers {
-            // AUDIT-FIX: Only request DNA from peers in the trusted allow-list.
-            // This prevents unauthenticated DNA transfusion from untrusted network nodes.
-            // In production, this should be backed by cryptographic signing.
             if !self.trusted_peers.contains(peer) {
                 continue;
             }
+            let addr = match peer.parse() {
+                Ok(a) => a,
+                Err(_) => continue,
+            };
             if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
-                &peer.parse().ok()?,
+                &addr,
                 std::time::Duration::from_millis(500)
             ) {
                 let req = format!("GET DNA {}\n", id);
                 let _ = stream.write_all(req.as_bytes());
                 let mut buffer = Vec::new();
                 let _ = stream.read_to_end(&mut buffer);
-                if let Ok(dna) = serde_json::from_slice(&buffer) {
+
+                if let Ok(signed_dna) = serde_json::from_slice::<SignedSoundDna>(&buffer) {
+                    // Verify cryptographic signature
+                    let pub_key_res = VerifyingKey::from_bytes(&signed_dna.signer_public_key);
+                    let sig_res = Signature::from_slice(&signed_dna.signature);
+
+                    if let (Ok(pub_key), Ok(sig)) = (pub_key_res, sig_res) {
+                        let dna_bytes = serde_json::to_vec(&signed_dna.dna).unwrap_or_default();
+                        if pub_key.verify(&dna_bytes, &sig).is_ok() {
+                            return Some(signed_dna.dna);
+                        } else {
+                            println!("Cloud: DNA signature verification FAILED from peer {}", peer);
+                        }
+                    }
+                } else if let Ok(dna) = serde_json::from_slice(&buffer) {
+                    // Fallback for non-signed DNA (Alpha compatibility)
                     return Some(dna);
                 }
             }
@@ -412,10 +473,36 @@ impl DiscoveryService {
     /// Proactively announces a new SoundDNA availability to known peers.
     pub fn announce_push(&self, dna_id: u64) {
         for peer in &self.known_peers {
-            if let Ok(addr) = peer.parse::<std::net::SocketAddr>() {
-                if let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100)) {
-                    let msg = format!("NEW_DNA {}\n", dna_id);
-                    let _ = stream.write_all(msg.as_bytes());
+            let addr = match peer.parse::<std::net::SocketAddr>() {
+                Ok(a) => a,
+                Err(_) => continue,
+            };
+            if let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100)) {
+                // AUDIT: In production, this NEW_DNA message must be cryptographically signed.
+                let msg = format!("NEW_DNA {}\n", dna_id);
+                let _ = stream.write_all(msg.as_bytes());
+            }
+        }
+    }
+
+    /// Performs a Gossip cycle with a random subset of known peers.
+    pub fn gossip_cycle(&self, lib: &LibraryDatabase) {
+        if let Ok(tracks) = lib.list_tracks() {
+            let metadata: Vec<(u64, String)> = tracks.into_iter().map(|t| (t.id, t.title)).collect();
+            // Select a random peer (simplified)
+            if let Some(peer) = self.known_peers.first() {
+                let addr = match peer.parse() {
+                    Ok(a) => a,
+                    Err(_) => return,
+                };
+                if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
+                    &addr,
+                    std::time::Duration::from_millis(200)
+                ) {
+                    if let Ok(payload) = serde_json::to_string(&metadata) {
+                        let msg = format!("GOSSIP {}\n", payload);
+                        let _ = stream.write_all(msg.as_bytes());
+                    }
                 }
             }
         }
@@ -425,7 +512,7 @@ impl DiscoveryService {
 pub struct DnaServer;
 
 impl DnaServer {
-    pub fn start(lib: Arc<Mutex<LibraryDatabase>>, port: u16) -> std::io::Result<()> {
+    pub fn start(lib: Arc<Mutex<LibraryDatabase>>, port: u16, signing_key: Option<[u8; 32]>) -> std::io::Result<()> {
         let listener = std::net::TcpListener::bind(format!("0.0.0.0:{}", port))?;
         println!("DNA Server listening on port {}", port);
 
@@ -447,11 +534,40 @@ impl DnaServer {
                                         }
                                     }
                                 }
+                                ["GOSSIP", payload] => {
+                                    if let Ok(remote_metadata) = serde_json::from_str::<Vec<(u64, String)>>(payload) {
+                                        println!("DNA Server: Received gossip payload with {} entries.", remote_metadata.len());
+                                        // In a real implementation, this would trigger pull-based sync for unknown IDs.
+                                    }
+                                }
+                                ["HANDSHAKE", pk_hex] => {
+                                    println!("DNA Server: Peer handshake with public key {}", pk_hex);
+                                    let resp = signing_key.map(|k| hex::encode(&k[..])).unwrap_or_else(|| "none".to_string());
+                                    let _ = stream.write_all(format!("IDENTITY {}\n", resp).as_bytes());
+                                }
                                 ["GET", "DNA", id_str] => {
                                     if let Ok(id) = id_str.parse::<u64>() {
                                         if let Ok(lib) = lib_clone.lock() {
                                             if let Ok(Some(track)) = lib.get_track(id) {
-                                                let _ = serde_json::to_writer(&mut stream, &track.metadata.dna);
+                                                // Production Beta: Sign DNA payload if secret key is found
+                                                use ed25519_dalek::{Signer, SigningKey};
+                                                let mut signature = [0u8; 64];
+                                                let mut pub_key = [0u8; 32];
+
+                                                if let Some(sk_bytes) = signing_key {
+                                                    let sk = SigningKey::from_bytes(&sk_bytes);
+                                                    let dna_bytes = serde_json::to_vec(&track.metadata.dna).unwrap_or_default();
+                                                    let sig = sk.sign(&dna_bytes);
+                                                    signature = sig.to_bytes();
+                                                    pub_key = sk.verifying_key().to_bytes();
+                                                }
+
+                                                let signed = SignedSoundDna {
+                                                    dna: track.metadata.dna,
+                                                    signature,
+                                                    signer_public_key: pub_key,
+                                                };
+                                                let _ = serde_json::to_writer(&mut stream, &signed);
                                             }
                                         }
                                     }
@@ -525,6 +641,22 @@ impl SmartCrateManager {
         }
 
         results
+    }
+
+    /// Automatically generates a smart crate based on "energy-level-matching" to a seed track.
+    pub fn generate_energy_matched_crate(seed_track: &LibraryTrack, _all_tracks: Vec<LibraryTrack>, threshold: f32) -> SmartCrateDefinition {
+        SmartCrateDefinition {
+            name: format!("Energy Match: {}", seed_track.title),
+            target_dna: Some(seed_track.metadata.dna.clone()),
+            threshold,
+            spectral_tilt_range: None,
+            rhythmic_syncopation_range: None,
+            glitch_density_range: None,
+            genre: Some(seed_track.genre.clone()),
+            bpm_range: Some((seed_track.metadata.bpm - 5.0, seed_track.metadata.bpm + 5.0)),
+            energy_range: Some((seed_track.energy_level - 0.2, seed_track.energy_level + 0.2)),
+            root_key: seed_track.metadata.root_key,
+        }
     }
 }
 
@@ -654,6 +786,8 @@ mod tests {
             fn list_peer_dna(&self) -> Vec<(u64, String)> {
                 vec![(0xABC, "Cloud Track".to_string())]
             }
+            fn gossip_metadata(&self, _known_ids: &[(u64, String)]) {}
+            fn get_public_key(&self) -> [u8; 32] { [0u8; 32] }
         }
 
         db.sync_with_cloud(&MockSync).unwrap();
@@ -729,13 +863,15 @@ mod tests {
         let child = transfuse_dna(&dna_a, &dna_b, 0.5);
 
         for i in 0..16 {
-            assert!((child.spectral.latent_space[i] - 0.5).abs() < 0.001);
+            // Neural shaping applies tanh() to the result: 0.5.tanh() ~= 0.4621
+            assert!((child.spectral.latent_space[i] - 0.5_f32.tanh()).abs() < 0.001);
         }
 
         let child_025 = transfuse_dna(&dna_a, &dna_b, 0.25);
         for i in 0..16 {
             // (0.2 * 0.75) + (0.8 * 0.25) = 0.15 + 0.2 = 0.35
-            assert!((child_025.spectral.latent_space[i] - 0.35).abs() < 0.001);
+            // 0.35.tanh() ~= 0.3363
+            assert!((child_025.spectral.latent_space[i] - 0.35_f32.tanh()).abs() < 0.001);
         }
     }
 
@@ -864,7 +1000,25 @@ impl NeuralTransfuser {
 
         let v_a = FloatX16::new(*src_a);
         let v_b = FloatX16::new(*src_b);
-        let v_res = (v_a * v_inv_bias) + (v_b * v_bias);
+
+        // Linear interpolation in latent space
+        let mut v_res = (v_a * v_inv_bias) + (v_b * v_bias);
+
+        // Stage 6: Apply neural shaping (tanh activation) for better transfusion semantics
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            v_res.parts[0] = audio_dsp::simd_vec::tanh_simd(v_res.parts[0]);
+            v_res.parts[1] = audio_dsp::simd_vec::tanh_simd(v_res.parts[1]);
+            v_res.parts[2] = audio_dsp::simd_vec::tanh_simd(v_res.parts[2]);
+            v_res.parts[3] = audio_dsp::simd_vec::tanh_simd(v_res.parts[3]);
+        }
+        #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+        {
+            // Fallback for non-wasm or missing SIMD128
+            let mut arr: [f32; 16] = v_res.into();
+            for val in arr.iter_mut() { *val = val.tanh(); }
+            v_res = FloatX16::new(arr);
+        }
 
         *dest = v_res.into();
     }
@@ -873,6 +1027,64 @@ impl NeuralTransfuser {
 pub trait NeuralEncoder {
     fn encode(&self, audio: &[f32]) -> [f32; 16];
     fn decode(&self, latent: &[f32; 16]) -> Vec<f32>;
+}
+
+/// Standard Stage 6 Neural Encoder using SIMD-optimized feature extraction.
+pub struct StandardNeuralEncoder {
+    /// Projection matrix for latent space reduction (mocked)
+    pub projection: [[f32; 128]; 16],
+}
+
+impl NeuralEncoder for StandardNeuralEncoder {
+    fn encode(&self, audio: &[f32]) -> [f32; 16] {
+        use audio_dsp::simd_vec::{FloatX8, load_f32x8};
+        let mut latent = [0.0f32; 16];
+
+        // 1. Decimate audio to 128 feature bins (simplified)
+        let mut features = [0.0f32; 128];
+        let step = audio.len() / 128;
+        if step > 0 {
+            for i in 0..128 {
+                features[i] = audio[i * step].abs();
+            }
+        }
+
+        // 2. Linear projection to 16-dim latent space using SIMD
+        for i in 0..16 {
+            let mut sum = 0.0f32;
+            let proj_row = &self.projection[i];
+
+            let mut j = 0;
+            while j + 8 <= 128 {
+                let v_feat = load_f32x8(&features, j);
+                let v_proj = load_f32x8(proj_row, j);
+                let v_res = v_feat * v_proj;
+                let arr: [f32; 8] = v_res.into();
+                sum += arr.iter().sum::<f32>();
+                j += 8;
+            }
+            latent[i] = sum.tanh();
+        }
+
+        latent
+    }
+
+    fn decode(&self, _latent: &[f32; 16]) -> Vec<f32> {
+        // Generative reconstruction (Stage 7)
+        Vec::new()
+    }
+}
+
+impl Default for StandardNeuralEncoder {
+    fn default() -> Self {
+        let mut projection = [[0.0f32; 128]; 16];
+        for i in 0..16 {
+            for j in 0..128 {
+                projection[i][j] = ((i * j) as f32).sin() * 0.1;
+            }
+        }
+        Self { projection }
+    }
 }
 
 pub struct FeatureMutator;
@@ -927,15 +1139,22 @@ pub fn calculate_similarity(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_
     // Normalize distance (max distance in 16D unit cube is 4.0)
     let spectral_sim = (1.0 - (dist / 4.0)).max(0.0);
 
-    // 2. Feature Vector Correlation (Cosine-like)
-    let mut feature_dot = 0.0;
-    let mut mag_a = 0.0;
-    let mut mag_b = 0.0;
-    for i in 0..8 {
-        feature_dot += dna_a.feature_vector[i] * dna_b.feature_vector[i];
-        mag_a += dna_a.feature_vector[i] * dna_a.feature_vector[i];
-        mag_b += dna_b.feature_vector[i] * dna_b.feature_vector[i];
-    }
+    // 2. Feature Vector Correlation (Cosine-like) - SIMD Optimized
+    use audio_dsp::simd_vec::load_f32x8;
+    let v_fv_a = load_f32x8(&dna_a.feature_vector, 0);
+    let v_fv_b = load_f32x8(&dna_b.feature_vector, 0);
+
+    let v_dot = v_fv_a * v_fv_b;
+    let v_mag_a = v_fv_a * v_fv_a;
+    let v_mag_b = v_fv_b * v_fv_b;
+
+    let dot_arr: [f32; 8] = v_dot.into();
+    let mag_a_arr: [f32; 8] = v_mag_a.into();
+    let mag_b_arr: [f32; 8] = v_mag_b.into();
+
+    let feature_dot: f32 = dot_arr.iter().sum();
+    let mag_a: f32 = mag_a_arr.iter().sum();
+    let mag_b: f32 = mag_b_arr.iter().sum();
     let feature_sim = if mag_a > 0.0 && mag_b > 0.0 {
         feature_dot / (mag_a.sqrt() * mag_b.sqrt())
     } else {
@@ -952,10 +1171,14 @@ pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits:
     let mut child = nullherz_traits::SoundDNA::default();
     let inv_bias = 1.0 - bias;
 
-    // 0. Feature Vector Transfusion
-    for i in 0..8 {
-        child.feature_vector[i] = dna_a.feature_vector[i] * inv_bias + dna_b.feature_vector[i] * bias;
-    }
+    // 0. Feature Vector Transfusion - SIMD Optimized
+    use audio_dsp::simd_vec::{FloatX8, load_f32x8, store_f32x8};
+    let v_inv_bias_8 = FloatX8::from(inv_bias);
+    let v_bias_8 = FloatX8::from(bias);
+    let v_fv_a = load_f32x8(&dna_a.feature_vector, 0);
+    let v_fv_b = load_f32x8(&dna_b.feature_vector, 0);
+    let v_fv_res = (v_fv_a * v_inv_bias_8) + (v_fv_b * v_bias_8);
+    store_f32x8(&mut child.feature_vector, 0, v_fv_res);
 
     // 1. Spectral Transfusion (Neural/Latent SIMD Optimized)
     NeuralTransfuser::interpolate_latent(&mut child.spectral.latent_space, &dna_a.spectral.latent_space, &dna_b.spectral.latent_space, bias);
