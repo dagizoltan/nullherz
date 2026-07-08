@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
@@ -10,7 +10,7 @@ pub struct EngineMetrics {
     pub resource_leaks: AtomicU64,
     pub last_xrun_magnitude_ns: AtomicU64,
     /// Sliding window of block processing times for predictive X-RUN mitigation.
-    pub processing_history_ns: Arc<Mutex<[u64; 16]>>,
+    pub processing_history_ns: [AtomicU64; 16],
     pub history_idx: AtomicU64,
 }
 
@@ -29,7 +29,12 @@ impl EngineMetrics {
             peak_ns: AtomicU64::new(0),
             resource_leaks: AtomicU64::new(0),
             last_xrun_magnitude_ns: AtomicU64::new(0),
-            processing_history_ns: Arc::new(Mutex::new([0u64; 16])),
+            processing_history_ns: [
+                AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
+                AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
+                AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
+                AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
+            ],
             history_idx: AtomicU64::new(0),
         }
     }
@@ -62,15 +67,18 @@ impl EngineMetrics {
 
         // Update sliding window history
         let idx = self.history_idx.fetch_add(1, Ordering::Relaxed) as usize % 16;
-        if let Ok(mut history) = self.processing_history_ns.try_lock() {
-            history[idx] = current_ns;
+        self.processing_history_ns[idx].store(current_ns, Ordering::Relaxed);
 
-            // Predictive Analysis: Check if the average of the last 4 blocks is trending upward
-            let last_4_avg = (history[idx] + history[(idx + 15) % 16] + history[(idx + 14) % 16] + history[(idx + 13) % 16]) / 4;
-            if last_4_avg > (block_duration_ns * 9 / 10) {
-                 // Imminent X-RUN predicted (>90% CPU budget used)
-                 // Trigger internal telemetry pulse (Placeholder for Conductor feedback)
-            }
+        // Predictive Analysis: Check if the average of the last 4 blocks is trending upward
+        let h_0 = self.processing_history_ns[idx].load(Ordering::Relaxed);
+        let h_1 = self.processing_history_ns[(idx + 15) % 16].load(Ordering::Relaxed);
+        let h_2 = self.processing_history_ns[(idx + 14) % 16].load(Ordering::Relaxed);
+        let h_3 = self.processing_history_ns[(idx + 13) % 16].load(Ordering::Relaxed);
+
+        let last_4_avg = (h_0 + h_1 + h_2 + h_3) / 4;
+        if last_4_avg > (block_duration_ns * 9 / 10) {
+             // Imminent X-RUN predicted (>90% CPU budget used)
+             // Trigger internal telemetry pulse (Placeholder for Conductor feedback)
         }
 
         let peak = nullherz_traits::telemetry::TelemetryProcessor::update_peak(&self.peak_ns, current_ns);

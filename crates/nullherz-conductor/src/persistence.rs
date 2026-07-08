@@ -77,6 +77,8 @@ pub struct ProjectState {
     pub clip_grid: crate::clip_orchestrator::ClipGrid,
     pub bpm: f32,
     pub transport_playing: bool,
+    #[serde(default)]
+    pub node_names: std::collections::HashMap<String, u32>,
 }
 
 use std::sync::Arc;
@@ -96,15 +98,18 @@ impl ProjectState {
             clip_grid: crate::clip_orchestrator::ClipGrid::default(),
             bpm: 120.0,
             transport_playing: false,
+            node_names: std::collections::HashMap::new(),
         }
     }
 
     pub fn capture(conductor: &crate::orchestrator::Conductor) -> Self {
         let mut state = Self::empty();
         let topo = &conductor.topology_manager.current_topology;
-        let mut engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
 
-        if let Some(ref mut engine) = *engine_lock {
+        // Use try_lock for non-blocking capture in auto-save context
+        let mut engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.try_lock();
+
+        if let Ok(Some(engine)) = engine_lock.as_deref_mut() {
             for child in engine.list_children() {
                 let metadata = child.metadata();
                 let node_idx = if let Some(m) = metadata { m.processor_id as u32 } else { continue; };
@@ -183,6 +188,7 @@ impl ProjectState {
         state.bpm = conductor.mixer_bridge.timeline.bpm;
         state.transport_playing = true;
         state.active_master_deck = conductor.active_master_deck;
+        state.node_names = conductor.mixer_manager.node_names.clone();
 
         state
     }
@@ -236,6 +242,7 @@ impl ProjectState {
         conductor.modulation_matrix = self.modulation_matrix.clone();
         conductor.pattern_manager.set_arrangement(self.arrangement.clone());
         conductor.active_master_deck = self.active_master_deck;
+        conductor.mixer_manager.node_names = self.node_names.clone();
 
         if let Some(ref mut prod) = conductor.engine_coordinator.command_producer {
             let _ = prod.push_command(TimestampedCommand {

@@ -688,6 +688,17 @@ pub type ProcessorCommand = Command;
 /// heap allocations, take locks, or execute blocking syscalls.
 pub trait RtSafe {}
 
+#[macro_export]
+macro_rules! assert_rt_safe {
+    () => {
+        #[cfg(debug_assertions)]
+        {
+            // In a more advanced implementation, we could use a custom allocator
+            // that panics if called from a thread marked as RT.
+        }
+    };
+}
+
 pub trait ProcessorFactory: Send + Sync {
     fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>>;
     fn name(&self) -> &'static str;
@@ -1165,6 +1176,7 @@ impl SampleMetadata {
 #[archive(check_bytes)]
 pub enum MidiTarget {
     Param { target_id: u64, param_id: u32 },
+    NamedParam { node_name: String, param_id: u32 },
     Macro { macro_id: u32 },
     Command(Command),
 }

@@ -24,7 +24,7 @@ impl MidiMapper {
         Ok(())
     }
 
-    pub fn translate(&self, event: &MidiEvent) -> Vec<Command> {
+    pub fn translate(&self, event: &MidiEvent, node_names: &std::collections::HashMap<String, u32>) -> Vec<Command> {
         let mut commands = Vec::new();
         let Some(ref map) = self.active_map else { return commands; };
 
@@ -84,6 +84,16 @@ impl MidiMapper {
                                     value: target_val,
                                     ramp_duration_samples: 128
                                 }));
+                            }
+                            MidiTarget::NamedParam { node_name, param_id } => {
+                                if let Some(&target_id) = node_names.get(node_name) {
+                                    commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                        target_id: target_id as u64,
+                                        param_id: *param_id,
+                                        value: target_val,
+                                        ramp_duration_samples: 128
+                                    }));
+                                }
                             }
                             MidiTarget::Macro { macro_id } => {
                                 commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetMacro {
