@@ -52,7 +52,7 @@ impl MidiMapper {
         cache.insert((target_id, param_id), value);
     }
 
-    pub fn translate(&self, event: &MidiEvent, node_names: &std::collections::HashMap<String, u32>) -> Vec<Command> {
+    pub fn translate(&self, event: &MidiEvent, node_names: &std::collections::HashMap<String, u32>, focused_node_idx: Option<u32>) -> Vec<Command> {
         let mut commands = Vec::new();
         let Some(ref map) = self.active_map else { return commands; };
 
@@ -121,6 +121,18 @@ impl MidiMapper {
                             }
                             MidiTarget::NamedParam { node_name, param_id } => {
                                 if let Some(&target_id) = node_names.get(node_name) {
+                                    if self.check_soft_takeover(target_id as u64, *param_id, target_val) {
+                                        commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                            target_id: target_id as u64,
+                                            param_id: *param_id,
+                                            value: target_val,
+                                            ramp_duration_samples: 128
+                                        }));
+                                    }
+                                }
+                            }
+                            MidiTarget::FocusedParam { param_id } => {
+                                if let Some(target_id) = focused_node_idx {
                                     if self.check_soft_takeover(target_id as u64, *param_id, target_val) {
                                         commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                             target_id: target_id as u64,

@@ -26,10 +26,16 @@ impl GeneticSequencer {
                 let micro_bias = (dna.micro_timing[step % 12] as f32 / 128.0).clamp(-0.2, 0.2);
                 let base_velocity = if dna_value { 0.8 } else { 0.0 };
 
+                let syncopation = dna.syncopation_index;
                 let value = if rand_val > strength {
                     if dna_value { (base_velocity + micro_bias).clamp(0.1, 1.0) } else { 0.0 }
                 } else {
-                    if rand_val > 0.8 { (0.7 + micro_bias).clamp(0.1, 1.0) } else { 0.0 }
+                    // Evolutionary drift: Create new syncopated hits based on DNA complexity
+                    if rand_val < strength * syncopation * 2.0 {
+                        (0.6 + micro_bias).clamp(0.1, 1.0)
+                    } else {
+                        0.0
+                    }
                 };
 
                 commands.push(Command::Performance(PerformanceCommand::SetSequencerStep {

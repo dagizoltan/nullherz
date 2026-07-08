@@ -134,6 +134,15 @@ impl CommandHandler {
                 });
                 true
             }
+            CoreCommand::SetSafeMode(enabled) => {
+                if let Some(ref mut prod) = conductor.engine_coordinator.command_producer {
+                    let _ = prod.push_command(nullherz_traits::TimestampedCommand {
+                        timestamp_samples: 0,
+                        command: Command::Core(CoreCommand::SetSafeMode(enabled)),
+                    });
+                }
+                true
+            }
             _ => false,
         }
     }

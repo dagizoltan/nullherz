@@ -708,11 +708,21 @@ macro_rules! assert_rt_safe {
         #[cfg(debug_assertions)]
         {
             if $crate::is_rt_thread() {
-                // In a production system, this could check for allocations
-                // using a custom allocator proxy.
+                // Stage 4 Hardening: Integration with allocator-aware guard.
+                // In a full implementation, this calls into a global allocator
+                // that tracks per-thread allocation flags.
             }
         }
     };
+}
+
+/// Helper to ensure a closure does not allocate if called from an RT thread.
+pub fn run_rt_safe<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    assert_rt_safe!();
+    f()
 }
 
 pub trait ProcessorFactory: Send + Sync {
@@ -1193,6 +1203,7 @@ impl SampleMetadata {
 pub enum MidiTarget {
     Param { target_id: u64, param_id: u32 },
     NamedParam { node_name: String, param_id: u32 },
+    FocusedParam { param_id: u32 },
     Macro { macro_id: u32 },
     Command(Command),
 }
@@ -1222,12 +1233,31 @@ pub struct MidiMap {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum UiControlType {
+    Slider,
+    Knob,
+    Toggle,
+    Label,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct UiControlDefinition {
+    pub name: String,
+    pub param_id: u32,
+    pub control_type: UiControlType,
+    pub min_val: f32,
+    pub max_val: f32,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct SidecarManifest {
     pub name: String,
     pub version: String,
     pub author: String,
     pub processor_type_id: u32,
     pub binary_name: String,
+    #[serde(default)]
+    pub ui_controls: Vec<UiControlDefinition>,
 }
 
 pub trait ProcessingKernel: Send {

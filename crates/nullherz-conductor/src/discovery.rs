@@ -115,6 +115,7 @@ impl SidecarDiscoveryService {
                                 author: "Universal Extension".to_string(),
                                 processor_type_id: 200, // WASM Generic ID
                                 binary_name: path.file_name().and_then(|s| s.to_str()).unwrap_or_default().to_string(),
+                                ui_controls: Vec::new(),
                             });
                         }
                     }

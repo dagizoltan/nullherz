@@ -38,6 +38,8 @@ pub struct Conductor {
     pub calibration_samples: u32,
     pub ptp_clock: Option<Arc<nullherz_traits::PtpClockProvider>>,
     last_autosave_secs: u64,
+    pub last_genetic_evolve_secs: u64,
+    pub focused_node_idx: Option<u32>,
 }
 
 impl Default for Conductor {
@@ -97,6 +99,8 @@ impl Conductor {
             calibration_samples: 0,
             ptp_clock: None,
             last_autosave_secs: 0,
+            last_genetic_evolve_secs: 0,
+            focused_node_idx: None,
         }
     }
 
@@ -371,7 +375,7 @@ impl Conductor {
                 }
             }
 
-            let mapped_commands = self.midi_mapper.translate(&event, &self.mixer_manager.node_names);
+            let mapped_commands = self.midi_mapper.translate(&event, &self.mixer_manager.node_names, self.focused_node_idx);
             if !mapped_commands.is_empty() {
                 self.apply_mixer_commands(mapped_commands);
             }
@@ -464,6 +468,17 @@ impl Conductor {
         }
 
         self.process_evolutionary_breeding(now);
+
+        // Genetic Pattern Evolution (Every 8 seconds)
+        if now % 8 == 0 && self.last_genetic_evolve_secs != now {
+            self.last_genetic_evolve_secs = now;
+            let current_beat = self.mixer_bridge.timeline.current_beat;
+            // Example: trigger evolution on node 0, track 0 if sampler is active
+            let node_idx = 0;
+            let track_idx = 0;
+            let cmd = nullherz_traits::PerformanceCommand::EvolvePattern { node_idx, track_idx, mutation_strength: 0.2 };
+            self.apply_mixer_commands(vec![nullherz_traits::Command::Performance(cmd)]);
+        }
 
         self.handle_transfusion_registrations();
 
