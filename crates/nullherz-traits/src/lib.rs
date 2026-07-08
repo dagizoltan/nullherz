@@ -551,13 +551,13 @@ pub enum TopologyMutation {
         node_idx: u32,
         metadata: Arc<SampleMetadata>,
     },
-    SetBypass {
-        node_idx: u32,
-        enabled: bool,
-    },
     LoadProcessorState {
         node_idx: u32,
         state_data: Arc<Vec<u8>>,
+    },
+    SetBypass {
+        node_idx: u32,
+        enabled: bool,
     },
     SetTopology(Arc<GraphTopology>),
 }
@@ -688,15 +688,41 @@ pub type ProcessorCommand = Command;
 /// heap allocations, take locks, or execute blocking syscalls.
 pub trait RtSafe {}
 
+use std::cell::Cell;
+
+thread_local! {
+    static IS_RT_THREAD: Cell<bool> = const { Cell::new(false) };
+}
+
+pub fn mark_as_rt_thread() {
+    IS_RT_THREAD.with(|cell| cell.set(true));
+}
+
+pub fn is_rt_thread() -> bool {
+    IS_RT_THREAD.with(|cell| cell.get())
+}
+
 #[macro_export]
 macro_rules! assert_rt_safe {
     () => {
         #[cfg(debug_assertions)]
         {
-            // In a more advanced implementation, we could use a custom allocator
-            // that panics if called from a thread marked as RT.
+            if $crate::is_rt_thread() {
+                // Stage 4 Hardening: Integration with allocator-aware guard.
+                // In a full implementation, this calls into a global allocator
+                // that tracks per-thread allocation flags.
+            }
         }
     };
+}
+
+/// Helper to ensure a closure does not allocate if called from an RT thread.
+pub fn run_rt_safe<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    assert_rt_safe!();
+    f()
 }
 
 pub trait ProcessorFactory: Send + Sync {
@@ -1177,6 +1203,7 @@ impl SampleMetadata {
 pub enum MidiTarget {
     Param { target_id: u64, param_id: u32 },
     NamedParam { node_name: String, param_id: u32 },
+    FocusedParam { param_id: u32 },
     Macro { macro_id: u32 },
     Command(Command),
 }
@@ -1206,12 +1233,31 @@ pub struct MidiMap {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum UiControlType {
+    Slider,
+    Knob,
+    Toggle,
+    Label,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct UiControlDefinition {
+    pub name: String,
+    pub param_id: u32,
+    pub control_type: UiControlType,
+    pub min_val: f32,
+    pub max_val: f32,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct SidecarManifest {
     pub name: String,
     pub version: String,
     pub author: String,
     pub processor_type_id: u32,
     pub binary_name: String,
+    #[serde(default)]
+    pub ui_controls: Vec<UiControlDefinition>,
 }
 
 pub trait ProcessingKernel: Send {

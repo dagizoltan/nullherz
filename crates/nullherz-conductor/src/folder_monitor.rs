@@ -18,20 +18,27 @@ impl FolderMonitor {
     }
 
     pub fn scan_folder(&self, path: &str) {
-        let path = Path::new(path);
-        if !path.is_dir() { return; }
+        use rayon::prelude::*;
+        let path_obj = Path::new(path);
+        if !path_obj.is_dir() { return; }
 
-        for entry in walkdir::WalkDir::new(path).into_iter().flatten() {
-            let file_path = entry.path();
-            if file_path.is_file() {
-                if let Some(ext) = file_path.extension() {
+        let entries: Vec<_> = walkdir::WalkDir::new(path_obj)
+            .into_iter()
+            .flatten()
+            .filter(|e| e.file_type().is_file())
+            .filter(|e| {
+                if let Some(ext) = e.path().extension() {
                     let ext = ext.to_string_lossy().to_lowercase();
-                    if ext == "wav" || ext == "flac" || ext == "mp3" || ext == "ogg" {
-                        self.load_and_register(file_path.to_str().unwrap());
-                    }
+                    ext == "wav" || ext == "flac" || ext == "mp3" || ext == "ogg"
+                } else {
+                    false
                 }
-            }
-        }
+            })
+            .collect();
+
+        entries.into_par_iter().for_each(|entry| {
+            self.load_and_register(entry.path().to_str().unwrap());
+        });
     }
 
     fn load_and_register(&self, path: &str) {

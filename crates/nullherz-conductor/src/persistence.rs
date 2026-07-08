@@ -107,58 +107,60 @@ impl ProjectState {
         let topo = &conductor.topology_manager.current_topology;
 
         // Use try_lock for non-blocking capture in auto-save context
-        let mut engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.try_lock();
+        let mut engine_handle_lock = conductor.engine_coordinator.backend_manager.engine_handle.try_lock();
 
-        if let Ok(Some(engine)) = engine_lock.as_deref_mut() {
-            for child in engine.list_children() {
-                let metadata = child.metadata();
-                let node_idx = if let Some(m) = metadata { m.processor_id as u32 } else { continue; };
+        if let Ok(ref mut engine_opt) = engine_handle_lock {
+            if let Some(engine) = engine_opt.as_mut() {
+                for child in engine.list_children() {
+                    let metadata = child.metadata();
+                    let node_idx = if let Some(m) = metadata { m.processor_id as u32 } else { continue; };
 
-                if let Some(&type_id) = conductor.topology_manager.active_node_types.get(&node_idx) {
-                    let mut params = Vec::new();
-                    for p_id in 0..16 {
-                        params.push((p_id, child.get_parameter(p_id)));
-                    }
+                    if let Some(&type_id) = conductor.topology_manager.active_node_types.get(&node_idx) {
+                        let mut params = Vec::new();
+                        for p_id in 0..16 {
+                            params.push((p_id, child.get_parameter(p_id)));
+                        }
 
-                    let (x, y) = topo.node_positions.get(&node_idx).cloned().unwrap_or((0.0, 0.0));
-                    state.nodes.push(NodeState {
-                        id: node_idx,
-                        type_id,
-                        params,
-                        x,
-                        y,
-                    });
-
-                    let state_data = child.serialize_state();
-                    if !state_data.is_empty() {
-                        state.processor_states.push(ProcessorState {
-                            node_idx,
-                            state_data: state_data.clone(),
+                        let (x, y) = topo.node_positions.get(&node_idx).cloned().unwrap_or((0.0, 0.0));
+                        state.nodes.push(NodeState {
+                            id: node_idx,
+                            type_id,
+                            params,
+                            x,
+                            y,
                         });
-                    }
 
-                    if type_id == ProcessorTypeId::SEQUENCER.0 {
-                        if state_data.len() > 16 * (1 + 16 * 64) {
-                            let mut patterns = Vec::new();
-                            let active_pattern = state_data[0] as usize;
-                            let mut cursor = 1;
-                            for _ in 0..16 {
-                                let len = state_data[cursor] as u32;
-                                cursor += 1;
-                                let mut grid = [[false; 64]; 16];
-                                for track in 0..16 {
-                                    for step in 0..64 {
-                                        grid[track][step] = state_data[cursor] == 1;
-                                        cursor += 1;
-                                    }
-                                }
-                                patterns.push(SequencerPatternState { grid, len });
-                            }
-                            state.sequencers.push(SequencerNodeState {
+                        let state_data = child.serialize_state();
+                        if !state_data.is_empty() {
+                            state.processor_states.push(ProcessorState {
                                 node_idx,
-                                patterns,
-                                active_pattern,
+                                state_data: state_data.clone(),
                             });
+                        }
+
+                        if type_id == ProcessorTypeId::SEQUENCER.0 {
+                            if state_data.len() > 16 * (1 + 16 * 64) {
+                                let mut patterns = Vec::new();
+                                let active_pattern = state_data[0] as usize;
+                                let mut cursor = 1;
+                                for _ in 0..16 {
+                                    let len = state_data[cursor] as u32;
+                                    cursor += 1;
+                                    let mut grid = [[false; 64]; 16];
+                                    for track in 0..16 {
+                                        for step in 0..64 {
+                                            grid[track][step] = state_data[cursor] == 1;
+                                            cursor += 1;
+                                        }
+                                    }
+                                    patterns.push(SequencerPatternState { grid, len });
+                                }
+                                state.sequencers.push(SequencerNodeState {
+                                    node_idx,
+                                    patterns,
+                                    active_pattern,
+                                });
+                            }
                         }
                     }
                 }
@@ -256,8 +258,10 @@ impl ProjectState {
     }
 
     pub fn save_to_file(&self, path: &str) -> std::io::Result<()> {
+        let temp_path = format!("{}.tmp", path);
         let json = serde_json::to_string_pretty(self).map_err(|e| std::io::Error::other(e))?;
-        std::fs::write(path, json)
+        std::fs::write(&temp_path, json)?;
+        std::fs::rename(temp_path, path)
     }
 
     pub fn load_from_file(path: &str) -> std::io::Result<Self> {
@@ -266,8 +270,10 @@ impl ProjectState {
     }
 
     pub fn save_to_rkyv(&self, path: &str) -> std::io::Result<()> {
+        let temp_path = format!("{}.tmp.rkyv", path);
         let bytes = rkyv::to_bytes::<_, 1024>(self).map_err(|e| std::io::Error::other(format!("rkyv serialize error: {}", e)))?;
-        std::fs::write(path, bytes)
+        std::fs::write(&temp_path, bytes)?;
+        std::fs::rename(temp_path, path)
     }
 
     pub fn load_from_rkyv(path: &str) -> std::io::Result<Self> {

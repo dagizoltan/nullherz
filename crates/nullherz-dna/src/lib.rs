@@ -665,13 +665,22 @@ impl DnaServer {
                                             let payload = &line_trimmed[prefix_len..];
 
                                             use ed25519_dalek::{Verifier, Signature, VerifyingKey};
-                                            if let (Ok(sig_bytes), Ok(pk_bytes)) = (hex::decode(sig_hex), hex::decode(pk_hex)) {
-                                                if let (Ok(sig), Ok(pk)) = (Signature::from_slice(&sig_bytes), VerifyingKey::from_bytes(&pk_bytes.try_into().unwrap_or([0u8; 32]))) {
+                                            let sig_res = hex::decode(sig_hex).map_err(|e| e.to_string()).and_then(|b| Signature::from_slice(&b).map_err(|e| e.to_string()));
+                                            let pk_res = hex::decode(pk_hex).map_err(|e| e.to_string()).and_then(|b| {
+                                                let arr: [u8; 32] = b.try_into().map_err(|_| "Invalid public key length")?;
+                                                VerifyingKey::from_bytes(&arr).map_err(|e| e.to_string())
+                                            });
+
+                                            match (sig_res, pk_res) {
+                                                (Ok(sig), Ok(pk)) => {
                                                     if pk.verify(payload.as_bytes(), &sig).is_ok() {
                                                         handle_gossip(payload, &lib_clone, &stream);
                                                     } else {
                                                         eprintln!("DNA Server: GOSSIP signature verification FAILED.");
                                                     }
+                                                }
+                                                _ => {
+                                                    eprintln!("DNA Server: GOSSIP contains invalid cryptographic material.");
                                                 }
                                             }
                                         }

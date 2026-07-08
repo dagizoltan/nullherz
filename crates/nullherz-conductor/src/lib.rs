@@ -14,6 +14,8 @@ pub mod discovery;
 pub mod midi_mapper;
 pub mod analysis_worker;
 pub mod folder_monitor;
+pub mod command_handler;
+pub mod telemetry_service;
 pub mod persistence;
 pub mod pattern_manager;
 #[cfg(test)]

@@ -151,11 +151,12 @@ impl AnalysisKernel {
             } else { 0.0 };
         }
 
-        // 3b. Formant Peak Detection
-        let mut peaks_found = Vec::new();
+        // 3b. Formant Peak Detection (SIMD candidate for sorting, but here we optimize finding)
+        let mut peaks_found = Vec::with_capacity(64);
         for bin in 1..511 {
-            if magnitudes[bin] > magnitudes[bin-1] && magnitudes[bin] > magnitudes[bin+1] {
-                peaks_found.push((bin, magnitudes[bin]));
+            let m = magnitudes[bin];
+            if m > magnitudes[bin-1] && m > magnitudes[bin+1] {
+                peaks_found.push((bin, m));
             }
         }
         peaks_found.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
@@ -165,16 +166,30 @@ impl AnalysisKernel {
             dna.spectral.formant_peaks[i] = (freq, 100, (mag * 1000.0) as u16);
         }
 
-        // 3c. MFCC-like Feature Vector Extraction
+        // 3c. MFCC-like Feature Vector Extraction (SIMD Optimized Summation)
         for octave in 0..8 {
             let start = (2.0f32.powi(octave as i32) * 20.0 * 1024.0 / self.sample_rate) as usize;
             let end = (2.0f32.powi(octave as i32 + 1) * 20.0 * 1024.0 / self.sample_rate) as usize;
-            let mut oct_energy = 0.0;
+
             if start < 512 {
                 let actual_end = end.min(512);
-                for bin in start..actual_end {
-                    oct_energy += magnitudes[bin];
+                let len = actual_end - start;
+                let mut oct_energy = 0.0;
+
+                // SIMD sum for octave energy
+                use audio_dsp::simd_vec::{load_f32x8, FloatX8};
+                let mut j = 0;
+                while j + 8 <= len {
+                    let v = load_f32x8(&magnitudes, start + j);
+                    let arr: [f32; 8] = v.into();
+                    oct_energy += arr.iter().sum::<f32>();
+                    j += 8;
                 }
+                while j < len {
+                    oct_energy += magnitudes[start + j];
+                    j += 1;
+                }
+
                 dna.feature_vector[octave as usize] = (oct_energy / total_energy.max(1e-6) * 5.0).min(1.0);
             }
         }

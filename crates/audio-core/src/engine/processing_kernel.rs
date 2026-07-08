@@ -32,8 +32,8 @@ impl ProcessingKernel for StandardKernel {
                 cmd = command_consumer.pop_command();
             }
 
-            if let Some(c) = cmd.take() {
-                if c.timestamp_samples < block_end_sample {
+            match cmd.take() {
+                Some(c) if c.timestamp_samples < block_end_sample => {
                     commands_processed += 1;
                     let cmd_offset = if c.timestamp_samples > block_start_sample {
                         (c.timestamp_samples - block_start_sample) as usize
@@ -62,15 +62,17 @@ impl ProcessingKernel for StandardKernel {
                             break;
                         }
                     }
-                } else {
+                }
+                Some(c) => {
                     *pending_command = Some(c);
                     while let Some(sb) = sub_block_iter.next_chunk() {
                         Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
                     }
                 }
-            } else {
-                while let Some(sb) = sub_block_iter.next_chunk() {
-                    Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
+                None => {
+                    while let Some(sb) = sub_block_iter.next_chunk() {
+                        Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
+                    }
                 }
             }
         }
