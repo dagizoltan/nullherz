@@ -159,9 +159,57 @@ impl GraphCompiler {
             }
         }
 
+        Self::identify_islands(n, &adj, &adj_count, &mut plan);
+
         Self::verify_no_hazards(topo, &plan)?;
 
         Ok(plan)
+    }
+
+    fn identify_islands(n: usize, adj: &[[usize; MAX_NODES]; MAX_NODES], adj_count: &[usize; MAX_NODES], plan: &mut CompiledGraphPlan) {
+        let mut visited = [false; MAX_NODES];
+        let mut island_id = 0u8;
+
+        for i in 0..n {
+            if !visited[i] {
+                island_id += 1;
+                let mut queue = [0usize; MAX_NODES];
+                let mut head = 0;
+                let mut tail = 0;
+
+                queue[tail] = i;
+                tail += 1;
+                visited[i] = true;
+
+                while head < tail {
+                    let u = queue[head];
+                    head += 1;
+                    plan.node_islands[u] = island_id;
+
+                    for &v in adj[u].iter().take(adj_count[u]) {
+                        if !visited[v] {
+                            visited[v] = true;
+                            queue[tail] = v;
+                            tail += 1;
+                        }
+                    }
+
+                    // Also check reverse adjacency to handle undirected islands
+                    for v in 0..n {
+                        if !visited[v] {
+                            for &neighbor in adj[v].iter().take(adj_count[v]) {
+                                if neighbor == u {
+                                    visited[v] = true;
+                                    queue[tail] = v;
+                                    tail += 1;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub fn verify_no_hazards(topo: &GraphTopology, plan: &CompiledGraphPlan) -> Result<(), AudioError> {

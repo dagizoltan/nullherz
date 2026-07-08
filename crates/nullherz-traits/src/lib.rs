@@ -447,6 +447,8 @@ pub struct CompiledGraphPlan {
     pub stages: [[usize; MAX_NODES]; MAX_NODES],
     pub stage_counts: [usize; MAX_NODES],
     pub num_stages: usize,
+    /// Disjoint sub-graph identification for partial re-compilation and optimized O(1) swaps.
+    pub node_islands: [u8; MAX_NODES],
 }
 
 impl Default for CompiledGraphPlan {
@@ -455,6 +457,7 @@ impl Default for CompiledGraphPlan {
             stages: [[0; MAX_NODES]; MAX_NODES],
             stage_counts: [0; MAX_NODES],
             num_stages: 0,
+            node_islands: [0; MAX_NODES],
         }
     }
 }
