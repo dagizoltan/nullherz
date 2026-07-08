@@ -44,6 +44,26 @@ pub struct Telemetry {
     /// Downsampled peak waveform data for 4 DJ decks for real-time visual feedback.
     #[serde(with = "BigArray")]
     pub waveform_peaks: [f32; 256],
+    /// Current mapping of well-known node names to indices.
+    #[serde(with = "BigArray")]
+    pub node_map_keys: [[u8; 32]; 32],
+    #[serde(with = "BigArray")]
+    pub node_map_values: [u32; 32],
+    /// List of detected audio devices.
+    pub audio_devices: [DeviceName; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DeviceName {
+    #[serde(with = "BigArray")]
+    pub name: [u8; 64],
+}
+
+impl Default for DeviceName {
+    fn default() -> Self {
+        Self { name: [0u8; 64] }
+    }
 }
 
 pub struct TelemetryProcessor;
@@ -77,6 +97,9 @@ impl Default for Telemetry {
             suggestions: [(0, 0.0); 4],
             active_master_deck: 'A',
             waveform_peaks: [0.0; 256],
+            node_map_keys: [[0u8; 32]; 32],
+            node_map_values: [0u32; 32],
+            audio_devices: [DeviceName::default(); 16],
         }
     }
 }

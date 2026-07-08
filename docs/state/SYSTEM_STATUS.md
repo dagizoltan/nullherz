@@ -31,7 +31,7 @@ The Nullherz engine is built upon a strict separation of concerns, ensuring that
 ### 2.1 Real-Time Safety & Performance
 - **Lock-Free Sample Access**: [VERIFIED] `SampleRegistry` uses an atomic-swap pattern (`crates/nullherz-dna/src/lib.rs:567`).
 - **Zero Heap Allocation**: [PARTIAL] Audit of audio hot-paths indicates zero-allocation for core processors, but broad system-wide verification is pending a custom allocator/linter check.
-- **CPU Hardening**: [VERIFIED] FTZ/DAZ enabled globally (`crates/ipc-layer/src/lib.rs:619`).
+- **CPU Hardening**: [VERIFIED] FTZ/DAZ enabled for RT threads (`crates/ipc-layer/src/lib.rs:810` - `setup_rt_thread`).
 - **Atomic Topology**: [VERIFIED] Structural shifts are buffered and committed via `TopologyManager` off-thread.
 
 ### 2.2 Fault Tolerance & Signal Stability
@@ -87,7 +87,7 @@ While the Nullherz engine is architecturally hardened, the transition to a "Valu
 | **Core Engine** | Production Beta | Parallel execution formally verified with Kani. |
 | **Clock Sync** | Production Beta | PTP/IEEE 1588 foundations with PI Clock Servo. |
 | **Topology Manager** | Production Beta | Thread-safe, off-audio DAG compilation. |
-| **Genetic Cloud** | Production Beta | Gossip-based DNA exchange with cryptographic signing. |
+| **Genetic Cloud** | [PARTIAL] | Gossip-based DNA exchange (PLANNED), basic TCP sync implemented. |
 | **DSP Kernels** | Production Beta | Wasm-SIMD128 optimized spectral and neural kernels. |
 | **Mixer Console** | Active | 4-channel DJ topology with harmonic auto-sync. |
 | **Curation** | Active | Intelligent "Energy Match" smart crating logic. |

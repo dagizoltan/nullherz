@@ -161,9 +161,21 @@ pub struct InspectorApp {
     pub(crate) bypassed_nodes: std::collections::HashSet<u32>,
     pub(crate) theme: nullherz_ui_hal::Theme,
     pub(crate) last_update_time: f64,
+    pub(crate) ingestion_path: String,
+    pub(crate) node_map: std::collections::HashMap<String, u32>,
+    pub(crate) playlist_queue: std::collections::VecDeque<u64>,
+    pub(crate) evolution_strengths: [f32; 16],
+    pub(crate) next_sample_id: u64,
+    pub(crate) editor_selection: Option<(f32, f32)>, // normalized (start, end)
+    pub(crate) audio_devices: Vec<String>,
+    pub(crate) selected_audio_device: String,
 }
 
 impl InspectorApp {
+    pub fn get_node_id(&self, name: &str) -> u32 {
+        *self.node_map.get(name).unwrap_or(&0)
+    }
+
     pub fn new(graph: GraphJson, _cc: &eframe::CreationContext<'_>) -> Self {
         let (cmd_tx, _cmd_rx) = mpsc::channel::<Command>();
         Self {
@@ -261,6 +273,21 @@ impl InspectorApp {
                 socket_color: egui::Color32::from_gray(80),
             },
             last_update_time: 0.0,
+            ingestion_path: "tracks/".to_string(),
+            playlist_queue: std::collections::VecDeque::new(),
+            evolution_strengths: [0.0; 16],
+            next_sample_id: 1000,
+            editor_selection: None,
+            audio_devices: vec!["default".to_string()],
+            selected_audio_device: "default".to_string(),
+            node_map: [
+                ("deck_a_sampler".to_string(), 0), ("deck_a_gain".to_string(), 4), ("deck_a_filter".to_string(), 3),
+                ("deck_b_sampler".to_string(), 4), ("deck_b_gain".to_string(), 8), ("deck_b_filter".to_string(), 7),
+                ("deck_c_sampler".to_string(), 8), ("deck_c_gain".to_string(), 12), ("deck_c_filter".to_string(), 11),
+                ("deck_d_sampler".to_string(), 12), ("deck_d_gain".to_string(), 16), ("deck_d_filter".to_string(), 15),
+                ("master_sum".to_string(), 30), ("master_crossfader".to_string(), 20), ("master_limiter".to_string(), 35),
+                ("capture_node".to_string(), 110), ("sequencer_node".to_string(), 70), ("sampler_node".to_string(), 100),
+            ].into_iter().collect(),
         }
     }
 
@@ -322,6 +349,27 @@ impl eframe::App for InspectorApp {
                 let target_m_peak = t.peak_levels[i];
                 let alpha_mp = if target_m_peak > self.damped_master_peaks[i] { 1.0 } else { decay * 0.5 };
                 self.damped_master_peaks[i] += (target_m_peak - self.damped_master_peaks[i]) * alpha_mp;
+            }
+
+            // Sync node map from telemetry
+            for i in 0..32 {
+                let key_bytes = t.node_map_keys[i];
+                if key_bytes[0] != 0 {
+                    let name = String::from_utf8_lossy(&key_bytes).trim_matches(char::from(0)).to_string();
+                    self.node_map.insert(name, t.node_map_values[i]);
+                }
+            }
+
+            // Sync audio devices from telemetry
+            let mut devs = Vec::new();
+            for i in 0..16 {
+                let dev_bytes = t.audio_devices[i].name;
+                if dev_bytes[0] != 0 {
+                    devs.push(String::from_utf8_lossy(&dev_bytes).trim_matches(char::from(0)).to_string());
+                }
+            }
+            if !devs.is_empty() {
+                self.audio_devices = devs;
             }
         }
 

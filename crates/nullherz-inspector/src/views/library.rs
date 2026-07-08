@@ -58,6 +58,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     if ui.button("🔄").on_hover_text("Refresh").clicked() { app.library_needs_refresh = true; }
                     ui.text_edit_singleline(&mut app.search_query);
                     ui.label("🔍");
+
+                    if ui.button("SCAN").clicked() {
+                        let mut path_bytes = [0u8; 256];
+                        let bytes = app.ingestion_path.as_bytes();
+                        let len = bytes.len().min(256);
+                        path_bytes[..len].copy_from_slice(&bytes[..len]);
+                        let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ScanFolder { path: path_bytes }));
+                    }
+                    ui.text_edit_singleline(&mut app.ingestion_path);
                 });
             });
             ui.add_space(10.0);
@@ -99,23 +108,36 @@ fn render_smart_crate_builder(app: &mut InspectorApp, ui: &mut Ui) {
 }
 
 fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
-    if let Ok(Some(track)) = app.library_db.get_track(track_id) {
+    if let Ok(Some(mut track)) = app.library_db.get_track(track_id) {
         Frame::group(ui.style()).fill(Color32::from_rgb(15, 15, 20)).show(ui, |ui| {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.heading(RichText::new(&track.title).size(14.0).strong());
+                    ui.text_edit_singleline(&mut track.title);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.button("❌").clicked() { app.selected_library_track = None; }
                     });
                 });
-                ui.label(RichText::new(&track.artist).color(Color32::from_gray(150)));
+                ui.horizontal(|ui| {
+                    ui.label("Artist:");
+                    ui.text_edit_singleline(&mut track.artist);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Genre:");
+                    ui.text_edit_singleline(&mut track.genre);
+                });
+
+                if ui.button("SAVE CHANGES").clicked() {
+                    let _ = app.library_db.save_track(&track);
+                    app.library_needs_refresh = true;
+                }
+
                 ui.add_space(8.0);
 
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("GENETIC PROFILE").small().strong().color(app.theme.accent));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.button("▶ PREVIEW").clicked() {
-                             // Mock preview logic
+                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::Preview { sample_id: track.id }));
                         }
                         if ui.button("⚡ ENERGY MATCH").on_hover_text("Generate smart crate with similar energy").clicked() {
                             let tracks = app.library_db.list_tracks().unwrap_or_default();
@@ -181,6 +203,10 @@ fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
                 ui.label(RichText::new(&track.artist).color(Color32::from_gray(120)).size(10.0));
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("🗑").on_hover_text("Delete track").clicked() {
+                         let _ = app.library_db.remove_track(track.id);
+                         app.library_needs_refresh = true;
+                    }
                     ui.add_space(5.0);
                     ui.label(RichText::new(format!("{:.0}", track.metadata.bpm)).monospace().size(9.0).color(Color32::from_gray(120)));
 

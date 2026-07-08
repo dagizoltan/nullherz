@@ -19,7 +19,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         ui.add_space(20.0);
         if ui.button("CLEAR ALL PATTERNS").clicked() {
             for i in 0..16 {
-                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: 70, track_idx: i as u32 }));
+                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: app.get_node_id("sequencer_node"), track_idx: i as u32 }));
                  app.sequencer_grid[i].fill(0.0);
             }
         }
@@ -38,8 +38,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             // Evolution Feedback (Track Label pulsing)
                             let time = ui.input(|i| i.time);
                             let pulse = (time * 5.0).sin() as f32 * 0.5 + 0.5;
-                            let is_evolving = i % 4 == 0; // Mock condition: track 1, 5, 9, 13 are "evolving"
-                            let label_color = if is_evolving {
+                            let strength = app.evolution_strengths[i];
+                            let label_color = if strength > 0.0 {
                                 app.theme.accent.gamma_multiply(0.5 + pulse * 0.5)
                             } else {
                                 Color32::WHITE
@@ -49,15 +49,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         ui.horizontal(|ui| {
                             if ui.selectable_label(app.track_mutes[i], "M").on_hover_text("Mute").clicked() {
                                 app.track_mutes[i] = !app.track_mutes[i];
-                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackMute { node_idx: 70, track_idx: i as u32, muted: app.track_mutes[i] }));
+                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackMute { node_idx: app.get_node_id("sequencer_node"), track_idx: i as u32, muted: app.track_mutes[i] }));
                             }
                             if ui.selectable_label(app.track_solos[i], "S").on_hover_text("Solo").clicked() {
                                 app.track_solos[i] = !app.track_solos[i];
-                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackSolo { node_idx: 70, track_idx: i as u32, soloed: app.track_solos[i] }));
+                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackSolo { node_idx: app.get_node_id("sequencer_node"), track_idx: i as u32, soloed: app.track_solos[i] }));
                             }
                             if ui.button("C").on_hover_text("Clear").clicked() {
                                 app.sequencer_grid[i].fill(0.0);
-                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: 70, track_idx: i as u32 }));
+                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: app.get_node_id("sequencer_node"), track_idx: i as u32 }));
                             }
                         });
                     });
@@ -153,7 +153,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     let val = if is_on { 1.0 } else { 0.0 };
                                     app.sequencer_grid[row][col] = val;
                                     let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
-                                        node_idx: 70,
+                                        node_idx: app.get_node_id("sequencer_node"),
                                         track: row as u32,
                                         step: col as u32,
                                         value: val,
@@ -165,7 +165,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     let new_val = (app.sequencer_grid[row][col] + delta).clamp(0.01, 1.0);
                                     app.sequencer_grid[row][col] = new_val;
                                     let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
-                                        node_idx: 70,
+                                        node_idx: app.get_node_id("sequencer_node"),
                                         track: row as u32,
                                         step: col as u32,
                                         value: new_val,
@@ -182,12 +182,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                       let _ = app.command_sender.send(Command::Performance(PerformanceCommand::TransfuseRow { row: row as u32 }));
                                  }
                                  ui.add_space(4.0);
-                                 let mut strength = 0.0;
-                                 if ui.add(egui::Slider::new(&mut strength, 0.0..=1.0).vertical().show_value(false)).on_hover_text("Genetic Evolution Strength").changed() {
+                                 if ui.add(egui::Slider::new(&mut app.evolution_strengths[row], 0.0..=1.0).vertical().show_value(false)).on_hover_text("Genetic Evolution Strength").changed() {
                                       let _ = app.command_sender.send(Command::Performance(PerformanceCommand::EvolvePattern {
                                           node_idx: row as u32,
                                           track_idx: 0,
-                                          mutation_strength: strength,
+                                          mutation_strength: app.evolution_strengths[row],
                                       }));
                                  }
                             });

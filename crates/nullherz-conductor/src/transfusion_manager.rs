@@ -275,13 +275,29 @@ impl TransfusionManager {
                 loop_points: None,
                 beat_grid_offset: 0,
                 peaks: Arc::new(Vec::new()),
+                total_samples: snapshot.len() as u64,
                 mip_waveform: nullherz_traits::MipWaveform::default(),
                 dna: nullherz_traits::SoundDNA::default(),
                 midi_map: None,
             };
 
-            self.sample_registry.register_with_metadata(sample_id, snapshot, metadata);
+            self.sample_registry.register_with_metadata(sample_id, snapshot, metadata.clone());
             eprintln!("Registered new transfusion source with metadata: ID={}", sample_id);
+
+            // Save to LibraryDatabase for persistence
+            if let Some(ref breeder) = self.evolutionary_breeder {
+                let track = nullherz_dna::LibraryTrack {
+                    id: sample_id,
+                    path: format!("captures/capture_{}.wav", sample_id),
+                    title: format!("Capture {}", sample_id),
+                    artist: "Nullherz Sampler".to_string(),
+                    album: "Live Captures".to_string(),
+                    genre: "Captured".to_string(),
+                    energy_level: 0.5,
+                    metadata,
+                };
+                let _ = breeder.library.lock().unwrap().save_track(&track);
+            }
 
             if let Some(ref discovery) = self.discovery_service {
                 if let Ok(discovery) = discovery.lock() {

@@ -21,6 +21,7 @@ pub struct MixerManager {
     pub id_allocator: std::sync::Arc<nullherz_traits::IdAllocator>,
     pub config: MixerConfig,
     pub deck_mappings: HashMap<char, DeckNodes>,
+    pub node_names: HashMap<String, u32>,
 }
 
 impl MixerManager {
@@ -29,6 +30,7 @@ impl MixerManager {
             id_allocator: std::sync::Arc::new(nullherz_traits::IdAllocator::default()),
             config: MixerConfig::default(),
             deck_mappings: HashMap::new(),
+            node_names: HashMap::new(),
         }
     }
 
@@ -45,13 +47,18 @@ impl MixerManager {
 
     pub fn create_dj_deck(&mut self, deck_id: char, fx_ids: &[u32], bus_assignment: char) -> Vec<Command> {
         let (commands, nodes) = dj::create_dj_deck(&self.id_allocator, deck_id, fx_ids, bus_assignment, &self.config);
-        self.deck_mappings.insert(deck_id, nodes);
+        self.deck_mappings.insert(deck_id, nodes.clone());
+        let id_lower = deck_id.to_lowercase();
+        self.node_names.insert(format!("deck_{}_sampler", id_lower), nodes.sampler_id);
+        self.node_names.insert(format!("deck_{}_gain", id_lower), nodes.gain_id);
+        self.node_names.insert(format!("deck_{}_filter", id_lower), nodes.filter_id);
         commands
     }
 
     pub fn create_crossfader(&mut self) -> Vec<Command> {
         let mut commands = Vec::new();
         let cf_id = self.id_allocator.allocate_node_id();
+        self.node_names.insert("master_crossfader".to_string(), cf_id);
         println!("Creating Master Crossfader (Node {})", cf_id);
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: cf_id, processor_type_id: ProcessorTypeId::CROSSFADER }));
         commands
@@ -96,6 +103,13 @@ impl MixerManager {
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: sum_id, output_idx: 0, new_buffer_idx: sum_out_l }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: sum_id, output_idx: 1, new_buffer_idx: sum_out_r }));
 
+        // --- PREVIEW NODE (Node 111) ---
+        let preview_id = 111;
+        self.node_names.insert("preview_node".to_string(), preview_id);
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: preview_id, processor_type_id: ProcessorTypeId::SAMPLER }));
+        // Route preview node to master sum
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: preview_id, output_idx: 0, new_buffer_idx: sum_out_l }));
+
         // --- MASTER FX CHAIN ---
 
         // 1. Master EQ (Biquad)
@@ -114,6 +128,7 @@ impl MixerManager {
 
         // 3. Master Limiter/Gain
         let lim_id = self.id_allocator.allocate_node_id();
+        self.node_names.insert("master_limiter".to_string(), lim_id);
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: lim_id, processor_type_id: ProcessorTypeId::GAIN }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: lim_id, input_idx: 0, new_buffer_idx: comp_out_l }));
 

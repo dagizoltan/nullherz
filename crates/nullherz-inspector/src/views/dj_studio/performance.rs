@@ -1,7 +1,9 @@
 use egui::{Ui, RichText, Color32, Vec2};
 use crate::InspectorApp;
 
-pub fn render_deck_performance(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
+use audio_core::Telemetry;
+
+pub fn render_deck_performance(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>) {
     ui.vertical(|ui| {
         ui.label(RichText::new("HOT-CUES").small().color(Color32::from_gray(100)));
         egui::Grid::new(format!("perf_grid_{}", i)).spacing([4.0, 4.0]).show(ui, |ui| {
@@ -12,11 +14,30 @@ pub fn render_deck_performance(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
                         .min_size(Vec2::new(32.0, 28.0))
                         .fill(Color32::from_gray(40));
 
-                    if ui.add(btn).clicked() {
-                        let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpToHotCue {
-                            node_idx: (i as u32 * 4),
-                            cue_idx: j as u32,
-                        }));
+                    let response = ui.add(btn);
+                    let node_name = match i {
+                        0 => "deck_a_sampler",
+                        1 => "deck_b_sampler",
+                        2 => "deck_c_sampler",
+                        3 => "deck_d_sampler",
+                        _ => "",
+                    };
+                    let node_idx = app.get_node_id(node_name);
+
+                    if response.clicked() {
+                        if ui.input(|i| i.modifiers.shift) {
+                            let pos = telemetry.as_ref().map(|t| t.sample_counter).unwrap_or(0);
+                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::SetHotCue {
+                                node_idx,
+                                cue_idx: j as u32,
+                                position_samples: pos,
+                            }));
+                        } else {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpToHotCue {
+                                node_idx,
+                                cue_idx: j as u32,
+                            }));
+                        }
                     }
                 }
                 ui.end_row();
