@@ -447,6 +447,8 @@ pub struct CompiledGraphPlan {
     pub stages: [[usize; MAX_NODES]; MAX_NODES],
     pub stage_counts: [usize; MAX_NODES],
     pub num_stages: usize,
+    /// Disjoint sub-graph identification for partial re-compilation and optimized O(1) swaps.
+    pub node_islands: [u8; MAX_NODES],
 }
 
 impl Default for CompiledGraphPlan {
@@ -455,6 +457,7 @@ impl Default for CompiledGraphPlan {
             stages: [[0; MAX_NODES]; MAX_NODES],
             stage_counts: [0; MAX_NODES],
             num_stages: 0,
+            node_islands: [0; MAX_NODES],
         }
     }
 }
@@ -818,9 +821,58 @@ impl PtpClockProvider {
 
     /// High-precision packet receive with SO_TIMESTAMPING extraction.
     pub fn recv_with_timestamp(&self, buf: &mut [u8]) -> std::io::Result<(usize, u64)> {
-        // Fallback for non-linux or compilation issues in sandbox
-        let now = self.get_system_time_ns();
-        Ok((buf.len(), now))
+        #[cfg(target_os = "linux")]
+        {
+            let mut iov = libc::iovec {
+                iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+                iov_len: buf.len(),
+            };
+
+            let mut control = [0u8; 512];
+            let mut msg = libc::msghdr {
+                msg_name: std::ptr::null_mut(),
+                msg_namelen: 0,
+                msg_iov: &mut iov,
+                msg_iovlen: 1,
+                msg_control: control.as_mut_ptr() as *mut libc::c_void,
+                msg_controllen: control.len() as _,
+                msg_flags: 0,
+            };
+
+            let n = unsafe { libc::recvmsg(self._socket_fd, &mut msg, 0) };
+            if n < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+
+            let mut timestamp_ns = self.get_system_time_ns();
+
+            unsafe {
+                let mut cmsg = libc::CMSG_FIRSTHDR(&msg);
+                while !cmsg.is_null() {
+                    if (*cmsg).cmsg_level == libc::SOL_SOCKET && (*cmsg).cmsg_type == libc::SCM_TIMESTAMPING {
+                        let ts_ptr = libc::CMSG_DATA(cmsg) as *const libc::timespec;
+                        // SCM_TIMESTAMPING returns 3 timespecs: [software, hw_transformed, hw_raw]
+                        let ts_hw_raw = *ts_ptr.add(2);
+                        let ts_sw = *ts_ptr.add(0);
+
+                        if ts_hw_raw.tv_sec != 0 || ts_hw_raw.tv_nsec != 0 {
+                            timestamp_ns = (ts_hw_raw.tv_sec as u64 * 1_000_000_000) + ts_hw_raw.tv_nsec as u64;
+                        } else if ts_sw.tv_sec != 0 || ts_sw.tv_nsec != 0 {
+                            timestamp_ns = (ts_sw.tv_sec as u64 * 1_000_000_000) + ts_sw.tv_nsec as u64;
+                        }
+                    }
+                    cmsg = libc::CMSG_NXTHDR(&msg, cmsg);
+                }
+            }
+            Ok((n as usize, timestamp_ns))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let now = self.get_system_time_ns();
+            let n = unsafe { libc::recv(self._socket_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0) };
+            if n < 0 { return Err(std::io::Error::last_os_error()); }
+            Ok((n as usize, now))
+        }
     }
 }
 
@@ -875,12 +927,18 @@ impl ClockServo {
 
     pub fn sample(&self, offset_ns: i64) -> f64 {
         let mut integral = f64::from_bits(self.integral.load(std::sync::atomic::Ordering::Relaxed));
+
+        // Stage 2 PI Controller:
+        // Disciplines the system clock frequency by integrating the phase error.
         integral += offset_ns as f64 * self.ki;
-        // Clamp integral to prevent windup
+
+        // Anti-windup clamping (1ms max integral correction)
         integral = integral.clamp(-1_000_000.0, 1_000_000.0);
+
         self.integral.store(integral.to_bits(), std::sync::atomic::Ordering::Relaxed);
         self.last_offset.store(offset_ns, std::sync::atomic::Ordering::Relaxed);
 
+        // Proportional + Integral output
         (offset_ns as f64 * self.kp) + integral
     }
 

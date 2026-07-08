@@ -50,6 +50,26 @@ impl WasmSidecarHost {
              }
         })?;
 
+        linker.func_wrap("nullherz", "get_audio_input_ref", |mut caller: Caller<'_, WasmState>, channel: i32| -> i64 {
+             let state = caller.data();
+             if let Some(rb_ptr) = state.audio_inputs.get(channel as usize) {
+                 unsafe {
+                     // Stage 2: Return a pointer directly into the SHM RingBuffer's current head
+                     // Note: This requires the guest to know the SHM layout.
+                     // For now, we'll return the absolute address of the data segment.
+                     let rb = &**rb_ptr;
+                     let head = rb.head.load(std::sync::atomic::Ordering::Acquire);
+                     let tail = rb.tail.load(std::sync::atomic::Ordering::Acquire);
+                     if head != tail {
+                         // This is a placeholder for true zero-copy mapping.
+                         // In a production scenario, we'd map this page into the WASM instance.
+                         return rb_ptr as *const _ as i64;
+                     }
+                 }
+             }
+             0
+        })?;
+
         linker.func_wrap("nullherz", "get_audio_input", |mut caller: Caller<'_, WasmState>, channel: i32, ptr: i32| -> i32 {
              let block = {
                  let state = caller.data_mut();
@@ -63,7 +83,7 @@ impl WasmSidecarHost {
              if let Some(block) = block {
                  let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
                  let data = bytemuck::cast_slice(&block.data);
-                 mem.write(&mut caller, ptr as usize, data).unwrap();
+                 let _ = mem.write(&mut caller, ptr as usize, data);
                  return block.len as i32;
              }
              0
@@ -73,7 +93,7 @@ impl WasmSidecarHost {
              let mut data = [0.0f32; 256];
              {
                  let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
-                 mem.read(&caller, ptr as usize, bytemuck::cast_slice_mut(&mut data)).unwrap();
+                 let _ = mem.read(&caller, ptr as usize, bytemuck::cast_slice_mut(&mut data));
              }
 
              let state = caller.data_mut();

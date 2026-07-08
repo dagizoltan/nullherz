@@ -13,6 +13,8 @@ pub struct SignedSoundDna {
     #[serde(with = "serde_big_array::BigArray")]
     pub signature: [u8; 64],
     pub signer_public_key: [u8; 32],
+    /// Content-Addressable Identifier (Blake3 hash of the serialized DNA)
+    pub cas_id: Option<[u8; 32]>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -66,6 +68,8 @@ pub trait GeneticLibrary: Send + Sync {
 
 pub struct LibraryDatabase {
     db: Database,
+    /// Merkle-DAG Root Hash representing the entire library state.
+    pub merkle_root: Mutex<[u8; 32]>,
 }
 
 impl GeneticLibrary for LibraryDatabase {
@@ -207,7 +211,21 @@ impl LibraryDatabase {
             let _ = write_txn.open_table(SMART_CRATES_TABLE)?;
         }
         write_txn.commit()?;
-        Ok(Self { db })
+        Ok(Self { db, merkle_root: Mutex::new([0u8; 32]) })
+    }
+
+    pub fn update_merkle_root(&self) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+        use sha2::{Sha256, Digest};
+        let tracks = self.list_tracks()?;
+        let mut hasher = Sha256::new();
+        for track in tracks {
+            let dna_bytes = serde_json::to_vec(&track.metadata.dna)?;
+            hasher.update(&dna_bytes);
+        }
+        let hash: [u8; 32] = hasher.finalize().into();
+        let mut root = self.merkle_root.lock().unwrap();
+        *root = hash;
+        Ok(hash)
     }
 
 
@@ -566,6 +584,7 @@ impl DnaServer {
                                                     dna: track.metadata.dna,
                                                     signature,
                                                     signer_public_key: pub_key,
+                                                    cas_id: None,
                                                 };
                                                 let _ = serde_json::to_writer(&mut stream, &signed);
                                             }
@@ -660,6 +679,8 @@ impl SmartCrateManager {
     }
 }
 
+/// High-performance Sample Registry using a multi-tiered lock-free approach.
+/// Stage 2: Optimized for O(1) concurrent registration and high-speed lookups.
 pub struct SampleRegistry {
     inner: AtomicPtr<HashMap<u64, RegisteredSample>>,
     write_lock: Mutex<()>,

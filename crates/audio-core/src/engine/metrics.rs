@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
@@ -9,6 +9,9 @@ pub struct EngineMetrics {
     pub peak_ns: AtomicU64,
     pub resource_leaks: AtomicU64,
     pub last_xrun_magnitude_ns: AtomicU64,
+    /// Sliding window of block processing times for predictive X-RUN mitigation.
+    pub processing_history_ns: Arc<Mutex<[u64; 16]>>,
+    pub history_idx: AtomicU64,
 }
 
 impl Default for EngineMetrics {
@@ -26,6 +29,8 @@ impl EngineMetrics {
             peak_ns: AtomicU64::new(0),
             resource_leaks: AtomicU64::new(0),
             last_xrun_magnitude_ns: AtomicU64::new(0),
+            processing_history_ns: Arc::new(Mutex::new([0u64; 16])),
+            history_idx: AtomicU64::new(0),
         }
     }
 
@@ -52,6 +57,19 @@ impl EngineMetrics {
                     let ratio = elapsed / elapsed_c;
                     self.ns_per_cycle.store(ratio.to_bits(), Ordering::Release);
                 }
+            }
+        }
+
+        // Update sliding window history
+        let idx = self.history_idx.fetch_add(1, Ordering::Relaxed) as usize % 16;
+        if let Ok(mut history) = self.processing_history_ns.try_lock() {
+            history[idx] = current_ns;
+
+            // Predictive Analysis: Check if the average of the last 4 blocks is trending upward
+            let last_4_avg = (history[idx] + history[(idx + 15) % 16] + history[(idx + 14) % 16] + history[(idx + 13) % 16]) / 4;
+            if last_4_avg > (block_duration_ns * 9 / 10) {
+                 // Imminent X-RUN predicted (>90% CPU budget used)
+                 // Trigger internal telemetry pulse (Placeholder for Conductor feedback)
             }
         }
 

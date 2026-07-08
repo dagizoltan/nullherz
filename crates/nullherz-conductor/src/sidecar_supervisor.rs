@@ -17,6 +17,7 @@ pub struct RemoteSidecar {
     pub mirrored_samples: std::collections::HashSet<u64>,
     pub pending_mirrored_samples: std::collections::HashSet<u64>,
     pub cpu_usage: f32,
+    pub cpu_usage_trend: f32,
     pub latency_ms: f32,
     pub assigned_nodes: std::collections::HashSet<u32>,
 }
@@ -54,6 +55,36 @@ impl RemoteSidecarManager {
                 let _ = writer.write_all(&full_payload).await;
             }
         }
+    }
+
+    pub fn predictive_migration_check(&mut self) -> Vec<(u32, String)> {
+        let mut migrations = Vec::new();
+        let num_nodes = self.remote_nodes.len();
+
+        for i in 0..num_nodes {
+            let (projected_cpu, node_addr, first_node_idx) = {
+                let node = &self.remote_nodes[i];
+                let proj = node.cpu_usage + node.cpu_usage_trend;
+                let first_idx = node.assigned_nodes.iter().next().copied();
+                (proj, node.addr.clone(), first_idx)
+            };
+
+            if projected_cpu > 0.85 {
+                if let Some(node_idx) = first_node_idx {
+                    // Find a candidate remote peer with lowest load
+                    let candidate = self.remote_nodes.iter()
+                        .filter(|n| n.addr != node_addr && n.is_active)
+                        .min_by(|a, b| a.cpu_usage.partial_cmp(&b.cpu_usage).unwrap_or(std::cmp::Ordering::Equal));
+
+                    if let Some(target) = candidate {
+                        if target.cpu_usage < 0.5 {
+                            migrations.push((node_idx, target.addr.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        migrations
     }
 
     pub async fn send_audio_block(&mut self, node_idx: u32, block: nullherz_traits::AudioBlock) {
@@ -204,6 +235,7 @@ impl SidecarSupervisor {
                                         mirrored_samples: std::collections::HashSet::new(),
                                         pending_mirrored_samples: std::collections::HashSet::new(),
                                         cpu_usage: 0.0,
+                                        cpu_usage_trend: 0.0,
                                         latency_ms: 0.0,
                                         assigned_nodes: std::collections::HashSet::new(),
                                     });
@@ -303,6 +335,7 @@ impl SidecarSupervisor {
                             mirrored_samples: std::collections::HashSet::new(),
                             pending_mirrored_samples: std::collections::HashSet::new(),
                             cpu_usage: 0.0,
+                            cpu_usage_trend: 0.0,
                             latency_ms: 0.0,
                             assigned_nodes: std::collections::HashSet::new(),
                         });
