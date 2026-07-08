@@ -53,12 +53,12 @@ pub struct ShmSlot<T> {
 /// that can reside in shared memory.
 #[repr(C, align(64))]
 pub struct ShmRingBuffer<T> {
-    head: AtomicUsize,
+    pub head: AtomicUsize,
     _pad1: [u8; 64],
-    tail: AtomicUsize,
+    pub tail: AtomicUsize,
     _pad2: [u8; 64],
-    capacity: usize,
-    buffer_offset: usize,
+    pub capacity: usize,
+    pub buffer_offset: usize,
     _marker: PhantomData<T>,
 }
 

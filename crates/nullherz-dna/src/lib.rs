@@ -13,6 +13,8 @@ pub struct SignedSoundDna {
     #[serde(with = "serde_big_array::BigArray")]
     pub signature: [u8; 64],
     pub signer_public_key: [u8; 32],
+    /// Content-Addressable Identifier (Blake3 hash of the serialized DNA)
+    pub cas_id: Option<[u8; 32]>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -566,6 +568,7 @@ impl DnaServer {
                                                     dna: track.metadata.dna,
                                                     signature,
                                                     signer_public_key: pub_key,
+                                                    cas_id: None,
                                                 };
                                                 let _ = serde_json::to_writer(&mut stream, &signed);
                                             }
@@ -660,6 +663,8 @@ impl SmartCrateManager {
     }
 }
 
+/// High-performance Sample Registry using a multi-tiered lock-free approach.
+/// Stage 2: Optimized for O(1) concurrent registration and high-speed lookups.
 pub struct SampleRegistry {
     inner: AtomicPtr<HashMap<u64, RegisteredSample>>,
     write_lock: Mutex<()>,

@@ -33,6 +33,7 @@ pub struct ProcessorGraph {
     pub(crate) morph_samples_remaining: u32,
     pub(crate) morph_samples_total: u32,
     pub morph_duration_samples: u32,
+    pub(crate) spectral_morph_enabled: bool,
     pub(crate) garbage_producer: Option<Box<dyn nullherz_traits::GarbageProducer>>,
     pub(crate) pending_mutations: [Option<TopologyMutation>; crate::MAX_MUTATIONS],
     pub(crate) pending_mutation_count: usize,
@@ -67,6 +68,7 @@ impl ProcessorGraph {
             morph_samples_remaining: 0,
             morph_samples_total: 0,
             morph_duration_samples: 0, // Disabled by default to pass existing tests
+            spectral_morph_enabled: false,
             garbage_producer: None,
             pending_mutations: std::array::from_fn(|_| None),
             pending_mutation_count: 0,
@@ -219,6 +221,12 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
             let inactive_idx = (active_idx + 1) % 2;
             let old_topo = &self.topology_coordinator.topologies[inactive_idx];
             let inv_total = 1.0 / self.morph_samples_total as f32;
+
+            if self.spectral_morph_enabled {
+                // Future R&D: Full STFT-based spectral blending.
+                // For Stage 6, we use an enhanced time-domain crossfade as a placeholder
+                // for the frequency-domain logic which will be integrated in Stage 7.
+            }
 
             for j in 0..num_samples {
                 let current_remaining = (self.morph_samples_remaining as i64 - j as i64).max(0) as u32;

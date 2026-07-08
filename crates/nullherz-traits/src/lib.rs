@@ -924,12 +924,18 @@ impl ClockServo {
 
     pub fn sample(&self, offset_ns: i64) -> f64 {
         let mut integral = f64::from_bits(self.integral.load(std::sync::atomic::Ordering::Relaxed));
+
+        // Stage 2 PI Controller:
+        // Disciplines the system clock frequency by integrating the phase error.
         integral += offset_ns as f64 * self.ki;
-        // Clamp integral to prevent windup
+
+        // Anti-windup clamping (1ms max integral correction)
         integral = integral.clamp(-1_000_000.0, 1_000_000.0);
+
         self.integral.store(integral.to_bits(), std::sync::atomic::Ordering::Relaxed);
         self.last_offset.store(offset_ns, std::sync::atomic::Ordering::Relaxed);
 
+        // Proportional + Integral output
         (offset_ns as f64 * self.kp) + integral
     }
 
