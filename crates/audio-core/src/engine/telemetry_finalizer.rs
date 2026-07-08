@@ -113,6 +113,7 @@ impl TelemetryFinalizer {
             sample_rate: transport.sample_rate,
             suggestions: [(0, 0.0); 4],
             active_master_deck: 'A',
+            waveform_peaks: [0.0; 256],
         };
         let _ = telemetry_producer.push_telemetry(telemetry.clone());
         telemetry

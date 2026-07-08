@@ -41,6 +41,9 @@ pub struct Telemetry {
     /// Proactive matchmaking suggestions: (Sample ID, Similarity Score)
     pub suggestions: [(u64, f32); 4],
     pub active_master_deck: char,
+    /// Downsampled peak waveform data for 4 DJ decks for real-time visual feedback.
+    #[serde(with = "BigArray")]
+    pub waveform_peaks: [f32; 256],
 }
 
 pub struct TelemetryProcessor;
@@ -73,6 +76,7 @@ impl Default for Telemetry {
             sample_rate: 44100.0,
             suggestions: [(0, 0.0); 4],
             active_master_deck: 'A',
+            waveform_peaks: [0.0; 256],
         }
     }
 }
