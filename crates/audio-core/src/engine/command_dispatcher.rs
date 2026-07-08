@@ -41,9 +41,9 @@ impl CommandDispatcher {
                 // Ignore structural mutations in RT command loop.
             }
             Command::Topology(TopologyCommand::SetBypass { node_idx, enabled }) => {
-                 graph.apply_topology_mutation(nullherz_traits::TopologyMutation::LoadProcessorState {
+                 graph.apply_topology_mutation(nullherz_traits::TopologyMutation::SetBypass {
                      node_idx: *node_idx,
-                     state_data: std::sync::Arc::new(if *enabled { vec![1] } else { vec![0] }),
+                     enabled: *enabled,
                  });
             }
             _ => { graph.apply_command(cmd); }

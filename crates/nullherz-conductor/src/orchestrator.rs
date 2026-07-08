@@ -37,6 +37,7 @@ pub struct Conductor {
     pub active_master_deck: char,
     pub calibration_samples: u32,
     pub ptp_clock: Option<Arc<nullherz_traits::PtpClockProvider>>,
+    last_autosave_secs: u64,
 }
 
 impl Default for Conductor {
@@ -95,6 +96,7 @@ impl Conductor {
             active_master_deck: 'A',
             calibration_samples: 0,
             ptp_clock: None,
+            last_autosave_secs: 0,
         }
     }
 
@@ -762,7 +764,7 @@ impl Conductor {
                 }
             }
 
-            let mapped_commands = self.midi_mapper.translate(&event);
+            let mapped_commands = self.midi_mapper.translate(&event, &self.mixer_manager.node_names);
             if !mapped_commands.is_empty() {
                 self.apply_mixer_commands(mapped_commands);
             }
@@ -772,6 +774,17 @@ impl Conductor {
     pub fn tick(&mut self) {
         use std::time::{SystemTime, UNIX_EPOCH};
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+
+        // 0. Handle Background Auto-Save (Every 60 seconds)
+        if now % 60 == 0 && self.last_autosave_secs != now {
+            self.last_autosave_secs = now;
+            let state = self.capture_state();
+            tokio::spawn(async move {
+                let _ = state.save_to_file("autosave.json");
+                let _ = state.save_to_rkyv("autosave.rkyv");
+                println!("Conductor: Background Auto-Save complete.");
+            });
+        }
 
         // Drain Local MIDI Consumer
         if let Some(ref mut consumer) = self.midi_consumer {

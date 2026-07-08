@@ -26,7 +26,8 @@ fn test_midi_mapping_translation() {
         _pad: 0,
     };
 
-    let cmds = mapper.translate(&event);
+    let node_names = std::collections::HashMap::new();
+    let cmds = mapper.translate(&event, &node_names);
     assert_eq!(cmds.len(), 1);
 
     if let Command::Mixer(MixerCommand::SetParam { target_id, param_id, value, .. }) = cmds[0] {

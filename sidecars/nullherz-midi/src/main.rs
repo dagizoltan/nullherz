@@ -45,43 +45,40 @@ fn main() -> Result<(), Box<dyn Error>> {
         let ports = midi_in.ports();
         if ports.is_empty() {
             eprintln!("No MIDI input ports found.");
-            return Ok(());
-        }
-
-        let port = if _port_filter.is_empty() {
-            println!("No port filter specified. Using first available port: {}", midi_in.port_name(&ports[0])?);
-            &ports[0]
         } else {
-            ports.iter()
-                .find(|p| midi_in.port_name(p).unwrap_or_default().contains(_port_filter))
-                .ok_or_else(|| format!("MIDI port matching '{}' not found.", _port_filter))?
-        };
+            let port = if _port_filter.is_empty() {
+                println!("No port filter specified. Using first available port: {}", midi_in.port_name(&ports[0])?);
+                &ports[0]
+            } else {
+                ports.iter()
+                    .find(|p| midi_in.port_name(p).unwrap_or_default().contains(_port_filter))
+                    .ok_or_else(|| format!("MIDI port matching '{}' not found.", _port_filter))?
+            };
 
-        println!("Connecting to MIDI port: {}", midi_in.port_name(port)?);
+            println!("Connecting to MIDI port: {}", midi_in.port_name(port)?);
 
-        if !map_path.is_empty() {
-            println!("Loading MIDI map from: {}", map_path);
-            // In a full implementation, we'd pass the map to the callback for pre-filtering
-            // or just let the conductor handle it.
-        }
-
-        // 3. Start MIDI Loop
-        let _conn = midi_in.connect(port, "nullherz-midi-input", move |stamp, message, _| {
-            if message.len() >= 3 {
-                let event = MidiEvent {
-                    timestamp_samples: stamp,
-                    status: message[0],
-                    data1: message[1],
-                    data2: message[2],
-                    _pad: 0,
-                };
-                if producer.push(event).is_err() {
-                    eprintln!("MIDI Bridge: Overflow! Dropping event.");
-                }
+            if !map_path.is_empty() {
+                println!("Loading MIDI map from: {}", map_path);
             }
-        }, ())?;
 
-        println!("MIDI Bridge active. Press Ctrl+C to exit.");
+            // 3. Start MIDI Loop
+            let _conn = midi_in.connect(port, "nullherz-midi-input", move |stamp, message, _| {
+                if message.len() >= 3 {
+                    let event = MidiEvent {
+                        timestamp_samples: stamp,
+                        status: message[0],
+                        data1: message[1],
+                        data2: message[2],
+                        _pad: 0,
+                    };
+                    if producer.push(event).is_err() {
+                        eprintln!("MIDI Bridge: Overflow! Dropping event.");
+                    }
+                }
+            }, ())?;
+
+            println!("MIDI Bridge active. Press Ctrl+C to exit.");
+        }
     }
 
     #[cfg(not(feature = "midir-backend"))]

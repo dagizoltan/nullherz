@@ -1,17 +1,33 @@
 {
-  "name": "Default Mapping",
+  "name": "Standard DJ Controller",
   "controls": [
     {
       "cc_number": 7,
-      "target": { "Param": { "target_id": 0, "param_id": 0 } },
+      "target": { "NamedParam": { "node_name": "deck_a_gain", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 8,
+      "target": { "NamedParam": { "node_name": "deck_b_gain", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 10,
+      "target": { "NamedParam": { "node_name": "master_limiter", "param_id": 0 } },
       "min_val": 0.0,
       "max_val": 1.0
     }
   ],
   "triggers": [
     {
-      "note_number": 36,
-      "target": { "Command": { "Core": "Play" } }
+      "note_number": 60,
+      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "A" } } } }
+    },
+    {
+      "note_number": 61,
+      "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "A" } } } }
     }
   ]
 }

@@ -364,7 +364,12 @@ impl PeerSync for CloudPeerSync {
     }
 
     fn get_public_key(&self) -> [u8; 32] {
-        [0u8; 32] // Placeholder
+        if let Some(sk_bytes) = self.signing_key {
+            let sk = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
+            sk.verifying_key().to_bytes()
+        } else {
+            [0u8; 32]
+        }
     }
 
     fn gossip_metadata(&self, known_ids: &[(u64, String)]) {
@@ -378,7 +383,15 @@ impl PeerSync for CloudPeerSync {
                 std::time::Duration::from_millis(100)
             ) {
                 if let Ok(payload) = serde_json::to_string(known_ids) {
-                    let msg = format!("GOSSIP {}\n", payload);
+                    let mut msg = if let Some(sk_bytes) = self.signing_key {
+                        use ed25519_dalek::Signer;
+                        let sk = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
+                        let sig = sk.sign(payload.as_bytes());
+                        // Format: GOSSIP_SIGNED <sig_hex> <pk_hex> <payload_json>
+                        format!("GOSSIP_SIGNED {} {} {}\n", hex::encode(sig.to_bytes()), hex::encode(sk.verifying_key().to_bytes()), payload)
+                    } else {
+                        format!("GOSSIP {}\n", payload)
+                    };
                     let _ = stream.write_all(msg.as_bytes());
                 }
             }
@@ -551,6 +564,63 @@ impl DiscoveryService {
     }
 }
 
+fn handle_gossip(payload: &str, lib_clone: &Arc<Mutex<LibraryDatabase>>, stream: &std::net::TcpStream) {
+    if let Ok(remote_metadata) = serde_json::from_str::<Vec<(u64, String)>>(payload) {
+        println!("DNA Server: Received GOSSIP payload with {} entries.", remote_metadata.len());
+
+        if let Ok(peer_addr) = stream.peer_addr() {
+            let peer_addr_str = peer_addr.to_string();
+
+            // 1. Identify missing IDs without holding the lock for networking
+            let mut missing_ids = Vec::new();
+            if let Ok(lib) = lib_clone.lock() {
+                for (id, name) in remote_metadata {
+                    if lib.get_track(id).map(|t| t.is_none()).unwrap_or(false) {
+                        missing_ids.push((id, name));
+                    }
+                }
+            }
+
+            // 2. Perform networking outside the lock
+            if !missing_ids.is_empty() {
+                let lib_c = lib_clone.clone();
+                let addr_clone = peer_addr_str.clone();
+                std::thread::spawn(move || {
+                    let sync_client = CloudPeerSync {
+                        peers: vec![addr_clone.clone()],
+                        trusted_peers: std::collections::HashSet::from([addr_clone.clone()]),
+                        peer_signatures: HashMap::new(),
+                        signing_key: None,
+                    };
+
+                    for (id, name) in missing_ids {
+                        println!("Gossip: Discovered unknown DNA '{}' ({}) at {}. Initiating pull...", id, name, addr_clone);
+                        if let Some(dna) = sync_client.request_dna(id) {
+                            let track = LibraryTrack {
+                                id,
+                                path: format!("cloud://{}", id),
+                                title: name,
+                                artist: "Cloud Peer".to_string(),
+                                album: "Gossip Discovery".to_string(),
+                                genre: "Unknown".to_string(),
+                                energy_level: 0.5,
+                                metadata: nullherz_traits::SampleMetadata {
+                                    dna,
+                                    ..nullherz_traits::SampleMetadata::new_empty()
+                                },
+                            };
+                            if let Ok(lib) = lib_c.lock() {
+                                let _ = lib.save_track(&track);
+                                println!("Gossip: Successfully synchronized DNA '{}' from cloud.", id);
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    }
+}
+
 pub struct DnaServer;
 
 impl DnaServer {
@@ -566,51 +636,88 @@ impl DnaServer {
                         let mut reader = BufReader::new(&stream);
                         let mut line = String::new();
                         if reader.read_line(&mut line).is_ok() {
-                            let parts: Vec<&str> = line.trim().split_whitespace().collect();
-                            match parts.as_slice() {
-                                ["LIST"] => {
-                                    if let Ok(lib) = lib_clone.lock() {
-                                        if let Ok(tracks) = lib.list_tracks() {
-                                            let list: Vec<(u64, String)> = tracks.into_iter().map(|t| (t.id, t.title)).collect();
-                                            let _ = serde_json::to_writer(&mut stream, &list);
+                            let line_trimmed = line.trim();
+                            if line_trimmed == "LIST" {
+                                if let Ok(lib) = lib_clone.lock() {
+                                    if let Ok(tracks) = lib.list_tracks() {
+                                        let list: Vec<(u64, String)> = tracks.into_iter().map(|t| (t.id, t.title)).collect();
+                                        let _ = serde_json::to_writer(&mut stream, &list);
+                                    }
+                                }
+                                return;
+                            }
+
+                            let parts: Vec<&str> = line_trimmed.split_whitespace().collect();
+                            if parts.is_empty() { return; }
+
+                            match parts[0] {
+                                "GOSSIP" => {
+                                    let payload = &line_trimmed[7..];
+                                    handle_gossip(payload, &lib_clone, &stream);
+                                }
+                                "GOSSIP_SIGNED" => {
+                                    if parts.len() >= 4 {
+                                        let sig_hex = parts[1];
+                                        let pk_hex = parts[2];
+                                        // Find start of payload. It's after "GOSSIP_SIGNED <sig> <pk> "
+                                        let prefix_len = "GOSSIP_SIGNED ".len() + sig_hex.len() + 1 + pk_hex.len() + 1;
+                                        if line_trimmed.len() > prefix_len {
+                                            let payload = &line_trimmed[prefix_len..];
+
+                                            use ed25519_dalek::{Verifier, Signature, VerifyingKey};
+                                            if let (Ok(sig_bytes), Ok(pk_bytes)) = (hex::decode(sig_hex), hex::decode(pk_hex)) {
+                                                if let (Ok(sig), Ok(pk)) = (Signature::from_slice(&sig_bytes), VerifyingKey::from_bytes(&pk_bytes.try_into().unwrap_or([0u8; 32]))) {
+                                                    if pk.verify(payload.as_bytes(), &sig).is_ok() {
+                                                        handle_gossip(payload, &lib_clone, &stream);
+                                                    } else {
+                                                        eprintln!("DNA Server: GOSSIP signature verification FAILED.");
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
-                                ["GOSSIP", payload] => {
-                                    if let Ok(remote_metadata) = serde_json::from_str::<Vec<(u64, String)>>(payload) {
-                                        println!("DNA Server: Received gossip payload with {} entries.", remote_metadata.len());
-                                        // In a real implementation, this would trigger pull-based sync for unknown IDs.
+                                "HANDSHAKE" => {
+                                    if parts.len() >= 2 {
+                                        let pk_hex = parts[1];
+                                        println!("DNA Server: Peer handshake with public key {}", pk_hex);
+                                        let resp = signing_key.map(|k| hex::encode(&k[..])).unwrap_or_else(|| "none".to_string());
+                                        let _ = stream.write_all(format!("IDENTITY {}\n", resp).as_bytes());
                                     }
                                 }
-                                ["HANDSHAKE", pk_hex] => {
-                                    println!("DNA Server: Peer handshake with public key {}", pk_hex);
-                                    let resp = signing_key.map(|k| hex::encode(&k[..])).unwrap_or_else(|| "none".to_string());
-                                    let _ = stream.write_all(format!("IDENTITY {}\n", resp).as_bytes());
-                                }
-                                ["GET", "DNA", id_str] => {
-                                    if let Ok(id) = id_str.parse::<u64>() {
-                                        if let Ok(lib) = lib_clone.lock() {
-                                            if let Ok(Some(track)) = lib.get_track(id) {
-                                                // Production Beta: Sign DNA payload if secret key is found
-                                                use ed25519_dalek::{Signer, SigningKey};
-                                                let mut signature = [0u8; 64];
-                                                let mut pub_key = [0u8; 32];
+                                "GET" => {
+                                    if parts.len() >= 3 && parts[1] == "DNA" {
+                                        let id_str = parts[2];
+                                        if let Ok(id) = id_str.parse::<u64>() {
+                                            if let Ok(lib) = lib_clone.lock() {
+                                                if let Ok(Some(track)) = lib.get_track(id) {
+                                                    // Production Beta: Sign DNA payload and calculate CAS-ID
+                                                    use ed25519_dalek::{Signer, SigningKey};
+                                                    use sha2::{Sha256, Digest};
 
-                                                if let Some(sk_bytes) = signing_key {
-                                                    let sk = SigningKey::from_bytes(&sk_bytes);
+                                                    let mut signature = [0u8; 64];
+                                                    let mut pub_key = [0u8; 32];
                                                     let dna_bytes = serde_json::to_vec(&track.metadata.dna).unwrap_or_default();
-                                                    let sig = sk.sign(&dna_bytes);
-                                                    signature = sig.to_bytes();
-                                                    pub_key = sk.verifying_key().to_bytes();
-                                                }
 
-                                                let signed = SignedSoundDna {
-                                                    dna: track.metadata.dna,
-                                                    signature,
-                                                    signer_public_key: pub_key,
-                                                    cas_id: None,
-                                                };
-                                                let _ = serde_json::to_writer(&mut stream, &signed);
+                                                    let mut hasher = Sha256::new();
+                                                    hasher.update(&dna_bytes);
+                                                    let cas_id: [u8; 32] = hasher.finalize().into();
+
+                                                    if let Some(sk_bytes) = signing_key {
+                                                        let sk = SigningKey::from_bytes(&sk_bytes);
+                                                        let sig = sk.sign(&dna_bytes);
+                                                        signature = sig.to_bytes();
+                                                        pub_key = sk.verifying_key().to_bytes();
+                                                    }
+
+                                                    let signed = SignedSoundDna {
+                                                        dna: track.metadata.dna,
+                                                        signature,
+                                                        signer_public_key: pub_key,
+                                                        cas_id: Some(cas_id),
+                                                    };
+                                                    let _ = serde_json::to_writer(&mut stream, &signed);
+                                                }
                                             }
                                         }
                                     }

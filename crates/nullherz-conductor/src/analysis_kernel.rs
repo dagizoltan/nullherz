@@ -40,6 +40,7 @@ impl AnalysisKernel {
 
         // 4. DNA Analysis (Rhythmic)
         self.analyze_rhythmic(&transients, buffer.len(), metadata.bpm, &mut dna);
+        self.extract_micro_timing(&transients, metadata.bpm, &mut dna);
 
         // 5. DNA Analysis (Spatial)
         self.analyze_spatial(buffer, &transients, &mut dna);
@@ -150,6 +151,34 @@ impl AnalysisKernel {
             } else { 0.0 };
         }
 
+        // 3b. Formant Peak Detection
+        let mut peaks_found = Vec::new();
+        for bin in 1..511 {
+            if magnitudes[bin] > magnitudes[bin-1] && magnitudes[bin] > magnitudes[bin+1] {
+                peaks_found.push((bin, magnitudes[bin]));
+            }
+        }
+        peaks_found.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        for i in 0..5.min(peaks_found.len()) {
+            let (bin, mag) = peaks_found[i];
+            let freq = (bin as f32 * self.sample_rate) / 1024.0;
+            dna.spectral.formant_peaks[i] = (freq, 100, (mag * 1000.0) as u16);
+        }
+
+        // 3c. MFCC-like Feature Vector Extraction
+        for octave in 0..8 {
+            let start = (2.0f32.powi(octave as i32) * 20.0 * 1024.0 / self.sample_rate) as usize;
+            let end = (2.0f32.powi(octave as i32 + 1) * 20.0 * 1024.0 / self.sample_rate) as usize;
+            let mut oct_energy = 0.0;
+            if start < 512 {
+                let actual_end = end.min(512);
+                for bin in start..actual_end {
+                    oct_energy += magnitudes[bin];
+                }
+                dna.feature_vector[octave as usize] = (oct_energy / total_energy.max(1e-6) * 5.0).min(1.0);
+            }
+        }
+
         let mut tilt_sum = 0.0;
         for (bin, &mag) in magnitudes.iter().enumerate().skip(1).take(511) {
             let freq_norm = bin as f32 / 512.0;
@@ -245,6 +274,34 @@ impl AnalysisKernel {
 
         if max_mag < 0.1 { return None; }
         Some(best_note as f32)
+    }
+
+    fn extract_micro_timing(&self, transients: &[u64], bpm: f32, dna: &mut nullherz_traits::SoundDNA) {
+        if bpm < 10.0 || transients.len() < 4 { return; }
+
+        let samples_per_beat = (self.sample_rate * 60.0) / bpm;
+        let samples_per_16th = samples_per_beat / 4.0;
+
+        // Group deviations by their position in a 12-slot "groove profile" (3 bars of 16ths, or triplets etc)
+        let mut buckets: [Vec<f32>; 12] = Default::default();
+
+        for &t in transients {
+            let beat_pos = t as f32 / samples_per_beat;
+            let sixteenth_pos = (t as f32 / samples_per_16th).round();
+            let deviation_samples = t as f32 - (sixteenth_pos * samples_per_16th);
+            let deviation_ms = (deviation_samples / self.sample_rate) * 1000.0;
+
+            let slot = (sixteenth_pos as usize) % 12;
+            buckets[slot].push(deviation_ms);
+        }
+
+        for i in 0..12 {
+            if !buckets[i].is_empty() {
+                let sum: f32 = buckets[i].iter().sum();
+                let avg = sum / buckets[i].len() as f32;
+                dna.rhythmic.micro_timing[i] = avg.clamp(-128.0, 127.0) as i16;
+            }
+        }
     }
 
     fn analyze_spatial(&self, buffer: &[f32], transients: &[u64], dna: &mut nullherz_traits::SoundDNA) {
