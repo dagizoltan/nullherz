@@ -69,7 +69,7 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
                     ui.set_min_height(160.0);
                     transport::render_deck_transport(app, ui, i);
                     ui.add_space(8.0);
-                    performance::render_deck_performance(app, ui, i);
+                    performance::render_deck_performance(app, ui, i, telemetry);
                     ui.add_space(8.0);
                     dna::render_deck_dna_panel(app, ui, i);
                     ui.add_space(8.0);
@@ -131,7 +131,7 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
                         ui.label(RichText::new("CROSSFADER").small().color(Color32::GRAY));
                         if widgets::render_horizontal_fader(ui, &mut app.crossfader_pos, 0.0..=1.0, Color32::WHITE, ui.available_width(), 32.0).changed() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                target_id: 20,
+                                target_id: app.get_node_id("master_crossfader") as u64,
                                 param_id: 0,
                                 value: app.crossfader_pos,
                                 ramp_duration_samples: 0,

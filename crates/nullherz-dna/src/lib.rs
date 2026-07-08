@@ -64,6 +64,7 @@ pub trait GeneticLibrary: Send + Sync {
     fn query_tracks(&self, genre: Option<&str>, min_bpm: Option<f32>, max_bpm: Option<f32>, root_key: Option<f32>) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>>;
     /// Proactively suggests tracks from the library that are genetically similar to the provided DNA.
     fn suggest_matches(&self, target_dna: &nullherz_traits::SoundDNA, limit: usize) -> Result<Vec<(u64, f32)>, Box<dyn std::error::Error>>;
+    fn remove_track(&self, id: u64) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 pub struct LibraryDatabase {
@@ -197,6 +198,29 @@ impl GeneticLibrary for LibraryDatabase {
 
     fn suggest_matches(&self, target_dna: &nullherz_traits::SoundDNA, limit: usize) -> Result<Vec<(u64, f32)>, Box<dyn std::error::Error>> {
         Matchmaker::find_best_matches(self, target_dna, limit)
+    }
+
+    fn remove_track(&self, id: u64) -> Result<(), Box<dyn std::error::Error>> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut track_table = write_txn.open_table(TRACKS_TABLE)?;
+            track_table.remove(id)?;
+
+            let mut crate_table = write_txn.open_table(CRATES_TABLE)?;
+            let mut keys_to_remove = Vec::new();
+            for res in crate_table.iter()? {
+                let (key_guard, _) = res?;
+                let (name, track_id) = key_guard.value();
+                if track_id == id {
+                    keys_to_remove.push((name.to_string(), track_id));
+                }
+            }
+            for (name, track_id) in keys_to_remove {
+                crate_table.remove((name.as_str(), track_id))?;
+            }
+        }
+        write_txn.commit()?;
+        Ok(())
     }
 }
 

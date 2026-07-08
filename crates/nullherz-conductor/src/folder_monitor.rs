@@ -23,37 +23,53 @@ impl FolderMonitor {
 
         for entry in walkdir::WalkDir::new(path).into_iter().flatten() {
             let file_path = entry.path();
-            if file_path.is_file()
-                && let Some(ext) = file_path.extension()
-                    && ext == "wav" {
+            if file_path.is_file() {
+                if let Some(ext) = file_path.extension() {
+                    let ext = ext.to_string_lossy().to_lowercase();
+                    if ext == "wav" || ext == "flac" || ext == "mp3" || ext == "ogg" {
                         self.load_and_register(file_path.to_str().unwrap());
                     }
+                }
+            }
         }
     }
 
     fn load_and_register(&self, path: &str) {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
+        use symphonia::core::audio::Signal;
 
-        // High-Quality WAV Loader for Alpha
-        let buffer = if let Ok(mut reader) = hound::WavReader::open(path) {
-            let spec = reader.spec();
-            match (spec.sample_format, spec.bits_per_sample) {
-                (hound::SampleFormat::Float, 32) => {
-                    let samples: Vec<f32> = reader.samples::<f32>().map(|s| s.unwrap_or(0.0)).collect();
-                    Arc::new(samples)
-                }
-                (hound::SampleFormat::Int, 16) => {
-                    let samples: Vec<f32> = reader.samples::<i16>().map(|s| s.unwrap_or(0) as f32 / 32768.0).collect();
-                    Arc::new(samples)
-                }
-                _ => {
-                    eprintln!("FolderMonitor: Unsupported WAV format ({:?}, {} bits)", spec.sample_format, spec.bits_per_sample);
-                    Arc::new(vec![0.0f32; 44100 * 5])
+        // Use symphonia for multi-format support
+        let buffer = if let Ok(file) = std::fs::File::open(path) {
+            let mss = symphonia::core::io::MediaSourceStream::new(Box::new(file), Default::default());
+            let hint = symphonia::core::probe::Hint::new();
+            let mut probed = symphonia::default::get_probe().format(&hint, mss, &Default::default(), &Default::default()).expect("unsupported format");
+            let mut decoder = symphonia::default::get_codecs().make(&probed.format.default_track().unwrap().codec_params, &Default::default()).expect("unsupported codec");
+
+            let mut samples = Vec::new();
+            let mut sample_buf = None;
+
+            while let Ok(packet) = probed.format.next_packet() {
+                if let Ok(decoded) = decoder.decode(&packet) {
+                    if sample_buf.is_none() {
+                        sample_buf = Some(symphonia::core::audio::AudioBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec()));
+                    }
+                    let buf = sample_buf.as_mut().unwrap();
+                    decoded.convert(buf);
+
+                    // Multi-channel support: Interleave channels for the registry
+                    let chan_len = buf.frames();
+                    let num_chans = buf.spec().channels.count();
+                    for i in 0..chan_len {
+                        for c in 0..num_chans {
+                            samples.push(buf.chan(c)[i]);
+                        }
+                    }
                 }
             }
+            Arc::new(samples)
         } else {
-            eprintln!("FolderMonitor: Failed to open WAV file: {}", path);
+            eprintln!("FolderMonitor: Failed to open file: {}", path);
             Arc::new(vec![0.0f32; 44100 * 5]) // Fallback to silent buffer
         };
 
@@ -64,6 +80,9 @@ impl FolderMonitor {
         let lib = self.library.lock().unwrap();
         if let Ok(Some(_)) = lib.get_track(id) { return; }
 
+        let mut metadata = SampleMetadata::new_empty();
+        metadata.total_samples = buffer.len() as u64;
+
         let track = LibraryTrack {
             id,
             path: path.to_string(),
@@ -72,7 +91,7 @@ impl FolderMonitor {
             album: "Unknown".to_string(),
             genre: "Unknown".to_string(),
             energy_level: 0.5,
-            metadata: SampleMetadata::new_empty(),
+            metadata,
         };
 
         let _ = lib.save_track(&track);

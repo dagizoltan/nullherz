@@ -18,9 +18,31 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             ui.add_space(20.0);
 
             // Waveform Editor Zone
-            let (rect, _response) = ui.allocate_at_least(Vec2::new(ui.available_width(), 200.0), Sense::hover());
+            let (rect, response) = ui.allocate_at_least(Vec2::new(ui.available_width(), 200.0), Sense::click_and_drag());
             ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(10, 10, 15));
             ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_gray(50)));
+
+            if response.dragged() {
+                let current_pos = ui.input(|i| i.pointer.latest_pos()).unwrap_or(egui::pos2(0.0, 0.0));
+                let x_norm = ((current_pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                if let Some((start, _)) = app.editor_selection {
+                    app.editor_selection = Some((start, x_norm));
+                } else {
+                    app.editor_selection = Some((x_norm, x_norm));
+                }
+            }
+            if response.clicked() {
+                let current_pos = ui.input(|i| i.pointer.latest_pos()).unwrap_or(egui::pos2(0.0, 0.0));
+                let x_norm = ((current_pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                app.editor_selection = Some((x_norm, x_norm));
+            }
+
+            if let Some((start, end)) = app.editor_selection {
+                let left = rect.left() + start.min(end) * rect.width();
+                let right = rect.left() + start.max(end) * rect.width();
+                let sel_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(right, rect.bottom()));
+                ui.painter().rect_filled(sel_rect, 0.0, Color32::from_white_alpha(30));
+            }
 
             if let Some(wf_lock) = &app.waveform_renderer {
                 let mut wf = wf_lock.lock().unwrap();
@@ -34,9 +56,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     wf.update_from_mip_waveform(&wgpu.queue, &track.metadata.mip_waveform, zoom, rect.width() as u32);
                 }
 
-                // Call into the GPU painter (this would be handled by egui::PaintCallback in a real integration)
-                // For the purpose of the UI logic, we assume the renderer is bound to the rect.
-                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "[ WAVEFORM VIEWPORT ]", egui::FontId::monospace(14.0), app.theme.accent.gamma_multiply(0.3));
+                nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_lock.clone());
             }
 
             ui.add_space(20.0);
@@ -69,9 +89,23 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 ui.vertical(|ui| {
                     ui.label("ACTIONS");
                     ui.horizontal(|ui| {
-                        if ui.button("✂ CROP").clicked() {}
-                        if ui.button("⚡ NORMALIZE").clicked() {}
-                        if ui.button("🧬 RE-ANALYZE DNA").clicked() {}
+                        if ui.button("✂ CROP").clicked() {
+                            if let Some((s, e)) = app.editor_selection {
+                                let (start, end) = if s < e { (s, e) } else { (e, s) };
+                                let total_samples = track.metadata.total_samples as f32;
+                                let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::Crop {
+                                    sample_id: track.id,
+                                    start_samples: (start * total_samples) as u64,
+                                    end_samples: (end * total_samples) as u64,
+                                }));
+                            }
+                        }
+                        if ui.button("⚡ NORMALIZE").clicked() {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::Normalize { sample_id: track.id }));
+                        }
+                        if ui.button("🧬 RE-ANALYZE DNA").clicked() {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ReAnalyze { sample_id: track.id }));
+                        }
                     });
                 });
             });

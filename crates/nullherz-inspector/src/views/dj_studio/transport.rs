@@ -12,5 +12,13 @@ pub fn render_deck_transport(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
         if ui.add_sized([45.0, 40.0], egui::Button::new(RichText::new("⏸").size(18.0)).fill(Color32::from_gray(35))).clicked() {
             let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::StopDeck { deck_id }));
         }
+        ui.add_space(6.0);
+        if ui.add_sized([45.0, 30.0], egui::Button::new(RichText::new("SYNC").size(12.0)).fill(Color32::from_rgb(0, 100, 150))).clicked() {
+            let master_deck_id = (b'A' + app.master_deck.unwrap_or(0) as u8) as char;
+            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::SyncDecks {
+                source_deck: master_deck_id,
+                target_deck: deck_id,
+            }));
+        }
     });
 }

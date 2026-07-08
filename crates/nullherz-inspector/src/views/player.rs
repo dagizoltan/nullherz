@@ -1,17 +1,20 @@
 use egui::{Ui, ScrollArea, Color32, Frame, Vec2, Sense, Stroke, RichText, Align2};
 use crate::InspectorApp;
 use audio_core::Telemetry;
-use egui_wgpu::wgpu;
-use std::sync::{Arc, Mutex};
 use nullherz_dna::GeneticLibrary;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     ui.horizontal(|ui| {
         ui.heading("Precision Media Player");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button("📂 LOAD FOLDER").clicked() {
-                // Folder monitor logic would go here
+            if ui.button("📂 SCAN").clicked() {
+                let mut path_bytes = [0u8; 256];
+                let bytes = app.ingestion_path.as_bytes();
+                let len = bytes.len().min(256);
+                path_bytes[..len].copy_from_slice(&bytes[..len]);
+                let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ScanFolder { path: path_bytes }));
             }
+            ui.text_edit_singleline(&mut app.ingestion_path);
         });
     });
     ui.add_space(10.0);
@@ -43,19 +46,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     wf.update_globals(&_wgpu.queue, scroll, app.sampler_waveform_zoom, [0.1, 0.4, 1.0, 1.0]);
                 }
 
-                struct WaveformCallback {
-                    renderer: Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>,
-                }
-                impl egui_wgpu::CallbackTrait for WaveformCallback {
-                    fn paint<'a>(&'a self, _info: egui::PaintCallbackInfo, render_pass: &mut wgpu::RenderPass<'a>, _resources: &egui_wgpu::CallbackResources) {
-                        if let Ok(wf) = self.renderer.lock() {
-                            let wf_ptr: *const nullherz_ui_hal::render::waveform_renderer::WaveformRenderer = &*wf;
-                            unsafe { (*wf_ptr).render(render_pass); }
-                        }
-                    }
-                }
-                let callback = egui_wgpu::Callback::new_paint_callback(rect, WaveformCallback { renderer: wf_mtx.clone() });
-                ui.painter().add(callback);
+                nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_mtx.clone());
             }
 
             if let Some(t) = telemetry {
@@ -82,9 +73,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 if ui.add(play_btn.min_size(Vec2::splat(60.0))).clicked() {
                     app.player_is_playing = !app.player_is_playing;
                     if app.player_is_playing {
-                        let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Play));
+                        let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Resume));
                     } else {
-                        let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop));
+                        let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Pause));
                     }
                 }
                 ui.add_space(10.0);
@@ -139,16 +130,34 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 ui.label(format!("{:.1}", track.metadata.bpm));
                 ui.label(format!("{}", track.metadata.root_key.unwrap_or(0.0)));
 
-                if ui.button("LOAD").clicked() {
-                    let deck_char = (b'A' + app.focused_deck as u8) as char;
-                    let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::LoadTrackToDeck {
-                        deck_id: deck_char,
-                        sample_id: track.id,
-                    }));
-                    app.now_playing[app.focused_deck] = Some(track.id);
-                }
+                ui.horizontal(|ui| {
+                    if ui.button("LOAD").clicked() {
+                        let deck_char = (b'A' + app.focused_deck as u8) as char;
+                        let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::LoadTrackToDeck {
+                            deck_id: deck_char,
+                            sample_id: track.id,
+                        }));
+                        app.now_playing[app.focused_deck] = Some(track.id);
+                    }
+                    if ui.button("QUEUE").clicked() {
+                        app.playlist_queue.push_back(track.id);
+                    }
+                });
                 ui.end_row();
             }
         });
+
+        ui.add_space(20.0);
+        ui.heading("Playlist Queue");
+        let mut to_remove = None;
+        for (idx, &track_id) in app.playlist_queue.iter().enumerate() {
+            if let Ok(Some(track)) = app.library_db.get_track(track_id) {
+                ui.horizontal(|ui| {
+                    ui.label(format!("{}. {} - {}", idx + 1, track.artist, track.title));
+                    if ui.button("❌").clicked() { to_remove = Some(idx); }
+                });
+            }
+        }
+        if let Some(idx) = to_remove { app.playlist_queue.remove(idx); }
     });
 }

@@ -194,4 +194,14 @@ impl AudioBackend for AlsaBackend {
             let _ = handle.join();
         }
     }
+
+    fn enumerate_devices(&self) -> Vec<String> {
+        let mut devices = Vec::new();
+        if let Ok(alsa) = AlsaLib::load() {
+             // In a real implementation, we'd use snd_device_name_hint
+             devices.push("default".to_string());
+             devices.push("hw:0,0".to_string());
+        }
+        devices
+    }
 }

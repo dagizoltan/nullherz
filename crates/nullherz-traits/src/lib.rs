@@ -90,6 +90,8 @@ pub enum AudioBackendType {
 pub enum CoreCommand {
     Play,
     Stop,
+    Pause,
+    Resume,
     SetSafeMode(bool),
     RequestSnapshots,
     CommitTopology,
@@ -184,6 +186,11 @@ pub enum PerformanceCommand {
         node_idx: u32,
         cue_idx: u32,
     },
+    SetHotCue {
+        node_idx: u32,
+        cue_idx: u32,
+        position_samples: u64,
+    },
     JumpByBeats {
         node_idx: u32,
         beats: f32,
@@ -242,6 +249,9 @@ pub enum PerformanceCommand {
         node_idx: u32,
         track_idx: u32,
     },
+    Preview {
+        sample_id: u64,
+    },
     PlayNode {
         node_idx: u32,
     },
@@ -254,8 +264,23 @@ pub enum PerformanceCommand {
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]
 pub enum ResourceCommand {
+    ScanFolder {
+        #[serde(with = "serde_big_array::BigArray")]
+        path: [u8; 256],
+    },
     RegisterCapture {
         capture_node_idx: u32,
+        sample_id: u64,
+    },
+    Normalize {
+        sample_id: u64,
+    },
+    Crop {
+        sample_id: u64,
+        start_samples: u64,
+        end_samples: u64,
+    },
+    ReAnalyze {
         sample_id: u64,
     },
     AddSourceFromRegistry {
@@ -1112,6 +1137,7 @@ pub struct SampleMetadata {
     pub beat_grid_offset: u64,
     #[serde(skip)]
     pub peaks: Arc<Vec<f32>>,
+    pub total_samples: u64,
     pub mip_waveform: MipWaveform,
     pub dna: SoundDNA,
     pub midi_map: Option<MidiMap>,
@@ -1127,6 +1153,7 @@ impl SampleMetadata {
             loop_points: None,
             beat_grid_offset: 0,
             peaks: Arc::new(Vec::new()),
+            total_samples: 0,
             mip_waveform: MipWaveform::default(),
             dna: SoundDNA::default(),
             midi_map: None,

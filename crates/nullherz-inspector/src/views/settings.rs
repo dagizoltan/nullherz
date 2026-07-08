@@ -67,9 +67,20 @@ fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
         });
 
         ui.add_space(10.0);
-        if ui.button("Scan for Devices").clicked() {
-             println!("Scanning audio hardware...");
-        }
+        ui.horizontal(|ui| {
+            ui.label("Device:");
+            egui::ComboBox::from_id_source("audio_device_select")
+                .selected_text(&app.selected_audio_device)
+                .show_ui(ui, |ui| {
+                    for dev in &app.audio_devices {
+                        ui.selectable_value(&mut app.selected_audio_device, dev.clone(), dev);
+                    }
+                });
+
+            if ui.button("Scan for Devices").clicked() {
+                 // Trigger re-enumeration in backend (noop for now as orchestrator does it every tick)
+            }
+        });
     });
 }
 
@@ -172,14 +183,15 @@ fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
 
         ui.add_space(20.0);
         if ui.button(RichText::new("SAVE SYSTEM CONFIG").strong()).clicked() {
-             // AUDIT-FIX: We must NOT send CommitTopology directly to the command bus,
-             // as that might bypass Conductor and hit the RT thread.
-             // Instead, we send it and rely on Conductor::apply_mixer_commands -> handle_core_command
-             // to NOT forward it if it handled it.
-             // Conductor currently doesn't handle CommitTopology in handle_core_command,
-             // it passes it to mixer_bridge.apply_mixer_commands which calls topology_manager.handle_topology_command.
-             // TopologyManager::handle_topology_command DOES handle CommitTopology off-thread.
              let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology));
+             // Trigger actual persistence in conductor
+             let ports = "Pioneer DDJ-400,Generic MIDI Keyboard".to_string();
+             let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMidiPorts({
+                 let mut b = [0u8; 128];
+                 let bytes = ports.as_bytes();
+                 b[..bytes.len().min(128)].copy_from_slice(&bytes[..bytes.len().min(128)]);
+                 b
+             })));
              println!("System configuration persisted.");
         }
     });

@@ -18,6 +18,7 @@ fn test_sampler_sync_logic() {
         loop_points: None,
         beat_grid_offset: 0,
         peaks: Arc::new(Vec::new()),
+        total_samples: buffer.len() as u64,
         mip_waveform: nullherz_traits::MipWaveform::default(),
         dna: SoundDNA::default(),
         midi_map: None,

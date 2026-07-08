@@ -32,6 +32,10 @@ impl AnalysisWorker {
         self
     }
 
+    pub fn request_analysis(&mut self, id: u64) {
+        self.processed_ids.remove(&id);
+    }
+
     pub fn start(mut self) {
         std::thread::spawn(move || {
             loop {

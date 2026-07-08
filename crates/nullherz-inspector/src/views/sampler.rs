@@ -2,8 +2,6 @@ use nullherz_dna::GeneticLibrary;
 use egui::{Color32, Ui, Frame, Vec2, Sense, Stroke, RichText, Margin};
 use crate::{InspectorApp, widgets};
 use audio_core::Telemetry;
-use egui_wgpu::wgpu;
-use std::sync::{Arc, Mutex};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     ui.horizontal(|ui| {
@@ -39,20 +37,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                  wf.update_globals(&_wgpu.queue, scroll, app.sampler_waveform_zoom, color);
              }
 
-             struct WaveformCallback {
-                 renderer: Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>,
-             }
-             impl egui_wgpu::CallbackTrait for WaveformCallback {
-                 fn paint<'a>(&'a self, _info: egui::PaintCallbackInfo, render_pass: &mut wgpu::RenderPass<'a>, _resources: &egui_wgpu::CallbackResources) {
-                     if let Ok(wf) = self.renderer.lock() {
-                         let wf_ptr: *const nullherz_ui_hal::render::waveform_renderer::WaveformRenderer = &*wf;
-                         unsafe { (*wf_ptr).render(render_pass); }
-                     }
-                 }
-             }
-
-             let callback = egui_wgpu::Callback::new_paint_callback(rect, WaveformCallback { renderer: wf_mtx.clone() });
-             ui.painter().add(callback);
+             nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_mtx.clone());
         }
 
         if let Some(t) = telemetry {
@@ -100,19 +85,19 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             if ui.selectable_value(&mut app.sampler_input_source, 5, "EXTERNAL IN").clicked() { changed = true; }
                             changed
                         }).inner.unwrap_or(false) {
-                            // Routing Logic: Connect selected source to node 110 (Capture)
+                            // Routing Logic: Connect selected source to Capture node
                             let src_node = match app.sampler_input_source {
-                                0 => 30, // Summing/Master
-                                1 => 4,  // Deck A Gain (heuristic)
-                                2 => 8,  // Deck B Gain
-                                3 => 12, // Deck C Gain
-                                4 => 16, // Deck D Gain
+                                0 => app.get_node_id("master_sum"),
+                                1 => app.get_node_id("deck_a_gain"),
+                                2 => app.get_node_id("deck_b_gain"),
+                                3 => app.get_node_id("deck_c_gain"),
+                                4 => app.get_node_id("deck_d_gain"),
                                 _ => 0,  // Hardware In
                             };
                             let _ = app.command_sender.send(nullherz_traits::Command::Topology(nullherz_traits::TopologyCommand::Connect {
                                 src_node_idx: src_node,
                                 src_output_idx: 0,
-                                dst_node_idx: 110,
+                                dst_node_idx: app.get_node_id("capture_node"),
                                 dst_input_idx: 0,
                             }));
                         }
@@ -122,7 +107,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     ui.horizontal(|ui| {
                         if ui.add(egui::Slider::new(&mut app.sampler_input_gain, 0.0..=4.0)).changed() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                target_id: 110, param_id: 0, value: app.sampler_input_gain, ramp_duration_samples: 0,
+                                target_id: app.get_node_id("capture_node") as u64, param_id: 0, value: app.sampler_input_gain, ramp_duration_samples: 0,
                             }));
                         }
                         if let Some(t) = telemetry {
@@ -135,7 +120,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     ui.label("Monitor");
                     if ui.add(egui::Slider::new(&mut app.sampler_monitor_level, 0.0..=1.0)).changed() {
                         let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                            target_id: 110, param_id: 1, value: app.sampler_monitor_level, ramp_duration_samples: 0,
+                            target_id: app.get_node_id("capture_node") as u64, param_id: 1, value: app.sampler_monitor_level, ramp_duration_samples: 0,
                         }));
                     }
                     ui.end_row();
@@ -144,7 +129,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     ui.horizontal(|ui| {
                         if ui.checkbox(&mut app.sampler_is_stereo, "Stereo").changed() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                target_id: 110, param_id: 2, value: if app.sampler_is_stereo { 1.0 } else { 0.0 }, ramp_duration_samples: 0,
+                                target_id: app.get_node_id("capture_node") as u64, param_id: 2, value: if app.sampler_is_stereo { 1.0 } else { 0.0 }, ramp_duration_samples: 0,
                             }));
                         }
                     });
@@ -162,20 +147,22 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     if ui.add(rec_btn.min_size(Vec2::new(100.0, 32.0))).clicked() {
                         app.sampler_is_recording = !app.sampler_is_recording;
                         let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                            target_id: 110, param_id: 3, value: if app.sampler_is_recording { 1.0 } else { 0.0 }, ramp_duration_samples: 0,
+                            target_id: app.get_node_id("capture_node") as u64, param_id: 3, value: if app.sampler_is_recording { 1.0 } else { 0.0 }, ramp_duration_samples: 0,
                         }));
                     }
 
                     if ui.add(egui::Button::new("RESET").min_size(Vec2::new(60.0, 32.0))).clicked() {
                         let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                            target_id: 110, param_id: 4, value: 1.0, ramp_duration_samples: 0,
+                            target_id: app.get_node_id("capture_node") as u64, param_id: 4, value: 1.0, ramp_duration_samples: 0,
                         }));
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(RichText::new("COMMIT").strong().color(app.theme.accent)).clicked() {
+                            let sample_id = app.next_sample_id;
+                            app.next_sample_id += 1;
                             let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::RegisterCapture {
-                                capture_node_idx: 110, sample_id: 0,
+                                capture_node_idx: app.get_node_id("capture_node"), sample_id,
                             }));
                         }
                     });
@@ -192,7 +179,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 ui.horizontal(|ui| {
                     if ui.checkbox(&mut app.sampler_slicer_mode, "ENABLE SLICER").changed() {
                         let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                            target_id: 100, param_id: 3, value: if app.sampler_slicer_mode { 1.0 } else { 0.0 }, ramp_duration_samples: 0,
+                            target_id: app.get_node_id("sampler_node") as u64, param_id: 3, value: if app.sampler_slicer_mode { 1.0 } else { 0.0 }, ramp_duration_samples: 0,
                         }));
                     }
                 });
@@ -211,7 +198,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                             if ui.add(btn).clicked() {
                                 let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::TriggerSlice {
-                                    node_idx: 100, slice_idx: idx as u32,
+                                    node_idx: app.get_node_id("sampler_node"), slice_idx: idx as u32,
                                 }));
                             }
                         }

@@ -349,6 +349,23 @@ impl Conductor {
         // Update Calibration Telemetry from cached state
         telemetry.calibration_samples = self.calibration_samples;
 
+        // Sync node name registry to telemetry
+        for (i, (name, &idx)) in self.mixer_manager.node_names.iter().enumerate().take(32) {
+            let bytes = name.as_bytes();
+            let len = bytes.len().min(32);
+            telemetry.node_map_keys[i][..len].copy_from_slice(&bytes[..len]);
+            telemetry.node_map_values[i] = idx;
+        }
+
+        // Sync audio devices to telemetry
+        if let Some(ref backend) = self.engine_coordinator.backend_manager.backend {
+            for (i, dev) in backend.enumerate_devices().iter().enumerate().take(16) {
+                let bytes = dev.as_bytes();
+                let len = bytes.len().min(64);
+                telemetry.audio_devices[i].name[..len].copy_from_slice(&bytes[..len]);
+            }
+        }
+
         // Stage 2: Waveform Telemetry Extraction
         let decks = ['A', 'B', 'C', 'D'];
         for (i, &deck_id) in decks.iter().enumerate().take(4) {
@@ -424,6 +441,24 @@ impl Conductor {
         match cmd {
             nullherz_traits::CoreCommand::SwitchBackend(backend_type) => {
                 let _ = self.switch_backend(backend_type);
+                true
+            }
+            nullherz_traits::CoreCommand::Pause => {
+                if let Some(ref prod) = self.engine_coordinator.command_producer {
+                    let _ = prod.push_command(nullherz_traits::TimestampedCommand {
+                        timestamp_samples: 0,
+                        command: nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop),
+                    });
+                }
+                true
+            }
+            nullherz_traits::CoreCommand::Resume => {
+                if let Some(ref prod) = self.engine_coordinator.command_producer {
+                    let _ = prod.push_command(nullherz_traits::TimestampedCommand {
+                        timestamp_samples: 0,
+                        command: nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Play),
+                    });
+                }
                 true
             }
             nullherz_traits::CoreCommand::SetMasterDeck(deck_id) => {
@@ -546,6 +581,23 @@ impl Conductor {
                 println!("Conductor: Clearing Pattern for Track {}", track_idx);
                 true
             }
+            nullherz_traits::PerformanceCommand::Preview { sample_id } => {
+                if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                    // Logic to load into a designated preview node
+                    let preview_node_idx = self.mixer_manager.node_names.get("preview_node").cloned().unwrap_or(111);
+                    if let Some(sample) = self.transfusion_manager.sample_registry.get(sample_id) {
+                         let _ = prod.push(nullherz_traits::TopologyMutation::AddSource {
+                            node_idx: preview_node_idx,
+                            buffer: sample.buffer,
+                            sample_id,
+                            metadata: Some(Arc::new(sample.metadata)),
+                        });
+                        // Trigger Play on the preview node
+                        let _ = self.handle_performance_command(nullherz_traits::PerformanceCommand::PlayNode { node_idx: preview_node_idx });
+                    }
+                }
+                true
+            }
             nullherz_traits::PerformanceCommand::SyncDecks { source_deck, target_deck } => {
                 let src_sampler_id = self.mixer_manager.deck_mappings.get(&source_deck).map(|d| d.sampler_id);
                 let dst_sampler_id = self.mixer_manager.deck_mappings.get(&target_deck).map(|d| d.sampler_id);
@@ -593,6 +645,47 @@ impl Conductor {
 
     fn handle_resource_command(&mut self, cmd: nullherz_traits::ResourceCommand) -> bool {
         match cmd {
+            nullherz_traits::ResourceCommand::ScanFolder { path } => {
+                let folder_path = String::from_utf8_lossy(&path).trim_matches(char::from(0)).to_string();
+                if let Some(ref monitor) = self.folder_monitor {
+                    monitor.scan_folder(&folder_path);
+                }
+                true
+            }
+            nullherz_traits::ResourceCommand::Normalize { sample_id } => {
+                if let Some(mut sample) = self.transfusion_manager.sample_registry.get(sample_id) {
+                    let mut max_peak = 0.0f32;
+                    for &s in sample.buffer.iter() { max_peak = max_peak.max(s.abs()); }
+                    if max_peak > 0.0 {
+                        let gain = 0.95 / max_peak;
+                        let mut new_buf = (*sample.buffer).clone();
+                        for s in new_buf.iter_mut() { *s *= gain; }
+                        sample.buffer = Arc::new(new_buf);
+                        self.transfusion_manager.sample_registry.register_with_metadata(sample_id, sample.buffer, sample.metadata);
+                    }
+                }
+                true
+            }
+            nullherz_traits::ResourceCommand::Crop { sample_id, start_samples, end_samples } => {
+                 if let Some(mut sample) = self.transfusion_manager.sample_registry.get(sample_id) {
+                     let start = start_samples as usize;
+                     let end = (end_samples as usize).min(sample.buffer.len());
+                     if start < end {
+                         let cropped = sample.buffer[start..end].to_vec();
+                         sample.buffer = Arc::new(cropped);
+                         self.transfusion_manager.sample_registry.register_with_metadata(sample_id, sample.buffer, sample.metadata);
+                     }
+                 }
+                 true
+            }
+            nullherz_traits::ResourceCommand::ReAnalyze { sample_id } => {
+                 if let Some(_) = self.transfusion_manager.sample_registry.get(sample_id) {
+                     if let Some(ref mut worker) = self.analysis_worker {
+                         worker.request_analysis(sample_id);
+                     }
+                 }
+                 true
+            }
             nullherz_traits::ResourceCommand::CommitBreeding { parent_a_id, parent_b_id, bias } => {
                 let lib = self.library.lock().unwrap();
                 self.transfusion_manager.commit_breeding(parent_a_id, parent_b_id, bias, &lib);

@@ -26,3 +26,4 @@ nullherz-gateway = { path = "../nullherz-gateway" }
 audio-dsp = { path = "../audio-dsp" }
 rayon = "1.10"
 walkdir = "2.5"
+symphonia = { version = "0.5", features = ["all"] }
