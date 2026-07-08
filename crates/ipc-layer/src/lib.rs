@@ -804,6 +804,7 @@ pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
         return;
     }
 
+    nullherz_traits::mark_as_rt_thread();
     let _ = crate::set_rt_priority(priority);
 
     if let Some(id) = cpu_id {
