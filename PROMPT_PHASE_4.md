@@ -1,36 +1,43 @@
-### **Architectural Directive: Nullherz Phase 4 - Advanced Synthesis & Cryptographic Hardening**
+### **Architectural Directive: Nullherz Phase 4 - Production Studio Hardening & Performance**
 
 **Context:**
-The Nullherz system has transitioned to a fixed-size, array-backed topology system with a decoupled, trait-based Sample Registry. Real-time safety is enforced via `Arc<SampleMetadata>` for zero-copy transfers and an optimized `StandardKernel` that batches simultaneous commands to minimize sub-block fragmentation. Node indices are standardized as `u32`, and the processor factory system is capability-aware.
+Nullherz has successfully stabilized its core execution plane with fixed-size array topologies, O(1) metadata transfers via `Arc<SampleMetadata>`, and an optimized processing kernel that minimizes sub-block fragmentation. The system is now ready to move beyond "DNA-centric" experimentation and toward professional-grade studio and performance features.
 
 **Objective:**
-Proceed with the implementation of Stage 7 synthesis features, harden the federated genetic cloud with cryptographic verification, and restore logic coverage for the DNA intelligent curation layer.
+Evolve the engine toward traditional high-performance DAW features, including sophisticated signal routing, automated latency compensation, and robust external plugin integration.
 
 **Core Tasks:**
 
-1.  **Stage 7: Frequency-Domain Spectral Morphing**
-    *   Implement the `Phase Vocoder` logic within `ProcessorGraph::process_parallel`.
-    *   Utilize the pre-allocated SIMD-aligned FFT buffers to perform magnitude-spectrum blending between the `old_path_buffers` and active `buffers` during structural topology swaps.
-    *   Ensure the morphing logic respects the `morph_duration_samples` parameter and provides seamless timbre transitions without phase-cancellation artifacts.
+1.  **Dynamic Plugin Delay Compensation (PDC)**
+    *   Implement a dynamic PDC algorithm in the `GraphCompiler`.
+    *   Traverse the DAG and utilize the `latency_samples()` method from the `AudioProcessor` trait to calculate required look-ahead buffers for each node path.
+    *   Update the `GraphExecutor` to insert ring-buffer based delays on "fast" paths to ensure phase-coherent summing at merge points.
 
-2.  **Cryptographic Cloud Hardening**
-    *   The `DiscoveryService` currently marks `NEW_DNA` announcements as an audit risk. Implement Ed25519 signing for these messages.
-    *   Harder the Gossip protocol: Ensure peers verify the signature of the serialized DNA against the `signer_public_key` before persisting it to the `LibraryDatabase`.
-    *   Transition the Gossip pull mechanism to a fully non-blocking task using the existing `tokio` integration in `nullherz-conductor`.
+2.  **Multi-Bus Studio Architecture**
+    *   Refactor `MixerManager` to support a "Studio Layout" beyond the 4-deck DJ model.
+    *   Introduce `Aux Bus` and `Master Bus` nodes with dedicated send/return routing.
+    *   Harder the `SummingProcessor` with SIMD-optimized saturation kernels (tanh/soft-clip) to provide a "Musical Master" ceiling.
 
-3.  **DNA Logic Restoration & SIMD Kernels**
-    *   Restore and update the `test_smart_crate_filtering` and `test_smart_crate_genre_and_bpm` tests in `nullherz-dna`. These were sidelined during the `Arc` refactor and require boilerplate updates for the new fixed-size metadata structures.
-    *   Expand the `audio-dsp` Wasm-SIMD pathways. Identify scalar loops in the `AnalysisKernel` (specifically Formant Peak detection) and implement 4-wide or 8-wide SIMD kernels to reduce analysis latency.
+3.  **Sidecar IPC & SDK Standardisation**
+    *   Harden the `fx-runtime` for non-Wasm (native process) sidecars.
+    *   Implement a shared-memory (SHM) fast-path for MIDI events and parameter automation between the `Conductor` and external processes, reducing TCP/UDP overhead.
+    *   Standardize the `sidecar-sdk` to support "Side-Chain Input" by allowing processors to request additional physical buffer assignments during registration.
 
-4.  **Hardware-Aligned Telemetry**
-    *   Optimize the `TelemetryProducer` path. Instead of `AtomicU64` arrays, investigate the use of a lock-free circular buffer for high-resolution cycle-count history to support "Execution Plane Jitter" visualization in the Inspector UI.
+4.  **High-Performance Disk Streaming**
+    *   The current `SampleBuffer` is entirely memory-resident. Implement a `StreamingSamplerProcessor`.
+    *   Utilize a background thread-pool in `nullherz-conductor` to manage ring-buffer pre-filling from disk (WAV/FLAC) based on current playback head positions.
+    *   Ensure the RT-thread only interacts with pre-allocated memory-mapped regions or lock-free queues.
+
+5.  **Traditional MIDI Engine Refinement**
+    *   Implement a `MidiSequenceKernel` supporting standard `.mid` ingestion.
+    *   Add a real-time "Quantize" transformation to the `SequencerProcessor` with adjustable swing and strength.
 
 **Constraints:**
-*   **RT-Hygiene:** Absolute zero allocations on the RT thread. Use the `assert_rt_safe!` macro.
-*   **ABI Stability:** Maintain the `u32` index standard for all `TopologyCommand` and `MixerCommand` variants.
-*   **Memory Pressure:** Continue using the `Box<[T; MAX_NODES]>` pattern for large arrays in the `GraphCompiler` to prevent stack overflows.
+*   **RT-Hygiene:** Maintain absolute zero-allocation in the `audio-core`.
+*   **Backwards Compatibility:** Ensure existing `MixerCommand` and `TopologyCommand` structures remain compatible.
+*   **Resource Caps:** Respect the `MAX_NODES` (64) and `MAX_CHANNELS` (16) limits enforced by the new array-backed topology.
 
 **Definition of Done:**
-*   Successful 1024-point FFT-based spectral morph verified in a test case.
-*   Signed DNA exchange verified between two mock discovery peers.
-*   Restored logic tests in `nullherz-dna` passing with 100% coverage of the `GeneticLibrary` query logic.
+*   PDC verified by measuring zero-phase deviation between a latent path and a dry path in `integration_tests.rs`.
+*   External sidecar running with < 1ms IPC jitter.
+*   Multi-track WAV playback (4+ tracks) running without memory spikes or dropouts using the new streaming engine.
