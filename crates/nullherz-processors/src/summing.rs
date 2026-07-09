@@ -17,7 +17,21 @@ impl SummingProcessor {
 impl nullherz_traits::SignalProcessor for SummingProcessor {
 fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if outputs.is_empty() { return; }
-        self.inner.process_16_to_1_simd(inputs, outputs[0]);
+        self.inner.process_16_to_1_simd(inputs, &mut outputs[0]);
+
+        // Hardened Master Ceiling with SIMD soft-clipping
+        let out = &mut outputs[0];
+        let mut i = 0;
+        while i + 4 <= out.len() {
+            let v = audio_dsp::simd_vec::load_f32x4(out, i);
+            let clipped = audio_dsp::simd_vec::soft_clip_simd(v);
+            audio_dsp::simd_vec::store_f32x4(out, i, clipped);
+            i += 4;
+        }
+        while i < out.len() {
+            out[i] = out[i].tanh();
+            i += 1;
+        }
     }
 }
 

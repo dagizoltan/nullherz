@@ -52,4 +52,22 @@
 
 ---
 
-**Architectural Recommendation:** *Finalize these schemas before implementing "Key Sync" or "Loop Slicer" to ensure they are built on the new modular foundation.*
+## 5. High-Performance DAW Features (Stage 8)
+**Focus:** Professional signal routing, automated latency management, and disk streaming.
+
+### Dynamic Plugin Delay Compensation (PDC)
+The `GraphCompiler` now performs a full DAG traversal to calculate path latencies. Required compensation delays are determined for each branch to ensure phase-coherent summing at merge points. The `GraphExecutor` applies these delays using efficient ring buffers.
+
+### Multi-Bus Studio Architecture
+Expansion beyond the DJ model to a flexible studio layout.
+*   **Aux Busses:** Support for dedicated send/return routing with independent FX chains.
+*   **Master Bus Hardening:** The master summing node is hardened with SIMD-optimized tanh soft-clipping, providing a "Musical Master" ceiling that prevents digital clipping while adding harmonic character.
+
+### High-Performance Disk Streaming
+The `StreamingSamplerProcessor` enables playback of multi-gigabyte sample libraries without exhausting RAM.
+*   **Background Pre-filling:** A dedicated thread pool in the `Conductor` manages non-blocking disk I/O.
+*   **RT-Hygiene:** The audio thread interacts exclusively with lock-free ring buffers, ensuring zero-allocation during streaming playback.
+
+---
+
+**Architectural Recommendation:** *Utilize the new PDC infrastructure for all future spectral and temporal sidecars to maintain phase integrity across complex routing topologies.*

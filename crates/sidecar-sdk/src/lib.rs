@@ -26,6 +26,7 @@ impl MemoryMapper for NativeMemoryMapper {
 pub struct SidecarHost<M: MemoryMapper = NativeMemoryMapper> {
     mapper: M,
     shm_cmd: M::Mapping,
+    shm_midi: Option<M::Mapping>,
     shm_signal: M::Mapping,
     shm_inputs: Vec<M::Mapping>,
     shm_outputs: Vec<M::Mapping>,
@@ -57,6 +58,7 @@ impl<M: MemoryMapper> SidecarHost<M> {
         Self {
             mapper,
             shm_cmd,
+            shm_midi: None,
             shm_signal,
             shm_inputs,
             shm_outputs,
@@ -94,6 +96,7 @@ pub struct SidecarContext<'a, P: AudioProcessor> {
     processor: P,
     extension_handler: Option<Box<dyn SidecarExtensionHandler>>,
     command_buffer: &'a ShmRingBuffer<nullherz_traits::TimestampedCommand>,
+    midi_buffer: Option<&'a ShmRingBuffer<nullherz_traits::MidiEvent>>,
     #[allow(dead_code)]
     feedback_buffer: Option<&'a ShmRingBuffer<nullherz_traits::ProcessorMetadata>>,
     input_buffers: Vec<&'a ShmRingBuffer<AudioBlock>>,
@@ -138,6 +141,7 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
             processor,
             extension_handler: None,
             command_buffer,
+            midi_buffer: None,
             feedback_buffer: None,
             input_buffers,
             output_buffers,
@@ -153,6 +157,13 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
 
     pub fn process_once(&mut self) {
         self.signal.pulse_heartbeat();
+
+        if let Some(midi_rb) = self.midi_buffer {
+            while let Some(event) = midi_rb.pop() {
+                self.processor.apply_midi(event, None);
+            }
+        }
+
         while let Some(ts_cmd) = self.command_buffer.pop() {
             match &ts_cmd.command {
                 nullherz_traits::Command::Extension(envelope) => {

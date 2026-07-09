@@ -21,6 +21,8 @@ pub struct SequencerProcessor {
     current_sample: u64,
     patterns: [Pattern; 16], // 16 patterns in memory
     active_pattern: usize,
+    pub quantize_amount: f32, // 0.0 to 1.0
+    pub swing: f32,           // 0.0 to 1.0
 }
 
 impl SequencerProcessor {
@@ -31,6 +33,8 @@ impl SequencerProcessor {
             current_sample: 0,
             patterns: [Pattern::default(); 16],
             active_pattern: 0,
+            quantize_amount: 1.0,
+            swing: 0.0,
         }
     }
 }
@@ -61,15 +65,29 @@ fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &
 
             if next_step_sample < block_end_sample {
                 let pattern = &self.patterns[self.active_pattern];
+
+                // Real-time Quantize & Swing
+                let is_even_step = next_step_idx % 2 == 0;
+                let swing_offset_samples = if !is_even_step {
+                    (self.swing as f64 * samples_per_step * 0.5) as u64
+                } else {
+                    0
+                };
+
                 let step_idx = (next_step_idx % pattern.len as u64) as usize;
-                let sample_offset = next_step_sample.saturating_sub(block_start_sample);
+                let sample_offset = next_step_sample.saturating_sub(block_start_sample) + swing_offset_samples;
 
                 if let Some(host) = context.host {
                     for track in 0..16 {
                         let velocity = pattern.grid[track][step_idx];
                         if velocity > 0.0 {
+                            // STAGE 8 Quantization Logic: Corrected to adjust timing offset
+                            // quantize_amount = 1.0 (hard-locked to grid), 0.0 (unquantized)
+                            let quantized_offset = 0; // Relative to step start
+                            let final_offset = (sample_offset as f32 * (1.0 - self.quantize_amount) + quantized_offset as f32 * self.quantize_amount) as u64;
+
                             host.push_command(
-                                self.current_sample + sample_offset.min(block_len - 1),
+                                self.current_sample + final_offset.min(block_len - 1),
                                 nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                     target_id: (70 + track as u64), // Placeholder targeting
                                     param_id: 0, // Gain/Velocity
@@ -117,6 +135,8 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
                     self.patterns[self.active_pattern].len = l;
                 }
             }
+            2 => self.quantize_amount = value.clamp(0.0, 1.0),
+            3 => self.swing = value.clamp(0.0, 1.0),
             _ => {}
         }
     }

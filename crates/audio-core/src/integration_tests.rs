@@ -141,4 +141,73 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         // 4. Verify telemetry (indirectly) and state
         assert_eq!(engine.transport.sample_rate, 44100.0);
     }
+
+    #[test]
+    fn test_pdc_phase_coherence() {
+        // 1. Setup Engine
+        let cmd_buffer = Arc::new(ipc_layer::MpscRingBuffer::<nullherz_traits::TimestampedCommand>::new(256));
+        let (tel_prod, _tel_cons) = RingBuffer::<nullherz_traits::telemetry::Telemetry>::new(1024).split();
+        let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn nullherz_traits::AudioProcessor>>::new(1024).split();
+
+        let mut graph = ProcessorGraph::new();
+        graph.set_garbage_producer(Box::new(garbage_prod));
+
+        // Path A: Dry (0 latency)
+        struct DryProcessor;
+        impl nullherz_traits::SignalProcessor for DryProcessor {
+            fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {
+                if !inputs.is_empty() && !outputs.is_empty() { outputs[0].copy_from_slice(inputs[0]); }
+            }
+        }
+        impl nullherz_traits::MidiResponder for DryProcessor {}
+        impl nullherz_traits::SnapshotProvider for DryProcessor {}
+        impl AudioProcessor for DryProcessor {
+            fn as_any(&self) -> &dyn std::any::Any { self }
+            fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+        }
+
+        // Path B: Latent (128 samples latency)
+        struct LatentProcessor { latency: usize }
+        impl nullherz_traits::SignalProcessor for LatentProcessor {
+            fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut nullherz_traits::ProcessContext) {
+                // In a real test we'd actually delay, but here we just report latency
+                if !inputs.is_empty() && !outputs.is_empty() { outputs[0].copy_from_slice(inputs[0]); }
+            }
+            fn latency_samples(&self) -> usize { self.latency }
+        }
+        impl nullherz_traits::MidiResponder for LatentProcessor {}
+        impl nullherz_traits::SnapshotProvider for LatentProcessor {}
+        impl AudioProcessor for LatentProcessor {
+            fn as_any(&self) -> &dyn std::any::Any { self }
+            fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+        }
+
+        graph.add_node(Box::new(DryProcessor), vec![10], vec![11]); // Node 0
+        graph.add_node(Box::new(LatentProcessor { latency: 128 }), vec![10], vec![12]); // Node 1
+
+        // Summing Node
+        let mut summing = Box::new(nullherz_processors::SummingProcessor::new(100));
+        graph.add_node(summing, vec![11, 12], vec![0]); // Node 2
+
+        graph.calculate_stages();
+
+        let active_idx = graph.topology_coordinator.active_idx();
+        let topo = &graph.topology_coordinator.topologies[active_idx];
+
+        // Verify PDC calculation
+        // Dry path (Node 0) should have 128 samples of input delay compensation
+        // Latent path (Node 1) should have 0 samples of input delay compensation
+        // Wait, PDC usually applies to the summation point or at the start.
+        // In my implementation:
+        // path_latencies[0] = 0
+        // path_latencies[1] = 0
+        // current_path_lat_0 = 0 + 0 = 0
+        // current_path_lat_1 = 0 + 128 = 128
+        // path_latencies[2] = max(0, 128) = 128
+        // input_delays[2][0] = 128 - (0 + 0) = 128
+        // input_delays[2][1] = 128 - (0 + 128) = 0
+
+        assert_eq!(topo.plan.input_delays[2].0[0], 128);
+        assert_eq!(topo.plan.input_delays[2].0[1], 0);
+    }
 }
