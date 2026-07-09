@@ -54,6 +54,14 @@ All messages over TCP use a 4-byte Big-Endian length prefix, followed by the pay
 - **Payload:** Memory-mapped `AudioBlock` segments.
 - **Usage:** Near-zero CPU overhead return path for extreme-density multi-machine DSP environments.
 
+### Type 8: MIDI & Automation Fast-Path (Conductor -> Sidecar)
+- **Mechanism:** Shared Memory (SHM) Ring Buffer.
+- **Payload:** `nullherz_traits::MidiEvent`.
+- **Usage:** Low-latency delivery of high-frequency MIDI events and parameter automation, bypassing the TCP/UDP stack for local sidecars.
+
+## Side-Chain Input Support
+Sidecars can now request additional physical buffer assignments during registration. The `sidecar-sdk` supports multi-input mappings, allowing for sophisticated side-chain compression and modular routing configurations within external DSP processes.
+
 ## Type-Safety & ABI Invariants
 
 1. **Alignment:** All `AudioBlock` payloads MUST be 64-byte aligned and 1088 bytes in size (including padding).
