@@ -66,6 +66,19 @@ impl GraphCompiler {
 
             for i in 0..n {
                 if !is_processed[i] && in_degree[i] == 0 {
+                    // PERF-09: Static Graph Pruning
+                    // If a node is bypassed, we still need to "process" it for Kahn's
+                    // to satisfy dependencies, but we omit it from the execution plan
+                    // to reclaim CPU cycles.
+                    if topo.bypass_states[i] {
+                        is_processed[i] = true;
+                        processed_count += 1;
+                        for &dependent in adj[i].iter().take(adj_count[i]) {
+                            in_degree[dependent] -= 1;
+                        }
+                        continue;
+                    }
+
                     // Check for RAW/WAR/WAW collision with other nodes in the stage
                     let mut collision = false;
                     let routing = &topo.routing[i];
@@ -546,6 +559,51 @@ mod tests {
             }
         }
         assert!(proxy_detected, "Proxy node was not injected for cross-boundary edge");
+    }
+
+    #[test]
+    fn test_static_graph_pruning() {
+        let mut v2p = [0u32; MAX_NODES];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
+        let mut topo = GraphTopology {
+            routing: [NodeRouting {
+                input_indices: [0; 16],
+                output_indices: [0; 16],
+                input_count: 0,
+                output_count: 0,
+                input_delays: [0; 16],
+            }; MAX_NODES],
+            virtual_to_physical: v2p,
+            plan: CompiledGraphPlan::default(),
+            crossfades: [None; 8],
+            node_count: 2,
+            node_assignments: [nullherz_traits::NodeAssignment([0; 32]); MAX_NODES],
+            node_positions: [None; MAX_NODES],
+            bypass_states: [false; MAX_NODES],
+        };
+
+        // Node 0 (active) -> Node 1 (bypassed)
+        topo.routing[0].output_indices[0] = 10;
+        topo.routing[0].output_count = 1;
+        topo.routing[1].input_indices[0] = 10;
+        topo.routing[1].input_count = 1;
+        topo.bypass_states[1] = true;
+
+        let plan = GraphCompiler::compile(&topo).expect("Compilation failed");
+
+        // Node 0 should be in the plan, Node 1 should be pruned
+        let mut node_0_found = false;
+        let mut node_1_found = false;
+
+        for s in 0..plan.num_stages {
+            for &node_idx in &plan.stages[s].0[..plan.stage_counts[s] as usize] {
+                if node_idx == 0 { node_0_found = true; }
+                if node_idx == 1 { node_1_found = true; }
+            }
+        }
+
+        assert!(node_0_found);
+        assert!(!node_1_found, "Bypassed node was not pruned from the execution plan");
     }
 
     #[test]

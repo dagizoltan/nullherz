@@ -253,11 +253,14 @@ impl FloatX16 {
         }
         #[cfg(all(not(target_feature = "avx512f"), target_arch = "wasm32", target_feature = "simd128"))]
         {
+            use std::arch::wasm32::*;
+            // Wasm SIMD128 bitselect(on_true, on_false, mask)
+            // mask is self.parts[i]
             Self { parts: [
-                self.parts[0].blend(on_true.parts[0], on_false.parts[0]),
-                self.parts[1].blend(on_true.parts[1], on_false.parts[1]),
-                self.parts[2].blend(on_true.parts[2], on_false.parts[2]),
-                self.parts[3].blend(on_true.parts[3], on_false.parts[3]),
+                v128_bitselect(on_true.parts[0], on_false.parts[0], self.parts[0]),
+                v128_bitselect(on_true.parts[1], on_false.parts[1], self.parts[1]),
+                v128_bitselect(on_true.parts[2], on_false.parts[2], self.parts[2]),
+                v128_bitselect(on_true.parts[3], on_false.parts[3], self.parts[3]),
             ]}
         }
         #[cfg(all(not(target_feature = "avx512f"), not(all(target_arch = "wasm32", target_feature = "simd128"))))]

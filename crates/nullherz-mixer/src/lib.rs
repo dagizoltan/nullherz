@@ -34,10 +34,67 @@ impl MixerManager {
         }
     }
 
-    pub fn validate_topology(&self) -> Result<(), String> {
+    pub fn validate_topology(&self, commands: &[nullherz_traits::Command]) -> Result<(), String> {
         if self.id_allocator.current_node_id() >= nullherz_traits::MAX_NODES as u32 {
             return Err(format!("Mixer topology exceeds MAX_NODES ({})", nullherz_traits::MAX_NODES));
         }
+
+        // Kahn's Algorithm for Cycle Detection
+        let mut in_degree = std::collections::HashMap::new();
+        let mut adj = std::collections::HashMap::new();
+        let mut nodes = std::collections::HashSet::new();
+
+        for cmd in commands {
+            if let Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx, .. }) = cmd {
+                nodes.insert(*node_idx);
+                in_degree.entry(*node_idx).or_insert(0);
+            }
+        }
+
+        // We need to track buffer producers to find edges between nodes
+        let mut buffer_producers = std::collections::HashMap::new();
+        for cmd in commands {
+             if let Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx, new_buffer_idx, .. }) = cmd {
+                 buffer_producers.insert(*new_buffer_idx, *node_idx);
+             }
+        }
+
+        for cmd in commands {
+            if let Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx, new_buffer_idx, .. }) = cmd {
+                if let Some(&src_node) = buffer_producers.get(new_buffer_idx) {
+                    if src_node != *node_idx {
+                        adj.entry(src_node).or_insert_with(Vec::new).push(*node_idx);
+                        *in_degree.entry(*node_idx).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        let mut queue = std::collections::VecDeque::new();
+        for (&node, &degree) in &in_degree {
+            if degree == 0 {
+                queue.push_back(node);
+            }
+        }
+
+        let mut count = 0;
+        while let Some(u) = queue.pop_front() {
+            count += 1;
+            if let Some(neighbors) = adj.get(&u) {
+                for &v in neighbors {
+                    let degree = in_degree.get_mut(&v).unwrap();
+                    *degree -= 1;
+                    if *degree == 0 {
+                        queue.push_back(v);
+                    }
+                }
+            }
+        }
+
+        if count < in_degree.len() {
+            return Err("Cycle detected in mixer topology!".to_string());
+        }
+
         Ok(())
     }
 
@@ -163,13 +220,14 @@ mod tests {
         // Studio strip with no FX should have:
         // 1. AddNode (Gain)
         // 2. UpdateEdge (Input)
-        // 3. UpdateOutputEdge (Gain Out)
-        // 4. AddNode (Fader)
-        // 5. UpdateEdge (Fader L)
-        // 6. UpdateEdge (Fader R)
-        // 7. UpdateOutputEdge (Master L)
-        // 8. UpdateOutputEdge (Master R)
-        assert_eq!(commands.len(), 8);
+        // 3. UpdateOutputEdge (Gain Out L)
+        // 4. UpdateOutputEdge (Gain Out R)
+        // 5. AddNode (Fader)
+        // 6. UpdateEdge (Fader L)
+        // 7. UpdateEdge (Fader R)
+        // 8. UpdateOutputEdge (Master L)
+        // 9. UpdateOutputEdge (Master R)
+        assert_eq!(commands.len(), 9);
 
 
     }
@@ -215,9 +273,38 @@ mod tests {
     }
 
     #[test]
+    fn test_topology_cycle_detection() {
+        let mut mixer = MixerManager::new();
+        let node_a = 0;
+        let node_b = 1;
+        let buf_a = 10;
+        let buf_b = 11;
+
+        let mut commands = vec![
+            Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: node_a, processor_type_id: ProcessorTypeId::GAIN }),
+            Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: node_b, processor_type_id: ProcessorTypeId::GAIN }),
+            // A -> B
+            Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: node_a, output_idx: 0, new_buffer_idx: buf_a }),
+            Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: node_b, input_idx: 0, new_buffer_idx: buf_a }),
+            // B -> A (Cycle!)
+            Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: node_b, output_idx: 0, new_buffer_idx: buf_b }),
+            Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: node_a, input_idx: 0, new_buffer_idx: buf_b }),
+        ];
+
+        let res = mixer.validate_topology(&commands);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), "Cycle detected in mixer topology!");
+
+        // Remove the back edge to break the cycle
+        commands.pop();
+        assert!(mixer.validate_topology(&commands).is_ok());
+    }
+
+    #[test]
     fn test_mixer_manager_4channel_connectivity() {
         let mut mixer = MixerManager::new();
         let commands = mixer.create_4channel_mixer();
+        assert!(mixer.validate_topology(&commands).is_ok());
 
         let mut nodes_with_outputs = std::collections::HashSet::new();
         let mut nodes_with_inputs = std::collections::HashSet::new();
