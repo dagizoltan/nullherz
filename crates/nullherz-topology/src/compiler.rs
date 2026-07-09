@@ -71,7 +71,7 @@ impl GraphCompiler {
                     let routing = &topo.routing[i];
 
                     for k in 0..routing.output_count {
-                        let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                        let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % 64) as usize;
                         let p_out = topo.virtual_to_physical[v_out] as usize;
                         if physical_writes_in_stage[p_out] || physical_reads_in_stage[p_out] {
                             collision = true;
@@ -81,7 +81,7 @@ impl GraphCompiler {
                     if collision { continue; }
 
                     for k in 0..routing.input_count {
-                        let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                        let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % 64) as usize;
                         let p_in = topo.virtual_to_physical[v_in] as usize;
                         if physical_writes_in_stage[p_in] {
                             collision = true;
@@ -93,12 +93,12 @@ impl GraphCompiler {
                         stage_nodes[stage_count] = i as u32;
                         stage_count += 1;
                         for k in 0..routing.output_count {
-                            let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                            let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % 64) as usize;
                             let p_out = topo.virtual_to_physical[v_out] as usize;
                             physical_writes_in_stage[p_out] = true;
                         }
                         for k in 0..routing.input_count {
-                            let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                            let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % 64) as usize;
                             let p_in = topo.virtual_to_physical[v_in] as usize;
                             physical_reads_in_stage[p_in] = true;
                         }
@@ -130,7 +130,7 @@ impl GraphCompiler {
 
         // --- STAGE 3: NETWORK PROXY INSERTION ---
         // Synthetic Proxy IDs start above MAX_NODES to avoid collision
-        let mut next_proxy_id = MAX_NODES as u32;
+        let mut next_proxy_id = MAX_NODES;
 
         for node_idx in 0..n {
             let local_assignment = &topo.node_assignments[node_idx];
@@ -229,7 +229,7 @@ impl GraphCompiler {
                 // Intra-node reuse is permitted for in-place processing.
 
                 for k in 0..routing.output_count {
-                    let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                    let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % 64) as usize;
                     let p_out = topo.virtual_to_physical[v_out] as usize;
 
                     if physical_writes[p_out] || physical_reads[p_out] {
@@ -238,7 +238,7 @@ impl GraphCompiler {
                 }
 
                 for k in 0..routing.input_count {
-                    let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                    let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % 64) as usize;
                     let p_in = topo.virtual_to_physical[v_in] as usize;
 
                     if physical_writes[p_in] {
@@ -248,12 +248,12 @@ impl GraphCompiler {
 
                 // After checking, MARK them as used by this node for the rest of the stage
                 for k in 0..routing.output_count {
-                    let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                    let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % 64) as usize;
                     let p_out = topo.virtual_to_physical[v_out] as usize;
                     physical_writes[p_out] = true;
                 }
                 for k in 0..routing.input_count {
-                    let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                    let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % 64) as usize;
                     let p_in = topo.virtual_to_physical[v_in] as usize;
                     physical_reads[p_in] = true;
                 }
@@ -272,34 +272,32 @@ mod tests {
     proptest! {
         #[test]
         fn test_compiler_hazard_detection_robustness(
-            v2p in prop::collection::vec(0..MAX_NODES, MAX_NODES),
-            writes in prop::collection::vec((0..MAX_NODES, 0..16usize), 1..10),
-            reads in prop::collection::vec((0..MAX_NODES, 0..16usize), 1..10)
+            v2p in prop::collection::vec(0..64usize, 64),
+            writes in prop::collection::vec((0..64usize, 0..16usize), 1..10),
+            reads in prop::collection::vec((0..64usize, 0..16usize), 1..10)
         ) {
-            let mut v2p_arr = [0u32; MAX_NODES];
-            for (i, &v) in v2p.iter().enumerate() { v2p_arr[i] = v as u32; }
+            let mut v2p_arr = [0usize; 64];
+            v2p_arr.copy_from_slice(&v2p);
 
             let mut topo = GraphTopology {
-                routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; MAX_NODES],
+                routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
                 virtual_to_physical: v2p_arr,
                 plan: CompiledGraphPlan::default(),
                 crossfades: [None; 8],
                 node_count: 1,
-                node_assignments: [nullherz_traits::NodeAssignment([0; 32]); MAX_NODES],
-                node_positions: [None; MAX_NODES],
-                bypass_states: [false; MAX_NODES],
+                node_assignments: std::collections::HashMap::new(),
+                node_positions: std::collections::HashMap::new(),
+                bypass_states: std::collections::HashSet::new(),
             };
 
-            for &(v_out_usize, _) in writes.iter() {
-                let v_out = v_out_usize as u32;
+            for (v_out, _) in writes {
                 if topo.routing[0].output_count < 16 {
                     topo.routing[0].output_indices[topo.routing[0].output_count] = v_out;
                     topo.routing[0].output_count += 1;
                 }
             }
 
-            for &(v_in_usize, _) in reads.iter() {
-                let v_in = v_in_usize as u32;
+            for (v_in, _) in reads {
                 if topo.routing[0].input_count < 16 {
                     topo.routing[0].input_indices[topo.routing[0].input_count] = v_in;
                     topo.routing[0].input_count += 1;
@@ -315,18 +313,18 @@ mod tests {
             num_nodes in 1..20usize,
             edges in prop::collection::vec((0..20usize, 0..20usize), 0..40)
         ) {
-            let mut v2p = [0u32; MAX_NODES];
-            for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
+            let mut v2p = [0usize; 64];
+            for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
 
             let mut topo = GraphTopology {
-                routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; MAX_NODES],
+                routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
                 virtual_to_physical: v2p,
                 plan: CompiledGraphPlan::default(),
                 crossfades: [None; 8],
                 node_count: num_nodes,
-                node_assignments: [nullherz_traits::NodeAssignment([0; 32]); MAX_NODES],
-                node_positions: [None; MAX_NODES],
-                bypass_states: [false; MAX_NODES],
+                node_assignments: std::collections::HashMap::new(),
+                node_positions: std::collections::HashMap::new(),
+                bypass_states: std::collections::HashSet::new(),
             };
 
             for (src, dst) in edges {
@@ -335,7 +333,7 @@ mod tests {
                 if src == dst { continue; }
 
                 // Create an edge src -> dst using a virtual buffer
-                let v_buf = (src + 10) as u32;
+                let v_buf = src + 10;
                 if topo.routing[src].output_count < 16 && topo.routing[dst].input_count < 16 {
                     topo.routing[src].output_indices[topo.routing[src].output_count] = v_buf;
                     topo.routing[src].output_count += 1;
@@ -356,17 +354,17 @@ mod tests {
 
     #[test]
     fn test_hazard_detection_raw() {
-        let mut v2p = [0u32; MAX_NODES];
-        for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
+        let mut v2p = [0usize; 64];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
         let mut topo = GraphTopology {
-            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; MAX_NODES],
+            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
             virtual_to_physical: v2p,
             plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],
             node_count: 2,
-            node_assignments: [nullherz_traits::NodeAssignment([0; 32]); MAX_NODES],
-            node_positions: [None; MAX_NODES],
-            bypass_states: [false; MAX_NODES],
+            node_assignments: std::collections::HashMap::new(),
+            node_positions: std::collections::HashMap::new(),
+            bypass_states: std::collections::HashSet::new(),
         };
 
         // Node 0 writes to buffer 10
@@ -381,8 +379,8 @@ mod tests {
         let mut plan = CompiledGraphPlan::default();
         plan.num_stages = 1;
         plan.stage_counts[0] = 2;
-        plan.stages[0].0[0] = 0;
-        plan.stages[0].0[1] = 1;
+        plan.stages[0][0] = 0;
+        plan.stages[0][1] = 1;
 
         let result = GraphCompiler::verify_no_hazards(&topo, &plan);
         assert!(result.is_err());
@@ -391,17 +389,17 @@ mod tests {
 
     #[test]
     fn test_hazard_detection_war() {
-        let mut v2p = [0u32; MAX_NODES];
-        for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
+        let mut v2p = [0usize; 64];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
         let mut topo = GraphTopology {
-            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; MAX_NODES],
+            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
             virtual_to_physical: v2p,
             plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],
             node_count: 2,
-            node_assignments: [nullherz_traits::NodeAssignment([0; 32]); MAX_NODES],
-            node_positions: [None; MAX_NODES],
-            bypass_states: [false; MAX_NODES],
+            node_assignments: std::collections::HashMap::new(),
+            node_positions: std::collections::HashMap::new(),
+            bypass_states: std::collections::HashSet::new(),
         };
 
         // Node 0 reads from buffer 10
@@ -415,8 +413,8 @@ mod tests {
         let mut plan = CompiledGraphPlan::default();
         plan.num_stages = 1;
         plan.stage_counts[0] = 2;
-        plan.stages[0].0[0] = 0;
-        plan.stages[0].0[1] = 1;
+        plan.stages[0][0] = 0;
+        plan.stages[0][1] = 1;
 
         let result = GraphCompiler::verify_no_hazards(&topo, &plan);
         assert!(result.is_err());
@@ -425,21 +423,21 @@ mod tests {
 
     #[test]
     fn test_proxy_injection_on_boundary_cross() {
-        let mut v2p = [0u32; MAX_NODES];
-        for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
-        let mut node_assignments = [nullherz_traits::NodeAssignment([0; 32]); MAX_NODES];
-        node_assignments[0] = nullherz_traits::NodeAssignment([0; 32]);
-        let mut remote_id = [0u8; 32]; remote_id[0] = 1; node_assignments[1] = nullherz_traits::NodeAssignment(remote_id);
+        let mut v2p = [0usize; 64];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
+        let mut node_assignments = std::collections::HashMap::new();
+        node_assignments.insert(0, "local".to_string());
+        node_assignments.insert(1, "remote_1".to_string());
 
         let mut topo = GraphTopology {
-            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; MAX_NODES],
+            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
             virtual_to_physical: v2p,
             plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],
             node_count: 2,
             node_assignments,
-            node_positions: [None; MAX_NODES],
-            bypass_states: [false; MAX_NODES],
+            node_positions: std::collections::HashMap::new(),
+            bypass_states: std::collections::HashSet::new(),
         };
 
         // Node 0 (Local) -> Node 1 (Remote) via Buffer 10
@@ -456,7 +454,7 @@ mod tests {
         assert!(plan.num_stages >= 2);
         let mut proxy_detected = false;
         for s in 0..plan.num_stages {
-            if plan.stages[s].0[0] >= MAX_NODES as u32 {
+            if plan.stages[s][0] >= MAX_NODES {
                 proxy_detected = true;
             }
         }
@@ -465,17 +463,17 @@ mod tests {
 
     #[test]
     fn test_hazard_detection_waw() {
-        let mut v2p = [0u32; MAX_NODES];
-        for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
+        let mut v2p = [0usize; 64];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
         let mut topo = GraphTopology {
-            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; MAX_NODES],
+            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; 64],
             virtual_to_physical: v2p,
             plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],
             node_count: 2,
-            node_assignments: [nullherz_traits::NodeAssignment([0; 32]); MAX_NODES],
-            node_positions: [None; MAX_NODES],
-            bypass_states: [false; MAX_NODES],
+            node_assignments: std::collections::HashMap::new(),
+            node_positions: std::collections::HashMap::new(),
+            bypass_states: std::collections::HashSet::new(),
         };
 
         // Both nodes write to buffer 10
@@ -487,8 +485,8 @@ mod tests {
         let mut plan = CompiledGraphPlan::default();
         plan.num_stages = 1;
         plan.stage_counts[0] = 2;
-        plan.stages[0].0[0] = 0;
-        plan.stages[0].0[1] = 1;
+        plan.stages[0][0] = 0;
+        plan.stages[0][1] = 1;
 
         let result = GraphCompiler::verify_no_hazards(&topo, &plan);
         assert!(result.is_err());

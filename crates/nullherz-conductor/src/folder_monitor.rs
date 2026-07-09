@@ -99,7 +99,7 @@ impl FolderMonitor {
             album: "Unknown".to_string(),
             genre: "Unknown".to_string(),
             energy_level: 0.5,
-            metadata: Arc::new(metadata),
+            metadata,
         };
 
         let _ = lib.save_track(&track);

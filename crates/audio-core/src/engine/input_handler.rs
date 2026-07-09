@@ -69,7 +69,7 @@ impl EngineInputHandler {
                         node_idx: *granular_node_idx,
                         buffer: sample.buffer,
                         sample_id: *sample_id,
-                        metadata: Some(sample.metadata.clone()),
+                        metadata: Some(Arc::new(sample.metadata)),
                     });
                 }
             }

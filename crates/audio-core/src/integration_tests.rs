@@ -35,14 +35,12 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
                 Some(Box::new(DynamicProcessor))
             }
-            fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId(0x99) }
             fn name(&self) -> &'static str { "Dynamic" }
         }
 
-        use nullherz_traits::ProcessorTypeId;
         let mut registry = ProcessorRegistry::new();
-        let dynamic_id = 0x99u32;
-        registry.register_factory(Box::new(DynamicFactory));
+        let dynamic_id = 9999u32;
+        registry.register(dynamic_id, Box::new(DynamicFactory));
 
         // 2. Setup Engine
         let cmd_buffer = Arc::new(ipc_layer::MpscRingBuffer::new(256));
@@ -74,7 +72,6 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         let mut engine = AudioEngine::new(
             resources,
             Box::new(graph),
-            Arc::new(nullherz_dna::SampleRegistry::new()),
             Arc::new(crate::rt_logging::RtLogger::new(256)),
             StandardKernel::default()
         );
@@ -126,7 +123,6 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         let mut engine = AudioEngine::new(
             resources,
             Box::new(graph),
-            Arc::new(nullherz_dna::SampleRegistry::new()),
             Arc::new(crate::rt_logging::RtLogger::new(256)),
             StandardKernel::default()
         );

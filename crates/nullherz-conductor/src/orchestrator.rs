@@ -10,7 +10,7 @@ use crate::clip_orchestrator::ClipOrchestrator;
 use crate::modulation_matrix::ModulationMatrix;
 use nullherz_traits::{Command, telemetry::Telemetry};
 use std::sync::{Arc, Mutex};
-use nullherz_dna::{ GeneticLibrary};
+use nullherz_dna::{SampleRegistry, GeneticLibrary};
 
 pub struct Conductor {
     pub engine_coordinator: EngineCoordinator,
@@ -54,7 +54,7 @@ impl Conductor {
     }
 
     pub fn with_library_path(path: &str) -> Self {
-        let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
+        let sample_registry = Arc::new(SampleRegistry::new());
         let library = match nullherz_dna::LibraryDatabase::load(path) {
             Ok(db) => Arc::new(std::sync::Mutex::new(db)),
             Err(_) => {
@@ -515,7 +515,7 @@ impl Conductor {
                                 if let Some(ref mut prod) = self.topology_manager.topo_producer {
                                     let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
                                         node_idx: m.processor_id as u32,
-                                        metadata: track.metadata.clone(),
+                                        metadata: Arc::new(track.metadata),
                                     });
                                 }
                             }
@@ -525,7 +525,7 @@ impl Conductor {
                                 if let Some(ref mut prod) = self.topology_manager.topo_producer {
                                     let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
                                         node_idx: m.processor_id as u32,
-                                        metadata: sample.metadata.clone(),
+                                        metadata: Arc::new(sample.metadata),
                                     });
                                 }
                             }

@@ -350,7 +350,7 @@ fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
         }
     }
 fn apply_command(&mut self, command: &nullherz_traits::Command) {
-        use nullherz_traits::{Command, CoreCommand};
+        use nullherz_traits::{Command, CoreCommand, MixerCommand};
         match command {
             Command::Core(CoreCommand::SetSafeMode(enabled)) => {
                 for node in self.nodes.iter() {
@@ -362,7 +362,11 @@ fn apply_command(&mut self, command: &nullherz_traits::Command) {
                 // It is handled off-thread by TopologyManager, which pushes a
                 // TopologyMutation::SetTopology for an O(1) Arc swap.
             }
-            Command::Mixer(nullherz_traits::MixerCommand::Bundle { .. }) => {}
+            Command::Mixer(MixerCommand::Bundle { .. }) => {
+                // BUG-07: ProcessorGraph must not broadcast the Bundle itself,
+                // because CommandDispatcher already expanded it into individual SetParam calls.
+                // We do nothing here to avoid double-application.
+            }
             _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }
         }
     }
@@ -472,7 +476,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         if topo.node_count > 0 { assert!(topo.plan.num_stages > 0); }
         let mut seen_nodes = std::collections::HashSet::new();
         for s_idx in 0..topo.plan.num_stages {
-            for n_idx in &topo.plan.stages[s_idx].0[..topo.plan.stage_counts[s_idx] as usize] {
+            for n_idx in &topo.plan.stages[s_idx][..topo.plan.stage_counts[s_idx]] {
                 assert!(seen_nodes.insert(*n_idx), "Node {} assigned to multiple stages", n_idx);
             }
         }

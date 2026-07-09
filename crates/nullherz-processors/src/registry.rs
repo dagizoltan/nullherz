@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use nullherz_traits::{AudioProcessor, ProcessorTypeId, ProcessorFactory, ProcessorCapability};
+use nullherz_traits::{AudioProcessor, ProcessorTypeId, ProcessorFactory};
 use crate::factory::*;
 
 pub struct ProcessorRegistry {
@@ -24,29 +24,34 @@ impl ProcessorRegistry {
     }
 
     fn register_defaults(&mut self) {
-        self.register_factory(Box::new(BiquadFactory));
-        self.register_factory(Box::new(GainFactory));
-        self.register_factory(Box::new(SamplerFactory));
-        self.register_factory(Box::new(CrossfaderFactory));
-        self.register_factory(Box::new(SummingFactory));
-        self.register_factory(Box::new(SpectralFactory));
-        self.register_factory(Box::new(WavetableFactory));
-        self.register_factory(Box::new(ModulationFactory));
-        self.register_factory(Box::new(SequencerFactory));
-        self.register_factory(Box::new(EnvelopeFollowerFactory));
-        self.register_factory(Box::new(GranularFactory));
-        self.register_factory(Box::new(SpectralMorphFactory));
-        self.register_factory(Box::new(CaptureFactory));
-        self.register_factory(Box::new(DjIsolatorFactory));
-        self.register_factory(Box::new(SimdBiquadFactory));
-        self.register_factory(Box::new(KeySyncFactory));
-        self.register_factory(Box::new(PersonalityInheritanceFactory));
+        self.register_with_type(ProcessorTypeId::BIQUAD, Box::new(BiquadFactory));
+        self.register_with_type(ProcessorTypeId::GAIN, Box::new(GainFactory));
+        self.register_with_type(ProcessorTypeId::SAMPLER, Box::new(SamplerFactory));
+        self.register_with_type(ProcessorTypeId::BIQUAD_EQ, Box::new(BiquadFactory)); // Reuse for now
+        self.register_with_type(ProcessorTypeId::CROSSFADER, Box::new(CrossfaderFactory));
+        self.register_with_type(ProcessorTypeId::SUMMING, Box::new(SummingFactory));
+        self.register_with_type(ProcessorTypeId::SPECTRAL, Box::new(SpectralFactory));
+        self.register_with_type(ProcessorTypeId::WAVETABLE, Box::new(WavetableFactory));
+        self.register_with_type(ProcessorTypeId::MODULATION, Box::new(ModulationFactory));
+        self.register_with_type(ProcessorTypeId::SEQUENCER, Box::new(SequencerFactory));
+        self.register_with_type(ProcessorTypeId::ENVELOPE_FOLLOWER, Box::new(EnvelopeFollowerFactory));
+        self.register_with_type(ProcessorTypeId::GRANULAR, Box::new(GranularFactory));
+        self.register_with_type(ProcessorTypeId::SPECTRAL_MORPH, Box::new(SpectralMorphFactory));
+        self.register_with_type(ProcessorTypeId::CAPTURE, Box::new(CaptureFactory));
+        self.register_with_type(ProcessorTypeId::DJ_ISOLATOR, Box::new(DjIsolatorFactory));
+        self.register_with_type(ProcessorTypeId::SIMD_BIQUAD, Box::new(SimdBiquadFactory));
+        self.register_with_type(ProcessorTypeId::KEY_SYNC, Box::new(KeySyncFactory));
+        self.register_with_type(ProcessorTypeId::PERSONALITY_INHERITANCE, Box::new(PersonalityInheritanceFactory));
     }
 
-    pub fn register_factory(&mut self, factory: Box<dyn ProcessorFactory>) {
-        let id = factory.type_id().0;
+    pub fn register(&mut self, id: u32, factory: Box<dyn ProcessorFactory>) {
         let name = factory.name().to_lowercase();
         self.named_factories.insert(name, id);
+        self.factories.insert(id, factory);
+    }
+
+    pub fn register_with_type(&mut self, p_type: ProcessorTypeId, factory: Box<dyn ProcessorFactory>) {
+        let id = p_type.0;
         self.factories.insert(id, factory);
     }
 
@@ -65,9 +70,5 @@ impl ProcessorRegistry {
 
     pub fn list_available_processors(&self) -> Vec<(u32, &str)> {
         self.factories.iter().map(|(id, f)| (*id, f.name())).collect()
-    }
-
-    pub fn get_capabilities(&self, id: u32) -> Option<ProcessorCapability> {
-        self.factories.get(&id).map(|f| f.capabilities())
     }
 }

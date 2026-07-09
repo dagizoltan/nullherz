@@ -756,34 +756,9 @@ where
     f()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProcessorCapability {
-    pub supports_parallel: bool,
-    pub is_instrument: bool,
-    pub has_midi_input: bool,
-    pub has_audio_input: bool,
-    pub has_audio_output: bool,
-}
-
-impl Default for ProcessorCapability {
-    fn default() -> Self {
-        Self {
-            supports_parallel: false,
-            is_instrument: false,
-            has_midi_input: false,
-            has_audio_input: true,
-            has_audio_output: true,
-        }
-    }
-}
-
 pub trait ProcessorFactory: Send + Sync {
     fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>>;
     fn name(&self) -> &'static str;
-    fn type_id(&self) -> ProcessorTypeId;
-    fn capabilities(&self) -> ProcessorCapability {
-        ProcessorCapability::default()
-    }
 }
 
 pub trait SignalProcessor: Send {
@@ -847,13 +822,13 @@ pub trait TopologyMutationConsumer: Send {
 #[derive(Clone)]
 pub struct RegisteredSample {
     pub buffer: Arc<Vec<f32>>,
-    pub metadata: Arc<SampleMetadata>,
+    pub metadata: SampleMetadata,
 }
 
 pub trait SampleRegistry: Send + Sync {
     fn get(&self, id: u64) -> Option<RegisteredSample>;
     fn register(&self, id: u64, buffer: Arc<Vec<f32>>);
-    fn register_with_metadata(&self, id: u64, buffer: Arc<Vec<f32>>, metadata: Arc<SampleMetadata>);
+    fn register_with_metadata(&self, id: u64, buffer: Arc<Vec<f32>>, metadata: SampleMetadata);
     fn drain_garbage(&self);
     fn list_ids(&self) -> Vec<u64>;
 }

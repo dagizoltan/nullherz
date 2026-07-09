@@ -1,5 +1,4 @@
-use nullherz_traits::SampleRegistry;
-use nullherz_dna::{ LibraryDatabase, LibraryTrack, GeneticLibrary};
+use nullherz_dna::{SampleRegistry, LibraryDatabase, LibraryTrack, GeneticLibrary};
 use nullherz_traits::SampleMetadata;
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,7 +8,7 @@ async fn test_analysis_pipeline() {
     let db_path = "test_analysis.redb";
     let _ = std::fs::remove_file(db_path);
 
-    let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
+    let sample_registry = Arc::new(SampleRegistry::new());
     let library = Arc::new(std::sync::Mutex::new(LibraryDatabase::load(db_path).unwrap()));
 
     // Register a mock sample (1 second of a 4Hz pulse to simulate transients)
@@ -33,7 +32,7 @@ async fn test_analysis_pipeline() {
             album: "Mock Album".to_string(),
             genre: "Mock Genre".to_string(),
             energy_level: 0.5,
-            metadata: Arc::new(SampleMetadata::new_empty()),
+            metadata: SampleMetadata::new_empty(),
         }).unwrap();
     }
 
@@ -78,7 +77,7 @@ async fn test_analysis_pipeline() {
 
 #[tokio::test]
 async fn test_root_key_detection() {
-    let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
+    let sample_registry = Arc::new(SampleRegistry::new());
 
     // Generate a 440Hz Sine Wave (Note A)
     let sample_rate = 44100;

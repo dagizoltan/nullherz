@@ -46,9 +46,9 @@ impl BreederView {
 
                     // Matchmaking Sort (Genetic Matchmaker UI)
                     let other_dna = if parent_idx == 0 {
-                        state.parent_b_id.and_then(|id| app.library_db.get_track(id).ok().flatten()).map(|t| (*t.metadata).dna.clone())
+                        state.parent_b_id.and_then(|id| app.library_db.get_track(id).ok().flatten()).map(|t| t.metadata.dna)
                     } else {
-                        state.parent_a_id.and_then(|id| app.library_db.get_track(id).ok().flatten()).map(|t| (*t.metadata).dna.clone())
+                        state.parent_a_id.and_then(|id| app.library_db.get_track(id).ok().flatten()).map(|t| t.metadata.dna)
                     };
 
                     if let Some(ref target) = other_dna {

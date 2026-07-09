@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use nullherz_dna::GeneticLibrary;
 use nullherz_traits::TimestampedCommand;
 use nullherz_mixer::MixerManager;
@@ -34,10 +33,10 @@ fn main() {
                 album: "Stress Test".to_string(),
                 genre: "Industrial".to_string(),
                 energy_level: 0.9,
-                metadata: Arc::new(SampleMetadata {
+                metadata: SampleMetadata {
                     dna,
                     ..SampleMetadata::new_empty()
-                }),
+                },
             };
             db.save_track(&track).unwrap();
         }

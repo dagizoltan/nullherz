@@ -27,7 +27,6 @@ impl ProcessingKernel for StandardKernel {
 
         let mut cmd = pending_command.take();
 
-        // Optimized Loop: Minimize sub-block fragmentation and avoid unnecessary polls
         while sub_block_iter.current_offset < num_samples {
             if cmd.is_none() && commands_processed < nullherz_traits::MAX_COMMANDS_PER_BLOCK {
                 cmd = command_consumer.pop_command();
@@ -36,20 +35,16 @@ impl ProcessingKernel for StandardKernel {
             match cmd.take() {
                 Some(c) if c.timestamp_samples < block_end_sample => {
                     commands_processed += 1;
-
-                    let target_offset = if c.timestamp_samples > block_start_sample {
+                    let cmd_offset = if c.timestamp_samples > block_start_sample {
                         (c.timestamp_samples - block_start_sample) as usize
                     } else {
                         sub_block_iter.current_offset
                     };
 
-                    // Process up to the command's timestamp
-                    while sub_block_iter.current_offset < target_offset {
-                        let sb = sub_block_iter.next_chunk_up_to(target_offset).unwrap();
+                    while let Some(sb) = sub_block_iter.next_chunk_up_to(cmd_offset) {
                         Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
                     }
 
-                    // Apply the command at the correct sample-accurate point
                     CommandDispatcher::handle_single_command(transport, graph, &c.command);
 
                     // Batch processing: Drain all commands with the same timestamp to minimize sub-block fragmentation
@@ -69,26 +64,21 @@ impl ProcessingKernel for StandardKernel {
                     }
                 }
                 Some(c) => {
-                    // Command is beyond this block
                     *pending_command = Some(c);
-                    break;
+                    while let Some(sb) = sub_block_iter.next_chunk() {
+                        Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
+                    }
                 }
                 None => {
-                    // No more commands for this block
-                    break;
+                    while let Some(sb) = sub_block_iter.next_chunk() {
+                        Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
+                    }
                 }
             }
-        }
-
-        // Process remaining audio in the block
-        while let Some(sb) = sub_block_iter.next_chunk() {
-            Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
         }
 
         if let Some(remaining) = cmd {
-            if pending_command.is_none() {
-                *pending_command = Some(remaining);
-            }
+            *pending_command = Some(remaining);
         }
     }
 }
@@ -138,11 +128,7 @@ impl StandardKernel {
             let input = inputs.get(i).copied().unwrap_or(empty_input);
             let end = (offset + len).min(input.len());
             let act = offset.min(input.len());
-            if end > act {
-                *sub_input = &input[act..end];
-            } else {
-                 *sub_input = &[][..];
-            }
+            *sub_input = &input[act..end];
         }
 
         let mut sub_outputs_reconstructed: [&mut [f32]; crate::MAX_CHANNELS] = std::array::from_fn(|_| &mut [][..]);

@@ -58,7 +58,7 @@ mod tests {
             let mut engine = AudioEngine::new(
                 resources,
                 Box::new(graph),
-                Arc::new(nullherz_dna::SampleRegistry::new()), Arc::new(crate::rt_logging::RtLogger::new(256)),
+                Arc::new(crate::rt_logging::RtLogger::new(256)),
                 StandardKernel::default()
             );
 
@@ -102,7 +102,7 @@ mod tests {
         let mut engine = AudioEngine::new(
             resources,
             Box::new(graph),
-            Arc::new(nullherz_dna::SampleRegistry::new()), Arc::new(crate::rt_logging::RtLogger::new(256)),
+            Arc::new(crate::rt_logging::RtLogger::new(256)),
             StandardKernel::default()
         );
 
@@ -153,7 +153,7 @@ mod tests {
             let mut engine = AudioEngine::new(
                 resources,
                 Box::new(graph),
-                Arc::new(nullherz_dna::SampleRegistry::new()), Arc::new(crate::rt_logging::RtLogger::new(256)),
+                Arc::new(crate::rt_logging::RtLogger::new(256)),
                 StandardKernel::default()
             );
 
@@ -210,7 +210,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         let mut engine = AudioEngine::new(
             resources,
             Box::new(MockProcessor { process_count: 0 }),
-            Arc::new(nullherz_dna::SampleRegistry::new()), Arc::new(crate::rt_logging::RtLogger::new(256)),
+            Arc::new(crate::rt_logging::RtLogger::new(256)),
             StandardKernel::default()
         );
 
@@ -265,7 +265,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         let mut engine = AudioEngine::new(
             resources,
             Box::new(MidiMockProcessor { midi_received: false }),
-            Arc::new(nullherz_dna::SampleRegistry::new()), Arc::new(crate::rt_logging::RtLogger::new(256)),
+            Arc::new(crate::rt_logging::RtLogger::new(256)),
             StandardKernel::default()
         );
 
@@ -338,7 +338,7 @@ fn apply_command(&mut self, cmd: &Command) {
         let mut engine = AudioEngine::new(
             resources,
             Box::new(ParamMockProcessor { param_value: 0.0, apply_count: 0, id: proc_id }),
-            Arc::new(nullherz_dna::SampleRegistry::new()), Arc::new(crate::rt_logging::RtLogger::new(256)),
+            Arc::new(crate::rt_logging::RtLogger::new(256)),
             StandardKernel::default()
         );
 
@@ -348,7 +348,7 @@ fn apply_command(&mut self, cmd: &Command) {
 
         let graph = unsafe { engine.graph_manager.get_active_graph_mut().as_any().downcast_ref::<ParamMockProcessor>().unwrap() };
         assert_eq!(graph.param_value, 0.5);
-        // BUG-07 Resolved: Bundle expansion is verified to only apply sub-commands once
+        // BUG-07 check: should only be applied once
         assert_eq!(graph.apply_count, 1);
     }
 }
