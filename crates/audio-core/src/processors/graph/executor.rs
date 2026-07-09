@@ -56,7 +56,7 @@ impl GraphExecutor {
         is_last_sub_block: bool,
         telemetry_node_times_cycles: &[std::sync::atomic::AtomicU64; crate::MAX_NODES],
     ) {
-        let stage = &topo.plan.stages[s_idx][..topo.plan.stage_counts[s_idx]];
+        let stage = &topo.plan.stages[s_idx].0[..topo.plan.stage_counts[s_idx] as usize];
         // SAFETY: buffers_ptr and x_buffers_ptr are used to reconstruct disjoint slices in worker threads.
         // The topological scheduler (GraphCompiler) guarantees that no two nodes in the same stage
         // read from or write to the same physical buffer in a way that creates hazards.
@@ -70,7 +70,8 @@ impl GraphExecutor {
             let mut worker_costs = [0u64; 64];
             let num_workers = pool.num_workers().min(64);
 
-            for &n_idx in stage {
+            for &n_idx_u32 in stage {
+                let n_idx = n_idx_u32 as usize;
                 let mut worker_idx = 0;
                 let mut min_cost = u64::MAX;
                 for w in 0..num_workers {
@@ -88,19 +89,19 @@ impl GraphExecutor {
                 let mut resolved_outputs = [0usize; crate::MAX_CHANNELS];
 
                 for j in 0..routing.input_count.min(crate::MAX_CHANNELS) {
-                    let v_idx = *routing.input_indices.get(j).unwrap_or(&0) % crate::MAX_NODES;
-                    let mut p_idx = topo.virtual_to_physical[v_idx];
+                    let v_idx = (*routing.input_indices.get(j).unwrap_or(&0) % crate::MAX_NODES as u32) as usize;
+                    let mut p_idx = topo.virtual_to_physical[v_idx] as usize;
                     let p_override = block_x_map[n_idx][j];
                     if p_override != 0 { p_idx = p_override as usize; }
                     resolved_inputs[j] = p_idx;
                 }
 
                 for (j, resolved_out) in resolved_outputs.iter_mut().enumerate().take(routing.output_count.min(crate::MAX_CHANNELS)) {
-                    let v_idx = *routing.output_indices.get(j).unwrap_or(&0) % crate::MAX_NODES;
-                    *resolved_out = topo.virtual_to_physical[v_idx];
+                    let v_idx = (*routing.output_indices.get(j).unwrap_or(&0) % crate::MAX_NODES as u32) as usize;
+                    *resolved_out = topo.virtual_to_physical[v_idx] as usize;
                 }
 
-                let is_bypassed = topo.bypass_states.contains(&(n_idx as u32));
+                let is_bypassed = topo.bypass_states[n_idx];
                 let job = Job {
                     node_ptr: &nodes[n_idx] as *const _,
                     num_samples,
@@ -124,14 +125,15 @@ impl GraphExecutor {
             pool.notify_workers();
             pool.wait_for_completion(start_count + num_nodes);
         } else {
-            for &n_idx in stage {
+            for &n_idx_u32 in stage {
+                let n_idx = n_idx_u32 as usize;
                 let node = &nodes[n_idx];
                 let routing = &topo.routing[n_idx];
                 let mut node_inputs_storage = [ &[][..]; crate::MAX_CHANNELS ];
                 let input_count = routing.input_count.min(crate::MAX_CHANNELS);
                 for i in 0..input_count {
-                    let v_idx = routing.input_indices.get(i).copied().unwrap_or(0).min(crate::MAX_NODES - 1);
-                    let mut p_idx = topo.virtual_to_physical[v_idx];
+                    let v_idx = routing.input_indices.get(i).copied().unwrap_or(0).min(crate::MAX_NODES as u32 - 1) as usize;
+                    let mut p_idx = topo.virtual_to_physical[v_idx] as usize;
                     let p_override = block_x_map[n_idx][i];
                     if p_override != 0 { p_idx = p_override as usize; }
 
@@ -147,8 +149,8 @@ impl GraphExecutor {
                 let mut node_outputs_reconstructed: [&mut [f32]; crate::MAX_CHANNELS] = std::array::from_fn(|_| &mut [][..]);
                 let output_count = routing.output_count.min(crate::MAX_CHANNELS);
                 for (i, node_out) in node_outputs_reconstructed.iter_mut().enumerate().take(output_count) {
-                    let v_idx = routing.output_indices.get(i).copied().unwrap_or(0).min(crate::MAX_NODES - 1);
-                    let p_idx = topo.virtual_to_physical.get(v_idx).copied().unwrap_or(0).min(crate::MAX_NODES - 1);
+                    let v_idx = routing.output_indices.get(i).copied().unwrap_or(0).min(crate::MAX_NODES as u32 - 1) as usize;
+                    let p_idx = topo.virtual_to_physical.get(v_idx).copied().unwrap_or(0).min(crate::MAX_NODES as u32 - 1) as usize;
                     unsafe {
                         *node_out = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr().add(offset), num_samples);
                     }
@@ -157,7 +159,7 @@ impl GraphExecutor {
                 let start = crate::get_cycles();
 
                 let mut inner_context = nullherz_traits::ProcessContext { transport, host, sub_block_offset: offset, is_last_sub_block };
-                if topo.bypass_states.contains(&(n_idx as u32)) {
+                if topo.bypass_states[n_idx] {
                     if input_count > 0 {
                         let input = node_inputs_storage[0];
                         for output in node_outputs_reconstructed.iter_mut().take(output_count) {

@@ -60,7 +60,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             ui.painter().text(header_rect.left_center() + egui::vec2(5.0, 0.0), egui::Align2::LEFT_CENTER, &node.name, egui::FontId::proportional(11.0), Color32::WHITE);
 
             // Host Assignment Badge
-            let host_assignment = app.graph.node_assignments.get(&(idx as u32)).map(|s| s.as_str()).unwrap_or("local");
+            let host_assignment_raw = &app.graph.node_assignments.0[idx].0;
+            let host_assignment = if host_assignment_raw[0] == 0 { "local" } else {
+                std::str::from_utf8(host_assignment_raw).unwrap_or("local").trim_matches(char::from(0))
+            };
             let host_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(75.0, 0.0), egui::vec2(50.0, 14.0));
             let host_color = if host_assignment == "local" { Color32::from_rgb(0, 150, 255) } else { app.theme.accent };
 

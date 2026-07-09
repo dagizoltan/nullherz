@@ -21,8 +21,8 @@ impl Default for TopologyManager {
 
 impl TopologyManager {
     pub fn new() -> Self {
-        let mut v2p = [0usize; nullherz_traits::MAX_NODES];
-        for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
+        let mut v2p = [0u32; nullherz_traits::MAX_NODES];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
 
         Self {
             registry: ProcessorRegistry::new(),
@@ -41,9 +41,9 @@ impl TopologyManager {
                 plan: Default::default(),
                 crossfades: [None; 8],
                 node_count: 0,
-                node_assignments: std::collections::HashMap::new(),
-                node_positions: std::collections::HashMap::new(),
-                bypass_states: std::collections::HashSet::new(),
+                node_assignments: [nullherz_traits::NodeAssignment([0; 32]); nullherz_traits::MAX_NODES],
+                node_positions: [None; nullherz_traits::MAX_NODES],
+                bypass_states: [false; nullherz_traits::MAX_NODES],
             },
         }
     }
@@ -79,7 +79,7 @@ impl TopologyManager {
                 let n_idx = node_idx as usize;
                 let i_idx = input_idx as usize;
                 if n_idx < nullherz_traits::MAX_NODES && i_idx < nullherz_traits::MAX_CHANNELS {
-                    self.current_topology.routing[n_idx].input_indices[i_idx] = new_buffer_idx as usize;
+                    self.current_topology.routing[n_idx].input_indices[i_idx] = new_buffer_idx;
                     if i_idx >= self.current_topology.routing[n_idx].input_count {
                         self.current_topology.routing[n_idx].input_count = i_idx + 1;
                     }
@@ -91,7 +91,7 @@ impl TopologyManager {
                 let n_idx = node_idx as usize;
                 let o_idx = output_idx as usize;
                 if n_idx < nullherz_traits::MAX_NODES && o_idx < nullherz_traits::MAX_CHANNELS {
-                    self.current_topology.routing[n_idx].output_indices[o_idx] = new_buffer_idx as usize;
+                    self.current_topology.routing[n_idx].output_indices[o_idx] = new_buffer_idx;
                     if o_idx >= self.current_topology.routing[n_idx].output_count {
                         self.current_topology.routing[n_idx].output_count = o_idx + 1;
                     }
@@ -134,22 +134,26 @@ impl TopologyManager {
                 }));
             }
             Command::Topology(nullherz_traits::TopologyCommand::SetBypass { node_idx, enabled }) => {
-                if enabled {
-                    self.current_topology.bypass_states.insert(node_idx);
-                } else {
-                    self.current_topology.bypass_states.remove(&node_idx);
+                let n_idx = node_idx as usize;
+                if n_idx < nullherz_traits::MAX_NODES {
+                    self.current_topology.bypass_states[n_idx] = enabled;
                 }
                 let _ = prod.push(TopologyMutation::SetBypass { node_idx, enabled });
                 return true;
             }
             Command::Topology(nullherz_traits::TopologyCommand::SetNodePosition { node_idx, x, y }) => {
-                self.current_topology.node_positions.insert(node_idx, (x, y));
+                let n_idx = node_idx as usize;
+                if n_idx < nullherz_traits::MAX_NODES {
+                    self.current_topology.node_positions[n_idx] = Some((x, y));
+                }
                 let _ = prod.push(TopologyMutation::SetNodePosition { node_idx, x, y });
                 return true;
             }
             Command::Topology(nullherz_traits::TopologyCommand::MigrateNode { node_idx, destination }) => {
-                let dest = String::from_utf8_lossy(&destination).trim_matches(char::from(0)).to_string();
-                self.current_topology.node_assignments.insert(node_idx, dest);
+                let n_idx = node_idx as usize;
+                if n_idx < nullherz_traits::MAX_NODES {
+                    self.current_topology.node_assignments[n_idx].0.copy_from_slice(&destination);
+                }
                 // Trigger topology commit to update proxy nodes
                 self.handle_topology_command(&Command::Core(nullherz_traits::CoreCommand::CommitTopology));
                 return true;

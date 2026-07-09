@@ -80,7 +80,7 @@ impl TopologyCoordinator {
                 let i_idx = input_idx as usize;
                 if n_idx < crate::MAX_NODES && i_idx < crate::MAX_CHANNELS {
                     let topo = self.inactive_topology_mut();
-                    topo.routing[n_idx].input_indices[i_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
+                    topo.routing[n_idx].input_indices[i_idx] = new_buffer_idx.min(crate::MAX_NODES as u32 - 1);
                     if i_idx >= topo.routing[n_idx].input_count {
                         topo.routing[n_idx].input_count = i_idx + 1;
                     }
@@ -91,7 +91,7 @@ impl TopologyCoordinator {
                 let o_idx = output_idx as usize;
                 if n_idx < crate::MAX_NODES && o_idx < crate::MAX_CHANNELS {
                     let topo = self.inactive_topology_mut();
-                    topo.routing[n_idx].output_indices[o_idx] = (new_buffer_idx as usize).min(crate::MAX_NODES - 1);
+                    topo.routing[n_idx].output_indices[o_idx] = new_buffer_idx.min(crate::MAX_NODES as u32 - 1);
                     if o_idx >= topo.routing[n_idx].output_count {
                         topo.routing[n_idx].output_count = o_idx + 1;
                     }
@@ -143,18 +143,19 @@ impl TopologyCoordinator {
                 }
             }
             TopologyMutation::SetNodePosition { node_idx, x, y } => {
-                let inactive = (self.active_idx() + 1) % 2;
-                self.topologies[inactive].node_positions.insert(node_idx, (x, y));
-                self.topologies[self.active_idx()].node_positions.insert(node_idx, (x, y));
+                let n_idx = node_idx as usize;
+                if n_idx < crate::MAX_NODES {
+                    let inactive = (self.active_idx() + 1) % 2;
+                    self.topologies[inactive].node_positions[n_idx] = Some((x, y));
+                    self.topologies[self.active_idx()].node_positions[n_idx] = Some((x, y));
+                }
             }
             TopologyMutation::SetBypass { node_idx, enabled } => {
-                let inactive = (self.active_idx() + 1) % 2;
-                if enabled {
-                    self.topologies[inactive].bypass_states.insert(node_idx);
-                    self.topologies[self.active_idx()].bypass_states.insert(node_idx);
-                } else {
-                    self.topologies[inactive].bypass_states.remove(&node_idx);
-                    self.topologies[self.active_idx()].bypass_states.remove(&node_idx);
+                let n_idx = node_idx as usize;
+                if n_idx < crate::MAX_NODES {
+                    let inactive = (self.active_idx() + 1) % 2;
+                    self.topologies[inactive].bypass_states[n_idx] = enabled;
+                    self.topologies[self.active_idx()].bypass_states[n_idx] = enabled;
                 }
             }
         }

@@ -3,7 +3,7 @@ use nullherz_traits::{Command, TopologyMutation, AudioProcessor, MidiConsumer, C
 use crate::engine::command_dispatcher::CommandDispatcher;
 use crate::engine::resource_recycler::ResourceRecycler;
 use crate::engine::metrics::EngineMetrics;
-use nullherz_dna::SampleRegistry;
+use nullherz_traits::SampleRegistry;
 use std::sync::atomic::AtomicBool;
 
 pub struct EngineInputHandler {}
@@ -17,7 +17,7 @@ impl EngineInputHandler {
         topology_consumer: &mut Option<Box<dyn TopologyMutationConsumer>>,
         midi_consumer: &mut Option<Box<dyn MidiConsumer>>,
         resource_recycler: &mut ResourceRecycler,
-        sample_registry: &SampleRegistry,
+        sample_registry: &dyn SampleRegistry,
         metrics: &EngineMetrics,
         health_signal: &Arc<AtomicBool>,
     ) {
@@ -55,7 +55,7 @@ impl EngineInputHandler {
     fn handle_command(
         graph: &mut dyn AudioProcessor,
         transport: &mut nullherz_traits::Transport,
-        sample_registry: &SampleRegistry,
+        sample_registry: &dyn SampleRegistry,
         cmd: &Command,
     ) {
         use nullherz_traits::ResourceCommand;
@@ -69,7 +69,7 @@ impl EngineInputHandler {
                         node_idx: *granular_node_idx,
                         buffer: sample.buffer,
                         sample_id: *sample_id,
-                        metadata: Some(Arc::new(sample.metadata)),
+                        metadata: Some(sample.metadata.clone()),
                     });
                 }
             }

@@ -4,6 +4,7 @@ pub mod telemetry;
 pub mod error;
 
 use std::sync::Arc;
+pub use serde_big_array::BigArray;
 
 #[derive(Debug, Clone, Copy)]
 pub struct AudioConfig {
@@ -467,19 +468,25 @@ pub struct ProcessorMetadata {
     pub parameters: [ParameterMetadata; 16],
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct StageNodes(#[serde(with = "BigArray")] pub [u32; MAX_NODES]);
+
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct CompiledGraphPlan {
-    pub stages: [[usize; MAX_NODES]; MAX_NODES],
-    pub stage_counts: [usize; MAX_NODES],
+    #[serde(with = "BigArray")]
+    pub stages: [StageNodes; MAX_NODES],
+    #[serde(with = "BigArray")]
+    pub stage_counts: [u32; MAX_NODES],
     pub num_stages: usize,
     /// Disjoint sub-graph identification for partial re-compilation and optimized O(1) swaps.
+    #[serde(with = "BigArray")]
     pub node_islands: [u8; MAX_NODES],
 }
 
 impl Default for CompiledGraphPlan {
     fn default() -> Self {
         Self {
-            stages: [[0; MAX_NODES]; MAX_NODES],
+            stages: [StageNodes([0; MAX_NODES]); MAX_NODES],
             stage_counts: [0; MAX_NODES],
             num_stages: 0,
             node_islands: [0; MAX_NODES],
@@ -487,15 +494,15 @@ impl Default for CompiledGraphPlan {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct NodeRouting {
-    pub input_indices: [usize; MAX_CHANNELS],
-    pub output_indices: [usize; MAX_CHANNELS],
+    pub input_indices: [u32; MAX_CHANNELS],
+    pub output_indices: [u32; MAX_CHANNELS],
     pub input_count: usize,
     pub output_count: usize,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct CrossfadeState {
     pub node_idx: usize,
     pub input_idx: usize,
@@ -505,16 +512,40 @@ pub struct CrossfadeState {
     pub total_samples: u32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct NodeAssignment(#[serde(with = "BigArray")] pub [u8; 32]);
+
+impl Default for NodeAssignment {
+    fn default() -> Self {
+        Self([0; 32])
+    }
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct NodeAssignmentArray(#[serde(with = "BigArray")] pub [NodeAssignment; MAX_NODES]);
+
+impl Default for NodeAssignmentArray {
+    fn default() -> Self {
+        Self([NodeAssignment::default(); MAX_NODES])
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct GraphTopology {
+    #[serde(with = "BigArray")]
     pub routing: [NodeRouting; MAX_NODES],
-    pub virtual_to_physical: [usize; MAX_NODES],
+    #[serde(with = "BigArray")]
+    pub virtual_to_physical: [u32; MAX_NODES],
     pub plan: CompiledGraphPlan,
     pub crossfades: [Option<CrossfadeState>; 8],
     pub node_count: usize,
-    pub node_assignments: std::collections::HashMap<u32, String>, // node_idx -> "local" or sidecar addr
-    pub node_positions: std::collections::HashMap<u32, (f32, f32)>,
-    pub bypass_states: std::collections::HashSet<u32>,
+    /// Mapping of node_idx to sidecar address or "local" (empty string/zeros).
+    #[serde(with = "BigArray")]
+    pub node_assignments: [NodeAssignment; MAX_NODES],
+    #[serde(with = "BigArray")]
+    pub node_positions: [Option<(f32, f32)>; MAX_NODES],
+    #[serde(with = "BigArray")]
+    pub bypass_states: [bool; MAX_NODES],
 }
 
 pub enum TopologyMutation {
@@ -725,9 +756,34 @@ where
     f()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProcessorCapability {
+    pub supports_parallel: bool,
+    pub is_instrument: bool,
+    pub has_midi_input: bool,
+    pub has_audio_input: bool,
+    pub has_audio_output: bool,
+}
+
+impl Default for ProcessorCapability {
+    fn default() -> Self {
+        Self {
+            supports_parallel: false,
+            is_instrument: false,
+            has_midi_input: false,
+            has_audio_input: true,
+            has_audio_output: true,
+        }
+    }
+}
+
 pub trait ProcessorFactory: Send + Sync {
     fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>>;
     fn name(&self) -> &'static str;
+    fn type_id(&self) -> ProcessorTypeId;
+    fn capabilities(&self) -> ProcessorCapability {
+        ProcessorCapability::default()
+    }
 }
 
 pub trait SignalProcessor: Send {
@@ -786,6 +842,20 @@ pub trait MidiConsumer: Send {
 
 pub trait TopologyMutationConsumer: Send {
     fn pop(&mut self) -> Option<TopologyMutation>;
+}
+
+#[derive(Clone)]
+pub struct RegisteredSample {
+    pub buffer: Arc<Vec<f32>>,
+    pub metadata: Arc<SampleMetadata>,
+}
+
+pub trait SampleRegistry: Send + Sync {
+    fn get(&self, id: u64) -> Option<RegisteredSample>;
+    fn register(&self, id: u64, buffer: Arc<Vec<f32>>);
+    fn register_with_metadata(&self, id: u64, buffer: Arc<Vec<f32>>, metadata: Arc<SampleMetadata>);
+    fn drain_garbage(&self);
+    fn list_ids(&self) -> Vec<u64>;
 }
 
 pub trait CommandBundleConsumer: Send {

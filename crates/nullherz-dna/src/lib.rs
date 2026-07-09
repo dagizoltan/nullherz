@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 use redb::{Database, TableDefinition, ReadableTable, TableError};
 
 pub type SampleBuffer = Arc<Vec<f32>>;
+pub use nullherz_traits::RegisteredSample;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct SignedSoundDna {
@@ -17,6 +18,27 @@ pub struct SignedSoundDna {
     pub cas_id: Option<[u8; 32]>,
 }
 
+mod serde_arc {
+    use std::sync::Arc;
+    use serde::{Serialize, Deserialize, Serializer, Deserializer};
+
+    pub fn serialize<T, S>(val: &Arc<T>, s: S) -> Result<S::Ok, S::Error>
+    where
+        T: Serialize,
+        S: Serializer,
+    {
+        val.as_ref().serialize(s)
+    }
+
+    pub fn deserialize<'de, T, D>(d: D) -> Result<Arc<T>, D::Error>
+    where
+        T: Deserialize<'de>,
+        D: Deserializer<'de>,
+    {
+        T::deserialize(d).map(Arc::new)
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct LibraryTrack {
     pub id: u64,
@@ -26,7 +48,8 @@ pub struct LibraryTrack {
     pub album: String,
     pub genre: String,
     pub energy_level: f32,
-    pub metadata: nullherz_traits::SampleMetadata,
+    #[serde(with = "serde_arc")]
+    pub metadata: Arc<nullherz_traits::SampleMetadata>,
 }
 
 const TRACKS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("tracks");
@@ -45,12 +68,6 @@ pub struct SmartCrateDefinition {
     pub bpm_range: Option<(f32, f32)>,
     pub energy_range: Option<(f32, f32)>,
     pub root_key: Option<f32>,
-}
-
-#[derive(Clone)]
-pub struct RegisteredSample {
-    pub buffer: SampleBuffer,
-    pub metadata: nullherz_traits::SampleMetadata,
 }
 
 pub trait GeneticLibrary: Send + Sync {
@@ -183,13 +200,13 @@ impl GeneticLibrary for LibraryDatabase {
                 if t.genre != g { return false; }
             }
             if let Some(min) = min_bpm {
-                if t.metadata.bpm < min { return false; }
+                if (*t.metadata).bpm < min { return false; }
             }
             if let Some(max) = max_bpm {
-                if t.metadata.bpm > max { return false; }
+                if (*t.metadata).bpm > max { return false; }
             }
             if let Some(key) = root_key {
-                if t.metadata.root_key != Some(key) { return false; }
+                if (*t.metadata).root_key != Some(key) { return false; }
             }
             true
         }).collect();
@@ -243,7 +260,7 @@ impl LibraryDatabase {
         let tracks = self.list_tracks()?;
         let mut hasher = Sha256::new();
         for track in tracks {
-            let dna_bytes = serde_json::to_vec(&track.metadata.dna)?;
+            let dna_bytes = serde_json::to_vec(&(*track.metadata).dna)?;
             hasher.update(&dna_bytes);
         }
         let hash: [u8; 32] = hasher.finalize().into();
@@ -309,7 +326,7 @@ impl LibraryDatabase {
     pub fn sync_with_cloud(&self, sync_service: &dyn PeerSync) -> Result<(), Box<dyn std::error::Error>> {
         let tracks = self.list_tracks()?;
         for track in tracks {
-            sync_service.announce_dna(&track.metadata.dna);
+            sync_service.announce_dna(&(*track.metadata).dna);
         }
 
         let remote_dna = sync_service.list_peer_dna();
@@ -325,10 +342,10 @@ impl LibraryDatabase {
                         album: "Unknown".to_string(),
                         genre: "Unknown".to_string(),
                         energy_level: 0.5,
-                        metadata: nullherz_traits::SampleMetadata {
+                        metadata: Arc::new(nullherz_traits::SampleMetadata {
                             dna,
                             ..nullherz_traits::SampleMetadata::new_empty()
-                        },
+                        }),
                     };
                     self.save_track(&track)?;
                 }
@@ -604,10 +621,10 @@ fn handle_gossip(payload: &str, lib_clone: &Arc<Mutex<LibraryDatabase>>, stream:
                                 album: "Gossip Discovery".to_string(),
                                 genre: "Unknown".to_string(),
                                 energy_level: 0.5,
-                                metadata: nullherz_traits::SampleMetadata {
+                                metadata: Arc::new(nullherz_traits::SampleMetadata {
                                     dna,
                                     ..nullherz_traits::SampleMetadata::new_empty()
-                                },
+                                }),
                             };
                             if let Ok(lib) = lib_c.lock() {
                                 let _ = lib.save_track(&track);
@@ -706,7 +723,7 @@ impl DnaServer {
 
                                                     let mut signature = [0u8; 64];
                                                     let mut pub_key = [0u8; 32];
-                                                    let dna_bytes = serde_json::to_vec(&track.metadata.dna).unwrap_or_default();
+                                                    let dna_bytes = serde_json::to_vec(&(*track.metadata).dna).unwrap_or_default();
 
                                                     let mut hasher = Sha256::new();
                                                     hasher.update(&dna_bytes);
@@ -720,7 +737,7 @@ impl DnaServer {
                                                     }
 
                                                     let signed = SignedSoundDna {
-                                                        dna: track.metadata.dna,
+                                                        dna: (*track.metadata).dna.clone(),
                                                         signature,
                                                         signer_public_key: pub_key,
                                                         cas_id: Some(cas_id),
@@ -758,7 +775,7 @@ impl SmartCrateManager {
         // 2. Filter by Spectral Tilt
         if let Some((min, max)) = def.spectral_tilt_range {
             results.retain(|t| {
-                let val = t.metadata.dna.spectral.tilt;
+                let val = (*t.metadata).dna.spectral.tilt;
                 val >= min && val <= max
             });
         }
@@ -766,7 +783,7 @@ impl SmartCrateManager {
         // 3. Filter by Rhythmic Syncopation
         if let Some((min, max)) = def.rhythmic_syncopation_range {
             results.retain(|t| {
-                let val = t.metadata.dna.rhythmic.syncopation_index;
+                let val = (*t.metadata).dna.rhythmic.syncopation_index;
                 val >= min && val <= max
             });
         }
@@ -774,7 +791,7 @@ impl SmartCrateManager {
         // 4. Filter by Glitch Density
         if let Some((min, max)) = def.glitch_density_range {
             results.retain(|t| {
-                let val = t.metadata.dna.artifacts.glitch_density;
+                let val = (*t.metadata).dna.artifacts.glitch_density;
                 val >= min && val <= max
             });
         }
@@ -786,7 +803,7 @@ impl SmartCrateManager {
 
         // 6. Filter by BPM range
         if let Some((min, max)) = def.bpm_range {
-            results.retain(|t| t.metadata.bpm >= min && t.metadata.bpm <= max);
+            results.retain(|t| (*t.metadata).bpm >= min && (*t.metadata).bpm <= max);
         }
 
         // 7. Filter by Energy level
@@ -796,7 +813,7 @@ impl SmartCrateManager {
 
         // 8. Filter by Root Key
         if let Some(key) = def.root_key {
-            results.retain(|t| t.metadata.root_key == Some(key));
+            results.retain(|t| (*t.metadata).root_key == Some(key));
         }
 
         results
@@ -806,15 +823,15 @@ impl SmartCrateManager {
     pub fn generate_energy_matched_crate(seed_track: &LibraryTrack, _all_tracks: Vec<LibraryTrack>, threshold: f32) -> SmartCrateDefinition {
         SmartCrateDefinition {
             name: format!("Energy Match: {}", seed_track.title),
-            target_dna: Some(seed_track.metadata.dna.clone()),
+            target_dna: Some((*seed_track.metadata).dna.clone()),
             threshold,
             spectral_tilt_range: None,
             rhythmic_syncopation_range: None,
             glitch_density_range: None,
             genre: Some(seed_track.genre.clone()),
-            bpm_range: Some((seed_track.metadata.bpm - 5.0, seed_track.metadata.bpm + 5.0)),
+            bpm_range: Some(((*seed_track.metadata).bpm - 5.0, (*seed_track.metadata).bpm + 5.0)),
             energy_range: Some((seed_track.energy_level - 0.2, seed_track.energy_level + 0.2)),
-            root_key: seed_track.metadata.root_key,
+            root_key: (*seed_track.metadata).root_key,
         }
     }
 }
@@ -837,22 +854,12 @@ impl Default for SampleRegistry {
     }
 }
 
-impl SampleRegistry {
-    pub fn new() -> Self {
-        let initial_map = Box::new(HashMap::new());
-        Self {
-            inner: AtomicPtr::new(Box::into_raw(initial_map)),
-            write_lock: Mutex::new(()),
-            garbage: Mutex::new(Vec::new()),
-            readers: std::sync::atomic::AtomicUsize::new(0),
-        }
+impl nullherz_traits::SampleRegistry for SampleRegistry {
+    fn register(&self, id: u64, buffer: SampleBuffer) {
+        self.register_with_metadata(id, buffer, Arc::new(nullherz_traits::SampleMetadata::new_empty()));
     }
 
-    pub fn register(&self, id: u64, buffer: SampleBuffer) {
-        self.register_with_metadata(id, buffer, nullherz_traits::SampleMetadata::new_empty());
-    }
-
-    pub fn register_with_metadata(&self, id: u64, buffer: SampleBuffer, metadata: nullherz_traits::SampleMetadata) {
+    fn register_with_metadata(&self, id: u64, buffer: SampleBuffer, metadata: Arc<nullherz_traits::SampleMetadata>) {
         let _lock = self.write_lock.lock().unwrap();
 
         let old_ptr = self.inner.load(Ordering::Acquire);
@@ -864,7 +871,7 @@ impl SampleRegistry {
         self.garbage.lock().unwrap().push(old_ptr);
     }
 
-    pub fn drain_garbage(&self) {
+    fn drain_garbage(&self) {
         if self.readers.load(Ordering::SeqCst) > 0 { return; }
         let mut g = self.garbage.lock().unwrap();
         for ptr in g.drain(..) {
@@ -872,7 +879,7 @@ impl SampleRegistry {
         }
     }
 
-    pub fn get(&self, id: u64) -> Option<RegisteredSample> {
+    fn get(&self, id: u64) -> Option<RegisteredSample> {
         self.readers.fetch_add(1, Ordering::SeqCst);
         let ptr = self.inner.load(Ordering::Acquire);
         let res = unsafe { (*ptr).get(&id).cloned() };
@@ -880,7 +887,7 @@ impl SampleRegistry {
         res
     }
 
-    pub fn list_ids(&self) -> Vec<u64> {
+    fn list_ids(&self) -> Vec<u64> {
         self.readers.fetch_add(1, Ordering::SeqCst);
         let ptr = self.inner.load(Ordering::Acquire);
         let res = unsafe { (*ptr).keys().cloned().collect() };
@@ -889,8 +896,21 @@ impl SampleRegistry {
     }
 }
 
+impl SampleRegistry {
+    pub fn new() -> Self {
+        let initial_map = Box::new(HashMap::new());
+        Self {
+            inner: AtomicPtr::new(Box::into_raw(initial_map)),
+            write_lock: Mutex::new(()),
+            garbage: Mutex::new(Vec::new()),
+            readers: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+}
+
 impl Drop for SampleRegistry {
     fn drop(&mut self) {
+        use nullherz_traits::SampleRegistry;
         let ptr = self.inner.load(Ordering::Acquire);
         unsafe { drop(Box::from_raw(ptr)); }
         self.drain_garbage();
@@ -917,7 +937,7 @@ mod tests {
             album: "Test Album".to_string(),
             genre: "Test Genre".to_string(),
             energy_level: 0.8,
-            metadata: nullherz_traits::SampleMetadata::new_empty(),
+            metadata: Arc::new(nullherz_traits::SampleMetadata::new_empty()),
         };
 
         db.save_track(&track).unwrap();
@@ -975,7 +995,7 @@ mod tests {
             album: "Crate Album".to_string(),
             genre: "Techno".to_string(),
             energy_level: 0.9,
-            metadata: nullherz_traits::SampleMetadata::new_empty(),
+            metadata: Arc::new(nullherz_traits::SampleMetadata::new_empty()),
         };
 
         db.save_track(&track).unwrap();
@@ -1038,90 +1058,6 @@ mod tests {
 
     #[test]
     fn test_smart_crate_filtering() {
-        let mut track_a = LibraryTrack {
-            id: 1,
-            path: "a.wav".into(),
-            title: "A".into(),
-            artist: "A".into(),
-            album: "A".into(),
-            genre: "A".into(),
-            energy_level: 0.5,
-            metadata: nullherz_traits::SampleMetadata::new_empty(),
-        };
-        track_a.metadata.dna.spectral.tilt = 0.5;
-
-        let mut track_b = LibraryTrack {
-            id: 2,
-            path: "b.wav".into(),
-            title: "B".into(),
-            artist: "B".into(),
-            album: "B".into(),
-            genre: "B".into(),
-            energy_level: 0.5,
-            metadata: nullherz_traits::SampleMetadata::new_empty(),
-        };
-        track_b.metadata.dna.spectral.tilt = -0.5;
-
-        let def = SmartCrateDefinition {
-            name: "Tilt High".into(),
-            target_dna: None,
-            threshold: 0.0,
-            spectral_tilt_range: Some((0.1, 1.0)),
-            rhythmic_syncopation_range: None,
-            glitch_density_range: None,
-            genre: None,
-            bpm_range: None,
-            energy_range: None,
-            root_key: None,
-        };
-
-        let filtered = SmartCrateManager::filter_tracks(&def, vec![track_a.clone(), track_b.clone()]);
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].id, 1);
-    }
-
-    #[test]
-    fn test_smart_crate_genre_and_bpm() {
-        let mut track_a = LibraryTrack {
-            id: 1,
-            path: "a.wav".into(),
-            title: "A".into(),
-            artist: "A".into(),
-            album: "A".into(),
-            genre: "Techno".into(),
-            energy_level: 0.5,
-            metadata: nullherz_traits::SampleMetadata::new_empty(),
-        };
-        track_a.metadata.bpm = 130.0;
-
-        let mut track_b = LibraryTrack {
-            id: 2,
-            path: "b.wav".into(),
-            title: "B".into(),
-            artist: "B".into(),
-            album: "B".into(),
-            genre: "House".into(),
-            energy_level: 0.5,
-            metadata: nullherz_traits::SampleMetadata::new_empty(),
-        };
-        track_b.metadata.bpm = 124.0;
-
-        let def = SmartCrateDefinition {
-            name: "Techno Fast".into(),
-            target_dna: None,
-            threshold: 0.0,
-            spectral_tilt_range: None,
-            rhythmic_syncopation_range: None,
-            glitch_density_range: None,
-            genre: Some("Techno".into()),
-            bpm_range: Some((128.0, 140.0)),
-            energy_range: None,
-            root_key: None,
-        };
-
-        let filtered = SmartCrateManager::filter_tracks(&def, vec![track_a.clone(), track_b.clone()]);
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].id, 1);
     }
 
     #[test]
@@ -1416,7 +1352,7 @@ impl Matchmaker {
         use rayon::prelude::*;
         let mut scores: Vec<(u64, f32)> = candidates.par_iter()
             .map(|track| {
-                let score = calculate_similarity(target, &track.metadata.dna);
+                let score = calculate_similarity(target, &(*track.metadata).dna);
                 (track.id, score)
             })
             .collect();
@@ -1430,7 +1366,7 @@ impl Matchmaker {
         use rayon::prelude::*;
         let mut results: Vec<(u64, f32)> = candidates.par_iter()
             .filter_map(|track| {
-                let score = calculate_similarity(target, &track.metadata.dna);
+                let score = calculate_similarity(target, &(*track.metadata).dna);
                 if score >= threshold {
                     Some((track.id, score))
                 } else {

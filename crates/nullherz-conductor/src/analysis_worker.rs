@@ -1,5 +1,6 @@
+use nullherz_traits::SampleRegistry;
 use std::sync::Arc;
-use nullherz_dna::{SampleRegistry, GeneticLibrary};
+use nullherz_dna::GeneticLibrary;
 use std::time::Duration;
 use rayon::prelude::*;
 use std::cell::RefCell;
@@ -9,7 +10,7 @@ thread_local! {
 }
 
 pub struct AnalysisWorker {
-    sample_registry: Arc<SampleRegistry>,
+    sample_registry: Arc<dyn SampleRegistry>,
     library: Option<Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>>,
     processed_ids: std::collections::HashSet<u64>,
     compatibility_matrix: std::collections::HashMap<u64, Vec<(u64, f32)>>,
@@ -17,7 +18,7 @@ pub struct AnalysisWorker {
 }
 
 impl AnalysisWorker {
-    pub fn new(sample_registry: Arc<SampleRegistry>) -> Self {
+    pub fn new(sample_registry: Arc<dyn SampleRegistry>) -> Self {
         Self {
             sample_registry,
             library: None,
@@ -80,12 +81,12 @@ impl AnalysisWorker {
             let mip_data = audio_dsp::util::WaveformProcessor::generate_mip_levels(&metadata.peaks, 5);
             metadata.mip_waveform.levels = mip_data.into_iter().map(Arc::new).collect();
 
-            self.sample_registry.register_with_metadata(id, buffer, metadata.clone());
+            self.sample_registry.register_with_metadata(id, buffer, Arc::new(metadata.clone()));
 
             if let Some(ref lib_mutex) = self.library {
                 let lib = lib_mutex.lock().unwrap();
                 if let Ok(Some(mut track)) = lib.get_track(id) {
-                    track.metadata = metadata;
+                    track.metadata = Arc::new(metadata);
                     let _ = lib.save_track(&track);
                 }
             }
@@ -108,14 +109,14 @@ impl AnalysisWorker {
         let dirty_list: Vec<u64> = self.dirty_ids.drain().collect();
         for id in dirty_list {
             if let Some(track) = tracks.iter().find(|t| t.id == id) {
-                let compatibility = nullherz_dna::Matchmaker::rank_compatibility(&track.metadata.dna, &tracks, 10);
+                let compatibility = nullherz_dna::Matchmaker::rank_compatibility(&(*track.metadata).dna, &tracks, 10);
                 self.compatibility_matrix.insert(id, compatibility);
             }
         }
 
         for track in &tracks {
             if !self.compatibility_matrix.contains_key(&track.id) {
-                 let compatibility = nullherz_dna::Matchmaker::rank_compatibility(&track.metadata.dna, &tracks, 10);
+                 let compatibility = nullherz_dna::Matchmaker::rank_compatibility(&(*track.metadata).dna, &tracks, 10);
                  self.compatibility_matrix.insert(track.id, compatibility);
             }
         }
