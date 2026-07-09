@@ -163,9 +163,64 @@ impl GraphCompiler {
 
         Self::identify_islands(n, &adj, &adj_count, &mut plan);
 
+        Self::calculate_pdc(n, &adj, &adj_count, &mut plan, topo);
+
         Self::verify_no_hazards(topo, &plan)?;
 
         Ok(plan)
+    }
+
+    fn calculate_pdc(n: usize, adj: &[[usize; MAX_NODES]; MAX_NODES], adj_count: &[usize; MAX_NODES], plan: &mut CompiledGraphPlan, topo: &GraphTopology) {
+        let mut path_latencies = [0u32; MAX_NODES];
+
+        // 1. Initial pass: Get intrinsic latencies from topo (populated by GraphManager)
+        for i in 0..n {
+            plan.node_latencies[i] = topo.plan.node_latencies[i];
+        }
+
+        // 2. Compute path latencies using topological order
+        for s_idx in 0..plan.num_stages {
+            for &u_u32 in &plan.stages[s_idx].0[..plan.stage_counts[s_idx] as usize] {
+                let u = u_u32 as usize;
+                if u >= MAX_NODES { continue; }
+
+                let current_path_lat = path_latencies[u] + plan.node_latencies[u];
+
+                for &v in adj[u].iter().take(adj_count[u]) {
+                    path_latencies[v] = path_latencies[v].max(current_path_lat);
+                }
+            }
+        }
+
+        // 2. Determine required delay for each node input to align summing
+        // We use a modified topo because we need to know which input comes from which path.
+        // Since topo.routing[v].input_indices[i] tells us the virtual buffer,
+        // and we can find which node writes to that virtual buffer.
+
+        let mut v_to_producer = [None; MAX_NODES];
+        for j in 0..n {
+            let routing_j = &topo.routing[j];
+            for k in 0..routing_j.output_count {
+                let v_out = routing_j.output_indices[k] as usize;
+                if v_out < MAX_NODES {
+                    v_to_producer[v_out] = Some(j);
+                }
+            }
+        }
+
+        for v in 0..n {
+            let routing_v = &topo.routing[v];
+            let max_v_path_lat = path_latencies[v];
+            for i in 0..routing_v.input_count {
+                let v_buf = routing_v.input_indices[i] as usize;
+                if let Some(u) = v_to_producer[v_buf] {
+                    let u_path_lat = path_latencies[u] + plan.node_latencies[u];
+                    if max_v_path_lat > u_path_lat {
+                        plan.input_delays[v].0[i] = max_v_path_lat - u_path_lat;
+                    }
+                }
+            }
+        }
     }
 
     fn identify_islands(n: usize, adj: &[[usize; MAX_NODES]; MAX_NODES], adj_count: &[usize; MAX_NODES], plan: &mut CompiledGraphPlan) {
@@ -280,7 +335,13 @@ mod tests {
             for (i, &v) in v2p.iter().enumerate() { v2p_arr[i] = v as u32; }
 
             let mut topo = GraphTopology {
-                routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; MAX_NODES],
+                routing: [NodeRouting {
+                    input_indices: [0; 16],
+                    output_indices: [0; 16],
+                    input_count: 0,
+                    output_count: 0,
+                    input_delays: [0; 16],
+                }; MAX_NODES],
                 virtual_to_physical: v2p_arr,
                 plan: CompiledGraphPlan::default(),
                 crossfades: [None; 8],
@@ -319,7 +380,13 @@ mod tests {
             for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
 
             let mut topo = GraphTopology {
-                routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; MAX_NODES],
+                routing: [NodeRouting {
+                    input_indices: [0; 16],
+                    output_indices: [0; 16],
+                    input_count: 0,
+                    output_count: 0,
+                    input_delays: [0; 16],
+                }; MAX_NODES],
                 virtual_to_physical: v2p,
                 plan: CompiledGraphPlan::default(),
                 crossfades: [None; 8],
@@ -359,7 +426,13 @@ mod tests {
         let mut v2p = [0u32; MAX_NODES];
         for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
         let mut topo = GraphTopology {
-            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; MAX_NODES],
+            routing: [NodeRouting {
+                input_indices: [0; 16],
+                output_indices: [0; 16],
+                input_count: 0,
+                output_count: 0,
+                input_delays: [0; 16],
+            }; MAX_NODES],
             virtual_to_physical: v2p,
             plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],
@@ -394,7 +467,13 @@ mod tests {
         let mut v2p = [0u32; MAX_NODES];
         for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
         let mut topo = GraphTopology {
-            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; MAX_NODES],
+            routing: [NodeRouting {
+                input_indices: [0; 16],
+                output_indices: [0; 16],
+                input_count: 0,
+                output_count: 0,
+                input_delays: [0; 16],
+            }; MAX_NODES],
             virtual_to_physical: v2p,
             plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],
@@ -432,7 +511,13 @@ mod tests {
         let mut remote_id = [0u8; 32]; remote_id[0] = 1; node_assignments[1] = nullherz_traits::NodeAssignment(remote_id);
 
         let mut topo = GraphTopology {
-            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; MAX_NODES],
+            routing: [NodeRouting {
+                input_indices: [0; 16],
+                output_indices: [0; 16],
+                input_count: 0,
+                output_count: 0,
+                input_delays: [0; 16],
+            }; MAX_NODES],
             virtual_to_physical: v2p,
             plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],
@@ -468,7 +553,13 @@ mod tests {
         let mut v2p = [0u32; MAX_NODES];
         for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
         let mut topo = GraphTopology {
-            routing: [NodeRouting { input_indices: [0; 16], output_indices: [0; 16], input_count: 0, output_count: 0 }; MAX_NODES],
+            routing: [NodeRouting {
+                input_indices: [0; 16],
+                output_indices: [0; 16],
+                input_count: 0,
+                output_count: 0,
+                input_delays: [0; 16],
+            }; MAX_NODES],
             virtual_to_physical: v2p,
             plan: CompiledGraphPlan::default(),
             crossfades: [None; 8],

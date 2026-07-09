@@ -1,4 +1,6 @@
 pub mod sidecar;
+pub mod delay;
+pub mod streaming_sampler;
 pub mod sampler;
 pub mod factory;
 pub mod registry;
@@ -24,6 +26,8 @@ pub mod test_kit;
 pub use nullherz_traits::{MAX_CHANNELS, MAX_NODES};
 
 pub use sidecar::SidecarProcessor;
+pub use delay::DelayProcessor;
+pub use streaming_sampler::StreamingSamplerProcessor;
 pub use sampler::SamplerProcessor;
 pub use gain::GainProcessor;
 pub use biquad::{BiquadProcessor, SimdBiquadProcessor};

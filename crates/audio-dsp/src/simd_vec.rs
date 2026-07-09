@@ -232,6 +232,10 @@ pub fn sigmoid_simd(x: f32x4) -> f32x4 {
     f32x4::from(0.5) + f32x4::from(0.5) * tanh_simd(x * f32x4::from(0.5))
 }
 
+pub fn soft_clip_simd(x: f32x4) -> f32x4 {
+    tanh_simd(x)
+}
+
 impl FloatX16 {
     pub fn blend(self, on_true: Self, on_false: Self) -> Self {
         #[cfg(target_feature = "avx512f")]

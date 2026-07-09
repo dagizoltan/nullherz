@@ -31,6 +31,7 @@ pub struct Transport {
 pub struct ProcessorTypeId(pub u32);
 
 impl ProcessorTypeId {
+    pub const DELAY: Self = Self(0);
     pub const BIQUAD: Self = Self(1);
     pub const GAIN: Self = Self(2);
     pub const SAMPLER: Self = Self(10);
@@ -481,7 +482,16 @@ pub struct CompiledGraphPlan {
     /// Disjoint sub-graph identification for partial re-compilation and optimized O(1) swaps.
     #[serde(with = "BigArray")]
     pub node_islands: [u8; MAX_NODES],
+    /// Per-node compensation delay in samples.
+    #[serde(with = "BigArray")]
+    pub node_latencies: [u32; MAX_NODES],
+    /// Per-node, per-input compensation delay.
+    #[serde(with = "BigArray")]
+    pub input_delays: [InputDelays; MAX_NODES],
 }
+
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct InputDelays(#[serde(with = "BigArray")] pub [u32; MAX_CHANNELS]);
 
 impl Default for CompiledGraphPlan {
     fn default() -> Self {
@@ -490,6 +500,8 @@ impl Default for CompiledGraphPlan {
             stage_counts: [0; MAX_NODES],
             num_stages: 0,
             node_islands: [0; MAX_NODES],
+            node_latencies: [0; MAX_NODES],
+            input_delays: [InputDelays([0; MAX_CHANNELS]); MAX_NODES],
         }
     }
 }
@@ -500,6 +512,8 @@ pub struct NodeRouting {
     pub output_indices: [u32; MAX_CHANNELS],
     pub input_count: usize,
     pub output_count: usize,
+    /// Delay compensation required for this node's inputs in samples.
+    pub input_delays: [u32; MAX_CHANNELS],
 }
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]

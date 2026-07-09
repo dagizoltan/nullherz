@@ -18,6 +18,7 @@ pub struct SidecarProcessor {
     // Keep SHM segments alive to prevent use-after-free
     _shm_cmd: Option<Arc<SharedMemory>>,
     _shm_feedback: Option<Arc<SharedMemory>>,
+    shm_midi: Option<Arc<SharedMemory>>,
     _shm_inputs: Vec<Arc<SharedMemory>>,
     _shm_outputs: Vec<Arc<SharedMemory>>,
     _shm_signal: Option<Arc<SharedMemory>>,
@@ -54,6 +55,7 @@ impl SidecarProcessor {
             missed_deadline_count: 0,
             _shm_cmd: None,
             _shm_feedback: None,
+            shm_midi: None,
             _shm_inputs: Vec::new(),
             _shm_outputs: Vec::new(),
             _shm_signal: None,
@@ -64,12 +66,14 @@ impl SidecarProcessor {
         &mut self,
         cmd: Arc<SharedMemory>,
         fb: Option<Arc<SharedMemory>>,
+        midi: Option<Arc<SharedMemory>>,
         inputs: Vec<Arc<SharedMemory>>,
         outputs: Vec<Arc<SharedMemory>>,
         signal: Arc<SharedMemory>,
     ) {
         self._shm_cmd = Some(cmd);
         self._shm_feedback = fb;
+        self.shm_midi = midi;
         self._shm_inputs = inputs;
         self._shm_outputs = outputs;
         self._shm_signal = Some(signal);
@@ -139,7 +143,16 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &
     }
 }
 
-impl nullherz_traits::MidiResponder for SidecarProcessor { fn apply_midi(&mut self, _event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) { } }
+impl nullherz_traits::MidiResponder for SidecarProcessor {
+    fn apply_midi(&mut self, event: nullherz_traits::MidiEvent, _context: Option<&nullherz_traits::ProcessContext>) {
+        if let Some(ref shm) = self.shm_midi {
+            let rb = unsafe { &*(shm.ptr() as *const ShmRingBuffer<nullherz_traits::MidiEvent>) };
+            let _ = rb.push(event);
+            unsafe { (*self.signal).notify(); }
+            if let Some(efd) = &self.event_fd { efd.notify(); }
+        }
+    }
+}
 
 impl nullherz_traits::SnapshotProvider for SidecarProcessor { }
 

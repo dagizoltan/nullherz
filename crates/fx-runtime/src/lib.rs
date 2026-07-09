@@ -33,6 +33,7 @@ pub struct SidecarHandle {
     pub process: Child,
     pub shm_cmd: Arc<SharedMemory>,
     pub shm_feedback: Arc<SharedMemory>,
+    pub shm_midi: Arc<SharedMemory>,
     pub shm_inputs: Vec<Arc<SharedMemory>>,
     pub shm_outputs: Vec<Arc<SharedMemory>>,
     pub shm_signal: Arc<SharedMemory>,
@@ -94,6 +95,13 @@ impl SidecarSupervisor {
         let fb_rb_ptr = unsafe { ShmRingBuffer::init(shm_feedback.ptr(), 8) };
         let shm_feedback = Arc::new(shm_feedback);
 
+        // 1c. Create SHM for MIDI and automation fast-path
+        let midi_shm_name = format!("/nullherz_midi_{}", name);
+        let (midi_layout, _) = ShmRingBuffer::<nullherz_traits::MidiEvent>::layout(256);
+        let shm_midi = SharedMemory::create(&midi_shm_name, midi_layout.size()).map_err(|e| e.to_string())?;
+        let _midi_rb_ptr: *mut ShmRingBuffer<nullherz_traits::MidiEvent> = unsafe { ShmRingBuffer::init(shm_midi.ptr(), 256) };
+        let shm_midi = Arc::new(shm_midi);
+
         // 2. Create SHM for audio blocks
         let mut shm_inputs = Vec::new();
         let mut input_ptrs = Vec::new();
@@ -140,6 +148,7 @@ impl SidecarSupervisor {
         }
         cmd.arg("--command-shm").arg(&cmd_shm_name)
            .arg("--feedback-shm").arg(&fb_shm_name)
+           .arg("--midi-shm").arg(&midi_shm_name)
            .arg("--channels").arg(num_channels.to_string())
            .arg("--signal-shm").arg(&sig_name)
            .arg("--event-fd").arg(efd_raw.to_string());
@@ -194,6 +203,7 @@ impl SidecarSupervisor {
         sidecar.set_shm_references(
             shm_cmd.clone(),
             Some(shm_feedback.clone()),
+            Some(shm_midi.clone()),
             shm_inputs.clone(),
             shm_outputs.clone(),
             shm_signal.clone(),
@@ -207,6 +217,7 @@ impl SidecarSupervisor {
             process: child,
             shm_cmd,
             shm_feedback,
+            shm_midi,
             shm_inputs,
             shm_outputs,
             shm_signal,

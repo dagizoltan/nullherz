@@ -45,6 +45,18 @@ impl MixerManager {
         studio::create_studio_strip(&self.id_allocator, name, fx_ids, &self.config)
     }
 
+    pub fn create_aux_bus(&mut self, name: &str, fx_ids: &[u32]) -> Vec<Command> {
+        let mut commands = Vec::new();
+        let bus_id = self.id_allocator.allocate_node_id();
+        self.node_names.insert(format!("aux_{}", name.to_lowercase()), bus_id);
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode {
+            node_idx: bus_id,
+            processor_type_id: ProcessorTypeId::SUMMING
+        }));
+        // Logic for FX chain on Aux bus
+        commands
+    }
+
     pub fn create_dj_deck(&mut self, deck_id: char, fx_ids: &[u32], bus_assignment: char) -> Vec<Command> {
         let (commands, nodes) = dj::create_dj_deck(&self.id_allocator, deck_id, fx_ids, bus_assignment, &self.config);
         self.deck_mappings.insert(deck_id, nodes.clone());

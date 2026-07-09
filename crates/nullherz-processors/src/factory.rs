@@ -1,5 +1,6 @@
 use nullherz_traits::{AudioProcessor, ProcessorFactory, ProcessorTypeId, ProcessorCapability};
 use crate::gain::*;
+use crate::delay::*;
 use crate::biquad::*;
 use crate::crossfader::*;
 use crate::summing::*;
@@ -18,6 +19,15 @@ impl ProcessorFactory for GainFactory {
     }
     fn name(&self) -> &'static str { "Gain" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::GAIN }
+}
+
+pub struct DelayFactory;
+impl ProcessorFactory for DelayFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(DelayProcessor::new(node_idx as u64, 44100))) // 1s max delay
+    }
+    fn name(&self) -> &'static str { "Delay" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::DELAY }
 }
 
 pub struct BiquadFactory;

@@ -44,7 +44,13 @@ impl ProcessorGraph {
         let mut v2p = [0u32; crate::MAX_NODES];
         for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
         let topo = GraphTopology {
-            routing: [NodeRouting { input_indices: [0; crate::MAX_CHANNELS], output_indices: [0; crate::MAX_CHANNELS], input_count: 0, output_count: 0 }; crate::MAX_NODES],
+            routing: [NodeRouting {
+                input_indices: [0; crate::MAX_CHANNELS],
+                output_indices: [0; crate::MAX_CHANNELS],
+                input_count: 0,
+                output_count: 0,
+                input_delays: [0; crate::MAX_CHANNELS],
+            }; crate::MAX_NODES],
             virtual_to_physical: v2p,
             plan: CompiledGraphPlan::default(),
             crossfades: [None; crate::MAX_CROSSFADE_BUFFERS],
@@ -83,6 +89,13 @@ impl ProcessorGraph {
         let active = self.topology_coordinator.active_idx();
         let inactive = (active + 1) % 2;
         let topo = &mut self.topology_coordinator.topologies[inactive];
+
+        // Populate intrinsic latencies before compilation
+        for i in 0..topo.node_count {
+            let lat = unsafe { (*self.nodes[i].processor.get()).latency_samples() };
+            topo.plan.node_latencies[i] = lat as u32;
+        }
+
         if let Ok(plan) = GraphCompiler::compile(topo) {
             topo.plan = plan;
         }
