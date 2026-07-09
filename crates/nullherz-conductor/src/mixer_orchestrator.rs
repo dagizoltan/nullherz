@@ -88,6 +88,22 @@ impl MixerOrchestrator {
                                 ramp_duration_samples: 128,
                             }));
                         }
+                        DeckParamType::Pan => {
+                            translated.push(Command::Mixer(MixerCommand::SetParam {
+                                target_id: nodes.stereo_util_id as u64,
+                                param_id: 0,
+                                value: *value,
+                                ramp_duration_samples: 128,
+                            }));
+                        }
+                        DeckParamType::Width => {
+                            translated.push(Command::Mixer(MixerCommand::SetParam {
+                                target_id: nodes.stereo_util_id as u64,
+                                param_id: 1,
+                                value: *value,
+                                ramp_duration_samples: 128,
+                            }));
+                        }
                     }
                 }
             }

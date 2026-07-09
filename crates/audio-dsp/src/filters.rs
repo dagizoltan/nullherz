@@ -591,12 +591,16 @@ impl EnvelopeFollower {
     }
 
     pub fn process_block(&mut self, input: &[f32], output: &mut [f32]) {
+        self.process_with_sidechain(input, input, output);
+    }
+
+    pub fn process_with_sidechain(&mut self, input: &[f32], sidechain: &[f32], output: &mut [f32]) {
         let mut env = self.envelope;
         let attack = self.attack_coeff;
         let release = self.release_coeff;
 
-        for i in 0..input.len() {
-            let rect = input[i].abs();
+        for i in 0..input.len().min(sidechain.len()) {
+            let rect = sidechain[i].abs();
             if rect > env {
                 env = rect + attack * (env - rect);
             } else {

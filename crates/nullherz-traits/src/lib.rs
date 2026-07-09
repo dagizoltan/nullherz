@@ -73,6 +73,8 @@ pub enum DeckParamType {
     EqMid,
     EqHigh,
     Filter,
+    Pan,
+    Width,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

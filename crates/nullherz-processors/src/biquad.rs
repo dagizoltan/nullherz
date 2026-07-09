@@ -157,4 +157,26 @@ fn apply_command(&mut self, command: &ProcessorCommand) {
                 self.set_parameter(param_id, value, ramp_duration_samples);
             }
     }
+
+fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        let mut parameters = [nullherz_traits::ParameterMetadata {
+            id: 0,
+            name: [0; 32],
+            min: -1.0,
+            max: 1.0,
+            default: 0.0,
+        }; 16];
+
+        let names: &[&[u8]] = &[b"b0", b"b1", b"b2", b"a1", b"a2"];
+        for (i, name) in names.iter().enumerate() {
+            parameters[i].id = i as u32;
+            parameters[i].name[..name.len()].copy_from_slice(name);
+        }
+
+        Some(nullherz_traits::ProcessorMetadata {
+            processor_id: self.id,
+            num_parameters: 5,
+            parameters,
+        })
+    }
 }

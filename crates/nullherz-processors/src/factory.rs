@@ -1,6 +1,8 @@
 use nullherz_traits::{AudioProcessor, ProcessorFactory, ProcessorTypeId, ProcessorCapability};
 use crate::gain::*;
 use crate::delay::*;
+use crate::compressor::*;
+use crate::stereo_utility::*;
 use crate::biquad::*;
 use crate::crossfader::*;
 use crate::summing::*;
@@ -179,4 +181,22 @@ impl ProcessorFactory for PersonalityInheritanceFactory {
     }
     fn name(&self) -> &'static str { "PersonalityInheritance" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::PERSONALITY_INHERITANCE }
+}
+
+pub struct CompressorFactory;
+impl ProcessorFactory for CompressorFactory {
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(CompressorProcessor::new(node_idx as u64, sample_rate)))
+    }
+    fn name(&self) -> &'static str { "Compressor" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId(170) }
+}
+
+pub struct StereoUtilityFactory;
+impl ProcessorFactory for StereoUtilityFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(StereoUtilityProcessor::new(node_idx as u64)))
+    }
+    fn name(&self) -> &'static str { "StereoUtility" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId(160) }
 }

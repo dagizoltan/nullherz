@@ -14,6 +14,7 @@ pub struct DeckNodes {
     pub gain_id: u32,
     pub filter_id: u32,
     pub keysync_id: u32,
+    pub stereo_util_id: u32,
 }
 
 #[derive(Default)]
