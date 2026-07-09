@@ -1,16 +1,17 @@
+use nullherz_traits::SampleRegistry;
 use std::sync::Arc;
-use nullherz_dna::{SampleRegistry, LibraryDatabase, LibraryTrack, GeneticLibrary};
+use nullherz_dna::{ LibraryDatabase, LibraryTrack, GeneticLibrary};
 use nullherz_traits::SampleMetadata;
 use std::path::Path;
 use std::time::Duration;
 
 pub struct FolderMonitor {
-    sample_registry: Arc<SampleRegistry>,
+    sample_registry: Arc<dyn SampleRegistry>,
     library: Arc<std::sync::Mutex<LibraryDatabase>>,
 }
 
 impl FolderMonitor {
-    pub fn new(sample_registry: Arc<SampleRegistry>, library: Arc<std::sync::Mutex<LibraryDatabase>>) -> Self {
+    pub fn new(sample_registry: Arc<dyn SampleRegistry>, library: Arc<std::sync::Mutex<LibraryDatabase>>) -> Self {
         Self {
             sample_registry,
             library,
@@ -98,7 +99,7 @@ impl FolderMonitor {
             album: "Unknown".to_string(),
             genre: "Unknown".to_string(),
             energy_level: 0.5,
-            metadata,
+            metadata: Arc::new(metadata),
         };
 
         let _ = lib.save_track(&track);

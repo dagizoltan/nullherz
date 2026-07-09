@@ -1,18 +1,18 @@
 use std::sync::Arc;
-use nullherz_dna::{SampleRegistry, LibraryDatabase, GeneticLibrary};
-use nullherz_traits::{RenderingEngine, SampleMetadata};
+use nullherz_dna::{ LibraryDatabase, GeneticLibrary};
+use nullherz_traits::{SampleRegistry, RenderingEngine, SampleMetadata};
 use audio_dsp::TransientDetector;
 
 /// Manages the registration and lifecycle of audio DNA (samples) captured by the engine.
 /// This component acts as the non-RT side of the 'Transfusion' synthesis layer.
 pub struct EvolutionaryBreeder {
-    sample_registry: Arc<SampleRegistry>,
+    sample_registry: Arc<dyn SampleRegistry>,
     library: Arc<std::sync::Mutex<LibraryDatabase>>,
     discovery_service: Option<Arc<std::sync::Mutex<nullherz_dna::DiscoveryService>>>,
 }
 
 impl EvolutionaryBreeder {
-    pub fn new(sample_registry: Arc<SampleRegistry>, library: Arc<std::sync::Mutex<LibraryDatabase>>) -> Self {
+    pub fn new(sample_registry: Arc<dyn SampleRegistry>, library: Arc<std::sync::Mutex<LibraryDatabase>>) -> Self {
         Self { sample_registry, library, discovery_service: None }
     }
 
@@ -29,7 +29,7 @@ impl EvolutionaryBreeder {
             let track_a = &tracks[idx_a];
 
             // Rank all tracks by compatibility to track_a
-            let compatibility = nullherz_dna::Matchmaker::rank_compatibility(&track_a.metadata.dna, &tracks, tracks.len());
+            let compatibility = nullherz_dna::Matchmaker::rank_compatibility(&(*track_a.metadata).dna, &tracks, tracks.len());
 
             // Find a partner in the "Genetic Variance" sweet-spot (0.4 - 0.7 similarity)
             let partner = compatibility.iter()
@@ -65,9 +65,9 @@ impl EvolutionaryBreeder {
 
             let child_dna = if use_chaotic {
                 println!("Evolutionary Breeder: Triggering Chaotic Mutation!");
-                nullherz_dna::chaotic_transfuse_dna(&parent_a.metadata.dna, &parent_b.metadata.dna, bias, 0.5)
+                nullherz_dna::chaotic_transfuse_dna(&(*parent_a.metadata).dna, &(*parent_b.metadata).dna, bias, 0.5)
             } else {
-                nullherz_dna::transfuse_dna(&parent_a.metadata.dna, &parent_b.metadata.dna, bias)
+                nullherz_dna::transfuse_dna(&(*parent_a.metadata).dna, &(*parent_b.metadata).dna, bias)
             };
 
             let len = parent_a.buffer.len().min(parent_b.buffer.len());
@@ -77,8 +77,9 @@ impl EvolutionaryBreeder {
             }
 
             let child_id = id_a ^ id_b ^ 0xECA;
-            let mut child_metadata = parent_a.metadata.clone();
-            child_metadata.dna = child_dna;
+            let mut child_metadata_struct = (*parent_a.metadata).clone();
+            child_metadata_struct.dna = child_dna;
+            let child_metadata = Arc::new(child_metadata_struct);
 
             self.sample_registry.register_with_metadata(child_id, Arc::new(child_buffer), child_metadata.clone());
 
@@ -92,9 +93,9 @@ impl EvolutionaryBreeder {
                 id: child_id,
                 path: format!("evolution/child_{}.wav", child_id),
                 title: if use_chaotic {
-                    format!("Chaotic Child ({} x {})", parent_a.metadata.dna.schema_version, parent_b.metadata.dna.schema_version)
+                    format!("Chaotic Child ({} x {})", (*parent_a.metadata).dna.schema_version, (*parent_b.metadata).dna.schema_version)
                 } else {
-                    format!("Evolutionary Child ({} x {})", parent_a.metadata.dna.schema_version, parent_b.metadata.dna.schema_version)
+                    format!("Evolutionary Child ({} x {})", (*parent_a.metadata).dna.schema_version, (*parent_b.metadata).dna.schema_version)
                 },
                 artist: "Evolutionary Bot".to_string(),
                 album: "Evolutionary Collection".to_string(),
@@ -109,14 +110,14 @@ impl EvolutionaryBreeder {
 
 pub struct TransfusionManager {
     /// The global registry where captured samples are stored for use by other processors.
-    pub sample_registry: Arc<SampleRegistry>,
+    pub sample_registry: Arc<dyn SampleRegistry>,
     pub evolutionary_breeder: Option<EvolutionaryBreeder>,
     pub discovery_service: Option<Arc<std::sync::Mutex<nullherz_dna::DiscoveryService>>>,
     transient_detector: TransientDetector,
 }
 
 impl TransfusionManager {
-    pub fn new(sample_registry: Arc<SampleRegistry>) -> Self {
+    pub fn new(sample_registry: Arc<dyn SampleRegistry>) -> Self {
         Self {
             sample_registry,
             evolutionary_breeder: None,
@@ -177,7 +178,7 @@ impl TransfusionManager {
             }
 
             // 1. Breed DNA
-            let child_dna = nullherz_dna::transfuse_dna(&parent_a.metadata.dna, &parent_b.metadata.dna, bias);
+            let child_dna = nullherz_dna::transfuse_dna(&(*parent_a.metadata).dna, &(*parent_b.metadata).dna, bias);
 
             // 2. Interpolate Audio Buffers (Simple time-domain linear blend for now)
             let len = parent_a.buffer.len().min(parent_b.buffer.len());
@@ -190,11 +191,12 @@ impl TransfusionManager {
             use std::time::{SystemTime, UNIX_EPOCH};
             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
             let child_id = (parent_a_id ^ parent_b_id).wrapping_add(now);
-            let mut child_metadata = parent_a.metadata.clone();
-            child_metadata.dna = child_dna;
+            let mut child_metadata_struct = (*parent_a.metadata).clone();
+            child_metadata_struct.dna = child_dna;
+            let child_metadata = Arc::new(child_metadata_struct);
 
             let buffer_arc = Arc::new(child_buffer);
-            self.sample_registry.register_with_metadata(child_id, buffer_arc.clone(), child_metadata.clone());
+            self.sample_registry.register_with_metadata(child_id, buffer_arc, child_metadata.clone());
 
             // 4. Save to Database
             let track = nullherz_dna::LibraryTrack {
@@ -215,7 +217,7 @@ impl TransfusionManager {
     pub fn commit_chaotic_breeding(&self, parent_a_id: u64, parent_b_id: u64, bias: f32, chaotic_strength: f32, library: &LibraryDatabase) {
         if let (Some(parent_a), Some(parent_b)) = (self.sample_registry.get(parent_a_id), self.sample_registry.get(parent_b_id)) {
             // 1. Breed DNA Chaotically
-            let child_dna = nullherz_dna::chaotic_transfuse_dna(&parent_a.metadata.dna, &parent_b.metadata.dna, bias, chaotic_strength);
+            let child_dna = nullherz_dna::chaotic_transfuse_dna(&(*parent_a.metadata).dna, &(*parent_b.metadata).dna, bias, chaotic_strength);
 
             // 2. Interpolate Audio Buffers
             let len = parent_a.buffer.len().min(parent_b.buffer.len());
@@ -228,11 +230,12 @@ impl TransfusionManager {
             use std::time::{SystemTime, UNIX_EPOCH};
             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
             let child_id = (parent_a_id ^ parent_b_id).wrapping_add(now);
-            let mut child_metadata = parent_a.metadata.clone();
-            child_metadata.dna = child_dna;
+            let mut child_metadata_struct = (*parent_a.metadata).clone();
+            child_metadata_struct.dna = child_dna;
+            let child_metadata = Arc::new(child_metadata_struct);
 
             let buffer_arc = Arc::new(child_buffer);
-            self.sample_registry.register_with_metadata(child_id, buffer_arc.clone(), child_metadata.clone());
+            self.sample_registry.register_with_metadata(child_id, buffer_arc, child_metadata.clone());
 
             // 4. Save to Database
             let track = nullherz_dna::LibraryTrack {
@@ -267,7 +270,7 @@ impl TransfusionManager {
                 }
             }
 
-            let metadata = SampleMetadata {
+            let metadata = Arc::new(SampleMetadata {
                 bpm: 128.0, // Default for testing sync
                 transients: Arc::new(transients),
                 root_key: None,
@@ -279,7 +282,7 @@ impl TransfusionManager {
                 mip_waveform: nullherz_traits::MipWaveform::default(),
                 dna: nullherz_traits::SoundDNA::default(),
                 midi_map: None,
-            };
+            });
 
             self.sample_registry.register_with_metadata(sample_id, snapshot, metadata.clone());
             eprintln!("Registered new transfusion source with metadata: ID={}", sample_id);
@@ -304,11 +307,6 @@ impl TransfusionManager {
                     discovery.announce_push(sample_id);
                 }
             }
-
-            // Also notify the topology manager to update the processor if it's currently active.
-            // This is a bit of a hack for now, as we'd ideally want a more structured way to update sources.
-            // We'll use AddSource for now, which is handled by Granular and Sampler.
-            // We don't know the node_idx here easily, so we skip for now or broadcast.
         }
     }
 }

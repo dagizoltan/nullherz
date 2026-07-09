@@ -18,7 +18,7 @@ use self::processing_kernel::StandardKernel;
 use self::input_handler::EngineInputHandler;
 use self::resource_recycler::ResourceRecycler;
 use self::telemetry_finalizer::TelemetryFinalizer;
-use nullherz_dna::SampleRegistry;
+use nullherz_traits::SampleRegistry;
 
 pub struct EngineHost {
     command_producer: Box<dyn nullherz_traits::CommandProducer>,
@@ -85,7 +85,7 @@ pub struct AudioEngine<K: ProcessingKernel = StandardKernel> {
     pub health_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub graph_manager: GraphManager,
     pub resource_recycler: ResourceRecycler,
-    pub sample_registry: Arc<SampleRegistry>,
+    pub sample_registry: Arc<dyn SampleRegistry>,
     pub kernel: K,
     pub host: Option<EngineHost>,
     pub pool: Option<Box<dyn nullherz_traits::ParallelExecutor>>,
@@ -138,6 +138,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
     pub fn new(
         resources: EngineResources,
         initial_graph: Box<dyn AudioProcessor>,
+        sample_registry: Arc<dyn SampleRegistry>,
         logger: Arc<RtLogger>,
         kernel: K,
     ) -> Self {
@@ -159,7 +160,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
                 resources.bundle_garbage_producer,
                 resources.bundle_overflow_producer
             ),
-            sample_registry: Arc::new(SampleRegistry::new()),
+            sample_registry,
             kernel,
             telemetry_producer: resources.telemetry_producer,
             telemetry_log_producer: None,
@@ -228,7 +229,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             &mut self.topology_consumer,
             &mut self.midi_consumer,
             &mut self.resource_recycler,
-            &self.sample_registry,
+            self.sample_registry.as_ref(),
             &self.metrics,
             &self.health_signal,
         );

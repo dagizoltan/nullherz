@@ -121,7 +121,7 @@ impl ProjectState {
                             params.push((p_id, child.get_parameter(p_id)));
                         }
 
-                        let (x, y) = topo.node_positions.get(&node_idx).cloned().unwrap_or((0.0, 0.0));
+                        let (x, y) = topo.node_positions[node_idx as usize].unwrap_or((0.0, 0.0));
                         state.nodes.push(NodeState {
                             id: node_idx,
                             type_id,

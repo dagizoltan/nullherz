@@ -1,4 +1,4 @@
-use nullherz_traits::{AudioProcessor, ProcessorFactory};
+use nullherz_traits::{AudioProcessor, ProcessorFactory, ProcessorTypeId, ProcessorCapability};
 use crate::gain::*;
 use crate::biquad::*;
 use crate::crossfader::*;
@@ -17,6 +17,7 @@ impl ProcessorFactory for GainFactory {
         Some(Box::new(GainProcessor::new(node_idx as u64, 1.0)))
     }
     fn name(&self) -> &'static str { "Gain" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::GAIN }
 }
 
 pub struct BiquadFactory;
@@ -28,6 +29,7 @@ impl ProcessorFactory for BiquadFactory {
         Some(Box::new(BiquadProcessor::new(node_idx as u64, coeffs)))
     }
     fn name(&self) -> &'static str { "Biquad" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::BIQUAD }
 }
 
 pub struct SamplerFactory;
@@ -36,6 +38,8 @@ impl ProcessorFactory for SamplerFactory {
         Some(Box::new(SamplerProcessor::new(node_idx as u64)))
     }
     fn name(&self) -> &'static str { "Sampler" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::SAMPLER }
+    fn capabilities(&self) -> ProcessorCapability { ProcessorCapability { has_midi_input: true, ..ProcessorCapability::default() } }
 }
 
 pub struct CrossfaderFactory;
@@ -44,6 +48,7 @@ impl ProcessorFactory for CrossfaderFactory {
         Some(Box::new(CrossfaderProcessor::new(node_idx as u64)))
     }
     fn name(&self) -> &'static str { "Crossfader" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::CROSSFADER }
 }
 
 pub struct SummingFactory;
@@ -52,6 +57,7 @@ impl ProcessorFactory for SummingFactory {
         Some(Box::new(SummingProcessor::new(node_idx as u64)))
     }
     fn name(&self) -> &'static str { "Summing" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::SUMMING }
 }
 
 pub struct SpectralFactory;
@@ -60,6 +66,7 @@ impl ProcessorFactory for SpectralFactory {
         Some(Box::new(SpectralProcessor::new(node_idx as u64, 1024)))
     }
     fn name(&self) -> &'static str { "Spectral" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::SPECTRAL }
 }
 
 pub struct WavetableFactory;
@@ -68,6 +75,8 @@ impl ProcessorFactory for WavetableFactory {
         Some(Box::new(WavetableProcessor::new(node_idx as u64, sample_rate)))
     }
     fn name(&self) -> &'static str { "Wavetable" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::WAVETABLE }
+    fn capabilities(&self) -> ProcessorCapability { ProcessorCapability { is_instrument: true, has_midi_input: true, has_audio_input: false, ..ProcessorCapability::default() } }
 }
 
 pub struct ModulationFactory;
@@ -76,6 +85,7 @@ impl ProcessorFactory for ModulationFactory {
         Some(Box::new(ModulationProcessor::new(node_idx as u64, 0, 0, 1.0, 0.0)))
     }
     fn name(&self) -> &'static str { "Modulation" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::MODULATION }
 }
 
 pub struct SequencerFactory;
@@ -84,6 +94,8 @@ impl ProcessorFactory for SequencerFactory {
         Some(Box::new(SequencerProcessor::new(node_idx, sample_rate, 120.0)))
     }
     fn name(&self) -> &'static str { "Sequencer" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::SEQUENCER }
+    fn capabilities(&self) -> ProcessorCapability { ProcessorCapability { is_instrument: true, has_audio_input: false, ..ProcessorCapability::default() } }
 }
 
 pub struct EnvelopeFollowerFactory;
@@ -92,6 +104,7 @@ impl ProcessorFactory for EnvelopeFollowerFactory {
         Some(Box::new(EnvelopeFollowerProcessor::new(node_idx as u64, sample_rate)))
     }
     fn name(&self) -> &'static str { "EnvelopeFollower" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::ENVELOPE_FOLLOWER }
 }
 
 pub struct GranularFactory;
@@ -100,6 +113,7 @@ impl ProcessorFactory for GranularFactory {
         Some(Box::new(GranularProcessor::new(node_idx as u64, sample_rate)))
     }
     fn name(&self) -> &'static str { "Granular" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::GRANULAR }
 }
 
 pub struct SpectralMorphFactory;
@@ -108,6 +122,7 @@ impl ProcessorFactory for SpectralMorphFactory {
         Some(Box::new(SpectralMorphProcessor::new(node_idx as u64, 1024)))
     }
     fn name(&self) -> &'static str { "SpectralMorph" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::SPECTRAL_MORPH }
 }
 
 pub struct CaptureFactory;
@@ -116,6 +131,7 @@ impl ProcessorFactory for CaptureFactory {
         Some(Box::new(CaptureProcessor::new(sample_rate as usize * 2, node_idx as u64))) // 2 seconds
     }
     fn name(&self) -> &'static str { "Capture" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::CAPTURE }
 }
 
 pub struct DjIsolatorFactory;
@@ -124,6 +140,7 @@ impl ProcessorFactory for DjIsolatorFactory {
         Some(Box::new(crate::dsp_kernel_processor::DspKernelProcessor::new(node_idx as u64, audio_dsp::DjIsolator::new())))
     }
     fn name(&self) -> &'static str { "DjIsolator" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::DJ_ISOLATOR }
 }
 
 pub struct SimdBiquadFactory;
@@ -133,6 +150,7 @@ impl ProcessorFactory for SimdBiquadFactory {
         Some(Box::new(crate::dsp_kernel_processor::MultiChannelDspProcessor::new(node_idx as u64, audio_dsp::SimdBiquad::new(coeffs), 8)))
     }
     fn name(&self) -> &'static str { "SimdBiquad" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::SIMD_BIQUAD }
 }
 
 pub struct KeySyncFactory;
@@ -141,6 +159,7 @@ impl ProcessorFactory for KeySyncFactory {
         Some(Box::new(KeySyncProcessor::new(node_idx as u64, 1024)))
     }
     fn name(&self) -> &'static str { "KeySync" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::KEY_SYNC }
 }
 
 pub struct PersonalityInheritanceFactory;
@@ -149,4 +168,5 @@ impl ProcessorFactory for PersonalityInheritanceFactory {
         Some(Box::new(PersonalityInheritanceProcessor::new(node_idx as u64, 1024)))
     }
     fn name(&self) -> &'static str { "PersonalityInheritance" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::PERSONALITY_INHERITANCE }
 }

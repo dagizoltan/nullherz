@@ -1,7 +1,7 @@
 use fx_runtime::SidecarManager;
 use crate::topology_manager::TopologyManager;
 use crate::ipc_audio_bridge::IpcAudioBridge;
-use nullherz_traits::{TopologyMutation, TimestampedCommand};
+use nullherz_traits::{TopologyMutation, TimestampedCommand, SampleRegistry};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use ipc_layer::tcp::{TcpIpcConsumer, TcpIpcProducer};
@@ -115,7 +115,7 @@ impl RemoteSidecarManager {
         }
     }
 
-    pub async fn ensure_sample_mirrored(&mut self, sample_id: u64, registry: &nullherz_dna::SampleRegistry) {
+    pub async fn ensure_sample_mirrored(&mut self, sample_id: u64, registry: &dyn SampleRegistry) {
         let sample = match registry.get(sample_id) {
             Some(s) => s,
             None => return,

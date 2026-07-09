@@ -27,6 +27,7 @@ pub struct EngineBuilder {
     telemetry_buffer_size: usize,
     garbage_buffer_size: usize,
     initial_graph: Option<Box<dyn AudioProcessor>>,
+    sample_registry: Option<Arc<dyn nullherz_traits::SampleRegistry>>,
 }
 
 impl Default for EngineBuilder {
@@ -39,6 +40,7 @@ impl Default for EngineBuilder {
             telemetry_buffer_size: 1024,
             garbage_buffer_size: 1024,
             initial_graph: None,
+            sample_registry: None,
         }
     }
 }
@@ -55,6 +57,11 @@ impl EngineBuilder {
 
     pub fn with_initial_graph(mut self, graph: Box<dyn AudioProcessor>) -> Self {
         self.initial_graph = Some(graph);
+        self
+    }
+
+    pub fn with_sample_registry(mut self, registry: Arc<dyn nullherz_traits::SampleRegistry>) -> Self {
+        self.sample_registry = Some(registry);
         self
     }
 
@@ -76,6 +83,7 @@ impl EngineBuilder {
         let (garbage_overflow_prod, garbage_overflow_cons) = RingBuffer::new(32).split();
 
         let initial_graph = self.initial_graph.unwrap_or_else(|| Box::new(ProcessorGraph::new()));
+        let sample_registry = self.sample_registry.expect("SampleRegistry required for engine build");
 
         let resources = crate::engine::EngineResources {
             command_consumer: Box::new(cmd_cons),
@@ -94,6 +102,7 @@ impl EngineBuilder {
         let engine = AudioEngine::new(
             resources,
             initial_graph,
+            sample_registry,
             Arc::new(crate::rt_logging::RtLogger::new(256)),
             crate::engine::processing_kernel::StandardKernel::default()
         ).with_flight_recorder(tel_log_prod);

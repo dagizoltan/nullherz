@@ -10,7 +10,7 @@ use crate::clip_orchestrator::ClipOrchestrator;
 use crate::modulation_matrix::ModulationMatrix;
 use nullherz_traits::{Command, telemetry::Telemetry};
 use std::sync::{Arc, Mutex};
-use nullherz_dna::{SampleRegistry, GeneticLibrary};
+use nullherz_dna::{ GeneticLibrary};
 
 pub struct Conductor {
     pub engine_coordinator: EngineCoordinator,
@@ -54,7 +54,7 @@ impl Conductor {
     }
 
     pub fn with_library_path(path: &str) -> Self {
-        let sample_registry = Arc::new(SampleRegistry::new());
+        let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
         let library = match nullherz_dna::LibraryDatabase::load(path) {
             Ok(db) => Arc::new(std::sync::Mutex::new(db)),
             Err(_) => {
@@ -105,6 +105,7 @@ impl Conductor {
     }
 
     pub fn setup_engine(&mut self) -> crate::EngineContext {
+        let registry = self.transfusion_manager.sample_registry.clone();
         // Initialize PTP Clock if on Linux
         #[cfg(target_os = "linux")]
         if let Ok(clock) = nullherz_traits::PtpClockProvider::new("eth0") {
@@ -117,7 +118,7 @@ impl Conductor {
             }
         }
 
-        let handle = self.engine_coordinator.setup();
+        let handle = self.engine_coordinator.setup(registry);
 
         self.mixer_bridge.bundle_producer = Some(handle.bundle_producer);
         self.mixer_bridge.bundle_pool = handle.bundle_garbage_consumer;
@@ -262,7 +263,9 @@ impl Conductor {
     fn process_distributed_audio(&mut self) {
         let topo = &self.topology_manager.current_topology;
         for node_idx in 0..topo.node_count {
-            if let Some(target) = topo.node_assignments.get(&(node_idx as u32)) {
+            let target_assignment = &topo.node_assignments[node_idx];
+            if target_assignment.0[0] != 0 {
+                let target = String::from_utf8_lossy(&target_assignment.0).trim_matches(char::from(0)).to_string();
                 if target != "local" {
                     let mut blocks = Vec::with_capacity(4);
                     while let Some(block) = self.audio_bridge.pop_block(node_idx as u32) {
@@ -484,7 +487,10 @@ impl Conductor {
 
         self.sync_sampler_metadata();
 
-        self.transfusion_manager.sample_registry.drain_garbage();
+        {
+            use nullherz_traits::SampleRegistry;
+            self.transfusion_manager.sample_registry.drain_garbage();
+        }
 
         self.drain_garbage();
     }
@@ -509,7 +515,7 @@ impl Conductor {
                                 if let Some(ref mut prod) = self.topology_manager.topo_producer {
                                     let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
                                         node_idx: m.processor_id as u32,
-                                        metadata: Arc::new(track.metadata),
+                                        metadata: track.metadata.clone(),
                                     });
                                 }
                             }
@@ -519,7 +525,7 @@ impl Conductor {
                                 if let Some(ref mut prod) = self.topology_manager.topo_producer {
                                     let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
                                         node_idx: m.processor_id as u32,
-                                        metadata: Arc::new(sample.metadata),
+                                        metadata: sample.metadata.clone(),
                                     });
                                 }
                             }

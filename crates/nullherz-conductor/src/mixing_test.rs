@@ -1,3 +1,4 @@
+
 #[cfg(test)]
 mod tests {
     use crate::Conductor;
@@ -36,6 +37,9 @@ mod tests {
             for t in 0..44100 {
                 let val = if (t % 200) < 100 { 0.5f32 } else { -0.5f32 };
                 writer_b.write_sample((val * 32767.0) as i16).unwrap();
+    use std::sync::Arc;
+
+
             }
         }
 
@@ -47,12 +51,12 @@ mod tests {
         let tracks = conductor.library.lock().unwrap().list_tracks().unwrap();
         assert!(tracks.len() >= 2, "Expected at least 2 tracks, found {}", tracks.len());
 
-        let mut track_a = tracks.iter().find(|t| t.title == "track_a.wav").unwrap().clone();
-        let mut track_b = tracks.iter().find(|t| t.title == "track_b.wav").unwrap().clone();
+        let track_a = tracks.iter().find(|t| t.title == "track_a.wav").unwrap().clone();
+        let track_b = tracks.iter().find(|t| t.title == "track_b.wav").unwrap().clone();
 
         // Setup root keys for harmonic sync testing (C and F)
-        track_a.metadata.root_key = Some(0.0);
-        track_b.metadata.root_key = Some(5.0);
+        let mut meta_a = (*track_a.metadata).clone(); meta_a.root_key = Some(0.0); let mut track_a = track_a.clone(); track_a.metadata = std::sync::Arc::new(meta_a);
+        let mut meta_b = (*track_b.metadata).clone(); meta_b.root_key = Some(5.0); let mut track_b = track_b.clone(); track_b.metadata = std::sync::Arc::new(meta_b);
 
         {
             let lib = conductor.library.lock().unwrap();

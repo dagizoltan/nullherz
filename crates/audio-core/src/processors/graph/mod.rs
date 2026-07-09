@@ -41,17 +41,17 @@ pub struct ProcessorGraph {
 
 impl ProcessorGraph {
     pub fn new() -> Self {
-        let mut v2p = [0usize; crate::MAX_NODES];
-        for (i, val) in v2p.iter_mut().enumerate() { *val = i; }
+        let mut v2p = [0u32; crate::MAX_NODES];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
         let topo = GraphTopology {
             routing: [NodeRouting { input_indices: [0; crate::MAX_CHANNELS], output_indices: [0; crate::MAX_CHANNELS], input_count: 0, output_count: 0 }; crate::MAX_NODES],
             virtual_to_physical: v2p,
             plan: CompiledGraphPlan::default(),
             crossfades: [None; crate::MAX_CROSSFADE_BUFFERS],
             node_count: 0,
-            node_assignments: std::collections::HashMap::new(),
-            node_positions: std::collections::HashMap::new(),
-            bypass_states: std::collections::HashSet::new(),
+            node_assignments: [nullherz_traits::NodeAssignment([0; 32]); crate::MAX_NODES],
+            node_positions: [None; crate::MAX_NODES],
+            bypass_states: [false; crate::MAX_NODES],
         };
 
         let nodes = Box::new(std::array::from_fn(|_| ProcessorNode {
@@ -129,11 +129,15 @@ impl ProcessorGraph {
         let topo = self.inactive_topology_mut();
         let input_count = inputs.len().min(crate::MAX_CHANNELS);
         topo.routing[idx].input_count = input_count;
-        topo.routing[idx].input_indices[..input_count].copy_from_slice(&inputs[..input_count]);
+        for (i, &v_idx) in inputs.iter().take(input_count).enumerate() {
+            topo.routing[idx].input_indices[i] = v_idx as u32;
+        }
 
         let output_count = outputs.len().min(crate::MAX_CHANNELS);
         topo.routing[idx].output_count = output_count;
-        topo.routing[idx].output_indices[..output_count].copy_from_slice(&outputs[..output_count]);
+        for (i, &v_idx) in outputs.iter().take(output_count).enumerate() {
+            topo.routing[idx].output_indices[i] = v_idx as u32;
+        }
         topo.node_count += 1;
 
         self.calculate_stages();
@@ -226,8 +230,8 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                 // Stage 7: Frequency-Domain Spectral Morphing
                 // We utilize the pre-allocated FFT resources to blend paths in the magnitude spectrum.
                 for i in 0..external_outputs.len().min(4) {
-                    let p_idx = topo.virtual_to_physical[i];
-                    let old_p_idx = old_topo.virtual_to_physical[i];
+                    let p_idx = topo.virtual_to_physical[i] as usize;
+                    let old_p_idx = old_topo.virtual_to_physical[i] as usize;
 
                     let new_data = &self.buffer_pool.buffers[p_idx].data[offset..offset + num_samples];
                     let old_data = &self.buffer_pool.old_path_buffers[old_p_idx].data[offset..offset + num_samples];
@@ -247,8 +251,8 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                     let progress = (self.morph_samples_total - current_remaining) as f32 * inv_total;
 
                     for i in 0..external_outputs.len().min(4) {
-                        let p_idx = topo.virtual_to_physical[i];
-                        let old_p_idx = old_topo.virtual_to_physical[i];
+                        let p_idx = topo.virtual_to_physical[i] as usize;
+                        let old_p_idx = old_topo.virtual_to_physical[i] as usize;
                         let new_val = self.buffer_pool.buffers[p_idx].data[offset + j];
                         let old_val = self.buffer_pool.old_path_buffers[old_p_idx].data[offset + j];
                         external_outputs[i][j] = old_val * (1.0 - progress) + new_val * progress;
@@ -259,7 +263,7 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
             self.morph_samples_remaining = self.morph_samples_remaining.saturating_sub(num_samples as u32);
         } else {
             for i in 0..external_outputs.len().min(4) {
-                let p_idx = topo.virtual_to_physical[i];
+                let p_idx = topo.virtual_to_physical[i] as usize;
                 external_outputs[i].copy_from_slice(&self.buffer_pool.buffers[p_idx].data[offset..offset + num_samples]);
             }
         }
@@ -294,8 +298,8 @@ fn latency_samples(&self) -> usize {
 
         for s_idx in 0..topo.plan.num_stages {
             let mut stage_max = 0;
-            for n_idx in &topo.plan.stages[s_idx][..topo.plan.stage_counts[s_idx]] {
-                let node = &self.nodes[*n_idx];
+            for &n_idx_u32 in &topo.plan.stages[s_idx].0[..topo.plan.stage_counts[s_idx] as usize] {
+                let node = &self.nodes[n_idx_u32 as usize];
                 let lat = unsafe { (*node.processor.get()).latency_samples() };
                 if lat > stage_max { stage_max = lat; }
             }
@@ -346,7 +350,7 @@ fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
         }
     }
 fn apply_command(&mut self, command: &nullherz_traits::Command) {
-        use nullherz_traits::{Command, CoreCommand, MixerCommand};
+        use nullherz_traits::{Command, CoreCommand};
         match command {
             Command::Core(CoreCommand::SetSafeMode(enabled)) => {
                 for node in self.nodes.iter() {
@@ -358,11 +362,7 @@ fn apply_command(&mut self, command: &nullherz_traits::Command) {
                 // It is handled off-thread by TopologyManager, which pushes a
                 // TopologyMutation::SetTopology for an O(1) Arc swap.
             }
-            Command::Mixer(MixerCommand::Bundle { .. }) => {
-                // BUG-07: ProcessorGraph must not broadcast the Bundle itself,
-                // because CommandDispatcher already expanded it into individual SetParam calls.
-                // We do nothing here to avoid double-application.
-            }
+            Command::Mixer(nullherz_traits::MixerCommand::Bundle { .. }) => {}
             _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }
         }
     }
@@ -472,7 +472,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         if topo.node_count > 0 { assert!(topo.plan.num_stages > 0); }
         let mut seen_nodes = std::collections::HashSet::new();
         for s_idx in 0..topo.plan.num_stages {
-            for n_idx in &topo.plan.stages[s_idx][..topo.plan.stage_counts[s_idx]] {
+            for n_idx in &topo.plan.stages[s_idx].0[..topo.plan.stage_counts[s_idx] as usize] {
                 assert!(seen_nodes.insert(*n_idx), "Node {} assigned to multiple stages", n_idx);
             }
         }

@@ -35,11 +35,12 @@ impl EngineCoordinator {
         }
     }
 
-    pub fn setup(&mut self) -> audio_core::engine::builder::EngineHandle {
+    pub fn setup(&mut self, sample_registry: Arc<dyn nullherz_traits::SampleRegistry>) -> audio_core::engine::builder::EngineHandle {
         ipc_layer::SharedMemory::cleanup_stale_segments();
 
         let (engine, handle) = EngineBuilder::new()
             .with_command_buffer_size(1024)
+            .with_sample_registry(sample_registry)
             .build();
 
         self.health_signal = Some(handle.health_signal.clone());

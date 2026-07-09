@@ -178,7 +178,7 @@ impl CommandHandler {
                                 .and_then(|c| c.resource_id());
                             if let Some(rid) = resource_id {
                                 if let Some(s) = conductor.transfusion_manager.sample_registry.get(rid) {
-                                    dna = s.metadata.dna.rhythmic;
+                                    dna = (*s.metadata).dna.rhythmic.clone();
                                 }
                             }
                         }
@@ -208,7 +208,7 @@ impl CommandHandler {
                             node_idx: preview_node_idx,
                             buffer: sample.buffer,
                             sample_id,
-                            metadata: Some(Arc::new(sample.metadata)),
+                            metadata: Some(sample.metadata.clone()),
                         });
                         let _ = Self::handle_performance_command(conductor, PerformanceCommand::PlayNode { node_idx: preview_node_idx });
                     }
@@ -227,7 +227,7 @@ impl CommandHandler {
                                  if let Some(rid) = src_proc.resource_id() {
                                      if let Ok(lib) = conductor.library.lock() {
                                          if let Ok(Some(track)) = lib.get_track(rid) {
-                                             src_bpm = track.metadata.bpm;
+                                             src_bpm = (*track.metadata).bpm;
                                          }
                                      }
                                  }
@@ -262,27 +262,25 @@ impl CommandHandler {
                 true
             }
             ResourceCommand::Normalize { sample_id } => {
-                if let Some(mut sample) = conductor.transfusion_manager.sample_registry.get(sample_id) {
+                if let Some(sample) = conductor.transfusion_manager.sample_registry.get(sample_id) {
                     let mut max_peak = 0.0f32;
                     for &s in sample.buffer.iter() { max_peak = max_peak.max(s.abs()); }
                     if max_peak > 0.0 {
                         let gain = 0.95 / max_peak;
                         let mut new_buf = (*sample.buffer).clone();
                         for s in new_buf.iter_mut() { *s *= gain; }
-                        sample.buffer = Arc::new(new_buf);
-                        conductor.transfusion_manager.sample_registry.register_with_metadata(sample_id, sample.buffer, sample.metadata);
+                        conductor.transfusion_manager.sample_registry.register_with_metadata(sample_id, Arc::new(new_buf), sample.metadata);
                     }
                 }
                 true
             }
             ResourceCommand::Crop { sample_id, start_samples, end_samples } => {
-                 if let Some(mut sample) = conductor.transfusion_manager.sample_registry.get(sample_id) {
+                 if let Some(sample) = conductor.transfusion_manager.sample_registry.get(sample_id) {
                      let start = start_samples as usize;
                      let end = (end_samples as usize).min(sample.buffer.len());
                      if start < end {
                          let cropped = sample.buffer[start..end].to_vec();
-                         sample.buffer = Arc::new(cropped);
-                         conductor.transfusion_manager.sample_registry.register_with_metadata(sample_id, sample.buffer, sample.metadata);
+                         conductor.transfusion_manager.sample_registry.register_with_metadata(sample_id, Arc::new(cropped), sample.metadata);
                      }
                  }
                  true
@@ -315,9 +313,10 @@ impl CommandHandler {
             }
             ResourceCommand::ApplyFeatureMutation { target_id, feature_name, strength } => {
                 let name = String::from_utf8_lossy(&feature_name).trim_matches(char::from(0)).to_string();
-                if let Some(mut sample) = conductor.transfusion_manager.sample_registry.get(target_id) {
-                    nullherz_dna::FeatureMutator::mutate(&mut sample.metadata.dna, &name, strength);
-                    conductor.transfusion_manager.sample_registry.register_with_metadata(target_id, sample.buffer, sample.metadata);
+                if let Some(sample) = conductor.transfusion_manager.sample_registry.get(target_id) {
+                    let mut metadata_mut = (*sample.metadata).clone();
+                    nullherz_dna::FeatureMutator::mutate(&mut metadata_mut.dna, &name, strength);
+                    conductor.transfusion_manager.sample_registry.register_with_metadata(target_id, sample.buffer, Arc::new(metadata_mut));
                     println!("Applied Feature Mutation '{}' (strength={:.2}) to sample {}", name, strength, target_id);
                 }
                 true
