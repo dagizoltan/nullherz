@@ -172,6 +172,8 @@ pub struct Gain {
     pub _smoothing_factor: f32,
     pub ramp_remaining: u32,
     pub ramp_step: f32,
+    pub soft_clip: bool,
+    pub clip_threshold: f32,
 }
 
 impl DspKernel for Gain {
@@ -181,13 +183,21 @@ impl DspKernel for Gain {
     }
 
     fn set_parameter(&mut self, id: u32, value: f32, ramp_samples: u32) {
-        if id == 0 {
-            self.set_gain(value, ramp_samples);
+        match id {
+            0 => self.set_gain(value, ramp_samples),
+            1 => self.soft_clip = value > 0.5,
+            2 => self.clip_threshold = value.max(0.01),
+            _ => {}
         }
     }
 
     fn get_parameter(&self, id: u32) -> f32 {
-        if id == 0 { self.target_gain } else { 0.0 }
+        match id {
+            0 => self.target_gain,
+            1 => if self.soft_clip { 1.0 } else { 0.0 },
+            2 => self.clip_threshold,
+            _ => 0.0
+        }
     }
 }
 
@@ -199,6 +209,8 @@ impl Gain {
             _smoothing_factor: smoothing_factor,
             ramp_remaining: 0,
             ramp_step: 0.0,
+            soft_clip: false,
+            clip_threshold: 1.0,
         }
     }
 
@@ -223,7 +235,6 @@ impl Gain {
         let mut current = self.current_gain;
 
         if self.ramp_remaining > 0 {
-            // Ramped gain: mostly scalar due to sequential nature, but can be vectorized in segments
             for i in 0..len {
                 if self.ramp_remaining > 0 {
                     current += self.ramp_step;
@@ -231,11 +242,13 @@ impl Gain {
                 } else {
                     current = self.target_gain;
                 }
-                let out = input[i] * current;
+                let mut out = input[i] * current;
+                if self.soft_clip {
+                    out = crate::simd_vec::tanh_simd(wide::f32x4::from(out / self.clip_threshold)).to_array()[0] * self.clip_threshold;
+                }
                 output[i] = if out.abs() < 1e-15 { 0.0 } else { out };
             }
         } else {
-            // Static gain: Highly vectorizable
             use crate::simd_vec::*;
             current = self.target_gain;
             let v_gain = FloatX8::from(current);
@@ -245,16 +258,43 @@ impl Gain {
             let mut i = 0;
             while i + 8 <= len {
                 let v_in = load_f32x8(input, i);
-                let v_out = v_in * v_gain;
-                // Denormal safeguard: if abs < eps, force to zero
-                // wide uses cmp_gt, cmp_lt etc instead of .lt() which returns a mask
+                let mut v_out = v_in * v_gain;
+
+                if self.soft_clip {
+                    let v_thresh = wide::f32x8::from(self.clip_threshold);
+                    let v_inv_thresh = wide::f32x8::from(1.0 / self.clip_threshold);
+
+                    // Manually split f32x8 into 2x f32x4
+                    let arr_out: [f32; 8] = v_out.into();
+                    let arr_inv: [f32; 8] = v_inv_thresh.into();
+
+                    let v_out_low = wide::f32x4::new([arr_out[0], arr_out[1], arr_out[2], arr_out[3]]);
+                    let v_out_high = wide::f32x4::new([arr_out[4], arr_out[5], arr_out[6], arr_out[7]]);
+                    let v_inv_low = wide::f32x4::new([arr_inv[0], arr_inv[1], arr_inv[2], arr_inv[3]]);
+                    let v_inv_high = wide::f32x4::new([arr_inv[4], arr_inv[5], arr_inv[6], arr_inv[7]]);
+
+                    let clipped_low = tanh_simd(v_out_low * v_inv_low);
+                    let clipped_high = tanh_simd(v_out_high * v_inv_high);
+
+                    let arr_cl_low: [f32; 4] = clipped_low.into();
+                    let arr_cl_high: [f32; 4] = clipped_high.into();
+
+                    v_out = wide::f32x8::new([
+                        arr_cl_low[0], arr_cl_low[1], arr_cl_low[2], arr_cl_low[3],
+                        arr_cl_high[0], arr_cl_high[1], arr_cl_high[2], arr_cl_high[3],
+                    ]) * v_thresh;
+                }
+
                 let mask = v_out.abs().cmp_lt(v_eps);
                 let v_out_clean = mask.blend(v_zero, v_out);
                 store_f32x8(output, i, v_out_clean);
                 i += 8;
             }
             while i < len {
-                let out = input[i] * current;
+                let mut out = input[i] * current;
+                if self.soft_clip {
+                    out = crate::simd_vec::tanh_simd(wide::f32x4::from(out / self.clip_threshold)).to_array()[0] * self.clip_threshold;
+                }
                 output[i] = if out.abs() < 1e-15 { 0.0 } else { out };
                 i += 1;
             }

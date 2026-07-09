@@ -104,13 +104,54 @@ impl MixerManager {
 
     pub fn create_aux_bus(&mut self, name: &str, fx_ids: &[u32]) -> Vec<Command> {
         let mut commands = Vec::new();
-        let bus_id = self.id_allocator.allocate_node_id();
-        self.node_names.insert(format!("aux_{}", name.to_lowercase()), bus_id);
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode {
-            node_idx: bus_id,
-            processor_type_id: ProcessorTypeId::SUMMING
-        }));
-        // Logic for FX chain on Aux bus
+        let name_lower = name.to_lowercase();
+
+        // 1. Summing Node (Stereo)
+        let sum_l_id = self.id_allocator.allocate_node_id();
+        let sum_r_id = self.id_allocator.allocate_node_id();
+        let sum_out_l = self.id_allocator.allocate_buffer_id(1);
+        let sum_out_r = self.id_allocator.allocate_buffer_id(1);
+
+        self.node_names.insert(format!("aux_{}_sum_l", name_lower), sum_l_id);
+        self.node_names.insert(format!("aux_{}_sum_r", name_lower), sum_r_id);
+
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: sum_l_id, processor_type_id: ProcessorTypeId::SUMMING }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: sum_l_id, output_idx: 0, new_buffer_idx: sum_out_l }));
+
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: sum_r_id, processor_type_id: ProcessorTypeId::SUMMING }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: sum_r_id, output_idx: 0, new_buffer_idx: sum_out_r }));
+
+        // 2. FX Chain
+        let mut prev_l = sum_l_id;
+        let mut prev_r = sum_r_id;
+
+        for (i, &fx_type) in fx_ids.iter().enumerate() {
+            let fx_l_id = self.id_allocator.allocate_node_id();
+            let fx_r_id = self.id_allocator.allocate_node_id();
+            let fx_buf_l = self.id_allocator.allocate_buffer_id(1);
+            let fx_buf_r = self.id_allocator.allocate_buffer_id(1);
+
+            self.node_names.insert(format!("aux_{}_fx{}_l", name_lower, i), fx_l_id);
+            self.node_names.insert(format!("aux_{}_fx{}_r", name_lower, i), fx_r_id);
+
+            // Left
+            commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: fx_l_id, processor_type_id: ProcessorTypeId(fx_type) }));
+            commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: prev_l, output_idx: 0, new_buffer_idx: fx_buf_l }));
+            commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: fx_l_id, input_idx: 0, new_buffer_idx: fx_buf_l }));
+
+            // Right
+            commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: fx_r_id, processor_type_id: ProcessorTypeId(fx_type) }));
+            commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: prev_r, output_idx: 0, new_buffer_idx: fx_buf_r }));
+            commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: fx_r_id, input_idx: 0, new_buffer_idx: fx_buf_r }));
+
+            prev_l = fx_l_id;
+            prev_r = fx_r_id;
+        }
+
+        // 3. Final Aux Output (Return to Master Sum by default)
+        // Note: The actual return routing might be handled by the caller or another component.
+        // For now we just ensure the chain is closed.
+
         commands
     }
 

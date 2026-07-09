@@ -254,6 +254,14 @@ impl crate::DspKernel for SimdBiquad {
                 out_ptrs[i] = outputs[i].as_mut_ptr();
             }
             self.process_8_channels(in_ptrs, out_ptrs, inputs[0].len());
+        } else if num_ch >= 4 {
+            let mut in_ptrs = [std::ptr::null(); 4];
+            let mut out_ptrs = [std::ptr::null_mut(); 4];
+            for i in 0..4 {
+                in_ptrs[i] = inputs[i].as_ptr();
+                out_ptrs[i] = outputs[i].as_mut_ptr();
+            }
+            self.process_4_channels(in_ptrs, out_ptrs, inputs[0].len());
         } else {
             for i in 0..num_ch {
                 self.process_scalar(i, inputs[i], outputs[i]);
@@ -335,6 +343,55 @@ impl SimdBiquad {
 
         unsafe { store_f32x16_ptr(self.z1.as_mut_ptr(), z1) };
         unsafe { store_f32x16_ptr(self.z2.as_mut_ptr(), z2) };
+    }
+
+    pub fn process_4_channels(&mut self, inputs: [*const f32; 4], outputs: [*mut f32; 4], len: usize) {
+        use wide::*;
+
+        let b0 = f32x4::from(self.coeffs.b0);
+        let b1 = f32x4::from(self.coeffs.b1);
+        let b2 = f32x4::from(self.coeffs.b2);
+        let a1 = f32x4::from(self.coeffs.a1);
+        let a2 = f32x4::from(self.coeffs.a2);
+
+        let mut z1 = f32x4::new([self.z1[0], self.z1[1], self.z1[2], self.z1[3]]);
+        let mut z2 = f32x4::new([self.z2[0], self.z2[1], self.z2[2], self.z2[3]]);
+
+        for i in 0..len {
+            let x = unsafe {
+                f32x4::new([
+                    *inputs[0].add(i), *inputs[1].add(i), *inputs[2].add(i), *inputs[3].add(i)
+                ])
+            };
+
+            let mut y = (x * b0) + z1;
+
+            let y_arr: [f32; 4] = y.into();
+            let mut finite = true;
+            for val in &y_arr { if !val.is_finite() { finite = false; break; } }
+
+            if !finite {
+                y = f32x4::ZERO;
+                z1 = f32x4::ZERO;
+                z2 = f32x4::ZERO;
+            } else {
+                z1 = ((x * b1) - (y * a1)) + z2;
+                z2 = (x * b2) - (y * a2);
+            }
+
+            let out_v: [f32; 4] = y.into();
+            unsafe {
+                *outputs[0].add(i) = out_v[0];
+                *outputs[1].add(i) = out_v[1];
+                *outputs[2].add(i) = out_v[2];
+                *outputs[3].add(i) = out_v[3];
+            }
+        }
+
+        let z1_arr: [f32; 4] = z1.into();
+        self.z1[0..4].copy_from_slice(&z1_arr);
+        let z2_arr: [f32; 4] = z2.into();
+        self.z2[0..4].copy_from_slice(&z2_arr);
     }
 
     pub fn process_8_channels(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {

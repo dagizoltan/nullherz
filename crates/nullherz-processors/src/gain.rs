@@ -55,9 +55,23 @@ fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
         let name = b"Gain";
         parameters[0].name[..name.len()].copy_from_slice(name);
 
+        let sc_name = b"SoftClip";
+        parameters[1].id = 1;
+        parameters[1].name[..sc_name.len()].copy_from_slice(sc_name);
+        parameters[1].min = 0.0;
+        parameters[1].max = 1.0;
+        parameters[1].default = 0.0;
+
+        let thresh_name = b"Threshold";
+        parameters[2].id = 2;
+        parameters[2].name[..thresh_name.len()].copy_from_slice(thresh_name);
+        parameters[2].min = 0.01;
+        parameters[2].max = 2.0;
+        parameters[2].default = 1.0;
+
         Some(nullherz_traits::ProcessorMetadata {
             processor_id: self.inner.id,
-            num_parameters: 1,
+            num_parameters: 3,
             parameters,
         })
     }
