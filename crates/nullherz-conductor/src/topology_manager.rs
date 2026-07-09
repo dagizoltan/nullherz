@@ -35,7 +35,8 @@ impl TopologyManager {
                     input_indices: [0; nullherz_traits::MAX_CHANNELS],
                     output_indices: [0; nullherz_traits::MAX_CHANNELS],
                     input_count: 0,
-                    output_count: 0
+                    output_count: 0,
+                    input_delays: [0; nullherz_traits::MAX_CHANNELS],
                 }; nullherz_traits::MAX_NODES],
                 virtual_to_physical: v2p,
                 plan: Default::default(),
