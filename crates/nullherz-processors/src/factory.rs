@@ -3,6 +3,7 @@ use crate::gain::*;
 use crate::delay::*;
 use crate::compressor::*;
 use crate::stereo_utility::*;
+use crate::analysis::*;
 use crate::biquad::*;
 use crate::crossfader::*;
 use crate::summing::*;
@@ -199,4 +200,13 @@ impl ProcessorFactory for StereoUtilityFactory {
     }
     fn name(&self) -> &'static str { "StereoUtility" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId(160) }
+}
+
+pub struct AnalysisFactory;
+impl ProcessorFactory for AnalysisFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(AnalysisProcessor::new(node_idx as u64)))
+    }
+    fn name(&self) -> &'static str { "Analysis" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId(180) }
 }

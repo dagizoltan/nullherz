@@ -7,7 +7,7 @@ fn test_modulation_matrix_expansion() {
     matrix.add_mapping(0, 100, 1, 2.0, 0);
     matrix.add_mapping(0, 101, 2, 0.5, 0);
 
-    let commands = matrix.expand_macro(0, 0.8);
+    let commands = matrix.expand_macro(0, 0.8, 0.0);
     assert_eq!(commands.len(), 1); // Grouped into 1 bundle
 
     match &commands[0] {

@@ -25,10 +25,39 @@ impl GraphExecutor {
                 let x_data = &mut crossfade_buffers[x_buf_idx].data[..num_samples];
 
                 let inv_total = 1.0 / state.total_samples as f32;
-                for j in 0..num_samples {
+                let mut j = 0;
+
+                // Vectorized Crossfade Loop (8-wide SIMD)
+                while j + 8 <= num_samples {
+                    use audio_dsp::simd_vec::*;
+                    let v_old = load_f32x8(old_data, j);
+                    let v_new = load_f32x8(new_data, j);
+
+                    let progress_start = (state.total_samples - state.remaining_samples) as f32 * inv_total;
+                    let v_progress = wide::f32x8::new([
+                        progress_start,
+                        progress_start + (1.0 * inv_total),
+                        progress_start + (2.0 * inv_total),
+                        progress_start + (3.0 * inv_total),
+                        progress_start + (4.0 * inv_total),
+                        progress_start + (5.0 * inv_total),
+                        progress_start + (6.0 * inv_total),
+                        progress_start + (7.0 * inv_total),
+                    ]);
+
+                    let v_one = wide::f32x8::from(1.0);
+                    let v_out = (v_old * (v_one - v_progress)) + (v_new * v_progress);
+                    store_f32x8(&mut x_data[..], j, v_out);
+
+                    state.remaining_samples = state.remaining_samples.saturating_sub(8);
+                    j += 8;
+                }
+
+                while j < num_samples {
                     let progress = (state.total_samples - state.remaining_samples) as f32 * inv_total;
                     x_data[j] = old_data[j] * (1.0 - progress) + new_data[j] * progress;
                     if state.remaining_samples > 0 { state.remaining_samples -= 1; }
+                    j += 1;
                 }
 
                 if state.node_idx < crate::MAX_NODES && state.input_idx < crate::MAX_CHANNELS {

@@ -174,6 +174,7 @@ pub struct Gain {
     pub ramp_step: f32,
     pub soft_clip: bool,
     pub clip_threshold: f32,
+    pub oversampler: crate::util::Oversampler2x,
 }
 
 impl DspKernel for Gain {
@@ -211,6 +212,7 @@ impl Gain {
             ramp_step: 0.0,
             soft_clip: false,
             clip_threshold: 1.0,
+            oversampler: crate::util::Oversampler2x::new(),
         }
     }
 
@@ -244,7 +246,16 @@ impl Gain {
                 }
                 let mut out = input[i] * current;
                 if self.soft_clip {
-                    out = crate::simd_vec::tanh_simd(wide::f32x4::from(out / self.clip_threshold)).to_array()[0] * self.clip_threshold;
+                    // RT-9: 2x Oversampled soft-clipping to reduce aliasing
+                    let thresh = self.clip_threshold;
+                    let inv_thresh = 1.0 / thresh;
+                    let os = self.oversampler.last_input;
+                    let s_mid = (out + os) * 0.5;
+
+                    let y_mid = (s_mid * inv_thresh).tanh() * thresh;
+                    let y_now = (out * inv_thresh).tanh() * thresh;
+                    out = (y_mid + y_now) * 0.5;
+                    self.oversampler.last_input = input[i] * current;
                 }
                 output[i] = if out.abs() < 1e-15 { 0.0 } else { out };
             }
@@ -256,47 +267,38 @@ impl Gain {
             let v_eps = FloatX8::from(1e-15);
 
             let mut i = 0;
-            while i + 8 <= len {
-                let v_in = load_f32x8(input, i);
-                let mut v_out = v_in * v_gain;
+            if self.soft_clip {
+                // Vectorized path with 2x oversampling is complex for dependencies
+                // Fallback to optimized oversampled scalar for soft-clip
+                while i < len {
+                    let mut out = input[i] * current;
+                    let thresh = self.clip_threshold;
+                    let inv_thresh = 1.0 / thresh;
+                    let last = self.oversampler.last_input;
+                    let s_mid = (out + last) * 0.5;
 
-                if self.soft_clip {
-                    let v_thresh = wide::f32x8::from(self.clip_threshold);
-                    let v_inv_thresh = wide::f32x8::from(1.0 / self.clip_threshold);
+                    let y_mid = (s_mid * inv_thresh).tanh() * thresh;
+                    let y_now = (out * inv_thresh).tanh() * thresh;
+                    out = (y_mid + y_now) * 0.5;
+                    self.oversampler.last_input = out;
 
-                    // Manually split f32x8 into 2x f32x4
-                    let arr_out: [f32; 8] = v_out.into();
-                    let arr_inv: [f32; 8] = v_inv_thresh.into();
-
-                    let v_out_low = wide::f32x4::new([arr_out[0], arr_out[1], arr_out[2], arr_out[3]]);
-                    let v_out_high = wide::f32x4::new([arr_out[4], arr_out[5], arr_out[6], arr_out[7]]);
-                    let v_inv_low = wide::f32x4::new([arr_inv[0], arr_inv[1], arr_inv[2], arr_inv[3]]);
-                    let v_inv_high = wide::f32x4::new([arr_inv[4], arr_inv[5], arr_inv[6], arr_inv[7]]);
-
-                    let clipped_low = tanh_simd(v_out_low * v_inv_low);
-                    let clipped_high = tanh_simd(v_out_high * v_inv_high);
-
-                    let arr_cl_low: [f32; 4] = clipped_low.into();
-                    let arr_cl_high: [f32; 4] = clipped_high.into();
-
-                    v_out = wide::f32x8::new([
-                        arr_cl_low[0], arr_cl_low[1], arr_cl_low[2], arr_cl_low[3],
-                        arr_cl_high[0], arr_cl_high[1], arr_cl_high[2], arr_cl_high[3],
-                    ]) * v_thresh;
+                    output[i] = if out.abs() < 1e-15 { 0.0 } else { out };
+                    i += 1;
                 }
-
-                let mask = v_out.abs().cmp_lt(v_eps);
-                let v_out_clean = mask.blend(v_zero, v_out);
-                store_f32x8(output, i, v_out_clean);
-                i += 8;
-            }
-            while i < len {
-                let mut out = input[i] * current;
-                if self.soft_clip {
-                    out = crate::simd_vec::tanh_simd(wide::f32x4::from(out / self.clip_threshold)).to_array()[0] * self.clip_threshold;
+            } else {
+                while i + 8 <= len {
+                    let v_in = load_f32x8(input, i);
+                    let v_out = v_in * v_gain;
+                    let mask = v_out.abs().cmp_lt(v_eps);
+                    let v_out_clean = mask.blend(v_zero, v_out);
+                    store_f32x8(output, i, v_out_clean);
+                    i += 8;
                 }
-                output[i] = if out.abs() < 1e-15 { 0.0 } else { out };
-                i += 1;
+                while i < len {
+                    let out = input[i] * current;
+                    output[i] = if out.abs() < 1e-15 { 0.0 } else { out };
+                    i += 1;
+                }
             }
         }
         self.current_gain = current;

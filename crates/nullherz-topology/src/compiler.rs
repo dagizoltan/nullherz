@@ -31,6 +31,9 @@ impl GraphCompiler {
 
         for (i, in_degree_val) in in_degree.iter_mut().enumerate().take(n) {
             let routing_i = &topo.routing[i];
+            // RT-9: side-chain dependency resolution
+            // We iterate through all active inputs (including potential side-chains)
+            // and ensure the producer is processed in an earlier stage.
             for l in 0..routing_i.input_count {
                 let v_in = routing_i.input_indices[l] as usize;
                 if v_in < MAX_NODES {

@@ -102,6 +102,13 @@ impl ProcessorGraph {
     }
 
     pub fn commit_graph(&mut self) {
+        // RT-9: Stateful Transition Queue
+        // Prevent structural commits while crossfades are still active to maintain
+        // signal continuity and avoid overlapping morphs.
+        if self.topology_coordinator.has_active_crossfades() || self.morph_samples_remaining > 0 {
+            return;
+        }
+
         if self.topology_coordinator.needs_commit {
             let old_node_count = self.topology_coordinator.active_topology().node_count;
             if old_node_count > 0 && self.morph_duration_samples > 0 {
