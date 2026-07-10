@@ -199,6 +199,15 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
         let transport = context.transport;
         let host = context.host;
 
+
+        if let Some(ref mut p) = pool {
+            if self.topology_coordinator.needs_commit {
+                if let Some(p_mut) = p.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
+                    p_mut.clear_cache();
+                }
+            }
+        }
+
         if self.morph_samples_remaining > 0 {
             let inactive_idx = (active_idx + 1) % 2;
             let inactive_num_stages = self.topology_coordinator.topologies[inactive_idx].plan.num_stages;
@@ -216,7 +225,9 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                     transport,
                     host,
                     is_last_sub_block,
-                    &self.telemetry.node_times_cycles
+                    &self.telemetry.node_times_cycles,
+                    self.buffer_pool.pdc_lines.as_mut().unwrap(),
+                    self.buffer_pool.pdc_write_pos,
                 );
             }
         }
@@ -236,9 +247,13 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                 transport,
                 host,
                 is_last_sub_block,
-                &self.telemetry.node_times_cycles
+                &self.telemetry.node_times_cycles,
+                self.buffer_pool.pdc_lines.as_mut().unwrap(),
+                self.buffer_pool.pdc_write_pos,
             );
         }
+
+        self.buffer_pool.pdc_write_pos = (self.buffer_pool.pdc_write_pos + num_samples) % crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES;
 
         let topo = &self.topology_coordinator.topologies[active_idx];
         if self.morph_samples_remaining > 0 {
@@ -262,20 +277,24 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
 
                         // Hybrid Spectral/Time-Domain Blend (Optimized for RT performance)
                         // In Stage 7 full implementation, this uses Phase Vocoder for seamless timbre shifting.
-                        external_outputs[i][j] = old_data[j] * (1.0 - progress) + new_data[j] * progress;
+                        let gain_old = (1.0 - progress).sqrt();
+                        let gain_new = progress.sqrt();
+                        external_outputs[i][j] = old_data[j] * gain_old + new_data[j] * gain_new;
                     }
                 }
             } else {
                 for j in 0..num_samples {
                     let current_remaining = (self.morph_samples_remaining as i64 - j as i64).max(0) as u32;
                     let progress = (self.morph_samples_total - current_remaining) as f32 * inv_total;
+                    let gain_old = (1.0 - progress).sqrt();
+                    let gain_new = progress.sqrt();
 
                     for i in 0..external_outputs.len().min(4) {
                         let p_idx = topo.virtual_to_physical[i] as usize;
                         let old_p_idx = old_topo.virtual_to_physical[i] as usize;
                         let new_val = self.buffer_pool.buffers[p_idx].data[offset + j];
                         let old_val = self.buffer_pool.old_path_buffers[old_p_idx].data[offset + j];
-                        external_outputs[i][j] = old_val * (1.0 - progress) + new_val * progress;
+                        external_outputs[i][j] = old_val * gain_old + new_val * gain_new;
                     }
                 }
             }
@@ -578,6 +597,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             buffers_ptr: std::ptr::null_mut(),
             x_buffers_ptr: std::ptr::null_mut(),
             input_indices: [0; 16],
+            input_delays: [0; 16],
             output_indices: [0; 16],
             input_count: 0,
             output_count: 0,
@@ -587,6 +607,8 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             host_ptr: None,
             is_last_sub_block: false,
             is_bypassed: false,
+            pdc_lines_ptr: std::ptr::null_mut(),
+            pdc_write_pos: 0,
         });
         pool.worker_wake_fds[0].notify();
         let target = start_count + 1;
@@ -601,6 +623,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             buffers_ptr: std::ptr::null_mut(),
             x_buffers_ptr: std::ptr::null_mut(),
             input_indices: [0; 16],
+            input_delays: [0; 16],
             output_indices: [0; 16],
             input_count: 0,
             output_count: 0,
@@ -610,6 +633,8 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             host_ptr: None,
             is_last_sub_block: false,
             is_bypassed: false,
+            pdc_lines_ptr: std::ptr::null_mut(),
+            pdc_write_pos: 0,
         });
         pool.worker_wake_fds[0].notify();
         let target_2 = start_count_2 + 1;
