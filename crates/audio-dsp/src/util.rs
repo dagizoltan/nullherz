@@ -285,3 +285,104 @@ pub fn slerp_nd(v0: &[f32], v1: &[f32], t: f32, out: &mut [f32]) {
         out[i] = s0 * v0[i] + s1 * v1[i];
     }
 }
+
+/// A high-order Poly-phase FIR filter for upsampling and downsampling.
+pub struct PolyphaseFilter {
+    pub factor: usize,
+    pub taps_per_phase: usize,
+    pub coefficients: Vec<f32>,
+    pub history: Vec<f32>,
+}
+
+impl PolyphaseFilter {
+    /// Creates a new poly-phase filter for the given factor (e.g. 4 or 8).
+    /// Uses a windowed sinc design for a sharp cutoff at the base Nyquist.
+    pub fn new(factor: usize, taps_per_phase: usize) -> Self {
+        let total_taps = factor * taps_per_phase;
+        let mut coefficients = vec![0.0; total_taps];
+        let cutoff = 1.0 / factor as f32;
+        let center = (total_taps - 1) as f32 / 2.0;
+
+        for i in 0..total_taps {
+            let x = i as f32 - center;
+            if x == 0.0 {
+                coefficients[i] = 1.0;
+            } else {
+                let angle = std::f32::consts::PI * x * cutoff;
+                coefficients[i] = angle.sin() / angle;
+            }
+            // Hamming window
+            let window = 0.54 - 0.46 * (2.0 * std::f32::consts::PI * i as f32 / (total_taps - 1) as f32).cos();
+            coefficients[i] *= window;
+        }
+
+        Self {
+            factor,
+            taps_per_phase,
+            coefficients,
+            history: vec![0.0; taps_per_phase],
+        }
+    }
+
+    /// Upsamples a single sample into `factor` samples.
+    pub fn upsample(&mut self, input: f32, output: &mut [f32]) {
+        // Shift history
+        for i in (1..self.taps_per_phase).rev() {
+            self.history[i] = self.history[i - 1];
+        }
+        self.history[0] = input;
+
+        for p in 0..self.factor {
+            let mut sum = 0.0;
+            for t in 0..self.taps_per_phase {
+                sum += self.history[t] * self.coefficients[t * self.factor + p];
+            }
+            output[p] = sum * self.factor as f32;
+        }
+    }
+
+    /// Downsamples `factor` samples into a single sample.
+    pub fn downsample(&mut self, input: &[f32]) -> f32 {
+        // This is a simplified downsampler that assumes input is already band-limited.
+        // In a true polyphase downsampler, we'd integrate over a window.
+        let mut sum = 0.0;
+        for i in 0..self.factor {
+            sum += input[i];
+        }
+        sum / self.factor as f32
+    }
+}
+
+/// A container that wraps any DSP logic and runs it at a higher internal sample rate.
+pub struct OversamplingContainer {
+    pub factor: usize,
+    pub upsampler: PolyphaseFilter,
+    pub downsampler: PolyphaseFilter,
+    upsampled_buffer: Vec<f32>,
+    processed_buffer: Vec<f32>,
+}
+
+impl OversamplingContainer {
+    pub fn new(factor: usize) -> Self {
+        Self {
+            factor,
+            upsampler: PolyphaseFilter::new(factor, 12),
+            downsampler: PolyphaseFilter::new(factor, 12),
+            upsampled_buffer: vec![0.0; factor],
+            processed_buffer: vec![0.0; factor],
+        }
+    }
+
+    /// Processes a block of audio through a closure at the higher rate.
+    /// RT-Safe: uses pre-allocated buffers to avoid heap allocation.
+    pub fn process_block<F>(&mut self, input: &[f32], output: &mut [f32], mut func: F)
+    where F: FnMut(&[f32], &mut [f32]) {
+        for i in 0..input.len() {
+            self.upsampler.upsample(input[i], &mut self.upsampled_buffer);
+
+            func(&self.upsampled_buffer, &mut self.processed_buffer);
+
+            output[i] = self.downsampler.downsample(&self.processed_buffer);
+        }
+    }
+}

@@ -29,6 +29,7 @@ pub struct SidecarHost<M: MemoryMapper = NativeMemoryMapper> {
     shm_midi: Option<M::Mapping>,
     shm_signal: M::Mapping,
     shm_inputs: Vec<M::Mapping>,
+    shm_sidechains: Vec<M::Mapping>,
     shm_outputs: Vec<M::Mapping>,
     event_fd: Option<EventFd>,
 }
@@ -36,7 +37,7 @@ pub struct SidecarHost<M: MemoryMapper = NativeMemoryMapper> {
 impl<M: MemoryMapper> SidecarHost<M> {
     /// # Safety
     /// All shared memory segment names must exist and be accessible by the current process via the mapper.
-    pub unsafe fn new_with_mapper(mapper: M, cmd_name: &str, sig_name: &str, in_names: &[String], out_names: &[String], efd: i32) -> Self {
+    pub unsafe fn new_with_mapper(mapper: M, cmd_name: &str, sig_name: &str, in_names: &[String], sc_names: &[String], out_names: &[String], efd: i32) -> Self {
         let (cmd_layout, _) = ShmRingBuffer::<nullherz_traits::TimestampedCommand>::layout(64);
         let shm_cmd = mapper.open(cmd_name, cmd_layout.size()).expect("Failed to open cmd SHM");
 
@@ -46,6 +47,11 @@ impl<M: MemoryMapper> SidecarHost<M> {
         let mut shm_inputs = Vec::new();
         for name in in_names {
             shm_inputs.push(mapper.open(name, audio_layout.size()).expect("Failed to open input SHM"));
+        }
+
+        let mut shm_sidechains = Vec::new();
+        for name in sc_names {
+            shm_sidechains.push(mapper.open(name, audio_layout.size()).expect("Failed to open sidechain SHM"));
         }
 
         let mut shm_outputs = Vec::new();
@@ -61,6 +67,7 @@ impl<M: MemoryMapper> SidecarHost<M> {
             shm_midi: None,
             shm_signal,
             shm_inputs,
+            shm_sidechains,
             shm_outputs,
             event_fd,
         }
@@ -73,6 +80,7 @@ impl<M: MemoryMapper> SidecarHost<M> {
             &self.shm_cmd,
             &self.shm_signal,
             &self.shm_inputs,
+            &self.shm_sidechains,
             &self.shm_outputs,
             self.event_fd.take()
         );
@@ -82,8 +90,8 @@ impl<M: MemoryMapper> SidecarHost<M> {
 }
 
 impl SidecarHost<NativeMemoryMapper> {
-     pub unsafe fn new(cmd_name: &str, sig_name: &str, in_names: &[String], out_names: &[String], efd: i32) -> Self {
-         unsafe { Self::new_with_mapper(NativeMemoryMapper, cmd_name, sig_name, in_names, out_names, efd) }
+     pub unsafe fn new(cmd_name: &str, sig_name: &str, in_names: &[String], sc_names: &[String], out_names: &[String], efd: i32) -> Self {
+         unsafe { Self::new_with_mapper(NativeMemoryMapper, cmd_name, sig_name, in_names, sc_names, out_names, efd) }
      }
 }
 
@@ -100,6 +108,7 @@ pub struct SidecarContext<'a, P: AudioProcessor> {
     #[allow(dead_code)]
     feedback_buffer: Option<&'a ShmRingBuffer<nullherz_traits::ProcessorMetadata>>,
     input_buffers: Vec<&'a ShmRingBuffer<AudioBlock>>,
+    sidechain_buffers: Vec<&'a ShmRingBuffer<AudioBlock>>,
     output_buffers: Vec<&'a ShmRingBuffer<AudioBlock>>,
     signal: &'a ShmSignal,
     event_fd: Option<EventFd>,
@@ -111,10 +120,11 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
         shm_cmd: &'a SharedMemory,
         shm_signal: &'a SharedMemory,
         shm_inputs: &'a [SharedMemory],
+        shm_sidechains: &'a [SharedMemory],
         shm_outputs: &'a [SharedMemory],
         event_fd: Option<EventFd>,
     ) -> Self {
-        Self::new_with_mapper(&NativeMemoryMapper, processor, shm_cmd, shm_signal, shm_inputs, shm_outputs, event_fd)
+        Self::new_with_mapper(&NativeMemoryMapper, processor, shm_cmd, shm_signal, shm_inputs, shm_sidechains, shm_outputs, event_fd)
     }
 
     pub fn new_with_mapper<M: MemoryMapper>(
@@ -123,6 +133,7 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
         shm_cmd: &'a M::Mapping,
         shm_signal: &'a M::Mapping,
         shm_inputs: &'a [M::Mapping],
+        shm_sidechains: &'a [M::Mapping],
         shm_outputs: &'a [M::Mapping],
         event_fd: Option<EventFd>,
     ) -> Self {
@@ -131,6 +142,10 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
         let mut input_buffers = Vec::new();
         for shm in shm_inputs {
             input_buffers.push(unsafe { &*(mapper.ptr(shm) as *const ShmRingBuffer<AudioBlock>) });
+        }
+        let mut sidechain_buffers = Vec::new();
+        for shm in shm_sidechains {
+            sidechain_buffers.push(unsafe { &*(mapper.ptr(shm) as *const ShmRingBuffer<AudioBlock>) });
         }
         let mut output_buffers = Vec::new();
         for shm in shm_outputs {
@@ -144,6 +159,7 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
             midi_buffer: None,
             feedback_buffer: None,
             input_buffers,
+            sidechain_buffers,
             output_buffers,
             signal,
             event_fd,
@@ -178,8 +194,10 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
         }
 
         let mut in_blocks = [AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; 16];
+        let mut sc_blocks = [AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; 16];
         let mut out_blocks = [AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; 16];
         let num_channels = self.input_buffers.len().min(self.output_buffers.len()).min(16);
+        let num_sidechains = self.sidechain_buffers.len().min(16);
 
         let mut available = true;
         for (i, in_buffer) in self.input_buffers.iter().enumerate().take(num_channels) {
@@ -191,22 +209,55 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
             }
         }
 
+        if available {
+            for (i, sc_buffer) in self.sidechain_buffers.iter().enumerate().take(num_sidechains) {
+                if let Some(block) = sc_buffer.pop() {
+                    sc_blocks[i] = block;
+                } else {
+                    // Sidechains are optional, but if we expect them we might want to wait.
+                    // For now assume optional.
+                }
+            }
+        }
+
         if available && num_channels > 0 {
             let block_len = in_blocks[0].len as usize;
-            let mut in_slices_arr: [&[f32]; 16] = [&[]; 16];
+            let mut in_slices_arr: [&[f32]; 32] = [&[]; 32];
             for i in 0..num_channels { in_slices_arr[i] = &in_blocks[i].data[..block_len]; }
+            for i in 0..num_sidechains { in_slices_arr[num_channels + i] = &sc_blocks[i].data[..block_len]; }
 
-            for (i, out_block) in out_blocks.iter_mut().enumerate().take(num_channels) {
-                let mut context = ProcessContext {
-                    transport: None,
-                    host: None,
-                    sub_block_offset: 0,
-                    is_last_sub_block: true,
-                };
-                let mut out_slice = [&mut out_block.data[..block_len]];
-                self.processor.process(&[in_slices_arr[i]], &mut out_slice, &mut context);
-                out_block.len = block_len as u32;
-                let _ = self.output_buffers[i].push(*out_block);
+            let mut out_data_ptrs: [*mut f32; 16] = [std::ptr::null_mut(); 16];
+            for i in 0..num_channels {
+                out_data_ptrs[i] = out_blocks[i].data.as_mut_ptr();
+            }
+
+            let mut context = ProcessContext {
+                transport: None,
+                host: None,
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+
+            // SAFETY: We reconstruct the mutable slices from raw pointers to satisfy the borrow checker,
+            // as we know each channel's buffer is distinct within the out_blocks array.
+            let mut out_slices_arr: [&mut [f32]; 16] = std::array::from_fn(|i| {
+                if !out_data_ptrs[i].is_null() {
+                    unsafe { std::slice::from_raw_parts_mut(out_data_ptrs[i], block_len) }
+                } else {
+                    &mut [][..]
+                }
+            });
+
+            // Call processor once with ALL channels and sidechains
+            self.processor.process(
+                &in_slices_arr[..num_channels + num_sidechains],
+                &mut out_slices_arr[..num_channels],
+                &mut context
+            );
+
+            for i in 0..num_channels {
+                out_blocks[i].len = block_len as u32;
+                let _ = self.output_buffers[i].push(out_blocks[i]);
             }
         }
     }

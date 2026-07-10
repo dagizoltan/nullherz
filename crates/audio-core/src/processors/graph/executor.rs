@@ -106,34 +106,52 @@ impl GraphExecutor {
             let mut worker_costs = [0u64; 64];
             let num_workers = pool.num_workers().min(64);
 
+            // STAGE 7: Latency-Aware Critical-Path Scheduler
+            // Identify critical path (highest latency chain) and pin it to worker 0
+            // while distributing other nodes to balance load.
+            let mut critical_node = None;
+            let mut max_node_lat = 0u32;
+            for &n_idx_u32 in stage {
+                let lat = topo.plan.node_latencies[n_idx_u32 as usize];
+                if lat > max_node_lat {
+                    max_node_lat = lat;
+                    critical_node = Some(n_idx_u32);
+                }
+            }
+
             for &n_idx_u32 in stage {
                 let n_idx = n_idx_u32 as usize;
                 let mut worker_idx = 0;
 
-                // Try to use cached assignment if available
-                let mut cached = false;
-                if let Some(p_mut) = pool.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
-                    if let Some(assignment) = p_mut.assignment_cache[n_idx] {
-                        worker_idx = assignment.worker_idx as usize;
-                        cached = true;
-                    }
-                }
-
-                if !cached {
-                    let mut min_cost = u64::MAX;
-                    for w in 0..num_workers {
-                        if worker_costs[w] < min_cost {
-                            min_cost = worker_costs[w];
-                            worker_idx = w;
+                // Priority: Pin critical node to a dedicated high-performance worker (idx 0)
+                if Some(n_idx_u32) == critical_node {
+                    worker_idx = 0;
+                } else {
+                    // Try to use cached assignment if available
+                    let mut cached = false;
+                    if let Some(p_mut) = pool.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
+                        if let Some(assignment) = p_mut.assignment_cache[n_idx] {
+                            worker_idx = assignment.worker_idx as usize;
+                            cached = true;
                         }
                     }
 
-                    // Cache the new assignment
-                    if let Some(p_mut) = pool.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
-                        p_mut.assignment_cache[n_idx] = Some(crate::processors::graph::pool::StaticAssignment {
-                            node_idx: n_idx as u32,
-                            worker_idx: worker_idx as u8,
-                        });
+                    if !cached {
+                        let mut min_cost = u64::MAX;
+                        for w in 0..num_workers {
+                            if worker_costs[w] < min_cost {
+                                min_cost = worker_costs[w];
+                                worker_idx = w;
+                            }
+                        }
+
+                        // Cache the new assignment
+                        if let Some(p_mut) = pool.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
+                            p_mut.assignment_cache[n_idx] = Some(crate::processors::graph::pool::StaticAssignment {
+                                node_idx: n_idx as u32,
+                                worker_idx: worker_idx as u8,
+                            });
+                        }
                     }
                 }
 

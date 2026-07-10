@@ -47,6 +47,32 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
             ui.add_space(10.0);
 
+            render_metric_group(ui, "DNA LATENT SPACE PROJECTION", frame_width, |ui| {
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(frame_width, 150.0), Sense::hover());
+                ui.painter().rect_filled(rect, 4.0, Color32::from_black_alpha(100));
+
+                let center = rect.center();
+                let scale = 60.0;
+
+                // Project 16D latent space to 2D using a simple fixed projection
+                let mut x = 0.0;
+                let mut y = 0.0;
+                for i in 0..16 {
+                    let angle = (i as f32 / 16.0) * std::f32::consts::PI * 2.0;
+                    x += app.damped_latent[i] * angle.cos();
+                    y += app.damped_latent[i] * angle.sin();
+                }
+
+                let pos = center + egui::vec2(x * scale, y * scale);
+                ui.painter().circle_filled(pos, 6.0, app.theme.accent);
+                ui.painter().circle_stroke(pos, 8.0, Stroke::new(1.0, Color32::WHITE));
+
+                ui.add_space(5.0);
+                ui.label(RichText::new("TIMBRAL TRAJECTORY").small().color(Color32::GRAY));
+            });
+
+            ui.add_space(10.0);
+
             render_metric_group(ui, "PHASE & CORRELATION", frame_width, |ui| {
                 if telemetry.is_some() {
                     widgets::render_goniometer(ui, &app.damped_goniometer, 180.0, app.theme.accent);

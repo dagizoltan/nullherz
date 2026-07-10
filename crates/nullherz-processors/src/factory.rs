@@ -210,3 +210,12 @@ impl ProcessorFactory for AnalysisFactory {
     fn name(&self) -> &'static str { "Analysis" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId(180) }
 }
+
+pub struct DnaMorphFactory;
+impl ProcessorFactory for DnaMorphFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(DnaMorpher::new(node_idx as u64, 1024)))
+    }
+    fn name(&self) -> &'static str { "DnaMorph" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::DNA_MORPH }
+}

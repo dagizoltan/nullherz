@@ -254,16 +254,10 @@ impl FloatX16 {
     pub fn blend(self, on_true: Self, on_false: Self) -> Self {
         #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
         {
-            // Note: self is used as mask. We assume self lanes are 0.0 or non-zero.
-            // true f32x16.blend takes a mask type.
-            let mut res = [0.0f32; 16];
-            let m: [f32; 16] = self.into();
-            let t: [f32; 16] = on_true.into();
-            let f: [f32; 16] = on_false.into();
-            for i in 0..16 {
-                res[i] = if m[i].to_bits() != 0 { t[i] } else { f[i] };
-            }
-            Self::new(res)
+            // Direct AVX-512 mask-based blending via 'wide'
+            // In a full implementation, we'd use _mm512_mask_blend_ps,
+            // but 'wide' f32x16.blend handles this efficiently.
+            Self { val: self.val.blend(on_true.val, on_false.val) }
         }
         #[cfg(all(not(all(target_arch = "x86_64", target_feature = "avx512f")), target_arch = "wasm32", target_feature = "simd128"))]
         {
@@ -322,10 +316,12 @@ impl FloatX16 {
     pub fn is_finite_mask(self) -> Self {
         #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
         {
+            // wide's f32x16 doesn't have a direct is_finite yet in all versions,
+            // so we use the standard trick: (x - x) == 0.0
+            let mask = (self.val - self.val).cmp_eq(wide::f32x16::ZERO);
             let mut res = [0.0f32; 16];
-            let a: [f32; 16] = self.into();
             for i in 0..16 {
-                if a[i].is_finite() { res[i] = f32::from_bits(0xFFFFFFFF); }
+                if mask.to_array()[i] != 0 { res[i] = f32::from_bits(0xFFFFFFFF); }
             }
             Self::new(res)
         }

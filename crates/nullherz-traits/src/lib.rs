@@ -50,6 +50,7 @@ impl ProcessorTypeId {
     pub const SIMD_BIQUAD: Self = Self(130);
     pub const KEY_SYNC: Self = Self(140);
     pub const PERSONALITY_INHERITANCE: Self = Self(150);
+    pub const DNA_MORPH: Self = Self(190);
 }
 
 impl From<u32> for ProcessorTypeId {
