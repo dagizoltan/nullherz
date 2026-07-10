@@ -87,7 +87,17 @@ impl TaskPool {
             let handle = thread::spawn(move || {
                 ipc_layer::setup_rt_thread(85, Some(i + 1)); // Pin workers to cores 1..N
                 while running_worker.load(Ordering::Relaxed) {
-                    if let Some(job) = cons.pop() {
+                    // RT-9: Hybrid spin-wait for reduced context-switch overhead
+                    let mut job_opt = None;
+                    for _ in 0..1000 {
+                         if let Some(j) = cons.pop() {
+                             job_opt = Some(j);
+                             break;
+                         }
+                         std::hint::spin_loop();
+                    }
+
+                    if let Some(job) = job_opt {
                         // SAFETY: job.node_ptr is guaranteed to be valid for the duration of the job execution.
                         let node = unsafe { &*job.node_ptr };
                         let num_samples = job.num_samples;

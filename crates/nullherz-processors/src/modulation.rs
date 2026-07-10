@@ -8,6 +8,7 @@ pub struct ModulationProcessor {
     pub param_id: u32,
     pub scale: f32,
     pub offset: f32,
+    pub ramp_duration_samples: u32,
     last_sent_value: f32,
 }
 
@@ -19,6 +20,7 @@ impl ModulationProcessor {
             param_id,
             scale,
             offset,
+            ramp_duration_samples: 32,
             last_sent_value: f32::NAN,
         }
     }
@@ -77,7 +79,7 @@ fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]], context: &
                     target_id: self.target_id,
                     param_id: self.param_id,
                     value: val,
-                    ramp_duration_samples: 32,
+                    ramp_duration_samples: self.ramp_duration_samples,
                 }));
                 self.last_sent_value = val;
             }
@@ -104,6 +106,7 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
             1 => self.param_id = value as u32,
             2 => self.scale = value,
             3 => self.offset = value,
+            4 => self.ramp_duration_samples = value as u32,
             _ => {}
         }
     }
@@ -113,7 +116,30 @@ fn get_parameter(&self, param_id: u32) -> f32 {
             1 => self.param_id as f32,
             2 => self.scale,
             3 => self.offset,
+            4 => self.ramp_duration_samples as f32,
             _ => 0.0,
         }
+    }
+
+fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        let mut parameters = [nullherz_traits::ParameterMetadata {
+            id: 0,
+            name: [0; 32],
+            min: -1e9,
+            max: 1e9,
+            default: 0.0,
+        }; 16];
+
+        let names: &[&[u8]] = &[b"TargetID", b"ParamID", b"Scale", b"Offset", b"RampSamples"];
+        for (i, name) in names.iter().enumerate() {
+            parameters[i].id = i as u32;
+            parameters[i].name[..name.len()].copy_from_slice(name);
+        }
+
+        Some(nullherz_traits::ProcessorMetadata {
+            processor_id: self.id,
+            num_parameters: 5,
+            parameters,
+        })
     }
 }

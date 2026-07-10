@@ -17,21 +17,35 @@ pub fn create_studio_strip(
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: gain_id, processor_type_id: ProcessorTypeId::GAIN }));
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: gain_id, input_idx: 0, new_buffer_idx: input_buf }));
 
-    let mut prev_node = gain_id;
-    let mut prev_buf_l = id_allocator.allocate_buffer_id(2);
-    let prev_buf_r = prev_buf_l + 1;
+    let mut prev_node_l = gain_id;
+    let mut prev_node_r = gain_id;
+
+    let mut prev_buf_l = id_allocator.allocate_buffer_id(1);
+    let mut prev_buf_r = id_allocator.allocate_buffer_id(1);
 
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: gain_id, output_idx: 0, new_buffer_idx: prev_buf_l }));
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: gain_id, output_idx: 1, new_buffer_idx: prev_buf_r }));
 
     for &fx_type in fx_ids {
-        let fx_id = id_allocator.allocate_node_id();
-        let fx_buf = id_allocator.allocate_buffer_id(1);
+        let fx_l_id = id_allocator.allocate_node_id();
+        let fx_r_id = id_allocator.allocate_node_id();
+        let fx_buf_l = id_allocator.allocate_buffer_id(1);
+        let fx_buf_r = id_allocator.allocate_buffer_id(1);
 
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: fx_id, processor_type_id: ProcessorTypeId(fx_type) }));
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: prev_node, output_idx: 0, new_buffer_idx: fx_buf }));
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: fx_id, input_idx: 0, new_buffer_idx: fx_buf }));
-        prev_node = fx_id;
-        prev_buf_l = fx_buf;
+        // Left Channel FX
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: fx_l_id, processor_type_id: ProcessorTypeId(fx_type) }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: prev_node_l, output_idx: 0, new_buffer_idx: fx_buf_l }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: fx_l_id, input_idx: 0, new_buffer_idx: fx_buf_l }));
+
+        // Right Channel FX
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: fx_r_id, processor_type_id: ProcessorTypeId(fx_type) }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: prev_node_r, output_idx: 1, new_buffer_idx: fx_buf_r }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: fx_r_id, input_idx: 0, new_buffer_idx: fx_buf_r }));
+
+        prev_node_l = fx_l_id;
+        prev_node_r = fx_r_id;
+        prev_buf_l = fx_buf_l;
+        prev_buf_r = fx_buf_r;
     }
 
     let fader_id = id_allocator.allocate_node_id();

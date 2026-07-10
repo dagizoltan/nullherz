@@ -60,7 +60,7 @@ fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
         parameters[1].name[..name1.len()].copy_from_slice(name1);
 
         Some(nullherz_traits::ProcessorMetadata {
-            processor_id: 0,
+            processor_id: self.id,
             num_parameters: 2,
             parameters,
         })

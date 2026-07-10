@@ -43,7 +43,7 @@ impl MixerBridge {
 
             match cmd {
                 Command::Mixer(nullherz_traits::MixerCommand::SetMacro { macro_id, value }) => {
-                    let expanded = modulation_matrix.expand_macro(macro_id, value);
+                    let expanded = modulation_matrix.expand_macro(macro_id, value, self.timeline.current_beat);
                     bundle.extend(expanded);
                 }
                 Command::Mixer(nullherz_traits::MixerCommand::AddModMapping { macro_id, target_id, param_id, scaling, ramp_duration_samples }) => {

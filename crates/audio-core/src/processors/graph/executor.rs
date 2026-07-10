@@ -25,10 +25,39 @@ impl GraphExecutor {
                 let x_data = &mut crossfade_buffers[x_buf_idx].data[..num_samples];
 
                 let inv_total = 1.0 / state.total_samples as f32;
-                for j in 0..num_samples {
+                let mut j = 0;
+
+                // Vectorized Crossfade Loop (8-wide SIMD)
+                while j + 8 <= num_samples {
+                    use audio_dsp::simd_vec::*;
+                    let v_old = load_f32x8(old_data, j);
+                    let v_new = load_f32x8(new_data, j);
+
+                    let progress_start = (state.total_samples - state.remaining_samples) as f32 * inv_total;
+                    let v_progress = wide::f32x8::new([
+                        progress_start,
+                        progress_start + (1.0 * inv_total),
+                        progress_start + (2.0 * inv_total),
+                        progress_start + (3.0 * inv_total),
+                        progress_start + (4.0 * inv_total),
+                        progress_start + (5.0 * inv_total),
+                        progress_start + (6.0 * inv_total),
+                        progress_start + (7.0 * inv_total),
+                    ]);
+
+                    let v_one = wide::f32x8::from(1.0);
+                    let v_out = (v_old * (v_one - v_progress)) + (v_new * v_progress);
+                    store_f32x8(&mut x_data[..], j, v_out);
+
+                    state.remaining_samples = state.remaining_samples.saturating_sub(8);
+                    j += 8;
+                }
+
+                while j < num_samples {
                     let progress = (state.total_samples - state.remaining_samples) as f32 * inv_total;
                     x_data[j] = old_data[j] * (1.0 - progress) + new_data[j] * progress;
                     if state.remaining_samples > 0 { state.remaining_samples -= 1; }
+                    j += 1;
                 }
 
                 if state.node_idx < crate::MAX_NODES && state.input_idx < crate::MAX_CHANNELS {
@@ -131,28 +160,29 @@ impl GraphExecutor {
                 let routing = &topo.routing[n_idx];
                 let mut node_inputs_storage = [ &[][..]; crate::MAX_CHANNELS ];
                 let input_count = routing.input_count.min(crate::MAX_CHANNELS);
+
+                // PERF: Optimized metadata resolution for non-parallel path
                 for i in 0..input_count {
-                    let v_idx = routing.input_indices.get(i).copied().unwrap_or(0).min(crate::MAX_NODES as u32 - 1) as usize;
-                    let mut p_idx = topo.virtual_to_physical[v_idx] as usize;
+                    let v_idx = *unsafe { routing.input_indices.get_unchecked(i) } as usize;
+                    let mut p_idx = *unsafe { topo.virtual_to_physical.get_unchecked(v_idx) } as usize;
                     let p_override = block_x_map[n_idx][i];
                     if p_override != 0 { p_idx = p_override as usize; }
 
                     if p_idx >= crate::MAX_NODES {
                         let x_idx = p_idx - crate::MAX_NODES;
-                        if x_idx < crate::MAX_CROSSFADE_BUFFERS {
-                            unsafe { node_inputs_storage[i] = &(&(*x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
-                        }
-                    } else if p_idx < crate::MAX_NODES {
+                        unsafe { node_inputs_storage[i] = &(&(*x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
+                    } else {
                         unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[offset..offset + num_samples]; }
                     }
                 }
+
                 let mut node_outputs_reconstructed: [&mut [f32]; crate::MAX_CHANNELS] = std::array::from_fn(|_| &mut [][..]);
                 let output_count = routing.output_count.min(crate::MAX_CHANNELS);
-                for (i, node_out) in node_outputs_reconstructed.iter_mut().enumerate().take(output_count) {
-                    let v_idx = routing.output_indices.get(i).copied().unwrap_or(0).min(crate::MAX_NODES as u32 - 1) as usize;
-                    let p_idx = topo.virtual_to_physical.get(v_idx).copied().unwrap_or(0).min(crate::MAX_NODES as u32 - 1) as usize;
+                for i in 0..output_count {
+                    let v_idx = *unsafe { routing.output_indices.get_unchecked(i) } as usize;
+                    let p_idx = *unsafe { topo.virtual_to_physical.get_unchecked(v_idx) } as usize;
                     unsafe {
-                        *node_out = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr().add(offset), num_samples);
+                        *node_outputs_reconstructed.get_unchecked_mut(i) = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr().add(offset), num_samples);
                     }
                 }
 

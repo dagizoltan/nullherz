@@ -23,10 +23,11 @@ pub struct SequencerProcessor {
     active_pattern: usize,
     pub quantize_amount: f32, // 0.0 to 1.0
     pub swing: f32,           // 0.0 to 1.0
+    bpm: f32,
 }
 
 impl SequencerProcessor {
-    pub fn new(id: u32, sample_rate: f32, _bpm: f32) -> Self {
+    pub fn new(id: u32, sample_rate: f32, bpm: f32) -> Self {
         Self {
             id,
             sample_rate,
@@ -35,6 +36,7 @@ impl SequencerProcessor {
             active_pattern: 0,
             quantize_amount: 1.0,
             swing: 0.0,
+            bpm,
         }
     }
 }
@@ -53,8 +55,11 @@ fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &
         if let Some(transport) = context.transport {
             if !transport.is_playing { return; }
 
+            // STAGE 9: Correct for mid-block BPM changes via transport update
+            self.bpm = transport.bpm;
+
             // Sample-absolute indexing to prevent precision drift
-            let samples_per_beat = (transport.sample_rate as f64 * 60.0) / transport.bpm as f64;
+            let samples_per_beat = (transport.sample_rate as f64 * 60.0) / self.bpm as f64;
             let samples_per_step = samples_per_beat * 0.25; // 16th note
 
             let block_start_sample = (transport.beat_position * samples_per_beat).round() as u64;
@@ -121,6 +126,10 @@ fn apply_command(&mut self, command: &nullherz_traits::Command) {
                 self.patterns[self.active_pattern].grid[*track as usize][*step as usize] = *value;
             }
         }
+
+        if let nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetBpm(new_bpm)) = command {
+            self.bpm = *new_bpm;
+        }
     }
 
 fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
@@ -182,5 +191,34 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
                 }
             }
         }
+    }
+
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        let mut parameters = [nullherz_traits::ParameterMetadata {
+            id: 0,
+            name: [0; 32],
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+        }; 16];
+
+        let names: &[&[u8]] = &[b"ActivePattern", b"PatternLen", b"Quantize", b"Swing"];
+        let mins = [0.0, 1.0, 0.0, 0.0];
+        let maxs = [15.0, 64.0, 1.0, 1.0];
+        let defs = [0.0, 16.0, 1.0, 0.0];
+
+        for (i, &name) in names.iter().enumerate() {
+            parameters[i].id = i as u32;
+            parameters[i].name[..name.len()].copy_from_slice(name);
+            parameters[i].min = mins[i];
+            parameters[i].max = maxs[i];
+            parameters[i].default = defs[i];
+        }
+
+        Some(nullherz_traits::ProcessorMetadata {
+            processor_id: self.id as u64,
+            num_parameters: 4,
+            parameters,
+        })
     }
 }

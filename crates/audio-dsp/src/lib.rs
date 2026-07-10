@@ -172,6 +172,9 @@ pub struct Gain {
     pub _smoothing_factor: f32,
     pub ramp_remaining: u32,
     pub ramp_step: f32,
+    pub soft_clip: bool,
+    pub clip_threshold: f32,
+    pub oversampler: crate::util::Oversampler2x,
 }
 
 impl DspKernel for Gain {
@@ -181,13 +184,21 @@ impl DspKernel for Gain {
     }
 
     fn set_parameter(&mut self, id: u32, value: f32, ramp_samples: u32) {
-        if id == 0 {
-            self.set_gain(value, ramp_samples);
+        match id {
+            0 => self.set_gain(value, ramp_samples),
+            1 => self.soft_clip = value > 0.5,
+            2 => self.clip_threshold = value.max(0.01),
+            _ => {}
         }
     }
 
     fn get_parameter(&self, id: u32) -> f32 {
-        if id == 0 { self.target_gain } else { 0.0 }
+        match id {
+            0 => self.target_gain,
+            1 => if self.soft_clip { 1.0 } else { 0.0 },
+            2 => self.clip_threshold,
+            _ => 0.0
+        }
     }
 }
 
@@ -199,6 +210,9 @@ impl Gain {
             _smoothing_factor: smoothing_factor,
             ramp_remaining: 0,
             ramp_step: 0.0,
+            soft_clip: false,
+            clip_threshold: 1.0,
+            oversampler: crate::util::Oversampler2x::new(),
         }
     }
 
@@ -223,7 +237,6 @@ impl Gain {
         let mut current = self.current_gain;
 
         if self.ramp_remaining > 0 {
-            // Ramped gain: mostly scalar due to sequential nature, but can be vectorized in segments
             for i in 0..len {
                 if self.ramp_remaining > 0 {
                     current += self.ramp_step;
@@ -231,11 +244,22 @@ impl Gain {
                 } else {
                     current = self.target_gain;
                 }
-                let out = input[i] * current;
+                let mut out = input[i] * current;
+                if self.soft_clip {
+                    // RT-9: 2x Oversampled soft-clipping to reduce aliasing
+                    let thresh = self.clip_threshold;
+                    let inv_thresh = 1.0 / thresh;
+                    let os = self.oversampler.last_input;
+                    let s_mid = (out + os) * 0.5;
+
+                    let y_mid = (s_mid * inv_thresh).tanh() * thresh;
+                    let y_now = (out * inv_thresh).tanh() * thresh;
+                    out = (y_mid + y_now) * 0.5;
+                    self.oversampler.last_input = input[i] * current;
+                }
                 output[i] = if out.abs() < 1e-15 { 0.0 } else { out };
             }
         } else {
-            // Static gain: Highly vectorizable
             use crate::simd_vec::*;
             current = self.target_gain;
             let v_gain = FloatX8::from(current);
@@ -243,20 +267,38 @@ impl Gain {
             let v_eps = FloatX8::from(1e-15);
 
             let mut i = 0;
-            while i + 8 <= len {
-                let v_in = load_f32x8(input, i);
-                let v_out = v_in * v_gain;
-                // Denormal safeguard: if abs < eps, force to zero
-                // wide uses cmp_gt, cmp_lt etc instead of .lt() which returns a mask
-                let mask = v_out.abs().cmp_lt(v_eps);
-                let v_out_clean = mask.blend(v_zero, v_out);
-                store_f32x8(output, i, v_out_clean);
-                i += 8;
-            }
-            while i < len {
-                let out = input[i] * current;
-                output[i] = if out.abs() < 1e-15 { 0.0 } else { out };
-                i += 1;
+            if self.soft_clip {
+                // Vectorized path with 2x oversampling is complex for dependencies
+                // Fallback to optimized oversampled scalar for soft-clip
+                while i < len {
+                    let mut out = input[i] * current;
+                    let thresh = self.clip_threshold;
+                    let inv_thresh = 1.0 / thresh;
+                    let last = self.oversampler.last_input;
+                    let s_mid = (out + last) * 0.5;
+
+                    let y_mid = (s_mid * inv_thresh).tanh() * thresh;
+                    let y_now = (out * inv_thresh).tanh() * thresh;
+                    out = (y_mid + y_now) * 0.5;
+                    self.oversampler.last_input = out;
+
+                    output[i] = if out.abs() < 1e-15 { 0.0 } else { out };
+                    i += 1;
+                }
+            } else {
+                while i + 8 <= len {
+                    let v_in = load_f32x8(input, i);
+                    let v_out = v_in * v_gain;
+                    let mask = v_out.abs().cmp_lt(v_eps);
+                    let v_out_clean = mask.blend(v_zero, v_out);
+                    store_f32x8(output, i, v_out_clean);
+                    i += 8;
+                }
+                while i < len {
+                    let out = input[i] * current;
+                    output[i] = if out.abs() < 1e-15 { 0.0 } else { out };
+                    i += 1;
+                }
             }
         }
         self.current_gain = current;

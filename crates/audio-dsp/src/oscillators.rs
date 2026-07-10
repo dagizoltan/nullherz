@@ -451,10 +451,11 @@ impl SamplerVoice {
                 let p2 = buffer[idx + 1];
                 let p3 = buffer[idx + 2];
 
+            // STAGE 9: Lagrange 4-point Polynomial coefficients (Pre-computed)
                 let c1 = p1;
-                let c2 = -0.5 * p0 + 0.5 * p2;
+            let c2 = 0.5 * (p2 - p0);
                 let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
-                let c4 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+            let c4 = 0.5 * (p3 - p0) + 1.5 * (p1 - p2);
 
                 ((c4 * x + c3) * x + c2) * x + c1
             }
@@ -536,10 +537,11 @@ impl SamplerVoice {
 
                     let p0 = p[0]; let p1 = p[1]; let p2 = p[2]; let p3 = p[3];
 
+                    // SIMD-ready arithmetic factorization
                     let c1 = p1;
-                    let c2 = -0.5 * p0 + 0.5 * p2;
+                    let c2 = 0.5 * (p2 - p0);
                     let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
-                    let c4 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+                    let c4 = 0.5 * (p3 - p0) + 1.5 * (p1 - p2);
                     ((c4 * x + c3) * x + c2) * x + c1
                 } else {
                     // Safe scalar fallback for buffer end (Boundary path)
@@ -549,9 +551,9 @@ impl SamplerVoice {
                     let p3 = *buffer.get(start_idx + 3).unwrap_or(&0.0);
 
                     let c1 = p1;
-                    let c2 = -0.5 * p0 + 0.5 * p2;
+                    let c2 = 0.5 * (p2 - p0);
                     let c3 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
-                    let c4 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+                    let c4 = 0.5 * (p3 - p0) + 1.5 * (p1 - p2);
                     ((c4 * x + c3) * x + c2) * x + c1
                 }
             }

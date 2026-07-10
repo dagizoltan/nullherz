@@ -83,6 +83,46 @@ impl LagrangeResampler {
     }
 }
 
+/// A 2x Oversampler using a simple linear interpolation for upsampling
+/// and a 2-point average for downsampling. Optimized for RT soft-clipping.
+#[derive(Debug, Clone, Copy)]
+pub struct Oversampler2x {
+    pub last_input: f32,
+}
+
+impl Default for Oversampler2x {
+    fn default() -> Self {
+        Self { last_input: 0.0 }
+    }
+}
+
+impl Oversampler2x {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Processes a block with 2x oversampling.
+    /// func: a closure that processes a single sample at the higher rate.
+    pub fn process_block<F>(&mut self, input: &[f32], output: &mut [f32], mut func: F)
+    where F: FnMut(f32) -> f32 {
+        for i in 0..input.len() {
+            let s = input[i];
+
+            // Upsample (Linear)
+            let s_mid = (s + self.last_input) * 0.5;
+
+            // Process at 2x rate
+            let y_mid = func(s_mid);
+            let y_now = func(s);
+
+            // Downsample (Average)
+            output[i] = (y_mid + y_now) * 0.5;
+
+            self.last_input = s;
+        }
+    }
+}
+
 /// Calculates a sliding window magnitude average for spectral envelope extraction.
 /// Optimized with SIMD where possible.
 pub fn extract_spectral_envelope(re: &[f32], im: &[f32], env: &mut [f32], window_size: usize) {

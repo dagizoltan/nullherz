@@ -102,6 +102,13 @@ impl ProcessorGraph {
     }
 
     pub fn commit_graph(&mut self) {
+        // RT-9: Stateful Transition Queue
+        // Prevent structural commits while crossfades are still active to maintain
+        // signal continuity and avoid overlapping morphs.
+        if self.topology_coordinator.has_active_crossfades() || self.morph_samples_remaining > 0 {
+            return;
+        }
+
         if self.topology_coordinator.needs_commit {
             let old_node_count = self.topology_coordinator.active_topology().node_count;
             if old_node_count > 0 && self.morph_duration_samples > 0 {
@@ -302,23 +309,52 @@ fn reset(&mut self) {
         }
     }
 fn latency_samples(&self) -> usize {
-        // For a DAG, the total latency is the maximum latency along any path from input to output.
-        // For simplicity in this iteration, we'll sum the latency of nodes in the longest stage path.
-        // A more accurate version would traverse the graph edges.
+        // STAGE 9: DAG Critical Path Latency Calculation
+        // The total system latency is the maximum accumulated latency along any path
+        // from a primary input to a primary output.
         let active_idx = self.topology_coordinator.active_idx();
         let topo = &self.topology_coordinator.topologies[active_idx];
-        let mut total_latency = 0;
+        let n = topo.node_count;
+        if n == 0 { return 0; }
 
-        for s_idx in 0..topo.plan.num_stages {
-            let mut stage_max = 0;
-            for &n_idx_u32 in &topo.plan.stages[s_idx].0[..topo.plan.stage_counts[s_idx] as usize] {
-                let node = &self.nodes[n_idx_u32 as usize];
-                let lat = unsafe { (*node.processor.get()).latency_samples() };
-                if lat > stage_max { stage_max = lat; }
-            }
-            total_latency += stage_max;
+        let mut node_latencies = [0usize; crate::MAX_NODES];
+        let mut path_latencies = [0usize; crate::MAX_NODES];
+
+        for i in 0..n {
+            node_latencies[i] = unsafe { (*self.nodes[i].processor.get()).latency_samples() };
         }
-        total_latency
+
+        // We use the topological stages from the plan to propagate path latencies
+        for s_idx in 0..topo.plan.num_stages {
+            let stage_nodes = &topo.plan.stages[s_idx].0[..topo.plan.stage_counts[s_idx] as usize];
+            for &u_u32 in stage_nodes {
+                let u = u_u32 as usize;
+                if u >= crate::MAX_NODES { continue; }
+
+                let lat_at_u = path_latencies[u] + node_latencies[u];
+
+                // Propagate to all nodes that read from u's outputs
+                let routing_u = &topo.routing[u];
+                for k in 0..routing_u.output_count {
+                    let v_out = routing_u.output_indices[k];
+
+                    // Find nodes that have v_out as an input
+                    for v in 0..n {
+                        let routing_v = &topo.routing[v];
+                        if routing_v.input_indices.iter().take(routing_v.input_count).any(|&v_in| v_in == v_out) {
+                            path_latencies[v] = path_latencies[v].max(lat_at_u);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Critical path is the max of (path_latency[i] + node_latency[i]) for all nodes
+        let mut max_latency = 0;
+        for i in 0..n {
+            max_latency = max_latency.max(path_latencies[i] + node_latencies[i]);
+        }
+        max_latency
     }
 }
 

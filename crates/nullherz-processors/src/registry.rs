@@ -20,6 +20,9 @@ impl ProcessorRegistry {
             named_factories: HashMap::new(),
         };
         registry.register_defaults();
+        registry.register_factory(Box::new(CompressorFactory));
+        registry.register_factory(Box::new(StereoUtilityFactory));
+        registry.register_factory(Box::new(AnalysisFactory));
         registry
     }
 

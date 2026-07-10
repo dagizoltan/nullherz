@@ -73,6 +73,8 @@ pub enum DeckParamType {
     EqMid,
     EqHigh,
     Filter,
+    Pan,
+    Width,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -356,6 +358,36 @@ impl DnaCommand {
             bias: 1.0,
             payload,
         }
+    }
+
+    /// Safely unpacks the DNA transfusion payload into its constituent parts.
+    pub fn unpack_transfusion(&self) -> ([f32; 16], [i16; 12], [u64; 4]) {
+        let mut latent = [0.0f32; 16];
+        let mut micro_timing = [0i16; 12];
+        let mut onset_mask = [0u64; 4];
+
+        // 1. Spectral (0-63)
+        // Hardening: Ensure we don't read invalid float states by zeroing out non-finite values.
+        latent.copy_from_slice(bytemuck::cast_slice(&self.payload[..64]));
+        for val in latent.iter_mut() {
+            if !val.is_finite() { *val = 0.0; }
+        }
+
+        // 2. Rhythmic Micro-timing (64-75)
+        for i in 0..12 {
+            micro_timing[i] = (self.payload[64 + i] as i8) as i16;
+        }
+
+        // 3. Rhythmic Onset Mask (76-107)
+        for i in 0..4 {
+            let mut mask = 0u64;
+            for j in 0..8 {
+                mask |= (self.payload[76 + i * 8 + j] as u64) << (j * 8);
+            }
+            onset_mask[i] = mask;
+        }
+
+        (latent, micro_timing, onset_mask)
     }
 }
 
@@ -985,10 +1017,16 @@ impl PtpClockProvider {
                 msg_flags: 0,
             };
 
-            let n = unsafe { libc::recvmsg(self._socket_fd, &mut msg, 0) };
-            if n < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
+            let n = loop {
+                let n = unsafe { libc::recvmsg(self._socket_fd, &mut msg, 0) };
+                if n < 0 {
+                    let err = std::io::Error::last_os_error();
+                    if err.kind() == std::io::ErrorKind::Interrupted { continue; }
+                    if err.kind() == std::io::ErrorKind::WouldBlock { continue; }
+                    return Err(err);
+                }
+                break n;
+            };
 
             let mut timestamp_ns = self.get_system_time_ns();
 
@@ -1015,8 +1053,16 @@ impl PtpClockProvider {
         #[cfg(not(target_os = "linux"))]
         {
             let now = self.get_system_time_ns();
-            let n = unsafe { libc::recv(self._socket_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0) };
-            if n < 0 { return Err(std::io::Error::last_os_error()); }
+            let n = loop {
+                let n = unsafe { libc::recv(self._socket_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0) };
+                if n < 0 {
+                    let err = std::io::Error::last_os_error();
+                    if err.kind() == std::io::ErrorKind::Interrupted { continue; }
+                    if err.kind() == std::io::ErrorKind::WouldBlock { continue; }
+                    return Err(err);
+                }
+                break n;
+            };
             Ok((n as usize, now))
         }
     }
@@ -1448,6 +1494,37 @@ mod tests {
     fn test_mip_waveform_default() {
         let mip = MipWaveform::default();
         assert!(mip.levels.is_empty());
+    }
+
+    #[test]
+    fn test_dna_transfusion_packing_roundtrip() {
+        let latent = [1.0f32; 16];
+        let micro_timing = [10i16; 12];
+        let onset_mask = [0x1234567890ABCDEFu64; 4];
+
+        let cmd = DnaCommand::pack_transfusion(1234, &latent, &micro_timing, &onset_mask);
+        let (u_latent, u_micro_timing, u_onset_mask) = cmd.unpack_transfusion();
+
+        assert_eq!(u_latent, latent);
+        assert_eq!(u_micro_timing, micro_timing);
+        assert_eq!(u_onset_mask, onset_mask);
+    }
+
+    #[test]
+    fn test_dna_transfusion_hardening() {
+        let mut latent = [0.0f32; 16];
+        latent[0] = f32::NAN;
+        latent[1] = f32::INFINITY;
+        let micro_timing = [0i16; 12];
+        let onset_mask = [0u64; 4];
+
+        let cmd = DnaCommand::pack_transfusion(1234, &latent, &micro_timing, &onset_mask);
+        let (u_latent, _, _) = cmd.unpack_transfusion();
+
+        assert!(u_latent[0].is_finite());
+        assert_eq!(u_latent[0], 0.0);
+        assert!(u_latent[1].is_finite());
+        assert_eq!(u_latent[1], 0.0);
     }
 
     #[test]

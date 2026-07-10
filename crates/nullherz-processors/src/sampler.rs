@@ -217,6 +217,28 @@ fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
     fn resource_id(&self) -> Option<u64> {
         self.sample_id
     }
+
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        let mut parameters = [nullherz_traits::ParameterMetadata {
+            id: 0,
+            name: [0; 32],
+            min: 0.0,
+            max: 2.0,
+            default: 1.0,
+        }; 16];
+
+        let names: &[&[u8]] = &[b"PlaybackRate", b"Quantize", b"SlicerMode", b"GridBeats", b"BeatsPerBar"];
+        for (i, &name) in names.iter().enumerate() {
+            parameters[i].id = (i + 1) as u32;
+            parameters[i].name[..name.len()].copy_from_slice(name);
+        }
+
+        Some(nullherz_traits::ProcessorMetadata {
+            processor_id: self.id,
+            num_parameters: 5,
+            parameters,
+        })
+    }
 }
 
 impl SamplerProcessor {

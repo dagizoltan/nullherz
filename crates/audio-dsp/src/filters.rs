@@ -254,6 +254,14 @@ impl crate::DspKernel for SimdBiquad {
                 out_ptrs[i] = outputs[i].as_mut_ptr();
             }
             self.process_8_channels(in_ptrs, out_ptrs, inputs[0].len());
+        } else if num_ch >= 4 {
+            let mut in_ptrs = [std::ptr::null(); 4];
+            let mut out_ptrs = [std::ptr::null_mut(); 4];
+            for i in 0..4 {
+                in_ptrs[i] = inputs[i].as_ptr();
+                out_ptrs[i] = outputs[i].as_mut_ptr();
+            }
+            self.process_4_channels(in_ptrs, out_ptrs, inputs[0].len());
         } else {
             for i in 0..num_ch {
                 self.process_scalar(i, inputs[i], outputs[i]);
@@ -337,6 +345,55 @@ impl SimdBiquad {
         unsafe { store_f32x16_ptr(self.z2.as_mut_ptr(), z2) };
     }
 
+    pub fn process_4_channels(&mut self, inputs: [*const f32; 4], outputs: [*mut f32; 4], len: usize) {
+        use wide::*;
+
+        let b0 = f32x4::from(self.coeffs.b0);
+        let b1 = f32x4::from(self.coeffs.b1);
+        let b2 = f32x4::from(self.coeffs.b2);
+        let a1 = f32x4::from(self.coeffs.a1);
+        let a2 = f32x4::from(self.coeffs.a2);
+
+        let mut z1 = f32x4::new([self.z1[0], self.z1[1], self.z1[2], self.z1[3]]);
+        let mut z2 = f32x4::new([self.z2[0], self.z2[1], self.z2[2], self.z2[3]]);
+
+        for i in 0..len {
+            let x = unsafe {
+                f32x4::new([
+                    *inputs[0].add(i), *inputs[1].add(i), *inputs[2].add(i), *inputs[3].add(i)
+                ])
+            };
+
+            let mut y = (x * b0) + z1;
+
+            let y_arr: [f32; 4] = y.into();
+            let mut finite = true;
+            for val in &y_arr { if !val.is_finite() { finite = false; break; } }
+
+            if !finite {
+                y = f32x4::ZERO;
+                z1 = f32x4::ZERO;
+                z2 = f32x4::ZERO;
+            } else {
+                z1 = ((x * b1) - (y * a1)) + z2;
+                z2 = (x * b2) - (y * a2);
+            }
+
+            let out_v: [f32; 4] = y.into();
+            unsafe {
+                *outputs[0].add(i) = out_v[0];
+                *outputs[1].add(i) = out_v[1];
+                *outputs[2].add(i) = out_v[2];
+                *outputs[3].add(i) = out_v[3];
+            }
+        }
+
+        let z1_arr: [f32; 4] = z1.into();
+        self.z1[0..4].copy_from_slice(&z1_arr);
+        let z2_arr: [f32; 4] = z2.into();
+        self.z2[0..4].copy_from_slice(&z2_arr);
+    }
+
     pub fn process_8_channels(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
         use wide::*;
 
@@ -398,13 +455,18 @@ impl SimdBiquad {
 impl crate::DspKernel for DjIsolator {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         if inputs.is_empty() || outputs.is_empty() { return; }
-        self.process_block_unrolled(inputs[0], outputs[0]);
+        self.process_block(inputs[0], outputs[0]);
     }
 
     fn reset(&mut self) {
-        self.low.reset();
-        self.mid.reset();
-        self.high.reset();
+        self.low_pass_1.reset();
+        self.low_pass_2.reset();
+        self.high_pass_1.reset();
+        self.high_pass_2.reset();
+        self.mid_low_hp_1.reset();
+        self.mid_low_hp_2.reset();
+        self.mid_high_lp_1.reset();
+        self.mid_high_lp_2.reset();
     }
 
     fn set_parameter(&mut self, id: u32, value: f32, _ramp_samples: u32) {
@@ -415,12 +477,18 @@ impl crate::DspKernel for DjIsolator {
     }
 }
 
-/// A 3-band DJ Isolator (Kill EQ) using high-order SIMD filters.
+/// A 3-band DJ Isolator (Kill EQ) using 4th-order Linkwitz-Riley crossovers.
+/// Each crossover consists of two cascaded 2nd-order biquads for a 24dB/octave slope.
 #[derive(Clone)]
 pub struct DjIsolator {
-    pub low: BiquadFilter,
-    pub mid: BiquadFilter,
-    pub high: BiquadFilter,
+    pub low_pass_1: BiquadFilter,
+    pub low_pass_2: BiquadFilter,
+    pub high_pass_1: BiquadFilter,
+    pub high_pass_2: BiquadFilter,
+    pub mid_low_hp_1: BiquadFilter,
+    pub mid_low_hp_2: BiquadFilter,
+    pub mid_high_lp_1: BiquadFilter,
+    pub mid_high_lp_2: BiquadFilter,
     pub gains: [f32; 3], // Low, Mid, High gains (0.0 to 1.0+)
 }
 
@@ -436,160 +504,47 @@ impl DjIsolator {
     }
 
     pub fn with_sample_rate(sample_rate: f32) -> Self {
-        // Precise Linkwitz-Riley crossover coefficients
-        let low_coeffs = BiquadCoefficients::linkwitz_riley_lp(300.0, sample_rate);
-        let high_coeffs = BiquadCoefficients::linkwitz_riley_hp(3000.0, sample_rate);
+        let lp_coeffs = BiquadCoefficients::linkwitz_riley_lp(300.0, sample_rate);
+        let hp_coeffs = BiquadCoefficients::linkwitz_riley_hp(3000.0, sample_rate);
 
-        // Mid is effectively everything in between
-        // In a true 3-way LR isolator, we'd use cascaded HP/LP.
-        // For this hardening, we use the exact poles for the boundaries.
+        let mid_hp = BiquadCoefficients::linkwitz_riley_hp(300.0, sample_rate);
         let mid_lp = BiquadCoefficients::linkwitz_riley_lp(3000.0, sample_rate);
 
         Self {
-            low: BiquadFilter::new(low_coeffs),
-            mid: BiquadFilter::new(mid_lp),
-            high: BiquadFilter::new(high_coeffs),
+            low_pass_1: BiquadFilter::new(lp_coeffs),
+            low_pass_2: BiquadFilter::new(lp_coeffs),
+            high_pass_1: BiquadFilter::new(hp_coeffs),
+            high_pass_2: BiquadFilter::new(hp_coeffs),
+            mid_low_hp_1: BiquadFilter::new(mid_hp),
+            mid_low_hp_2: BiquadFilter::new(mid_hp),
+            mid_high_lp_1: BiquadFilter::new(mid_lp),
+            mid_high_lp_2: BiquadFilter::new(mid_lp),
             gains: [1.0, 1.0, 1.0],
         }
     }
 
-    /// Processes a block of audio using 4x unrolled scalar kernels.
-    pub fn process_block_unrolled(&mut self, input: &[f32], output: &mut [f32]) {
-        let len = input.len();
-        if len == 0 { return; }
-
-        if self.low.ramp_duration > 0 || self.mid.ramp_duration > 0 || self.high.ramp_duration > 0 {
-            self.process_block(input, output);
-            return;
-        }
-
-        let mut l_z1 = self.low.z1; let mut l_z2 = self.low.z2;
-        let l_b0 = self.low.coeffs.b0; let l_b1 = self.low.coeffs.b1; let l_b2 = self.low.coeffs.b2;
-        let l_a1 = self.low.coeffs.a1; let l_a2 = self.low.coeffs.a2;
+    pub fn process_block(&mut self, input: &[f32], output: &mut [f32]) {
         let g_l = self.gains[0];
-
-        let mut m_z1 = self.mid.z1; let mut m_z2 = self.mid.z2;
-        let m_b0 = self.mid.coeffs.b0; let m_b1 = self.mid.coeffs.b1; let m_b2 = self.mid.coeffs.b2;
-        let m_a1 = self.mid.coeffs.a1; let m_a2 = self.mid.coeffs.a2;
         let g_m = self.gains[1];
-
-        let mut h_z1 = self.high.z1; let mut h_z2 = self.high.z2;
-        let h_b0 = self.high.coeffs.b0; let h_b1 = self.high.coeffs.b1; let h_b2 = self.high.coeffs.b2;
-        let h_a1 = self.high.coeffs.a1; let h_a2 = self.high.coeffs.a2;
         let g_h = self.gains[2];
 
-        let mut i = 0;
-        while i + 4 <= len {
-            unsafe {
-                for k in 0..4 {
-                    let s = *input.get_unchecked(i + k);
-
-                    let l = s * l_b0 + l_z1;
-                    l_z1 = s * l_b1 - l * l_a1 + l_z2;
-                    l_z2 = s * l_b2 - l * l_a2;
-
-                    let m = s * m_b0 + m_z1;
-                    m_z1 = s * m_b1 - m * m_a1 + m_z2;
-                    m_z2 = s * m_b2 - m * m_a2;
-
-                    let h = s * h_b0 + h_z1;
-                    h_z1 = s * h_b1 - h * h_a1 + h_z2;
-                    h_z2 = s * h_b2 - h * h_a2;
-
-                    *output.get_unchecked_mut(i + k) = l * g_l + m * g_m + h * g_h;
-                }
-            }
-            i += 4;
-        }
-
-        while i < len {
-            let s = input[i];
-            let l = s * l_b0 + l_z1;
-            l_z1 = s * l_b1 - l * l_a1 + l_z2;
-            l_z2 = s * l_b2 - l * l_a2;
-
-            let m = s * m_b0 + m_z1;
-            m_z1 = s * m_b1 - m * m_a1 + m_z2;
-            m_z2 = s * m_b2 - m * m_a2;
-
-            let h = s * h_b0 + h_z1;
-            h_z1 = s * h_b1 - h * h_a1 + h_z2;
-            h_z2 = s * h_b2 - h * h_a2;
-
-            output[i] = l * g_l + m * g_m + h * g_h;
-            i += 1;
-        }
-
-        self.low.z1 = l_z1; self.low.z2 = l_z2;
-        self.mid.z1 = m_z1; self.mid.z2 = m_z2;
-        self.high.z1 = h_z1; self.high.z2 = h_z2;
-    }
-
-    pub fn process_block(&mut self, input: &[f32], output: &mut [f32]) {
         for i in 0..input.len() {
             let s = input[i];
-            let l = self.low.process_sample(s) * self.gains[0];
-            let m = self.mid.process_sample(s) * self.gains[1];
-            let h = self.high.process_sample(s) * self.gains[2];
-            output[i] = l + m + h;
+
+            // 4th Order Low (2 cascaded LP)
+            let l = self.low_pass_2.process_sample(self.low_pass_1.process_sample(s));
+
+            // 4th Order High (2 cascaded HP)
+            let h = self.high_pass_2.process_sample(self.high_pass_1.process_sample(s));
+
+            // 4th Order Mid (HP 300 -> LP 3000)
+            let m_low = self.mid_low_hp_2.process_sample(self.mid_low_hp_1.process_sample(s));
+            let m = self.mid_high_lp_2.process_sample(self.mid_high_lp_1.process_sample(m_low));
+
+            output[i] = l * g_l + m * g_m + h * g_h;
         }
     }
 
-    /// Processes a block of audio using AVX2 SIMD instructions.
-    ///
-    /// # Safety
-    /// Caller must ensure input and output slices are valid for 'len' elements
-    /// and that the CPU supports AVX2.
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2")]
-    pub unsafe fn process_block_avx2(&mut self, input: &[f32], output: &mut [f32]) {
-        // SAFETY: CPU feature check is responsibility of the caller (target_feature enabled).
-        // Slices are checked by the caller.
-        unsafe {
-        use std::arch::x86_64::*;
-        let len = input.len();
-        if len == 0 { return; }
-
-        if self.low.ramp_duration > 0 || self.mid.ramp_duration > 0 || self.high.ramp_duration > 0 {
-            self.process_block(input, output);
-            return;
-        }
-
-        let b0 = _mm_set_ps(0.0, self.high.coeffs.b0, self.mid.coeffs.b0, self.low.coeffs.b0);
-        let b1 = _mm_set_ps(0.0, self.high.coeffs.b1, self.mid.coeffs.b1, self.low.coeffs.b1);
-        let b2 = _mm_set_ps(0.0, self.high.coeffs.b2, self.mid.coeffs.b2, self.low.coeffs.b2);
-        let a1 = _mm_set_ps(0.0, self.high.coeffs.a1, self.mid.coeffs.a1, self.low.coeffs.a1);
-        let a2 = _mm_set_ps(0.0, self.high.coeffs.a2, self.mid.coeffs.a2, self.low.coeffs.a2);
-        let gains = _mm_set_ps(0.0, self.gains[2], self.gains[1], self.gains[0]);
-
-        let mut z1 = _mm_set_ps(0.0, self.high.z1, self.mid.z1, self.low.z1);
-        let mut z2 = _mm_set_ps(0.0, self.high.z2, self.mid.z2, self.low.z2);
-
-        for i in 0..len {
-            let x = _mm_set1_ps(*input.get_unchecked(i));
-            let y = _mm_add_ps(_mm_mul_ps(x, b0), z1);
-            z1 = _mm_add_ps(_mm_sub_ps(_mm_mul_ps(x, b1), _mm_mul_ps(y, a1)), z2);
-            z2 = _mm_sub_ps(_mm_mul_ps(x, b2), _mm_mul_ps(y, a2));
-
-            let mixed = _mm_mul_ps(y, gains);
-            let sum = _mm_hadd_ps(mixed, mixed);
-            let sum = _mm_hadd_ps(sum, sum);
-            *output.get_unchecked_mut(i) = _mm_cvtss_f32(sum);
-        }
-
-        let mut final_z1 = [0.0f32; 4];
-        let mut final_z2 = [0.0f32; 4];
-        _mm_storeu_ps(final_z1.as_mut_ptr(), z1);
-        _mm_storeu_ps(final_z2.as_mut_ptr(), z2);
-
-        self.low.z1 = final_z1[0];
-        self.mid.z1 = final_z1[1];
-        self.high.z1 = final_z1[2];
-        self.low.z2 = final_z2[0];
-        self.mid.z2 = final_z2[1];
-        self.high.z2 = final_z2[2];
-        }
-    }
 }
 
 impl crate::DspKernel for BiquadFilter {
@@ -636,12 +591,16 @@ impl EnvelopeFollower {
     }
 
     pub fn process_block(&mut self, input: &[f32], output: &mut [f32]) {
+        self.process_with_sidechain(input, input, output);
+    }
+
+    pub fn process_with_sidechain(&mut self, input: &[f32], sidechain: &[f32], output: &mut [f32]) {
         let mut env = self.envelope;
         let attack = self.attack_coeff;
         let release = self.release_coeff;
 
-        for i in 0..input.len() {
-            let rect = input[i].abs();
+        for i in 0..input.len().min(sidechain.len()) {
+            let rect = sidechain[i].abs();
             if rect > env {
                 env = rect + attack * (env - rect);
             } else {

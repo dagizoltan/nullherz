@@ -33,7 +33,13 @@ pub fn create_dj_deck(
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: gain_id, output_idx: 0, new_buffer_idx: gain_out }));
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: filter_id, input_idx: 0, new_buffer_idx: gain_out }));
 
-    let mut prev_id = filter_id;
+    let stereo_util_id = id_allocator.allocate_node_id();
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: stereo_util_id, processor_type_id: ProcessorTypeId(160) }));
+    let filter_out = id_allocator.allocate_buffer_id(1);
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: filter_id, output_idx: 0, new_buffer_idx: filter_out }));
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: stereo_util_id, input_idx: 0, new_buffer_idx: filter_out }));
+
+    let mut prev_id = stereo_util_id;
     for &fx_type in fx_ids {
         let fx_id = id_allocator.allocate_node_id();
         let fx_buf = id_allocator.allocate_buffer_id(1);
@@ -74,6 +80,7 @@ pub fn create_dj_deck(
         gain_id,
         filter_id,
         keysync_id,
+        stereo_util_id,
     };
 
     (commands, nodes)
