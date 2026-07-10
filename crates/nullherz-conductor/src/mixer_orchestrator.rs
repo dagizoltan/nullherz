@@ -41,6 +41,25 @@ impl MixerOrchestrator {
                                 }));
                                 println!("MixerOrchestrator: Harmonic Sync: Shifted Deck {} by {} semitones", deck_id, diff);
                             }
+
+                            // DNA-Aware Auto-Gain: Adjust target gain based on track energy
+                            // Feature vector index 0 is assumed to be average RMS energy
+                            let track_energy = track.metadata.dna.feature_vector[0];
+                            if track_energy > 0.0 {
+                                // Target normalization to 0.7 energy level
+                                let energy_compensation = 0.7 / track_energy.max(0.1);
+                                translated.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: nodes.gain_id as u64,
+                                    param_id: 0,
+                                    value: energy_compensation.clamp(0.5, 1.5),
+                                    ramp_duration_samples: 44100, // 1s smooth transition
+                                }));
+                                println!("MixerOrchestrator: DNA-Aware Gain: Compensing by factor {}", energy_compensation);
+                            }
+
+                            // Groove Transfusion: Apply rhythmic micro-timing to associated sequencer
+                            let seq_node_idx = nullherz_traits::NodeConventions::sequencer_for_deck(*deck_id);
+                            translated.extend(crate::pattern_manager::DnaSequencer::apply_groove(&track.metadata.dna.rhythmic, seq_node_idx, 0));
                         }
                     }
                 }

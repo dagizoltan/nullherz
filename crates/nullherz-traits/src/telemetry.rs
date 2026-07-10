@@ -17,6 +17,8 @@ pub struct Telemetry {
     #[serde(with = "BigArray")]
     pub node_times_ns: [u64; MAX_NODES],
     #[serde(with = "BigArray")]
+    pub node_peak_times_ns: [u64; MAX_NODES],
+    #[serde(with = "BigArray")]
     pub peak_levels: [f32; MAX_NODES],
     #[serde(with = "BigArray")]
     pub spectrum: [f32; 128],
@@ -80,6 +82,7 @@ impl Default for Telemetry {
             bpm: 120.0,
             beat_position: 0.0,
             node_times_ns: [0; MAX_NODES],
+            node_peak_times_ns: [0; MAX_NODES],
             peak_levels: [0.0; MAX_NODES],
             spectrum: [0.0; 128],
             goniometer_pts: [0.0; 128],

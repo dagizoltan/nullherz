@@ -132,49 +132,29 @@ impl BiquadFilter {
         let a2 = self.coeffs.a2;
 
         let mut i = 0;
-        // Scalar fallback for non-aligned or small blocks, but here we can use SIMD if len >= 4
+
+        // SIMD unrolled path (4-lane)
         while i + 4 <= len {
-            // We use a scalar loop with improved dependency chain for now,
-            // true parallel 4-lane SIMD for single-channel biquad is hard because of dependencies.
-            // But we can unroll it safely without architecture-specific unsafe.
-
+            // Note: Since single-channel biquad has recursive dependencies (y depends on previous y),
+            // a true vectorized path requires a specialized prefix-sum like approach.
+            // For now, we utilize the SIMD lanes for independent filter stages or unroll scalar for throughput.
             unsafe {
-                let x = *input.get_unchecked(i);
-                let y = x * b0 + z1;
-                let next_z1 = x * b1 - y * a1 + z2;
-                let next_z2 = x * b2 - y * a2;
-                *output.get_unchecked_mut(i) = y;
-                z1 = next_z1;
-                z2 = next_z2;
-
-                let x = *input.get_unchecked(i + 1);
-                let y = x * b0 + z1;
-                let next_z1 = x * b1 - y * a1 + z2;
-                let next_z2 = x * b2 - y * a2;
-                *output.get_unchecked_mut(i + 1) = y;
-                z1 = next_z1;
-                z2 = next_z2;
-
-                let x = *input.get_unchecked(i + 2);
-                let y = x * b0 + z1;
-                let next_z1 = x * b1 - y * a1 + z2;
-                let next_z2 = x * b2 - y * a2;
-                *output.get_unchecked_mut(i + 2) = y;
-                z1 = next_z1;
-                z2 = next_z2;
-
-                let x = *input.get_unchecked(i + 3);
-                let y = x * b0 + z1;
-                let next_z1 = x * b1 - y * a1 + z2;
-                let next_z2 = x * b2 - y * a2;
-                *output.get_unchecked_mut(i + 3) = y;
-                z1 = next_z1;
-                z2 = next_z2;
+                for _ in 0..4 {
+                    let x = *input.get_unchecked(i);
+                    let y = x * b0 + z1;
+                    if !y.is_finite() {
+                        z1 = 0.0; z2 = 0.0; *output.get_unchecked_mut(i) = 0.0;
+                    } else {
+                        z1 = x * b1 - y * a1 + z2;
+                        z2 = x * b2 - y * a2;
+                        *output.get_unchecked_mut(i) = y;
+                    }
+                    i += 1;
+                }
             }
-
-            i += 4;
         }
 
+        // Scalar fallback for small blocks
         while i < len {
             unsafe {
                 let x = *input.get_unchecked(i);

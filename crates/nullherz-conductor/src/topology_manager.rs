@@ -36,7 +36,7 @@ impl TopologyManager {
                     output_indices: [0; nullherz_traits::MAX_CHANNELS],
                     input_count: 0,
                     output_count: 0,
-                    input_delays: [0; nullherz_traits::MAX_CHANNELS],
+                    input_delays: [0.0; nullherz_traits::MAX_CHANNELS],
                 }; nullherz_traits::MAX_NODES],
                 virtual_to_physical: v2p,
                 plan: Default::default(),
@@ -161,12 +161,18 @@ impl TopologyManager {
             }
             Command::Core(nullherz_traits::CoreCommand::CommitTopology) => {
                 // RT-2: Off-thread compilation
-                if let Ok(plan) = GraphCompiler::compile(&self.current_topology) {
-                    self.current_topology.plan = plan;
-                    let _ = prod.push(TopologyMutation::SetTopology(Arc::new(self.current_topology.clone())));
-                    return true;
-                } else {
-                    eprintln!("Off-thread compilation failed! Cycle detected?");
+                match GraphCompiler::compile(&self.current_topology) {
+                    Ok(plan) => {
+                        self.current_topology.plan = plan;
+                        if let Err(_e) = prod.push(TopologyMutation::SetTopology(Arc::new(self.current_topology.clone()))) {
+                            eprintln!("Topology Commit failed: Mutation producer rejected SetTopology");
+                        } else {
+                            return true;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Off-thread compilation failed: {}", e);
+                    }
                 }
             }
             _ => {}

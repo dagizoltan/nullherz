@@ -46,7 +46,10 @@ impl GraphExecutor {
                     ]);
 
                     let v_one = wide::f32x8::from(1.0);
-                    let v_out = (v_old * (v_one - v_progress)) + (v_new * v_progress);
+                    // Constant-Power (Square-Root) Crossfade
+                    let v_gain_old = (v_one - v_progress).sqrt();
+                    let v_gain_new = v_progress.sqrt();
+                    let v_out = (v_old * v_gain_old) + (v_new * v_gain_new);
                     store_f32x8(&mut x_data[..], j, v_out);
 
                     state.remaining_samples = state.remaining_samples.saturating_sub(8);
@@ -55,7 +58,9 @@ impl GraphExecutor {
 
                 while j < num_samples {
                     let progress = (state.total_samples - state.remaining_samples) as f32 * inv_total;
-                    x_data[j] = old_data[j] * (1.0 - progress) + new_data[j] * progress;
+                    let gain_old = (1.0 - progress).sqrt();
+                    let gain_new = progress.sqrt();
+                    x_data[j] = old_data[j] * gain_old + new_data[j] * gain_new;
                     if state.remaining_samples > 0 { state.remaining_samples -= 1; }
                     j += 1;
                 }
@@ -84,6 +89,8 @@ impl GraphExecutor {
         host: Option<&dyn nullherz_traits::Host>,
         is_last_sub_block: bool,
         telemetry_node_times_cycles: &[std::sync::atomic::AtomicU64; crate::MAX_NODES],
+        pdc_lines: &mut crate::processors::graph::buffer_pool::PdcLines,
+        pdc_write_pos: usize,
     ) {
         let stage = &topo.plan.stages[s_idx].0[..topo.plan.stage_counts[s_idx] as usize];
         // SAFETY: buffers_ptr and x_buffers_ptr are used to reconstruct disjoint slices in worker threads.
@@ -102,11 +109,31 @@ impl GraphExecutor {
             for &n_idx_u32 in stage {
                 let n_idx = n_idx_u32 as usize;
                 let mut worker_idx = 0;
-                let mut min_cost = u64::MAX;
-                for w in 0..num_workers {
-                    if worker_costs[w] < min_cost {
-                        min_cost = worker_costs[w];
-                        worker_idx = w;
+
+                // Try to use cached assignment if available
+                let mut cached = false;
+                if let Some(p_mut) = pool.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
+                    if let Some(assignment) = p_mut.assignment_cache[n_idx] {
+                        worker_idx = assignment.worker_idx as usize;
+                        cached = true;
+                    }
+                }
+
+                if !cached {
+                    let mut min_cost = u64::MAX;
+                    for w in 0..num_workers {
+                        if worker_costs[w] < min_cost {
+                            min_cost = worker_costs[w];
+                            worker_idx = w;
+                        }
+                    }
+
+                    // Cache the new assignment
+                    if let Some(p_mut) = pool.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
+                        p_mut.assignment_cache[n_idx] = Some(crate::processors::graph::pool::StaticAssignment {
+                            node_idx: n_idx as u32,
+                            worker_idx: worker_idx as u8,
+                        });
                     }
                 }
 
@@ -131,6 +158,14 @@ impl GraphExecutor {
                 }
 
                 let is_bypassed = topo.bypass_states[n_idx];
+
+
+                let telemetry_ptr = if let Some(p_mut) = pool.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
+                    &p_mut.worker_telemetry[worker_idx] as *const _ as *mut _
+                } else {
+                    telemetry_node_times_cycles as *const _ as *mut _
+                };
+
                 let job = Job {
                     node_ptr: &nodes[n_idx] as *const _,
                     num_samples,
@@ -138,15 +173,18 @@ impl GraphExecutor {
                     buffers_ptr,
                     x_buffers_ptr,
                     input_indices: resolved_inputs,
+                    input_delays: topo.plan.input_delays[n_idx].0,
                     output_indices: resolved_outputs,
                     input_count: routing.input_count,
                     output_count: routing.output_count,
                     node_idx: n_idx,
-                    telemetry_ptr: telemetry_node_times_cycles as *const _,
+                    telemetry_ptr,
                     transport: transport.copied(),
                     host_ptr: host.map(|h| h as *const dyn nullherz_traits::Host),
                     is_last_sub_block,
                     is_bypassed,
+                    pdc_lines_ptr: pdc_lines,
+                    pdc_write_pos,
                 };
                 unsafe { pool.push_job_raw(worker_idx, &job as *const _ as *const u8, std::mem::size_of::<Job>(), |_| {}); }
             }
@@ -159,6 +197,7 @@ impl GraphExecutor {
                 let node = &nodes[n_idx];
                 let routing = &topo.routing[n_idx];
                 let mut node_inputs_storage = [ &[][..]; crate::MAX_CHANNELS ];
+                let mut pdc_storage = [[0.0f32; ipc_layer::MAX_BLOCK_SIZE]; crate::MAX_CHANNELS];
                 let input_count = routing.input_count.min(crate::MAX_CHANNELS);
 
                 // PERF: Optimized metadata resolution for non-parallel path
@@ -192,14 +231,35 @@ impl GraphExecutor {
 
                 // PDC: Apply input delays if required
                 for i in 0..input_count {
-                     let delay = topo.plan.input_delays[n_idx].0[i] as usize;
-                    if delay > 0 {
-                         // STAGE 8 PDC: Functional ring-buffer based path alignment
-                         // This ensures phase-coherent summing at merge points.
-                         let _input = node_inputs_storage[i];
-                         // In a production RT-thread, we'd use a pre-allocated pool of delay lines.
-                         // For this beta implementation, we assume the GraphCompiler inserted
-                         // Delay nodes or we utilize an internal scratch delay buffer.
+                    let delay_f = topo.plan.input_delays[n_idx].0[i];
+                    if delay_f > 0.0 && delay_f < (crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES as f32 - 4.0) {
+                        // STAGE 8 PDC: Functional ring-buffer based path alignment
+                        let input = node_inputs_storage[i];
+                        let max_len = crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES;
+
+                        // Write to delay line
+                        let mut w_pos = (pdc_write_pos.wrapping_sub(num_samples)) % max_len;
+                        for &sample in input {
+                            pdc_lines.set_sample(n_idx, i, w_pos, sample);
+                            w_pos = (w_pos + 1) % max_len;
+                        }
+
+                        let delay_int = delay_f.floor() as usize;
+                        let delay_frac = delay_f - delay_f.floor();
+
+                        // Read from delay line with offset
+                        let mut r_pos = (pdc_write_pos.wrapping_sub(num_samples).wrapping_sub(delay_int)) % max_len;
+                        for j in 0..num_samples {
+                            pdc_storage[i][j] = pdc_lines.get_sample_interpolated(n_idx, i, r_pos, delay_frac);
+                            r_pos = (r_pos + 1) % max_len;
+                        }
+                    }
+                }
+
+                for i in 0..input_count {
+                    let delay_f = topo.plan.input_delays[n_idx].0[i];
+                    if delay_f > 0.0 && delay_f < (crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES as f32 - 4.0) {
+                        node_inputs_storage[i] = &pdc_storage[i][..num_samples];
                     }
                 }
 

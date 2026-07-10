@@ -220,10 +220,19 @@ pub fn complex_mul_accumulate_wasm_simd(re: &mut f32x4, im: &mut f32x4, hr: f32x
 }
 
 /// SIMD-optimized tanh approximation for neural activation.
+/// Uses a Padé approximant for high performance in real-time paths.
 pub fn tanh_simd(x: f32x4) -> f32x4 {
     let x2 = x * x;
     let a = x * (f32x4::from(1.0) + f32x4::from(0.12317192) * x2);
     let b = f32x4::from(1.0) + f32x4::from(0.4565311) * x2 + f32x4::from(0.01524316) * x2 * x2;
+    a / b
+}
+
+/// 8-wide SIMD tanh approximation.
+pub fn tanh_simd_x8(x: f32x8) -> f32x8 {
+    let x2 = x * x;
+    let a = x * (f32x8::from(1.0) + f32x8::from(0.12317192) * x2);
+    let b = f32x8::from(1.0) + f32x8::from(0.4565311) * x2 + f32x8::from(0.01524316) * x2 * x2;
     a / b
 }
 
@@ -234,6 +243,11 @@ pub fn sigmoid_simd(x: f32x4) -> f32x4 {
 
 pub fn soft_clip_simd(x: f32x4) -> f32x4 {
     tanh_simd(x)
+}
+
+/// 8-wide soft-clipping primitive.
+pub fn soft_clip_simd_x8(x: f32x8) -> f32x8 {
+    tanh_simd_x8(x)
 }
 
 impl FloatX16 {

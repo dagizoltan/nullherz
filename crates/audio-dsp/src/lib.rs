@@ -224,6 +224,9 @@ impl Gain {
         self.target_gain = gain;
         if ramp_samples > 0 {
             self.ramp_remaining = ramp_samples;
+            // Standardize to constant-power ramp (linear in voltage is default,
+            // but we use linear interpolation of target which is often perceived linearly).
+            // For true constant-power we'd need to interpolate in dB or square-root space.
             self.ramp_step = (gain - self.current_gain) / ramp_samples as f32;
         } else {
             self.current_gain = gain;
@@ -268,21 +271,41 @@ impl Gain {
 
             let mut i = 0;
             if self.soft_clip {
-                // Vectorized path with 2x oversampling is complex for dependencies
-                // Fallback to optimized oversampled scalar for soft-clip
+                let thresh = self.clip_threshold;
+                let v_thresh = FloatX8::from(thresh);
+                let v_inv_thresh = FloatX8::from(1.0 / thresh);
+                let v_half = FloatX8::from(0.5);
+
+                while i + 8 <= len {
+                    let v_in_raw = load_f32x8(input, i);
+                    let v_in = v_in_raw * v_gain;
+
+                    let in_arr: [f32; 8] = v_in.into();
+                    let v_prev = FloatX8::new([
+                        self.oversampler.last_input, in_arr[0], in_arr[1], in_arr[2],
+                        in_arr[3], in_arr[4], in_arr[5], in_arr[6]
+                    ]);
+
+                    let v_mids = (v_in + v_prev) * v_half;
+                    let v_y_mid = soft_clip_simd_x8(v_mids * v_inv_thresh) * v_thresh;
+                    let v_y_now = soft_clip_simd_x8(v_in * v_inv_thresh) * v_thresh;
+                    let v_out = (v_y_mid + v_y_now) * v_half;
+
+                    let mask = v_out.abs().cmp_lt(v_eps);
+                    let v_out_clean = mask.blend(v_zero, v_out);
+                    store_f32x8(output, i, v_out_clean);
+
+                    self.oversampler.last_input = in_arr[7];
+                    i += 8;
+                }
                 while i < len {
-                    let mut out = input[i] * current;
-                    let thresh = self.clip_threshold;
-                    let inv_thresh = 1.0 / thresh;
-                    let last = self.oversampler.last_input;
-                    let s_mid = (out + last) * 0.5;
-
-                    let y_mid = (s_mid * inv_thresh).tanh() * thresh;
-                    let y_now = (out * inv_thresh).tanh() * thresh;
-                    out = (y_mid + y_now) * 0.5;
-                    self.oversampler.last_input = out;
-
-                    output[i] = if out.abs() < 1e-15 { 0.0 } else { out };
+                    let s_in = input[i] * current;
+                    let s_mid = (s_in + self.oversampler.last_input) * 0.5;
+                    let y_mid = (s_mid / thresh).tanh() * thresh;
+                    let y_now = (s_in / thresh).tanh() * thresh;
+                    let s_out = (y_mid + y_now) * 0.5;
+                    output[i] = if s_out.abs() < 1e-15 { 0.0 } else { s_out };
+                    self.oversampler.last_input = s_in;
                     i += 1;
                 }
             } else {

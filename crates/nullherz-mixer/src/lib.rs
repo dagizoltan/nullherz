@@ -214,8 +214,8 @@ impl MixerManager {
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: sum_id, output_idx: 0, new_buffer_idx: sum_out_l }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: sum_id, output_idx: 1, new_buffer_idx: sum_out_r }));
 
-        // --- PREVIEW NODE (Node 111) ---
-        let preview_id = 111;
+        // --- PREVIEW NODE ---
+        let preview_id = nullherz_traits::NodeConventions::PREVIEW;
         self.node_names.insert("preview_node".to_string(), preview_id);
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: preview_id, processor_type_id: ProcessorTypeId::SAMPLER }));
         // Route preview node to master sum

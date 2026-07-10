@@ -72,8 +72,7 @@ impl MidiMapper {
                 }
             }
             0xB0 => { // Control Change
-                let mut target_val = 0.0;
-                let mut found = false;
+                let mut target_val;
 
                 // 1. Handle 14-bit CC Pairing (Stage 2 High-Res)
                 if event.data1 < 32 {
@@ -84,8 +83,6 @@ impl MidiMapper {
 
                 for ctrl in &map.controls {
                     if ctrl.cc_number == event.data1 {
-                        found = true;
-
                         // Check if this control is 14-bit (LSB CC 32-63)
                         if event.data1 >= 32 && event.data1 < 64 {
                             let msb_cc = event.data1 - 32;

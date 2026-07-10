@@ -12,15 +12,18 @@ pub struct Job {
     pub buffers_ptr: *mut AudioBlock,
     pub x_buffers_ptr: *mut AudioBlock,
     pub input_indices: [usize; crate::MAX_CHANNELS],
+    pub input_delays: [f32; crate::MAX_CHANNELS],
     pub output_indices: [usize; crate::MAX_CHANNELS],
     pub input_count: usize,
     pub output_count: usize,
     pub node_idx: usize, // for telemetry
-    pub telemetry_ptr: *const [AtomicU64; crate::MAX_NODES],
+    pub telemetry_ptr: *mut [AtomicU64; crate::MAX_NODES],
     pub transport: Option<crate::Transport>,
     pub host_ptr: Option<*const dyn nullherz_traits::Host>,
     pub is_last_sub_block: bool,
     pub is_bypassed: bool,
+    pub pdc_lines_ptr: *mut crate::processors::graph::buffer_pool::PdcLines,
+    pub pdc_write_pos: usize,
 }
 
 unsafe impl Send for Job {}
@@ -58,6 +61,12 @@ impl nullherz_traits::ParallelExecutor for TaskPool {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct StaticAssignment {
+    pub node_idx: u32,
+    pub worker_idx: u8,
+}
+
 pub struct TaskPool {
     workers: Vec<thread::JoinHandle<()>>,
     pub(crate) worker_producers: Vec<Producer<Job>>,
@@ -65,6 +74,10 @@ pub struct TaskPool {
     pub(crate) running: Arc<AtomicBool>,
     pub(crate) worker_wake_fds: Vec<ipc_layer::EventFd>,
     pub(crate) completion_fd: ipc_layer::EventFd,
+    /// Caches worker assignments for stable topologies.
+    pub assignment_cache: [Option<StaticAssignment>; crate::MAX_NODES],
+    /// Per-worker telemetry storage to eliminate atomic contention.
+    pub worker_telemetry: Arc<Box<[[AtomicU64; crate::MAX_NODES]]>>,
 }
 
 impl TaskPool {
@@ -75,6 +88,12 @@ impl TaskPool {
         let completion = Arc::new(AtomicUsize::new(0));
         let running = Arc::new(AtomicBool::new(true));
         let completion_fd = ipc_layer::EventFd::create().expect("Failed to create completion EventFd");
+
+        let mut tel_data = Vec::with_capacity(num_workers);
+        for _ in 0..num_workers {
+            tel_data.push(std::array::from_fn(|_| AtomicU64::new(0)));
+        }
+        let worker_telemetry = Arc::new(tel_data.into_boxed_slice());
 
         for i in 0..num_workers {
             let (prod, mut cons) = RingBuffer::<Job>::new(128).split();
@@ -133,6 +152,38 @@ impl TaskPool {
                             }
                         }
 
+                        let mut pdc_storage = [[0.0f32; ipc_layer::MAX_BLOCK_SIZE]; crate::MAX_CHANNELS];
+                        if !job.pdc_lines_ptr.is_null() {
+                            let pdc_lines = unsafe { &mut *job.pdc_lines_ptr };
+                            for i in 0..input_count {
+                                let delay_f = job.input_delays[i];
+                                if delay_f > 0.0 && delay_f < (crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES as f32 - 4.0) {
+                                    let input = node_inputs_storage[i];
+                                    let max_len = crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES;
+                                    let mut w_pos = (job.pdc_write_pos.wrapping_sub(num_samples)) % max_len;
+                                    for &sample in input {
+                                        pdc_lines.set_sample(job.node_idx, i, w_pos, sample);
+                                        w_pos = (w_pos + 1) % max_len;
+                                    }
+
+                                    let delay_int = delay_f.floor() as usize;
+                                    let delay_frac = delay_f - delay_f.floor();
+
+                                    let mut r_pos = (job.pdc_write_pos.wrapping_sub(num_samples).wrapping_sub(delay_int)) % max_len;
+                                    for j in 0..num_samples {
+                                        pdc_storage[i][j] = pdc_lines.get_sample_interpolated(job.node_idx, i, r_pos, delay_frac);
+                                        r_pos = (r_pos + 1) % max_len;
+                                    }
+                                }
+                            }
+                            for i in 0..input_count {
+                                let delay = job.input_delays[i] as usize;
+                                if delay > 0 && delay < crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES {
+                                    node_inputs_storage[i] = &pdc_storage[i][..num_samples];
+                                }
+                            }
+                        }
+
                         let start = crate::get_cycles();
 
                         let mut inner_context = nullherz_traits::ProcessContext {
@@ -160,6 +211,8 @@ impl TaskPool {
 
                         let elapsed = crate::get_cycles().wrapping_sub(start);
                         // SAFETY: telemetry_ptr is guaranteed valid for the engine lifetime.
+                        // Optimization: report to local worker accumulator first if we had one,
+                        // for now we use store with Relaxed ordering which is sufficient for telemetry.
                         unsafe { (*job.telemetry_ptr)[job.node_idx].store(elapsed, Ordering::Relaxed); }
 
                         completion_worker.fetch_add(1, Ordering::Release);
@@ -175,7 +228,20 @@ impl TaskPool {
             worker_wake_fds.push(wake_fd);
         }
 
-        Self { workers, worker_producers, completion, running, worker_wake_fds, completion_fd }
+        Self {
+            workers,
+            worker_producers,
+            completion,
+            running,
+            worker_wake_fds,
+            completion_fd,
+            assignment_cache: [None; crate::MAX_NODES],
+            worker_telemetry,
+        }
+    }
+
+    pub fn clear_cache(&mut self) {
+        self.assignment_cache = [None; crate::MAX_NODES];
     }
 }
 
