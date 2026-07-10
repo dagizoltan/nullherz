@@ -142,6 +142,7 @@ impl GraphExecutor {
 
                 let routing = &topo.routing[n_idx];
                 let mut resolved_inputs = [0usize; crate::MAX_CHANNELS];
+                let mut resolved_sidechains = [0usize; crate::MAX_CHANNELS];
                 let mut resolved_outputs = [0usize; crate::MAX_CHANNELS];
 
                 for j in 0..routing.input_count.min(crate::MAX_CHANNELS) {
@@ -150,6 +151,12 @@ impl GraphExecutor {
                     let p_override = block_x_map[n_idx][j];
                     if p_override != 0 { p_idx = p_override as usize; }
                     resolved_inputs[j] = p_idx;
+                }
+
+                for j in 0..routing.sidechain_count.min(crate::MAX_CHANNELS) {
+                    let v_idx = (*routing.sidechain_indices.get(j).unwrap_or(&0) % crate::MAX_NODES as u32) as usize;
+                    let p_idx = topo.virtual_to_physical[v_idx] as usize;
+                    resolved_sidechains[j] = p_idx;
                 }
 
                 for (j, resolved_out) in resolved_outputs.iter_mut().enumerate().take(routing.output_count.min(crate::MAX_CHANNELS)) {
@@ -173,10 +180,12 @@ impl GraphExecutor {
                     buffers_ptr,
                     x_buffers_ptr,
                     input_indices: resolved_inputs,
+                    sidechain_indices: resolved_sidechains,
                     input_delays: topo.plan.input_delays[n_idx].0,
                     output_indices: resolved_outputs,
                     input_count: routing.input_count,
                     output_count: routing.output_count,
+                    sidechain_count: routing.sidechain_count,
                     node_idx: n_idx,
                     telemetry_ptr,
                     transport: transport.copied(),
@@ -196,24 +205,11 @@ impl GraphExecutor {
                 let n_idx = n_idx_u32 as usize;
                 let node = &nodes[n_idx];
                 let routing = &topo.routing[n_idx];
-                let mut node_inputs_storage = [ &[][..]; crate::MAX_CHANNELS ];
-                let mut pdc_storage = [[0.0f32; ipc_layer::MAX_BLOCK_SIZE]; crate::MAX_CHANNELS];
+                let mut node_inputs_storage = [ &[][..]; crate::MAX_CHANNELS * 2 ];
+                let mut pdc_storage = [[0.0f32; ipc_layer::MAX_BLOCK_SIZE]; crate::MAX_CHANNELS * 2];
                 let input_count = routing.input_count.min(crate::MAX_CHANNELS);
+                let sidechain_count = routing.sidechain_count.min(crate::MAX_CHANNELS);
 
-                // PERF: Optimized metadata resolution for non-parallel path
-                for i in 0..input_count {
-                    let v_idx = *unsafe { routing.input_indices.get_unchecked(i) } as usize;
-                    let mut p_idx = *unsafe { topo.virtual_to_physical.get_unchecked(v_idx) } as usize;
-                    let p_override = block_x_map[n_idx][i];
-                    if p_override != 0 { p_idx = p_override as usize; }
-
-                    if p_idx >= crate::MAX_NODES {
-                        let x_idx = p_idx - crate::MAX_NODES;
-                        unsafe { node_inputs_storage[i] = &(&(*x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
-                    } else {
-                        unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[offset..offset + num_samples]; }
-                    }
-                }
 
                 let mut node_outputs_reconstructed: [&mut [f32]; crate::MAX_CHANNELS] = std::array::from_fn(|_| &mut [][..]);
                 let output_count = routing.output_count.min(crate::MAX_CHANNELS);
@@ -230,6 +226,26 @@ impl GraphExecutor {
                 let mut inner_context = nullherz_traits::ProcessContext { transport, host, sub_block_offset: offset, is_last_sub_block };
 
                 // PDC: Apply input delays if required
+                for i in 0..input_count + sidechain_count {
+                    let v_idx = if i < input_count {
+                        *unsafe { routing.input_indices.get_unchecked(i) } as usize
+                    } else {
+                        *unsafe { routing.sidechain_indices.get_unchecked(i - input_count) } as usize
+                    };
+                    let mut p_idx = *unsafe { topo.virtual_to_physical.get_unchecked(v_idx) } as usize;
+                    if i < input_count {
+                        let p_override = block_x_map[n_idx][i];
+                        if p_override != 0 { p_idx = p_override as usize; }
+                    }
+
+                    if p_idx >= crate::MAX_NODES {
+                        let x_idx = p_idx - crate::MAX_NODES;
+                        unsafe { node_inputs_storage[i] = &(&(*x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
+                    } else {
+                        unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[offset..offset + num_samples]; }
+                    }
+                }
+
                 for i in 0..input_count {
                     let delay_f = topo.plan.input_delays[n_idx].0[i];
                     if delay_f > 0.0 && delay_f < (crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES as f32 - 4.0) {
@@ -275,7 +291,10 @@ impl GraphExecutor {
                         }
                     }
                 } else {
-                    unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
+                    unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count + sidechain_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
+                    for output in node_outputs_reconstructed.iter().take(output_count) {
+                        crate::assert_finite_block!(output, n_idx);
+                    }
                 }
 
                 let elapsed = crate::get_cycles().wrapping_sub(start);

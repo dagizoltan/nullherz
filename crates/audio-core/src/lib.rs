@@ -44,3 +44,21 @@ pub fn get_cycles() -> u64 {
         }
     }
 }
+
+#[macro_export]
+macro_rules! assert_finite_block {
+    ($block:expr, $node_idx:expr) => {
+        #[cfg(debug_assertions)]
+        {
+            for (i, sample) in $block.iter().enumerate() {
+                if !sample.is_finite() {
+                    eprintln!(
+                        "RT-FATAL: Non-finite sample detected at Node {}, offset {}: {}",
+                        $node_idx, i, sample
+                    );
+                    panic!("Non-finite sample in RT path");
+                }
+            }
+        }
+    };
+}

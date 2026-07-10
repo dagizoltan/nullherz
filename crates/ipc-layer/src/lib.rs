@@ -811,25 +811,82 @@ pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
         let _ = pin_thread_to_core(id);
     }
 
-    #[cfg(target_arch = "x86_64")]
-    unsafe {
-        let mut mxcsr: u32 = 0;
-        std::arch::asm!("stmxcsr [{}]", in(reg) &mut mxcsr);
-        // Enable Flush-to-Zero (bit 15) and Denormals-Are-Zero (bit 6)
-        mxcsr |= 0x8000 | 0x0040;
-        std::arch::asm!("ldmxcsr [{}]", in(reg) &mxcsr);
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    unsafe {
-        let mut fpcr: u64;
-        std::arch::asm!("mrs {}, fpcr", out(reg) fpcr);
-        // Bit 24 is FZ (Flush-to-Zero)
-        fpcr |= 1 << 24;
-        std::arch::asm!("msr fpcr, {}", in(reg) fpcr);
-    }
+    // Set permanent FTZ/DAZ for the thread
+    FpControlGuard::apply_ftz_daz();
 
     INITIALIZED.with(|i| i.set(true));
+}
+
+/// RAII guard for floating-point control state.
+/// Ensures FTZ/DAZ are set during the lifetime of the guard and restored afterwards.
+pub struct FpControlGuard {
+    #[cfg(target_arch = "x86_64")]
+    original_mxcsr: u32,
+    #[cfg(target_arch = "aarch64")]
+    original_fpcr: u64,
+}
+
+impl FpControlGuard {
+    #[inline(always)]
+    pub fn apply_ftz_daz() {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            let mut mxcsr: u32 = 0;
+            std::arch::asm!("stmxcsr [{}]", in(reg) &mut mxcsr);
+            // Enable Flush-to-Zero (bit 15) and Denormals-Are-Zero (bit 6)
+            mxcsr |= 0x8000 | 0x0040;
+            std::arch::asm!("ldmxcsr [{}]", in(reg) &mxcsr);
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            let mut fpcr: u64;
+            std::arch::asm!("mrs {}, fpcr", out(reg) fpcr);
+            // Bit 24 is FZ (Flush-to-Zero)
+            fpcr |= 1 << 24;
+            std::arch::asm!("msr fpcr, {}", in(reg) fpcr);
+        }
+    }
+
+    #[inline(always)]
+    pub fn new() -> Self {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            let mut original_mxcsr: u32 = 0;
+            std::arch::asm!("stmxcsr [{}]", in(reg) &mut original_mxcsr);
+            Self::apply_ftz_daz();
+            Self { original_mxcsr }
+        }
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            let mut original_fpcr: u64 = 0;
+            std::arch::asm!("mrs {}, fpcr", out(reg) original_fpcr);
+            Self::apply_ftz_daz();
+            Self { original_fpcr }
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        { Self {} }
+    }
+}
+
+impl Default for FpControlGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for FpControlGuard {
+    #[inline(always)]
+    fn drop(&mut self) {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            std::arch::asm!("ldmxcsr [{}]", in(reg) &self.original_mxcsr);
+        }
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            std::arch::asm!("msr fpcr, {}", in(reg) self.original_fpcr);
+        }
+    }
 }
 
 /// Prototype for zero-copy RDMA distribution.

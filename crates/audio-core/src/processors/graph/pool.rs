@@ -12,10 +12,12 @@ pub struct Job {
     pub buffers_ptr: *mut AudioBlock,
     pub x_buffers_ptr: *mut AudioBlock,
     pub input_indices: [usize; crate::MAX_CHANNELS],
+    pub sidechain_indices: [usize; crate::MAX_CHANNELS],
     pub input_delays: [f32; crate::MAX_CHANNELS],
     pub output_indices: [usize; crate::MAX_CHANNELS],
     pub input_count: usize,
     pub output_count: usize,
+    pub sidechain_count: usize,
     pub node_idx: usize, // for telemetry
     pub telemetry_ptr: *mut [AtomicU64; crate::MAX_NODES],
     pub transport: Option<crate::Transport>,
@@ -122,21 +124,27 @@ impl TaskPool {
                         let num_samples = job.num_samples;
                         let buffers_ptr = job.buffers_ptr;
 
-                        let mut node_inputs_storage = [ &[][..]; crate::MAX_CHANNELS ];
+                        let mut node_inputs_storage = [ &[][..]; crate::MAX_CHANNELS * 2 ];
                         let input_count = job.input_count.min(crate::MAX_CHANNELS);
+                        let sidechain_count = job.sidechain_count.min(crate::MAX_CHANNELS);
                         let offset = job.sub_block_offset;
 
-                        for (i, input_storage) in node_inputs_storage.iter_mut().enumerate().take(input_count) {
-                            let p_idx = *job.input_indices.get(i).unwrap_or(&0);
+                        for i in 0..input_count + sidechain_count {
+                            let p_idx = if i < input_count {
+                                *job.input_indices.get(i).unwrap_or(&0)
+                            } else {
+                                *job.sidechain_indices.get(i - input_count).unwrap_or(&0)
+                            };
+
                             if p_idx >= crate::MAX_NODES {
                                 let x_idx = p_idx - crate::MAX_NODES;
                                 if x_idx < crate::MAX_CROSSFADE_BUFFERS {
                                     // SAFETY: x_buffers_ptr is valid for MAX_CROSSFADE_BUFFERS AudioBlocks as pre-allocated by ProcessorGraph.
-                                    unsafe { *input_storage = &(&(*job.x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
+                                    unsafe { node_inputs_storage[i] = &(&(*job.x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
                                 }
                             } else if p_idx < crate::MAX_NODES {
                                 // SAFETY: buffers_ptr is valid for MAX_NODES AudioBlocks as pre-allocated by ProcessorGraph.
-                                unsafe { *input_storage = &(&(*buffers_ptr.add(p_idx)).data)[offset..offset + num_samples]; }
+                                unsafe { node_inputs_storage[i] = &(&(*job.buffers_ptr.add(p_idx)).data)[offset..offset + num_samples]; }
                             }
                         }
 
@@ -206,7 +214,10 @@ impl TaskPool {
                                 }
                             }
                         } else {
-                            unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
+                            unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count + sidechain_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
+                            for output in node_outputs_reconstructed.iter().take(output_count) {
+                                crate::assert_finite_block!(output, job.node_idx);
+                            }
                         }
 
                         let elapsed = crate::get_cycles().wrapping_sub(start);

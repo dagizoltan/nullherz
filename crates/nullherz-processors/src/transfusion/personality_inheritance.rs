@@ -10,8 +10,8 @@ pub struct PersonalityInheritanceProcessor {
     pipeline: SpectralPipeline,
 
     // The "Source" DNA to inherit from
-    source_personality: Arc<SpectralPersonality>,
-    source_rhythmic: Arc<RhythmicDNA>,
+    pub(crate) source_personality: Arc<SpectralPersonality>,
+    pub(crate) source_rhythmic: Arc<RhythmicDNA>,
     source_artifacts: Arc<ArtifactProfile>,
     source_spatial: Arc<SpatialDNA>,
 
