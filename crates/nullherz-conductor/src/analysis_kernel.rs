@@ -177,7 +177,7 @@ impl AnalysisKernel {
                 let mut oct_energy = 0.0;
 
                 // SIMD sum for octave energy
-                use audio_dsp::simd_vec::{load_f32x8, FloatX8};
+                use audio_dsp::simd_vec::load_f32x8;
                 let mut j = 0;
                 while j + 8 <= len {
                     let v = load_f32x8(&magnitudes, start + j);
@@ -301,7 +301,6 @@ impl AnalysisKernel {
         let mut buckets: [Vec<f32>; 12] = Default::default();
 
         for &t in transients {
-            let beat_pos = t as f32 / samples_per_beat;
             let sixteenth_pos = (t as f32 / samples_per_16th).round();
             let deviation_samples = t as f32 - (sixteenth_pos * samples_per_16th);
             let deviation_ms = (deviation_samples / self.sample_rate) * 1000.0;

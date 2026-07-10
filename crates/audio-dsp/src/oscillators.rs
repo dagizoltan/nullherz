@@ -93,10 +93,30 @@ impl WavetableOscillator {
     pub fn process_scalar(&mut self, channel: usize, fm: &[f32], pm: &[f32], output: &mut [f32]) {
         let mut phase = self.phases[channel];
         let base_inc = self.phase_incs[channel];
+        let len = output.len();
+        let mut i = 0;
 
-        for i in 0..output.len() {
+        // SIMD unrolled path for single channel (4x throughput)
+        while i + 4 <= len {
+            for _ in 0..4 {
+                let modulated_inc = base_inc * (1.0 + fm[i]);
+                let modulated_phase = phase + pm[i] * 2048.0;
+                let idx_f = modulated_phase.floor();
+                let idx = (idx_f as i32 & 2047) as usize;
+                let next_idx = (idx + 1) & 2047;
+                let frac = modulated_phase - idx_f;
+
+                output[i] = self.table[idx] * (1.0 - frac) + self.table[next_idx] * frac;
+
+                phase += modulated_inc;
+                if phase >= 2048.0 { phase -= 2048.0; }
+                else if phase < 0.0 { phase += 2048.0; }
+                i += 1;
+            }
+        }
+
+        while i < len {
             let modulated_inc = base_inc * (1.0 + fm[i]);
-
             let modulated_phase = phase + pm[i] * 2048.0;
             let idx_f = modulated_phase.floor();
             let idx = (idx_f as i32 & 2047) as usize;
@@ -106,15 +126,9 @@ impl WavetableOscillator {
             output[i] = self.table[idx] * (1.0 - frac) + self.table[next_idx] * frac;
 
             phase += modulated_inc;
-            if phase >= 2048.0 {
-                phase -= 2048.0;
-                if phase >= 2048.0 { phase %= 2048.0; }
-            } else if phase < 0.0 {
-                phase += 2048.0;
-                if phase < 0.0 {
-                    phase = phase.rem_euclid(2048.0);
-                }
-            }
+            if phase >= 2048.0 { phase -= 2048.0; }
+            else if phase < 0.0 { phase += 2048.0; }
+            i += 1;
         }
         self.phases[channel] = phase;
     }

@@ -50,7 +50,7 @@ impl WasmSidecarHost {
              }
         })?;
 
-        linker.func_wrap("nullherz", "get_audio_input_ref", |mut caller: Caller<'_, WasmState>, channel: i32| -> i64 {
+        linker.func_wrap("nullherz", "get_audio_input_ref", |caller: Caller<'_, WasmState>, channel: i32| -> i64 {
              let state = caller.data();
              if let Some(rb_ptr) = state.audio_inputs.get(channel as usize) {
                  unsafe {

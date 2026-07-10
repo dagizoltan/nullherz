@@ -58,8 +58,7 @@ impl MixerOrchestrator {
                             }
 
                             // Groove Transfusion: Apply rhythmic micro-timing to associated sequencer
-                            // Convention: Deck A -> Sequencer Node 70, Deck B -> 71, etc.
-                            let seq_node_idx = 70 + (deck_id.to_ascii_uppercase() as u32 - 'A' as u32);
+                            let seq_node_idx = nullherz_traits::NodeConventions::sequencer_for_deck(*deck_id);
                             translated.extend(crate::pattern_manager::DnaSequencer::apply_groove(&track.metadata.dna.rhythmic, seq_node_idx, 0));
                         }
                     }

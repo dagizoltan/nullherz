@@ -160,6 +160,12 @@ impl GraphExecutor {
                 let is_bypassed = topo.bypass_states[n_idx];
 
 
+                let telemetry_ptr = if let Some(p_mut) = pool.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
+                    &p_mut.worker_telemetry[worker_idx] as *const _ as *mut _
+                } else {
+                    telemetry_node_times_cycles as *const _ as *mut _
+                };
+
                 let job = Job {
                     node_ptr: &nodes[n_idx] as *const _,
                     num_samples,
@@ -172,7 +178,7 @@ impl GraphExecutor {
                     input_count: routing.input_count,
                     output_count: routing.output_count,
                     node_idx: n_idx,
-                    telemetry_ptr: telemetry_node_times_cycles as *const _,
+                    telemetry_ptr,
                     transport: transport.copied(),
                     host_ptr: host.map(|h| h as *const dyn nullherz_traits::Host),
                     is_last_sub_block,

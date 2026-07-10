@@ -685,6 +685,20 @@ pub const MAX_MUTATIONS: usize = 16;
 pub const DEFAULT_WORKER_COUNT: usize = 4;
 pub const MAX_COMMANDS_PER_BLOCK: usize = 256;
 
+/// Centralized node index conventions for standard signal graph layouts.
+pub struct NodeConventions;
+impl NodeConventions {
+    pub const PREVIEW: u32 = 111;
+    pub const DECK_A_SEQUENCER: u32 = 70;
+    pub const DECK_B_SEQUENCER: u32 = 71;
+    pub const DECK_C_SEQUENCER: u32 = 72;
+    pub const DECK_D_SEQUENCER: u32 = 73;
+
+    pub fn sequencer_for_deck(deck_id: char) -> u32 {
+        Self::DECK_A_SEQUENCER + (deck_id.to_ascii_uppercase() as u32 - 'A' as u32)
+    }
+}
+
 pub struct SubBlock {
     pub offset: usize,
     pub len: usize,

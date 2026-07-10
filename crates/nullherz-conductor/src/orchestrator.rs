@@ -475,7 +475,6 @@ impl Conductor {
         // Genetic Pattern Evolution (Every 8 seconds)
         if now % 8 == 0 && self.last_genetic_evolve_secs != now {
             self.last_genetic_evolve_secs = now;
-            let current_beat = self.mixer_bridge.timeline.current_beat;
             // Example: trigger evolution on node 0, track 0 if sampler is active
             let node_idx = 0;
             let track_idx = 0;
@@ -488,7 +487,6 @@ impl Conductor {
         self.sync_sampler_metadata();
 
         {
-            use nullherz_traits::SampleRegistry;
             self.transfusion_manager.sample_registry.drain_garbage();
         }
 

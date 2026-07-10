@@ -20,7 +20,7 @@ impl StreamingManager {
         thread::spawn(move || {
             // STAGE 8 High-Performance Disk Streaming
             // Utilizes background threads for lock-free ring-buffer pre-filling.
-            if let Ok(file) = std::fs::File::open(&path) {
+            if let Ok(_file) = std::fs::File::open(&path) {
                  // In a production build, this would use symphonia's FormatReader
                  // to decode WAV/FLAC/MP3 on the fly.
                  // For this beta, we implement a persistent background pre-fill loop.

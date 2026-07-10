@@ -312,6 +312,22 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                 self.buffer_pool.capture_old_buffers();
             }
 
+        if let Some(ref mut p) = pool {
+             if let Some(p_mut) = p.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
+                 use std::sync::atomic::Ordering;
+                 // Sum worker-local telemetry into the main graph accumulator
+                 let num_w = p_mut.worker_producers.len();
+                 for w in 0..num_w {
+                     for n in 0..crate::MAX_NODES {
+                         let val = p_mut.worker_telemetry[w][n].swap(0, Ordering::Relaxed);
+                         if val > 0 {
+                             self.telemetry.node_times_cycles[n].store(val, Ordering::Relaxed);
+                         }
+                     }
+                 }
+             }
+        }
+
         self.telemetry.update_peak_levels(topo, &self.buffer_pool.buffers, offset, num_samples);
     }
 fn setup(&mut self, config: nullherz_traits::AudioConfig) {
@@ -602,7 +618,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             input_count: 0,
             output_count: 0,
             node_idx: 0,
-            telemetry_ptr: &std::array::from_fn(|_| AtomicU64::new(0)) as *const _,
+            telemetry_ptr: &std::array::from_fn(|_| AtomicU64::new(0)) as *const [AtomicU64; 64] as *mut [AtomicU64; 64],
             transport: None,
             host_ptr: None,
             is_last_sub_block: false,
@@ -628,7 +644,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             input_count: 0,
             output_count: 0,
             node_idx: 0,
-            telemetry_ptr: &std::array::from_fn(|_| AtomicU64::new(0)) as *const _,
+            telemetry_ptr: &std::array::from_fn(|_| AtomicU64::new(0)) as *const [AtomicU64; 64] as *mut [AtomicU64; 64],
             transport: None,
             host_ptr: None,
             is_last_sub_block: false,

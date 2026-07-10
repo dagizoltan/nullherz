@@ -400,7 +400,7 @@ impl PeerSync for CloudPeerSync {
                 std::time::Duration::from_millis(100)
             ) {
                 if let Ok(payload) = serde_json::to_string(known_ids) {
-                    let mut msg = if let Some(sk_bytes) = self.signing_key {
+                let msg = if let Some(sk_bytes) = self.signing_key {
                         use ed25519_dalek::Signer;
                         let sk = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
                         let sig = sk.sign(payload.as_bytes());
@@ -1134,7 +1134,7 @@ pub struct StandardNeuralEncoder {
 
 impl NeuralEncoder for StandardNeuralEncoder {
     fn encode(&self, audio: &[f32]) -> [f32; 16] {
-        use audio_dsp::simd_vec::{FloatX8, load_f32x8};
+        use audio_dsp::simd_vec::load_f32x8;
         let mut latent = [0.0f32; 16];
 
         // 1. Decimate audio to 128 feature bins (simplified)
