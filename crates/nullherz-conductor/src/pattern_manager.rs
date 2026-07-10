@@ -94,6 +94,23 @@ impl DnaSequencer {
         commands
     }
 
+    /// Applies Groove Transfusion: transfers micro-timing offsets from DNA to a target track.
+    pub fn apply_groove(dna: &nullherz_traits::RhythmicDNA, node_idx: u32, track_idx: u32) -> Vec<nullherz_traits::Command> {
+        let mut commands = Vec::new();
+        // RhythmicDNA.micro_timing contains 12 offsets (e.g. for 16th notes in a 3/4 bar or similar subdivision)
+        // We map these to sequencer parameters if the processor supports timing offsets.
+        for (i, &offset_i16) in dna.micro_timing.iter().enumerate() {
+            let offset_f32 = (offset_i16 as f32) / 128.0; // Normalize to approx +/- 1.0 step fraction
+            commands.push(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                target_id: node_idx as u64,
+                param_id: 100 + (track_idx * 16) + (i as u32), // Convention: param 100+ is timing offsets
+                value: offset_f32,
+                ramp_duration_samples: 0,
+            }));
+        }
+        commands
+    }
+
     pub fn mutate_pattern(
         dna: &nullherz_traits::RhythmicDNA,
         current_grid: &[[f32; 64]; 16],

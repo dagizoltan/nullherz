@@ -56,6 +56,11 @@ impl MixerOrchestrator {
                                 }));
                                 println!("MixerOrchestrator: DNA-Aware Gain: Compensing by factor {}", energy_compensation);
                             }
+
+                            // Groove Transfusion: Apply rhythmic micro-timing to associated sequencer
+                            // Convention: Deck A -> Sequencer Node 70, Deck B -> 71, etc.
+                            let seq_node_idx = 70 + (deck_id.to_ascii_uppercase() as u32 - 'A' as u32);
+                            translated.extend(crate::pattern_manager::DnaSequencer::apply_groove(&track.metadata.dna.rhythmic, seq_node_idx, 0));
                         }
                     }
                 }

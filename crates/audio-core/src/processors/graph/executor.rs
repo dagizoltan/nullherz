@@ -225,8 +225,8 @@ impl GraphExecutor {
 
                 // PDC: Apply input delays if required
                 for i in 0..input_count {
-                    let delay = topo.plan.input_delays[n_idx].0[i] as usize;
-                    if delay > 0 && delay < crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES {
+                    let delay_f = topo.plan.input_delays[n_idx].0[i];
+                    if delay_f > 0.0 && delay_f < (crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES as f32 - 4.0) {
                         // STAGE 8 PDC: Functional ring-buffer based path alignment
                         let input = node_inputs_storage[i];
                         let max_len = crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES;
@@ -238,18 +238,21 @@ impl GraphExecutor {
                             w_pos = (w_pos + 1) % max_len;
                         }
 
+                        let delay_int = delay_f.floor() as usize;
+                        let delay_frac = delay_f - delay_f.floor();
+
                         // Read from delay line with offset
-                        let mut r_pos = (pdc_write_pos.wrapping_sub(num_samples).wrapping_sub(delay)) % max_len;
+                        let mut r_pos = (pdc_write_pos.wrapping_sub(num_samples).wrapping_sub(delay_int)) % max_len;
                         for j in 0..num_samples {
-                            pdc_storage[i][j] = pdc_lines.get_sample(n_idx, i, r_pos);
+                            pdc_storage[i][j] = pdc_lines.get_sample_interpolated(n_idx, i, r_pos, delay_frac);
                             r_pos = (r_pos + 1) % max_len;
                         }
                     }
                 }
 
                 for i in 0..input_count {
-                    let delay = topo.plan.input_delays[n_idx].0[i] as usize;
-                    if delay > 0 && delay < crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES {
+                    let delay_f = topo.plan.input_delays[n_idx].0[i];
+                    if delay_f > 0.0 && delay_f < (crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES as f32 - 4.0) {
                         node_inputs_storage[i] = &pdc_storage[i][..num_samples];
                     }
                 }

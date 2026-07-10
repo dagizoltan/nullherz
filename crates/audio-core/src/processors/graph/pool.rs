@@ -12,7 +12,7 @@ pub struct Job {
     pub buffers_ptr: *mut AudioBlock,
     pub x_buffers_ptr: *mut AudioBlock,
     pub input_indices: [usize; crate::MAX_CHANNELS],
-    pub input_delays: [u32; crate::MAX_CHANNELS],
+    pub input_delays: [f32; crate::MAX_CHANNELS],
     pub output_indices: [usize; crate::MAX_CHANNELS],
     pub input_count: usize,
     pub output_count: usize,
@@ -148,8 +148,8 @@ impl TaskPool {
                         if !job.pdc_lines_ptr.is_null() {
                             let pdc_lines = unsafe { &mut *job.pdc_lines_ptr };
                             for i in 0..input_count {
-                                let delay = job.input_delays[i] as usize;
-                                if delay > 0 && delay < crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES {
+                                let delay_f = job.input_delays[i];
+                                if delay_f > 0.0 && delay_f < (crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES as f32 - 4.0) {
                                     let input = node_inputs_storage[i];
                                     let max_len = crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES;
                                     let mut w_pos = (job.pdc_write_pos.wrapping_sub(num_samples)) % max_len;
@@ -157,9 +157,13 @@ impl TaskPool {
                                         pdc_lines.set_sample(job.node_idx, i, w_pos, sample);
                                         w_pos = (w_pos + 1) % max_len;
                                     }
-                                    let mut r_pos = (job.pdc_write_pos.wrapping_sub(num_samples).wrapping_sub(delay)) % max_len;
+
+                                    let delay_int = delay_f.floor() as usize;
+                                    let delay_frac = delay_f - delay_f.floor();
+
+                                    let mut r_pos = (job.pdc_write_pos.wrapping_sub(num_samples).wrapping_sub(delay_int)) % max_len;
                                     for j in 0..num_samples {
-                                        pdc_storage[i][j] = pdc_lines.get_sample(job.node_idx, i, r_pos);
+                                        pdc_storage[i][j] = pdc_lines.get_sample_interpolated(job.node_idx, i, r_pos, delay_frac);
                                         r_pos = (r_pos + 1) % max_len;
                                     }
                                 }

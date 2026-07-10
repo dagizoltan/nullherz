@@ -7,6 +7,7 @@ pub struct EngineMetrics {
     pub calibration_start_cycles: AtomicU64,
     pub ns_per_cycle: Arc<AtomicU64>,
     pub peak_ns: AtomicU64,
+    pub node_peak_cycles: [AtomicU64; 64],
     pub resource_leaks: AtomicU64,
     pub last_xrun_magnitude_ns: AtomicU64,
     /// Sliding window of block processing times for predictive X-RUN mitigation.
@@ -27,6 +28,7 @@ impl EngineMetrics {
             calibration_start_cycles: AtomicU64::new(0),
             ns_per_cycle: Arc::new(AtomicU64::new((1.0f64).to_bits())),
             peak_ns: AtomicU64::new(0),
+            node_peak_cycles: std::array::from_fn(|_| AtomicU64::new(0)),
             resource_leaks: AtomicU64::new(0),
             last_xrun_magnitude_ns: AtomicU64::new(0),
             processing_history_ns: [

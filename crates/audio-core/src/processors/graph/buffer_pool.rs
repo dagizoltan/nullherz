@@ -21,6 +21,28 @@ impl PdcLines {
         self.data[idx]
     }
 
+    /// Reads with 4-point Lagrange interpolation for fractional sub-sample PDC.
+    #[inline(always)]
+    pub fn get_sample_interpolated(&self, node_idx: usize, ch_idx: usize, pos_integral: usize, frac: f32) -> f32 {
+        let max_len = MAX_PDC_SAMPLES;
+        let p1 = pos_integral;
+        let p0 = if p1 == 0 { max_len - 1 } else { p1 - 1 };
+        let p2 = (p1 + 1) % max_len;
+        let p3 = (p1 + 2) % max_len;
+
+        let a = self.get_sample(node_idx, ch_idx, p0);
+        let b = self.get_sample(node_idx, ch_idx, p1);
+        let c = self.get_sample(node_idx, ch_idx, p2);
+        let d = self.get_sample(node_idx, ch_idx, p3);
+
+        let c0 = b;
+        let c1 = c - (1.0/3.0)*a - 0.5*b - (1.0/6.0)*d;
+        let c2 = 0.5*(a + c) - b;
+        let c3 = (1.0/6.0)*(d - a) + 0.5*(b - c);
+
+        c3*frac*frac*frac + c2*frac*frac + c1*frac + c0
+    }
+
     #[inline(always)]
     pub fn set_sample(&mut self, node_idx: usize, ch_idx: usize, pos: usize, val: f32) {
         let idx = (node_idx * crate::MAX_CHANNELS * MAX_PDC_SAMPLES) + (ch_idx * MAX_PDC_SAMPLES) + pos;

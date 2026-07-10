@@ -232,7 +232,7 @@ impl GraphCompiler {
                 if let Some(u) = v_to_producer[v_buf] {
                     let u_path_lat = path_latencies[u] + plan.node_latencies[u];
                     if max_v_path_lat > u_path_lat {
-                        plan.input_delays[v].0[i] = max_v_path_lat - u_path_lat;
+                        plan.input_delays[v].0[i] = (max_v_path_lat - u_path_lat) as f32;
                     }
                 }
             }

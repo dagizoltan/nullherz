@@ -523,7 +523,7 @@ pub struct CompiledGraphPlan {
 }
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct InputDelays(#[serde(with = "BigArray")] pub [u32; MAX_CHANNELS]);
+pub struct InputDelays(#[serde(with = "BigArray")] pub [f32; MAX_CHANNELS]);
 
 impl Default for CompiledGraphPlan {
     fn default() -> Self {
@@ -533,7 +533,7 @@ impl Default for CompiledGraphPlan {
             num_stages: 0,
             node_islands: [0; MAX_NODES],
             node_latencies: [0; MAX_NODES],
-            input_delays: [InputDelays([0; MAX_CHANNELS]); MAX_NODES],
+            input_delays: [InputDelays([0.0; MAX_CHANNELS]); MAX_NODES],
         }
     }
 }
@@ -545,7 +545,7 @@ pub struct NodeRouting {
     pub input_count: usize,
     pub output_count: usize,
     /// Delay compensation required for this node's inputs in samples.
-    pub input_delays: [u32; MAX_CHANNELS],
+    pub input_delays: [f32; MAX_CHANNELS],
 }
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]

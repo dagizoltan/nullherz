@@ -21,6 +21,7 @@ impl TelemetryFinalizer {
         transport: &nullherz_traits::Transport,
     ) -> Telemetry {
         let mut node_times = [0u64; 64];
+        let mut node_peak_times = [0u64; 64];
         let mut peak_levels = [0.0f32; 64];
         let mut node_times_cycles = [0u64; 64];
 
@@ -32,6 +33,12 @@ impl TelemetryFinalizer {
             ns_per_cycle,
             &mut node_times
         );
+
+        for i in 0..64 {
+            let cycles = node_times_cycles[i];
+            let peak_cycles = nullherz_traits::telemetry::TelemetryProcessor::update_peak(&metrics.node_peak_cycles[i], cycles);
+            node_peak_times[i] = (peak_cycles as f64 * ns_per_cycle) as u64;
+        }
 
         let elapsed_cycles = crate::get_cycles().wrapping_sub(start_cycles);
         let current_ns = (elapsed_cycles as f64 * ns_per_cycle) as u64;
@@ -97,6 +104,7 @@ impl TelemetryFinalizer {
             bpm: transport.bpm,
             beat_position: transport.beat_position,
             node_times_ns: node_times,
+            node_peak_times_ns: node_peak_times,
             peak_levels,
             spectrum,
             goniometer_pts,
