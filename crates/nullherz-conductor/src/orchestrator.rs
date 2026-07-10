@@ -619,7 +619,14 @@ impl Conductor {
                      }));
 
                      // 2. DNA Morphing (Latent Space Slerp via DnaMorpher node if assigned)
-                     // Implementation assumes a DnaMorpher exists in the chain
+                     if let Some(morph_id) = dst_nodes.dna_morph_id {
+                        commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                            target_id: morph_id as u64,
+                            param_id: 0, // Morph Position
+                            value: progress,
+                            ramp_duration_samples: 0,
+                        }));
+                     }
                 }
             }
 

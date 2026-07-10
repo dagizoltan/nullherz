@@ -143,11 +143,12 @@ impl std::ops::Add for FloatX16 {
         { Self { val: self.val + rhs.val } }
         #[cfg(all(not(all(target_arch = "x86_64", target_feature = "avx512f")), target_arch = "wasm32", target_feature = "simd128"))]
         {
+            use std::arch::wasm32::*;
             Self { parts: [
-                self.parts[0] + rhs.parts[0],
-                self.parts[1] + rhs.parts[1],
-                self.parts[2] + rhs.parts[2],
-                self.parts[3] + rhs.parts[3],
+                f32x4_add(self.parts[0], rhs.parts[0]),
+                f32x4_add(self.parts[1], rhs.parts[1]),
+                f32x4_add(self.parts[2], rhs.parts[2]),
+                f32x4_add(self.parts[3], rhs.parts[3]),
             ]}
         }
         #[cfg(all(not(all(target_arch = "x86_64", target_feature = "avx512f")), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
@@ -162,11 +163,12 @@ impl std::ops::Sub for FloatX16 {
         { Self { val: self.val - rhs.val } }
         #[cfg(all(not(all(target_arch = "x86_64", target_feature = "avx512f")), target_arch = "wasm32", target_feature = "simd128"))]
         {
+            use std::arch::wasm32::*;
             Self { parts: [
-                self.parts[0] - rhs.parts[0],
-                self.parts[1] - rhs.parts[1],
-                self.parts[2] - rhs.parts[2],
-                self.parts[3] - rhs.parts[3],
+                f32x4_sub(self.parts[0], rhs.parts[0]),
+                f32x4_sub(self.parts[1], rhs.parts[1]),
+                f32x4_sub(self.parts[2], rhs.parts[2]),
+                f32x4_sub(self.parts[3], rhs.parts[3]),
             ]}
         }
         #[cfg(all(not(all(target_arch = "x86_64", target_feature = "avx512f")), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
@@ -181,11 +183,12 @@ impl std::ops::Mul for FloatX16 {
         { Self { val: self.val * rhs.val } }
         #[cfg(all(not(all(target_arch = "x86_64", target_feature = "avx512f")), target_arch = "wasm32", target_feature = "simd128"))]
         {
+            use std::arch::wasm32::*;
             Self { parts: [
-                self.parts[0] * rhs.parts[0],
-                self.parts[1] * rhs.parts[1],
-                self.parts[2] * rhs.parts[2],
-                self.parts[3] * rhs.parts[3],
+                f32x4_mul(self.parts[0], rhs.parts[0]),
+                f32x4_mul(self.parts[1], rhs.parts[1]),
+                f32x4_mul(self.parts[2], rhs.parts[2]),
+                f32x4_mul(self.parts[3], rhs.parts[3]),
             ]}
         }
         #[cfg(all(not(all(target_arch = "x86_64", target_feature = "avx512f")), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
@@ -200,11 +203,12 @@ impl std::ops::Div for FloatX16 {
         { Self { val: self.val / rhs.val } }
         #[cfg(all(not(all(target_arch = "x86_64", target_feature = "avx512f")), target_arch = "wasm32", target_feature = "simd128"))]
         {
+            use std::arch::wasm32::*;
             Self { parts: [
-                self.parts[0] / rhs.parts[0],
-                self.parts[1] / rhs.parts[1],
-                self.parts[2] / rhs.parts[2],
-                self.parts[3] / rhs.parts[3],
+                f32x4_div(self.parts[0], rhs.parts[0]),
+                f32x4_div(self.parts[1], rhs.parts[1]),
+                f32x4_div(self.parts[2], rhs.parts[2]),
+                f32x4_div(self.parts[3], rhs.parts[3]),
             ]}
         }
         #[cfg(all(not(all(target_arch = "x86_64", target_feature = "avx512f")), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
@@ -285,11 +289,12 @@ impl FloatX16 {
         { Self { val: self.val.abs() } }
         #[cfg(all(not(all(target_arch = "x86_64", target_feature = "avx512f")), target_arch = "wasm32", target_feature = "simd128"))]
         {
+            use std::arch::wasm32::*;
             Self { parts: [
-                self.parts[0].abs(),
-                self.parts[1].abs(),
-                self.parts[2].abs(),
-                self.parts[3].abs(),
+                f32x4_abs(self.parts[0]),
+                f32x4_abs(self.parts[1]),
+                f32x4_abs(self.parts[2]),
+                f32x4_abs(self.parts[3]),
             ]}
         }
         #[cfg(all(not(all(target_arch = "x86_64", target_feature = "avx512f")), not(all(target_arch = "wasm32", target_feature = "simd128"))))]
@@ -301,11 +306,12 @@ impl FloatX16 {
         { Self { val: self.val.sqrt() } }
         #[cfg(all(not(all(target_arch = "x86_64", target_feature = "avx512f")), target_arch = "wasm32", target_feature = "simd128"))]
         {
+            use std::arch::wasm32::*;
             Self { parts: [
-                self.parts[0].sqrt(),
-                self.parts[1].sqrt(),
-                self.parts[2].sqrt(),
-                self.parts[3].sqrt(),
+                f32x4_sqrt(self.parts[0]),
+                f32x4_sqrt(self.parts[1]),
+                f32x4_sqrt(self.parts[2]),
+                f32x4_sqrt(self.parts[3]),
             ]}
         }
         #[cfg(all(not(all(target_arch = "x86_64", target_feature = "avx512f")), not(all(target_arch = "wasm32", target_feature = "simd128"))))]

@@ -94,6 +94,30 @@ impl MixerOrchestrator {
                     }
                 }
             }
+            Command::Mixer(MixerCommand::SetMacro { macro_id, value }) => {
+                // STAGE 8: Semantic DNA-Macro Performance Links
+                // If a macro is set, we check if it's bound to a Deck's timbral trajectory.
+                // Convention: Macro IDs 100-103 map to DnaMorpher position of Decks A-D.
+                if *macro_id >= 100 && *macro_id <= 103 {
+                    let deck_id = match *macro_id {
+                        100 => 'A',
+                        101 => 'B',
+                        102 => 'C',
+                        103 => 'D',
+                        _ => 'A',
+                    };
+                    if let Some(nodes) = mixer_manager.deck_mappings.get(&deck_id) {
+                        if let Some(morph_id) = nodes.dna_morph_id {
+                            translated.push(Command::Mixer(MixerCommand::SetParam {
+                                target_id: morph_id as u64,
+                                param_id: 0, // Morph Position
+                                value: *value,
+                                ramp_duration_samples: 1024,
+                            }));
+                        }
+                    }
+                }
+            }
             Command::Mixer(MixerCommand::SetDeckParam { deck_id, param_type, value }) => {
                 if let Some(nodes) = mixer_manager.deck_mappings.get(deck_id) {
                     match param_type {

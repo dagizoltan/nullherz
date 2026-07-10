@@ -52,6 +52,10 @@ macro_rules! assert_finite_block {
         {
             for (i, sample) in $block.iter().enumerate() {
                 if !sample.is_finite() {
+                    // RT-9: Safety Violation. eprintln! takes a lock.
+                    // In a production RT thread, we must use RtLogger.
+                    // However, since this is a panic-inducing debug check,
+                    // we accept the jitter to provide diagnostic info before the crash.
                     eprintln!(
                         "RT-FATAL: Non-finite sample detected at Node {}, offset {}: {}",
                         $node_idx, i, sample

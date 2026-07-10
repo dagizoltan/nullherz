@@ -9,6 +9,9 @@ pub struct JitterBuffer {
     pub drift_accumulator: f32,
     pub last_drain_time: std::time::Instant,
     pub clock: Option<Arc<dyn nullherz_traits::ClockProvider>>,
+    // STAGE 8: Adaptive Statistics
+    pub arrival_times: VecDeque<std::time::Instant>,
+    pub stats_update_counter: usize,
 }
 
 impl JitterBuffer {
@@ -19,6 +22,8 @@ impl JitterBuffer {
             drift_accumulator: 0.0,
             last_drain_time: std::time::Instant::now(),
             clock: None,
+            arrival_times: VecDeque::with_capacity(32),
+            stats_update_counter: 0,
         }
     }
 
@@ -26,6 +31,43 @@ impl JitterBuffer {
         if self.buffer.len() < self.target_size * 8 {
             self.buffer.push_back(block);
         }
+
+        // Track arrival for adaptive jitter calculation
+        let now = std::time::Instant::now();
+        self.arrival_times.push_back(now);
+        if self.arrival_times.len() > 32 { self.arrival_times.pop_front(); }
+
+        self.stats_update_counter += 1;
+        if self.stats_update_counter >= 32 {
+            self.update_adaptive_target();
+            self.stats_update_counter = 0;
+        }
+    }
+
+    fn update_adaptive_target(&mut self) {
+        let n = self.arrival_times.len();
+        if n < 2 { return; }
+
+        let mut sum_x = 0.0;
+        let mut sum_x2 = 0.0;
+        let count = n - 1;
+
+        for i in 1..n {
+            let x = self.arrival_times[i].duration_since(self.arrival_times[i-1]).as_secs_f32();
+            sum_x += x;
+            sum_x2 += x * x;
+        }
+
+        let mean = sum_x / count as f32;
+        let variance = (sum_x2 / count as f32) - (mean * mean);
+        let std_dev = variance.max(0.0).sqrt();
+
+        // Rule: Target size should be enough to cover 3 standard deviations of jitter.
+        // Assuming block size is ~5ms (256 samples @ 48k).
+        let block_duration = 256.0 / 44100.0;
+        let jitter_blocks = (std_dev * 3.0 / block_duration).ceil() as usize;
+
+        self.target_size = jitter_blocks.clamp(2, 16);
     }
 
     pub fn pop(&mut self) -> Option<AudioBlock> {

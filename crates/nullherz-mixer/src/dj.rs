@@ -15,11 +15,17 @@ pub fn create_dj_deck(
     let resample_id = id_allocator.allocate_node_id();
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: resample_id, processor_type_id: ProcessorTypeId::SAMPLER }));
 
-    let keysync_id = id_allocator.allocate_node_id();
-    commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: keysync_id, processor_type_id: ProcessorTypeId::KEY_SYNC }));
+    let dna_morph_id = id_allocator.allocate_node_id();
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: dna_morph_id, processor_type_id: ProcessorTypeId::DNA_MORPH }));
     let resample_out = id_allocator.allocate_buffer_id(1);
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: resample_id, output_idx: 0, new_buffer_idx: resample_out }));
-    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: keysync_id, input_idx: 0, new_buffer_idx: resample_out }));
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: dna_morph_id, input_idx: 0, new_buffer_idx: resample_out }));
+
+    let keysync_id = id_allocator.allocate_node_id();
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: keysync_id, processor_type_id: ProcessorTypeId::KEY_SYNC }));
+    let dna_morph_out = id_allocator.allocate_buffer_id(1);
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: dna_morph_id, output_idx: 0, new_buffer_idx: dna_morph_out }));
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: keysync_id, input_idx: 0, new_buffer_idx: dna_morph_out }));
 
     let gain_id = id_allocator.allocate_node_id();
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: gain_id, processor_type_id: ProcessorTypeId::GAIN }));
@@ -81,6 +87,7 @@ pub fn create_dj_deck(
         filter_id,
         keysync_id,
         stereo_util_id,
+        dna_morph_id: Some(dna_morph_id),
     };
 
     (commands, nodes)
