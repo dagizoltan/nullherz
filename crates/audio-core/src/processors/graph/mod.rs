@@ -47,8 +47,10 @@ impl ProcessorGraph {
             routing: [NodeRouting {
                 input_indices: [0; crate::MAX_CHANNELS],
                 output_indices: [0; crate::MAX_CHANNELS],
+                sidechain_indices: [0; crate::MAX_CHANNELS],
                 input_count: 0,
                 output_count: 0,
+                sidechain_count: 0,
                 input_delays: [0.0; crate::MAX_CHANNELS],
             }; crate::MAX_NODES],
             virtual_to_physical: v2p,
@@ -469,14 +471,14 @@ fn list_children(&self) -> Vec<&dyn AudioProcessor> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use nullherz_traits::SignalProcessor;
     use super::*;
     use nullherz_traits::ProcessContext;
     use std::sync::atomic::AtomicU64;
 
     use std::sync::atomic::Ordering;
-    struct IdentityProcessor;
+    pub struct IdentityProcessor;
     impl std::fmt::Debug for IdentityProcessor {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "IdentityProcessor") }
     }
@@ -613,10 +615,12 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             buffers_ptr: std::ptr::null_mut(),
             x_buffers_ptr: std::ptr::null_mut(),
             input_indices: [0; 16],
+            sidechain_indices: [0; 16],
             input_delays: [0.0; 16],
             output_indices: [0; 16],
             input_count: 0,
             output_count: 0,
+            sidechain_count: 0,
             node_idx: 0,
             telemetry_ptr: &std::array::from_fn(|_| AtomicU64::new(0)) as *const [AtomicU64; 64] as *mut [AtomicU64; 64],
             transport: None,
@@ -639,10 +643,12 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             buffers_ptr: std::ptr::null_mut(),
             x_buffers_ptr: std::ptr::null_mut(),
             input_indices: [0; 16],
+            sidechain_indices: [0; 16],
             input_delays: [0.0; 16],
             output_indices: [0; 16],
             input_count: 0,
             output_count: 0,
+            sidechain_count: 0,
             node_idx: 0,
             telemetry_ptr: &std::array::from_fn(|_| AtomicU64::new(0)) as *const [AtomicU64; 64] as *mut [AtomicU64; 64],
             transport: None,

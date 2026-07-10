@@ -251,3 +251,37 @@ impl WaveformProcessor {
         mip_levels
     }
 }
+
+/// Performs Spherical Linear Interpolation (Slerp) between two N-dimensional vectors.
+/// Used for smooth transition between DNA latent space representations while preserving timbral energy.
+pub fn slerp_nd(v0: &[f32], v1: &[f32], t: f32, out: &mut [f32]) {
+    let n = v0.len().min(v1.len()).min(out.len());
+    if n == 0 { return; }
+
+    // 1. Calculate Dot Product
+    let mut dot = 0.0;
+    for i in 0..n { dot += v0[i] * v1[i]; }
+
+    // Clamp dot product to avoid NaN in acos due to floating point precision
+    let dot = dot.clamp(-1.0, 1.0);
+
+    // 2. Calculate Angle between vectors
+    let theta_0 = dot.acos();
+    let sin_theta_0 = theta_0.sin();
+
+    // If angle is very small, use linear interpolation to avoid division by zero
+    if sin_theta_0.abs() < 1e-6 {
+        for i in 0..n {
+            out[i] = v0[i] + (v1[i] - v0[i]) * t;
+        }
+        return;
+    }
+
+    let theta_t = theta_0 * t;
+    let s0 = (theta_0 - theta_t).sin() / sin_theta_0;
+    let s1 = theta_t.sin() / sin_theta_0;
+
+    for i in 0..n {
+        out[i] = s0 * v0[i] + s1 * v1[i];
+    }
+}

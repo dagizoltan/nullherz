@@ -1,5 +1,169 @@
 pub trait Filter {
     fn process_sample(&mut self, input: f32) -> f32;
+    fn reset(&mut self) {}
+}
+
+/// A 4-pole Moog Ladder filter with non-linear feedback.
+#[derive(Debug, Clone, Copy)]
+pub struct MoogLadder {
+    pub sample_rate: f32,
+    pub cutoff: f32,
+    pub resonance: f32,
+    pub drive: f32,
+    // State variables
+    s: [f32; 4],
+    // Coefficients
+    g: f32,
+    h: f32,
+}
+
+impl MoogLadder {
+    pub fn new(sample_rate: f32) -> Self {
+        let mut filter = Self {
+            sample_rate,
+            cutoff: 1000.0,
+            resonance: 0.1,
+            drive: 1.0,
+            s: [0.0; 4],
+            g: 0.0,
+            h: 0.0,
+        };
+        filter.update_coeffs();
+        filter
+    }
+
+    pub fn set_params(&mut self, cutoff: f32, resonance: f32, drive: f32) {
+        self.cutoff = cutoff.clamp(20.0, 20000.0);
+        self.resonance = resonance.clamp(0.0, 4.0);
+        self.drive = drive.clamp(1.0, 10.0);
+        self.update_coeffs();
+    }
+
+    fn update_coeffs(&mut self) {
+        let wd = 2.0 * std::f32::consts::PI * self.cutoff;
+        let t = 1.0 / self.sample_rate;
+        let wa = (2.0 / t) * (wd * t / 2.0).tan();
+        self.g = wa * t / 2.0;
+        self.h = self.g / (1.0 + self.g);
+    }
+}
+
+impl Filter for MoogLadder {
+    fn process_sample(&mut self, input: f32) -> f32 {
+        // Simple tanh-based saturation for non-linear feedback
+        let input_driven = (input * self.drive).tanh();
+
+        let g = self.g;
+        let h = self.h;
+        let res = self.resonance;
+
+        // Feedback path with saturation
+        let fb = (self.s[3] * res).tanh();
+        let u = (input_driven - fb) / (1.0 + g.powi(4) * res);
+
+        // 4 cascaded integrators
+        let mut x = u;
+        for i in 0..4 {
+            let v = (x - self.s[i]) * h;
+            let y = v + self.s[i];
+            self.s[i] = y + v;
+            x = y;
+        }
+
+        x
+    }
+
+    fn reset(&mut self) {
+        self.s.fill(0.0);
+    }
+}
+
+/// A Zero-Delay Feedback (ZDF) State Variable Filter (SVF) using TPT.
+#[derive(Debug, Clone, Copy)]
+pub struct ZdfSvf {
+    pub sample_rate: f32,
+    pub cutoff: f32,
+    pub resonance: f32,
+    // State variables
+    s1: f32,
+    s2: f32,
+    // Coefficients
+    g: f32,
+    k: f32,
+}
+
+impl ZdfSvf {
+    pub fn new(sample_rate: f32) -> Self {
+        let mut filter = Self {
+            sample_rate,
+            cutoff: 1000.0,
+            resonance: 0.707,
+            s1: 0.0,
+            s2: 0.0,
+            g: 0.0,
+            k: 0.0,
+        };
+        filter.update_coeffs();
+        filter
+    }
+
+    pub fn set_params(&mut self, cutoff: f32, resonance: f32) {
+        self.cutoff = cutoff.clamp(20.0, 20000.0);
+        self.resonance = resonance.clamp(0.01, 10.0);
+        self.update_coeffs();
+    }
+
+    fn update_coeffs(&mut self) {
+        let g = (std::f32::consts::PI * self.cutoff / self.sample_rate).tan();
+        let k = 1.0 / self.resonance;
+        self.g = g;
+        self.k = k;
+    }
+
+    pub fn process_lp(&mut self, input: f32) -> f32 {
+        let g = self.g;
+        let k = self.k;
+        let a1 = 1.0 / (1.0 + g * (g + k));
+        let a2 = g * a1;
+        let a3 = g * a2;
+
+        let v3 = input - self.s2;
+        let v1 = a1 * self.s1 + a2 * v3;
+        let v2 = self.s2 + a2 * self.s1 + a3 * v3;
+
+        self.s1 = 2.0 * v1 - self.s1;
+        self.s2 = 2.0 * v2 - self.s2;
+
+        v2 // Lowpass
+    }
+
+    pub fn process_hp(&mut self, input: f32) -> f32 {
+        let g = self.g;
+        let k = self.k;
+        let a1 = 1.0 / (1.0 + g * (g + k));
+        let a2 = g * a1;
+        let a3 = g * a2;
+
+        let v3 = input - self.s2;
+        let v1 = a1 * self.s1 + a2 * v3;
+        let v2 = self.s2 + a2 * self.s1 + a3 * v3;
+
+        self.s1 = 2.0 * v1 - self.s1;
+        self.s2 = 2.0 * v2 - self.s2;
+
+        input - k * v1 - v2 // Highpass
+    }
+}
+
+impl Filter for ZdfSvf {
+    fn process_sample(&mut self, input: f32) -> f32 {
+        self.process_lp(input)
+    }
+
+    fn reset(&mut self) {
+        self.s1 = 0.0;
+        self.s2 = 0.0;
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -635,6 +799,30 @@ mod tests {
 
         for i in 0..100 {
             assert!((out_scalar[i] - out_unrolled[i]).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_moog_ladder_stability() {
+        let mut filter = MoogLadder::new(44100.0);
+        filter.set_params(1000.0, 3.0, 2.0);
+        let input = vec![1.0; 1000];
+        let mut output = vec![0.0; 1000];
+        for i in 0..1000 {
+            output[i] = filter.process_sample(input[i]);
+            assert!(output[i].is_finite());
+        }
+    }
+
+    #[test]
+    fn test_zdf_svf_stability() {
+        let mut filter = ZdfSvf::new(44100.0);
+        filter.set_params(1000.0, 5.0);
+        let input = vec![1.0; 1000];
+        let mut output = vec![0.0; 1000];
+        for i in 0..1000 {
+            output[i] = filter.process_lp(input[i]);
+            assert!(output[i].is_finite());
         }
     }
 

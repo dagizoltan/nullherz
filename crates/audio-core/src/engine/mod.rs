@@ -214,6 +214,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
 
     pub fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         nullherz_traits::assert_rt_safe!();
+        let _fp_guard = ipc_layer::FpControlGuard::new();
         let start_cycles = crate::get_cycles();
         let num_samples = outputs.first().map(|o| o.len()).unwrap_or(0);
         if num_samples == 0 { return; }

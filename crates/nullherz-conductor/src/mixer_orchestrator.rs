@@ -60,6 +60,36 @@ impl MixerOrchestrator {
                             // Groove Transfusion: Apply rhythmic micro-timing to associated sequencer
                             let seq_node_idx = nullherz_traits::NodeConventions::sequencer_for_deck(*deck_id);
                             translated.extend(crate::pattern_manager::DnaSequencer::apply_groove(&track.metadata.dna.rhythmic, seq_node_idx, 0));
+
+                            // Formant-Driven EQ: Automatically "de-ess" or "enhance" based on formant peaks
+                            // Formant peaks are (Freq, Q, Gain)
+                            for (i, peak) in track.metadata.dna.spectral.formant_peaks.iter().enumerate() {
+                                if peak.0 > 0.0 {
+                                    // Map top 3 peaks to BiquadEQ bands 0, 1, 2 if available
+                                    if i < 3 {
+                                        translated.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                            target_id: nodes.filter_id as u64, // Assume filter_id points to a BiquadEQ for this logic
+                                            param_id: (i * 3) as u32,      // Freq
+                                            value: peak.0,
+                                            ramp_duration_samples: 1024,
+                                        }));
+                                        translated.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                            target_id: nodes.filter_id as u64,
+                                            param_id: (i * 3 + 1) as u32,  // Q
+                                            value: (peak.1 as f32 / 100.0).max(0.1),
+                                            ramp_duration_samples: 1024,
+                                        }));
+                                        // Reduce gain of sharp peaks to "tame" the sample
+                                        let reduction = -3.0f32;
+                                        translated.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                            target_id: nodes.filter_id as u64,
+                                            param_id: (i * 3 + 2) as u32,  // Gain
+                                            value: reduction,
+                                            ramp_duration_samples: 1024,
+                                        }));
+                                    }
+                                }
+                            }
                         }
                     }
                 }

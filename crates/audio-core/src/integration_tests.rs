@@ -88,6 +88,64 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         assert_eq!(out[0], 0.123);
     }
 
+    struct SidechainGainProcessor {
+        gain: f32,
+    }
+
+    impl std::fmt::Debug for SidechainGainProcessor {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "SidechainGainProcessor") }
+    }
+
+    impl nullherz_traits::SignalProcessor for SidechainGainProcessor {
+        fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
+            // inputs[0] is main, inputs[1] is sidechain
+            let main = inputs[0];
+            let sc = inputs.get(1).map(|&s| s).unwrap_or(&[]);
+            let out = &mut outputs[0];
+            for i in 0..out.len() {
+                let sc_val = if i < sc.len() { sc[i] } else { 1.0 };
+                out[i] = main[i] * sc_val * self.gain;
+            }
+        }
+    }
+
+    impl nullherz_traits::MidiResponder for SidechainGainProcessor {}
+    impl nullherz_traits::SnapshotProvider for SidechainGainProcessor {}
+    impl crate::processors::AudioProcessor for SidechainGainProcessor {
+        fn as_any(&self) -> &dyn std::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    }
+
+    #[test]
+    fn test_sidechain_routing() {
+        use nullherz_traits::SignalProcessor;
+        let mut graph = ProcessorGraph::new();
+        // Node 0: SidechainGainProcessor. Input 2 (main), Sidechain 3 (sc), Output 0
+        graph.add_node(Box::new(SidechainGainProcessor { gain: 1.0 }), vec![2], vec![0]);
+
+        let active_idx = graph.topology_coordinator.active_idx();
+        graph.topology_coordinator.topologies[active_idx].routing[0].sidechain_indices[0] = 3;
+        graph.topology_coordinator.topologies[active_idx].routing[0].sidechain_count = 1;
+
+        graph.buffer_pool.buffers[2].data.fill(0.5); // Main signal
+        graph.buffer_pool.buffers[3].data.fill(0.2); // Sidechain signal
+
+        let mut out_data = [0.0f32; 128];
+        let mut outputs = [&mut out_data[..]];
+        let mut context = nullherz_traits::ProcessContext {
+            transport: None,
+            host: None,
+            sub_block_offset: 0,
+            is_last_sub_block: true,
+        };
+
+        graph.process(&[], &mut outputs, &mut context);
+
+        for i in 0..128 {
+            assert!((out_data[i] - 0.1).abs() < 1e-6); // 0.5 * 0.2
+        }
+    }
+
     #[test]
     fn test_complete_engine_cycle_with_registry() {
         let _registry = ProcessorRegistry::new();
@@ -145,8 +203,8 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
     #[test]
     fn test_pdc_phase_coherence() {
         // 1. Setup Engine
-        let cmd_buffer = Arc::new(ipc_layer::MpscRingBuffer::<nullherz_traits::TimestampedCommand>::new(256));
-        let (tel_prod, _tel_cons) = RingBuffer::<nullherz_traits::telemetry::Telemetry>::new(1024).split();
+        let _cmd_buffer = Arc::new(ipc_layer::MpscRingBuffer::<nullherz_traits::TimestampedCommand>::new(256));
+        let (_tel_prod, _tel_cons) = RingBuffer::<nullherz_traits::telemetry::Telemetry>::new(1024).split();
         let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn nullherz_traits::AudioProcessor>>::new(1024).split();
 
         let mut graph = ProcessorGraph::new();
@@ -186,7 +244,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         graph.add_node(Box::new(LatentProcessor { latency: 128 }), vec![10], vec![12]); // Node 1
 
         // Summing Node
-        let mut summing = Box::new(nullherz_processors::SummingProcessor::new(100));
+        let summing = Box::new(nullherz_processors::SummingProcessor::new(100));
         graph.add_node(summing, vec![11, 12], vec![0]); // Node 2
 
         graph.calculate_stages();
@@ -207,7 +265,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         // input_delays[2][0] = 128 - (0 + 0) = 128
         // input_delays[2][1] = 128 - (0 + 128) = 0
 
-        assert_eq!(topo.plan.input_delays[2].0[0], 128);
-        assert_eq!(topo.plan.input_delays[2].0[1], 0);
+        assert_eq!(topo.plan.input_delays[2].0[0], 128.0);
+        assert_eq!(topo.plan.input_delays[2].0[1], 0.0);
     }
 }

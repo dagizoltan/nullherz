@@ -542,8 +542,10 @@ impl Default for CompiledGraphPlan {
 pub struct NodeRouting {
     pub input_indices: [u32; MAX_CHANNELS],
     pub output_indices: [u32; MAX_CHANNELS],
+    pub sidechain_indices: [u32; MAX_CHANNELS],
     pub input_count: usize,
     pub output_count: usize,
+    pub sidechain_count: usize,
     /// Delay compensation required for this node's inputs in samples.
     pub input_delays: [f32; MAX_CHANNELS],
 }
