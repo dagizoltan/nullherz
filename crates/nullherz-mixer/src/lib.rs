@@ -15,6 +15,7 @@ pub struct DeckNodes {
     pub filter_id: u32,
     pub keysync_id: u32,
     pub stereo_util_id: u32,
+    pub dna_morph_id: Option<u32>,
 }
 
 #[derive(Default)]

@@ -35,6 +35,7 @@ pub struct SidecarHandle {
     pub shm_feedback: Arc<SharedMemory>,
     pub shm_midi: Arc<SharedMemory>,
     pub shm_inputs: Vec<Arc<SharedMemory>>,
+    pub(crate) shm_sidechains: Vec<Arc<SharedMemory>>,
     pub shm_outputs: Vec<Arc<SharedMemory>>,
     pub shm_signal: Arc<SharedMemory>,
     pub last_heartbeat: std::time::Instant,
@@ -190,11 +191,27 @@ impl SidecarSupervisor {
             eprintln!("Warning: could not set RT priority for sidecar {}: {}", name, e);
         }
 
+        let mut sidechain_ptrs = Vec::new();
+        let mut sc_names = String::new();
+        let mut shm_sidechains = Vec::new();
+        // Support up to 2 sidechains for now
+        for i in 0..2 {
+            let name = format!("nullherz_{}_sc_{}", name, i);
+            let (layout, _) = ShmRingBuffer::<AudioBlock>::layout(16);
+            let shm = Arc::new(SharedMemory::create(&name, layout.size() + 64).map_err(|e| e.to_string())?);
+            let ptr = unsafe { ShmRingBuffer::<AudioBlock>::init(shm.ptr(), 16) };
+            sidechain_ptrs.push(ptr);
+            shm_sidechains.push(shm);
+            if i > 0 { sc_names.push(','); }
+            sc_names.push_str(&name);
+        }
+
         let mut sidecar = unsafe {
             nullherz_processors::SidecarProcessor::new(
                 cmd_rb_ptr,
                 Some(fb_rb_ptr),
                 &input_ptrs,
+                &sidechain_ptrs,
                 &output_ptrs,
                 signal_ptr,
                 Some(efd)
@@ -205,6 +222,7 @@ impl SidecarSupervisor {
             Some(shm_feedback.clone()),
             Some(shm_midi.clone()),
             shm_inputs.clone(),
+            shm_sidechains.clone(),
             shm_outputs.clone(),
             shm_signal.clone(),
         );
@@ -219,6 +237,7 @@ impl SidecarSupervisor {
             shm_feedback,
             shm_midi,
             shm_inputs,
+            shm_sidechains,
             shm_outputs,
             shm_signal,
             last_heartbeat: std::time::Instant::now(),

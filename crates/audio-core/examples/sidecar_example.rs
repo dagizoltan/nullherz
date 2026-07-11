@@ -46,6 +46,7 @@ fn main() {
             cmd_rb_ptr,
             Some(fb_rb_ptr),
             &in_ptrs,
+            &[],
             &out_ptrs,
             sig_ptr,
             Some(efd)

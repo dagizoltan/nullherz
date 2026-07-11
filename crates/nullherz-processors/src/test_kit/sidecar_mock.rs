@@ -42,6 +42,7 @@ impl SidecarMockHost {
                 cmd_ptr,
                 None,
                 &in_ptrs,
+                &[],
                 &out_ptrs,
                 sig_ptr,
                 None

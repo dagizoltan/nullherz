@@ -40,6 +40,15 @@ pub struct Conductor {
     last_autosave_secs: u64,
     pub last_genetic_evolve_secs: u64,
     pub focused_node_idx: Option<u32>,
+    pub active_transitions: Vec<DnaTransition>,
+}
+
+pub struct DnaTransition {
+    pub source_deck: char,
+    pub target_deck: char,
+    pub start_beat: f64,
+    pub duration_beats: f64,
+    pub is_complete: bool,
 }
 
 impl Default for Conductor {
@@ -101,6 +110,7 @@ impl Conductor {
             last_autosave_secs: 0,
             last_genetic_evolve_secs: 0,
             focused_node_idx: None,
+            active_transitions: Vec::new(),
         }
     }
 
@@ -471,6 +481,7 @@ impl Conductor {
         }
 
         self.process_evolutionary_breeding(now);
+        self.tick_dna_transitions();
 
         // Genetic Pattern Evolution (Every 8 seconds)
         if now % 8 == 0 && self.last_genetic_evolve_secs != now {
@@ -562,5 +573,72 @@ impl Conductor {
 
     pub fn apply_state(&mut self, state: crate::persistence::ProjectState) {
         let _ = state.apply(self);
+    }
+
+    pub fn start_deck_transition(&mut self, source_deck: char, target_deck: char, duration_beats: f64) {
+        let current_beat = self.mixer_bridge.timeline.current_beat;
+        self.active_transitions.push(DnaTransition {
+            source_deck,
+            target_deck,
+            start_beat: current_beat,
+            duration_beats,
+            is_complete: false,
+        });
+        println!("Conductor: Starting Semantic Transition: {} -> {} over {} beats", source_deck, target_deck, duration_beats);
+    }
+
+    fn tick_dna_transitions(&mut self) {
+        let current_beat = self.mixer_bridge.timeline.current_beat;
+        let mut commands = Vec::new();
+
+        self.active_transitions.retain_mut(|t| {
+            if t.is_complete { return false; }
+
+            let progress = (current_beat - t.start_beat) / t.duration_beats;
+            let progress = progress.clamp(0.0, 1.0) as f32;
+
+            // Orchestrate DNA Morphing via DnaMorpher if available
+            // For now, we apply slerp/morphing parameters to the respective deck processors
+            if let Some(src_nodes) = self.mixer_manager.deck_mappings.get(&t.source_deck) {
+                if let Some(dst_nodes) = self.mixer_manager.deck_mappings.get(&t.target_deck) {
+                     // 1. Cross-fade volumes (Constant Power)
+                     let gain_src = (1.0 - progress).sqrt();
+                     let gain_dst = progress.sqrt();
+
+                     commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                         target_id: src_nodes.gain_id as u64,
+                         param_id: 0,
+                         value: gain_src,
+                         ramp_duration_samples: 1024,
+                     }));
+                     commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                         target_id: dst_nodes.gain_id as u64,
+                         param_id: 0,
+                         value: gain_dst,
+                         ramp_duration_samples: 1024,
+                     }));
+
+                     // 2. DNA Morphing (Latent Space Slerp via DnaMorpher node if assigned)
+                     if let Some(morph_id) = dst_nodes.dna_morph_id {
+                        commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                            target_id: morph_id as u64,
+                            param_id: 0, // Morph Position
+                            value: progress,
+                            ramp_duration_samples: 0,
+                        }));
+                     }
+                }
+            }
+
+            if progress >= 1.0 {
+                t.is_complete = true;
+                println!("Conductor: Transition {} -> {} complete.", t.source_deck, t.target_deck);
+            }
+            true
+        });
+
+        if !commands.is_empty() {
+            self.apply_mixer_commands(commands);
+        }
     }
 }

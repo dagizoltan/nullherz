@@ -9,8 +9,10 @@ pub struct SidecarProcessor {
     feedback_consumer_ptr: Option<*const ShmRingBuffer<nullherz_traits::ProcessorMetadata>>,
     pub last_metadata: Option<nullherz_traits::ProcessorMetadata>,
     input_shm: [*mut ShmRingBuffer<AudioBlock>; MAX_CHANNELS],
+    pub(crate) sidechain_shm: [*mut ShmRingBuffer<AudioBlock>; MAX_CHANNELS],
     output_shm: [*const ShmRingBuffer<AudioBlock>; MAX_CHANNELS],
     num_channels: usize,
+    num_sidechains: usize,
     signal: *const ShmSignal,
     event_fd: Option<EventFd>,
     last_heartbeat: u64,
@@ -20,6 +22,7 @@ pub struct SidecarProcessor {
     _shm_feedback: Option<Arc<SharedMemory>>,
     shm_midi: Option<Arc<SharedMemory>>,
     _shm_inputs: Vec<Arc<SharedMemory>>,
+    pub(crate) _shm_sidechains: Vec<Arc<SharedMemory>>,
     _shm_outputs: Vec<Arc<SharedMemory>>,
     _shm_signal: Option<Arc<SharedMemory>>,
 }
@@ -33,22 +36,28 @@ impl SidecarProcessor {
         command_ptr: *const ShmRingBuffer<nullherz_traits::Command>,
         feedback_ptr: Option<*const ShmRingBuffer<nullherz_traits::ProcessorMetadata>>,
         inputs: &[*mut ShmRingBuffer<AudioBlock>],
+        sidechains: &[*mut ShmRingBuffer<AudioBlock>],
         outputs: &[*const ShmRingBuffer<AudioBlock>],
         signal: *const ShmSignal,
         event_fd: Option<EventFd>,
     ) -> Self {
         let mut input_shm = [std::ptr::null_mut(); MAX_CHANNELS];
+        let mut sidechain_shm = [std::ptr::null_mut(); MAX_CHANNELS];
         let mut output_shm = [std::ptr::null(); MAX_CHANNELS];
         let num_channels = inputs.len().min(MAX_CHANNELS).min(outputs.len());
+        let num_sidechains = sidechains.len().min(MAX_CHANNELS);
         input_shm[..num_channels].copy_from_slice(&inputs[..num_channels]);
+        sidechain_shm[..num_sidechains].copy_from_slice(&sidechains[..num_sidechains]);
         output_shm[..num_channels].copy_from_slice(&outputs[..num_channels]);
         Self {
             command_producer_ptr: command_ptr,
             feedback_consumer_ptr: feedback_ptr,
             last_metadata: None,
             input_shm,
+            sidechain_shm,
             output_shm,
             num_channels,
+            num_sidechains,
             signal,
             event_fd,
             last_heartbeat: 0,
@@ -57,6 +66,7 @@ impl SidecarProcessor {
             _shm_feedback: None,
             shm_midi: None,
             _shm_inputs: Vec::new(),
+            _shm_sidechains: Vec::new(),
             _shm_outputs: Vec::new(),
             _shm_signal: None,
         }
@@ -68,6 +78,7 @@ impl SidecarProcessor {
         fb: Option<Arc<SharedMemory>>,
         midi: Option<Arc<SharedMemory>>,
         inputs: Vec<Arc<SharedMemory>>,
+        sidechains: Vec<Arc<SharedMemory>>,
         outputs: Vec<Arc<SharedMemory>>,
         signal: Arc<SharedMemory>,
     ) {
@@ -75,6 +86,7 @@ impl SidecarProcessor {
         self._shm_feedback = fb;
         self.shm_midi = midi;
         self._shm_inputs = inputs;
+        self._shm_sidechains = sidechains;
         self._shm_outputs = outputs;
         self._shm_signal = Some(signal);
     }
@@ -107,6 +119,21 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &
                 block.len = len as u32;
                 unsafe { let _ = (*self.input_shm[i]).push(block); }
             }
+        }
+
+        // Push sidechains if present
+        for i in 0..self.num_sidechains {
+            let input_idx = self.num_channels + i;
+            if input_idx < inputs.len() {
+                let mut block = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] };
+                let len = inputs[input_idx].len().min(ipc_layer::MAX_BLOCK_SIZE);
+                block.data[..len].copy_from_slice(&inputs[input_idx][..len]);
+                block.len = len as u32;
+                unsafe { let _ = (*self.sidechain_shm[i]).push(block); }
+            }
+        }
+
+        for i in 0..self.num_channels {
 
             if i < outputs.len() {
                 let mut consumed = false;
@@ -327,11 +354,13 @@ mod tests {
             let in_ptr = ShmRingBuffer::<AudioBlock>::init(in_shm.ptr(), 16);
             let out_ptr = ShmRingBuffer::<AudioBlock>::init(out_shm.ptr(), 16);
 
+            let out_ptrs = [out_ptr as *const ShmRingBuffer<AudioBlock>];
             let mut proc = SidecarProcessor::new(
                 cmd_ptr,
                 None,
                 &[in_ptr],
-                &[out_ptr as *const _],
+                &[],
+                &out_ptrs,
                 sig_ptr,
                 None
             );
@@ -376,11 +405,13 @@ mod tests {
             let in_ptr = ShmRingBuffer::<AudioBlock>::init(in_shm.ptr(), 16);
             let out_ptr = ShmRingBuffer::<AudioBlock>::init(out_shm.ptr(), 16);
 
+            let out_ptrs = [out_ptr as *const ShmRingBuffer<AudioBlock>];
             let mut proc = SidecarProcessor::new(
                 cmd_ptr,
                 None,
                 &[in_ptr],
-                &[out_ptr as *const _],
+                &[],
+                &out_ptrs,
                 sig_ptr,
                 None
             );
