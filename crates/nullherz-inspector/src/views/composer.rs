@@ -181,11 +181,8 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
 
                 // 6. Track Volume Fader
                 let mock_volume_color = if is_muted { Color32::from_gray(40) } else { track_color };
-                // Let's use a temporary volume fader state, styled like Ableton's flat strip
-                let mut vol = app.sequencer_grid[i][0]; // Re-use step value as track volume representation
-                if widgets::render_fader(ui, &mut vol, 0.0..=1.0, mock_volume_color, 70.0, 14.0).changed() {
-                     app.sequencer_grid[i][0] = vol;
-                }
+                // Hardened: Decoupled track volume from sequencer_grid step 0 to prevent pattern corruption!
+                widgets::render_fader(ui, &mut app.track_volumes[i], 0.0..=1.0, mock_volume_color, 70.0, 14.0);
             });
         });
 }

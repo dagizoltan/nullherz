@@ -127,7 +127,6 @@ pub struct InspectorApp {
     pub(crate) sequencer_active_step: usize,
     pub(crate) sampler_slicer_mode: bool,
     pub(crate) _playlists: Vec<Playlist>,
-    pub(crate) player_is_playing: bool,
     pub(crate) cached_library: Vec<nullherz_dna::LibraryTrack>,
     pub(crate) library_needs_refresh: bool,
     pub(crate) breeding_view: views::breeder::BreederView,
@@ -149,6 +148,8 @@ pub struct InspectorApp {
     pub(crate) focused_deck: usize,
     pub(crate) track_mutes: [bool; 16],
     pub(crate) track_solos: [bool; 16],
+    pub(crate) track_volumes: [f32; 16],
+    pub(crate) deck_playing: [bool; 4],
     pub(crate) record_automation: bool,
     pub(crate) _automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>, // target_id -> [(beat, value)]
     pub(crate) sampler_waveform_zoom: f32,
@@ -262,7 +263,6 @@ impl InspectorApp {
             sequencer_active_step: 0,
             sampler_slicer_mode: false,
             _playlists: vec![],
-            player_is_playing: false,
             cached_library: vec![],
             library_needs_refresh: true,
             breeding_view: views::breeder::BreederView::new(),
@@ -295,6 +295,8 @@ impl InspectorApp {
             focused_deck: 0, // Default to focus Deck A
             track_mutes: [false; 16],
             track_solos: [false; 16],
+            track_volumes: [1.0; 16],
+            deck_playing: [false; 4],
             record_automation: false,
             _automation_data: std::collections::HashMap::new(),
             sampler_waveform_zoom: 1.0,

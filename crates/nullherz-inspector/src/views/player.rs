@@ -17,6 +17,28 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             ui.label(RichText::new(format!("FOCUS: DECK {}", deck_char)).strong().color(deck_color));
         });
     });
+    ui.add_space(8.0);
+
+    // Deck Tab Selector
+    ui.horizontal(|ui| {
+        for i in 0..4 {
+            let active = i == app.focused_deck;
+            let d_char = (b'A' + i as u8) as char;
+            let d_color = InspectorApp::deck_color(i);
+            let btn_text = format!("DECK {}", d_char);
+
+            let btn = if active {
+                egui::Button::new(RichText::new(btn_text).strong().color(Color32::BLACK)).fill(d_color)
+            } else {
+                egui::Button::new(RichText::new(btn_text).color(d_color)).fill(Color32::from_rgb(20, 20, 24))
+            };
+
+            if ui.add_sized([100.0, 24.0], btn).clicked() {
+                app.focused_deck = i;
+            }
+            ui.add_space(4.0);
+        }
+    });
     ui.add_space(12.0);
 
     // Advanced Player Deck Panel (Turntable + Transport Dashboard)
@@ -156,15 +178,16 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpByBeats { node_idx, beats: -4.0 }));
                                 }
 
-                                let play_btn = if app.player_is_playing {
+                                let is_deck_playing = app.deck_playing[deck_idx];
+                                let play_btn = if is_deck_playing {
                                     egui::Button::new(RichText::new("⏸").size(18.0)).fill(Color32::from_rgb(0, 100, 200))
                                 } else {
                                     egui::Button::new(RichText::new("▶").size(18.0))
                                 };
 
                                 if ui.add(play_btn).clicked() {
-                                    app.player_is_playing = !app.player_is_playing;
-                                    if app.player_is_playing {
+                                    app.deck_playing[deck_idx] = !is_deck_playing;
+                                    if app.deck_playing[deck_idx] {
                                         let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id: deck_char }));
                                     } else {
                                         let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::StopDeck { deck_id: deck_char }));
