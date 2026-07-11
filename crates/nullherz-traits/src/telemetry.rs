@@ -107,6 +107,44 @@ impl Default for Telemetry {
     }
 }
 
+impl Telemetry {
+    /// Returns the interpolated beat position using the high-precision monotonic clock to eliminate UI playhead stuttering.
+    pub fn get_interpolated_beat_position(&self) -> f64 {
+        if self.bpm <= 0.0 || self.system_time_ns == 0 {
+            return self.beat_position;
+        }
+
+        let now_ns = {
+            static BASELINE: std::sync::OnceLock<(std::time::Instant, u64)> = std::sync::OnceLock::new();
+            #[cfg(not(any(target_os = "windows", target_arch = "wasm32")))]
+            let &(base_instant, base_ns) = BASELINE.get_or_init(|| {
+                let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+                unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts); }
+                let ns = (ts.tv_sec as u64 * 1_000_000_000) + ts.tv_nsec as u64;
+                (std::time::Instant::now(), ns)
+            });
+
+            #[cfg(any(target_os = "windows", target_arch = "wasm32"))]
+            let &(base_instant, base_ns) = BASELINE.get_or_init(|| {
+                (std::time::Instant::now(), 0)
+            });
+
+            base_ns + base_instant.elapsed().as_nanos() as u64
+        };
+
+        if now_ns > self.system_time_ns {
+            let elapsed_ns = now_ns - self.system_time_ns;
+            let elapsed_sec = elapsed_ns as f64 / 1_000_000_000.0;
+            // Cap interpolation to 1.0 second to prevent runaway drift if playback pauses/glitches
+            if elapsed_sec < 1.0 {
+                let elapsed_beats = elapsed_sec * (self.bpm as f64 / 60.0);
+                return self.beat_position + elapsed_beats;
+            }
+        }
+        self.beat_position
+    }
+}
+
 impl TelemetryProcessor {
     pub fn collect_node_times(
         node_times_cycles: &[u64; MAX_NODES],

@@ -120,13 +120,11 @@ impl ProcessorGraph {
                 self.morph_samples_total = self.morph_duration_samples;
                 self.morph_samples_remaining = self.morph_samples_total;
             }
-        }
 
-        if let Err(msg) = self.topology_coordinator.commit() {
-            if let Some(ref logger) = self.logger {
-                logger.log(crate::rt_logging::RtLogLevel::Error, &format!("Refusing to commit hazardous topology: {}", msg), 0);
-            } else {
-                eprintln!("CRITICAL: Refusing to commit hazardous topology: {}", msg);
+            if let Err(msg) = self.topology_coordinator.commit() {
+                if let Some(ref logger) = self.logger {
+                    logger.log(crate::rt_logging::RtLogLevel::Error, &format!("Refusing to commit hazardous topology: {}", msg), 0);
+                }
             }
         }
 
@@ -218,6 +216,11 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
         let num_samples = if !external_outputs.is_empty() { external_outputs[0].len() } else { 0 };
         if num_samples == 0 { return; }
 
+        let pdc_lines = match self.buffer_pool.pdc_lines.as_mut() {
+            Some(pdc) => pdc,
+            None => return,
+        };
+
         let active_idx = self.topology_coordinator.active_idx();
         let offset = context.sub_block_offset;
 
@@ -264,7 +267,7 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                     host,
                     is_last_sub_block,
                     &self.telemetry.node_times_cycles,
-                    self.buffer_pool.pdc_lines.as_mut().unwrap(),
+                    pdc_lines,
                     self.buffer_pool.pdc_write_pos,
                 );
             }
@@ -286,7 +289,7 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                 host,
                 is_last_sub_block,
                 &self.telemetry.node_times_cycles,
-                self.buffer_pool.pdc_lines.as_mut().unwrap(),
+                pdc_lines,
                 self.buffer_pool.pdc_write_pos,
             );
         }

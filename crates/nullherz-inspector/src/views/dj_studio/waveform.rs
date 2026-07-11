@@ -30,7 +30,7 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
             ui.painter().text(rect.left_top() + Vec2::new(5.0, 5.0), egui::Align2::LEFT_TOP, title, egui::FontId::monospace(10.0), deck_color.gamma_multiply(0.8));
 
             // Render playhead
-            let playhead_x = rect.min.x + (telemetry.as_ref().map(|t| (t.beat_position % 4.0) / 4.0).unwrap_or(0.0) as f32 * rect.width());
+            let playhead_x = rect.min.x + (telemetry.as_ref().map(|t| (t.get_interpolated_beat_position() % 4.0) / 4.0).unwrap_or(0.0) as f32 * rect.width());
             ui.painter().line_segment([egui::pos2(playhead_x, rect.min.y), egui::pos2(playhead_x, rect.max.y)], egui::Stroke::new(1.0, Color32::WHITE));
         } else {
             // Enhanced EMPTY DECK visualization
