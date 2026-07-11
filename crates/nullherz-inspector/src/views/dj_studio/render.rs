@@ -6,29 +6,34 @@ use audio_core::Telemetry;
 use super::{mixer, dna, transport, performance, waveform};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
-    let total_h = ui.available_height();
     let theme = app.theme;
 
-    render_header(ui, telemetry, &theme);
-    ui.add_space(4.0);
+    // Protect the global layout by keeping the top-level ScrollArea
+    ScrollArea::vertical().id_source("console_scroll").show(ui, |ui| {
+        let total_h = ui.available_height();
 
-    // Waveform stack (top half of the window)
-    // Consumes exactly 50% of the available central-panel height.
-    let waveform_section_h = total_h * 0.5;
-    let lane_h = waveform_section_h / 4.0;
+        render_header(ui, telemetry, &theme);
+        ui.add_space(4.0);
 
-    ui.vertical(|ui| {
-        ui.set_height(waveform_section_h);
-        for i in 0..4 {
-            render_waveform_lane(app, ui, i, lane_h, telemetry);
-            ui.add_space(2.0);
-        }
-    });
+        // Waveform stack (top half of the window)
+        // Consumes exactly 50% of the visible viewport height.
+        let waveform_section_h = total_h * 0.5;
+        let spacing_h = 2.0;
+        let lane_h = (waveform_section_h - spacing_h * 3.0) / 4.0;
 
-    ui.add_space(4.0);
+        ui.vertical(|ui| {
+            for i in 0..4 {
+                render_waveform_lane(app, ui, i, lane_h, telemetry);
+                if i < 3 {
+                    ui.add_space(spacing_h);
+                }
+            }
+        });
 
-    // Mixer section (bottom half of the window)
-    ScrollArea::vertical().id_source("mixer_scroll").show(ui, |ui| {
+        ui.add_space(8.0);
+
+        // Mixer section (bottom half of the window)
+        // Shows all 4 channel strips side-by-side. Horizontal dividers between them.
         ui.horizontal_top(|ui| {
             for i in 0..4 {
                 render_channel_strip(app, ui, i, telemetry);
@@ -227,51 +232,52 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
     let border_thickness = if is_focused { 1.5 } else { 1.0 };
 
-    Frame::none()
-        .fill(bg_color)
-        .stroke(Stroke::new(border_thickness, stroke_color))
-        .rounding(Rounding::same(6.0))
-        .inner_margin(Margin::symmetric(12.0, 10.0))
-        .show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                // Header (Selectable title/indicator for focus)
-                let deck_id_label = (b'A' + i as u8) as char;
-                let label_text = RichText::new(format!("CH {}", deck_id_label)).strong().size(12.0).color(if is_focused { deck_color } else { Color32::from_gray(140) });
-                if ui.selectable_label(is_focused, label_text).clicked() {
-                    app.focused_deck = i;
-                }
-                ui.add_space(4.0);
+    ui.allocate_ui_with_layout(Vec2::new(140.0, ui.available_height()), egui::Layout::top_down(egui::Align::Center), |ui| {
+        ui.set_width(140.0);
+        Frame::none()
+            .fill(bg_color)
+            .stroke(Stroke::new(border_thickness, stroke_color))
+            .rounding(Rounding::same(6.0))
+            .inner_margin(Margin::symmetric(12.0, 10.0))
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    // Header (Selectable title/indicator for focus)
+                    let deck_id_label = (b'A' + i as u8) as char;
+                    let label_text = RichText::new(format!("CH {}", deck_id_label)).strong().size(12.0).color(if is_focused { deck_color } else { Color32::from_gray(140) });
+                    if ui.selectable_label(is_focused, label_text).clicked() {
+                        app.focused_deck = i;
+                    }
+                    ui.add_space(4.0);
 
-                // 1. Hot cues (2x4)
-                performance::render_deck_performance(app, ui, i, telemetry);
-                ui.add_space(8.0);
+                    // 1. Hot cues (2x4)
+                    performance::render_deck_performance(app, ui, i, telemetry);
+                    ui.add_space(8.0);
 
-                // Divider
-                let (line_rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), egui::Sense::hover());
-                ui.painter().rect_filled(line_rect, Rounding::ZERO, Color32::from_rgb(22, 22, 26));
-                ui.add_space(8.0);
+                    // Divider (Native separator)
+                    ui.separator();
+                    ui.add_space(8.0);
 
-                // 2 & 3. EQ + Filter Column & Volume Row
-                mixer::render_deck_mixer(app, ui, i, deck_color);
-                ui.add_space(8.0);
+                    // 2 & 3. EQ + Filter Column & Volume Row
+                    mixer::render_deck_mixer(app, ui, i, deck_color);
+                    ui.add_space(8.0);
 
-                // Divider
-                let (line_rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), egui::Sense::hover());
-                ui.painter().rect_filled(line_rect, Rounding::ZERO, Color32::from_rgb(22, 22, 26));
-                ui.add_space(8.0);
+                    // Divider (Native separator)
+                    ui.separator();
+                    ui.add_space(8.0);
 
-                // 4. Transport Row
-                transport::render_deck_transport(app, ui, i);
-                ui.add_space(8.0);
+                    // 4. Transport Row
+                    transport::render_deck_transport(app, ui, i);
+                    ui.add_space(8.0);
 
-                // 5. Collapsible DNA panel (collapsed by default)
-                egui::CollapsingHeader::new(RichText::new("DNA").small().color(Color32::from_gray(120)))
-                    .default_open(false)
-                    .show(ui, |ui| {
-                        dna::render_deck_dna_panel(app, ui, i);
-                    });
+                    // 5. Collapsible DNA panel (collapsed by default)
+                    egui::CollapsingHeader::new(RichText::new("DNA").small().color(Color32::from_gray(120)))
+                        .default_open(false)
+                        .show(ui, |ui| {
+                            dna::render_deck_dna_panel(app, ui, i);
+                        });
+                });
             });
-        });
+    });
 }
 
 fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
