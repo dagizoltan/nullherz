@@ -12,7 +12,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     let theme = app.theme;
 
     // Compute total available height on the finite, constrained parent UI (outside of any ScrollArea)
-    let total_h = ui.available_height();
+    let total_h = ui.available_height().max(500.0);
 
     render_header(ui, telemetry, &theme);
     ui.add_space(4.0);
