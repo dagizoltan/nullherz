@@ -6,34 +6,39 @@ use audio_core::Telemetry;
 use super::{mixer, dna, transport, performance, waveform};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
+    if app.focused_deck >= 4 {
+        app.focused_deck = 0;
+    }
     let theme = app.theme;
 
-    // Protect the global layout by keeping the top-level ScrollArea
-    ScrollArea::vertical().id_source("console_scroll").show(ui, |ui| {
-        let total_h = ui.available_height();
+    // Compute total available height on the finite, constrained parent UI (outside of any ScrollArea)
+    let total_h = ui.available_height();
 
-        render_header(ui, telemetry, &theme);
-        ui.add_space(4.0);
+    render_header(ui, telemetry, &theme);
+    ui.add_space(4.0);
 
-        // Waveform stack (top half of the window)
-        // Consumes exactly 50% of the visible viewport height.
-        let waveform_section_h = total_h * 0.5;
-        let spacing_h = 2.0;
-        let lane_h = (waveform_section_h - spacing_h * 3.0) / 4.0;
+    // Waveform stack (top half of the window)
+    // Consumes exactly 50% of the available central-panel height.
+    // It sits OUTSIDE any ScrollArea so it remains persistent and visible at all times.
+    let waveform_section_h = total_h * 0.5;
+    let spacing_h = 2.0;
+    let lane_h = (waveform_section_h - spacing_h * 3.0) / 4.0;
 
-        ui.vertical(|ui| {
-            for i in 0..4 {
-                render_waveform_lane(app, ui, i, lane_h, telemetry);
-                if i < 3 {
-                    ui.add_space(spacing_h);
-                }
+    ui.vertical(|ui| {
+        for i in 0..4 {
+            render_waveform_lane(app, ui, i, lane_h, telemetry);
+            if i < 3 {
+                ui.add_space(spacing_h);
             }
-        });
+        }
+    });
 
-        ui.add_space(8.0);
+    ui.add_space(4.0);
 
-        // Mixer section (bottom half of the window)
-        // Shows all 4 channel strips side-by-side. Horizontal dividers between them.
+    // Mixer section (bottom half of the window)
+    // Wrapped in a nested vertical ScrollArea so the mixer strips and master section scroll independently
+    // within the remaining available height of the central panel.
+    ScrollArea::vertical().id_source("mixer_scroll").show(ui, |ui| {
         ui.horizontal_top(|ui| {
             for i in 0..4 {
                 render_channel_strip(app, ui, i, telemetry);

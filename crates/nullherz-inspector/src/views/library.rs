@@ -234,11 +234,13 @@ fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
 
             if res.double_clicked() {
                 let deck_idx = app.focused_deck;
-                let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
-                    granular_node_idx: (deck_idx as u32 * 4),
-                    sample_id: track.id,
-                }));
-                app.now_playing[deck_idx] = Some(track.id);
+                if deck_idx < 4 {
+                    let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
+                        granular_node_idx: (deck_idx as u32 * 4),
+                        sample_id: track.id,
+                    }));
+                    app.now_playing[deck_idx] = Some(track.id);
+                }
             }
 
             ui.painter().hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, Color32::from_gray(25)));

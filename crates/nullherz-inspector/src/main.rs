@@ -292,7 +292,7 @@ impl InspectorApp {
             damped_master_peaks: [0.0; 2],
             discovered_sidecars: vec![],
             personality_macro_mode: false,
-            focused_deck: 999, // All decks start closed/collapsed
+            focused_deck: 0, // Default to focus Deck A
             track_mutes: [false; 16],
             track_solos: [false; 16],
             record_automation: false,
