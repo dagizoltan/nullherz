@@ -4,7 +4,7 @@ use crate::InspectorApp;
 use audio_core::Telemetry;
 
 pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>, deck_color: Color32) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 60.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), egui::Sense::hover());
     ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(10, 10, 15));
 
     if let Some(wf_lock) = &app.waveform_renderer {
@@ -25,9 +25,6 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
             }
 
             nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_lock.clone());
-
-            let title = track.as_ref().map(|t| t.title.as_str()).unwrap_or("LOADING...");
-            ui.painter().text(rect.left_top() + Vec2::new(5.0, 5.0), egui::Align2::LEFT_TOP, title, egui::FontId::monospace(10.0), deck_color.gamma_multiply(0.8));
 
             // Render playhead using actual per-deck playback position
             let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[i]).unwrap_or(0);
