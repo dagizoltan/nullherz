@@ -133,6 +133,7 @@ pub struct InspectorApp {
     pub(crate) breeding_view: views::breeder::BreederView,
     pub(crate) wgpu_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::wgpu_backend::WgpuRenderer>>>,
     pub(crate) waveform_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>>,
+    pub(crate) deck_waveform_renderers: [Option<Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>>; 4],
     pub(crate) active_connection_source: Option<(u32, u32)>, // (node_idx, output_idx)
     pub(crate) active_node_drag: Option<u32>,
     pub(crate) smart_crate_builder_open: bool,
@@ -267,6 +268,7 @@ impl InspectorApp {
             breeding_view: views::breeder::BreederView::new(),
             wgpu_renderer: None,
             waveform_renderer: None,
+            deck_waveform_renderers: [None, None, None, None],
             active_connection_source: None,
             active_node_drag: None,
             smart_crate_builder_open: false,
@@ -599,6 +601,17 @@ fn main() -> eframe::Result<()> {
                     1024
                 );
                 app.waveform_renderer = Some(Arc::new(Mutex::new(wf_renderer)));
+
+                let mut deck_wfs = [None, None, None, None];
+                for i in 0..4 {
+                    let wf = nullherz_ui_hal::render::waveform_renderer::WaveformRenderer::new(
+                        &render_state.device,
+                        render_state.target_format,
+                        1024
+                    );
+                    deck_wfs[i] = Some(Arc::new(Mutex::new(wf)));
+                }
+                app.deck_waveform_renderers = deck_wfs;
             }
 
             Box::new(app)

@@ -7,7 +7,7 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), egui::Sense::hover());
     ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(10, 10, 15));
 
-    if let Some(wf_lock) = &app.waveform_renderer {
+    if let Some(wf_lock) = &app.deck_waveform_renderers[i] {
         if let Some(track_id) = app.now_playing[i] {
             let mut wf = wf_lock.lock().unwrap();
             let zoom = 1.0;
