@@ -34,9 +34,45 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         ui.label(RichText::new("VIRTUAL JOG WHEEL").small().color(Color32::from_gray(100)));
                         ui.add_space(4.0);
 
-                        // Render an elegant rotating Jog Wheel
-                        let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[deck_idx]).unwrap_or(0);
-                        let rotation_angle = (elapsed_samples as f32 * 0.0001) % (std::f32::consts::PI * 2.0);
+                        // High-precision playhead and rotation interpolation using safe drift-free Instant sync
+                        let rotation_angle = if let Some(t) = telemetry {
+                            let raw_pos = t.deck_positions[deck_idx] as f64;
+                            let playback_rate = t.deck_playback_rates[deck_idx] as f64;
+
+                            // Check if deck is actually playing (rate is non-zero)
+                            let interpolated_pos = if playback_rate != 0.0 {
+                                static LAST_SYNC: std::sync::Mutex<Option<(std::time::Instant, [u64; 4])>> = std::sync::Mutex::new(Option::None);
+                                let mut sync = LAST_SYNC.lock().unwrap();
+                                let now = std::time::Instant::now();
+
+                                if let Some((last_time, last_positions)) = &*sync {
+                                    if last_positions[deck_idx] == t.deck_positions[deck_idx] {
+                                        // Still in the same telemetry block, interpolate forward
+                                        let elapsed = now.duration_since(*last_time).as_secs_f64();
+                                        if elapsed < 1.0 {
+                                            raw_pos + elapsed * t.sample_rate as f64 * playback_rate
+                                        } else {
+                                            raw_pos
+                                        }
+                                    } else {
+                                        // New telemetry block received, update sync point and use raw position
+                                        *sync = Some((now, t.deck_positions));
+                                        raw_pos
+                                    }
+                                } else {
+                                    // First initialization
+                                    *sync = Some((now, t.deck_positions));
+                                    raw_pos
+                                }
+                            } else {
+                                raw_pos
+                            };
+
+                            // Calculate elegant tempo-synced rotational trajectory (e.g. 1 turn per 20,000 samples)
+                            ((interpolated_pos * 0.0001) % (std::f64::consts::PI * 2.0)) as f32
+                        } else {
+                            0.0
+                        };
 
                         let (rect, _response) = ui.allocate_exact_size(Vec2::splat(120.0), Sense::click_and_drag());
 

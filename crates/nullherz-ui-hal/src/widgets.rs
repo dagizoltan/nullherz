@@ -21,8 +21,8 @@ pub fn render_knob(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive
         let radius = rect.width() / 2.0;
 
         // --- GEOMETRY CACHING ---
-        // Cache static parts of the knob (Rim, Face, Shadow)
-        let cache_id = ui.make_persistent_id("knob_base_v2");
+        // Cache static parts of the knob (Rim, Face, Shadow) using a unique persistent ID per widget
+        let cache_id = response.id.with("knob_base");
         let shapes = ui.ctx().memory_mut(|mem| {
             mem.data.get_temp::<Arc<Vec<egui::Shape>>>(cache_id).unwrap_or_else(|| {
                  let mut s = Vec::new();
