@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use audio_core::Telemetry;
 use nullherz_traits::Command;
 use std::sync::mpsc;
+use nullherz_dna::GeneticLibrary;
 
 mod widgets;
 mod views;
@@ -195,16 +196,55 @@ impl InspectorApp {
             quantize_enabled: true,
             master_gain: 1.0,
             crossfader_pos: 0.5,
-            library_db: nullherz_dna::LibraryDatabase::load("library.redb").unwrap_or_else(|e| {
-                eprintln!("Warning: Failed to load library.redb ({}). Using transient storage.", e);
-                nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase")
-            }),
+            library_db: {
+                let db = nullherz_dna::LibraryDatabase::load("library.redb").unwrap_or_else(|e| {
+                    eprintln!("Warning: Failed to load library.redb ({}). Using transient storage.", e);
+                    nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase")
+                });
+                // Seed demo tracks if database is empty
+                if let Ok(tracks) = db.list_tracks() {
+                    if tracks.is_empty() {
+                        let mut metadata_a = nullherz_traits::SampleMetadata::new_empty();
+                        metadata_a.bpm = 120.0;
+                        metadata_a.total_samples = 44100 * 60 * 3; // 3 minutes
+                        metadata_a.root_key = Some(5.0);
+                        let track_a = nullherz_dna::LibraryTrack {
+                            id: 1,
+                            path: "tracks/track_a.wav".to_string(),
+                            title: "Demo Track A".to_string(),
+                            artist: "Nullherz".to_string(),
+                            album: "Demo Album".to_string(),
+                            genre: "Techno".to_string(),
+                            energy_level: 0.8,
+                            metadata: std::sync::Arc::new(metadata_a),
+                        };
+                        let _ = db.save_track(&track_a);
+
+                        let mut metadata_b = nullherz_traits::SampleMetadata::new_empty();
+                        metadata_b.bpm = 124.0;
+                        metadata_b.total_samples = 44100 * 60 * 3; // 3 minutes
+                        metadata_b.root_key = Some(8.0);
+                        let track_b = nullherz_dna::LibraryTrack {
+                            id: 2,
+                            path: "tracks/track_b.wav".to_string(),
+                            title: "Demo Track B".to_string(),
+                            artist: "Nullherz".to_string(),
+                            album: "Demo Album".to_string(),
+                            genre: "House".to_string(),
+                            energy_level: 0.6,
+                            metadata: std::sync::Arc::new(metadata_b),
+                        };
+                        let _ = db.save_track(&track_b);
+                    }
+                }
+                db
+            },
             active_crate: None,
             search_query: String::new(),
             is_streaming: false,
             active_right_tab: Some(RightTab::Library),
             master_deck: Some(0),
-            now_playing: [None, None, None, None],
+            now_playing: [Some(1), Some(2), None, None],
             global_bpm: 128.0,
             macros: [0.0; 8],
             _macro_names: std::array::from_fn(|i| format!("MACRO {}", i + 1)),
@@ -250,7 +290,7 @@ impl InspectorApp {
             damped_master_peaks: [0.0; 2],
             discovered_sidecars: vec![],
             personality_macro_mode: false,
-            focused_deck: 0,
+            focused_deck: 999, // All decks start closed/collapsed
             track_mutes: [false; 16],
             track_solos: [false; 16],
             record_automation: false,

@@ -28,11 +28,11 @@ pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_col
 
         ui.add_space(8.0);
 
-        // Fader & Meter
+        // Fader & Meter (Compact height)
         ui.horizontal(|ui| {
             let peak = app.damped_peaks[i];
-            widgets::render_vu_meter(ui, peak, app.channel_peak_hold[i], deck_color, 160.0);
-            if widgets::render_fader(ui, &mut app.channel_faders[i], 0.0..=1.0, deck_color, 160.0, 22.0).changed() {
+            widgets::render_vu_meter(ui, peak, app.channel_peak_hold[i], deck_color, 100.0);
+            if widgets::render_fader(ui, &mut app.channel_faders[i], 0.0..=1.0, deck_color, 100.0, 18.0).changed() {
                 send_deck_param(app, deck_id, nullherz_traits::DeckParamType::Gain, app.channel_faders[i]);
             }
         });

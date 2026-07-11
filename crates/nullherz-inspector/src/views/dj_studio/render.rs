@@ -173,8 +173,8 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
                         transport::render_deck_transport(app, ui, i);
                         ui.add_space(12.0);
 
-                        // Vertical Divider
-                        let (line_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 140.0), egui::Sense::hover());
+                        // Vertical Divider (Compact height)
+                        let (line_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 100.0), egui::Sense::hover());
                         ui.painter().rect_filled(line_rect, Rounding::ZERO, Color32::from_rgb(22, 22, 26));
                         ui.add_space(12.0);
 
@@ -182,8 +182,8 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
                         performance::render_deck_performance(app, ui, i, telemetry);
                         ui.add_space(12.0);
 
-                        // Vertical Divider
-                        let (line_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 140.0), egui::Sense::hover());
+                        // Vertical Divider (Compact height)
+                        let (line_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 100.0), egui::Sense::hover());
                         ui.painter().rect_filled(line_rect, Rounding::ZERO, Color32::from_rgb(22, 22, 26));
                         ui.add_space(12.0);
 
@@ -191,8 +191,8 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
                         mixer::render_deck_mixer(app, ui, i, deck_color);
                         ui.add_space(12.0);
 
-                        // Vertical Divider
-                        let (line_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 140.0), egui::Sense::hover());
+                        // Vertical Divider (Compact height)
+                        let (line_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 100.0), egui::Sense::hover());
                         ui.painter().rect_filled(line_rect, Rounding::ZERO, Color32::from_rgb(22, 22, 26));
                         ui.add_space(12.0);
 
