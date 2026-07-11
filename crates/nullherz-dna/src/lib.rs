@@ -448,9 +448,6 @@ impl PeerSync for CloudPeerSync {
                             println!("Cloud: DNA signature verification FAILED from peer {}", peer);
                         }
                     }
-                } else if let Ok(dna) = serde_json::from_slice(&buffer) {
-                    // Fallback for non-signed DNA (Alpha compatibility)
-                    return Some(dna);
                 }
             }
         }

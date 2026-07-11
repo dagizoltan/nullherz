@@ -50,18 +50,34 @@ impl MoogLadder {
 
 impl Filter for MoogLadder {
     fn process_sample(&mut self, input: f32) -> f32 {
-        // Simple tanh-based saturation for non-linear feedback
-        let input_driven = (input * self.drive).tanh();
-
         let g = self.g;
         let h = self.h;
         let res = self.resonance;
+        let drive = self.drive;
 
-        // Feedback path with saturation
-        let fb = (self.s[3] * res).tanh();
-        let u = (input_driven - fb) / (1.0 + g.powi(4) * res);
+        // STAGE 9: Newton-Raphson Iterative Solver for Moog Ladder
+        // Resolves the implicit equation: y = tanh(drive * (input - res * y4))
+        // we solve for the feedback term 'u' at the input of the first stage.
+        let solver = crate::util::IterativeSolver::new(4, 1e-4);
 
-        // 4 cascaded integrators
+        let s = self.s;
+        let u = solver.solve(input,
+            |x| {
+                // Calculate y4 given input 'x'
+                let mut v = x;
+                for i in 0..4 {
+                    v = s[i] + (v - s[i]) * h;
+                }
+                // f(x) = x - (input - res * tanh(v))
+                x - ((input * drive).tanh() - (v * res).tanh())
+            },
+            |_x| {
+                // Derivative approximation (simplified)
+                1.0 + g.powi(4) * res
+            }
+        );
+
+        // Apply stages with resolved feedback
         let mut x = u;
         for i in 0..4 {
             let v = (x - self.s[i]) * h;

@@ -579,6 +579,134 @@ impl Default for NodeAssignmentArray {
     }
 }
 
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
+#[repr(u32)]
+pub enum TemporalShape {
+    Sine,
+    Saw,
+    Square,
+    Triangle,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
+pub struct ModMapping {
+    pub macro_id: u32,
+    pub target_id: u64,
+    pub param_id: u32,
+    pub scaling: f32,
+    pub ramp_duration_samples: u32,
+    pub temporal_shape: Option<TemporalShape>,
+    pub active: bool,
+}
+
+impl Default for ModMapping {
+    fn default() -> Self {
+        Self {
+            macro_id: 0,
+            target_id: 0,
+            param_id: 0,
+            scaling: 1.0,
+            ramp_duration_samples: 0,
+            temporal_shape: None,
+            active: false,
+        }
+    }
+}
+
+pub const MAX_MOD_MAPPINGS: usize = 128;
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
+pub struct ModulationMatrix {
+    #[serde(with = "BigArray")]
+    pub mappings: [ModMapping; MAX_MOD_MAPPINGS],
+}
+
+impl Default for ModulationMatrix {
+    fn default() -> Self {
+        Self {
+            mappings: [ModMapping::default(); MAX_MOD_MAPPINGS],
+        }
+    }
+}
+
+impl ModulationMatrix {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_mapping(&mut self, macro_id: u32, target_id: u64, param_id: u32, scaling: f32, ramp_duration_samples: u32, shape: Option<TemporalShape>) {
+        // First try to find an existing mapping to update
+        for mapping in self.mappings.iter_mut() {
+            if mapping.active && mapping.macro_id == macro_id && mapping.target_id == target_id && mapping.param_id == param_id {
+                mapping.scaling = scaling;
+                mapping.ramp_duration_samples = ramp_duration_samples;
+                mapping.temporal_shape = shape;
+                return;
+            }
+        }
+
+        // Otherwise find a free slot
+        for mapping in self.mappings.iter_mut() {
+            if !mapping.active {
+                mapping.macro_id = macro_id;
+                mapping.target_id = target_id;
+                mapping.param_id = param_id;
+                mapping.scaling = scaling;
+                mapping.ramp_duration_samples = ramp_duration_samples;
+                mapping.temporal_shape = shape;
+                mapping.active = true;
+                return;
+            }
+        }
+    }
+
+    pub fn remove_mapping(&mut self, macro_id: u32, target_id: u64, param_id: u32) {
+        for mapping in self.mappings.iter_mut() {
+            if mapping.active && mapping.macro_id == macro_id && mapping.target_id == target_id && mapping.param_id == param_id {
+                mapping.active = false;
+            }
+        }
+    }
+
+    pub fn expand_macro<F>(&self, macro_id: u32, value: f32, beat_pos: f64, mut f: F)
+    where
+        F: FnMut(u64, u32, f32, u32),
+    {
+        for mapping in self.mappings.iter() {
+            if mapping.active && mapping.macro_id == macro_id {
+                let mut val = value * mapping.scaling;
+
+                if let Some(shape) = mapping.temporal_shape {
+                    let phase = (beat_pos % 1.0) as f32; // 1-beat cycle
+                    let modifier = match shape {
+                        TemporalShape::Sine => (phase * 2.0 * std::f32::consts::PI).sin(),
+                        TemporalShape::Saw => phase * 2.0 - 1.0,
+                        TemporalShape::Square => {
+                            if phase < 0.5 {
+                                1.0
+                            } else {
+                                -1.0
+                            }
+                        }
+                        TemporalShape::Triangle => {
+                            if phase < 0.5 {
+                                phase * 4.0 - 1.0
+                            } else {
+                                1.0 - (phase - 0.5) * 4.0
+                            }
+                        }
+                    };
+                    val *= modifier;
+                }
+                f(mapping.target_id, mapping.param_id, val, mapping.ramp_duration_samples);
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct GraphTopology {
     #[serde(with = "BigArray")]
@@ -1559,5 +1687,44 @@ mod tests {
         let dna_binary = dna.to_binary().unwrap();
         let dna_decoded = SoundDNA::from_binary(&dna_binary).unwrap();
         assert_eq!(dna, dna_decoded);
+    }
+
+    #[test]
+    fn test_modulation_matrix_add_remove() {
+        let mut matrix = ModulationMatrix::new();
+        matrix.add_mapping(1, 100, 2, 0.5, 1024, Some(TemporalShape::Sine));
+
+        assert!(matrix.mappings[0].active);
+        assert_eq!(matrix.mappings[0].macro_id, 1);
+        assert_eq!(matrix.mappings[0].target_id, 100);
+        assert_eq!(matrix.mappings[0].param_id, 2);
+        assert_eq!(matrix.mappings[0].scaling, 0.5);
+        assert_eq!(matrix.mappings[0].temporal_shape, Some(TemporalShape::Sine));
+
+        // Update existing
+        matrix.add_mapping(1, 100, 2, 0.7, 512, None);
+        assert!(matrix.mappings[0].active);
+        assert_eq!(matrix.mappings[0].scaling, 0.7);
+        assert_eq!(matrix.mappings[0].temporal_shape, None);
+
+        // Remove
+        matrix.remove_mapping(1, 100, 2);
+        assert!(!matrix.mappings[0].active);
+    }
+
+    #[test]
+    fn test_modulation_matrix_expansion() {
+        let mut matrix = ModulationMatrix::new();
+        matrix.add_mapping(1, 100, 2, 0.5, 1024, None);
+        matrix.add_mapping(1, 101, 3, 2.0, 0, None);
+
+        let mut results = Vec::new();
+        matrix.expand_macro(1, 0.8, 0.0, |target, param, val, ramp| {
+            results.push((target, param, val, ramp));
+        });
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0], (100, 2, 0.4, 1024));
+        assert_eq!(results[1], (101, 3, 1.6, 0));
     }
 }

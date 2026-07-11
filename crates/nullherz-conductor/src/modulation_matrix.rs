@@ -54,6 +54,11 @@ impl ModulationMatrix {
         }
     }
 
+    pub fn update_macro_value(&mut self, _macro_id: u32, _value: f32) {
+        // Conductor no longer performs real-time expansion.
+        // This method can be used for UI state persistence or telemetry.
+    }
+
     pub fn expand_macro(&self, macro_id: u32, value: f32, beat_pos: f64) -> Vec<Command> {
         let mut expanded = Vec::new();
         if let Some(mappings) = self.mappings.get(&macro_id) {

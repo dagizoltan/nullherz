@@ -235,6 +235,11 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             &self.health_signal,
         );
 
+        // Audit Fix §0: Drain and commit buffered topology mutations to the live graph.
+        if let Some(graph_concrete) = graph.as_any_mut().downcast_mut::<crate::processors::graph::ProcessorGraph>() {
+            graph_concrete.commit_graph();
+        }
+
         let block_start_samples = self.transport.absolute_samples;
 
         self.kernel.execute(
