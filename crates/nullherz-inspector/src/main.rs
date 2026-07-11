@@ -478,7 +478,7 @@ impl eframe::App for InspectorApp {
         if let Some(tab) = self.active_right_tab {
             egui::SidePanel::right("right_sidebar")
                 .resizable(true)
-                .default_width(300.0)
+                .default_width(450.0)
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         if ui.selectable_label(self.active_right_tab == Some(RightTab::Library), "LIBRARY").clicked() {
