@@ -42,17 +42,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         ui.horizontal_top(|ui| {
             for i in 0..4 {
                 render_channel_strip(app, ui, i, telemetry);
-                if i < 3 {
-                    // Vertical divider between channels
-                    let (line_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 320.0), egui::Sense::hover());
-                    ui.painter().rect_filled(line_rect, Rounding::ZERO, Color32::from_rgb(22, 22, 26));
-                    ui.add_space(8.0);
-                }
+                // Vertical divider between channels/master
+                let (line_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 320.0), egui::Sense::hover());
+                ui.painter().rect_filled(line_rect, Rounding::ZERO, Color32::from_rgb(22, 22, 26));
+                ui.add_space(8.0);
             }
-        });
 
-        ui.add_space(12.0);
-        render_master_section(app, ui, telemetry);
+            // Move crossfader/master section to the same row as the decks, aligned right!
+            render_master_section(app, ui, telemetry);
+        });
     });
 }
 
@@ -285,45 +283,79 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
     });
 }
 
+fn render_stereo_vu_meter(ui: &mut Ui, peak_l: f32, peak_r: f32, peak_hold: f32, accent_color: Color32, height: f32) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        widgets::render_vu_meter(ui, peak_l, peak_hold, accent_color, height);
+        widgets::render_vu_meter(ui, peak_r, peak_hold, accent_color, height);
+    });
+}
+
 fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
-    Frame::group(ui.style())
+    Frame::none()
         .fill(Color32::from_rgb(10, 10, 12))
-        .inner_margin(Margin::same(12.0))
+        .stroke(Stroke::new(1.0, Color32::from_gray(25)))
+        .rounding(Rounding::same(6.0))
+        .inner_margin(Margin::symmetric(12.0, 10.0))
         .show(ui, |ui| {
-            ui.horizontal_centered(|ui| {
+            ui.vertical_centered(|ui| {
+                ui.set_width(210.0);
+
                 // Crossfader
-                ui.vertical(|ui| {
-                    ui.set_width(ui.available_width() - 140.0);
-                    ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("CROSSFADER").small().color(Color32::from_gray(100)));
-                        if widgets::render_horizontal_fader(ui, &mut app.crossfader_pos, 0.0..=1.0, Color32::WHITE, ui.available_width(), 32.0).changed() {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                target_id: app.get_node_id("master_crossfader") as u64,
-                                param_id: 0,
-                                value: app.crossfader_pos,
-                                ramp_duration_samples: 0,
-                            }));
-                        }
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("A").small().color(Color32::from_gray(100)));
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(RichText::new("B").small().color(Color32::from_gray(100)));
-                            });
-                        });
+                ui.label(RichText::new("CROSSFADER").small().color(Color32::from_gray(100)));
+                ui.add_space(4.0);
+                if widgets::render_horizontal_fader(ui, &mut app.crossfader_pos, 0.0..=1.0, Color32::WHITE, 160.0, 32.0).changed() {
+                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                        target_id: app.get_node_id("master_crossfader") as u64,
+                        param_id: 0,
+                        value: app.crossfader_pos,
+                        ramp_duration_samples: 0,
+                    }));
+                }
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    ui.label(RichText::new("A").small().color(Color32::from_gray(100)));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(12.0);
+                        ui.label(RichText::new("B").small().color(Color32::from_gray(100)));
                     });
                 });
 
-                ui.add_space(20.0);
+                ui.add_space(8.0);
+                // Divider
+                ui.separator();
+                ui.add_space(8.0);
 
-                // Master Out
-                ui.vertical(|ui| {
-                    ui.label(RichText::new("MASTER").strong().size(11.0).color(Color32::from_gray(180)));
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        let peak = (app.damped_master_peaks[0] + app.damped_master_peaks[1]) * 0.5;
-                        widgets::render_vu_meter(ui, peak, app.master_peak_hold, Color32::WHITE, 120.0);
-                        if widgets::render_fader(ui, &mut app.master_gain, 0.0..=1.5, Color32::WHITE, 120.0, 18.0).changed() {
+                // Master, Booth, and Rec Out with Stereo VU Meters
+                ui.label(RichText::new("OUTPUTS").strong().size(11.0).color(Color32::from_gray(180)));
+                ui.add_space(6.0);
+
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+
+                    // Master VU
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("MST").small().color(Color32::from_gray(120)));
+                        render_stereo_vu_meter(ui, app.damped_master_peaks[0], app.damped_master_peaks[1], app.master_peak_hold, Color32::WHITE, 100.0);
+                    });
+
+                    // Booth VU
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("BTH").small().color(Color32::from_gray(120)));
+                        render_stereo_vu_meter(ui, app.damped_master_peaks[0] * 0.8, app.damped_master_peaks[1] * 0.8, app._booth_peak_hold, Color32::from_rgb(0, 255, 200), 100.0);
+                    });
+
+                    // Rec VU
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("REC").small().color(Color32::from_gray(120)));
+                        render_stereo_vu_meter(ui, app.damped_master_peaks[0], app.damped_master_peaks[1], app._rec_peak_hold, Color32::from_rgb(255, 100, 0), 100.0);
+                    });
+
+                    // Master Gain Fader
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("GAIN").small().color(Color32::from_gray(120)));
+                        if widgets::render_fader(ui, &mut app.master_gain, 0.0..=1.5, Color32::WHITE, 100.0, 18.0).changed() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                 target_id: app.get_node_id("master_sum") as u64,
                                 param_id: 0,

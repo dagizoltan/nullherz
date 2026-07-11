@@ -4,6 +4,11 @@ use audio_core::Telemetry;
 use nullherz_dna::GeneticLibrary;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
+    if app.focused_deck >= 4 {
+        app.focused_deck = 0;
+    }
+    let deck_char = (b'A' + app.focused_deck as u8) as char;
+
     ui.horizontal(|ui| {
         ui.heading("Precision Media Player");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -73,9 +78,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 if ui.add(play_btn.min_size(Vec2::splat(60.0))).clicked() {
                     app.player_is_playing = !app.player_is_playing;
                     if app.player_is_playing {
-                        let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Resume));
+                        let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id: deck_char }));
                     } else {
-                        let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Pause));
+                        let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::StopDeck { deck_id: deck_char }));
                     }
                 }
                 ui.add_space(10.0);
