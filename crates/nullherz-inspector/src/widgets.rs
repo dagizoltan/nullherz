@@ -1,27 +1,52 @@
 use egui::Color32;
+use nullherz_ui_hal::Theme;
 
 pub fn render_knob(_ui: &mut egui::Ui, _value: &mut f32, _range: std::ops::RangeInclusive<f32>, _label: &str, _accent_color: Color32) -> egui::Response {
     nullherz_ui_hal::widgets::render_knob(_ui, _value, _range, _label, _accent_color)
+}
+
+pub fn render_knob_themed(ui: &mut egui::Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, label: &str, theme: &Theme) -> egui::Response {
+    nullherz_ui_hal::widgets::render_knob_themed(ui, value, range, label, theme)
 }
 
 pub fn render_spectrum_analyzer(ui: &mut egui::Ui, spectrum: &[f32; 128], accent_color: Color32, height: f32) {
     nullherz_ui_hal::widgets::render_spectrum_analyzer(ui, spectrum, accent_color, height)
 }
 
+pub fn render_spectrum_analyzer_themed(ui: &mut egui::Ui, spectrum: &[f32; 128], theme: &Theme, height: f32) {
+    nullherz_ui_hal::widgets::render_spectrum_analyzer_themed(ui, spectrum, theme, height)
+}
+
 pub fn render_goniometer(ui: &mut egui::Ui, pts: &[f32; 128], size: f32, accent_color: Color32) {
     nullherz_ui_hal::widgets::render_goniometer(ui, pts, size, accent_color)
+}
+
+pub fn render_goniometer_themed(ui: &mut egui::Ui, pts: &[f32; 128], size: f32, theme: &Theme) {
+    nullherz_ui_hal::widgets::render_goniometer_themed(ui, pts, size, theme)
 }
 
 pub fn render_vu_meter(ui: &mut egui::Ui, peak: f32, peak_hold: f32, accent_color: Color32, height: f32) {
     nullherz_ui_hal::widgets::render_vu_meter(ui, peak, peak_hold, accent_color, height)
 }
 
+pub fn render_vu_meter_themed(ui: &mut egui::Ui, peak: f32, peak_hold: f32, theme: &Theme, height: f32) {
+    nullherz_ui_hal::widgets::render_vu_meter_themed(ui, peak, peak_hold, theme, height)
+}
+
 pub fn render_fader(ui: &mut egui::Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, accent_color: Color32, height: f32, handle_h: f32) -> egui::Response {
     nullherz_ui_hal::widgets::render_fader(ui, value, range, accent_color, height, handle_h)
 }
 
+pub fn render_fader_themed(ui: &mut egui::Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, theme: &Theme, height: f32, handle_h: f32) -> egui::Response {
+    nullherz_ui_hal::widgets::render_fader_themed(ui, value, range, theme, height, handle_h)
+}
+
 pub fn render_horizontal_fader(ui: &mut egui::Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, accent_color: Color32, width: f32, handle_w: f32) -> egui::Response {
     nullherz_ui_hal::widgets::render_horizontal_fader(ui, value, range, accent_color, width, handle_w)
+}
+
+pub fn render_horizontal_fader_themed(ui: &mut egui::Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, theme: &Theme, width: f32, handle_w: f32) -> egui::Response {
+    nullherz_ui_hal::widgets::render_horizontal_fader_themed(ui, value, range, theme, width, handle_w)
 }
 
 pub fn format_duration(samples: u64, sample_rate: f32) -> String {

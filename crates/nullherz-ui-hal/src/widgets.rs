@@ -297,6 +297,30 @@ pub fn render_horizontal_fader(ui: &mut Ui, value: &mut f32, range: std::ops::Ra
     response
 }
 
+pub fn render_knob_themed(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, label: &str, theme: &super::Theme) -> Response {
+    render_knob(ui, value, range, label, theme.accent)
+}
+
+pub fn render_spectrum_analyzer_themed(ui: &mut Ui, spectrum: &[f32; 128], theme: &super::Theme, height: f32) {
+    render_spectrum_analyzer(ui, spectrum, theme.accent, height);
+}
+
+pub fn render_goniometer_themed(ui: &mut Ui, pts: &[f32; 128], size: f32, theme: &super::Theme) {
+    render_goniometer(ui, pts, size, theme.accent);
+}
+
+pub fn render_vu_meter_themed(ui: &mut Ui, peak: f32, peak_hold: f32, theme: &super::Theme, height: f32) {
+    render_vu_meter(ui, peak, peak_hold, theme.accent, height);
+}
+
+pub fn render_fader_themed(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, theme: &super::Theme, height: f32, handle_h: f32) -> Response {
+    render_fader(ui, value, range, theme.accent, height, handle_h)
+}
+
+pub fn render_horizontal_fader_themed(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, theme: &super::Theme, width: f32, handle_w: f32) -> Response {
+    render_horizontal_fader(ui, value, range, theme.accent, width, handle_w)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

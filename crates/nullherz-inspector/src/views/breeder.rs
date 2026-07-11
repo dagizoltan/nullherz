@@ -1,4 +1,4 @@
-use egui::{Ui, Vec2, Color32, Stroke, Sense, RichText};
+use egui::{Ui, Vec2, Color32, Stroke, Sense, RichText, Rounding};
 use nullherz_traits::{Command, DnaCommand};
 use nullherz_dna::GeneticLibrary;
 
@@ -28,8 +28,9 @@ impl BreederView {
     }
 
     pub fn show(ui: &mut Ui, state: &mut BreederView, telemetry: &Option<audio_core::Telemetry>, app: &mut crate::InspectorApp) {
-        ui.heading("DNA Breeder");
-        ui.add_space(10.0);
+        let theme = app.theme;
+        ui.heading(RichText::new("DNA Breeder").size(theme.type_heading));
+        ui.add_space(theme.space_sm);
 
         if let Some(parent_idx) = state.selecting_parent {
             egui::Window::new(format!("Select Parent {}", if parent_idx == 0 { "A" } else { "B" }))
@@ -64,7 +65,7 @@ impl BreederView {
 
                         ui.horizontal(|ui| {
                             if let Some(s) = similarity {
-                                let color = if s > 0.8 { app.theme.accent } else if s > 0.5 { Color32::YELLOW } else { Color32::GRAY };
+                                let color = if s > 0.8 { theme.accent } else if s > 0.5 { theme.warning } else { theme.text_secondary };
                                 ui.add(egui::ProgressBar::new(s).desired_width(60.0).fill(color).text(format!("{:.0}%", s * 100.0)));
                             }
 
@@ -87,48 +88,48 @@ impl BreederView {
         ui.horizontal(|ui| {
             // Parent A Selection
             ui.vertical(|ui| {
-                ui.label("Parent A");
+                ui.label(RichText::new("Parent A").size(theme.type_caption).color(theme.text_secondary));
                 let label = state.parent_a_id.and_then(|id| app.library_db.get_track(id).ok().flatten())
                     .map(|t| t.title).unwrap_or_else(|| "Select Sample".to_string());
 
-                if ui.button(label).clicked() {
+                if ui.button(RichText::new(label).size(theme.type_label)).clicked() {
                     state.selecting_parent = Some(0);
                 }
             });
 
-            ui.add_space(40.0);
-            ui.label(RichText::new("X").size(20.0).strong());
-            ui.add_space(40.0);
+            ui.add_space(theme.space_xl);
+            ui.label(RichText::new("X").size(theme.type_display).strong().color(theme.text_primary));
+            ui.add_space(theme.space_xl);
 
             // Parent B Selection
             ui.vertical(|ui| {
-                ui.label("Parent B");
+                ui.label(RichText::new("Parent B").size(theme.type_caption).color(theme.text_secondary));
                 let label = state.parent_b_id.and_then(|id| app.library_db.get_track(id).ok().flatten())
                     .map(|t| t.title).unwrap_or_else(|| "Select Sample".to_string());
 
-                if ui.button(label).clicked() {
+                if ui.button(RichText::new(label).size(theme.type_label)).clicked() {
                     state.selecting_parent = Some(1);
                 }
             });
         });
 
-        ui.add_space(30.0);
+        ui.add_space(theme.space_lg);
 
         ui.horizontal(|ui| {
             // 2D Transfusion Pad (Industrial XY Pad)
             ui.vertical(|ui| {
-                ui.label("Transfusion Pad (X: Spectral, Y: Rhythmic)");
+                ui.label(RichText::new("Transfusion Pad (X: Spectral, Y: Rhythmic)").size(theme.type_body));
                 let (rect, response) = ui.allocate_at_least(Vec2::splat(250.0), Sense::drag());
 
-                ui.painter().rect_filled(rect, 4.0, Color32::from_black_alpha(150));
-                ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_gray(80)));
+                ui.painter().rect_filled(rect, theme.radius_md, theme.bg_inset);
+                ui.painter().rect_stroke(rect, theme.radius_md, Stroke::new(1.0, theme.border));
 
                 // Grid lines (Industrial Look)
                 for i in 1..4 {
                     let x = rect.left() + i as f32 * (rect.width() / 4.0);
-                    ui.painter().vline(x, rect.y_range(), Stroke::new(0.5, Color32::from_gray(50)));
+                    ui.painter().vline(x, rect.y_range(), Stroke::new(0.5, theme.border));
                     let y = rect.top() + i as f32 * (rect.height() / 4.0);
-                    ui.painter().hline(rect.x_range(), y, Stroke::new(0.5, Color32::from_gray(50)));
+                    ui.painter().hline(rect.x_range(), y, Stroke::new(0.5, theme.border));
                 }
 
                 if response.dragged() {
@@ -140,18 +141,18 @@ impl BreederView {
                 }
 
                 let handle_pos = rect.left_top() + Vec2::new(state.transfusion_bias_x * rect.width(), (1.0 - state.transfusion_bias_y) * rect.height());
-                ui.painter().circle_filled(handle_pos, 8.0, app.theme.accent);
-                ui.painter().circle_stroke(handle_pos, 8.0, Stroke::new(2.0, Color32::WHITE));
+                ui.painter().circle_filled(handle_pos, 8.0, theme.accent);
+                ui.painter().circle_stroke(handle_pos, 8.0, Stroke::new(2.0, theme.text_primary));
             });
 
-            ui.add_space(20.0);
+            ui.add_space(theme.space_md);
 
             // Interpolated DNA Preview (Genetic Blueprint)
             ui.vertical(|ui| {
-                ui.label("Genetic Blueprint (Latent Space Preview)");
+                ui.label(RichText::new("Genetic Blueprint (Latent Space Preview)").size(theme.type_body));
                 let (preview_rect, _) = ui.allocate_at_least(Vec2::new(300.0, 150.0), Sense::hover());
-                ui.painter().rect_filled(preview_rect, 2.0, Color32::from_rgb(15, 15, 20));
-                ui.painter().rect_stroke(preview_rect, 2.0, Stroke::new(1.0, Color32::from_gray(40)));
+                ui.painter().rect_filled(preview_rect, theme.radius_sm, theme.bg_inset);
+                ui.painter().rect_stroke(preview_rect, theme.radius_sm, Stroke::new(1.0, theme.border));
 
                 if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
                     if let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
@@ -172,58 +173,58 @@ impl BreederView {
                                 egui::Rect::from_min_max(egui::pos2(x + spacing, center_y), egui::pos2(x + bin_width - spacing, center_y + h))
                             };
 
-                            let color = if i < 8 { Color32::from_rgb(0, 200, 255) } else { Color32::from_rgb(255, 100, 0) };
+                            let color = if i < 8 { theme.deck_colors[1] } else { theme.deck_colors[2] };
                             ui.painter().rect_filled(r, 1.0, color.gamma_multiply(0.8));
                         }
-                        ui.painter().hline(preview_rect.x_range(), preview_rect.center().y, Stroke::new(1.0, Color32::from_gray(60)));
+                        ui.painter().hline(preview_rect.x_range(), preview_rect.center().y, Stroke::new(1.0, theme.border));
                     }
                 } else {
-                    ui.painter().text(preview_rect.center(), egui::Align2::CENTER_CENTER, "SELECT PARENTS TO VIEW GENETIC BLUEPRINT", egui::FontId::monospace(10.0), Color32::GRAY);
+                    ui.painter().text(preview_rect.center(), egui::Align2::CENTER_CENTER, "SELECT PARENTS TO VIEW GENETIC BLUEPRINT", egui::FontId::monospace(theme.type_caption), theme.text_secondary);
                 }
             });
 
-            ui.add_space(20.0);
+            ui.add_space(theme.space_md);
 
             // Visualizers (Real-time Feedback)
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Real-time Evolution Monitor");
+                    ui.label(RichText::new("Real-time Evolution Monitor").size(theme.type_body));
                 });
 
                 ui.group(|ui| {
                     if telemetry.is_some() {
-                        crate::widgets::render_spectrum_analyzer(ui, &app.damped_spectrum, app.theme.accent, 100.0);
+                        crate::widgets::render_spectrum_analyzer(ui, &app.damped_spectrum, theme.accent, 100.0);
                     } else {
                         ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
-                        ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "NO SIGNAL", egui::FontId::proportional(12.0), Color32::GRAY);
+                        ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "NO SIGNAL", egui::FontId::proportional(theme.type_caption), theme.text_secondary);
                     }
                 });
 
-                ui.add_space(10.0);
+                ui.add_space(theme.space_sm);
 
                 ui.group(|ui| {
                     if telemetry.is_some() {
-                        crate::widgets::render_goniometer(ui, &app.damped_goniometer, 200.0, app.theme.accent);
+                        crate::widgets::render_goniometer(ui, &app.damped_goniometer, 200.0, theme.accent);
                     } else {
                         ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
-                        ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "GONIOMETER", egui::FontId::proportional(12.0), Color32::GRAY);
+                        ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "GONIOMETER", egui::FontId::proportional(theme.type_caption), theme.text_secondary);
                     }
                 });
             });
         });
 
-        ui.add_space(20.0);
+        ui.add_space(theme.space_md);
         ui.group(|ui| {
             ui.horizontal(|ui| {
-                ui.label(format!("Spectral Bias: {:.2}", state.transfusion_bias_x));
-                ui.add_space(20.0);
-                ui.label(format!("Rhythmic Bias: {:.2}", state.transfusion_bias_y));
+                ui.label(RichText::new(format!("Spectral Bias: {:.2}", state.transfusion_bias_x)).size(theme.type_caption));
+                ui.add_space(theme.space_md);
+                ui.label(RichText::new(format!("Rhythmic Bias: {:.2}", state.transfusion_bias_y)).size(theme.type_caption));
             });
         });
 
-        ui.add_space(20.0);
+        ui.add_space(theme.space_md);
         ui.horizontal(|ui| {
-            if ui.button(RichText::new("🧬 EVOLVE PERMANENTLY").strong().size(16.0)).clicked() {
+            if ui.button(RichText::new("🧬 EVOLVE PERMANENTLY").strong().size(theme.type_label)).clicked() {
                 if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
                     let cmd = Command::Resource(nullherz_traits::ResourceCommand::CommitBreeding {
                         parent_a_id: id_a,
@@ -234,7 +235,7 @@ impl BreederView {
                 }
             }
 
-            if ui.button(RichText::new("🎹 MUTATE PATTERN").strong().size(16.0)).clicked() {
+            if ui.button(RichText::new("🎹 MUTATE PATTERN").strong().size(theme.type_label)).clicked() {
                  if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
                      if let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
                          let child_rhythmic = nullherz_dna::transfuse_dna(&track_a.metadata.dna, &track_b.metadata.dna, state.transfusion_bias_y).rhythmic;

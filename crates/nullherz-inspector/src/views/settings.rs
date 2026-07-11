@@ -2,8 +2,9 @@ use egui::{Ui, Color32, Frame, RichText};
 use crate::{InspectorApp, SettingsTab};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
-    ui.heading("System Settings");
-    ui.add_space(20.0);
+    let theme = app.theme;
+    ui.heading(RichText::new("System Settings").size(theme.type_heading));
+    ui.add_space(theme.space_md);
 
     ui.horizontal(|ui| {
         ui.selectable_value(&mut app.active_settings_tab, SettingsTab::General, "GENERAL");
@@ -13,7 +14,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         ui.selectable_value(&mut app.active_settings_tab, SettingsTab::Calibration, "CALIBRATION");
     });
     ui.separator();
-    ui.add_space(10.0);
+    ui.add_space(theme.space_sm);
 
     match app.active_settings_tab {
         SettingsTab::General => render_general(app, ui),
@@ -23,15 +24,16 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         SettingsTab::Calibration => render_calibration(app, ui),
     }
 
-    ui.add_space(30.0);
+    ui.add_space(theme.space_xl);
     ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-        if ui.button(RichText::new("STOP ENGINE").color(Color32::RED)).clicked() {
+        if ui.button(RichText::new("STOP ENGINE").color(theme.danger).strong().size(theme.type_label)).clicked() {
             let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop));
         }
     });
 }
 
 fn render_general(app: &mut InspectorApp, ui: &mut Ui) {
+    let theme = app.theme;
     ui.strong("Global Transport");
     Frame::group(ui.style()).show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -48,9 +50,10 @@ fn render_general(app: &mut InspectorApp, ui: &mut Ui) {
 }
 
 fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
+    let theme = app.theme;
     ui.strong("Audio Engine Configuration");
     Frame::group(ui.style()).show(ui, |ui| {
-        ui.label(RichText::new("Select Audio Backend").color(Color32::from_gray(180)));
+        ui.label(RichText::new("Select Audio Backend").color(theme.text_secondary).size(theme.type_caption));
         ui.horizontal(|ui| {
             if ui.button("ALSA").clicked() {
                 let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(nullherz_traits::AudioBackendType::Alsa)));
@@ -66,7 +69,7 @@ fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
             }
         });
 
-        ui.add_space(10.0);
+        ui.add_space(theme.space_sm);
         ui.horizontal(|ui| {
             ui.label("Device:");
             egui::ComboBox::from_id_source("audio_device_select")
@@ -83,11 +86,11 @@ fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
         });
     });
 
-    ui.add_space(15.0);
+    ui.add_space(theme.space_md);
     ui.strong("Soundcard Wiring Test");
     Frame::group(ui.style()).show(ui, |ui| {
-        ui.label(RichText::new("Verify the physical outputs and routing of your audio interface by outputting a test signal.").color(Color32::from_gray(140)));
-        ui.add_space(8.0);
+        ui.label(RichText::new("Verify the physical outputs and routing of your audio interface by outputting a test signal.").color(theme.text_secondary).size(theme.type_caption));
+        ui.add_space(theme.space_sm);
 
         ui.horizontal(|ui| {
             if ui.button("▶ PLAY TEST PREVIEW (TRACK A)").clicked() {
@@ -106,6 +109,7 @@ fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
 }
 
 fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
+    let theme = app.theme;
     ui.strong("MIDI Hardware & Mappings");
     Frame::group(ui.style()).show(ui, |ui| {
         ui.label("Active Port Mappings:");
@@ -121,7 +125,7 @@ fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
             let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMidiPorts(buffer)));
         }
 
-        ui.add_space(15.0);
+        ui.add_space(theme.space_md);
         ui.label("Controller Profiles:");
         ui.horizontal(|ui| {
             let options = ["default", "pioneer_ddj400", "akai_mpk_mini"];
@@ -138,11 +142,12 @@ fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
     });
 }
 
-fn render_network(_app: &mut InspectorApp, ui: &mut Ui) {
+fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
+    let theme = app.theme;
     ui.strong("Distributed Sidecar Discovery");
     Frame::group(ui.style()).show(ui, |ui| {
-        ui.label(RichText::new("P2P Cloud Sync and Remote DSP Nodes").color(Color32::from_gray(150)));
-        ui.add_space(10.0);
+        ui.label(RichText::new("P2P Cloud Sync and Remote DSP Nodes").color(theme.text_secondary).size(theme.type_caption));
+        ui.add_space(theme.space_sm);
 
         ui.label("Remote Nodes Detected:");
         ui.group(|ui| {
@@ -159,13 +164,14 @@ fn render_network(_app: &mut InspectorApp, ui: &mut Ui) {
 }
 
 fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
+    let theme = app.theme;
     ui.strong("Hardware Latency Calibration");
     Frame::group(ui.style()).show(ui, |ui| {
         ui.label("Measure Round-Trip Latency (RTL) to ensure sample-accurate alignment.");
-        ui.add_space(10.0);
+        ui.add_space(theme.space_sm);
 
         ui.horizontal(|ui| {
-            if ui.button(RichText::new("● START CALIBRATION").color(app.theme.accent)).clicked() {
+            if ui.button(RichText::new("● START CALIBRATION").color(theme.accent)).clicked() {
                 let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CalibrateLatency));
             }
 
@@ -181,16 +187,16 @@ fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
             }
         });
 
-        ui.add_space(20.0);
+        ui.add_space(theme.space_md);
         ui.strong("Distributed Clock Discipline (PTP/IEEE 1588)");
         Frame::group(ui.style()).show(ui, |ui| {
             if let Some(t) = app.last_telemetry.lock().unwrap().as_ref() {
                 ui.horizontal(|ui| {
                     ui.label("Sync Status:");
                     if t.clock_jitter_ns < 1000 {
-                        ui.label(RichText::new("● LOCKED").color(Color32::GREEN));
+                        ui.label(RichText::new("● LOCKED").color(theme.success));
                     } else {
-                        ui.label(RichText::new("○ SEEKING").color(Color32::YELLOW));
+                        ui.label(RichText::new("○ SEEKING").color(theme.warning));
                     }
                 });
                 ui.label(format!("System Time: {} ns", t.system_time_ns));
@@ -202,8 +208,8 @@ fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
             }
         });
 
-        ui.add_space(20.0);
-        if ui.button(RichText::new("SAVE SYSTEM CONFIG").strong()).clicked() {
+        ui.add_space(theme.space_md);
+        if ui.button(RichText::new("SAVE SYSTEM CONFIG").strong().size(theme.type_label)).clicked() {
              let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology));
              // Trigger actual persistence in conductor
              let ports = "Pioneer DDJ-400,Generic MIDI Keyboard".to_string();

@@ -1,30 +1,31 @@
-use egui::{Ui, Color32, RichText, Sense, Vec2};
+use egui::{Ui, Color32, RichText, Sense, Vec2, Rounding, Stroke};
 use crate::InspectorApp;
 use audio_core::Telemetry;
 use nullherz_traits::{Command, TopologyCommand};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
-    ui.heading("System Topology");
-    ui.add_space(10.0);
+    let theme = app.theme;
+    ui.heading(RichText::new("System Topology").size(theme.type_heading));
+    ui.add_space(theme.space_sm);
 
     let mut socket_positions = std::collections::HashMap::new(); // (node_idx, is_out, socket_idx) -> pos
 
     if let Some((src_node, src_out)) = app.active_connection_source {
-        ui.label(RichText::new(format!("DRAGGING CONNECTION FROM NODE {} OUT {}", src_node, src_out)).color(Color32::YELLOW));
+        ui.label(RichText::new(format!("DRAGGING CONNECTION FROM NODE {} OUT {}", src_node, src_out)).color(theme.warning).size(theme.type_body));
         if ui.button("CANCEL").clicked() { app.active_connection_source = None; }
     }
 
     if let Some(src_node) = app.active_node_drag {
-        ui.label(RichText::new(format!("DRAGGING NODE {} (Release over remote card to migrate)", src_node)).color(Color32::LIGHT_BLUE));
+        ui.label(RichText::new(format!("DRAGGING NODE {} (Release over remote card to migrate)", src_node)).color(theme.accent_muted).size(theme.type_body));
         if ui.button("CANCEL DRAG").clicked() { app.active_node_drag = None; }
     }
 
     ui.group(|ui| {
-        ui.label(RichText::new("REAL-TIME NODE GRAPH (Spatial View)").color(Color32::from_gray(100)));
-        ui.add_space(10.0);
+        ui.label(RichText::new("REAL-TIME NODE GRAPH (Spatial View)").color(theme.text_secondary).size(theme.type_caption));
+        ui.add_space(theme.space_sm);
 
         let (canvas_rect, _response) = ui.allocate_at_least(egui::vec2(ui.available_width(), 400.0), Sense::hover());
-        ui.painter().rect_filled(canvas_rect, 4.0, Color32::from_gray(30));
+        ui.painter().rect_filled(canvas_rect, theme.radius_md, theme.bg_inset);
 
         for (idx, node) in app.graph.nodes.iter_mut().enumerate() {
             let node_id = ui.make_persistent_id(format!("node_spatial_{}", idx));
@@ -51,13 +52,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             }
 
             // Draw Node Card
-            ui.painter().rect_filled(node_rect, 4.0, Color32::from_gray(50));
-            ui.painter().rect_stroke(node_rect, 4.0, egui::Stroke::new(1.0, Color32::from_gray(80)));
+            ui.painter().rect_filled(node_rect, theme.radius_sm, theme.bg_surface);
+            ui.painter().rect_stroke(node_rect, theme.radius_sm, egui::Stroke::new(1.0, theme.border));
 
             // Node Header
             let header_rect = egui::Rect::from_min_size(node_pos, egui::vec2(node_size.x, 20.0));
-            ui.painter().rect_filled(header_rect, 4.0, Color32::from_gray(40));
-            ui.painter().text(header_rect.left_center() + egui::vec2(5.0, 0.0), egui::Align2::LEFT_CENTER, &node.name, egui::FontId::proportional(11.0), Color32::WHITE);
+            ui.painter().rect_filled(header_rect, theme.radius_sm, theme.bg_inset);
+            ui.painter().text(header_rect.left_center() + egui::vec2(5.0, 0.0), egui::Align2::LEFT_CENTER, &node.name, egui::FontId::proportional(theme.type_caption), theme.text_primary);
 
             // Host Assignment Badge
             let host_assignment_raw = &app.graph.node_assignments.0[idx].0;
@@ -65,7 +66,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 std::str::from_utf8(host_assignment_raw).unwrap_or("local").trim_matches(char::from(0))
             };
             let host_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(75.0, 0.0), egui::vec2(50.0, 14.0));
-            let host_color = if host_assignment == "local" { Color32::from_rgb(0, 150, 255) } else { app.theme.accent };
+            let host_color = if host_assignment == "local" { theme.accent_muted } else { theme.accent };
 
             let host_resp = ui.interact(host_rect, node_id.with("host_migrate"), Sense::click());
             if host_resp.clicked() {
@@ -99,9 +100,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     enabled: new_state,
                 }));
             }
-            let bypass_color = if bypassed { Color32::from_rgb(255, 100, 0) } else { Color32::from_gray(60) };
+            let bypass_color = if bypassed { theme.danger } else { theme.text_disabled };
             ui.painter().rect_filled(bypass_rect, 2.0, bypass_color);
-            ui.painter().text(bypass_rect.center(), egui::Align2::CENTER_CENTER, "BYP", egui::FontId::monospace(9.0), Color32::WHITE);
+            ui.painter().text(bypass_rect.center(), egui::Align2::CENTER_CENTER, "BYP", egui::FontId::monospace(9.0), theme.text_primary);
 
             // Industrial Sockets (Circular)
             let socket_radius = 6.0;
@@ -113,13 +114,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 socket_positions.insert((idx as u32, false, in_idx as u32), socket_pos);
 
                 let is_occupied = app.graph.edges.iter().any(|e| e.to == idx as u32 && e.input_idx == in_idx as u32);
-                let color = if is_occupied { app.theme.accent } else { app.theme.socket_color };
+                let color = if is_occupied { theme.accent } else { theme.socket_color };
 
                 let is_compatible = app.active_connection_source.is_some();
                 let stroke = if is_compatible {
-                    egui::Stroke::new(2.0, Color32::from_rgb(255, 215, 0)) // Gold stroke for compatible inputs
+                    egui::Stroke::new(2.0, theme.warning) // Gold/warning stroke for compatible inputs
                 } else {
-                    egui::Stroke::new(1.0, Color32::WHITE)
+                    egui::Stroke::new(1.0, theme.text_primary)
                 };
 
                 let socket_rect = egui::Rect::from_center_size(socket_pos, Vec2::splat(socket_radius * 2.5));
@@ -129,7 +130,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 ui.painter().circle_stroke(socket_pos, socket_radius, stroke);
 
                 if socket_resp.hovered() {
-                    ui.painter().circle_stroke(socket_pos, socket_radius + 2.0, egui::Stroke::new(1.0, Color32::YELLOW));
+                    ui.painter().circle_stroke(socket_pos, socket_radius + 2.0, egui::Stroke::new(1.0, theme.warning));
                     if ui.input(|i| i.pointer.any_released()) {
                         if let Some((src_node, src_out)) = app.active_connection_source {
                             let _ = app.command_sender.send(Command::Topology(TopologyCommand::Connect {
@@ -160,8 +161,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 let socket_rect = egui::Rect::from_center_size(socket_pos, Vec2::splat(socket_radius * 2.5));
                 let socket_resp = ui.interact(socket_rect, node_id.with(("out", out_idx)), Sense::click());
 
-                ui.painter().circle_filled(socket_pos, socket_radius, Color32::from_gray(100));
-                ui.painter().circle_stroke(socket_pos, socket_radius, egui::Stroke::new(1.0, Color32::WHITE));
+                ui.painter().circle_filled(socket_pos, socket_radius, theme.text_disabled);
+                ui.painter().circle_stroke(socket_pos, socket_radius, egui::Stroke::new(1.0, theme.text_primary));
 
                 if socket_resp.clicked() {
                     app.active_connection_source = Some((idx as u32, out_idx as u32));
@@ -172,8 +173,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             if let Some(t) = telemetry {
                  if idx < t.node_times_ns.len() {
                      let time = t.node_times_ns[idx];
-                     let color = if time > 500_000 { Color32::RED } else if time > 100_000 { Color32::YELLOW } else { app.theme.accent };
-                     ui.painter().text(node_rect.left_bottom() + egui::vec2(5.0, -5.0), egui::Align2::LEFT_BOTTOM, format!("{} ns", time), egui::FontId::proportional(9.0), color);
+                     let color = if time > 500_000 { theme.danger } else if time > 100_000 { theme.warning } else { theme.accent };
+                     ui.painter().text(node_rect.left_bottom() + egui::vec2(5.0, -5.0), egui::Align2::LEFT_BOTTOM, format!("{} ns", time), egui::FontId::proportional(theme.type_caption), color);
                  }
             }
         }
@@ -189,7 +190,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         if let (Some(&start), Some(&end)) = (socket_positions.get(&start_key), socket_positions.get(&end_key)) {
             let level = telemetry.as_ref().map(|t| t.peak_levels[edge.from as usize]).unwrap_or(0.0);
-            let base_color = if level > 1.0 { Color32::from_rgb(255, 50, 50) } else if level > 0.01 { app.theme.accent } else { Color32::from_gray(80) };
+            let base_color = if level > 1.0 { theme.danger } else if level > 0.01 { theme.accent } else { theme.text_disabled };
 
             let cp1 = start + egui::vec2(60.0, 0.0);
             let cp2 = end - egui::vec2(60.0, 0.0);
@@ -203,7 +204,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             painter.add(egui::Shape::CubicBezier(bezier));
 
             // Buffer Index Label
-            painter.text(start + egui::vec2(10.0, -10.0), egui::Align2::LEFT_BOTTOM, format!("B{}", edge.buffer_idx), egui::FontId::monospace(9.0), Color32::from_gray(150));
+            painter.text(start + egui::vec2(10.0, -10.0), egui::Align2::LEFT_BOTTOM, format!("B{}", edge.buffer_idx), egui::FontId::monospace(theme.type_caption), theme.text_secondary);
 
             // Signal Flow Animation (Moving dashes)
             if level > 0.01 {
@@ -211,7 +212,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 for j in 0..dash_count {
                     let t_offset = (time as f32 * 0.5 + (j as f32 / dash_count as f32)) % 1.0;
                     let p = bezier.sample(t_offset);
-                    painter.circle_filled(p, 2.0, Color32::WHITE.gamma_multiply(0.8));
+                    painter.circle_filled(p, 2.0, theme.text_primary.gamma_multiply(0.8));
                 }
             }
         }
@@ -227,36 +228,36 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     points: [start, cp1, cp2, mouse_pos],
                     closed: false,
                     fill: Color32::TRANSPARENT,
-                    stroke: egui::Stroke::new(2.0, Color32::YELLOW),
+                    stroke: egui::Stroke::new(2.0, theme.warning),
                 }));
             }
         }
     }
 
-    ui.add_space(20.0);
-    ui.heading("Active Connections");
+    ui.add_space(theme.space_md);
+    ui.heading(RichText::new("Active Connections").size(theme.type_heading));
     ui.label("Edge connections view enhanced with visual cables.");
 
-    ui.add_space(30.0);
+    ui.add_space(theme.space_lg);
     ui.separator();
-    ui.heading("Sidecar Discovery");
-    ui.label(RichText::new("Detected WASM and Native Sidecars in plugins/").small().color(Color32::GRAY));
-    ui.add_space(10.0);
+    ui.heading(RichText::new("Sidecar Discovery").size(theme.type_heading));
+    ui.label(RichText::new("Detected WASM and Native Sidecars in plugins/").size(theme.type_caption).color(theme.text_secondary));
+    ui.add_space(theme.space_sm);
 
     egui::ScrollArea::vertical().id_source("sidecar_scroll").show(ui, |ui| {
         if app.discovered_sidecars.is_empty() {
-            ui.label(RichText::new("No sidecars detected yet.").italics().small());
+            ui.label(RichText::new("No sidecars detected yet.").italics().size(theme.type_caption));
         }
 
         for manifest in &app.discovered_sidecars {
             ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(&manifest.name).strong());
-                        ui.label(RichText::new(format!("v{} by {}", manifest.version, manifest.author)).small().color(Color32::GRAY));
+                        ui.label(RichText::new(&manifest.name).strong().size(theme.type_body));
+                        ui.label(RichText::new(format!("v{} by {}", manifest.version, manifest.author)).size(theme.type_caption).color(theme.text_secondary));
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                         if ui.button("HOT-LOAD").clicked() {
+                         if ui.button(RichText::new("HOT-LOAD").size(theme.type_label)).clicked() {
                              let mut name_buf = [0u8; 32];
                              let bytes = manifest.name.as_bytes();
                              let len = bytes.len().min(32);
@@ -270,7 +271,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     });
                 });
             });
-            ui.add_space(5.0);
+            ui.add_space(theme.space_xs);
         }
     });
 }

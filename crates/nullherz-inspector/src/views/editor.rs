@@ -1,26 +1,27 @@
-use egui::{Ui, Vec2, Color32, Stroke, Sense, RichText};
+use egui::{Ui, Vec2, Color32, Stroke, Sense, RichText, Rounding};
 use crate::InspectorApp;
 use nullherz_dna::GeneticLibrary;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
-    ui.heading("Audio Editor");
-    ui.add_space(10.0);
+    let theme = app.theme;
+    ui.heading(RichText::new("Audio Editor").size(theme.type_heading));
+    ui.add_space(theme.space_sm);
 
     if let Some(track_id) = app.selected_library_track {
         if let Ok(Some(track)) = app.library_db.get_track(track_id) {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(&track.title).strong().size(18.0));
-                ui.label(format!("by {}", track.artist));
+                ui.label(RichText::new(&track.title).strong().size(theme.type_heading));
+                ui.label(RichText::new(format!("by {}", track.artist)).size(theme.type_body));
             });
-            ui.add_space(5.0);
-            ui.label(RichText::new(&track.path).size(10.0).color(Color32::GRAY));
+            ui.add_space(theme.space_xs);
+            ui.label(RichText::new(&track.path).size(theme.type_caption).color(theme.text_secondary));
 
-            ui.add_space(20.0);
+            ui.add_space(theme.space_md);
 
             // Waveform Editor Zone
             let (rect, response) = ui.allocate_at_least(Vec2::new(ui.available_width(), 200.0), Sense::click_and_drag());
-            ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(10, 10, 15));
-            ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_gray(50)));
+            ui.painter().rect_filled(rect, theme.radius_md, theme.bg_inset);
+            ui.painter().rect_stroke(rect, theme.radius_md, Stroke::new(1.0, theme.border));
 
             if response.dragged() {
                 let current_pos = ui.input(|i| i.pointer.latest_pos()).unwrap_or(egui::pos2(0.0, 0.0));
@@ -48,7 +49,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 let mut wf = wf_lock.lock().unwrap();
                 let zoom = app.sampler_waveform_zoom;
                 let scroll = 0.0;
-                let color = [0.0, 1.0, 0.8, 1.0]; // Teal theme
+                let color = theme.accent.to_array().map(|v| v as f32 / 255.0);
 
                 if let Some(wgpu) = &app.wgpu_renderer {
                     let wgpu = wgpu.lock().unwrap();
@@ -59,24 +60,24 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_lock.clone());
             }
 
-            ui.add_space(20.0);
+            ui.add_space(theme.space_md);
             ui.horizontal(|ui| {
                 ui.label("ZOOM");
                 ui.add(egui::Slider::new(&mut app.sampler_waveform_zoom, 0.1..=10.0).text(""));
 
-                ui.add_space(20.0);
+                ui.add_space(theme.space_md);
                 if ui.button("⟲ RESET").clicked() {
                     app.sampler_waveform_zoom = 1.0;
                 }
             });
 
-            ui.add_space(20.0);
+            ui.add_space(theme.space_md);
             ui.separator();
-            ui.add_space(10.0);
+            ui.add_space(theme.space_sm);
 
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label("METADATA");
+                    ui.label(RichText::new("METADATA").size(theme.type_caption).strong());
                     ui.group(|ui| {
                         ui.label(format!("BPM: {:.2}", track.metadata.bpm));
                         ui.label(format!("Root Key: {:?}", track.metadata.root_key));
@@ -84,10 +85,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     });
                 });
 
-                ui.add_space(20.0);
+                ui.add_space(theme.space_md);
 
                 ui.vertical(|ui| {
-                    ui.label("ACTIONS");
+                    ui.label(RichText::new("ACTIONS").size(theme.type_caption).strong());
                     ui.horizontal(|ui| {
                         if ui.button("✂ CROP").clicked() {
                             if let Some((s, e)) = app.editor_selection {
@@ -111,13 +112,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             });
 
         } else {
-            ui.label(RichText::new("Track not found in library.").color(Color32::RED));
+            ui.label(RichText::new("Track not found in library.").color(theme.danger));
             if ui.button("Deselect").clicked() { app.selected_library_track = None; }
         }
     } else {
         ui.vertical_centered(|ui| {
             ui.add_space(100.0);
-            ui.label(RichText::new("NO TRACK SELECTED").size(20.0).color(Color32::from_gray(80)));
+            ui.label(RichText::new("NO TRACK SELECTED").size(theme.type_heading).color(theme.text_disabled));
             ui.label("Select a track from the library to begin editing.");
             if ui.button("OPEN LIBRARY").clicked() {
                 app.active_right_tab = Some(crate::RightTab::Library);

@@ -3,24 +3,25 @@ use crate::InspectorApp;
 
 pub fn render_deck_transport(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
     let deck_id = (b'A' + i as u8) as char;
+    let theme = app.theme;
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.spacing_mut().item_spacing.x = theme.space_xs;
 
         // Play / Stop column
         ui.vertical(|ui| {
             // PLAY
-            if ui.add_sized([36.0, 24.0], egui::Button::new(RichText::new("▶").size(12.0)).fill(Color32::from_gray(35))).clicked() {
+            if ui.add_sized([36.0, 24.0], egui::Button::new(RichText::new("▶").size(theme.type_caption)).fill(theme.bg_surface)).clicked() {
                 let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id }));
             }
-            ui.add_space(4.0);
+            ui.add_space(theme.space_xs);
             // STOP (secondary small button under PLAY)
-            if ui.add_sized([36.0, 16.0], egui::Button::new(RichText::new("⏸").size(10.0)).fill(Color32::from_gray(35))).clicked() {
+            if ui.add_sized([36.0, 16.0], egui::Button::new(RichText::new("⏸").size(theme.type_caption)).fill(theme.bg_surface)).clicked() {
                 let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::StopDeck { deck_id }));
             }
         });
 
         // CUE
-        if ui.add_sized([36.0, 44.0], egui::Button::new(RichText::new("CUE").size(12.0).strong()).fill(Color32::from_gray(35))).clicked() {
+        if ui.add_sized([36.0, 44.0], egui::Button::new(RichText::new("CUE").size(theme.type_caption).strong()).fill(theme.bg_surface)).clicked() {
             let node_name = match i {
                 0 => "deck_a_sampler",
                 1 => "deck_b_sampler",
@@ -36,7 +37,7 @@ pub fn render_deck_transport(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
         }
 
         // SYNC
-        if ui.add_sized([36.0, 44.0], egui::Button::new(RichText::new("SYNC").size(10.0).strong()).fill(Color32::from_rgb(0, 100, 150))).clicked() {
+        if ui.add_sized([36.0, 44.0], egui::Button::new(RichText::new("SYNC").size(theme.type_caption).strong()).fill(theme.accent_muted)).clicked() {
             let master_deck_id = (b'A' + app.master_deck.unwrap_or(0) as u8) as char;
             let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::SyncDecks {
                 source_deck: master_deck_id,
