@@ -239,6 +239,19 @@ fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
             parameters,
         })
     }
+
+    fn processor_type(&self) -> &'static str {
+        "sampler"
+    }
+
+    fn get_playback_position(&self) -> u64 {
+        for voice in &self.voices {
+            if voice.is_active {
+                return voice.play_head as u64;
+            }
+        }
+        0
+    }
 }
 
 impl SamplerProcessor {

@@ -1011,6 +1011,8 @@ pub trait AudioProcessor: SignalProcessor + MidiResponder + SnapshotProvider + S
     fn list_children(&self) -> Vec<&dyn AudioProcessor> { Vec::new() }
     fn resource_id(&self) -> Option<u64> { None }
     fn load_state(&mut self, _data: &[u8]) {}
+    fn processor_type(&self) -> &'static str { "" }
+    fn get_playback_position(&self) -> u64 { 0 }
 }
 
 pub trait CommandProducer: Send + Sync + dyn_clone::DynClone {
