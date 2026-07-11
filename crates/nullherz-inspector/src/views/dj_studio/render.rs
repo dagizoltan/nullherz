@@ -203,12 +203,12 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
             });
         });
 
-    // Draw left vertical accent bar based on calculated card bounds
+    // Draw left vertical accent bar inside the card bounds
     let rect = response.response.rect;
-    let bar_width = if is_focused { 5.0 } else { 2.0 };
+    let bar_width = if is_focused { 4.0 } else { 1.5 };
     let bar_rect = egui::Rect::from_min_max(
-        rect.left_top(),
-        egui::pos2(rect.left() + bar_width, rect.bottom())
+        egui::pos2(rect.left() + 1.0, rect.top() + 1.0),
+        egui::pos2(rect.left() + 1.0 + bar_width, rect.bottom() - 1.0)
     );
     let bar_color = if is_focused { deck_color } else { Color32::from_gray(30) };
     ui.painter().rect_filled(bar_rect, Rounding::ZERO, bar_color);
