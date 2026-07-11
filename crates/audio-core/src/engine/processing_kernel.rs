@@ -50,14 +50,15 @@ impl ProcessingKernel for StandardKernel {
                     }
 
                     // Apply the command at the correct sample-accurate point
-                    CommandDispatcher::handle_single_command(transport, graph, &c.command);
+                    let is_last_sub_block = target_offset + ipc_layer::MAX_BLOCK_SIZE >= num_samples;
+                    CommandDispatcher::handle_single_command_with_context(transport, target_offset, is_last_sub_block, host, graph, &c.command);
 
                     // Batch processing: Drain all commands with the same timestamp to minimize sub-block fragmentation
                     loop {
                         if commands_processed >= nullherz_traits::MAX_COMMANDS_PER_BLOCK { break; }
                         if let Some(next_cmd) = command_consumer.pop_command() {
                             if next_cmd.timestamp_samples == c.timestamp_samples {
-                                CommandDispatcher::handle_single_command(transport, graph, &next_cmd.command);
+                                CommandDispatcher::handle_single_command_with_context(transport, target_offset, is_last_sub_block, host, graph, &next_cmd.command);
                                 commands_processed += 1;
                             } else {
                                 cmd = Some(next_cmd);

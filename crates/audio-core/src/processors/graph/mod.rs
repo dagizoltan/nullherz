@@ -34,6 +34,7 @@ pub struct ProcessorGraph {
     pub(crate) morph_samples_total: u32,
     pub morph_duration_samples: u32,
     pub(crate) spectral_morph_enabled: bool,
+    pub(crate) modulation_matrix: nullherz_traits::ModulationMatrix,
     pub(crate) garbage_producer: Option<Box<dyn nullherz_traits::GarbageProducer>>,
     pub(crate) pending_mutations: [Option<TopologyMutation>; crate::MAX_MUTATIONS],
     pub(crate) pending_mutation_count: usize,
@@ -77,6 +78,7 @@ impl ProcessorGraph {
             morph_samples_total: 0,
             morph_duration_samples: 0, // Disabled by default to pass existing tests
             spectral_morph_enabled: false,
+            modulation_matrix: nullherz_traits::ModulationMatrix::new(),
             garbage_producer: None,
             pending_mutations: std::array::from_fn(|_| None),
             pending_mutation_count: 0,
@@ -139,6 +141,40 @@ impl ProcessorGraph {
         }
     }
 
+
+    pub fn apply_command_with_context(&mut self, command: &nullherz_traits::Command, context: Option<&nullherz_traits::ProcessContext>) {
+        use nullherz_traits::{Command, CoreCommand, MixerCommand};
+        match command {
+            Command::Core(CoreCommand::SetSafeMode(enabled)) => {
+                for node in self.nodes.iter() {
+                    unsafe { (*node.processor.get()).set_safe_mode(*enabled); }
+                }
+            }
+            Command::Core(CoreCommand::CommitTopology) => {
+                // AUDIT: CommitTopology must never be executed on the RT thread.
+                // It is handled off-thread by TopologyManager, which pushes a
+                // TopologyMutation::SetTopology for an O(1) Arc swap.
+            }
+            Command::Mixer(MixerCommand::SetMacro { macro_id, value }) => {
+                let beat_pos = context.and_then(|c| c.transport.map(|t| t.beat_position)).unwrap_or(0.0);
+                let nodes_ptr = &self.nodes;
+                self.modulation_matrix.expand_macro(*macro_id, *value, beat_pos, |target_id, param_id, val, ramp| {
+                    let node_idx = target_id as usize;
+                    if node_idx < crate::MAX_NODES {
+                        unsafe { (*nodes_ptr[node_idx].processor.get()).set_parameter(param_id, val, ramp); }
+                    }
+                });
+            }
+            Command::Mixer(MixerCommand::AddModMapping { macro_id, target_id, param_id, scaling, ramp_duration_samples }) => {
+                self.modulation_matrix.add_mapping(*macro_id, *target_id, *param_id, *scaling, *ramp_duration_samples, None);
+            }
+            Command::Mixer(MixerCommand::RemoveModMapping { macro_id, target_id, param_id }) => {
+                self.modulation_matrix.remove_mapping(*macro_id, *target_id, *param_id);
+            }
+            Command::Mixer(nullherz_traits::MixerCommand::Bundle { .. }) => {}
+            _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }
+        }
+    }
 
     pub fn add_node(&mut self, processor: Box<dyn AudioProcessor>, inputs: Vec<usize>, outputs: Vec<usize>) {
         if self.node_count >= crate::MAX_NODES { return; }
@@ -436,21 +472,7 @@ fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
         }
     }
 fn apply_command(&mut self, command: &nullherz_traits::Command) {
-        use nullherz_traits::{Command, CoreCommand};
-        match command {
-            Command::Core(CoreCommand::SetSafeMode(enabled)) => {
-                for node in self.nodes.iter() {
-                    unsafe { (*node.processor.get()).set_safe_mode(*enabled); }
-                }
-            }
-            Command::Core(CoreCommand::CommitTopology) => {
-                // AUDIT: CommitTopology must never be executed on the RT thread.
-                // It is handled off-thread by TopologyManager, which pushes a
-                // TopologyMutation::SetTopology for an O(1) Arc swap.
-            }
-            Command::Mixer(nullherz_traits::MixerCommand::Bundle { .. }) => {}
-            _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }
-        }
+        self.apply_command_with_context(command, None);
     }
 fn set_garbage_producer(&mut self, producer: Box<dyn nullherz_traits::GarbageProducer>) {
         self.garbage_producer = Some(producer);

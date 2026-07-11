@@ -41,16 +41,18 @@ impl MixerBridge {
                 continue;
             }
 
-            match cmd {
+            match &cmd {
                 Command::Mixer(nullherz_traits::MixerCommand::SetMacro { macro_id, value }) => {
-                    let expanded = modulation_matrix.expand_macro(macro_id, value, self.timeline.current_beat);
-                    bundle.extend(expanded);
+                    modulation_matrix.update_macro_value(*macro_id, *value);
+                    bundle.push(cmd);
                 }
                 Command::Mixer(nullherz_traits::MixerCommand::AddModMapping { macro_id, target_id, param_id, scaling, ramp_duration_samples }) => {
-                    modulation_matrix.add_mapping(macro_id, target_id, param_id, scaling, ramp_duration_samples);
+                    modulation_matrix.add_mapping(*macro_id, *target_id, *param_id, *scaling, *ramp_duration_samples);
+                    bundle.push(cmd);
                 }
                 Command::Mixer(nullherz_traits::MixerCommand::RemoveModMapping { macro_id, target_id, param_id }) => {
-                    modulation_matrix.remove_mapping(macro_id, target_id, param_id);
+                    modulation_matrix.remove_mapping(*macro_id, *target_id, *param_id);
+                    bundle.push(cmd);
                 }
                 _ => {
                     bundle.push(cmd);

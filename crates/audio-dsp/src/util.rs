@@ -83,6 +83,39 @@ impl LagrangeResampler {
     }
 }
 
+/// A Newton-Raphson Iterative Solver for non-linear feedback loops.
+/// Used to resolve implicit equations in high-fidelity virtual analog filters.
+pub struct IterativeSolver {
+    pub max_iterations: usize,
+    pub tolerance: f32,
+}
+
+impl IterativeSolver {
+    pub fn new(max_iterations: usize, tolerance: f32) -> Self {
+        Self { max_iterations, tolerance }
+    }
+
+    /// Solves for x such that f(x) = 0.
+    /// func: f(x)
+    /// deriv: f'(x)
+    pub fn solve<F, D>(&self, initial_guess: f32, mut func: F, mut deriv: D) -> f32
+    where F: FnMut(f32) -> f32, D: FnMut(f32) -> f32 {
+        let mut x = initial_guess;
+        for _ in 0..self.max_iterations {
+            let y = func(x);
+            if y.abs() < self.tolerance {
+                break;
+            }
+            let dy = deriv(x);
+            if dy.abs() < 1e-9 {
+                break; // Prevent division by zero
+            }
+            x = x - y / dy;
+        }
+        x
+    }
+}
+
 /// A 2x Oversampler using a simple linear interpolation for upsampling
 /// and a 2-point average for downsampling. Optimized for RT soft-clipping.
 #[derive(Debug, Clone, Copy)]

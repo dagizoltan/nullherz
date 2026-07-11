@@ -8,6 +8,17 @@ impl CommandDispatcher {
         graph: &mut dyn AudioProcessor,
         cmd: &nullherz_traits::Command,
     ) {
+        Self::handle_single_command_with_context(transport, 0, false, None, graph, cmd);
+    }
+
+    pub fn handle_single_command_with_context(
+        transport: &mut nullherz_traits::Transport,
+        sub_block_offset: usize,
+        is_last_sub_block: bool,
+        host: Option<&dyn nullherz_traits::Host>,
+        graph: &mut dyn AudioProcessor,
+        cmd: &nullherz_traits::Command,
+    ) {
         use nullherz_traits::{Command, CoreCommand, MixerCommand, TopologyCommand};
         match cmd {
             Command::Core(CoreCommand::Play) => {
@@ -35,7 +46,7 @@ impl CommandDispatcher {
                 transport.bpm = *bpm;
             }
             Command::Mixer(MixerCommand::Bundle { count, data }) => {
-                Self::handle_bundle_command(graph, *count, *data);
+                Self::handle_bundle_command_with_context(transport, sub_block_offset, is_last_sub_block, host, graph, *count, *data);
             }
             Command::Topology(TopologyCommand::AddNode { .. }) | Command::Topology(TopologyCommand::SwapProcessor { .. }) => {
                 // Ignore structural mutations in RT command loop.
@@ -46,7 +57,19 @@ impl CommandDispatcher {
                      enabled: *enabled,
                  });
             }
-            _ => { graph.apply_command(cmd); }
+            _ => {
+                if let Some(graph_concrete) = graph.as_any_mut().downcast_mut::<crate::processors::graph::ProcessorGraph>() {
+                    let context = nullherz_traits::ProcessContext {
+                        transport: Some(transport),
+                        host,
+                        sub_block_offset,
+                        is_last_sub_block,
+                    };
+                    graph_concrete.apply_command_with_context(cmd, Some(&context));
+                } else {
+                    graph.apply_command(cmd);
+                }
+            }
         }
     }
 
@@ -71,11 +94,11 @@ impl CommandDispatcher {
         graph.apply_command(&Command::Core(CoreCommand::CommitTopology));
     }
 
-    fn handle_bundle_command(graph: &mut dyn AudioProcessor, count: u32, data: [u8; 128]) {
+    fn handle_bundle_command_with_context(transport: &mut nullherz_traits::Transport, sub_block_offset: usize, is_last_sub_block: bool, host: Option<&dyn nullherz_traits::Host>, graph: &mut dyn AudioProcessor, count: u32, data: [u8; 128]) {
         let cmd = nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::Bundle { count, data });
         if let Some(iter) = cmd.bundle_iter() {
             for sub_cmd in iter {
-                graph.apply_command(&sub_cmd);
+                Self::handle_single_command_with_context(transport, sub_block_offset, is_last_sub_block, host, graph, &sub_cmd);
             }
         }
     }
