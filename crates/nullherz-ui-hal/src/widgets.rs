@@ -1,6 +1,16 @@
 use std::sync::Arc;
 use egui::{Color32, Rect, Response, Sense, Stroke, Ui, Vec2, Align2, FontId, lerp, vec2};
 
+/// Decoupled calculation of high-precision VU ballistic level.
+/// Fast instant attack and slower geometric decay.
+pub fn calculate_ballistic_vu(peak: f32, smoothed_peak: f32, decay: f32) -> f32 {
+    if peak > smoothed_peak {
+        peak // Instant attack
+    } else {
+        (smoothed_peak * (1.0 - decay)).max(0.0) // Slower decay
+    }
+}
+
 pub fn render_knob(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, label: &str, accent_color: Color32) -> Response {
     let knob_size = 36.0;
     let label_height = if label.is_empty() { 0.0 } else { 20.0 };
@@ -22,7 +32,8 @@ pub fn render_knob(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive
 
         // --- GEOMETRY CACHING ---
         // Cache static parts of the knob (Rim, Face, Shadow)
-        let cache_id = ui.make_persistent_id("knob_base_v2");
+        // Hardened: Unique ID per widget instance to avoid geometry cache collisions
+        let cache_id = response.id.with("knob_base_v3");
         let shapes = ui.ctx().memory_mut(|mem| {
             mem.data.get_temp::<Arc<Vec<egui::Shape>>>(cache_id).unwrap_or_else(|| {
                  let mut s = Vec::new();
@@ -167,13 +178,7 @@ pub fn render_vu_meter(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Col
     let id = ui.next_auto_id();
     let mut smoothed_peak = ui.ctx().memory_mut(|mem| *mem.data.get_temp_mut_or_default::<f32>(id));
 
-    let _attack = 0.9; // Faster attack (unused due to instant jump)
-    let decay = 0.02; // Slower quadratic-like decay
-    if peak > smoothed_peak {
-        smoothed_peak = peak; // Instant attack for peak tracking
-    } else {
-        smoothed_peak = smoothed_peak * (1.0 - decay);
-    }
+    smoothed_peak = calculate_ballistic_vu(peak, smoothed_peak, 0.02);
     ui.ctx().memory_mut(|mem| mem.data.insert_temp(id, smoothed_peak));
 
     // Level Rendering
@@ -290,4 +295,38 @@ pub fn render_horizontal_fader(ui: &mut Ui, value: &mut f32, range: std::ops::Ra
     }
 
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calculate_ballistic_vu_attack() {
+        // Attack should be instant when the input peak exceeds the current smoothed level.
+        let peak = 0.8;
+        let smoothed = 0.2;
+        let result = calculate_ballistic_vu(peak, smoothed, 0.02);
+        assert_eq!(result, 0.8);
+    }
+
+    #[test]
+    fn test_calculate_ballistic_vu_decay() {
+        // Decay should follow geometric falloff when the input peak is lower than the current level.
+        let peak = 0.1;
+        let smoothed = 0.5;
+        let decay = 0.02;
+        let result = calculate_ballistic_vu(peak, smoothed, decay);
+        assert_eq!(result, 0.5 * (1.0 - decay));
+    }
+
+    #[test]
+    fn test_calculate_ballistic_vu_clamped() {
+        // Ensure that ballistic VU never drops below zero even with high decay rates.
+        let peak = 0.0;
+        let smoothed = 0.001;
+        let decay = 0.99;
+        let result = calculate_ballistic_vu(peak, smoothed, decay);
+        assert!(result >= 0.0);
+    }
 }
