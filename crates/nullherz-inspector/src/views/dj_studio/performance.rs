@@ -7,11 +7,11 @@ pub fn render_deck_performance(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
     ui.vertical(|ui| {
         ui.label(RichText::new("HOT-CUES").small().color(Color32::from_gray(100)));
         egui::Grid::new(format!("perf_grid_{}", i)).spacing([4.0, 4.0]).show(ui, |ui| {
-            for row in 0..2 {
-                for col in 0..4 {
-                    let j = row * 4 + col;
+            for row in 0..4 {
+                for col in 0..2 {
+                    let j = row * 2 + col;
                     let btn = egui::Button::new(RichText::new(format!("{}", j + 1)).strong())
-                        .min_size(Vec2::new(32.0, 28.0))
+                        .min_size(Vec2::new(32.0, 24.0))
                         .fill(Color32::from_gray(40));
 
                     let response = ui.add(btn);

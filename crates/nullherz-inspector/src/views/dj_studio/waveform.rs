@@ -3,8 +3,8 @@ use egui::{Ui, Vec2, Color32, Stroke};
 use crate::InspectorApp;
 use audio_core::Telemetry;
 
-pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>, deck_color: Color32) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), egui::Sense::hover());
+pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>, deck_color: Color32, height: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), egui::Sense::hover());
     ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(10, 10, 15));
 
     if let Some(wf_lock) = &app.deck_waveform_renderers[i] {
