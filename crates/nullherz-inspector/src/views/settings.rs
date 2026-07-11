@@ -82,6 +82,27 @@ fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
             }
         });
     });
+
+    ui.add_space(15.0);
+    ui.strong("Soundcard Wiring Test");
+    Frame::group(ui.style()).show(ui, |ui| {
+        ui.label(RichText::new("Verify the physical outputs and routing of your audio interface by outputting a test signal.").color(Color32::from_gray(140)));
+        ui.add_space(8.0);
+
+        ui.horizontal(|ui| {
+            if ui.button("▶ PLAY TEST PREVIEW (TRACK A)").clicked() {
+                let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::Preview { sample_id: 1 }));
+            }
+            if ui.button("▶ PLAY TEST PREVIEW (TRACK B)").clicked() {
+                let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::Preview { sample_id: 2 }));
+            }
+            if ui.button("⏹ STOP TEST").clicked() {
+                let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::StopNode {
+                    node_idx: nullherz_traits::NodeConventions::PREVIEW,
+                }));
+            }
+        });
+    });
 }
 
 fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
