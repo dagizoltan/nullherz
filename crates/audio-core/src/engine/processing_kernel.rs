@@ -45,8 +45,11 @@ impl ProcessingKernel for StandardKernel {
 
                     // Process up to the command's timestamp
                     while sub_block_iter.current_offset < target_offset {
-                        let sb = sub_block_iter.next_chunk_up_to(target_offset).unwrap();
-                        Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
+                        if let Some(sb) = sub_block_iter.next_chunk_up_to(target_offset) {
+                            Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
+                        } else {
+                            break;
+                        }
                     }
 
                     // Apply the command at the correct sample-accurate point

@@ -40,7 +40,9 @@ impl GraphTelemetry {
                 let mut channel_peak_v = f32x8::ZERO;
                 let mut i = 0;
                 while i + 8 <= data.len() {
-                    let v = f32x8::new(data[i..i+8].try_into().unwrap());
+                    let mut arr = [0.0f32; 8];
+                    arr.copy_from_slice(&data[i..i+8]);
+                    let v = f32x8::new(arr);
                     channel_peak_v = channel_peak_v.max(v.abs());
                     i += 8;
                 }
