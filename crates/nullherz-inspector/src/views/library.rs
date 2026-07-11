@@ -235,8 +235,9 @@ fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
             if res.double_clicked() {
                 let deck_idx = app.focused_deck;
                 if deck_idx < 4 {
-                    let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
-                        granular_node_idx: (deck_idx as u32 * 4),
+                    let deck_char = (b'A' + deck_idx as u8) as char;
+                    let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::LoadTrackToDeck {
+                        deck_id: deck_char,
                         sample_id: track.id,
                     }));
                     app.now_playing[deck_idx] = Some(track.id);
