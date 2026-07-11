@@ -37,6 +37,56 @@ pub fn render_deck_dna_panel(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
                 if idx % 2 == 1 { ui.end_row(); }
             }
         });
+
+        // Interactive 2D Vector Coordinate Pad representing DNA blend
+        ui.add_space(6.0);
+        ui.label(RichText::new("GENETIC COORDINATES").size(7.5).color(Color32::from_gray(120)));
+        let pad_size = 54.0;
+        let (rect, response) = ui.allocate_exact_size(egui::Vec2::new(pad_size, pad_size), egui::Sense::drag());
+
+        // Draw vector pad background
+        ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(15, 15, 18));
+        ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, Color32::from_gray(40)));
+
+        // Grid axis lines
+        ui.painter().line_segment(
+            [egui::pos2(rect.center().x, rect.min.y), egui::pos2(rect.center().x, rect.max.y)],
+            egui::Stroke::new(0.5, Color32::from_gray(30))
+        );
+        ui.painter().line_segment(
+            [egui::pos2(rect.min.x, rect.center().y), egui::pos2(rect.max.x, rect.center().y)],
+            egui::Stroke::new(0.5, Color32::from_gray(30))
+        );
+
+        // Map metallic vs organic on X-axis, warm vs aggressive on Y-axis
+        let mut x = (app.channel_personality_metallic[i] - app.channel_personality_organic[i] + 1.0) * 0.5;
+        let mut y = (app.channel_personality_warm[i] - app.channel_personality_aggressive[i] + 1.0) * 0.5;
+
+        if response.dragged() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                x = ((pos.x - rect.min.x) / pad_size).clamp(0.0, 1.0);
+                y = ((pos.y - rect.min.y) / pad_size).clamp(0.0, 1.0);
+
+                // Derive individual trait strengths from 2D coordinates
+                app.channel_personality_metallic[i] = (x * 2.0 - 1.0).max(0.0);
+                app.channel_personality_organic[i] = ((1.0 - x) * 2.0 - 1.0).max(0.0);
+                app.channel_personality_warm[i] = (y * 2.0 - 1.0).max(0.0);
+                app.channel_personality_aggressive[i] = ((1.0 - y) * 2.0 - 1.0).max(0.0);
+
+                emit_personality_mutation(app, i, 0, "metallic", app.channel_personality_metallic[i]);
+                emit_personality_mutation(app, i, 1, "organic", app.channel_personality_organic[i]);
+                emit_personality_mutation(app, i, 2, "warm", app.channel_personality_warm[i]);
+                emit_personality_mutation(app, i, 3, "aggressive", app.channel_personality_aggressive[i]);
+            }
+        }
+
+        // Target locator dot
+        let dot_pos = egui::pos2(
+            rect.min.x + x * pad_size,
+            rect.min.y + y * pad_size
+        );
+        ui.painter().circle_filled(dot_pos, 3.0, deck_color);
+        ui.painter().circle_stroke(dot_pos, 5.0, egui::Stroke::new(1.0, deck_color.linear_multiply(0.4)));
     });
 }
 

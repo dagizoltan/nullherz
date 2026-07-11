@@ -24,11 +24,55 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
                 }
             }
 
+            // Draw subtle background beat-grid ticks/lines
+            let grid_stroke = Stroke::new(1.0, Color32::from_white_alpha(15));
+            for grid_i in 1..16 {
+                let x = rect.min.x + (grid_i as f32 / 16.0) * rect.width();
+                ui.painter().line_segment(
+                    [egui::pos2(x, rect.min.y), egui::pos2(x, rect.max.y)],
+                    grid_stroke
+                );
+            }
+            ui.painter().line_segment(
+                [egui::pos2(rect.min.x, rect.center().y), egui::pos2(rect.max.x, rect.center().y)],
+                grid_stroke
+            );
+
             nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_lock.clone());
+
+            let total_samples = track.as_ref().map(|t| t.metadata.total_samples).unwrap_or(0).max(1);
+
+            // Render Hot Cue vertical lines with badge numbers 1-8 across the active zone
+            if let Some(ref t) = track {
+                for (cue_idx, cue_pos) in t.metadata.hot_cues.iter().enumerate() {
+                    if let Some(pos_samples) = cue_pos {
+                        let ratio = *pos_samples as f32 / total_samples as f32;
+                        let cue_x = rect.min.x + (ratio.clamp(0.0, 1.0) * rect.width());
+
+                        let cue_color = deck_color;
+                        ui.painter().line_segment(
+                            [egui::pos2(cue_x, rect.min.y), egui::pos2(cue_x, rect.max.y)],
+                            Stroke::new(1.5, cue_color.linear_multiply(0.8))
+                        );
+
+                        let badge_rect = egui::Rect::from_center_size(
+                            egui::pos2(cue_x, rect.min.y + 10.0),
+                            Vec2::new(12.0, 12.0)
+                        );
+                        ui.painter().rect_filled(badge_rect, 2.0, cue_color);
+                        ui.painter().text(
+                            badge_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            format!("{}", cue_idx + 1),
+                            egui::FontId::monospace(8.0),
+                            Color32::BLACK
+                        );
+                    }
+                }
+            }
 
             // Render playhead using actual per-deck playback position
             let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[i]).unwrap_or(0);
-            let total_samples = track.as_ref().map(|t| t.metadata.total_samples).unwrap_or(0).max(1);
             let playhead_ratio = elapsed_samples as f32 / total_samples as f32;
             let playhead_x = rect.min.x + (playhead_ratio.clamp(0.0, 1.0) * rect.width());
 

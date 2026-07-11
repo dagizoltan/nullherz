@@ -141,6 +141,18 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
 
         ui.add_space(6.0);
 
+        // Animated Phase Ring next to deck ID representing beat position
+        let (ring_rect, _) = ui.allocate_exact_size(Vec2::new(16.0, 16.0), egui::Sense::hover());
+        let center = ring_rect.center();
+        let radius = 7.0;
+        ui.painter().circle_stroke(center, radius, Stroke::new(1.0, Color32::from_gray(50)));
+        let beat_pos = telemetry.as_ref().map(|t| t.beat_position).unwrap_or(0.0);
+        let angle = (beat_pos % 1.0) as f32 * 2.0 * std::f32::consts::PI;
+        let indicator_pos = center + Vec2::new(angle.sin(), -angle.cos()) * radius;
+        ui.painter().circle_filled(indicator_pos, 2.0, deck_color);
+
+        ui.add_space(6.0);
+
         // Master Deck Toggle ("M")
         let is_master = app.master_deck == Some(i);
         let m_color = if is_master { deck_color } else { Color32::from_gray(80) };
