@@ -157,3 +157,87 @@ impl MidiMapper {
         commands
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nullherz_traits::{MidiEvent, CoreCommand, MixerCommand};
+
+    #[test]
+    fn test_load_from_json_and_cc_translation() {
+        let json_map = r#"{
+            "name": "Test Map",
+            "controls": [
+                {
+                    "cc_number": 10,
+                    "target": { "Param": { "target_id": 42, "param_id": 1 } },
+                    "min_val": 0.0,
+                    "max_val": 1.0
+                },
+                {
+                    "cc_number": 11,
+                    "target": { "Macro": { "macro_id": 2 } },
+                    "min_val": 10.0,
+                    "max_val": 20.0
+                }
+            ],
+            "triggers": [
+                {
+                    "note_number": 60,
+                    "target": { "Command": { "Core": "Play" } }
+                }
+            ]
+        }"#;
+
+        let mut mapper = MidiMapper::new();
+        assert!(mapper.load_from_json(json_map).is_ok());
+
+        // Test MIDI Note On Trigger -> Command translation
+        let note_on = MidiEvent {
+            timestamp_samples: 0,
+            status: 0x90,
+            data1: 60,
+            data2: 127,
+            _pad: 0,
+        };
+        let commands = mapper.translate(&note_on, &std::collections::HashMap::new(), None);
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0], Command::Core(CoreCommand::Play));
+
+        // Test CC 11 -> Macro parameter translation
+        let cc_event = MidiEvent {
+            timestamp_samples: 0,
+            status: 0xB0,
+            data1: 11,
+            data2: 64, // Mid point (64 / 127 = 0.5039)
+            _pad: 0,
+        };
+        let commands2 = mapper.translate(&cc_event, &std::collections::HashMap::new(), None);
+        assert_eq!(commands2.len(), 1);
+        if let Command::Mixer(MixerCommand::SetMacro { macro_id, value }) = commands2[0] {
+            assert_eq!(macro_id, 2);
+            assert!(value >= 15.0 && value <= 15.1); // approx mid-point of [10.0, 20.0]
+        } else {
+            panic!("Expected SetMacro command");
+        }
+    }
+
+    #[test]
+    fn test_soft_takeover_logic() {
+        let mapper = MidiMapper::new();
+        let target_id = 100u64;
+        let param_id = 2u32;
+
+        // First takeover should initialize the cache and return true
+        assert!(mapper.check_soft_takeover(target_id, param_id, 0.5));
+
+        // Jumps of > 5% without crossing should return false (soft takeover blocked)
+        assert!(!mapper.check_soft_takeover(target_id, param_id, 0.6));
+
+        // Moves within 5% tolerance should return true (soft takeover active)
+        assert!(mapper.check_soft_takeover(target_id, param_id, 0.52));
+
+        // Moves within 5% of the updated value should continue to return true
+        assert!(mapper.check_soft_takeover(target_id, param_id, 0.54));
+    }
+}
