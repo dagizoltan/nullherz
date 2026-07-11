@@ -94,6 +94,27 @@ impl TelemetryFinalizer {
             }
         }
 
+        let mut deck_positions = [0u64; 4];
+        let mut deck_playback_rates = [1.0f32; 4];
+        if let Some(pg) = graph.as_any_mut().downcast_mut::<crate::processors::ProcessorGraph>() {
+            let mut deck_idx = 0;
+            for i in 0..pg.node_count {
+                let proc = unsafe { &*pg.nodes[i].processor.get() };
+                if proc.processor_type() == "sampler" {
+                    let sampler_id = i as u32;
+                    if sampler_id != 111 { // Exclude preview sampler
+                        if deck_idx < 4 {
+                            deck_positions[deck_idx] = proc.get_playback_position();
+                            deck_playback_rates[deck_idx] = proc.get_parameter(1);
+                            deck_idx += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         let telemetry = Telemetry {
             process_time_ns: current_ns,
             peak_process_time_ns: peak,
@@ -122,6 +143,8 @@ impl TelemetryFinalizer {
             suggestions: [(0, 0.0); 4],
             active_master_deck: 'A',
             waveform_peaks: [0.0; 256],
+            deck_positions,
+            deck_playback_rates,
             node_map_keys: [[0u8; 32]; 32],
             node_map_values: [0u32; 32],
             audio_devices: [nullherz_traits::telemetry::DeviceName::default(); 16],

@@ -46,6 +46,8 @@ pub struct Telemetry {
     /// Downsampled peak waveform data for 4 DJ decks for real-time visual feedback.
     #[serde(with = "BigArray")]
     pub waveform_peaks: [f32; 256],
+    pub deck_positions: [u64; 4],
+    pub deck_playback_rates: [f32; 4],
     /// Current mapping of well-known node names to indices.
     #[serde(with = "BigArray")]
     pub node_map_keys: [[u8; 32]; 32],
@@ -100,6 +102,8 @@ impl Default for Telemetry {
             suggestions: [(0, 0.0); 4],
             active_master_deck: 'A',
             waveform_peaks: [0.0; 256],
+            deck_positions: [0; 4],
+            deck_playback_rates: [1.0; 4],
             node_map_keys: [[0u8; 32]; 32],
             node_map_values: [0u32; 32],
             audio_devices: [DeviceName::default(); 16],

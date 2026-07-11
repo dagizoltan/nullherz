@@ -29,9 +29,16 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
             let title = track.as_ref().map(|t| t.title.as_str()).unwrap_or("LOADING...");
             ui.painter().text(rect.left_top() + Vec2::new(5.0, 5.0), egui::Align2::LEFT_TOP, title, egui::FontId::monospace(10.0), deck_color.gamma_multiply(0.8));
 
-            // Render playhead
-            let playhead_x = rect.min.x + (telemetry.as_ref().map(|t| (t.get_interpolated_beat_position() % 4.0) / 4.0).unwrap_or(0.0) as f32 * rect.width());
-            ui.painter().line_segment([egui::pos2(playhead_x, rect.min.y), egui::pos2(playhead_x, rect.max.y)], egui::Stroke::new(1.0, Color32::WHITE));
+            // Render playhead using actual per-deck playback position
+            let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[i]).unwrap_or(0);
+            let total_samples = track.as_ref().map(|t| t.metadata.total_samples).unwrap_or(0).max(1);
+            let playhead_ratio = elapsed_samples as f32 / total_samples as f32;
+            let playhead_x = rect.min.x + (playhead_ratio.clamp(0.0, 1.0) * rect.width());
+
+            ui.painter().line_segment(
+                [egui::pos2(playhead_x, rect.min.y), egui::pos2(playhead_x, rect.max.y)],
+                egui::Stroke::new(2.0, deck_color)
+            );
         } else {
             // Enhanced EMPTY DECK visualization
             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "EMPTY DECK", egui::FontId::monospace(12.0), Color32::from_gray(60));
