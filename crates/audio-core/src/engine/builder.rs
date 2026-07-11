@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use ipc_layer::{RingBuffer, MpscRingBuffer, Producer, Consumer};
-use nullherz_traits::{AudioProcessor, TopologyMutation, MidiEvent, telemetry::Telemetry};
+use nullherz_traits::{AudioProcessor, TopologyMutation, MidiEvent, telemetry::Telemetry, ProcessingKernel};
 use crate::engine::AudioEngine;
+use crate::engine::processing_kernel::StandardKernel;
 use crate::processors::ProcessorGraph;
 
 pub struct EngineHandle {
@@ -19,7 +20,7 @@ pub struct EngineHandle {
     pub health_signal: Arc<std::sync::atomic::AtomicBool>,
 }
 
-pub struct EngineBuilder {
+pub struct EngineBuilder<K: ProcessingKernel + 'static = StandardKernel> {
     command_buffer_size: usize,
     midi_buffer_size: usize,
     bundle_buffer_size: usize,
@@ -28,9 +29,10 @@ pub struct EngineBuilder {
     garbage_buffer_size: usize,
     initial_graph: Option<Box<dyn AudioProcessor>>,
     sample_registry: Option<Arc<dyn nullherz_traits::SampleRegistry>>,
+    kernel: K,
 }
 
-impl Default for EngineBuilder {
+impl Default for EngineBuilder<StandardKernel> {
     fn default() -> Self {
         Self {
             command_buffer_size: 1024,
@@ -41,15 +43,18 @@ impl Default for EngineBuilder {
             garbage_buffer_size: 1024,
             initial_graph: None,
             sample_registry: None,
+            kernel: StandardKernel::default(),
         }
     }
 }
 
-impl EngineBuilder {
+impl EngineBuilder<StandardKernel> {
     pub fn new() -> Self {
         Self::default()
     }
+}
 
+impl<K: ProcessingKernel + 'static> EngineBuilder<K> {
     pub fn with_command_buffer_size(mut self, size: usize) -> Self {
         self.command_buffer_size = size;
         self
@@ -65,7 +70,21 @@ impl EngineBuilder {
         self
     }
 
-    pub fn build(self) -> (Arc<AudioEngine>, EngineHandle) {
+    pub fn with_kernel<K2: ProcessingKernel + 'static>(self, kernel: K2) -> EngineBuilder<K2> {
+        EngineBuilder {
+            command_buffer_size: self.command_buffer_size,
+            midi_buffer_size: self.midi_buffer_size,
+            bundle_buffer_size: self.bundle_buffer_size,
+            topology_buffer_size: self.topology_buffer_size,
+            telemetry_buffer_size: self.telemetry_buffer_size,
+            garbage_buffer_size: self.garbage_buffer_size,
+            initial_graph: self.initial_graph,
+            sample_registry: self.sample_registry,
+            kernel,
+        }
+    }
+
+    pub fn build(self) -> (Arc<AudioEngine<K>>, EngineHandle) {
         let cmd_buffer = Arc::new(MpscRingBuffer::new(self.command_buffer_size));
         let cmd_cons = ipc_layer::LocalMpscCommandConsumer(cmd_buffer.clone());
         let cmd_prod = ipc_layer::LocalMpscCommandProducer(cmd_buffer.clone());
@@ -104,14 +123,14 @@ impl EngineBuilder {
             initial_graph,
             sample_registry,
             Arc::new(crate::rt_logging::RtLogger::new(256)),
-            crate::engine::processing_kernel::StandardKernel::default()
+            self.kernel,
         ).with_flight_recorder(tel_log_prod);
 
         let engine = Arc::new(engine);
 
         let handle = EngineHandle {
             command_producer: Box::new(cmd_prod),
-            controller: engine.clone(),
+            controller: engine.clone() as Arc<dyn nullherz_traits::RenderingController>,
             midi_producer: midi_prod,
             bundle_producer: bundle_prod,
             topology_producer: topo_prod,

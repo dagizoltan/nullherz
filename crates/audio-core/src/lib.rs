@@ -8,6 +8,9 @@ mod engine_tests;
 #[cfg(test)]
 mod integration_tests;
 
+#[cfg(test)]
+mod decoupling_tests;
+
 pub use engine::AudioEngine;
 pub use processors::{AudioProcessor, ProcessorGraph, ProcessorNode, GraphTopology, NodeRouting, CrossfadeState};
 pub use nullherz_traits::telemetry::Telemetry;
