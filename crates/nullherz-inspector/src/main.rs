@@ -180,6 +180,31 @@ impl InspectorApp {
 
     pub fn new(graph: GraphJson, _cc: &eframe::CreationContext<'_>) -> Self {
         let (cmd_tx, _cmd_rx) = mpsc::channel::<Command>();
+        let theme = nullherz_ui_hal::Theme::default();
+
+        // Apply style and visuals globally
+        let mut visuals = egui::Visuals::dark();
+        visuals.panel_fill = theme.bg_canvas;
+        visuals.window_fill = theme.bg_surface;
+        visuals.widgets.inactive.bg_fill = theme.bg_surface;
+        visuals.widgets.inactive.rounding = egui::Rounding::same(theme.radius_sm);
+        visuals.widgets.hovered.bg_fill = theme.bg_surface_raised;
+        visuals.widgets.hovered.rounding = egui::Rounding::same(theme.radius_sm);
+        visuals.widgets.active.bg_fill = theme.accent_muted;
+        visuals.widgets.active.rounding = egui::Rounding::same(theme.radius_sm);
+        visuals.widgets.noninteractive.bg_fill = theme.bg_surface;
+        visuals.widgets.noninteractive.rounding = egui::Rounding::same(theme.radius_md);
+
+        visuals.override_text_color = Some(theme.text_primary);
+
+        _cc.egui_ctx.set_visuals(visuals);
+
+        let mut style = (*_cc.egui_ctx.style()).clone();
+        style.spacing.item_spacing = egui::vec2(theme.space_sm, theme.space_sm);
+        style.spacing.window_margin = egui::Margin::same(theme.space_md);
+        style.spacing.button_padding = egui::vec2(theme.space_sm, theme.space_xs);
+        _cc.egui_ctx.set_style(style);
+
         Self {
             graph,
             command_sender: cmd_tx,
@@ -308,13 +333,7 @@ impl InspectorApp {
             sampler_input_source: 0,
             selected_library_track: None,
             bypassed_nodes: std::collections::HashSet::new(),
-            theme: nullherz_ui_hal::Theme {
-                accent: egui::Color32::from_rgb(0, 255, 200), // #00FFC8-ish
-                bg_dark: egui::Color32::from_rgb(10, 10, 12), // #0A0A0C
-                bg_med: egui::Color32::from_rgb(30, 30, 30),  // #1E1E1E
-                text_primary: egui::Color32::WHITE,
-                socket_color: egui::Color32::from_gray(80),
-            },
+            theme,
             last_update_time: 0.0,
             ingestion_path: "tracks/".to_string(),
             playlist_queue: std::collections::VecDeque::new(),
@@ -481,6 +500,8 @@ impl eframe::App for InspectorApp {
             egui::SidePanel::right("right_sidebar")
                 .resizable(true)
                 .default_width(450.0)
+                .min_width(280.0)
+                .max_width(600.0)
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         if ui.selectable_label(self.active_right_tab == Some(RightTab::Library), "LIBRARY").clicked() {

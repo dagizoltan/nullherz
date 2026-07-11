@@ -2,9 +2,10 @@ use egui::{Ui, Color32, RichText};
 use crate::{InspectorApp, widgets};
 
 pub fn render_deck_dna_panel(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
+    let theme = app.theme;
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("DNA").small().color(Color32::from_gray(100)));
+            ui.label(RichText::new("DNA").size(theme.type_caption).color(theme.text_secondary));
             ui.checkbox(&mut app.personality_macro_mode, "🔗");
         });
 
@@ -15,9 +16,9 @@ pub fn render_deck_dna_panel(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
             ("AGGRESSIVE", 3, "aggressive"),
         ];
 
-        let deck_color = InspectorApp::deck_color(i);
+        let deck_color = theme.deck_colors[i];
 
-        egui::Grid::new(format!("dna_grid_{}", i)).num_columns(2).spacing([4.0, 4.0]).show(ui, |ui| {
+        egui::Grid::new(format!("dna_grid_{}", i)).num_columns(2).spacing([theme.space_xs, theme.space_xs]).show(ui, |ui| {
             for (label, idx, feature) in traits {
                 ui.vertical(|ui| {
                     ui.set_max_width(32.0);
@@ -32,7 +33,7 @@ pub fn render_deck_dna_panel(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
                         let strength = *val;
                         emit_personality_mutation(app, i, idx, feature, strength);
                     }
-                    ui.label(RichText::new(label).size(6.0).color(Color32::from_gray(100)));
+                    ui.label(RichText::new(label).size(theme.type_caption).color(theme.text_disabled));
                 });
                 if idx % 2 == 1 { ui.end_row(); }
             }

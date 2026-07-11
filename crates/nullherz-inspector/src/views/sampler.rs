@@ -1,68 +1,73 @@
 use nullherz_dna::GeneticLibrary;
-use egui::{Color32, Ui, Frame, Vec2, Sense, Stroke, RichText, Margin};
+use egui::{Color32, Ui, Frame, Vec2, Sense, Stroke, RichText, Margin, Rounding};
 use crate::{InspectorApp, widgets};
 use audio_core::Telemetry;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
+    let theme = app.theme;
     ui.horizontal(|ui| {
-        ui.heading("Production Sampler & Capture");
+        ui.heading(RichText::new("Production Sampler & Capture").size(theme.type_heading));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if app.sampler_is_recording {
                 let time = ui.input(|i| i.time);
                 let alpha = ((time * 3.0).sin() * 0.5 + 0.5) as f32;
-                ui.label(RichText::new("● RECORDING").color(Color32::RED.gamma_multiply(alpha)).strong());
+                ui.label(RichText::new("● RECORDING").color(theme.danger.gamma_multiply(alpha)).strong().size(theme.type_label));
             }
         });
     });
-    ui.add_space(10.0);
+    ui.add_space(theme.space_sm);
 
     // Waveform Preview Area
-    Frame::none().fill(Color32::from_rgb(10, 10, 12)).rounding(4.0).inner_margin(12.0).show(ui, |ui| {
-        let (rect, _response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 160.0), Sense::hover());
+    Frame::none()
+        .fill(theme.bg_inset)
+        .rounding(Rounding::same(theme.radius_md))
+        .inner_margin(Margin::same(12.0))
+        .show(ui, |ui| {
+            let (rect, _response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 160.0), Sense::hover());
 
-        if let (Some(wgpu_mtx), Some(wf_mtx)) = (&app.wgpu_renderer, &app.waveform_renderer) {
-             let _wgpu = wgpu_mtx.lock().unwrap();
-             let mut wf = wf_mtx.lock().unwrap();
+            if let (Some(wgpu_mtx), Some(wf_mtx)) = (&app.wgpu_renderer, &app.waveform_renderer) {
+                 let _wgpu = wgpu_mtx.lock().unwrap();
+                 let mut wf = wf_mtx.lock().unwrap();
 
-             let deck_idx = app.focused_deck;
-             if let Some(track_id) = app.now_playing[deck_idx] {
-                 if let Ok(Some(track)) = app.library_db.get_track(track_id) {
-                     wf.update_from_mip_waveform(&_wgpu.queue, &track.metadata.mip_waveform, app.sampler_waveform_zoom, rect.width() as u32);
+                 let deck_idx = app.focused_deck;
+                 if let Some(track_id) = app.now_playing[deck_idx] {
+                     if let Ok(Some(track)) = app.library_db.get_track(track_id) {
+                         wf.update_from_mip_waveform(&_wgpu.queue, &track.metadata.mip_waveform, app.sampler_waveform_zoom, rect.width() as u32);
+                     }
                  }
-             }
 
-             if let Some(t) = telemetry {
-                 let scroll = (t.get_interpolated_beat_position() as f32 % 4.0) / 4.0 * 2.0;
-                 let color = app.theme.accent.to_array().map(|v| v as f32 / 255.0);
-                 wf.update_globals(&_wgpu.queue, scroll, app.sampler_waveform_zoom, color);
-             }
+                 if let Some(t) = telemetry {
+                     let scroll = (t.get_interpolated_beat_position() as f32 % 4.0) / 4.0 * 2.0;
+                     let color = theme.accent.to_array().map(|v| v as f32 / 255.0);
+                     wf.update_globals(&_wgpu.queue, scroll, app.sampler_waveform_zoom, color);
+                 }
 
-             nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_mtx.clone());
-        }
+                 nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_mtx.clone());
+            }
 
-        if let Some(t) = telemetry {
-            let playhead_x = rect.left() + (t.get_interpolated_beat_position() as f32 % 4.0) / 4.0 * rect.width();
-            ui.painter().line_segment([egui::pos2(playhead_x, rect.top()), egui::pos2(playhead_x, rect.bottom())], Stroke::new(1.5, app.theme.accent));
-        }
-    });
+            if let Some(t) = telemetry {
+                let playhead_x = rect.left() + (t.get_interpolated_beat_position() as f32 % 4.0) / 4.0 * rect.width();
+                ui.painter().line_segment([egui::pos2(playhead_x, rect.top()), egui::pos2(playhead_x, rect.bottom())], Stroke::new(1.5, theme.accent));
+            }
+        });
 
-    ui.add_space(8.0);
+    ui.add_space(theme.space_sm);
     ui.horizontal(|ui| {
-        ui.label("Zoom:");
+        ui.label(RichText::new("Zoom:").size(theme.type_caption));
         ui.add(egui::Slider::new(&mut app.sampler_waveform_zoom, 1.0..=32.0).logarithmic(true).show_value(false));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-             if ui.button("RESET VIEW").clicked() { app.sampler_waveform_zoom = 1.0; }
+             if ui.button(RichText::new("RESET VIEW").size(theme.type_caption)).clicked() { app.sampler_waveform_zoom = 1.0; }
         });
     });
 
-    ui.add_space(15.0);
+    ui.add_space(theme.space_md);
 
     ui.columns(2, |cols| {
         // Column 1: Capture Controls
         let ui = &mut cols[0];
         ui.vertical(|ui| {
-            ui.heading("Capture Settings");
-            ui.add_space(8.0);
+            ui.heading(RichText::new("Capture Settings").size(theme.type_heading));
+            ui.add_space(theme.space_sm);
             Frame::group(ui.style()).inner_margin(Margin::same(12.0)).show(ui, |ui| {
                 egui::Grid::new("capture_settings_grid").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
                     ui.label("Input Source");
@@ -112,7 +117,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         }
                         if let Some(t) = telemetry {
                             let level = t.peak_levels.get(app.sampler_input_source).cloned().unwrap_or(0.0);
-                            widgets::render_vu_meter(ui, level, app.channel_peak_hold[0], app.theme.accent, 20.0);
+                            widgets::render_vu_meter(ui, level, app.channel_peak_hold[0], theme.accent, 20.0);
                         }
                     });
                     ui.end_row();
@@ -139,9 +144,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 ui.add_space(15.0);
                 ui.horizontal(|ui| {
                     let rec_btn = if app.sampler_is_recording {
-                        egui::Button::new(RichText::new("■ STOP").strong().color(Color32::WHITE)).fill(Color32::from_rgb(180, 0, 0))
+                        egui::Button::new(RichText::new("■ STOP").strong().color(theme.text_primary).size(theme.type_label)).fill(theme.danger.linear_multiply(0.7))
                     } else {
-                        egui::Button::new(RichText::new("● RECORD").strong().color(Color32::RED))
+                        egui::Button::new(RichText::new("● RECORD").strong().color(theme.danger).size(theme.type_label))
                     };
 
                     if ui.add(rec_btn.min_size(Vec2::new(100.0, 32.0))).clicked() {
@@ -151,14 +156,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         }));
                     }
 
-                    if ui.add(egui::Button::new("RESET").min_size(Vec2::new(60.0, 32.0))).clicked() {
+                    if ui.add(egui::Button::new(RichText::new("RESET").size(theme.type_label)).min_size(Vec2::new(60.0, 32.0))).clicked() {
                         let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                             target_id: app.get_node_id("capture_node") as u64, param_id: 4, value: 1.0, ramp_duration_samples: 0,
                         }));
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(RichText::new("COMMIT").strong().color(app.theme.accent)).clicked() {
+                        if ui.button(RichText::new("COMMIT").strong().color(theme.accent).size(theme.type_label)).clicked() {
                             let sample_id = app.next_sample_id;
                             app.next_sample_id += 1;
                             let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::RegisterCapture {
@@ -173,8 +178,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         // Column 2: Performance Slicer
         let ui = &mut cols[1];
         ui.vertical(|ui| {
-            ui.heading("Loop Slicer");
-            ui.add_space(8.0);
+            ui.heading(RichText::new("Loop Slicer").size(theme.type_heading));
+            ui.add_space(theme.space_sm);
             Frame::group(ui.style()).inner_margin(Margin::same(12.0)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if ui.checkbox(&mut app.sampler_slicer_mode, "ENABLE SLICER").changed() {
@@ -184,17 +189,17 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     }
                 });
 
-                ui.add_space(10.0);
-                ui.label(RichText::new("PERFORMANCE PADS").small().color(Color32::from_gray(100)));
-                egui::Grid::new("slicer_pads").spacing([8.0, 8.0]).show(ui, |ui| {
+                ui.add_space(theme.space_sm);
+                ui.label(RichText::new("PERFORMANCE PADS").size(theme.type_caption).color(theme.text_secondary));
+                egui::Grid::new("slicer_pads").spacing([theme.space_sm, theme.space_sm]).show(ui, |ui| {
                     for row in 0..2 {
                         for col in 0..8 {
                             let idx = row * 8 + col;
                             let is_active = telemetry.as_ref().map(|t| (t.get_interpolated_beat_position() as usize % 16) == idx).unwrap_or(false);
 
-                            let btn = egui::Button::new(RichText::new(format!("{}", idx + 1)).strong())
+                            let btn = egui::Button::new(RichText::new(format!("{}", idx + 1)).strong().size(theme.type_caption))
                                 .min_size(Vec2::splat(36.0))
-                                .fill(if is_active { Color32::from_rgb(0, 150, 120) } else { Color32::from_gray(40) });
+                                .fill(if is_active { theme.accent_muted } else { theme.text_disabled });
 
                             if ui.add(btn).clicked() {
                                 let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::TriggerSlice {

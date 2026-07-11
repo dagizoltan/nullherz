@@ -4,11 +4,12 @@ use audio_core::Telemetry;
 use nullherz_traits::{Command, MixerCommand};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
-    ui.heading("Modulation Routing Matrix");
-    ui.add_space(10.0);
+    let theme = app.theme;
+    ui.heading(RichText::new("Modulation Routing Matrix").size(theme.type_heading));
+    ui.add_space(theme.space_sm);
 
     ui.group(|ui| {
-        ui.label(RichText::new("ANAWAVES TRAIT INHERITANCE").color(Color32::from_gray(100)));
+        ui.label(RichText::new("ANAWAVES TRAIT INHERITANCE").color(theme.text_secondary).size(theme.type_caption));
         ui.add_space(5.0);
         ui.vertical(|ui| {
             ui.label("Global Spectral Window");
@@ -26,18 +27,18 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
                     target_id: 100, // Assuming spectral morph node
                     opcode: 0x01,
                     data: [app.spectral_window_shape as u8, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-                }));
+                 }));
             }
         });
     });
 
-    ui.add_space(20.0);
+    ui.add_space(theme.space_md);
 
     // Matrix Header
     ui.horizontal(|ui| {
-        ui.add_sized([140.0, 20.0], egui::Label::new(RichText::new("MODULATION TARGET").small().strong()));
+        ui.add_sized([140.0, 20.0], egui::Label::new(RichText::new("MODULATION TARGET").size(theme.type_caption).strong()));
         for i in 0..8 {
-            ui.add_sized([45.0, 20.0], egui::Label::new(RichText::new(format!("MACRO {}", i + 1)).small().color(app.theme.accent)));
+            ui.add_sized([45.0, 20.0], egui::Label::new(RichText::new(format!("MACRO {}", i + 1)).size(theme.type_caption).color(theme.accent)));
         }
     });
 
@@ -49,20 +50,20 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
             let node_id = idx as u64;
             // High-visibility grouping per node
             ui.group(|ui| {
-                ui.label(RichText::new(&node.name).strong().color(Color32::WHITE));
+                ui.label(RichText::new(&node.name).strong().color(theme.text_primary).size(theme.type_body));
                 ui.add_space(4.0);
 
                 for param_id in 0..4 {
                     let name = format!("Param {}", param_id);
                     ui.horizontal(|ui| {
-                        ui.add_sized([120.0, 25.0], egui::Label::new(RichText::new(name).small().color(Color32::from_gray(180))));
+                        ui.add_sized([120.0, 25.0], egui::Label::new(RichText::new(name).size(theme.type_caption).color(theme.text_secondary)));
 
                         for macro_id in 0..8 {
                             // Hardened: Mini-knob for scaling control
                             let mut scaling = 0.0; // In a real app we'd fetch this from the modulation matrix state
                             ui.vertical(|ui| {
                                 ui.set_max_width(45.0);
-                                if crate::widgets::render_knob(ui, &mut scaling, -1.0..=1.0, "", Color32::from_gray(120)).changed() {
+                                if crate::widgets::render_knob(ui, &mut scaling, -1.0..=1.0, "", theme.text_disabled).changed() {
                                      let _ = app.command_sender.send(Command::Mixer(MixerCommand::AddModMapping {
                                         macro_id: macro_id as u32,
                                         target_id: node_id,
@@ -76,17 +77,17 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
                     });
                 }
             });
-            ui.add_space(8.0);
+            ui.add_space(theme.space_xs);
         }
     });
 
-    ui.add_space(20.0);
+    ui.add_space(theme.space_md);
     ui.label("Macro Control Bank");
     ui.horizontal(|ui| {
         for i in 0..8 {
             ui.vertical(|ui| {
                 let prev_val = app.macros[i];
-                crate::widgets::render_knob(ui, &mut app.macros[i], 0.0..=1.0, &format!("M{}", i+1), app.theme.accent);
+                crate::widgets::render_knob(ui, &mut app.macros[i], 0.0..=1.0, &format!("M{}", i+1), theme.accent);
                 if app.macros[i] != prev_val {
                     let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetMacro {
                         macro_id: i as u32,

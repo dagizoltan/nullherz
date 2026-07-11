@@ -9,52 +9,53 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     }
     let deck_idx = app.focused_deck;
     let deck_char = (b'A' + deck_idx as u8) as char;
-    let deck_color = InspectorApp::deck_color(deck_idx);
+    let theme = app.theme;
+    let deck_color = theme.deck_colors[deck_idx];
 
     ui.horizontal(|ui| {
-        ui.heading(RichText::new("ADVANCED PERFORMANCE PLAYER").strong().color(Color32::WHITE));
+        ui.heading(RichText::new("ADVANCED PERFORMANCE PLAYER").strong().color(theme.text_primary).size(theme.type_heading));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(format!("FOCUS: DECK {}", deck_char)).strong().color(deck_color));
+            ui.label(RichText::new(format!("FOCUS: DECK {}", deck_char)).strong().color(deck_color).size(theme.type_label));
         });
     });
-    ui.add_space(8.0);
+    ui.add_space(theme.space_sm);
 
     // Deck Tab Selector
     ui.horizontal(|ui| {
         for i in 0..4 {
             let active = i == app.focused_deck;
             let d_char = (b'A' + i as u8) as char;
-            let d_color = InspectorApp::deck_color(i);
+            let d_color = theme.deck_colors[i];
             let btn_text = format!("DECK {}", d_char);
 
             let btn = if active {
-                egui::Button::new(RichText::new(btn_text).strong().color(Color32::BLACK)).fill(d_color)
+                egui::Button::new(RichText::new(btn_text).strong().color(Color32::BLACK).size(theme.type_label)).fill(d_color)
             } else {
-                egui::Button::new(RichText::new(btn_text).color(d_color)).fill(Color32::from_rgb(20, 20, 24))
+                egui::Button::new(RichText::new(btn_text).color(d_color).size(theme.type_label)).fill(theme.bg_inset)
             };
 
             if ui.add_sized([100.0, 24.0], btn).clicked() {
                 app.focused_deck = i;
             }
-            ui.add_space(4.0);
+            ui.add_space(theme.space_xs);
         }
     });
-    ui.add_space(12.0);
+    ui.add_space(theme.space_md);
 
     // Advanced Player Deck Panel (Turntable + Transport Dashboard)
     Frame::none()
-        .fill(Color32::from_rgb(10, 10, 12))
-        .stroke(Stroke::new(1.0, Color32::from_gray(25)))
-        .rounding(Rounding::same(8.0))
-        .inner_margin(Margin::same(16.0))
+        .fill(theme.bg_canvas)
+        .stroke(Stroke::new(1.0, theme.border))
+        .rounding(Rounding::same(theme.radius_md))
+        .inner_margin(Margin::same(theme.space_md))
         .show(ui, |ui| {
             ui.horizontal_top(|ui| {
                 // Column 1: Vinyl Jog Wheel & Physical Trajectory (turntable)
                 ui.vertical(|ui| {
                     ui.set_width(180.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("VIRTUAL JOG WHEEL").small().color(Color32::from_gray(100)));
-                        ui.add_space(4.0);
+                        ui.label(RichText::new("VIRTUAL JOG WHEEL").color(theme.text_secondary).size(theme.type_caption));
+                        ui.add_space(theme.space_xs);
 
                         // Render an elegant rotating Jog Wheel
                         let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[deck_idx]).unwrap_or(0);
@@ -63,13 +64,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         let (rect, _response) = ui.allocate_exact_size(Vec2::splat(120.0), Sense::click_and_drag());
 
                         // Jog Wheel outer ring
-                        ui.painter().circle_stroke(rect.center(), 58.0, Stroke::new(2.0, Color32::from_gray(40)));
-                        ui.painter().circle_filled(rect.center(), 56.0, Color32::from_rgb(14, 14, 16));
-                        ui.painter().circle_stroke(rect.center(), 48.0, Stroke::new(1.0, Color32::from_gray(30)));
+                        ui.painter().circle_stroke(rect.center(), 58.0, Stroke::new(2.0, theme.border));
+                        ui.painter().circle_filled(rect.center(), 56.0, theme.bg_inset);
+                        ui.painter().circle_stroke(rect.center(), 48.0, Stroke::new(1.0, theme.border));
 
                         // Rotational vinyl grooves
                         for radius in [12.0, 20.0, 28.0, 36.0, 44.0] {
-                            ui.painter().circle_stroke(rect.center(), radius, Stroke::new(0.5, Color32::from_gray(20)));
+                            ui.painter().circle_stroke(rect.center(), radius, Stroke::new(0.5, theme.border.linear_multiply(0.5)));
                         }
 
                         // Center hub (accent color)
@@ -81,12 +82,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         let marker_end = rect.center() + Vec2::new(rotation_angle.cos() * marker_len, rotation_angle.sin() * marker_len);
                         ui.painter().line_segment([rect.center(), marker_end], Stroke::new(2.0, deck_color));
 
-                        ui.add_space(8.0);
-                        ui.label(RichText::new("SCRATCH / JOG").small().color(Color32::from_gray(80)));
+                        ui.add_space(theme.space_sm);
+                        ui.label(RichText::new("SCRATCH / JOG").color(theme.text_disabled).size(theme.type_caption));
                     });
                 });
 
-                ui.add_space(16.0);
+                ui.add_space(theme.space_md);
 
                 // Column 2: Dashboard (Waveform + Pitch + Slicer Pads + Loop Control)
                 ui.vertical(|ui| {
@@ -98,33 +99,33 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[deck_idx]).unwrap_or(0);
 
                     Frame::none()
-                        .fill(Color32::from_rgb(6, 6, 8))
-                        .rounding(Rounding::same(4.0))
-                        .inner_margin(Margin::symmetric(12.0, 8.0))
+                        .fill(theme.bg_inset)
+                        .rounding(Rounding::same(theme.radius_sm))
+                        .inner_margin(Margin::symmetric(theme.space_md, theme.space_sm))
                         .show(ui, |ui| {
                             ui.vertical(|ui| {
                                 if let Some(ref t) = track {
                                     ui.horizontal(|ui| {
-                                        ui.label(RichText::new(&t.title).strong().size(13.0).color(Color32::WHITE));
-                                        ui.add_space(8.0);
-                                        ui.label(RichText::new(format!("by {}", t.artist)).size(10.0).color(Color32::from_gray(140)));
+                                        ui.label(RichText::new(&t.title).strong().size(theme.type_body).color(theme.text_primary));
+                                        ui.add_space(theme.space_sm);
+                                        ui.label(RichText::new(format!("by {}", t.artist)).size(theme.type_caption).color(theme.text_secondary));
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            ui.label(RichText::new(format!("{:.1} BPM", t.metadata.bpm)).monospace().strong().color(deck_color));
+                                            ui.label(RichText::new(format!("{:.1} BPM", t.metadata.bpm)).monospace().strong().color(deck_color).size(theme.type_body));
                                         });
                                     });
                                 } else {
                                     ui.centered_and_justified(|ui| {
-                                        ui.label(RichText::new("NO TRACK LOADED IN DECK").monospace().color(Color32::from_gray(60)).size(10.0));
+                                        ui.label(RichText::new("NO TRACK LOADED IN DECK").monospace().color(theme.text_disabled).size(theme.type_caption));
                                     });
                                 }
                             });
                         });
 
-                    ui.add_space(8.0);
+                    ui.add_space(theme.space_sm);
 
                     // Waveform Display (Headless safe with fallback)
                     let (wf_rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 70.0), Sense::hover());
-                    ui.painter().rect_filled(wf_rect, 2.0, Color32::from_rgb(10, 10, 15));
+                    ui.painter().rect_filled(wf_rect, theme.radius_sm, theme.bg_inset);
 
                     if let Some(ref t) = track {
                         if let (Some(wgpu_mtx), Some(wf_mtx)) = (&app.wgpu_renderer, &app.deck_waveform_renderers[deck_idx]) {
@@ -139,10 +140,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, wf_rect, wf_mtx.clone());
                         } else {
                             // Fallback rendering
-                            ui.painter().text(wf_rect.center(), egui::Align2::CENTER_CENTER, format!("{} (NO GPU)", t.title), egui::FontId::monospace(10.0), Color32::from_gray(100));
+                            ui.painter().text(wf_rect.center(), egui::Align2::CENTER_CENTER, format!("{} (NO GPU)", t.title), egui::FontId::monospace(theme.type_caption), theme.text_secondary);
                             ui.painter().line_segment(
                                 [egui::pos2(wf_rect.min.x, wf_rect.center().y), egui::pos2(wf_rect.max.x, wf_rect.center().y)],
-                                egui::Stroke::new(1.0, Color32::from_gray(40))
+                                egui::Stroke::new(1.0, theme.border)
                             );
                         }
 
@@ -156,7 +157,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         );
                     }
 
-                    ui.add_space(8.0);
+                    ui.add_space(theme.space_sm);
 
                     // Transport and performance dashboard (Side-by-side controls)
                     ui.horizontal_top(|ui| {
@@ -166,7 +167,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                             // Transport row
                             ui.horizontal(|ui| {
-                                if ui.button(RichText::new("⏮").size(16.0)).clicked() {
+                                if ui.button(RichText::new("⏮").size(theme.type_label)).clicked() {
                                     let node_name = match deck_idx {
                                         0 => "deck_a_sampler",
                                         1 => "deck_b_sampler",
@@ -180,9 +181,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                                 let is_deck_playing = app.deck_playing[deck_idx];
                                 let play_btn = if is_deck_playing {
-                                    egui::Button::new(RichText::new("⏸").size(18.0)).fill(Color32::from_rgb(0, 100, 200))
+                                    egui::Button::new(RichText::new("⏸").size(theme.type_heading)).fill(theme.accent_muted)
                                 } else {
-                                    egui::Button::new(RichText::new("▶").size(18.0))
+                                    egui::Button::new(RichText::new("▶").size(theme.type_heading))
                                 };
 
                                 if ui.add(play_btn).clicked() {
@@ -194,7 +195,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     }
                                 }
 
-                                if ui.button(RichText::new("⏭").size(16.0)).clicked() {
+                                if ui.button(RichText::new("⏭").size(theme.type_label)).clicked() {
                                     let node_name = match deck_idx {
                                         0 => "deck_a_sampler",
                                         1 => "deck_b_sampler",
@@ -224,7 +225,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 }
                             });
 
-                            ui.add_space(8.0);
+                            ui.add_space(theme.space_sm);
 
                             // Loop controls section
                             ui.strong("LOOP CONTROLS");
@@ -254,7 +255,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         }));
                                     }
                                 }
-                                if ui.button(RichText::new("EXIT").color(Color32::RED)).clicked() {
+                                if ui.button(RichText::new("EXIT").color(theme.danger)).clicked() {
                                     let node_name = match deck_idx {
                                         0 => "deck_a_sampler",
                                         1 => "deck_b_sampler",
@@ -278,14 +279,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         // Performance slice pads (TriggerSlice)
                         ui.vertical(|ui| {
                             ui.strong("REAL-TIME TRACK SLICER");
-                            ui.add_space(2.0);
-                            egui::Grid::new("slicer_pads_grid").spacing([4.0, 4.0]).show(ui, |ui| {
+                            ui.add_space(theme.space_xs);
+                            egui::Grid::new("slicer_pads_grid").spacing([theme.space_xs, theme.space_xs]).show(ui, |ui| {
                                 for r in 0..2 {
                                     for c in 0..4 {
                                         let pad_idx = r * 4 + c;
-                                        let btn = egui::Button::new(RichText::new(format!("SL {}", pad_idx + 1)).strong())
+                                        let btn = egui::Button::new(RichText::new(format!("SL {}", pad_idx + 1)).strong().size(theme.type_caption))
                                             .min_size(Vec2::new(42.0, 24.0))
-                                            .fill(Color32::from_gray(35));
+                                            .fill(theme.bg_surface);
                                         if ui.add(btn).clicked() {
                                             let node_name = match deck_idx {
                                                 0 => "deck_a_sampler",
@@ -310,19 +311,19 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             });
         });
 
-    ui.add_space(16.0);
+    ui.add_space(theme.space_md);
     ui.separator();
-    ui.add_space(10.0);
+    ui.add_space(theme.space_sm);
 
     // Modern Library Browser with load buttons targeting focused deck
     ui.horizontal(|ui| {
-        ui.heading("Precision Library Browser");
+        ui.heading(RichText::new("Precision Library Browser").size(theme.type_heading));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.text_edit_singleline(&mut app.search_query);
             ui.label("🔍");
         });
     });
-    ui.add_space(10.0);
+    ui.add_space(theme.space_sm);
 
     ScrollArea::vertical().show(ui, |ui| {
         if app.cached_library.is_empty() && app.library_needs_refresh {
@@ -332,11 +333,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             }
         }
 
-        egui::Grid::new("library_grid").num_columns(5).spacing([20.0, 8.0]).striped(true).show(ui, |ui| {
-            ui.label(RichText::new("TITLE").strong());
-            ui.label(RichText::new("ARTIST").strong());
-            ui.label(RichText::new("BPM").strong());
-            ui.label(RichText::new("KEY").strong());
+        egui::Grid::new("library_grid").num_columns(5).spacing([theme.space_lg, theme.space_sm]).striped(true).show(ui, |ui| {
+            ui.label(RichText::new("TITLE").strong().size(theme.type_label));
+            ui.label(RichText::new("ARTIST").strong().size(theme.type_label));
+            ui.label(RichText::new("BPM").strong().size(theme.type_label));
+            ui.label(RichText::new("KEY").strong().size(theme.type_label));
             ui.label("");
             ui.end_row();
 
@@ -346,20 +347,20 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     continue;
                 }
 
-                ui.label(&track.title);
-                ui.label(&track.artist);
-                ui.label(format!("{:.1}", track.metadata.bpm));
-                ui.label(format!("{}", track.metadata.root_key.unwrap_or(0.0)));
+                ui.label(RichText::new(&track.title).size(theme.type_body));
+                ui.label(RichText::new(&track.artist).size(theme.type_body));
+                ui.label(RichText::new(format!("{:.1}", track.metadata.bpm)).size(theme.type_body));
+                ui.label(RichText::new(format!("{}", track.metadata.root_key.unwrap_or(0.0))).size(theme.type_body));
 
                 ui.horizontal(|ui| {
-                    if ui.button(RichText::new(format!("LOAD TO DECK {}", deck_char)).color(deck_color).strong()).clicked() {
+                    if ui.button(RichText::new(format!("LOAD TO DECK {}", deck_char)).color(deck_color).strong().size(theme.type_caption)).clicked() {
                         let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::LoadTrackToDeck {
                             deck_id: deck_char,
                             sample_id: track.id,
                         }));
                         app.now_playing[deck_idx] = Some(track.id);
                     }
-                    if ui.button("QUEUE").clicked() {
+                    if ui.button(RichText::new("QUEUE").size(theme.type_caption)).clicked() {
                         app.playlist_queue.push_back(track.id);
                     }
                 });
@@ -367,13 +368,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             }
         });
 
-        ui.add_space(20.0);
-        ui.heading("Playlist Queue");
+        ui.add_space(theme.space_lg);
+        ui.heading(RichText::new("Playlist Queue").size(theme.type_heading));
         let mut to_remove = None;
         for (idx, &track_id) in app.playlist_queue.iter().enumerate() {
             if let Ok(Some(track)) = app.library_db.get_track(track_id) {
                 ui.horizontal(|ui| {
-                    ui.label(format!("{}. {} - {}", idx + 1, track.artist, track.title));
+                    ui.label(RichText::new(format!("{}. {} - {}", idx + 1, track.artist, track.title)).size(theme.type_body));
                     if ui.button("❌").clicked() { to_remove = Some(idx); }
                 });
             }
