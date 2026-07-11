@@ -571,6 +571,9 @@ impl eframe::App for InspectorApp {
                  _ => { ui.label("View coming soon..."); }
              }
         });
+
+        // Continuous real-time repaint request for fluid animations and fast metering feedback
+        ctx.request_repaint();
     }
 }
 
