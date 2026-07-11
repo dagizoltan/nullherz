@@ -37,7 +37,7 @@ fn render_header(ui: &mut Ui, telemetry: &Option<Telemetry>, theme: &nullherz_ui
         .inner_margin(Margin::symmetric(16.0, 12.0))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.heading(RichText::new("NULLHERZ DJ CONSOLE").strong().color(theme.text_primary).size(16.0).letter_spacing(1.5));
+                ui.heading(RichText::new("NULLHERZ DJ CONSOLE").strong().color(theme.text_primary).size(16.0).extra_letter_spacing(1.5));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if let Some(t) = telemetry {
                         ui.label(RichText::new("BPM").small().color(Color32::from_gray(100)));
@@ -79,7 +79,7 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
                 let bar_color = if is_focused { deck_color } else { Color32::from_gray(30) };
 
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(bar_width, 280.0), egui::Sense::hover());
-                ui.painter().rect_filled(rect, Rounding::none(), bar_color);
+                ui.painter().rect_filled(rect, Rounding::ZERO, bar_color);
 
                 // Main card content area
                 ui.vertical(|ui| {
@@ -183,7 +183,7 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
 
                         // Vertical Divider
                         let (line_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 140.0), egui::Sense::hover());
-                        ui.painter().rect_filled(line_rect, Rounding::none(), Color32::from_rgb(22, 22, 26));
+                        ui.painter().rect_filled(line_rect, Rounding::ZERO, Color32::from_rgb(22, 22, 26));
                         ui.add_space(8.0);
 
                         // 2. Performance (Hot cues)
@@ -192,7 +192,7 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
 
                         // Vertical Divider
                         let (line_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 140.0), egui::Sense::hover());
-                        ui.painter().rect_filled(line_rect, Rounding::none(), Color32::from_rgb(22, 22, 26));
+                        ui.painter().rect_filled(line_rect, Rounding::ZERO, Color32::from_rgb(22, 22, 26));
                         ui.add_space(8.0);
 
                         // 3. Mixer (Faders / EQs / Filters)
@@ -201,7 +201,7 @@ fn render_deck_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &O
 
                         // Vertical Divider
                         let (line_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 140.0), egui::Sense::hover());
-                        ui.painter().rect_filled(line_rect, Rounding::none(), Color32::from_rgb(22, 22, 26));
+                        ui.painter().rect_filled(line_rect, Rounding::ZERO, Color32::from_rgb(22, 22, 26));
                         ui.add_space(8.0);
 
                         // 4. DNA panel
