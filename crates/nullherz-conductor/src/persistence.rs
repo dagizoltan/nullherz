@@ -278,7 +278,8 @@ impl ProjectState {
 
     pub fn load_from_rkyv(path: &str) -> std::io::Result<Self> {
         let bytes = std::fs::read(path)?;
-        let archived = unsafe { rkyv::archived_root::<Self>(&bytes[..]) };
+        let archived = rkyv::check_archived_root::<Self>(&bytes[..])
+            .map_err(|e| std::io::Error::other(format!("rkyv validation error: {}", e)))?;
         let deserialized: Self = rkyv::Deserialize::<Self, _>::deserialize(archived, &mut rkyv::Infallible).map_err(|e| std::io::Error::other(format!("rkyv deserialize error: {}", e)))?;
         Ok(deserialized)
     }

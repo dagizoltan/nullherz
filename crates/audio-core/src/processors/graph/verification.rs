@@ -32,23 +32,23 @@ mod verification {
         let block_x_map = [[0u8; crate::MAX_CHANNELS]; crate::MAX_NODES];
         let telemetry = std::array::from_fn(|_| AtomicU64::new(0));
 
-        GraphExecutor::execute_stage(
-            &nodes,
-            &mut buffers,
-            &mut crossfade_buffers,
-            &topo,
-            0,
-            16,
-            0,
-            &block_x_map,
-            &mut None,
-            None,
-            None,
-            true,
-            &telemetry,
-        );
+        // Verify Disjoint Output Invariant:
+        // Parallel execution is only safe if all nodes in a stage write to disjoint physical buffers.
+        let stage_nodes = &topo.plan.stages[0].0[..topo.plan.stage_counts[0] as usize];
+        for (i, &u_idx) in stage_nodes.iter().enumerate() {
+            for &v_idx in stage_nodes.iter().skip(i + 1) {
+                let u_routing = &topo.routing[u_idx as usize];
+                let v_routing = &topo.routing[v_idx as usize];
 
-        kani::assert(true, "Execution finished without hazard overlap");
+                for k in 0..u_routing.output_count {
+                    for l in 0..v_routing.output_count {
+                        let u_phys = topo.virtual_to_physical[u_routing.output_indices[k] as usize];
+                        let v_phys = topo.virtual_to_physical[v_routing.output_indices[l] as usize];
+                        kani::assert(u_phys != v_phys, "Write hazard detected: parallel nodes write to same physical buffer");
+                    }
+                }
+            }
+        }
     }
 
     #[kani::proof]
