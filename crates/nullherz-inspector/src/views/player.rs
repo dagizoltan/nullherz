@@ -42,7 +42,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 }
 
                 if let Some(t) = telemetry {
-                    let scroll = (t.beat_position as f32 % 4.0) / 4.0 * 2.0;
+                    let scroll = (t.get_interpolated_beat_position() as f32 % 4.0) / 4.0 * 2.0;
                     wf.update_globals(&_wgpu.queue, scroll, app.sampler_waveform_zoom, [0.1, 0.4, 1.0, 1.0]);
                 }
 
@@ -50,7 +50,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             }
 
             if let Some(t) = telemetry {
-                let playhead_x = rect.left() + (t.beat_position as f32 % 4.0) / 4.0 * rect.width();
+                let playhead_x = rect.left() + (t.get_interpolated_beat_position() as f32 % 4.0) / 4.0 * rect.width();
                 ui.painter().line_segment([egui::pos2(playhead_x, rect.top()), egui::pos2(playhead_x, rect.bottom())], Stroke::new(2.0, Color32::from_rgb(0, 150, 255)));
             }
 

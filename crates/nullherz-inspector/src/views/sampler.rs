@@ -32,7 +32,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
              }
 
              if let Some(t) = telemetry {
-                 let scroll = (t.beat_position as f32 % 4.0) / 4.0 * 2.0;
+                 let scroll = (t.get_interpolated_beat_position() as f32 % 4.0) / 4.0 * 2.0;
                  let color = app.theme.accent.to_array().map(|v| v as f32 / 255.0);
                  wf.update_globals(&_wgpu.queue, scroll, app.sampler_waveform_zoom, color);
              }
@@ -41,7 +41,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         }
 
         if let Some(t) = telemetry {
-            let playhead_x = rect.left() + (t.beat_position as f32 % 4.0) / 4.0 * rect.width();
+            let playhead_x = rect.left() + (t.get_interpolated_beat_position() as f32 % 4.0) / 4.0 * rect.width();
             ui.painter().line_segment([egui::pos2(playhead_x, rect.top()), egui::pos2(playhead_x, rect.bottom())], Stroke::new(1.5, app.theme.accent));
         }
     });
@@ -190,7 +190,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     for row in 0..2 {
                         for col in 0..8 {
                             let idx = row * 8 + col;
-                            let is_active = telemetry.as_ref().map(|t| (t.beat_position as usize % 16) == idx).unwrap_or(false);
+                            let is_active = telemetry.as_ref().map(|t| (t.get_interpolated_beat_position() as usize % 16) == idx).unwrap_or(false);
 
                             let btn = egui::Button::new(RichText::new(format!("{}", idx + 1)).strong())
                                 .min_size(Vec2::splat(36.0))

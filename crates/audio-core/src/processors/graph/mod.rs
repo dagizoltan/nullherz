@@ -120,13 +120,11 @@ impl ProcessorGraph {
                 self.morph_samples_total = self.morph_duration_samples;
                 self.morph_samples_remaining = self.morph_samples_total;
             }
-        }
 
-        if let Err(msg) = self.topology_coordinator.commit() {
-            if let Some(ref logger) = self.logger {
-                logger.log(crate::rt_logging::RtLogLevel::Error, &format!("Refusing to commit hazardous topology: {}", msg), 0);
-            } else {
-                eprintln!("CRITICAL: Refusing to commit hazardous topology: {}", msg);
+            if let Err(msg) = self.topology_coordinator.commit() {
+                if let Some(ref logger) = self.logger {
+                    logger.log(crate::rt_logging::RtLogLevel::Error, &format!("Refusing to commit hazardous topology: {}", msg), 0);
+                }
             }
         }
 
