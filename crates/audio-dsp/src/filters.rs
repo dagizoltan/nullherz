@@ -169,6 +169,23 @@ impl ZdfSvf {
 
         input - k * v1 - v2 // Highpass
     }
+
+    pub fn process_bp(&mut self, input: f32) -> f32 {
+        let g = self.g;
+        let k = self.k;
+        let a1 = 1.0 / (1.0 + g * (g + k));
+        let a2 = g * a1;
+        let a3 = g * a2;
+
+        let v3 = input - self.s2;
+        let v1 = a1 * self.s1 + a2 * v3;
+        let v2 = self.s2 + a2 * self.s1 + a3 * v3;
+
+        self.s1 = 2.0 * v1 - self.s1;
+        self.s2 = 2.0 * v2 - self.s2;
+
+        v1 // Bandpass
+    }
 }
 
 impl Filter for ZdfSvf {
@@ -826,6 +843,18 @@ mod tests {
         let mut output = vec![0.0; 1000];
         for i in 0..1000 {
             output[i] = filter.process_sample(input[i]);
+            assert!(output[i].is_finite());
+        }
+    }
+
+    #[test]
+    fn test_zdf_svf_bandpass_stability() {
+        let mut filter = ZdfSvf::new(44100.0);
+        filter.set_params(1500.0, 4.0);
+        let input = vec![0.5; 1000];
+        let mut output = vec![0.0; 1000];
+        for i in 0..1000 {
+            output[i] = filter.process_bp(input[i]);
             assert!(output[i].is_finite());
         }
     }
