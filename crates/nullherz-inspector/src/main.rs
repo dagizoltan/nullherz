@@ -154,6 +154,10 @@ pub struct InspectorApp {
     pub(crate) _automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>, // target_id -> [(beat, value)]
     pub(crate) sampler_waveform_zoom: f32,
     pub(crate) active_settings_tab: SettingsTab,
+    pub(crate) active_backend: nullherz_traits::AudioBackendType,
+    pub(crate) active_midi_profile: String,
+    pub(crate) config_saved_time: Option<f64>,
+    pub(crate) selected_hotload_node_idx: usize,
     // --- Broadcast Settings State ---
     pub(crate) broadcast_url: String,
     pub(crate) broadcast_key: String,
@@ -309,6 +313,10 @@ impl InspectorApp {
             _automation_data: std::collections::HashMap::new(),
             sampler_waveform_zoom: 1.0,
             active_settings_tab: SettingsTab::General,
+            active_backend: nullherz_traits::AudioBackendType::Threaded,
+            active_midi_profile: "default".to_string(),
+            config_saved_time: None,
+            selected_hotload_node_idx: 0,
             broadcast_url: "rtmp://gossip.genetic.cloud/live".to_string(),
             broadcast_key: "live_73819283_ab781c981d39281a".to_string(),
             broadcast_reveal_key: false,

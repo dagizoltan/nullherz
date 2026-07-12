@@ -1,9 +1,11 @@
 use egui::{Ui, Color32, Frame, RichText, Vec2, Sense};
 use crate::{InspectorApp, SettingsTab};
+use nullherz_traits::AudioBackendType;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
+    let theme = app.theme;
     ui.heading("System Settings");
-    ui.add_space(20.0);
+    ui.add_space(theme.space_md);
 
     // Two-Column Vertical Tab Layout
     ui.columns(2, |columns| {
@@ -11,8 +13,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         let left_ui = &mut columns[0];
         left_ui.set_max_width(180.0);
         left_ui.vertical(|ui| {
-            ui.label(RichText::new("SECTIONS").small().strong().color(app.theme.text_secondary));
-            ui.add_space(6.0);
+            ui.label(RichText::new("SECTIONS").small().strong().color(theme.text_secondary));
+            ui.add_space(theme.space_xs);
 
             let options = [
                 (SettingsTab::General, "⚙ GENERAL"),
@@ -24,14 +26,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
             nullherz_ui_hal::widgets::render_segmented_control_vertical(
                 ui,
-                &app.theme,
+                &theme,
                 &mut app.active_settings_tab,
                 &options,
                 160.0,
             );
 
-            ui.add_space(40.0);
-            if ui.button(RichText::new("🛑 STOP ENGINE").strong().color(app.theme.danger)).clicked() {
+            ui.add_space(theme.space_lg);
+            if ui.button(RichText::new("🛑 STOP ENGINE").strong().color(theme.danger)).clicked() {
                 let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop));
             }
         });
@@ -49,16 +51,50 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             }
         });
     });
+
+    ui.add_space(theme.space_lg);
+    ui.separator();
+    ui.add_space(theme.space_md);
+
+    // PERSISTENT FOOTER: "SAVE SYSTEM CONFIG" with transient feedback
+    ui.horizontal(|ui| {
+        let save_btn = egui::Button::new(RichText::new("💾 SAVE SYSTEM CONFIG").strong().size(theme.type_label))
+            .fill(theme.accent.linear_multiply(0.15));
+
+        if ui.add_sized([200.0, 32.0], save_btn).clicked() {
+             let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology));
+             // Trigger actual persistence in conductor
+             let ports = "Pioneer DDJ-400,Generic MIDI Keyboard".to_string();
+             let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMidiPorts({
+                 let mut b = [0u8; 128];
+                 let bytes = ports.as_bytes();
+                 b[..bytes.len().min(128)].copy_from_slice(&bytes[..bytes.len().min(128)]);
+                 b
+             })));
+             app.config_saved_time = Some(ui.input(|i| i.time));
+        }
+
+        if let Some(saved_t) = app.config_saved_time {
+            let current_t = ui.input(|i| i.time);
+            if current_t - saved_t < 1.5 {
+                ui.label(RichText::new("Saved ✓").strong().color(theme.success));
+                ui.ctx().request_repaint(); // Keep repainting while banner is active
+            } else {
+                app.config_saved_time = None;
+            }
+        }
+    });
 }
 
 fn render_general(app: &mut InspectorApp, ui: &mut Ui) {
+    let theme = app.theme;
     ui.strong("Global Transport");
-    ui.add_space(4.0);
+    ui.add_space(theme.space_xs);
     Frame::none()
-        .fill(app.theme.bg_surface)
-        .rounding(app.theme.radius_md)
-        .stroke(app.theme.border_stroke)
-        .inner_margin(app.theme.space_md)
+        .fill(theme.bg_surface)
+        .rounding(theme.radius_md)
+        .stroke(theme.border_stroke)
+        .inner_margin(theme.space_md)
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Global BPM:");
@@ -66,7 +102,7 @@ fn render_general(app: &mut InspectorApp, ui: &mut Ui) {
                     let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetBpm(app.global_bpm)));
                 }
             });
-            ui.add_space(8.0);
+            ui.add_space(theme.space_sm);
             if ui.checkbox(&mut app.quantize_enabled, "Quantize Commands").changed() {
                  let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetSafeMode(app.quantize_enabled)));
             }
@@ -74,32 +110,41 @@ fn render_general(app: &mut InspectorApp, ui: &mut Ui) {
 }
 
 fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
+    let theme = app.theme;
     ui.strong("Audio Engine Configuration");
-    ui.add_space(4.0);
+    ui.add_space(theme.space_xs);
     Frame::none()
-        .fill(app.theme.bg_surface)
-        .rounding(app.theme.radius_md)
-        .stroke(app.theme.border_stroke)
-        .inner_margin(app.theme.space_md)
+        .fill(theme.bg_surface)
+        .rounding(theme.radius_md)
+        .stroke(theme.border_stroke)
+        .inner_margin(theme.space_md)
         .show(ui, |ui| {
-            ui.label(RichText::new("Select Audio Backend").color(app.theme.text_secondary));
-            ui.add_space(6.0);
+            ui.label(RichText::new("Select Audio Backend").color(theme.text_secondary));
+            ui.add_space(theme.space_sm);
+
             ui.horizontal(|ui| {
-                if ui.button("ALSA").clicked() {
-                    let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(nullherz_traits::AudioBackendType::Alsa)));
-                }
-                if ui.button("JACK").clicked() {
-                    let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(nullherz_traits::AudioBackendType::Jack)));
-                }
-                if ui.button("Pipewire").clicked() {
-                    let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(nullherz_traits::AudioBackendType::Pipewire)));
-                }
-                if ui.button("Threaded").clicked() {
-                    let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(nullherz_traits::AudioBackendType::Threaded)));
+                let backends = [
+                    (AudioBackendType::Alsa, "ALSA"),
+                    (AudioBackendType::Jack, "JACK"),
+                    (AudioBackendType::Pipewire, "Pipewire"),
+                    (AudioBackendType::Threaded, "Threaded"),
+                ];
+
+                for (backend, label) in backends {
+                    let is_active = app.active_backend == backend;
+                    let mut btn = egui::Button::new(label);
+                    if is_active {
+                        btn = btn.fill(theme.accent.linear_multiply(0.12))
+                                 .stroke(egui::Stroke::new(1.0, theme.accent));
+                    }
+                    if ui.add(btn).clicked() {
+                        app.active_backend = backend;
+                        let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(backend)));
+                    }
                 }
             });
 
-            ui.add_space(12.0);
+            ui.add_space(theme.space_md);
             ui.horizontal(|ui| {
                 ui.label("Device:");
                 egui::ComboBox::from_id_source("audio_device_select")
@@ -116,17 +161,17 @@ fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
             });
         });
 
-    ui.add_space(15.0);
+    ui.add_space(theme.space_md);
     ui.strong("Soundcard Wiring Test");
-    ui.add_space(4.0);
+    ui.add_space(theme.space_xs);
     Frame::none()
-        .fill(app.theme.bg_surface)
-        .rounding(app.theme.radius_md)
-        .stroke(app.theme.border_stroke)
-        .inner_margin(app.theme.space_md)
+        .fill(theme.bg_surface)
+        .rounding(theme.radius_md)
+        .stroke(theme.border_stroke)
+        .inner_margin(theme.space_md)
         .show(ui, |ui| {
-            ui.label(RichText::new("Verify the physical outputs and routing of your audio interface by outputting a test signal.").color(app.theme.text_secondary));
-            ui.add_space(10.0);
+            ui.label(RichText::new("Verify the physical outputs and routing of your audio interface by outputting a test signal.").color(theme.text_secondary));
+            ui.add_space(theme.space_sm);
 
             ui.horizontal(|ui| {
                 if ui.button("▶ PLAY TEST PREVIEW (TRACK A)").clicked() {
@@ -145,18 +190,26 @@ fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
 }
 
 fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
+    let theme = app.theme;
     ui.strong("MIDI Hardware & Mappings");
-    ui.add_space(4.0);
+    ui.add_space(theme.space_xs);
+
+    // Mock/planned disclosure for live MIDI device enumeration
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("ℹ NOTE: MIDI Device enumeration is currently running in Mock/Simulated mode. Actual RT MIDI port mapping auto-discovery is not yet fully exposed by the midi_mapper.rs backend.").size(9.0).color(theme.text_secondary));
+    });
+    ui.add_space(theme.space_xs);
+
     Frame::none()
-        .fill(app.theme.bg_surface)
-        .rounding(app.theme.radius_md)
-        .stroke(app.theme.border_stroke)
-        .inner_margin(app.theme.space_md)
+        .fill(theme.bg_surface)
+        .rounding(theme.radius_md)
+        .stroke(theme.border_stroke)
+        .inner_margin(theme.space_md)
         .show(ui, |ui| {
             ui.label("Active Port Mappings:");
             ui.label("• Pioneer DDJ-400 (Attached)");
             ui.label("• Generic MIDI Keyboard (Attached)");
-            ui.add_space(6.0);
+            ui.add_space(theme.space_sm);
 
             if ui.button("BIND DETECTED PORTS").clicked() {
                 let ports = "Pioneer DDJ-400,Generic MIDI Keyboard";
@@ -167,13 +220,20 @@ fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
                 let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMidiPorts(buffer)));
             }
 
-            ui.add_space(15.0);
+            ui.add_space(theme.space_md);
             ui.label("Controller Profiles:");
-            ui.add_space(4.0);
+            ui.add_space(theme.space_xs);
             ui.horizontal(|ui| {
                 let options = ["default", "pioneer_ddj400", "akai_mpk_mini"];
                 for opt in options {
-                    if ui.button(format!("Load {}", opt)).clicked() {
+                    let is_active = app.active_midi_profile == opt;
+                    let mut btn = egui::Button::new(format!("Load {}", opt));
+                    if is_active {
+                        btn = btn.fill(theme.accent.linear_multiply(0.12))
+                                 .stroke(egui::Stroke::new(1.0, theme.accent));
+                    }
+                    if ui.add(btn).clicked() {
+                        app.active_midi_profile = opt.to_string();
                         let mut buffer = [0u8; 32];
                         let bytes = opt.as_bytes();
                         let len = bytes.len().min(32);
@@ -186,19 +246,27 @@ fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
 }
 
 fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
+    let theme = app.theme;
     ui.strong("Distributed Sidecar Discovery");
-    ui.add_space(4.0);
+    ui.add_space(theme.space_xs);
+
+    // Mock/planned disclosure for remote node discovery
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("ℹ NOTE: P2P Network Node Discovery is currently running in Mock/Simulated mode. Actual mesh/gossip node discovery is not yet fully exposed by the discovery.rs network backend.").size(9.0).color(theme.text_secondary));
+    });
+    ui.add_space(theme.space_xs);
+
     Frame::none()
-        .fill(app.theme.bg_surface)
-        .rounding(app.theme.radius_md)
-        .stroke(app.theme.border_stroke)
-        .inner_margin(app.theme.space_md)
+        .fill(theme.bg_surface)
+        .rounding(theme.radius_md)
+        .stroke(theme.border_stroke)
+        .inner_margin(theme.space_md)
         .show(ui, |ui| {
-            ui.label(RichText::new("P2P Cloud Sync and Remote DSP Nodes").color(app.theme.text_secondary));
-            ui.add_space(12.0);
+            ui.label(RichText::new("P2P Cloud Sync and Remote DSP Nodes").color(theme.text_secondary));
+            ui.add_space(theme.space_md);
 
             ui.label("Remote Nodes Detected:");
-            ui.add_space(6.0);
+            ui.add_space(theme.space_sm);
 
             let remote_nodes = [
                 ("192.168.1.45 (Studio-PC-2)", true),
@@ -207,17 +275,17 @@ fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
 
             for (name, is_connected) in remote_nodes {
                 Frame::none()
-                    .fill(app.theme.bg_inset)
-                    .rounding(app.theme.radius_md)
-                    .stroke(app.theme.border_stroke)
+                    .fill(theme.bg_inset)
+                    .rounding(theme.radius_md)
+                    .stroke(theme.border_stroke)
                     .inner_margin(egui::Margin::symmetric(10.0, 8.0))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             // Status indicator dot
-                            let dot_color = if is_connected { app.theme.success } else { app.theme.danger };
+                            let dot_color = if is_connected { theme.success } else { theme.danger };
                             let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
                             ui.painter().circle_filled(dot_rect.center(), 4.0, dot_color);
-                            ui.add_space(4.0);
+                            ui.add_space(theme.space_xs);
 
                             ui.label(name);
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -227,25 +295,26 @@ fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
                             });
                         });
                     });
-                ui.add_space(6.0);
+                ui.add_space(theme.space_sm);
             }
         });
 }
 
 fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
+    let theme = app.theme;
     ui.strong("Hardware Latency Calibration");
-    ui.add_space(4.0);
+    ui.add_space(theme.space_xs);
     Frame::none()
-        .fill(app.theme.bg_surface)
-        .rounding(app.theme.radius_md)
-        .stroke(app.theme.border_stroke)
-        .inner_margin(app.theme.space_md)
+        .fill(theme.bg_surface)
+        .rounding(theme.radius_md)
+        .stroke(theme.border_stroke)
+        .inner_margin(theme.space_md)
         .show(ui, |ui| {
             ui.label("Measure Round-Trip Latency (RTL) to ensure sample-accurate alignment.");
-            ui.add_space(10.0);
+            ui.add_space(theme.space_sm);
 
             ui.horizontal(|ui| {
-                if ui.button(RichText::new("● START CALIBRATION").color(app.theme.accent)).clicked() {
+                if ui.button(RichText::new("● START CALIBRATION").color(theme.accent)).clicked() {
                     let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CalibrateLatency));
                 }
 
@@ -262,22 +331,22 @@ fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
             });
         });
 
-    ui.add_space(20.0);
+    ui.add_space(theme.space_md);
     ui.strong("Distributed Clock Discipline (PTP/IEEE 1588)");
-    ui.add_space(4.0);
+    ui.add_space(theme.space_xs);
     Frame::none()
-        .fill(app.theme.bg_surface)
-        .rounding(app.theme.radius_md)
-        .stroke(app.theme.border_stroke)
-        .inner_margin(app.theme.space_md)
+        .fill(theme.bg_surface)
+        .rounding(theme.radius_md)
+        .stroke(theme.border_stroke)
+        .inner_margin(theme.space_md)
         .show(ui, |ui| {
             if let Some(t) = app.last_telemetry.lock().unwrap().as_ref() {
                 ui.horizontal(|ui| {
                     ui.label("Sync Status:");
                     if t.clock_jitter_ns < 1000 {
-                        ui.label(RichText::new("● LOCKED").color(app.theme.success));
+                        ui.label(RichText::new("● LOCKED").color(theme.success));
                     } else {
-                        ui.label(RichText::new("○ SEEKING").color(app.theme.warning));
+                        ui.label(RichText::new("○ SEEKING").color(theme.warning));
                     }
                 });
                 ui.label(format!("System Time: {} ns", t.system_time_ns));
@@ -286,27 +355,6 @@ fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
                 ui.label(format!("Offset: {} ns", (t.device_time_ns as i64 - t.system_time_ns as i64)));
             } else {
                 ui.label("No clock telemetry available.");
-            }
-        });
-
-    ui.add_space(20.0);
-    Frame::none()
-        .fill(app.theme.bg_surface)
-        .rounding(app.theme.radius_md)
-        .stroke(app.theme.border_stroke)
-        .inner_margin(app.theme.space_md)
-        .show(ui, |ui| {
-            if ui.button(RichText::new("SAVE SYSTEM CONFIG").strong()).clicked() {
-                 let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology));
-                 // Trigger actual persistence in conductor
-                 let ports = "Pioneer DDJ-400,Generic MIDI Keyboard".to_string();
-                 let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMidiPorts({
-                     let mut b = [0u8; 128];
-                     let bytes = ports.as_bytes();
-                     b[..bytes.len().min(128)].copy_from_slice(&bytes[..bytes.len().min(128)]);
-                     b
-                 })));
-                 println!("System configuration persisted.");
             }
         });
 }
