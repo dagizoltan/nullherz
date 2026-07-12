@@ -64,7 +64,13 @@ impl BreederView {
 
                         ui.horizontal(|ui| {
                             if let Some(s) = similarity {
-                                let color = if s > 0.8 { app.theme.accent } else if s > 0.5 { Color32::YELLOW } else { Color32::GRAY };
+                                let color = if s > 0.8 {
+                                    app.theme.accent
+                                } else if s > 0.5 {
+                                    Color32::from_rgb(255, 200, 0) // Unified Yellow warning indicator
+                                } else {
+                                    app.theme.text_secondary
+                                };
                                 ui.add(egui::ProgressBar::new(s).desired_width(60.0).fill(color).text(format!("{:.0}%", s * 100.0)));
                             }
 
@@ -97,7 +103,7 @@ impl BreederView {
             });
 
             ui.add_space(40.0);
-            ui.label(RichText::new("X").size(20.0).strong());
+            ui.label(RichText::new("X").size(20.0).strong().color(app.theme.accent));
             ui.add_space(40.0);
 
             // Parent B Selection
@@ -120,15 +126,15 @@ impl BreederView {
                 ui.label("Transfusion Pad (X: Spectral, Y: Rhythmic)");
                 let (rect, response) = ui.allocate_at_least(Vec2::splat(250.0), Sense::drag());
 
-                ui.painter().rect_filled(rect, 4.0, Color32::from_black_alpha(150));
-                ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_gray(80)));
+                ui.painter().rect_filled(rect, app.theme.radius_md, app.theme.bg_dark.linear_multiply(0.8));
+                ui.painter().rect_stroke(rect, app.theme.radius_md, app.theme.border);
 
-                // Grid lines (Industrial Look)
+                // Grid lines (Industrial Look) - Decoupled from hardcoded colors
                 for i in 1..4 {
                     let x = rect.left() + i as f32 * (rect.width() / 4.0);
-                    ui.painter().vline(x, rect.y_range(), Stroke::new(0.5, Color32::from_gray(50)));
+                    ui.painter().vline(x, rect.y_range(), Stroke::new(0.5, app.theme.border.color.linear_multiply(0.5)));
                     let y = rect.top() + i as f32 * (rect.height() / 4.0);
-                    ui.painter().hline(rect.x_range(), y, Stroke::new(0.5, Color32::from_gray(50)));
+                    ui.painter().hline(rect.x_range(), y, Stroke::new(0.5, app.theme.border.color.linear_multiply(0.5)));
                 }
 
                 if response.dragged() {
@@ -141,7 +147,7 @@ impl BreederView {
 
                 let handle_pos = rect.left_top() + Vec2::new(state.transfusion_bias_x * rect.width(), (1.0 - state.transfusion_bias_y) * rect.height());
                 ui.painter().circle_filled(handle_pos, 8.0, app.theme.accent);
-                ui.painter().circle_stroke(handle_pos, 8.0, Stroke::new(2.0, Color32::WHITE));
+                ui.painter().circle_stroke(handle_pos, 8.0, Stroke::new(2.0, app.theme.text_primary));
             });
 
             ui.add_space(20.0);
@@ -150,8 +156,8 @@ impl BreederView {
             ui.vertical(|ui| {
                 ui.label("Genetic Blueprint (Latent Space Preview)");
                 let (preview_rect, _) = ui.allocate_at_least(Vec2::new(300.0, 150.0), Sense::hover());
-                ui.painter().rect_filled(preview_rect, 2.0, Color32::from_rgb(15, 15, 20));
-                ui.painter().rect_stroke(preview_rect, 2.0, Stroke::new(1.0, Color32::from_gray(40)));
+                ui.painter().rect_filled(preview_rect, app.theme.radius_md, app.theme.bg_inset);
+                ui.painter().rect_stroke(preview_rect, app.theme.radius_md, app.theme.border);
 
                 if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
                     if let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
@@ -172,13 +178,13 @@ impl BreederView {
                                 egui::Rect::from_min_max(egui::pos2(x + spacing, center_y), egui::pos2(x + bin_width - spacing, center_y + h))
                             };
 
-                            let color = if i < 8 { Color32::from_rgb(0, 200, 255) } else { Color32::from_rgb(255, 100, 0) };
+                            let color = if i < 8 { app.theme.track_colors[4] } else { app.theme.track_colors[2] };
                             ui.painter().rect_filled(r, 1.0, color.gamma_multiply(0.8));
                         }
-                        ui.painter().hline(preview_rect.x_range(), preview_rect.center().y, Stroke::new(1.0, Color32::from_gray(60)));
+                        ui.painter().hline(preview_rect.x_range(), preview_rect.center().y, Stroke::new(1.0, app.theme.border.color));
                     }
                 } else {
-                    ui.painter().text(preview_rect.center(), egui::Align2::CENTER_CENTER, "SELECT PARENTS TO VIEW GENETIC BLUEPRINT", egui::FontId::monospace(10.0), Color32::GRAY);
+                    ui.painter().text(preview_rect.center(), egui::Align2::CENTER_CENTER, "SELECT PARENTS TO VIEW GENETIC BLUEPRINT", egui::FontId::monospace(10.0), app.theme.text_secondary);
                 }
             });
 
@@ -195,7 +201,7 @@ impl BreederView {
                         crate::widgets::render_spectrum_analyzer(ui, &app.damped_spectrum, app.theme.accent, 100.0);
                     } else {
                         ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
-                        ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "NO SIGNAL", egui::FontId::proportional(12.0), Color32::GRAY);
+                        ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "NO SIGNAL", egui::FontId::proportional(12.0), app.theme.text_secondary);
                     }
                 });
 
@@ -206,7 +212,7 @@ impl BreederView {
                         crate::widgets::render_goniometer(ui, &app.damped_goniometer, 200.0, app.theme.accent);
                     } else {
                         ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
-                        ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "GONIOMETER", egui::FontId::proportional(12.0), Color32::GRAY);
+                        ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "GONIOMETER", egui::FontId::proportional(12.0), app.theme.text_secondary);
                     }
                 });
             });

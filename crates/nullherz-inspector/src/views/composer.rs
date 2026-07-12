@@ -6,7 +6,7 @@ pub use nullherz_conductor::pattern_manager::DnaSequencer;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     ui.horizontal(|ui| {
-        ui.heading(RichText::new("SESSION VIEW (COMPOSER)").strong().color(Color32::WHITE));
+        ui.heading(RichText::new("SESSION VIEW (COMPOSER)").strong().color(app.theme.text_primary));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
              ui.label(egui::RichText::new("QUANTIZED: 1 BAR").color(app.theme.accent).size(10.0));
         });
@@ -15,7 +15,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
     ui.horizontal(|ui| {
         let is_recording = app.record_automation;
-        ui.toggle_value(&mut app.record_automation, RichText::new("🔴 RECORD AUTOMATION").color(if is_recording { Color32::RED } else { Color32::GRAY }));
+        ui.toggle_value(&mut app.record_automation, RichText::new("🔴 RECORD AUTOMATION").color(if is_recording { Color32::from_rgb(255, 50, 50) } else { app.theme.text_secondary }));
         ui.add_space(20.0);
         if ui.button("STOP ALL CLIPS").clicked() {
             for i in 0..16 {
@@ -37,7 +37,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
             // Vertical divider before the Master section
             let (line_rect, _) = ui.allocate_exact_size(Vec2::new(2.0, 480.0), Sense::hover());
-            ui.painter().rect_filled(line_rect, Rounding::ZERO, Color32::from_rgb(40, 40, 45));
+            ui.painter().rect_filled(line_rect, Rounding::ZERO, app.theme.border.color);
             ui.add_space(12.0);
 
             // Render Master section with scene launchers stacked vertically on the far right
@@ -53,9 +53,9 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
     let is_soloed = app.track_solos[i];
 
     Frame::none()
-        .fill(Color32::from_rgb(10, 10, 12))
-        .stroke(Stroke::new(1.0, Color32::from_gray(25)))
-        .rounding(Rounding::same(6.0))
+        .fill(app.theme.bg_dark)
+        .stroke(app.theme.border)
+        .rounding(Rounding::same(app.theme.radius_md))
         .inner_margin(Margin::same(6.0))
         .show(ui, |ui| {
             ui.vertical_centered(|ui| {
@@ -63,7 +63,7 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
 
                 // 1. Track Title Bar
                 let header_bg = if is_muted {
-                    Color32::from_rgb(25, 25, 28)
+                    app.theme.bg_inset
                 } else {
                     track_color.gamma_multiply(0.25)
                 };
@@ -74,7 +74,7 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
                     .show(ui, |ui| {
                         ui.set_width(80.0);
                         ui.centered_and_justified(|ui| {
-                            ui.label(RichText::new(format!("TRK {}", i + 1)).strong().size(11.0).color(Color32::WHITE));
+                            ui.label(RichText::new(format!("TRK {}", i + 1)).strong().size(11.0).color(app.theme.text_primary));
                         });
                     });
 
@@ -110,18 +110,18 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
 
                     // Render clip capsule
                     ui.painter().rect_filled(rect, 3.0, color);
-                    ui.painter().rect_stroke(rect, 3.0, Stroke::new(1.0, Color32::from_gray(35)));
+                    ui.painter().rect_stroke(rect, 3.0, app.theme.border);
 
                     if is_playing {
                         // Play triangle indicator
                         let tri_p1 = rect.left_center() + Vec2::new(6.0, -5.0);
                         let tri_p2 = rect.left_center() + Vec2::new(6.0, 5.0);
                         let tri_p3 = rect.left_center() + Vec2::new(12.0, 0.0);
-                        ui.painter().add(egui::Shape::convex_polygon(vec![tri_p1, tri_p2, tri_p3], Color32::WHITE, Stroke::NONE));
+                        ui.painter().add(egui::Shape::convex_polygon(vec![tri_p1, tri_p2, tri_p3], app.theme.text_primary, Stroke::NONE));
                     }
 
                     if response.hovered() {
-                        ui.painter().rect_stroke(rect, 3.0, Stroke::new(1.0, Color32::WHITE));
+                        ui.painter().rect_stroke(rect, 3.0, Stroke::new(1.0, app.theme.text_primary));
                     }
 
                     if response.clicked() {
@@ -143,7 +143,7 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
                 ui.add_space(6.0);
 
                 // 3. Stop Clip button
-                if ui.add_sized([76.0, 18.0], egui::Button::new(RichText::new("■ Stop").small()).fill(Color32::from_rgb(30, 30, 35))).clicked() {
+                if ui.add_sized([76.0, 18.0], egui::Button::new(RichText::new("■ Stop").small()).fill(app.theme.bg_inset)).clicked() {
                     app.sequencer_grid[i].fill(0.0);
                     let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: app.get_node_id("sequencer_node"), track_idx: i as u32 }));
                 }
@@ -151,7 +151,7 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
                 ui.add_space(6.0);
 
                 // 4. Send & Evolution Control
-                ui.label(RichText::new("GENE EVOLVE").size(7.0).color(Color32::from_gray(100)));
+                ui.label(RichText::new("GENE EVOLVE").size(7.0).color(app.theme.text_secondary));
                 if ui.add(egui::Slider::new(&mut app.evolution_strengths[i], 0.0..=1.0).show_value(false)).changed() {
                     let _ = app.command_sender.send(Command::Performance(PerformanceCommand::EvolvePattern {
                         node_idx: i as u32,
@@ -166,13 +166,13 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
                 ui.horizontal(|ui| {
                     ui.add_space(2.0);
                     // Yellow when ON (unmuted), Dark when OFF (muted)
-                    let activator_color = if !is_muted { Color32::from_rgb(255, 200, 0) } else { Color32::from_gray(40) };
+                    let activator_color = if !is_muted { Color32::from_rgb(255, 200, 0) } else { app.theme.bg_inset };
                     if ui.add_sized([34.0, 18.0], egui::Button::new(RichText::new("ON").size(9.0).strong()).fill(activator_color)).clicked() {
                         app.track_mutes[i] = !is_muted;
                         let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackMute { node_idx: app.get_node_id("sequencer_node"), track_idx: i as u32, muted: app.track_mutes[i] }));
                     }
 
-                    let solo_color = if is_soloed { Color32::from_rgb(0, 150, 255) } else { Color32::from_gray(40) };
+                    let solo_color = if is_soloed { app.theme.track_colors[1] } else { app.theme.bg_inset };
                     if ui.add_sized([34.0, 18.0], egui::Button::new(RichText::new("S").size(9.0).strong()).fill(solo_color)).clicked() {
                         app.track_solos[i] = !is_soloed;
                         let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackSolo { node_idx: app.get_node_id("sequencer_node"), track_idx: i as u32, soloed: app.track_solos[i] }));
@@ -182,7 +182,7 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
                 ui.add_space(6.0);
 
                 // 6. Track Volume Fader
-                let mock_volume_color = if is_muted { Color32::from_gray(40) } else { track_color };
+                let mock_volume_color = if is_muted { app.theme.bg_inset } else { track_color };
                 // Hardened: Decoupled track volume from sequencer_grid step 0 to prevent pattern corruption!
                 widgets::render_fader(ui, &mut app.track_volumes[i], 0.0..=1.0, mock_volume_color, 70.0, 14.0);
             });
@@ -191,9 +191,9 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
 
 fn render_master_scene_strip(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
     Frame::none()
-        .fill(Color32::from_rgb(14, 14, 16))
-        .stroke(Stroke::new(1.0, Color32::from_gray(30)))
-        .rounding(Rounding::same(6.0))
+        .fill(app.theme.bg_inset)
+        .stroke(app.theme.border)
+        .rounding(Rounding::same(app.theme.radius_md))
         .inner_margin(Margin::same(6.0))
         .show(ui, |ui| {
             ui.vertical_centered(|ui| {
@@ -201,13 +201,13 @@ fn render_master_scene_strip(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &O
 
                 // 1. Master Header
                 Frame::none()
-                    .fill(Color32::from_rgb(30, 30, 35))
+                    .fill(app.theme.bg_surface)
                     .rounding(Rounding::same(2.0))
                     .inner_margin(Margin::symmetric(8.0, 4.0))
                     .show(ui, |ui| {
                         ui.set_width(80.0);
                         ui.centered_and_justified(|ui| {
-                            ui.label(RichText::new("MASTER").strong().size(11.0).color(Color32::WHITE));
+                            ui.label(RichText::new("MASTER").strong().size(11.0).color(app.theme.text_primary));
                         });
                     });
 
@@ -216,7 +216,7 @@ fn render_master_scene_strip(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &O
                 // 2. Vertically Stacked Scene Launchers (aligned with track slots!)
                 for scene_idx in 0..8 {
                     let btn_text = format!("Scene {}", scene_idx + 1);
-                    if ui.add_sized([76.0, 24.0], egui::Button::new(RichText::new(btn_text).size(10.0).strong()).fill(Color32::from_rgb(45, 50, 45))).clicked() {
+                    if ui.add_sized([76.0, 24.0], egui::Button::new(RichText::new(btn_text).size(10.0).strong()).fill(app.theme.accent.linear_multiply(0.12))).clicked() {
                         let _ = app.command_sender.send(Command::Performance(PerformanceCommand::LaunchClip { row: 0xFF, col: scene_idx as u32 }));
                     }
                     ui.add_space(4.0);
@@ -227,7 +227,7 @@ fn render_master_scene_strip(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &O
                 ui.add_space(6.0);
 
                 // 3. Stop All Clips button
-                if ui.add_sized([76.0, 18.0], egui::Button::new(RichText::new("■ Stop All").small()).fill(Color32::from_rgb(40, 20, 20))).clicked() {
+                if ui.add_sized([76.0, 18.0], egui::Button::new(RichText::new("■ Stop All").small()).fill(Color32::from_rgb(150, 20, 20))).clicked() {
                     for i in 0..16 {
                         app.sequencer_grid[i].fill(0.0);
                         let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: app.get_node_id("sequencer_node"), track_idx: i as u32 }));
@@ -235,10 +235,10 @@ fn render_master_scene_strip(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &O
                 }
 
                 ui.add_space(12.0);
-                ui.label(RichText::new("MST VOL").small().color(Color32::from_gray(120)));
+                ui.label(RichText::new("MST VOL").small().color(app.theme.text_secondary));
 
                 // 4. Master Volume Fader
-                widgets::render_fader(ui, &mut app.master_gain, 0.0..=1.5, Color32::WHITE, 120.0, 16.0);
+                widgets::render_fader(ui, &mut app.master_gain, 0.0..=1.5, app.theme.text_primary, 120.0, 16.0);
             });
         });
 }
