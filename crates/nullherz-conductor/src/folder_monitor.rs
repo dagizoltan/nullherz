@@ -38,7 +38,9 @@ impl FolderMonitor {
             .collect();
 
         entries.into_par_iter().for_each(|entry| {
-            self.load_and_register(entry.path().to_str().unwrap());
+            if let Some(path_str) = entry.path().to_str() {
+                self.load_and_register(path_str);
+            }
         });
     }
 
@@ -47,35 +49,49 @@ impl FolderMonitor {
         use std::hash::{Hash, Hasher};
         use symphonia::core::audio::Signal;
 
-        // Use symphonia for multi-format support
+        // Use symphonia for multi-format support with panic-safe fallback bounds checks
         let buffer = if let Ok(file) = std::fs::File::open(path) {
             let mss = symphonia::core::io::MediaSourceStream::new(Box::new(file), Default::default());
             let hint = symphonia::core::probe::Hint::new();
-            let mut probed = symphonia::default::get_probe().format(&hint, mss, &Default::default(), &Default::default()).expect("unsupported format");
-            let mut decoder = symphonia::default::get_codecs().make(&probed.format.default_track().unwrap().codec_params, &Default::default()).expect("unsupported codec");
 
-            let mut samples = Vec::new();
-            let mut sample_buf = None;
+            if let Ok(probed_res) = symphonia::default::get_probe().format(&hint, mss, &Default::default(), &Default::default()) {
+                let mut probed = probed_res;
+                if let Some(track) = probed.format.default_track() {
+                    if let Ok(mut decoder) = symphonia::default::get_codecs().make(&track.codec_params, &Default::default()) {
+                        let mut samples = Vec::new();
+                        let mut sample_buf = None;
 
-            while let Ok(packet) = probed.format.next_packet() {
-                if let Ok(decoded) = decoder.decode(&packet) {
-                    if sample_buf.is_none() {
-                        sample_buf = Some(symphonia::core::audio::AudioBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec()));
-                    }
-                    let buf = sample_buf.as_mut().unwrap();
-                    decoded.convert(buf);
+                        while let Ok(packet) = probed.format.next_packet() {
+                            if let Ok(decoded) = decoder.decode(&packet) {
+                                if sample_buf.is_none() {
+                                    sample_buf = Some(symphonia::core::audio::AudioBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec()));
+                                }
+                                let buf = sample_buf.as_mut().unwrap();
+                                decoded.convert(buf);
 
-                    // Multi-channel support: Interleave channels for the registry
-                    let chan_len = buf.frames();
-                    let num_chans = buf.spec().channels.count();
-                    for i in 0..chan_len {
-                        for c in 0..num_chans {
-                            samples.push(buf.chan(c)[i]);
+                                // Multi-channel support: Interleave channels for the registry
+                                let chan_len = buf.frames();
+                                let num_chans = buf.spec().channels.count();
+                                for i in 0..chan_len {
+                                    for c in 0..num_chans {
+                                        samples.push(buf.chan(c)[i]);
+                                    }
+                                }
+                            }
                         }
+                        Arc::new(samples)
+                    } else {
+                        eprintln!("FolderMonitor: Unsupported codec for: {}", path);
+                        Arc::new(vec![0.0f32; 44100 * 5])
                     }
+                } else {
+                    eprintln!("FolderMonitor: No default track for: {}", path);
+                    Arc::new(vec![0.0f32; 44100 * 5])
                 }
+            } else {
+                eprintln!("FolderMonitor: Unsupported format or corrupt audio: {}", path);
+                Arc::new(vec![0.0f32; 44100 * 5])
             }
-            Arc::new(samples)
         } else {
             eprintln!("FolderMonitor: Failed to open file: {}", path);
             Arc::new(vec![0.0f32; 44100 * 5]) // Fallback to silent buffer
@@ -114,5 +130,30 @@ impl FolderMonitor {
                 std::thread::sleep(Duration::from_secs(10));
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_folder_monitor_non_existent_path_safety() {
+        let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
+
+        let db_path = "test_folder_monitor.redb";
+        let _ = std::fs::remove_file(db_path);
+        let library_db = LibraryDatabase::load(db_path).unwrap();
+        let library = Arc::new(std::sync::Mutex::new(library_db));
+
+        let monitor = FolderMonitor::new(sample_registry, library);
+
+        // Scanning a non-existent folder must return immediately and never panic
+        monitor.scan_folder("/non_existent_directory_safely_ignored_by_rayon");
+
+        // Loading a corrupt or non-existent file path must fallback gracefully to silent buffer
+        monitor.load_and_register("/non_existent_audio_file.wav");
+
+        let _ = std::fs::remove_file(db_path);
     }
 }
