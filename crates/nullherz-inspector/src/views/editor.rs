@@ -1,4 +1,4 @@
-use egui::{Ui, Vec2, Color32, Stroke, Sense, RichText};
+use egui::{Ui, Vec2, Color32, Sense, RichText};
 use crate::InspectorApp;
 use nullherz_dna::GeneticLibrary;
 
@@ -13,14 +13,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 ui.label(format!("by {}", track.artist));
             });
             ui.add_space(5.0);
-            ui.label(RichText::new(&track.path).size(10.0).color(Color32::GRAY));
+            ui.label(RichText::new(&track.path).size(10.0).color(app.theme.text_secondary));
 
             ui.add_space(20.0);
 
             // Waveform Editor Zone
             let (rect, response) = ui.allocate_at_least(Vec2::new(ui.available_width(), 200.0), Sense::click_and_drag());
-            ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(10, 10, 15));
-            ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_gray(50)));
+            ui.painter().rect_filled(rect, app.theme.radius_md, app.theme.bg_dark);
+            ui.painter().rect_stroke(rect, app.theme.radius_md, app.theme.border);
 
             if response.dragged() {
                 let current_pos = ui.input(|i| i.pointer.latest_pos()).unwrap_or(egui::pos2(0.0, 0.0));
@@ -41,14 +41,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 let left = rect.left() + start.min(end) * rect.width();
                 let right = rect.left() + start.max(end) * rect.width();
                 let sel_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(right, rect.bottom()));
-                ui.painter().rect_filled(sel_rect, 0.0, Color32::from_white_alpha(30));
+                ui.painter().rect_filled(sel_rect, 0.0, app.theme.accent.linear_multiply(0.2));
             }
 
             if let Some(wf_lock) = &app.waveform_renderer {
                 let mut wf = wf_lock.lock().unwrap();
                 let zoom = app.sampler_waveform_zoom;
                 let scroll = 0.0;
-                let color = [0.0, 1.0, 0.8, 1.0]; // Teal theme
+                let color = app.theme.accent.to_array().map(|v| v as f32 / 255.0);
 
                 if let Some(wgpu) = &app.wgpu_renderer {
                     let wgpu = wgpu.lock().unwrap();
@@ -111,13 +111,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             });
 
         } else {
-            ui.label(RichText::new("Track not found in library.").color(Color32::RED));
+            ui.label(RichText::new("Track not found in library.").color(Color32::from_rgb(255, 50, 50)));
             if ui.button("Deselect").clicked() { app.selected_library_track = None; }
         }
     } else {
         ui.vertical_centered(|ui| {
             ui.add_space(100.0);
-            ui.label(RichText::new("NO TRACK SELECTED").size(20.0).color(Color32::from_gray(80)));
+            ui.label(RichText::new("NO TRACK SELECTED").size(20.0).color(app.theme.text_secondary));
             ui.label("Select a track from the library to begin editing.");
             if ui.button("OPEN LIBRARY").clicked() {
                 app.active_right_tab = Some(crate::RightTab::Library);
