@@ -67,7 +67,7 @@ impl BreederView {
                                 let color = if s > 0.8 {
                                     app.theme.accent
                                 } else if s > 0.5 {
-                                    Color32::from_rgb(255, 200, 0) // Unified Yellow warning indicator
+                                    app.theme.warning // Unified Yellow warning indicator
                                 } else {
                                     app.theme.text_secondary
                                 };
@@ -127,14 +127,14 @@ impl BreederView {
                 let (rect, response) = ui.allocate_at_least(Vec2::splat(250.0), Sense::drag());
 
                 ui.painter().rect_filled(rect, app.theme.radius_md, app.theme.bg_dark.linear_multiply(0.8));
-                ui.painter().rect_stroke(rect, app.theme.radius_md, app.theme.border);
+                ui.painter().rect_stroke(rect, app.theme.radius_md, app.theme.border_stroke);
 
                 // Grid lines (Industrial Look) - Decoupled from hardcoded colors
                 for i in 1..4 {
                     let x = rect.left() + i as f32 * (rect.width() / 4.0);
-                    ui.painter().vline(x, rect.y_range(), Stroke::new(0.5, app.theme.border.color.linear_multiply(0.5)));
+                    ui.painter().vline(x, rect.y_range(), Stroke::new(0.5, app.theme.border.linear_multiply(0.5)));
                     let y = rect.top() + i as f32 * (rect.height() / 4.0);
-                    ui.painter().hline(rect.x_range(), y, Stroke::new(0.5, app.theme.border.color.linear_multiply(0.5)));
+                    ui.painter().hline(rect.x_range(), y, Stroke::new(0.5, app.theme.border.linear_multiply(0.5)));
                 }
 
                 if response.dragged() {
@@ -157,7 +157,7 @@ impl BreederView {
                 ui.label("Genetic Blueprint (Latent Space Preview)");
                 let (preview_rect, _) = ui.allocate_at_least(Vec2::new(300.0, 150.0), Sense::hover());
                 ui.painter().rect_filled(preview_rect, app.theme.radius_md, app.theme.bg_inset);
-                ui.painter().rect_stroke(preview_rect, app.theme.radius_md, app.theme.border);
+                ui.painter().rect_stroke(preview_rect, app.theme.radius_md, app.theme.border_stroke);
 
                 if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
                     if let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
@@ -181,7 +181,7 @@ impl BreederView {
                             let color = if i < 8 { app.theme.track_colors[4] } else { app.theme.track_colors[2] };
                             ui.painter().rect_filled(r, 1.0, color.gamma_multiply(0.8));
                         }
-                        ui.painter().hline(preview_rect.x_range(), preview_rect.center().y, Stroke::new(1.0, app.theme.border.color));
+                        ui.painter().hline(preview_rect.x_range(), preview_rect.center().y, Stroke::new(1.0, app.theme.border));
                     }
                 } else {
                     ui.painter().text(preview_rect.center(), egui::Align2::CENTER_CENTER, "SELECT PARENTS TO VIEW GENETIC BLUEPRINT", egui::FontId::monospace(10.0), app.theme.text_secondary);

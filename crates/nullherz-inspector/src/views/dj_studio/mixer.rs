@@ -3,6 +3,7 @@ use crate::{InspectorApp, widgets};
 
 pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_color: Color32) {
     let deck_id = (b'A' + i as u8) as char;
+    let theme = app.theme;
     ui.vertical(|ui| {
         // EQ & Filter Row with adjacent sub-columns
         ui.horizontal(|ui| {
@@ -21,7 +22,7 @@ pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_col
                 }
             });
 
-            ui.add_space(8.0);
+            ui.add_space(theme.space_sm);
 
             // Column B: Filter (Vec-driven column for extensibility)
             let mut changed_filter = None;
@@ -41,7 +42,7 @@ pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_col
             }
         });
 
-        ui.add_space(8.0);
+        ui.add_space(theme.space_sm);
 
         // Volume: Channel fader + Stereo VU meter pair beneath the EQ/Filter row
         ui.horizontal(|ui| {

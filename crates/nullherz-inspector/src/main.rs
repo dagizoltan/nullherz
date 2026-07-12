@@ -344,13 +344,8 @@ impl InspectorApp {
     }
 
     pub fn deck_color(i: usize) -> egui::Color32 {
-        match i {
-            0 => egui::Color32::from_rgb(0, 255, 200),
-            1 => egui::Color32::from_rgb(0, 150, 255),
-            2 => egui::Color32::from_rgb(255, 100, 0),
-            3 => egui::Color32::from_rgb(255, 0, 100),
-            _ => egui::Color32::WHITE,
-        }
+        let theme = nullherz_ui_hal::Theme::default();
+        theme.deck_colors[i % 4]
     }
 }
 
@@ -564,7 +559,7 @@ impl eframe::App for InspectorApp {
         // 3. Bottom Bar (Status & Global Controls)
         egui::TopBottomPanel::bottom("bottom_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("nullherz Alpha").size(10.0).color(egui::Color32::from_gray(100)));
+                ui.label(egui::RichText::new("nullherz Alpha").size(10.0).color(self.theme.text_disabled));
                 ui.separator();
 
                 if let Some(t) = &telemetry {
@@ -584,14 +579,57 @@ impl eframe::App for InspectorApp {
 
                     for (tab, icon, label) in tabs.into_iter().rev() {
                         let is_selected = self.active_right_tab == Some(tab);
-                        let bg_color = if is_selected { egui::Color32::from_gray(50) } else { egui::Color32::TRANSPARENT };
-                        if ui.add(egui::Button::new(egui::RichText::new(icon).size(16.0)).fill(bg_color)).on_hover_text(label).clicked() {
+                        let size = egui::vec2(36.0, 36.0);
+                        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+
+                        if response.clicked() {
                             if self.active_right_tab == Some(tab) {
                                 self.active_right_tab = None;
                             } else {
                                 self.active_right_tab = Some(tab);
                             }
+                            ui.ctx().request_repaint();
                         }
+
+                        // Background hover/active treatment
+                        if is_selected {
+                            ui.painter().rect_filled(
+                                rect.shrink(1.0),
+                                self.theme.radius_sm,
+                                self.theme.accent.linear_multiply(0.12),
+                            );
+                            // 2px Bottom Edge Accent Bar
+                            let accent_bar = egui::Rect::from_min_max(
+                                rect.left_bottom() + egui::vec2(6.0, -3.0),
+                                rect.right_bottom() + egui::vec2(-6.0, -1.0),
+                            );
+                            ui.painter().rect_filled(accent_bar, 1.0, self.theme.accent);
+                        } else if response.hovered() {
+                            ui.painter().rect_filled(
+                                rect.shrink(1.0),
+                                self.theme.radius_sm,
+                                self.theme.bg_med.linear_multiply(0.4),
+                            );
+                        }
+
+                        // Icon Color Shift
+                        let icon_color = if is_selected {
+                            self.theme.accent
+                        } else if response.hovered() {
+                            self.theme.text_primary
+                        } else {
+                            self.theme.text_secondary
+                        };
+
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            icon,
+                            egui::FontId::proportional(16.0),
+                            icon_color,
+                        );
+
+                        response.on_hover_text(label);
                     }
 
                     ui.separator();

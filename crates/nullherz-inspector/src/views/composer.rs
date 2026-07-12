@@ -15,7 +15,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
     ui.horizontal(|ui| {
         let is_recording = app.record_automation;
-        ui.toggle_value(&mut app.record_automation, RichText::new("🔴 RECORD AUTOMATION").color(if is_recording { Color32::from_rgb(255, 50, 50) } else { app.theme.text_secondary }));
+        ui.toggle_value(&mut app.record_automation, RichText::new("🔴 RECORD AUTOMATION").color(if is_recording { app.theme.danger } else { app.theme.text_secondary }));
         ui.add_space(20.0);
         if ui.button("STOP ALL CLIPS").clicked() {
             for i in 0..16 {
@@ -37,7 +37,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
             // Vertical divider before the Master section
             let (line_rect, _) = ui.allocate_exact_size(Vec2::new(2.0, 480.0), Sense::hover());
-            ui.painter().rect_filled(line_rect, Rounding::ZERO, app.theme.border.color);
+            ui.painter().rect_filled(line_rect, Rounding::ZERO, app.theme.border);
             ui.add_space(12.0);
 
             // Render Master section with scene launchers stacked vertically on the far right
@@ -54,7 +54,7 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
 
     Frame::none()
         .fill(app.theme.bg_dark)
-        .stroke(app.theme.border)
+        .stroke(app.theme.border_stroke)
         .rounding(Rounding::same(app.theme.radius_md))
         .inner_margin(Margin::same(6.0))
         .show(ui, |ui| {
@@ -94,9 +94,9 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
 
                     let velocity = app.sequencer_grid[i][slot_idx];
                     let mut color = if is_playing {
-                        Color32::from_rgb(0, 255, 100) // Vibrant play green (semantic override)
+                        app.theme.success // Vibrant play green (semantic override)
                     } else if is_starting {
-                        Color32::from_rgb(255, 200, 0) // Quantizing warning yellow (semantic override)
+                        app.theme.warning // Quantizing warning yellow (semantic override)
                     } else if velocity > 0.0 {
                         track_color.gamma_multiply(velocity.clamp(0.5, 1.0)) // Track-specific active slot hue
                     } else {
@@ -110,7 +110,7 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
 
                     // Render clip capsule
                     ui.painter().rect_filled(rect, 3.0, color);
-                    ui.painter().rect_stroke(rect, 3.0, app.theme.border);
+                    ui.painter().rect_stroke(rect, 3.0, app.theme.border_stroke);
 
                     if is_playing {
                         // Play triangle indicator
@@ -166,7 +166,7 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
                 ui.horizontal(|ui| {
                     ui.add_space(2.0);
                     // Yellow when ON (unmuted), Dark when OFF (muted)
-                    let activator_color = if !is_muted { Color32::from_rgb(255, 200, 0) } else { app.theme.bg_inset };
+                    let activator_color = if !is_muted { app.theme.warning } else { app.theme.bg_inset };
                     if ui.add_sized([34.0, 18.0], egui::Button::new(RichText::new("ON").size(9.0).strong()).fill(activator_color)).clicked() {
                         app.track_mutes[i] = !is_muted;
                         let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackMute { node_idx: app.get_node_id("sequencer_node"), track_idx: i as u32, muted: app.track_mutes[i] }));
@@ -192,7 +192,7 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
 fn render_master_scene_strip(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
     Frame::none()
         .fill(app.theme.bg_inset)
-        .stroke(app.theme.border)
+        .stroke(app.theme.border_stroke)
         .rounding(Rounding::same(app.theme.radius_md))
         .inner_margin(Margin::same(6.0))
         .show(ui, |ui| {
@@ -227,7 +227,7 @@ fn render_master_scene_strip(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &O
                 ui.add_space(6.0);
 
                 // 3. Stop All Clips button
-                if ui.add_sized([76.0, 18.0], egui::Button::new(RichText::new("■ Stop All").small()).fill(Color32::from_rgb(150, 20, 20))).clicked() {
+                if ui.add_sized([76.0, 18.0], egui::Button::new(RichText::new("■ Stop All").small()).fill(app.theme.danger)).clicked() {
                     for i in 0..16 {
                         app.sequencer_grid[i].fill(0.0);
                         let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: app.get_node_id("sequencer_node"), track_idx: i as u32 }));

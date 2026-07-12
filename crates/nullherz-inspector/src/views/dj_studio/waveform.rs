@@ -4,8 +4,9 @@ use crate::InspectorApp;
 use audio_core::Telemetry;
 
 pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>, deck_color: Color32, height: f32) {
+    let theme = app.theme;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(10, 10, 15));
+    ui.painter().rect_filled(rect, theme.radius_sm, theme.bg_inset);
 
     let track_id = app.now_playing[i];
     let track = track_id.and_then(|id| app.library_db.get_track(id).ok().flatten());
@@ -26,11 +27,11 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
             nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_lock.clone());
         } else {
             // Draw simulated fallback waveform lines when GPU/WGPU is unavailable
-            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, format!("{} (NO GPU)", t.title), egui::FontId::monospace(10.0), Color32::from_gray(100));
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, format!("{} (NO GPU)", t.title), egui::FontId::monospace(theme.type_caption), theme.text_secondary);
             // Draw a center line
             ui.painter().line_segment(
                 [egui::pos2(rect.min.x, rect.center().y), egui::pos2(rect.max.x, rect.center().y)],
-                egui::Stroke::new(1.0, Color32::from_gray(40))
+                egui::Stroke::new(1.0, theme.border)
             );
         }
 
@@ -46,8 +47,8 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
         );
     } else {
         // Enhanced EMPTY DECK visualization (always shown regardless of GPU/WGPU availability!)
-        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "EMPTY DECK", egui::FontId::monospace(12.0), Color32::from_gray(60));
+        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "EMPTY DECK", egui::FontId::monospace(theme.type_caption), theme.text_disabled);
         // Render a dashed border for the empty zone
-        ui.painter().rect_stroke(rect.shrink(2.0), 2.0, Stroke::new(1.0, Color32::from_gray(30)));
+        ui.painter().rect_stroke(rect.shrink(2.0), theme.radius_sm, Stroke::new(1.0, theme.border));
     }
 }

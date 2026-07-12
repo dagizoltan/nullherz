@@ -26,7 +26,7 @@ pub fn render(app: &InspectorApp, ui: &mut Ui) {
                     Frame::none()
                         .fill(app.theme.bg_surface)
                         .rounding(app.theme.radius_md)
-                        .stroke(app.theme.border)
+                        .stroke(app.theme.border_stroke)
                         .inner_margin(app.theme.space_md)
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
@@ -54,7 +54,7 @@ pub fn render(app: &InspectorApp, ui: &mut Ui) {
             ui.label(RichText::new("GENETIC DRIFT (DECK DISTANCE)").small().strong().color(app.theme.text_secondary));
             let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 60.0), egui::Sense::hover());
             ui.painter().rect_filled(rect, app.theme.radius_md, app.theme.bg_inset);
-            ui.painter().rect_stroke(rect, app.theme.radius_md, app.theme.border);
+            ui.painter().rect_stroke(rect, app.theme.radius_md, app.theme.border_stroke);
 
             // Render meaningful genetic drift visualization
             if let Some(t) = &*telemetry {
@@ -74,7 +74,7 @@ pub fn render(app: &InspectorApp, ui: &mut Ui) {
             Frame::none()
                 .fill(app.theme.bg_surface)
                 .rounding(app.theme.radius_md)
-                .stroke(app.theme.border)
+                .stroke(app.theme.border_stroke)
                 .inner_margin(app.theme.space_md)
                 .show(ui, |ui| {
                     ui.label(RichText::new("SYSTEM EVENTS").strong());
