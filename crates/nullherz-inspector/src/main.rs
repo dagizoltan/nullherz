@@ -154,6 +154,14 @@ pub struct InspectorApp {
     pub(crate) _automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>, // target_id -> [(beat, value)]
     pub(crate) sampler_waveform_zoom: f32,
     pub(crate) active_settings_tab: SettingsTab,
+    // --- Broadcast Settings State ---
+    pub(crate) broadcast_url: String,
+    pub(crate) broadcast_key: String,
+    pub(crate) broadcast_reveal_key: bool,
+    pub(crate) broadcast_codec: usize, // 0: Opus, 1: AAC, 2: FLAC
+    pub(crate) broadcast_bitrate: f32, // 64 to 512 kbps
+    pub(crate) broadcast_state: usize, // 0: Offline, 1: Connecting, 2: Live, 3: Error
+    pub(crate) broadcast_error_msg: String,
     pub(crate) sampler_input_gain: f32,
     pub(crate) sampler_monitor_level: f32,
     pub(crate) sampler_is_recording: bool,
@@ -301,6 +309,13 @@ impl InspectorApp {
             _automation_data: std::collections::HashMap::new(),
             sampler_waveform_zoom: 1.0,
             active_settings_tab: SettingsTab::General,
+            broadcast_url: "rtmp://gossip.genetic.cloud/live".to_string(),
+            broadcast_key: "live_73819283_ab781c981d39281a".to_string(),
+            broadcast_reveal_key: false,
+            broadcast_codec: 0,
+            broadcast_bitrate: 256.0,
+            broadcast_state: 0,
+            broadcast_error_msg: "Connection timed out (Socket error 111)".to_string(),
             sampler_input_gain: 1.0,
             sampler_monitor_level: 0.0,
             sampler_is_recording: false,
@@ -308,13 +323,7 @@ impl InspectorApp {
             sampler_input_source: 0,
             selected_library_track: None,
             bypassed_nodes: std::collections::HashSet::new(),
-            theme: nullherz_ui_hal::Theme {
-                accent: egui::Color32::from_rgb(0, 255, 200), // #00FFC8-ish
-                bg_dark: egui::Color32::from_rgb(10, 10, 12), // #0A0A0C
-                bg_med: egui::Color32::from_rgb(30, 30, 30),  // #1E1E1E
-                text_primary: egui::Color32::WHITE,
-                socket_color: egui::Color32::from_gray(80),
-            },
+            theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
             ingestion_path: "tracks/".to_string(),
             playlist_queue: std::collections::VecDeque::new(),
@@ -416,15 +425,15 @@ impl eframe::App for InspectorApp {
             }
         }
 
-        // 1. Left Sidebar (Navigation Plane)
+        // 1. Left Sidebar (Navigation Plane) - Migrated to theme tokens & Left-Edge Accent design
         egui::SidePanel::left("left_sidebar")
             .resizable(false)
             .default_width(70.0)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(10.0);
-                    // Minimalist Logo/Brand
-                    ui.label(egui::RichText::new("Ω").size(24.0).color(egui::Color32::from_rgb(0, 255, 200)));
+                    // Minimalist Logo/Brand using theme.accent
+                    ui.label(egui::RichText::new("Ω").size(24.0).color(self.theme.accent));
                     ui.add_space(20.0);
 
                     let top_nav = [
@@ -443,16 +452,63 @@ impl eframe::App for InspectorApp {
                         (View::Settings, "⚙", "SETTINGS"),
                     ];
 
+                    // Render custom nav button with active left-edge accent bar & icon color shifting
+                    let mut render_nav_btn = |ui: &mut egui::Ui, view: View, icon: &str, label: &str| {
+                        let is_selected = self.active_view == view;
+                        let size = egui::vec2(50.0, 50.0);
+                        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+
+                        if response.clicked() {
+                            self.active_view = view;
+                            ui.ctx().request_repaint();
+                        }
+
+                        // Background hover treatment
+                        if is_selected {
+                            ui.painter().rect_filled(
+                                rect.shrink(1.0),
+                                self.theme.radius_md,
+                                self.theme.accent.linear_multiply(0.12),
+                            );
+                            // 3px Left Edge Accent Bar
+                            let accent_bar = egui::Rect::from_min_max(
+                                rect.left_top() + egui::vec2(2.0, 8.0),
+                                rect.left_bottom() + egui::vec2(5.0, -8.0),
+                            );
+                            ui.painter().rect_filled(accent_bar, 1.5, self.theme.accent);
+                        } else if response.hovered() {
+                            ui.painter().rect_filled(
+                                rect.shrink(1.0),
+                                self.theme.radius_md,
+                                self.theme.bg_med.linear_multiply(0.4),
+                            );
+                        }
+
+                        // Icon Color Shift: Accent for selected, text_secondary for inactive (highlight on hover)
+                        let icon_color = if is_selected {
+                            self.theme.accent
+                        } else if response.hovered() {
+                            self.theme.text_primary
+                        } else {
+                            self.theme.text_secondary
+                        };
+
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            icon,
+                            egui::FontId::proportional(20.0),
+                            icon_color,
+                        );
+
+                        response.on_hover_text(label);
+                    };
+
                     // Bottom Navigation pinned to bottom
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                         ui.add_space(10.0);
                         for (view, icon, label) in bottom_nav.into_iter().rev() {
-                            let is_selected = self.active_view == view;
-                            let bg_color = if is_selected { egui::Color32::from_gray(50) } else { egui::Color32::TRANSPARENT };
-
-                            if ui.add(egui::Button::new(egui::RichText::new(icon).size(20.0)).fill(bg_color).min_size(egui::vec2(50.0, 50.0))).on_hover_text(label).clicked() {
-                                self.active_view = view;
-                            }
+                            render_nav_btn(ui, view, icon, label);
                             ui.add_space(10.0);
                         }
 
@@ -462,12 +518,7 @@ impl eframe::App for InspectorApp {
                         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                             egui::ScrollArea::vertical().id_source("nav_scroll").show(ui, |ui| {
                                 for (view, icon, label) in top_nav {
-                                    let is_selected = self.active_view == view;
-                                    let bg_color = if is_selected { egui::Color32::from_gray(50) } else { egui::Color32::TRANSPARENT };
-
-                                    if ui.add(egui::Button::new(egui::RichText::new(icon).size(20.0)).fill(bg_color).min_size(egui::vec2(50.0, 50.0))).on_hover_text(label).clicked() {
-                                        self.active_view = view;
-                                    }
+                                    render_nav_btn(ui, view, icon, label);
                                     ui.add_space(10.0);
                                 }
                             });

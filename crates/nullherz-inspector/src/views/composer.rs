@@ -47,7 +47,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 }
 
 fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>) {
-    let track_color = app.theme.accent;
+    // Utilize per-track color identity from theme
+    let track_color = app.theme.track_colors[i];
     let is_muted = app.track_mutes[i];
     let is_soloed = app.track_solos[i];
 
@@ -64,7 +65,7 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
                 let header_bg = if is_muted {
                     Color32::from_rgb(25, 25, 28)
                 } else {
-                    track_color.gamma_multiply(0.2)
+                    track_color.gamma_multiply(0.25)
                 };
                 Frame::none()
                     .fill(header_bg)
@@ -93,13 +94,14 @@ fn render_vertical_track_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
 
                     let velocity = app.sequencer_grid[i][slot_idx];
                     let mut color = if is_playing {
-                        Color32::from_rgb(0, 255, 100) // Vibrant play green
+                        Color32::from_rgb(0, 255, 100) // Vibrant play green (semantic override)
                     } else if is_starting {
-                        Color32::from_rgb(255, 200, 0) // Quantizing warning yellow
+                        Color32::from_rgb(255, 200, 0) // Quantizing warning yellow (semantic override)
                     } else if velocity > 0.0 {
-                        Color32::from_rgb(0, 120, 200).gamma_multiply(velocity.clamp(0.4, 1.0)) // Active sequence blue
+                        track_color.gamma_multiply(velocity.clamp(0.5, 1.0)) // Track-specific active slot hue
                     } else {
-                        Color32::from_rgb(18, 18, 22) // Flat dark slot
+                        // Subtle track-specific passive tint for idle empty slots
+                        track_color.gamma_multiply(0.04)
                     };
 
                     if slot_idx == app.sequencer_active_step {

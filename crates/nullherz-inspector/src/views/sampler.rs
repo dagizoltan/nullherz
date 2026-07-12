@@ -66,41 +66,38 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             Frame::group(ui.style()).inner_margin(Margin::same(12.0)).show(ui, |ui| {
                 egui::Grid::new("capture_settings_grid").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
                     ui.label("Input Source");
-                    if egui::ComboBox::from_id_source("input_src")
-                        .selected_text(match app.sampler_input_source {
-                            0 => "MASTER OUT",
-                            1 => "DECK A",
-                            2 => "DECK B",
-                            3 => "DECK C",
-                            4 => "DECK D",
-                            _ => "EXTERNAL",
-                        })
-                        .show_ui(ui, |ui| {
-                            let mut changed = false;
-                            if ui.selectable_value(&mut app.sampler_input_source, 0, "MASTER OUT").clicked() { changed = true; }
-                            if ui.selectable_value(&mut app.sampler_input_source, 1, "DECK A").clicked() { changed = true; }
-                            if ui.selectable_value(&mut app.sampler_input_source, 2, "DECK B").clicked() { changed = true; }
-                            if ui.selectable_value(&mut app.sampler_input_source, 3, "DECK C").clicked() { changed = true; }
-                            if ui.selectable_value(&mut app.sampler_input_source, 4, "DECK D").clicked() { changed = true; }
-                            if ui.selectable_value(&mut app.sampler_input_source, 5, "EXTERNAL IN").clicked() { changed = true; }
-                            changed
-                        }).inner.unwrap_or(false) {
-                            // Routing Logic: Connect selected source to Capture node
-                            let src_node = match app.sampler_input_source {
-                                0 => app.get_node_id("master_sum"),
-                                1 => app.get_node_id("deck_a_gain"),
-                                2 => app.get_node_id("deck_b_gain"),
-                                3 => app.get_node_id("deck_c_gain"),
-                                4 => app.get_node_id("deck_d_gain"),
-                                _ => 0,  // Hardware In
-                            };
-                            let _ = app.command_sender.send(nullherz_traits::Command::Topology(nullherz_traits::TopologyCommand::Connect {
-                                src_node_idx: src_node,
-                                src_output_idx: 0,
-                                dst_node_idx: app.get_node_id("capture_node"),
-                                dst_input_idx: 0,
-                            }));
-                        }
+                    let options = [
+                        (0, "MST"),
+                        (1, "A"),
+                        (2, "B"),
+                        (3, "C"),
+                        (4, "D"),
+                        (5, "EXT"),
+                    ];
+                    let old_source = app.sampler_input_source;
+                    nullherz_ui_hal::widgets::render_segmented_control(
+                        ui,
+                        &app.theme,
+                        &mut app.sampler_input_source,
+                        &options,
+                    );
+                    if app.sampler_input_source != old_source {
+                        // Routing Logic: Connect selected source to Capture node
+                        let src_node = match app.sampler_input_source {
+                            0 => app.get_node_id("master_sum"),
+                            1 => app.get_node_id("deck_a_gain"),
+                            2 => app.get_node_id("deck_b_gain"),
+                            3 => app.get_node_id("deck_c_gain"),
+                            4 => app.get_node_id("deck_d_gain"),
+                            _ => 0,  // Hardware In
+                        };
+                        let _ = app.command_sender.send(nullherz_traits::Command::Topology(nullherz_traits::TopologyCommand::Connect {
+                            src_node_idx: src_node,
+                            src_output_idx: 0,
+                            dst_node_idx: app.get_node_id("capture_node"),
+                            dst_input_idx: 0,
+                        }));
+                    }
                     ui.end_row();
 
                     ui.label("Input Gain");
