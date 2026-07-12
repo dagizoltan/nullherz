@@ -120,7 +120,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         };
 
                         let color = if load > 0.9 {
-                            Color32::from_rgb(255, 50, 50) // Stress
+                            theme.danger // Stress
                         } else if load > 0.1 {
                             theme.accent.gamma_multiply(0.8) // Active
                         } else {
@@ -145,7 +145,7 @@ where F: FnOnce(&mut Ui)
     Frame::none()
         .fill(theme.bg_surface)
         .rounding(Rounding::same(theme.radius_md))
-        .stroke(theme.border)
+        .stroke(theme.border_stroke)
         .inner_margin(Margin::same(theme.space_md))
         .show(ui, |ui| {
             ui.set_width(width);

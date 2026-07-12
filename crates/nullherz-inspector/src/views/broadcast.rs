@@ -20,7 +20,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             Frame::none()
                 .fill(app.theme.bg_surface)
                 .rounding(app.theme.radius_md)
-                .stroke(app.theme.border)
+                .stroke(app.theme.border_stroke)
                 .inner_margin(app.theme.space_md)
                 .show(ui, |ui| {
                     ui.label("Stream Server URL");
@@ -48,7 +48,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             Frame::none()
                 .fill(app.theme.bg_surface)
                 .rounding(app.theme.radius_md)
-                .stroke(app.theme.border)
+                .stroke(app.theme.border_stroke)
                 .inner_margin(app.theme.space_md)
                 .show(ui, |ui| {
                     ui.label("Codec Selection");
@@ -78,7 +78,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             Frame::none()
                 .fill(app.theme.bg_surface)
                 .rounding(app.theme.radius_md)
-                .stroke(app.theme.border)
+                .stroke(app.theme.border_stroke)
                 .inner_margin(app.theme.space_md)
                 .show(ui, |ui| {
                     // Pre-flight State Machine Selection
@@ -99,37 +99,37 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
                     // Connection Dot / Banner based on current state
                     let (status_text, dot_color, bg_banner) = match app.broadcast_state {
-                        1 => ("CONNECTING...", Color32::YELLOW, Color32::from_rgb(45, 45, 10)),
-                        2 => ("LIVE & STREAMING", Color32::GREEN, Color32::from_rgb(10, 45, 10)),
-                        3 => ("ERROR", Color32::RED, Color32::from_rgb(45, 10, 10)),
-                        _ => ("OFFLINE", Color32::from_gray(120), Color32::from_gray(20)),
+                        1 => ("CONNECTING...", app.theme.warning, app.theme.warning.linear_multiply(0.12)),
+                        2 => ("LIVE & STREAMING", app.theme.success, app.theme.success.linear_multiply(0.12)),
+                        3 => ("ERROR", app.theme.danger, app.theme.danger.linear_multiply(0.12)),
+                        _ => ("OFFLINE", app.theme.text_secondary, app.theme.bg_inset),
                     };
 
                     Frame::none()
                         .fill(bg_banner)
                         .rounding(app.theme.radius_md)
-                        .stroke(app.theme.border)
+                        .stroke(app.theme.border_stroke)
                         .inner_margin(egui::Margin::symmetric(12.0, 10.0))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
                                 ui.painter().circle_filled(dot_rect.center(), 5.5, dot_color);
                                 ui.add_space(6.0);
-                                ui.label(RichText::new(status_text).strong().size(13.0).color(Color32::WHITE));
+                                ui.label(RichText::new(status_text).strong().size(13.0).color(app.theme.text_primary));
                             });
                         });
 
                     if app.broadcast_state == 3 {
                         ui.add_space(8.0);
-                        ui.label(RichText::new(format!("⚠ {}", app.broadcast_error_msg)).color(Color32::RED).small());
+                        ui.label(RichText::new(format!("⚠ {}", app.broadcast_error_msg)).color(app.theme.danger).small());
                     }
 
                     ui.add_space(15.0);
 
                     // Action Button based on state
                     let action_btn = match app.broadcast_state {
-                        0 | 3 => egui::Button::new(RichText::new("🚀 GO LIVE").strong().color(Color32::WHITE)).fill(app.theme.accent.linear_multiply(0.4)),
-                        _ => egui::Button::new(RichText::new("🛑 STOP STREAM").strong().color(Color32::WHITE)).fill(Color32::from_rgb(180, 20, 20)),
+                        0 | 3 => egui::Button::new(RichText::new("🚀 GO LIVE").strong().color(app.theme.text_primary)).fill(app.theme.accent.linear_multiply(0.4)),
+                        _ => egui::Button::new(RichText::new("🛑 STOP STREAM").strong().color(app.theme.text_primary)).fill(app.theme.danger),
                     };
 
                     if ui.add_sized([ui.available_width(), 32.0], action_btn).clicked() {
@@ -150,7 +150,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             Frame::none()
                 .fill(app.theme.bg_surface)
                 .rounding(app.theme.radius_md)
-                .stroke(app.theme.border)
+                .stroke(app.theme.border_stroke)
                 .inner_margin(app.theme.space_md)
                 .show(ui, |ui| {
                     if app.broadcast_state == 2 {

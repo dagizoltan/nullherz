@@ -20,7 +20,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             // Waveform Editor Zone
             let (rect, response) = ui.allocate_at_least(Vec2::new(ui.available_width(), 200.0), Sense::click_and_drag());
             ui.painter().rect_filled(rect, app.theme.radius_md, app.theme.bg_dark);
-            ui.painter().rect_stroke(rect, app.theme.radius_md, app.theme.border);
+            ui.painter().rect_stroke(rect, app.theme.radius_md, app.theme.border_stroke);
 
             if response.dragged() {
                 let current_pos = ui.input(|i| i.pointer.latest_pos()).unwrap_or(egui::pos2(0.0, 0.0));
@@ -111,7 +111,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             });
 
         } else {
-            ui.label(RichText::new("Track not found in library.").color(Color32::from_rgb(255, 50, 50)));
+            ui.label(RichText::new("Track not found in library.").color(app.theme.danger));
             if ui.button("Deselect").clicked() { app.selected_library_track = None; }
         }
     } else {

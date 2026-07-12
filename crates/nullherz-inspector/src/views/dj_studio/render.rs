@@ -15,7 +15,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     let total_h = ui.available_height().max(500.0);
 
     render_header(ui, telemetry, &theme);
-    ui.add_space(4.0);
+    ui.add_space(theme.space_xs);
 
     // Waveform stack (top half of the window)
     // Consumes exactly 50% of the available central-panel height.
@@ -33,7 +33,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         }
     });
 
-    ui.add_space(4.0);
+    ui.add_space(theme.space_xs);
 
     // Mixer section (bottom half of the window)
     // Wrapped in a nested vertical ScrollArea so the mixer strips and master section scroll independently
@@ -44,8 +44,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 render_channel_strip(app, ui, i, telemetry);
                 // Vertical divider between channels/master
                 let (line_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 320.0), egui::Sense::hover());
-                ui.painter().rect_filled(line_rect, Rounding::ZERO, Color32::from_rgb(22, 22, 26));
-                ui.add_space(8.0);
+                ui.painter().rect_filled(line_rect, Rounding::ZERO, theme.border);
+                ui.add_space(theme.space_sm);
             }
 
             // Move crossfader/master section to the same row as the decks, aligned right!
@@ -56,16 +56,16 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
 fn render_header(ui: &mut Ui, telemetry: &Option<Telemetry>, theme: &nullherz_ui_hal::Theme) {
     Frame::none()
-        .fill(Color32::from_rgb(10, 10, 12))
-        .rounding(Rounding::same(6.0))
+        .fill(theme.bg_canvas)
+        .rounding(Rounding::same(theme.radius_md))
         .inner_margin(Margin::symmetric(16.0, 8.0))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.heading(RichText::new("NULLHERZ DJ CONSOLE").strong().color(theme.text_primary).size(15.0).extra_letter_spacing(1.5));
+                ui.heading(RichText::new("NULLHERZ DJ CONSOLE").strong().color(theme.text_primary).size(theme.type_heading).extra_letter_spacing(1.5));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if let Some(t) = telemetry {
-                        ui.label(RichText::new("BPM").small().color(Color32::from_gray(100)));
-                        ui.label(RichText::new(format!("{:.1}", t.bpm)).monospace().strong().color(theme.accent).size(15.0));
+                        ui.label(RichText::new("BPM").size(theme.type_caption).color(theme.text_secondary));
+                        ui.label(RichText::new(format!("{:.1}", t.bpm)).monospace().strong().color(theme.accent).size(theme.type_heading));
                     }
                 });
             });
@@ -73,19 +73,20 @@ fn render_header(ui: &mut Ui, telemetry: &Option<Telemetry>, theme: &nullherz_ui
 }
 
 fn render_waveform_lane(app: &mut InspectorApp, ui: &mut Ui, i: usize, lane_h: f32, telemetry: &Option<Telemetry>) {
-    let deck_color = InspectorApp::deck_color(i);
+    let theme = app.theme;
+    let deck_color = theme.deck_colors[i];
     let is_focused = app.focused_deck == i;
 
     let bg_color = if is_focused {
-        Color32::from_rgb(14, 14, 16)
+        theme.bg_surface
     } else {
-        Color32::from_rgb(10, 10, 12)
+        theme.bg_canvas
     };
 
     let stroke_color = if is_focused {
         deck_color
     } else {
-        Color32::from_gray(25)
+        theme.border
     };
 
     let border_thickness = if is_focused { 1.5 } else { 1.0 };
@@ -94,7 +95,7 @@ fn render_waveform_lane(app: &mut InspectorApp, ui: &mut Ui, i: usize, lane_h: f
     let response = Frame::none()
         .fill(bg_color)
         .stroke(Stroke::new(border_thickness, stroke_color))
-        .rounding(Rounding::same(4.0))
+        .rounding(Rounding::same(theme.radius_sm))
         .inner_margin(Margin::same(0.0))
         .show(ui, |ui| {
             ui.set_height(lane_h);
@@ -115,7 +116,7 @@ fn render_waveform_lane(app: &mut InspectorApp, ui: &mut Ui, i: usize, lane_h: f
         egui::pos2(rect.left() + 1.0, rect.top() + 1.0),
         egui::pos2(rect.left() + 1.0 + bar_width, rect.bottom() - 1.0)
     );
-    let bar_color = if is_focused { deck_color } else { Color32::from_gray(30) };
+    let bar_color = if is_focused { deck_color } else { theme.border };
     ui.painter().rect_filled(bar_rect, Rounding::ZERO, bar_color);
 
     // Clicking a lane sets app.focused_deck = i
@@ -126,13 +127,14 @@ fn render_waveform_lane(app: &mut InspectorApp, ui: &mut Ui, i: usize, lane_h: f
 }
 
 fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_color: Color32, is_focused: bool, telemetry: &Option<Telemetry>) {
+    let theme = app.theme;
     let deck_id_label = (b'A' + i as u8) as char;
     ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
         // Left padding for the left accent bar
         ui.add_space(8.0);
 
         // Deck label
-        let label_text = RichText::new(format!("DECK {}", deck_id_label)).strong().size(11.0).color(if is_focused { deck_color } else { Color32::from_gray(140) });
+        let label_text = RichText::new(format!("DECK {}", deck_id_label)).strong().size(theme.type_caption).color(if is_focused { deck_color } else { theme.text_secondary });
         if ui.selectable_label(is_focused, label_text).clicked() {
             app.focused_deck = i;
         }
@@ -141,8 +143,8 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
 
         // Master Deck Toggle ("M")
         let is_master = app.master_deck == Some(i);
-        let m_color = if is_master { deck_color } else { Color32::from_gray(80) };
-        if ui.selectable_label(is_master, RichText::new("M").strong().size(10.0).color(m_color)).clicked() {
+        let m_color = if is_master { deck_color } else { theme.text_disabled };
+        if ui.selectable_label(is_master, RichText::new("M").strong().size(theme.type_caption).color(m_color)).clicked() {
              app.master_deck = Some(i);
              let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMasterDeck(deck_id_label)));
         }
@@ -151,8 +153,8 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
 
         // Sync toggle
         let is_sync = app.channel_sync[i];
-        let sync_color = if is_sync { app.theme.accent } else { Color32::from_gray(80) };
-        if ui.selectable_label(is_sync, RichText::new("S").strong().size(10.0).color(sync_color)).clicked() {
+        let sync_color = if is_sync { theme.accent } else { theme.text_disabled };
+        if ui.selectable_label(is_sync, RichText::new("S").strong().size(theme.type_caption).color(sync_color)).clicked() {
             app.channel_sync[i] = !is_sync;
         }
 
@@ -169,22 +171,22 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
             } else {
                 t.title.clone()
             };
-            ui.label(RichText::new(title_text).strong().size(11.0).color(Color32::WHITE));
+            ui.label(RichText::new(title_text).strong().size(theme.type_caption).color(theme.text_primary));
 
             let artist_text = if t.artist.len() > 15 {
                 format!("by {}...", &t.artist[..13])
             } else {
                 format!("by {}", t.artist)
             };
-            ui.label(RichText::new(artist_text).size(9.0).color(Color32::from_gray(140)));
+            ui.label(RichText::new(artist_text).size(theme.type_caption).color(theme.text_secondary));
 
             ui.add_space(8.0);
 
             // Live BPM
             let playback_rate = telemetry.as_ref().map(|t| t.deck_playback_rates[i]).unwrap_or(1.0);
             let live_bpm = t.metadata.bpm * playback_rate;
-            ui.label(RichText::new(format!("{:.1}", live_bpm)).monospace().strong().size(11.0).color(deck_color));
-            ui.label(RichText::new("BPM").size(8.0).color(Color32::from_gray(100)));
+            ui.label(RichText::new(format!("{:.1}", live_bpm)).monospace().strong().size(theme.type_caption).color(deck_color));
+            ui.label(RichText::new("BPM").size(theme.type_caption).color(theme.text_secondary));
 
             ui.add_space(8.0);
 
@@ -196,7 +198,7 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
             if !t.genre.is_empty() {
                 meta_text.push_str(&format!("G:{}", t.genre));
             }
-            ui.label(RichText::new(meta_text).size(8.0).color(Color32::from_gray(120)));
+            ui.label(RichText::new(meta_text).size(theme.type_caption).color(theme.text_secondary));
 
             // Time Display on the far right
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -212,25 +214,26 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
                 widgets::render_time_display(ui, &elapsed_str, &remaining_str, deck_color);
             });
         } else {
-            ui.label(RichText::new("NO TRACK LOADED").monospace().color(Color32::from_gray(60)).size(9.0));
+            ui.label(RichText::new("NO TRACK LOADED").monospace().color(theme.text_disabled).size(theme.type_caption));
         }
     });
 }
 
 fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>) {
-    let deck_color = InspectorApp::deck_color(i);
+    let theme = app.theme;
+    let deck_color = theme.deck_colors[i];
     let is_focused = app.focused_deck == i;
 
     let bg_color = if is_focused {
-        Color32::from_rgb(14, 14, 16)
+        theme.bg_surface
     } else {
-        Color32::from_rgb(10, 10, 12)
+        theme.bg_canvas
     };
 
     let stroke_color = if is_focused {
         deck_color
     } else {
-        Color32::from_gray(25)
+        theme.border
     };
 
     let border_thickness = if is_focused { 1.5 } else { 1.0 };
@@ -240,40 +243,40 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
         Frame::none()
             .fill(bg_color)
             .stroke(Stroke::new(border_thickness, stroke_color))
-            .rounding(Rounding::same(6.0))
+            .rounding(Rounding::same(theme.radius_md))
             .inner_margin(Margin::symmetric(12.0, 10.0))
             .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     // Header (Selectable title/indicator for focus)
                     let deck_id_label = (b'A' + i as u8) as char;
-                    let label_text = RichText::new(format!("CH {}", deck_id_label)).strong().size(12.0).color(if is_focused { deck_color } else { Color32::from_gray(140) });
+                    let label_text = RichText::new(format!("CH {}", deck_id_label)).strong().size(theme.type_body).color(if is_focused { deck_color } else { theme.text_secondary });
                     if ui.selectable_label(is_focused, label_text).clicked() {
                         app.focused_deck = i;
                     }
-                    ui.add_space(4.0);
+                    ui.add_space(theme.space_xs);
 
                     // 1. Hot cues (2x4)
                     performance::render_deck_performance(app, ui, i, telemetry);
-                    ui.add_space(8.0);
+                    ui.add_space(theme.space_sm);
 
                     // Divider (Native separator)
                     ui.separator();
-                    ui.add_space(8.0);
+                    ui.add_space(theme.space_sm);
 
                     // 2 & 3. EQ + Filter Column & Volume Row
                     mixer::render_deck_mixer(app, ui, i, deck_color);
-                    ui.add_space(8.0);
+                    ui.add_space(theme.space_sm);
 
                     // Divider (Native separator)
                     ui.separator();
-                    ui.add_space(8.0);
+                    ui.add_space(theme.space_sm);
 
                     // 4. Transport Row
                     transport::render_deck_transport(app, ui, i);
-                    ui.add_space(8.0);
+                    ui.add_space(theme.space_sm);
 
                     // 5. Collapsible DNA panel (collapsed by default)
-                    egui::CollapsingHeader::new(RichText::new("DNA").small().color(Color32::from_gray(120)))
+                    egui::CollapsingHeader::new(RichText::new("DNA").size(theme.type_caption).color(theme.text_secondary))
                         .default_open(false)
                         .show(ui, |ui| {
                             dna::render_deck_dna_panel(app, ui, i);
@@ -292,19 +295,20 @@ fn render_stereo_vu_meter(ui: &mut Ui, peak_l: f32, peak_r: f32, peak_hold: f32,
 }
 
 fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
+    let theme = app.theme;
     Frame::none()
-        .fill(Color32::from_rgb(10, 10, 12))
-        .stroke(Stroke::new(1.0, Color32::from_gray(25)))
-        .rounding(Rounding::same(6.0))
+        .fill(theme.bg_canvas)
+        .stroke(Stroke::new(1.0, theme.border))
+        .rounding(Rounding::same(theme.radius_md))
         .inner_margin(Margin::symmetric(12.0, 10.0))
         .show(ui, |ui| {
             ui.vertical_centered(|ui| {
                 ui.set_width(210.0);
 
                 // Crossfader
-                ui.label(RichText::new("CROSSFADER").small().color(Color32::from_gray(100)));
-                ui.add_space(4.0);
-                if widgets::render_horizontal_fader(ui, &mut app.crossfader_pos, 0.0..=1.0, Color32::WHITE, 160.0, 32.0).changed() {
+                ui.label(RichText::new("CROSSFADER").size(theme.type_caption).color(theme.text_secondary));
+                ui.add_space(theme.space_xs);
+                if widgets::render_horizontal_fader(ui, &mut app.crossfader_pos, 0.0..=1.0, theme.text_primary, 160.0, 32.0).changed() {
                     let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                         target_id: app.get_node_id("master_crossfader") as u64,
                         param_id: 0,
@@ -315,20 +319,20 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
-                    ui.label(RichText::new("A").small().color(Color32::from_gray(100)));
+                    ui.label(RichText::new("A").size(theme.type_caption).color(theme.text_secondary));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(12.0);
-                        ui.label(RichText::new("B").small().color(Color32::from_gray(100)));
+                        ui.label(RichText::new("B").size(theme.type_caption).color(theme.text_secondary));
                     });
                 });
 
-                ui.add_space(8.0);
+                ui.add_space(theme.space_sm);
                 // Divider
                 ui.separator();
-                ui.add_space(8.0);
+                ui.add_space(theme.space_sm);
 
                 // Master, Booth, and Rec Out with Stereo VU Meters
-                ui.label(RichText::new("OUTPUTS").strong().size(11.0).color(Color32::from_gray(180)));
+                ui.label(RichText::new("OUTPUTS").strong().size(theme.type_body).color(theme.text_secondary));
                 ui.add_space(6.0);
 
                 ui.horizontal(|ui| {
@@ -336,26 +340,26 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
 
                     // Master VU
                     ui.vertical(|ui| {
-                        ui.label(RichText::new("MST").small().color(Color32::from_gray(120)));
-                        render_stereo_vu_meter(ui, app.damped_master_peaks[0], app.damped_master_peaks[1], app.master_peak_hold, Color32::WHITE, 100.0);
+                        ui.label(RichText::new("MST").size(theme.type_caption).color(theme.text_secondary));
+                        render_stereo_vu_meter(ui, app.damped_master_peaks[0], app.damped_master_peaks[1], app.master_peak_hold, theme.text_primary, 100.0);
                     });
 
                     // Booth VU
                     ui.vertical(|ui| {
-                        ui.label(RichText::new("BTH").small().color(Color32::from_gray(120)));
-                        render_stereo_vu_meter(ui, app.damped_master_peaks[0] * 0.8, app.damped_master_peaks[1] * 0.8, app._booth_peak_hold, Color32::from_rgb(0, 255, 200), 100.0);
+                        ui.label(RichText::new("BTH").size(theme.type_caption).color(theme.text_secondary));
+                        render_stereo_vu_meter(ui, app.damped_master_peaks[0] * 0.8, app.damped_master_peaks[1] * 0.8, app._booth_peak_hold, theme.accent, 100.0);
                     });
 
                     // Rec VU
                     ui.vertical(|ui| {
-                        ui.label(RichText::new("REC").small().color(Color32::from_gray(120)));
-                        render_stereo_vu_meter(ui, app.damped_master_peaks[0], app.damped_master_peaks[1], app._rec_peak_hold, Color32::from_rgb(255, 100, 0), 100.0);
+                        ui.label(RichText::new("REC").size(theme.type_caption).color(theme.text_secondary));
+                        render_stereo_vu_meter(ui, app.damped_master_peaks[0], app.damped_master_peaks[1], app._rec_peak_hold, theme.deck_colors[2], 100.0);
                     });
 
                     // Master Gain Fader
                     ui.vertical(|ui| {
-                        ui.label(RichText::new("GAIN").small().color(Color32::from_gray(120)));
-                        if widgets::render_fader(ui, &mut app.master_gain, 0.0..=1.5, Color32::WHITE, 100.0, 18.0).changed() {
+                        ui.label(RichText::new("GAIN").size(theme.type_caption).color(theme.text_secondary));
+                        if widgets::render_fader(ui, &mut app.master_gain, 0.0..=1.5, theme.text_primary, 100.0, 18.0).changed() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                 target_id: app.get_node_id("master_sum") as u64,
                                 param_id: 0,

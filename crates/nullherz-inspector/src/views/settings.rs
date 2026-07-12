@@ -31,7 +31,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             );
 
             ui.add_space(40.0);
-            if ui.button(RichText::new("🛑 STOP ENGINE").strong().color(Color32::RED)).clicked() {
+            if ui.button(RichText::new("🛑 STOP ENGINE").strong().color(app.theme.danger)).clicked() {
                 let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop));
             }
         });
@@ -57,7 +57,7 @@ fn render_general(app: &mut InspectorApp, ui: &mut Ui) {
     Frame::none()
         .fill(app.theme.bg_surface)
         .rounding(app.theme.radius_md)
-        .stroke(app.theme.border)
+        .stroke(app.theme.border_stroke)
         .inner_margin(app.theme.space_md)
         .show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -79,7 +79,7 @@ fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
     Frame::none()
         .fill(app.theme.bg_surface)
         .rounding(app.theme.radius_md)
-        .stroke(app.theme.border)
+        .stroke(app.theme.border_stroke)
         .inner_margin(app.theme.space_md)
         .show(ui, |ui| {
             ui.label(RichText::new("Select Audio Backend").color(app.theme.text_secondary));
@@ -122,7 +122,7 @@ fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
     Frame::none()
         .fill(app.theme.bg_surface)
         .rounding(app.theme.radius_md)
-        .stroke(app.theme.border)
+        .stroke(app.theme.border_stroke)
         .inner_margin(app.theme.space_md)
         .show(ui, |ui| {
             ui.label(RichText::new("Verify the physical outputs and routing of your audio interface by outputting a test signal.").color(app.theme.text_secondary));
@@ -150,7 +150,7 @@ fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
     Frame::none()
         .fill(app.theme.bg_surface)
         .rounding(app.theme.radius_md)
-        .stroke(app.theme.border)
+        .stroke(app.theme.border_stroke)
         .inner_margin(app.theme.space_md)
         .show(ui, |ui| {
             ui.label("Active Port Mappings:");
@@ -191,7 +191,7 @@ fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
     Frame::none()
         .fill(app.theme.bg_surface)
         .rounding(app.theme.radius_md)
-        .stroke(app.theme.border)
+        .stroke(app.theme.border_stroke)
         .inner_margin(app.theme.space_md)
         .show(ui, |ui| {
             ui.label(RichText::new("P2P Cloud Sync and Remote DSP Nodes").color(app.theme.text_secondary));
@@ -209,12 +209,12 @@ fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
                 Frame::none()
                     .fill(app.theme.bg_inset)
                     .rounding(app.theme.radius_md)
-                    .stroke(app.theme.border)
+                    .stroke(app.theme.border_stroke)
                     .inner_margin(egui::Margin::symmetric(10.0, 8.0))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             // Status indicator dot
-                            let dot_color = if is_connected { Color32::GREEN } else { Color32::RED };
+                            let dot_color = if is_connected { app.theme.success } else { app.theme.danger };
                             let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
                             ui.painter().circle_filled(dot_rect.center(), 4.0, dot_color);
                             ui.add_space(4.0);
@@ -238,7 +238,7 @@ fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
     Frame::none()
         .fill(app.theme.bg_surface)
         .rounding(app.theme.radius_md)
-        .stroke(app.theme.border)
+        .stroke(app.theme.border_stroke)
         .inner_margin(app.theme.space_md)
         .show(ui, |ui| {
             ui.label("Measure Round-Trip Latency (RTL) to ensure sample-accurate alignment.");
@@ -268,16 +268,16 @@ fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
     Frame::none()
         .fill(app.theme.bg_surface)
         .rounding(app.theme.radius_md)
-        .stroke(app.theme.border)
+        .stroke(app.theme.border_stroke)
         .inner_margin(app.theme.space_md)
         .show(ui, |ui| {
             if let Some(t) = app.last_telemetry.lock().unwrap().as_ref() {
                 ui.horizontal(|ui| {
                     ui.label("Sync Status:");
                     if t.clock_jitter_ns < 1000 {
-                        ui.label(RichText::new("● LOCKED").color(Color32::GREEN));
+                        ui.label(RichText::new("● LOCKED").color(app.theme.success));
                     } else {
-                        ui.label(RichText::new("○ SEEKING").color(Color32::YELLOW));
+                        ui.label(RichText::new("○ SEEKING").color(app.theme.warning));
                     }
                 });
                 ui.label(format!("System Time: {} ns", t.system_time_ns));
@@ -293,7 +293,7 @@ fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
     Frame::none()
         .fill(app.theme.bg_surface)
         .rounding(app.theme.radius_md)
-        .stroke(app.theme.border)
+        .stroke(app.theme.border_stroke)
         .inner_margin(app.theme.space_md)
         .show(ui, |ui| {
             if ui.button(RichText::new("SAVE SYSTEM CONFIG").strong()).clicked() {

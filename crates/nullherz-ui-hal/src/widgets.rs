@@ -282,7 +282,7 @@ pub fn render_segmented_control<T: PartialEq + Clone>(
             rect,
             theme.radius_md,
             theme.bg_inset,
-            theme.border,
+            theme.border_stroke,
         );
 
         let mut current_x = rect.min.x;
@@ -366,7 +366,7 @@ pub fn render_segmented_control_vertical<T: PartialEq + Clone>(
             rect,
             theme.radius_md,
             theme.bg_inset,
-            theme.border,
+            theme.border_stroke,
         );
 
         for (i, (val, label)) in options.iter().enumerate() {

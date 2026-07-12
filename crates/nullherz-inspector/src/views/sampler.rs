@@ -10,7 +10,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             if app.sampler_is_recording {
                 let time = ui.input(|i| i.time);
                 let alpha = ((time * 3.0).sin() * 0.5 + 0.5) as f32;
-                ui.label(RichText::new("● RECORDING").color(Color32::from_rgb(255, 50, 50).gamma_multiply(alpha)).strong());
+                ui.label(RichText::new("● RECORDING").color(app.theme.danger.gamma_multiply(alpha)).strong());
             }
         });
     });
@@ -20,7 +20,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     Frame::none()
         .fill(app.theme.bg_dark)
         .rounding(app.theme.radius_md)
-        .stroke(app.theme.border)
+        .stroke(app.theme.border_stroke)
         .inner_margin(app.theme.space_md)
         .show(ui, |ui| {
             let (rect, _response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 160.0), Sense::hover());
@@ -71,7 +71,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             Frame::none()
                 .fill(app.theme.bg_surface)
                 .rounding(app.theme.radius_md)
-                .stroke(app.theme.border)
+                .stroke(app.theme.border_stroke)
                 .inner_margin(app.theme.space_md)
                 .show(ui, |ui| {
                     egui::Grid::new("capture_settings_grid").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
@@ -146,9 +146,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     ui.add_space(15.0);
                     ui.horizontal(|ui| {
                         let rec_btn = if app.sampler_is_recording {
-                            egui::Button::new(RichText::new("■ STOP").strong().color(Color32::WHITE)).fill(Color32::from_rgb(200, 30, 30))
+                            egui::Button::new(RichText::new("■ STOP").strong().color(app.theme.text_primary)).fill(app.theme.danger)
                         } else {
-                            egui::Button::new(RichText::new("● RECORD").strong().color(Color32::from_rgb(255, 50, 50)))
+                            egui::Button::new(RichText::new("● RECORD").strong().color(app.theme.text_primary)).fill(app.theme.danger)
                         };
 
                         if ui.add(rec_btn.min_size(Vec2::new(100.0, 32.0))).clicked() {
@@ -185,7 +185,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             Frame::none()
                 .fill(app.theme.bg_surface)
                 .rounding(app.theme.radius_md)
-                .stroke(app.theme.border)
+                .stroke(app.theme.border_stroke)
                 .inner_margin(app.theme.space_md)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
