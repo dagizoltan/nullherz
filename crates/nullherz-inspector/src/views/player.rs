@@ -276,7 +276,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                         ui.separator();
 
-                        // Performance slice pads (TriggerSlice with dynamic beat-grid quantization)
+                        // Performance slice pads (TriggerSlice)
                         ui.vertical(|ui| {
                             ui.strong("REAL-TIME TRACK SLICER");
                             ui.add_space(theme.space_xs);
@@ -296,23 +296,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                 _ => "",
                                             };
                                             let node_idx = app.get_node_id(node_name);
-
-                                            // Quantized micro-jump calculation
-                                            let current_beat = telemetry.as_ref().map(|t| t.get_interpolated_beat_position()).unwrap_or(0.0);
-                                            let current_bar = (current_beat / 4.0).floor() * 4.0;
-                                            let target_beat = current_bar + (pad_idx as f64 * 0.5); // 1/2 beat slice offsets
-                                            let mut beats_to_jump = target_beat - current_beat;
-
-                                            if app.quantize_enabled {
-                                                // Quantize jump to the nearest 1/8th of a beat
-                                                beats_to_jump = (beats_to_jump * 8.0).round() / 8.0;
-                                            }
-
-                                            // Dispatch the micro-jump and slice triggering to the execution plane
-                                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpByBeats {
-                                                node_idx,
-                                                beats: beats_to_jump as f32,
-                                            }));
                                             let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::TriggerSlice {
                                                 node_idx,
                                                 slice_idx: pad_idx as u32,

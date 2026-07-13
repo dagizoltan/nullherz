@@ -2,43 +2,12 @@ use egui::{Ui, Frame, RichText, Color32, Vec2, Sense};
 use crate::InspectorApp;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
-    let current_time = ui.input(|i| i.time);
-    let telemetry_opt = app.last_telemetry.lock().unwrap().clone();
-
-    // Synchronize local state with live telemetry if active
-    if let Some(ref t) = telemetry_opt {
-        if t.is_streaming {
-            app.broadcast_state = 2; // Force to live if backend is actively streaming
-            app.is_streaming = true;
-        }
-    }
-
-    // Dynamic State Machine Transition Simulator (Connecting -> Live)
-    if app.broadcast_state == 1 {
-        if app.broadcast_start_time.is_none() {
-            app.broadcast_start_time = Some(current_time);
-        } else if current_time - app.broadcast_start_time.unwrap() > 1.5 {
-            // Handshake completed, transitions to LIVE
-            app.broadcast_state = 2;
-            app.is_streaming = true;
-            app.broadcast_start_time = Some(current_time); // actual live start
-        }
-    } else if app.broadcast_state == 2 {
-        if app.broadcast_start_time.is_none() {
-            app.broadcast_start_time = Some(current_time);
-        }
-        app.is_streaming = true;
-    } else {
-        app.broadcast_start_time = None;
-        app.is_streaming = false;
-    }
-
     ui.heading("Global Broadcast Console");
     ui.add_space(10.0);
 
-    // Production-Grade Telemetry Banner
+    // Explicit Documenting Note on Real-Time Streaming Telemetry
     ui.horizontal(|ui| {
-        ui.label(RichText::new("✔ LIVE TELEMETRY: Connected directly to streaming_manager.rs and active RTMP/Opus broadcast sockets.").size(9.0).color(app.theme.success));
+        ui.label(RichText::new("ℹ NOTE: Streaming Telemetry is currently running in Mock/Simulated mode. Actual RT live-stream state/telemetry tracking is not yet fully exposed by the underlying streaming_manager.rs backend.").size(9.0).color(app.theme.text_secondary));
     });
     ui.add_space(15.0);
 
@@ -165,13 +134,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
                     if ui.add_sized([ui.available_width(), 32.0], action_btn).clicked() {
                         if app.broadcast_state == 0 || app.broadcast_state == 3 {
-                            app.broadcast_state = 1; // Start connecting (will auto-transition to live after 1.5s)
-                            app.broadcast_start_time = Some(current_time);
+                            app.broadcast_state = 1; // Start connecting
                             app.is_streaming = true;
                         } else {
                             app.broadcast_state = 0; // Turn off
                             app.is_streaming = false;
-                            app.broadcast_start_time = None;
                         }
                     }
                 });
@@ -187,52 +154,18 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 .inner_margin(app.theme.space_md)
                 .show(ui, |ui| {
                     if app.broadcast_state == 2 {
-                        let mut live_start = app.broadcast_start_time.unwrap_or(current_time);
-                        let mut current_bitrate = app.broadcast_bitrate;
-                        let mut dropped = 0;
-                        let mut viewer_count = 42;
-
-                        // Override with actual telemetry if available
-                        let mut used_live = false;
-                        if let Some(ref t) = telemetry_opt {
-                            if t.is_streaming {
-                                live_start = current_time - t.stream_uptime_sec as f64;
-                                current_bitrate = t.stream_bitrate;
-                                dropped = t.stream_dropped_frames;
-                                viewer_count = t.stream_viewers;
-                                used_live = true;
-                            }
-                        }
-
-                        let uptime_sec = (current_time - live_start) as u32;
+                        let time = ui.input(|i| i.time);
+                        let uptime_sec = (time % 3600.0) as u32;
                         let min = uptime_sec / 60;
                         let sec = uptime_sec % 60;
 
-                        if !used_live {
-                            // Real-time jitter for bitrate in local fallback
-                            let bitrate_jitter = ((current_time * 3.5).cos() * 1.8) as f32;
-                            current_bitrate = app.broadcast_bitrate + bitrate_jitter;
-
-                            // Simulated packets/dropped frames based on network quality in local fallback
-                            dropped = if app.broadcast_bitrate > 400.0 {
-                                (uptime_sec / 15) as u32
-                            } else {
-                                0
-                            };
-
-                            // Fluctuating viewer count in local fallback
-                            let viewer_base = 42;
-                            let viewer_modulation = ((current_time * 0.15).sin() * 3.0) as f32;
-                            viewer_count = (viewer_base as f32 + viewer_modulation).round() as u32;
-                        }
-
                         ui.label(format!("Uptime: {:02}:{:02}", min, sec));
-                        ui.label(format!("Outgoing Bitrate: {:.1} kbps", current_bitrate));
-                        ui.label(format!("Dropped Frames: {} ({:.2}%)", dropped, if uptime_sec > 0 { (dropped as f32 / (uptime_sec as f32 * 30.0)) * 100.0 } else { 0.0 }));
-                        ui.label(format!("Viewer Count: {} concurrent listeners", viewer_count));
+                        ui.label(format!("Outgoing Bitrate: {:.1} kbps", app.broadcast_bitrate - (time as f32 * 0.1).sin() * 5.0));
+                        ui.label("Dropped Frames: 0 (0.00%)");
+                        ui.label("Viewer Count: 14 concurrent listeners");
                     } else if app.broadcast_state == 1 {
                         ui.label("Uptime: --:--");
-                        ui.label("Outgoing Bitrate: Negotiating RTMP handshake...");
+                        ui.label("Outgoing Bitrate: Negotiating...");
                         ui.label("Dropped Frames: --");
                         ui.label("Viewer Count: --");
                     } else {

@@ -41,12 +41,6 @@ pub struct Conductor {
     pub last_genetic_evolve_secs: u64,
     pub focused_node_idx: Option<u32>,
     pub active_transitions: Vec<DnaTransition>,
-    // --- Live RTMP/Opus Broadcast Streaming ---
-    pub is_streaming: bool,
-    pub stream_start_time: Option<std::time::Instant>,
-    pub stream_bitrate: f32,
-    pub stream_dropped_frames: u32,
-    pub stream_viewers: u32,
 }
 
 pub struct DnaTransition {
@@ -117,11 +111,6 @@ impl Conductor {
             last_genetic_evolve_secs: 0,
             focused_node_idx: None,
             active_transitions: Vec::new(),
-            is_streaming: false,
-            stream_start_time: None,
-            stream_bitrate: 256.0,
-            stream_dropped_frames: 0,
-            stream_viewers: 42,
         }
     }
 
