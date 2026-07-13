@@ -8,9 +8,19 @@ edition = "2021"
 libfuzzer-sys = "0.4"
 nullherz-processors = { path = ".." }
 nullherz-traits = { path = "../../nullherz-traits" }
+audio-dsp = { path = "../../audio-dsp" }
 
 [[bin]]
 name = "gain_fuzz"
 path = "fuzz_targets/gain_fuzz.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "filter_fuzz"
+path = "fuzz_targets/filter_fuzz.rs"
+test = false
+doc = false
+
+[workspace]
+# Empty workspace table isolates this package from the root workspace
