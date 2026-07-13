@@ -6,17 +6,20 @@ use nullherz_traits::Command;
 use std::sync::mpsc;
 use nullherz_dna::GeneticLibrary;
 
-mod widgets;
 mod views;
+
+pub fn default_coordinate() -> f32 {
+    -1.0
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeJson {
     pub inputs: Vec<usize>,
     pub outputs: Vec<usize>,
     pub name: String,
-    #[serde(default)]
+    #[serde(default = "default_coordinate")]
     pub x: f32,
-    #[serde(default)]
+    #[serde(default = "default_coordinate")]
     pub y: f32,
 }
 
@@ -385,22 +388,234 @@ impl InspectorApp {
         }
     }
 
-    pub fn deck_color(i: usize) -> egui::Color32 {
-        let theme = nullherz_ui_hal::Theme::default();
+    pub fn deck_color(theme: &nullherz_ui_hal::Theme, i: usize) -> egui::Color32 {
         theme.deck_colors[i % 4]
     }
-}
 
-impl eframe::App for InspectorApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let current_time = ctx.input(|i| i.time);
+    fn render_left_sidebar(&mut self, ctx: &egui::Context) {
+        egui::SidePanel::left("left_sidebar")
+            .resizable(false)
+            .default_width(70.0)
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new("Ω").size(24.0).color(self.theme.accent));
+                    ui.add_space(20.0);
 
-        // Initialize last_saved_time on first loop run if it's 0.0
-        if self.last_saved_time == 0.0 {
-            self.last_saved_time = current_time;
+                    let top_nav = [
+                        (View::Player, "💿", "MEDIA PLAYER"),
+                        (View::Console, "📻", "DJ CONSOLE"),
+                        (View::Composer, "🎹", "COMPOSER"),
+                        (View::Editor, "✂", "EDITOR"),
+                        (View::Sampler, "🎤", "SAMPLER"),
+                        (View::Breeder, "🧬", "DNA BREEDER"),
+                        (View::Broadcast, "📡", "BROADCAST"),
+                    ];
+
+                    let bottom_nav = [
+                        (View::Topology, "🕸", "TOPOLOGY"),
+                        (View::Account, "👤", "ACCOUNT"),
+                        (View::Settings, "⚙", "SETTINGS"),
+                    ];
+
+                    let mut render_nav_btn = |ui: &mut egui::Ui, view: View, icon: &str, label: &str| {
+                        let is_selected = self.active_view == view;
+                        let size = egui::vec2(50.0, 50.0);
+                        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+
+                        if response.clicked() {
+                            self.active_view = view;
+                            ui.ctx().request_repaint();
+                        }
+
+                        if is_selected {
+                            ui.painter().rect_filled(
+                                rect.shrink(1.0),
+                                self.theme.radius_md,
+                                self.theme.accent.linear_multiply(0.12),
+                            );
+                            let accent_bar = egui::Rect::from_min_max(
+                                rect.left_top() + egui::vec2(2.0, 8.0),
+                                rect.left_bottom() + egui::vec2(5.0, -8.0),
+                            );
+                            ui.painter().rect_filled(accent_bar, 1.5, self.theme.accent);
+                        } else if response.hovered() {
+                            ui.painter().rect_filled(
+                                rect.shrink(1.0),
+                                self.theme.radius_md,
+                                self.theme.bg_med.linear_multiply(0.4),
+                            );
+                        }
+
+                        let icon_color = if is_selected {
+                            self.theme.accent
+                        } else if response.hovered() {
+                            self.theme.text_primary
+                        } else {
+                            self.theme.text_secondary
+                        };
+
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            icon,
+                            egui::FontId::proportional(20.0),
+                            icon_color,
+                        );
+
+                        response.on_hover_text(label);
+                    };
+
+                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                        ui.add_space(10.0);
+                        for (view, icon, label) in bottom_nav.into_iter().rev() {
+                            render_nav_btn(ui, view, icon, label);
+                            ui.add_space(10.0);
+                        }
+
+                        ui.separator();
+
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                            egui::ScrollArea::vertical().id_source("nav_scroll").show(ui, |ui| {
+                                for (view, icon, label) in top_nav {
+                                    render_nav_btn(ui, view, icon, label);
+                                    ui.add_space(10.0);
+                                }
+                            });
+                        });
+                    });
+                });
+            });
+    }
+
+    fn render_right_sidebar(&mut self, ctx: &egui::Context) {
+        if let Some(tab) = self.active_right_tab {
+            egui::SidePanel::right("right_sidebar")
+                .resizable(true)
+                .min_width(280.0)
+                .max_width(600.0)
+                .default_width(450.0)
+                .show(ctx, |ui| {
+                    let tab_info = match tab {
+                        RightTab::Library => ("📂", "LIBRARY"),
+                        RightTab::GeneticCloud => ("☁", "GENETIC CLOUD"),
+                        RightTab::Notifications => ("🧠", "AI & INSIGHTS"),
+                        RightTab::Metrics => ("📊", "METRICS"),
+                    };
+
+                    egui::Frame::none()
+                        .fill(self.theme.bg_surface)
+                        .inner_margin(egui::Margin::symmetric(self.theme.space_md, self.theme.space_sm))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("{} {}", tab_info.0, tab_info.1))
+                                        .strong()
+                                        .color(self.theme.accent)
+                                        .size(self.theme.type_heading),
+                                );
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.button("❌").clicked() {
+                                        self.active_right_tab = None;
+                                    }
+                                });
+                            });
+                        });
+
+                    ui.separator();
+                    ui.add_space(self.theme.space_sm);
+
+                    match tab {
+                        RightTab::Library => views::library::render(self, ui),
+                        RightTab::GeneticCloud => views::genetic_cloud::render(self, ui),
+                        RightTab::Notifications => views::notifications::render(self, ui),
+                        RightTab::Metrics => views::metrics::render(self, ui),
+                    }
+                });
         }
+    }
 
-        // --- Keyboard Shortcuts ---
+    fn render_bottom_bar(&mut self, ctx: &egui::Context, telemetry: &Option<Telemetry>) {
+        egui::TopBottomPanel::bottom("bottom_bar").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("nullherz Alpha").size(10.0).color(self.theme.text_disabled));
+                ui.separator();
+
+                if let Some(t) = telemetry {
+                    ui.label(format!("BPM: {:.1}", t.bpm));
+                    ui.separator();
+                    ui.label(format!("POS: {:.2}", t.beat_position));
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let tabs = [
+                        (RightTab::Library, "📂", "LIBRARY"),
+                        (RightTab::GeneticCloud, "☁", "GENETIC CLOUD"),
+                        (RightTab::Notifications, "🧠", "AI & INSIGHTS"),
+                        (RightTab::Metrics, "📊", "METRICS"),
+                    ];
+
+                    for (tab, icon, label) in tabs.into_iter().rev() {
+                        let is_selected = self.active_right_tab == Some(tab);
+                        let size = egui::vec2(36.0, 36.0);
+                        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+
+                        if response.clicked() {
+                            if self.active_right_tab == Some(tab) {
+                                self.active_right_tab = None;
+                            } else {
+                                self.active_right_tab = Some(tab);
+                            }
+                            ui.ctx().request_repaint();
+                        }
+
+                        if is_selected {
+                            ui.painter().rect_filled(
+                                rect.shrink(1.0),
+                                self.theme.radius_sm,
+                                self.theme.accent.linear_multiply(0.12),
+                            );
+                            let accent_bar = egui::Rect::from_min_max(
+                                rect.left_bottom() + egui::vec2(6.0, -3.0),
+                                rect.right_bottom() + egui::vec2(-6.0, -1.0),
+                            );
+                            ui.painter().rect_filled(accent_bar, 1.0, self.theme.accent);
+                        } else if response.hovered() {
+                            ui.painter().rect_filled(
+                                rect.shrink(1.0),
+                                self.theme.radius_sm,
+                                self.theme.bg_med.linear_multiply(0.4),
+                            );
+                        }
+
+                        let icon_color = if is_selected {
+                            self.theme.accent
+                        } else if response.hovered() {
+                            self.theme.text_primary
+                        } else {
+                            self.theme.text_secondary
+                        };
+
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            icon,
+                            egui::FontId::proportional(16.0),
+                            icon_color,
+                        );
+
+                        response.on_hover_text(label);
+                    }
+
+                    ui.separator();
+                    ui.toggle_value(&mut self.is_streaming, "📡 BROADCAST");
+                });
+            });
+        });
+    }
+
+    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        let current_time = ctx.input(|i| i.time);
         if self.shortcuts_enabled {
             ctx.input(|i| {
                 if i.key_pressed(egui::Key::Space) {
@@ -435,8 +650,9 @@ impl eframe::App for InspectorApp {
                 if i.key_pressed(egui::Key::Num9) { self.active_view = View::Account; }
             });
         }
+    }
 
-        // --- Autosave Background Job ---
+    fn handle_autosave(&mut self, current_time: f64) {
         if self.autosave_enabled {
             let interval_secs = (self.autosave_interval_mins as f64) * 60.0;
             if current_time - self.last_saved_time >= interval_secs {
@@ -453,6 +669,23 @@ impl eframe::App for InspectorApp {
                 self.autosave_triggered = Some(current_time);
             }
         }
+    }
+}
+
+impl eframe::App for InspectorApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let current_time = ctx.input(|i| i.time);
+
+        // Initialize last_saved_time on first loop run if it's 0.0
+        if self.last_saved_time == 0.0 {
+            self.last_saved_time = current_time;
+        }
+
+        // --- Keyboard Shortcuts ---
+        self.handle_shortcuts(ctx);
+
+        // --- Autosave Background Job ---
+        self.handle_autosave(current_time);
 
         let is_focused = ctx.input(|i| i.focused);
 
@@ -522,235 +755,14 @@ impl eframe::App for InspectorApp {
             }
         }
 
-        // 1. Left Sidebar (Navigation Plane) - Migrated to theme tokens & Left-Edge Accent design
-        egui::SidePanel::left("left_sidebar")
-            .resizable(false)
-            .default_width(70.0)
-            .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(10.0);
-                    // Minimalist Logo/Brand using theme.accent
-                    ui.label(egui::RichText::new("Ω").size(24.0).color(self.theme.accent));
-                    ui.add_space(20.0);
-
-                    let top_nav = [
-                        (View::Player, "💿", "MEDIA PLAYER"),
-                        (View::Console, "📻", "DJ CONSOLE"),
-                        (View::Composer, "🎹", "COMPOSER"),
-                        (View::Editor, "✂", "EDITOR"),
-                        (View::Sampler, "🎤", "SAMPLER"),
-                        (View::Breeder, "🧬", "DNA BREEDER"),
-                        (View::Broadcast, "📡", "BROADCAST"),
-                    ];
-
-                    let bottom_nav = [
-                        (View::Topology, "🕸", "TOPOLOGY"),
-                        (View::Account, "👤", "ACCOUNT"),
-                        (View::Settings, "⚙", "SETTINGS"),
-                    ];
-
-                    // Render custom nav button with active left-edge accent bar & icon color shifting
-                    let mut render_nav_btn = |ui: &mut egui::Ui, view: View, icon: &str, label: &str| {
-                        let is_selected = self.active_view == view;
-                        let size = egui::vec2(50.0, 50.0);
-                        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-
-                        if response.clicked() {
-                            self.active_view = view;
-                            ui.ctx().request_repaint();
-                        }
-
-                        // Background hover treatment
-                        if is_selected {
-                            ui.painter().rect_filled(
-                                rect.shrink(1.0),
-                                self.theme.radius_md,
-                                self.theme.accent.linear_multiply(0.12),
-                            );
-                            // 3px Left Edge Accent Bar
-                            let accent_bar = egui::Rect::from_min_max(
-                                rect.left_top() + egui::vec2(2.0, 8.0),
-                                rect.left_bottom() + egui::vec2(5.0, -8.0),
-                            );
-                            ui.painter().rect_filled(accent_bar, 1.5, self.theme.accent);
-                        } else if response.hovered() {
-                            ui.painter().rect_filled(
-                                rect.shrink(1.0),
-                                self.theme.radius_md,
-                                self.theme.bg_med.linear_multiply(0.4),
-                            );
-                        }
-
-                        // Icon Color Shift: Accent for selected, text_secondary for inactive (highlight on hover)
-                        let icon_color = if is_selected {
-                            self.theme.accent
-                        } else if response.hovered() {
-                            self.theme.text_primary
-                        } else {
-                            self.theme.text_secondary
-                        };
-
-                        ui.painter().text(
-                            rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            icon,
-                            egui::FontId::proportional(20.0),
-                            icon_color,
-                        );
-
-                        response.on_hover_text(label);
-                    };
-
-                    // Bottom Navigation pinned to bottom
-                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                        ui.add_space(10.0);
-                        for (view, icon, label) in bottom_nav.into_iter().rev() {
-                            render_nav_btn(ui, view, icon, label);
-                            ui.add_space(10.0);
-                        }
-
-                        ui.separator();
-
-                        // Top Navigation in a scroll area to take remaining space
-                        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                            egui::ScrollArea::vertical().id_source("nav_scroll").show(ui, |ui| {
-                                for (view, icon, label) in top_nav {
-                                    render_nav_btn(ui, view, icon, label);
-                                    ui.add_space(10.0);
-                                }
-                            });
-                        });
-                    });
-                });
-            });
+        // 1. Left Sidebar (Navigation Plane)
+        self.render_left_sidebar(ctx);
 
         // 2. Right Sidebar (Intelligence Plane - Collapsible)
-        if let Some(tab) = self.active_right_tab {
-            egui::SidePanel::right("right_sidebar")
-                .resizable(true)
-                .min_width(280.0)
-                .max_width(600.0)
-                .default_width(450.0)
-                .show(ctx, |ui| {
-                    let tab_info = match tab {
-                        RightTab::Library => ("📂", "LIBRARY"),
-                        RightTab::GeneticCloud => ("☁", "GENETIC CLOUD"),
-                        RightTab::Notifications => ("🧠", "AI & INSIGHTS"),
-                        RightTab::Metrics => ("📊", "METRICS"),
-                    };
-
-                    egui::Frame::none()
-                        .fill(self.theme.bg_surface)
-                        .inner_margin(egui::Margin::symmetric(self.theme.space_md, self.theme.space_sm))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new(format!("{} {}", tab_info.0, tab_info.1))
-                                        .strong()
-                                        .color(self.theme.accent)
-                                        .size(self.theme.type_heading),
-                                );
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.button("❌").clicked() {
-                                        self.active_right_tab = None;
-                                    }
-                                });
-                            });
-                        });
-
-                    ui.separator();
-                    ui.add_space(self.theme.space_sm);
-
-                    match tab {
-                        RightTab::Library => views::library::render(self, ui),
-                        RightTab::GeneticCloud => views::genetic_cloud::render(self, ui),
-                        RightTab::Notifications => views::notifications::render(self, ui),
-                        RightTab::Metrics => views::metrics::render(self, ui),
-                    }
-                });
-        }
+        self.render_right_sidebar(ctx);
 
         // 3. Bottom Bar (Status & Global Controls)
-        egui::TopBottomPanel::bottom("bottom_bar").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("nullherz Alpha").size(10.0).color(self.theme.text_disabled));
-                ui.separator();
-
-                if let Some(t) = &telemetry {
-                    ui.label(format!("BPM: {:.1}", t.bpm));
-                    ui.separator();
-                    ui.label(format!("POS: {:.2}", t.beat_position));
-                }
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Right Sidebar Tab Buttons
-                    let tabs = [
-                        (RightTab::Library, "📂", "LIBRARY"),
-                        (RightTab::GeneticCloud, "☁", "GENETIC CLOUD"),
-                        (RightTab::Notifications, "🧠", "AI & INSIGHTS"),
-                        (RightTab::Metrics, "📊", "METRICS"),
-                    ];
-
-                    for (tab, icon, label) in tabs.into_iter().rev() {
-                        let is_selected = self.active_right_tab == Some(tab);
-                        let size = egui::vec2(36.0, 36.0);
-                        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-
-                        if response.clicked() {
-                            if self.active_right_tab == Some(tab) {
-                                self.active_right_tab = None;
-                            } else {
-                                self.active_right_tab = Some(tab);
-                            }
-                            ui.ctx().request_repaint();
-                        }
-
-                        // Background hover/active treatment
-                        if is_selected {
-                            ui.painter().rect_filled(
-                                rect.shrink(1.0),
-                                self.theme.radius_sm,
-                                self.theme.accent.linear_multiply(0.12),
-                            );
-                            // 2px Bottom Edge Accent Bar
-                            let accent_bar = egui::Rect::from_min_max(
-                                rect.left_bottom() + egui::vec2(6.0, -3.0),
-                                rect.right_bottom() + egui::vec2(-6.0, -1.0),
-                            );
-                            ui.painter().rect_filled(accent_bar, 1.0, self.theme.accent);
-                        } else if response.hovered() {
-                            ui.painter().rect_filled(
-                                rect.shrink(1.0),
-                                self.theme.radius_sm,
-                                self.theme.bg_med.linear_multiply(0.4),
-                            );
-                        }
-
-                        // Icon Color Shift
-                        let icon_color = if is_selected {
-                            self.theme.accent
-                        } else if response.hovered() {
-                            self.theme.text_primary
-                        } else {
-                            self.theme.text_secondary
-                        };
-
-                        ui.painter().text(
-                            rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            icon,
-                            egui::FontId::proportional(16.0),
-                            icon_color,
-                        );
-
-                        response.on_hover_text(label);
-                    }
-
-                    ui.separator();
-                    ui.toggle_value(&mut self.is_streaming, "📡 BROADCAST");
-                });
-            });
-        });
+        self.render_bottom_bar(ctx, &telemetry);
 
         // 4. Central Panel (Execution Plane)
         egui::CentralPanel::default().show(ctx, |ui| {

@@ -83,7 +83,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
                                 let mut scaling = 0.0; // In a real app we'd fetch this from the modulation matrix state
                                 ui.vertical(|ui| {
                                     ui.set_max_width(45.0);
-                                    if crate::widgets::render_knob(ui, &mut scaling, -1.0..=1.0, "", theme.text_disabled).changed() {
+                                    if nullherz_ui_hal::widgets::render_knob(ui, &mut scaling, -1.0..=1.0, "", theme.text_disabled).changed() {
                                          let _ = app.command_sender.send(Command::Mixer(MixerCommand::AddModMapping {
                                             macro_id: macro_id as u32,
                                             target_id: node_id,
@@ -115,7 +115,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
                 for i in 0..8 {
                     ui.vertical(|ui| {
                         let prev_val = app.macros[i];
-                        crate::widgets::render_knob(ui, &mut app.macros[i], 0.0..=1.0, &format!("M{}", i+1), theme.accent);
+                        nullherz_ui_hal::widgets::render_knob(ui, &mut app.macros[i], 0.0..=1.0, &format!("M{}", i+1), theme.accent);
                         if app.macros[i] != prev_val {
                             let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetMacro {
                                 macro_id: i as u32,

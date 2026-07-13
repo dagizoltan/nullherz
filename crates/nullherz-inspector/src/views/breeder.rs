@@ -204,7 +204,7 @@ impl BreederView {
                     .inner_margin(Margin::same(theme.space_sm))
                     .show(ui, |ui| {
                         if telemetry.is_some() {
-                            crate::widgets::render_spectrum_analyzer(ui, &app.damped_spectrum, theme.accent, 100.0);
+                            nullherz_ui_hal::widgets::render_spectrum_analyzer(ui, &app.damped_spectrum, theme.accent, 100.0);
                         } else {
                             ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
                             ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "NO SIGNAL", egui::FontId::new(theme.type_body, egui::FontFamily::Proportional), theme.text_secondary);
@@ -220,7 +220,7 @@ impl BreederView {
                     .inner_margin(Margin::same(theme.space_sm))
                     .show(ui, |ui| {
                         if telemetry.is_some() {
-                            crate::widgets::render_goniometer(ui, &app.damped_goniometer, 200.0, theme.accent);
+                            nullherz_ui_hal::widgets::render_goniometer(ui, &app.damped_goniometer, 200.0, theme.accent);
                         } else {
                             ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
                             ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "GONIOMETER", egui::FontId::new(theme.type_body, egui::FontFamily::Proportional), theme.text_secondary);

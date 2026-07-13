@@ -1,15 +1,19 @@
 use serde::{Serialize, Deserialize};
 use serde_with::serde_as;
 
+pub fn default_coordinate() -> f32 {
+    -1.0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]
 pub struct NodeState {
     pub id: u32,
     pub type_id: u32,
     pub params: Vec<(u32, f32)>,
-    #[serde(default)]
+    #[serde(default = "default_coordinate")]
     pub x: f32,
-    #[serde(default)]
+    #[serde(default = "default_coordinate")]
     pub y: f32,
 }
 
@@ -121,7 +125,7 @@ impl ProjectState {
                             params.push((p_id, child.get_parameter(p_id)));
                         }
 
-                        let (x, y) = topo.node_positions[node_idx as usize].unwrap_or((0.0, 0.0));
+                        let (x, y) = topo.node_positions[node_idx as usize].unwrap_or((-1.0, -1.0));
                         state.nodes.push(NodeState {
                             id: node_idx,
                             type_id,

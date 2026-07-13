@@ -1,5 +1,6 @@
 use egui::{Ui, Color32, Frame, RichText, Rounding, Margin};
-use crate::{InspectorApp, widgets};
+use crate::InspectorApp;
+use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {

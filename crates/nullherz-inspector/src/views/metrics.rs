@@ -1,5 +1,6 @@
 use egui::{Ui, Color32, Frame, Margin, Rounding, Stroke, RichText, Sense};
-use crate::{InspectorApp, widgets};
+use crate::InspectorApp;
+use nullherz_ui_hal::widgets;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let telemetry = app.last_telemetry.lock().unwrap().clone();

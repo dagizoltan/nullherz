@@ -10,7 +10,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     let deck_idx = app.focused_deck;
     let deck_char = (b'A' + deck_idx as u8) as char;
     let theme = app.theme;
-    let deck_color = theme.deck_colors[deck_idx];
+    let deck_color = crate::InspectorApp::deck_color(&theme, deck_idx);
 
     ui.horizontal(|ui| {
         ui.heading(RichText::new("ADVANCED PERFORMANCE PLAYER").strong().color(theme.text_primary).size(theme.type_heading));
@@ -25,7 +25,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         for i in 0..4 {
             let active = i == app.focused_deck;
             let d_char = (b'A' + i as u8) as char;
-            let d_color = theme.deck_colors[i];
+            let d_color = crate::InspectorApp::deck_color(&theme, i);
             let btn_text = format!("DECK {}", d_char);
 
             let btn = if active {
@@ -44,9 +44,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
     // Advanced Player Deck Panel (Turntable + Transport Dashboard)
     Frame::none()
-        .fill(theme.bg_canvas)
-        .stroke(Stroke::new(1.0, theme.border))
-        .rounding(Rounding::same(theme.radius_md))
+        .fill(theme.bg_surface)
+        .stroke(theme.border_stroke)
+        .rounding(theme.radius_md)
         .inner_margin(Margin::same(theme.space_md))
         .show(ui, |ui| {
             ui.horizontal_top(|ui| {
@@ -100,7 +100,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                     Frame::none()
                         .fill(theme.bg_inset)
-                        .rounding(Rounding::same(theme.radius_sm))
+                        .rounding(theme.radius_sm)
                         .inner_margin(Margin::symmetric(theme.space_md, theme.space_sm))
                         .show(ui, |ui| {
                             ui.vertical(|ui| {

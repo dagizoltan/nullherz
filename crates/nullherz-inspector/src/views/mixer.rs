@@ -1,5 +1,6 @@
 use egui::{Ui, Frame, Margin, Rounding, Stroke, RichText, Color32};
-use crate::{InspectorApp, widgets};
+use crate::InspectorApp;
+use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
@@ -9,7 +10,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
     ui.horizontal(|ui| {
         for i in 0..4 {
-            let deck_color = theme.deck_colors[i];
+            let deck_color = crate::InspectorApp::deck_color(&theme, i);
             Frame::none()
                 .fill(theme.bg_surface)
                 .rounding(Rounding::same(theme.radius_md))
