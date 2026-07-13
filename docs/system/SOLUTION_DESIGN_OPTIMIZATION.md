@@ -70,4 +70,34 @@ The `StreamingSamplerProcessor` enables playback of multi-gigabyte sample librar
 
 ---
 
+## 6. Strategic Architecture & Roadmap Suggestions (Core & Traditional Features)
+Following a comprehensive system reverse-engineering, we recommend the following technical directives to expand and refine Nullherz's core and traditional features:
+
+### A. Core Performance & SIMD Optimization
+*   **Vectorized Single-Channel Biquads (Parallel Prefix Sum)**:
+    *   *Current State*: While multi-channel biquad processing (`SimdBiquad`) is fully vectorized, single-channel biquads (`BiquadFilter`) use scalar unrolling due to recursive sample dependencies.
+    *   *Recommendation*: Implement a vectorized **Parallel Prefix Sum (Scan)** algorithm for single-channel biquads. This enables using vector lanes (AVX2/AVX-512) to compute recursive filter equations on a single mono stream, delivering up to a $3\times$ single-core performance increase for large block sizes.
+*   **Cache Alignment Safeguards**:
+    *   *Recommendation*: Pad or align all processing nodes within `ProcessorGraph` to 64-byte boundaries (the standard cache-line size) to prevent **false sharing** when worker threads in the `TaskPool` execute adjacent nodes in parallel.
+
+### B. High-Fidelity Traditional DSP Extensions
+*   **Look-Ahead Dynamics & Mastering Limiter**:
+    *   *Recommendation*: Introduce an ultra-low-distortion mastering limiter in `nullherz-processors`. Use a latency-matched look-ahead buffer (e.g., 1–5ms) to pre-analyze signal peaks, coupled with a smooth exponential gain reduction curve and multi-stage auto-release to transparently catch fast inter-sample peaks (ISPs) without transient distortion.
+*   **Fractional Delay Interpolation**:
+    *   *Recommendation*: Traditional delay lines (`DelayProcessor`) currently round delay times to the nearest integer sample, producing pitch-stepping artifacts during modulation. Implementing **fractional delay lines** with Lagrange or 3rd-order Hermite spline interpolation will support smooth pitch sliding for high-fidelity tape delay, chorus, flanging, and physical modeling.
+*   **Oversampled Non-Linearities (Saturators/Clippers)**:
+    *   *Recommendation*: Non-linear processes like `tanh` soft-clipping in the Moog filter or summing nodes generate high-frequency harmonics that alias back into the audible spectrum. Introduce a modular, low-latency **Oversampling Node** (e.g., $2\times$ or $4\times$ utilizing half-band polyphase IIR filters) to run non-linear processors at higher sample rates and cleanly filter out aliasing before downsampling.
+
+### C. Real-Time Safety & Diagnostics
+*   **Real-Time Watchdog & Priority Inversion Auditing**:
+    *   *Recommendation*: Integrate a lightweight diagnostic watchdog on the audio thread to log when `process_block` duration exceeds 85% of the block budget (measured via `get_cycles()`). Ensure the audio thread on Linux uses `SCHED_FIFO` real-time priority, and audit all lock-free channels to ensure strict **Priority-Inheritance**-compliant SPSC/MPSC queue models.
+*   **Automated Allocator Safety Verification**:
+    *   *Recommendation*: Integrate `assert_rt_safe!` macros with a custom global allocator (e.g., via a thread-local flag set by `mark_as_rt_thread()`) to automatically panic or log errors if any heap allocation (`malloc`/`free`) is initiated from the audio thread during testing or CI.
+
+### D. Graph Routing & Dynamic Sidechain Matrices
+*   **Arbitrary Multichannel Sidechaining**:
+    *   *Recommendation*: Refactor `NodeRouting` and `GraphBufferPool` to support a fully dynamic, multi-bus sidechain matrix. Allow any node to register its output as a dynamic sidechain modulator for any other node, managed dynamically by the `TopologyCoordinator`'s delay-compensation calculations.
+
+---
+
 **Architectural Recommendation:** *Utilize the new PDC infrastructure for all future spectral and temporal sidecars to maintain phase integrity across complex routing topologies.*
