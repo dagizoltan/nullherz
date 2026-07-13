@@ -136,6 +136,66 @@ pub fn render_preferences(app: &mut InspectorApp, ui: &mut Ui) {
                     ui.end_row();
                 });
         });
+
+    ui.add_space(theme.space_md);
+
+    // Theme Customizer Group
+    ui.label(RichText::new("THEME CUSTOMIZER").small().strong().color(theme.text_secondary));
+    ui.add_space(theme.space_xs);
+    Frame::none()
+        .fill(theme.bg_surface)
+        .rounding(theme.radius_md)
+        .stroke(theme.border_stroke)
+        .inner_margin(theme.space_md)
+        .show(ui, |ui| {
+            ui.label("Shift Accent, Success, and Danger colors, adjust rounding scales, or toggle shadow weights dynamically in real-time:");
+            ui.add_space(theme.space_sm);
+
+            ui.horizontal(|ui| {
+                ui.label("Accent Color:");
+                ui.color_edit_button_srgba(&mut app.theme.accent);
+
+                ui.add_space(theme.space_md);
+                ui.label("Success Color:");
+                ui.color_edit_button_srgba(&mut app.theme.success);
+
+                ui.add_space(theme.space_md);
+                ui.label("Danger Color:");
+                ui.color_edit_button_srgba(&mut app.theme.danger);
+            });
+            ui.add_space(theme.space_sm);
+
+            ui.horizontal(|ui| {
+                ui.label("Border Color:");
+                if ui.color_edit_button_srgba(&mut app.theme.border).changed() {
+                    app.theme.border_stroke.color = app.theme.border;
+                }
+            });
+            ui.add_space(theme.space_sm);
+
+            ui.horizontal(|ui| {
+                ui.label("Small Rounding:");
+                ui.add(egui::Slider::new(&mut app.theme.radius_sm, 0.0..=12.0).show_value(true));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Card Rounding:");
+                ui.add(egui::Slider::new(&mut app.theme.radius_md, 0.0..=24.0).show_value(true));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Panel Rounding:");
+                ui.add(egui::Slider::new(&mut app.theme.radius_lg, 0.0..=36.0).show_value(true));
+            });
+            ui.add_space(theme.space_sm);
+
+            ui.horizontal(|ui| {
+                ui.label("Shadow Blur (Medium):");
+                ui.add(egui::Slider::new(&mut app.theme.shadow_md.blur, 0.0..=30.0).show_value(true));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Shadow Y Offset:");
+                ui.add(egui::Slider::new(&mut app.theme.shadow_md.offset.y, 0.0..=10.0).show_value(true));
+            });
+        });
 }
 
 pub fn view_label(view: View) -> &'static str {
