@@ -6,9 +6,30 @@ pub fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
     ui.strong("MIDI Hardware & Mappings");
     ui.add_space(theme.space_xs);
 
-    // Mock/planned disclosure for live MIDI device enumeration
+    // Query actual MIDI ports dynamically using midir
+    let mut actual_ports: Vec<String> = Vec::new();
+    let mut midi_error: Option<String> = None;
+    match midir::MidiInput::new("Nullherz Inspector MIDI Scan") {
+        Ok(midi_in) => {
+            let ports: Vec<midir::MidiInputPort> = midi_in.ports();
+            for port in &ports {
+                if let Ok(name) = midi_in.port_name(port) {
+                    actual_ports.push(name);
+                }
+            }
+        }
+        Err(e) => {
+            midi_error = Some(e.to_string());
+        }
+    }
+
+    // Display appropriate live discovery status banner
     ui.horizontal(|ui| {
-        ui.label(RichText::new("ℹ NOTE: MIDI Device enumeration is currently running in Mock/Simulated mode. Actual RT MIDI port mapping auto-discovery is not yet fully exposed by the midi_mapper.rs backend.").size(9.0).color(theme.text_secondary));
+        if midi_error.is_none() {
+            ui.label(RichText::new("✔ LIVE MIDI: Dynamic hot-plug port scanner is active via ALSA/Midir.").size(9.0).color(theme.success));
+        } else {
+            ui.label(RichText::new(format!("⚠ MIDI SCANNER WARNING: {} (Running in emulation fallback mode).", midi_error.as_ref().unwrap())).size(9.0).color(theme.warning));
+        }
     });
     ui.add_space(theme.space_xs);
 
@@ -19,12 +40,26 @@ pub fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
         .inner_margin(theme.space_md)
         .show(ui, |ui| {
             ui.label("Active Port Mappings:");
-            ui.label("• Pioneer DDJ-400 (Attached)");
-            ui.label("• Generic MIDI Keyboard (Attached)");
+            ui.add_space(theme.space_xs);
+
+            if actual_ports.is_empty() {
+                // Emulation fallback mode
+                ui.label(RichText::new("No physical MIDI controllers detected. Presenting mock controllers for emulation:").size(theme.type_caption).color(theme.text_secondary));
+                ui.label("• Pioneer DDJ-400 (Attached - Emulated)");
+                ui.label("• Generic MIDI Keyboard (Attached - Emulated)");
+            } else {
+                for name in &actual_ports {
+                    ui.label(format!("• {} (Attached - Active)", name));
+                }
+            }
             ui.add_space(theme.space_sm);
 
             if ui.button("BIND DETECTED PORTS").clicked() {
-                let ports = "Pioneer DDJ-400,Generic MIDI Keyboard";
+                let ports = if actual_ports.is_empty() {
+                    "Pioneer DDJ-400,Generic MIDI Keyboard".to_string()
+                } else {
+                    actual_ports.join(",")
+                };
                 let mut buffer = [0u8; 128];
                 let bytes = ports.as_bytes();
                 let len = bytes.len().min(128);

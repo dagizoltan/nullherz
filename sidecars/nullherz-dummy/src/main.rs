@@ -53,7 +53,8 @@ fn main() {
     }
 
     unsafe {
-        let mut sidecar = SidecarHost::new(cmd_shm, sig_shm, &inputs, &outputs, efd_val);
+        let sc_names = Vec::new();
+        let mut sidecar = SidecarHost::new(cmd_shm, sig_shm, &inputs, &sc_names, &outputs, efd_val);
         sidecar.run(DummyProcessor);
     }
 }

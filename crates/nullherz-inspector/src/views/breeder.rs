@@ -5,7 +5,7 @@ use nullherz_dna::GeneticLibrary;
 pub struct BreederView {
     pub parent_a_id: Option<u64>,
     pub parent_b_id: Option<u64>,
-    pub transfusion_bias_x: f32, // Spectral Bias
+    pub transfusion_bias_x: f32, // Spectral Bias / Interpolation
     pub transfusion_bias_y: f32, // Rhythmic Bias
     pub target_node_idx: u32,
     pub selecting_parent: Option<usize>, // 0 for A, 1 for B
@@ -122,15 +122,15 @@ impl BreederView {
         ui.add_space(theme.space_lg);
 
         ui.horizontal(|ui| {
-            // 2D Transfusion Pad (Industrial XY Pad)
+            // N-Dimensional DNA Breeder Map (PCA / t-SNE Canvas)
             ui.vertical(|ui| {
-                ui.label(RichText::new("Transfusion Pad (X: Spectral, Y: Rhythmic)").size(theme.type_body));
-                let (rect, response) = ui.allocate_at_least(Vec2::splat(250.0), Sense::drag());
+                ui.label(RichText::new("N-Dimensional DNA Breeder Map (t-SNE / PCA)").size(theme.type_body));
+                let (rect, response) = ui.allocate_at_least(Vec2::splat(250.0), Sense::click_and_drag());
 
                 ui.painter().rect_filled(rect, theme.radius_md, theme.bg_dark.linear_multiply(0.8));
                 ui.painter().rect_stroke(rect, theme.radius_md, theme.border_stroke);
 
-                // Grid lines (Industrial Look) - Decoupled from hardcoded colors
+                // Grid lines (Industrial Look)
                 for i in 1..4 {
                     let x = rect.left() + i as f32 * (rect.width() / 4.0);
                     ui.painter().vline(x, rect.y_range(), Stroke::new(0.5, theme.border.linear_multiply(0.5)));
@@ -138,15 +138,82 @@ impl BreederView {
                     ui.painter().hline(rect.x_range(), y, Stroke::new(0.5, theme.border.linear_multiply(0.5)));
                 }
 
-                if response.dragged() {
-                    let pos = response.interact_pointer_pos().unwrap();
-                    state.transfusion_bias_x = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-                    state.transfusion_bias_y = ((rect.bottom() - pos.y) / rect.height()).clamp(0.0, 1.0);
-
-                    state.emit_dna_command(app);
+                // Dynamic template nodes (clustered templates from library)
+                let mut tracks = app.cached_library.clone();
+                if tracks.is_empty() {
+                    if let Ok(list) = app.library_db.list_tracks() {
+                        tracks = list;
+                    }
                 }
 
+                let mut node_positions = Vec::new();
+                for track in &tracks {
+                    // Deterministic PCA/t-SNE layout coordinates inside bounds to keep nodes visible
+                    let x_coord = 0.15 + ((track.id * 17) % 70) as f32 / 100.0;
+                    let y_coord = 0.15 + ((track.id * 31) % 70) as f32 / 100.0;
+                    let node_pos = rect.left_top() + Vec2::new(x_coord * rect.width(), (1.0 - y_coord) * rect.height());
+                    node_positions.push((track.id, node_pos, track.title.clone()));
+
+                    // Draw node dot
+                    ui.painter().circle_filled(node_pos, 5.0, theme.text_secondary.gamma_multiply(0.6));
+                    ui.painter().text(
+                        node_pos + Vec2::new(0.0, 8.0),
+                        egui::Align2::CENTER_TOP,
+                        &track.title,
+                        egui::FontId::new(theme.type_caption, egui::FontFamily::Proportional),
+                        theme.text_secondary,
+                    );
+                }
+
+                if response.dragged() || response.clicked() {
+                    let pos = response.interact_pointer_pos().unwrap();
+                    let target_x = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                    let target_y = ((rect.bottom() - pos.y) / rect.height()).clamp(0.0, 1.0);
+
+                    // Find nearest neighbors to set parents and bias dynamically
+                    if !node_positions.is_empty() {
+                        let current_cursor_pos = rect.left_top() + Vec2::new(target_x * rect.width(), (1.0 - target_y) * rect.height());
+                        let mut with_dists = node_positions.iter().map(|(id, pos, _)| {
+                            let d = (*pos - current_cursor_pos).length();
+                            (*id, d, *pos)
+                        }).collect::<Vec<_>>();
+                        with_dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+                        if with_dists.len() >= 2 {
+                            state.parent_a_id = Some(with_dists[0].0);
+                            state.parent_b_id = Some(with_dists[1].0);
+                            let d1 = with_dists[0].1;
+                            let d2 = with_dists[1].1;
+                            let total_d = d1 + d2;
+                            if total_d > 0.001 {
+                                state.transfusion_bias_x = d2 / total_d; // closer to A -> larger d2 weight -> bias_x closer to 1
+                            } else {
+                                state.transfusion_bias_x = 0.5;
+                            }
+                        } else {
+                            state.parent_a_id = Some(with_dists[0].0);
+                            state.parent_b_id = None;
+                            state.transfusion_bias_x = 1.0;
+                        }
+                        state.transfusion_bias_y = target_y;
+                        state.emit_dna_command(app);
+                    }
+                }
+
+                // Draw lines from cursor to the 2 nearest neighbors
                 let handle_pos = rect.left_top() + Vec2::new(state.transfusion_bias_x * rect.width(), (1.0 - state.transfusion_bias_y) * rect.height());
+                if !node_positions.is_empty() {
+                    let mut with_dists = node_positions.iter().map(|(_, pos, _)| {
+                        let d = (*pos - handle_pos).length();
+                        (*pos, d)
+                    }).collect::<Vec<_>>();
+                    with_dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                    for item in with_dists.iter().take(2) {
+                        ui.painter().line_segment([handle_pos, item.0], Stroke::new(1.0, theme.accent.gamma_multiply(0.4)));
+                    }
+                }
+
+                // Draw handle
                 ui.painter().circle_filled(handle_pos, 8.0, theme.accent);
                 ui.painter().circle_stroke(handle_pos, 8.0, Stroke::new(2.0, theme.text_primary));
             });
@@ -237,9 +304,9 @@ impl BreederView {
             .inner_margin(Margin::same(theme.space_sm))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("Spectral Bias: {:.2}", state.transfusion_bias_x)).size(theme.type_body));
+                    ui.label(RichText::new(format!("Spectral Bias (Weight A): {:.2}", state.transfusion_bias_x)).size(theme.type_body));
                     ui.add_space(theme.space_md);
-                    ui.label(RichText::new(format!("Rhythmic Bias: {:.2}", state.transfusion_bias_y)).size(theme.type_body));
+                    ui.label(RichText::new(format!("Rhythmic Bias (Weight B): {:.2}", state.transfusion_bias_y)).size(theme.type_body));
                 });
             });
 

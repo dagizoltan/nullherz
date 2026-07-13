@@ -3307,6 +3307,7 @@ dependencies = [
  "egui-phosphor",
  "egui-wgpu",
  "futures-util",
+ "midir",
  "nullherz-conductor",
  "nullherz-dna",
  "nullherz-traits",

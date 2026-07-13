@@ -37,7 +37,8 @@ fn main() {
     let efd = args.get(5).and_then(|s| s.parse::<i32>().ok()).unwrap_or(-1);
 
     unsafe {
-        let mut host = SidecarHost::new(cmd_name, sig_name, &in_names, &out_names, efd);
+        let sc_names = Vec::new();
+        let mut host = SidecarHost::new(cmd_name, sig_name, &in_names, &sc_names, &out_names, efd);
         let processor = MySidecarProcessor { id: 0 };
         println!("Sidecar template starting...");
         host.run(processor);
