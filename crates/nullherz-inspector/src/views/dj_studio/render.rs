@@ -84,10 +84,10 @@ pub fn format_duration(samples: u64, sample_rate: f32) -> String {
     format!("{}:{:02}", minutes, seconds)
 }
 
-pub fn render_time_display(ui: &mut egui::Ui, elapsed: &str, remaining: &str, accent_color: Color32) {
+pub fn render_time_display(ui: &mut egui::Ui, elapsed: &str, remaining: &str, accent_color: Color32, theme: &nullherz_ui_hal::Theme) {
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(elapsed).monospace().size(13.0).color(Color32::from_gray(180)));
-        ui.add_space(8.0);
+        ui.label(egui::RichText::new(elapsed).monospace().size(13.0).color(theme.text_secondary));
+        ui.add_space(theme.space_sm);
         ui.label(egui::RichText::new(format!("-{}", remaining)).monospace().size(13.0).color(accent_color));
     });
 }
@@ -231,7 +231,7 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
                 let remaining_samples = if total_samples >= elapsed_samples { total_samples - elapsed_samples } else { 0 };
                 let remaining_str = format_duration(remaining_samples, sample_rate);
 
-                render_time_display(ui, &elapsed_str, &remaining_str, deck_color);
+                render_time_display(ui, &elapsed_str, &remaining_str, deck_color, &theme);
             });
         } else {
             ui.label(RichText::new("NO TRACK LOADED").monospace().color(theme.text_disabled).size(theme.type_caption));
