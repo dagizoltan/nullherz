@@ -9,24 +9,24 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         ui.vertical(|ui| {
             ui.set_max_width(90.0);
             ui.add_space(theme.space_xs);
-            ui.label(RichText::new("📁 CRATES").size(theme.type_caption).strong().color(theme.text_secondary));
+            ui.label(RichText::new(format!("{} CRATES", egui_phosphor::regular::FOLDER)).size(theme.type_caption).strong().color(theme.text_secondary));
             ui.add_space(theme.space_sm);
 
             let is_all = app.active_crate.is_none();
-            if ui.selectable_label(is_all, "📦 ALL").clicked() { app.active_crate = None; }
+            if ui.selectable_label(is_all, &format!("{} ALL", egui_phosphor::regular::PACKAGE)).clicked() { app.active_crate = None; }
 
             ui.add_space(theme.space_xs);
             let crates = app.library_db.list_crates().unwrap_or_default();
             for crate_name in crates {
                 let is_selected = app.active_crate.as_deref() == Some(crate_name.as_str());
-                if ui.selectable_label(is_selected, format!("🏷 {}", crate_name)).clicked() {
+                if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::TAG, crate_name)).clicked() {
                     app.active_crate = Some(crate_name);
                     app.library_needs_refresh = true;
                 }
             }
 
             ui.add_space(theme.space_sm);
-            ui.label(RichText::new("✨ SMART").size(theme.type_caption).strong().color(theme.text_secondary));
+            ui.label(RichText::new(format!("{} SMART", egui_phosphor::regular::STAR)).size(theme.type_caption).strong().color(theme.text_secondary));
             let smart_crates = app.library_db.list_smart_crates().unwrap_or_default();
             for smart in smart_crates {
                 let is_selected = app.active_crate.as_deref() == Some(smart.name.as_str());
@@ -55,9 +55,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             // Library Toolbar
             ui.horizontal(|ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("🔄").on_hover_text("Refresh").clicked() { app.library_needs_refresh = true; }
+                    if ui.button(egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE).on_hover_text("Refresh").clicked() { app.library_needs_refresh = true; }
                     ui.text_edit_singleline(&mut app.search_query);
-                    ui.label("🔍");
+                    ui.label(egui_phosphor::regular::MAGNIFYING_GLASS);
 
                     if ui.button("SCAN").clicked() {
                         let mut path_bytes = [0u8; 256];
@@ -126,7 +126,7 @@ fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
                     ui.horizontal(|ui| {
                         ui.text_edit_singleline(&mut track.title);
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.button("❌").clicked() { app.selected_library_track = None; }
+                            if ui.button(egui_phosphor::regular::X).clicked() { app.selected_library_track = None; }
                         });
                     });
                     ui.horizontal(|ui| {
@@ -216,7 +216,7 @@ fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
                 ui.label(RichText::new(&track.artist).color(theme.text_secondary).size(theme.type_caption));
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("🗑").on_hover_text("Delete track").clicked() {
+                    if ui.button(egui_phosphor::regular::TRASH).on_hover_text("Delete track").clicked() {
                          let _ = app.library_db.remove_track(track.id);
                          app.library_needs_refresh = true;
                     }

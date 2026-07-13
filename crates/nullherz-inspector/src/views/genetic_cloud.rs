@@ -49,13 +49,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             // Production Beta: Mock verification status check
                             let is_verified = track.id % 2 == 0;
                             if is_verified {
-                                ui.label(RichText::new("✔ VERIFIED").size(theme.type_caption).color(theme.accent));
+                                ui.label(RichText::new(format!("{} VERIFIED", egui_phosphor::regular::CHECK)).size(theme.type_caption).color(theme.accent));
                             }
                         });
                         ui.label(RichText::new(&track.artist).size(theme.type_caption).color(theme.text_secondary));
                     });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(RichText::new("🧬").size(theme.type_label)).on_hover_text("Pollinate").clicked() {
+                            if ui.button(RichText::new(egui_phosphor::regular::DNA).size(theme.type_label)).on_hover_text("Pollinate").clicked() {
                                 let mut local_copy = (*track).clone();
                                 local_copy.id = track.id ^ 0xFEED;
                                 local_copy.artist = "Imported Genesis".to_string();

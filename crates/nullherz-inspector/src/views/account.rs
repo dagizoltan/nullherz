@@ -14,7 +14,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         .inner_margin(theme.space_md)
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("👤").size(theme.type_hero));
+                ui.label(RichText::new(egui_phosphor::regular::USER).size(theme.type_hero));
                 ui.vertical(|ui| {
                     ui.label(RichText::new("Local Producer").strong().size(theme.type_heading));
                     ui.label("Identity: Node-7742 (Mastering Grade)");
@@ -89,7 +89,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
     ui.add_space(theme.space_lg);
     ui.horizontal(|ui| {
-        ui.label(RichText::new("☁").size(theme.type_display).color(theme.accent_muted));
+        ui.label(RichText::new(egui_phosphor::regular::CLOUD).size(theme.type_display).color(theme.accent_muted));
         ui.label(RichText::new("GENETIC CLOUD PEERS").strong().size(theme.type_label));
     });
     ui.add_space(theme.space_xs);
@@ -106,7 +106,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             } else {
                 for peer in &app.discovered_sidecars {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("📡").color(theme.success));
+                        ui.label(RichText::new(egui_phosphor::regular::BROADCAST).color(theme.success));
                         ui.vertical(|ui| {
                             ui.label(&peer.name);
                             ui.label(RichText::new(format!("{} - {}", peer.author, peer.version)).size(theme.type_caption).color(theme.text_secondary));

@@ -219,6 +219,32 @@ impl InspectorApp {
         visuals.window_rounding = egui::Rounding::same(theme.radius_lg);
         cc.egui_ctx.set_visuals(visuals);
 
+        let mut fonts = egui::FontDefinitions::default();
+
+        // Load Inter-Regular
+        let inter_reg_bytes = include_bytes!("../assets/fonts/Inter-Regular.ttf");
+        fonts.font_data.insert(
+            "Inter-Regular".to_owned(),
+            egui::FontData::from_static(inter_reg_bytes),
+        );
+
+        // Load Inter-Medium
+        let inter_med_bytes = include_bytes!("../assets/fonts/Inter-Medium.ttf");
+        fonts.font_data.insert(
+            "Inter-Medium".to_owned(),
+            egui::FontData::from_static(inter_med_bytes),
+        );
+
+        // Insert Inter-Regular at the first position for the Proportional font family
+        fonts.families.entry(egui::FontFamily::Proportional)
+            .or_default()
+            .insert(0, "Inter-Regular".to_owned());
+
+        // Add egui-phosphor icon font
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+
+        cc.egui_ctx.set_fonts(fonts);
+
         let (cmd_tx, _cmd_rx) = mpsc::channel::<Command>();
         let default_view = View::Console;
         Self {
@@ -403,19 +429,19 @@ impl InspectorApp {
                     ui.add_space(20.0);
 
                     let top_nav = [
-                        (View::Player, "💿", "MEDIA PLAYER"),
-                        (View::Console, "📻", "DJ CONSOLE"),
-                        (View::Composer, "🎹", "COMPOSER"),
-                        (View::Editor, "✂", "EDITOR"),
-                        (View::Sampler, "🎤", "SAMPLER"),
-                        (View::Breeder, "🧬", "DNA BREEDER"),
-                        (View::Broadcast, "📡", "BROADCAST"),
+                        (View::Player, egui_phosphor::regular::DISC, "MEDIA PLAYER"),
+                        (View::Console, egui_phosphor::regular::RADIO, "DJ CONSOLE"),
+                        (View::Composer, egui_phosphor::regular::PIANO_KEYS, "COMPOSER"),
+                        (View::Editor, egui_phosphor::regular::SCISSORS, "EDITOR"),
+                        (View::Sampler, egui_phosphor::regular::MICROPHONE, "SAMPLER"),
+                        (View::Breeder, egui_phosphor::regular::DNA, "DNA BREEDER"),
+                        (View::Broadcast, egui_phosphor::regular::BROADCAST, "BROADCAST"),
                     ];
 
                     let bottom_nav = [
-                        (View::Topology, "🕸", "TOPOLOGY"),
-                        (View::Account, "👤", "ACCOUNT"),
-                        (View::Settings, "⚙", "SETTINGS"),
+                        (View::Topology, egui_phosphor::regular::SHARE_NETWORK, "TOPOLOGY"),
+                        (View::Account, egui_phosphor::regular::USER, "ACCOUNT"),
+                        (View::Settings, egui_phosphor::regular::GEAR, "SETTINGS"),
                     ];
 
                     let mut render_nav_btn = |ui: &mut egui::Ui, view: View, icon: &str, label: &str| {
@@ -490,17 +516,23 @@ impl InspectorApp {
 
     fn render_right_sidebar(&mut self, ctx: &egui::Context) {
         if let Some(tab) = self.active_right_tab {
+            let right_panel_frame = egui::Frame::none()
+                .fill(self.theme.bg_surface)
+                .stroke(self.theme.border_stroke)
+                .shadow(self.theme.shadow_md);
+
             egui::SidePanel::right("right_sidebar")
                 .resizable(true)
                 .min_width(280.0)
                 .max_width(600.0)
                 .default_width(450.0)
+                .frame(right_panel_frame)
                 .show(ctx, |ui| {
                     let tab_info = match tab {
-                        RightTab::Library => ("📂", "LIBRARY"),
-                        RightTab::GeneticCloud => ("☁", "GENETIC CLOUD"),
-                        RightTab::Notifications => ("🧠", "AI & INSIGHTS"),
-                        RightTab::Metrics => ("📊", "METRICS"),
+                        RightTab::Library => (egui_phosphor::regular::FOLDER_OPEN, "LIBRARY"),
+                        RightTab::GeneticCloud => (egui_phosphor::regular::CLOUD, "GENETIC CLOUD"),
+                        RightTab::Notifications => (egui_phosphor::regular::BRAIN, "AI & INSIGHTS"),
+                        RightTab::Metrics => (egui_phosphor::regular::CHART_BAR, "METRICS"),
                     };
 
                     egui::Frame::none()
@@ -515,7 +547,7 @@ impl InspectorApp {
                                         .size(self.theme.type_heading),
                                 );
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.button("❌").clicked() {
+                                    if ui.button(egui_phosphor::regular::X).clicked() {
                                         self.active_right_tab = None;
                                     }
                                 });
@@ -549,10 +581,10 @@ impl InspectorApp {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let tabs = [
-                        (RightTab::Library, "📂", "LIBRARY"),
-                        (RightTab::GeneticCloud, "☁", "GENETIC CLOUD"),
-                        (RightTab::Notifications, "🧠", "AI & INSIGHTS"),
-                        (RightTab::Metrics, "📊", "METRICS"),
+                        (RightTab::Library, egui_phosphor::regular::FOLDER_OPEN, "LIBRARY"),
+                        (RightTab::GeneticCloud, egui_phosphor::regular::CLOUD, "GENETIC CLOUD"),
+                        (RightTab::Notifications, egui_phosphor::regular::BRAIN, "AI & INSIGHTS"),
+                        (RightTab::Metrics, egui_phosphor::regular::CHART_BAR, "METRICS"),
                     ];
 
                     for (tab, icon, label) in tabs.into_iter().rev() {
@@ -608,7 +640,7 @@ impl InspectorApp {
                     }
 
                     ui.separator();
-                    ui.toggle_value(&mut self.is_streaming, "📡 BROADCAST");
+                    ui.toggle_value(&mut self.is_streaming, &format!("{} BROADCAST", egui_phosphor::regular::BROADCAST));
                 });
             });
         });

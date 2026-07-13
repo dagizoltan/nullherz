@@ -167,7 +167,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                             // Transport row
                             ui.horizontal(|ui| {
-                                if ui.button(RichText::new("⏮").size(theme.type_label)).clicked() {
+                                if ui.button(RichText::new(egui_phosphor::regular::SKIP_BACK).size(theme.type_label)).clicked() {
                                     let node_name = match deck_idx {
                                         0 => "deck_a_sampler",
                                         1 => "deck_b_sampler",
@@ -181,9 +181,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                                 let is_deck_playing = app.deck_playing[deck_idx];
                                 let play_btn = if is_deck_playing {
-                                    egui::Button::new(RichText::new("⏸").size(theme.type_heading)).fill(theme.accent_muted)
+                                    egui::Button::new(RichText::new(egui_phosphor::regular::PAUSE).size(theme.type_heading)).fill(theme.accent_muted)
                                 } else {
-                                    egui::Button::new(RichText::new("▶").size(theme.type_heading))
+                                    egui::Button::new(RichText::new(egui_phosphor::regular::PLAY).size(theme.type_heading))
                                 };
 
                                 if ui.add(play_btn).clicked() {
@@ -195,7 +195,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     }
                                 }
 
-                                if ui.button(RichText::new("⏭").size(theme.type_label)).clicked() {
+                                if ui.button(RichText::new(egui_phosphor::regular::SKIP_FORWARD).size(theme.type_label)).clicked() {
                                     let node_name = match deck_idx {
                                         0 => "deck_a_sampler",
                                         1 => "deck_b_sampler",
@@ -320,7 +320,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         ui.heading(RichText::new("Precision Library Browser").size(theme.type_heading));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.text_edit_singleline(&mut app.search_query);
-            ui.label("🔍");
+            ui.label(egui_phosphor::regular::MAGNIFYING_GLASS);
         });
     });
     ui.add_space(theme.space_sm);
@@ -375,7 +375,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             if let Ok(Some(track)) = app.library_db.get_track(track_id) {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(format!("{}. {} - {}", idx + 1, track.artist, track.title)).size(theme.type_body));
-                    if ui.button("❌").clicked() { to_remove = Some(idx); }
+                    if ui.button(egui_phosphor::regular::X).clicked() { to_remove = Some(idx); }
                 });
             }
         }

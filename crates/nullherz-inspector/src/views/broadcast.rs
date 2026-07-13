@@ -35,7 +35,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             egui::TextEdit::singleline(&mut app.broadcast_key).password(true)
                         };
                         ui.add_sized([ui.available_width() - 32.0, 18.0], text_edit);
-                        if ui.button(if app.broadcast_reveal_key { "👁" } else { "🙈" }).clicked() {
+                        if ui.button(if app.broadcast_reveal_key { egui_phosphor::regular::EYE } else { egui_phosphor::regular::EYE_CLOSED }).clicked() {
                             app.broadcast_reveal_key = !app.broadcast_reveal_key;
                         }
                     });
@@ -121,15 +121,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
                     if app.broadcast_state == 3 {
                         ui.add_space(8.0);
-                        ui.label(RichText::new(format!("⚠ {}", app.broadcast_error_msg)).color(app.theme.danger).small());
+                        ui.label(RichText::new(format!("{} {}", egui_phosphor::regular::WARNING, app.broadcast_error_msg)).color(app.theme.danger).small());
                     }
 
                     ui.add_space(15.0);
 
                     // Action Button based on state
                     let action_btn = match app.broadcast_state {
-                        0 | 3 => egui::Button::new(RichText::new("🚀 GO LIVE").strong().color(app.theme.text_primary)).fill(app.theme.accent.linear_multiply(0.4)),
-                        _ => egui::Button::new(RichText::new("🛑 STOP STREAM").strong().color(app.theme.text_primary)).fill(app.theme.danger),
+                        0 | 3 => egui::Button::new(RichText::new(format!("{} GO LIVE", egui_phosphor::regular::ROCKET_LAUNCH)).strong().color(app.theme.text_primary)).fill(app.theme.accent.linear_multiply(0.4)),
+                        _ => egui::Button::new(RichText::new(format!("{} STOP STREAM", egui_phosphor::regular::STOP_CIRCLE)).strong().color(app.theme.text_primary)).fill(app.theme.danger),
                     };
 
                     if ui.add_sized([ui.available_width(), 32.0], action_btn).clicked() {

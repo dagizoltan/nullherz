@@ -248,7 +248,7 @@ impl BreederView {
             let has_parents = state.parent_a_id.is_some() && state.parent_b_id.is_some();
 
             ui.add_enabled_ui(has_parents, |ui| {
-                let btn = ui.button(RichText::new("🧬 EVOLVE PERMANENTLY").strong().size(theme.type_label));
+                let btn = ui.button(RichText::new(format!("{} EVOLVE PERMANENTLY", egui_phosphor::regular::DNA)).strong().size(theme.type_label));
                 if btn.clicked() {
                     if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
                         let cmd = Command::Resource(nullherz_traits::ResourceCommand::CommitBreeding {
@@ -262,7 +262,7 @@ impl BreederView {
             }).response.on_disabled_hover_text("Select both parents first");
 
             ui.add_enabled_ui(has_parents, |ui| {
-                let btn = ui.button(RichText::new("🎹 MUTATE PATTERN").strong().size(theme.type_label));
+                let btn = ui.button(RichText::new(format!("{} MUTATE PATTERN", egui_phosphor::regular::PIANO_KEYS)).strong().size(theme.type_label));
                 if btn.clicked() {
                      if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
                          if let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
