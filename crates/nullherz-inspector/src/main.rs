@@ -73,6 +73,7 @@ pub enum SettingsTab {
     Midi,
     Network,
     Calibration,
+    Preferences,
 }
 
 
@@ -183,6 +184,14 @@ pub struct InspectorApp {
     pub(crate) editor_selection: Option<(f32, f32)>, // normalized (start, end)
     pub(crate) audio_devices: Vec<String>,
     pub(crate) selected_audio_device: String,
+    pub(crate) restore_last_session: bool,
+    pub(crate) default_view_on_launch: View,
+    pub(crate) autosave_enabled: bool,
+    pub(crate) autosave_interval_mins: u32,
+    pub(crate) last_saved_time: f64,
+    pub(crate) autosave_triggered: Option<f64>,
+    pub(crate) shortcuts_enabled: bool,
+    pub(crate) global_playing: bool,
 }
 
 impl InspectorApp {
@@ -190,13 +199,30 @@ impl InspectorApp {
         *self.node_map.get(name).unwrap_or(&0)
     }
 
-    pub fn new(graph: GraphJson, _cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(graph: GraphJson, cc: &eframe::CreationContext<'_>) -> Self {
+        let theme = nullherz_ui_hal::Theme::default();
+        let mut visuals = egui::Visuals::dark();
+        visuals.panel_fill = theme.bg_canvas;
+        visuals.window_fill = theme.bg_surface;
+        visuals.extreme_bg_color = theme.bg_inset;
+        visuals.override_text_color = Some(theme.text_primary);
+        visuals.widgets.noninteractive.bg_fill = theme.bg_surface;
+        visuals.widgets.noninteractive.rounding = egui::Rounding::same(theme.radius_md);
+        visuals.widgets.inactive.bg_fill = theme.bg_inset;
+        visuals.widgets.inactive.rounding = egui::Rounding::same(theme.radius_sm);
+        visuals.widgets.hovered.rounding = egui::Rounding::same(theme.radius_sm);
+        visuals.widgets.active.rounding = egui::Rounding::same(theme.radius_sm);
+        visuals.widgets.open.rounding = egui::Rounding::same(theme.radius_sm);
+        visuals.window_rounding = egui::Rounding::same(theme.radius_lg);
+        cc.egui_ctx.set_visuals(visuals);
+
         let (cmd_tx, _cmd_rx) = mpsc::channel::<Command>();
+        let default_view = View::Console;
         Self {
             graph,
             command_sender: cmd_tx,
             last_telemetry: Arc::new(Mutex::new(None)),
-            active_view: View::Console,
+            active_view: default_view,
             channel_faders: [1.0; 4],
             channel_eq_high: [1.0; 4],
             channel_eq_mid: [1.0; 4],
@@ -340,6 +366,14 @@ impl InspectorApp {
             editor_selection: None,
             audio_devices: vec!["default".to_string()],
             selected_audio_device: "default".to_string(),
+            restore_last_session: false,
+            default_view_on_launch: default_view,
+            autosave_enabled: false,
+            autosave_interval_mins: 5,
+            last_saved_time: 0.0,
+            autosave_triggered: None,
+            shortcuts_enabled: true,
+            global_playing: false,
             node_map: [
                 ("deck_a_sampler".to_string(), 0), ("deck_a_gain".to_string(), 4), ("deck_a_filter".to_string(), 3),
                 ("deck_b_sampler".to_string(), 4), ("deck_b_gain".to_string(), 8), ("deck_b_filter".to_string(), 7),
@@ -360,6 +394,66 @@ impl InspectorApp {
 impl eframe::App for InspectorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let current_time = ctx.input(|i| i.time);
+
+        // Initialize last_saved_time on first loop run if it's 0.0
+        if self.last_saved_time == 0.0 {
+            self.last_saved_time = current_time;
+        }
+
+        // --- Keyboard Shortcuts ---
+        if self.shortcuts_enabled {
+            ctx.input(|i| {
+                if i.key_pressed(egui::Key::Space) {
+                    if self.global_playing {
+                        let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop));
+                        self.global_playing = false;
+                    } else {
+                        let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Play));
+                        self.global_playing = true;
+                    }
+                }
+                if i.key_pressed(egui::Key::S) && i.modifiers.command {
+                    let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology));
+                    let ports = "Pioneer DDJ-400,Generic MIDI Keyboard".to_string();
+                    let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMidiPorts({
+                        let mut b = [0u8; 128];
+                        let bytes = ports.as_bytes();
+                        b[..bytes.len().min(128)].copy_from_slice(&bytes[..bytes.len().min(128)]);
+                        b
+                    })));
+                    self.config_saved_time = Some(current_time);
+                    self.autosave_triggered = None;
+                }
+                if i.key_pressed(egui::Key::Num1) { self.active_view = View::Player; }
+                if i.key_pressed(egui::Key::Num2) { self.active_view = View::Console; }
+                if i.key_pressed(egui::Key::Num3) { self.active_view = View::Composer; }
+                if i.key_pressed(egui::Key::Num4) { self.active_view = View::Editor; }
+                if i.key_pressed(egui::Key::Num5) { self.active_view = View::Sampler; }
+                if i.key_pressed(egui::Key::Num6) { self.active_view = View::Breeder; }
+                if i.key_pressed(egui::Key::Num7) { self.active_view = View::Broadcast; }
+                if i.key_pressed(egui::Key::Num8) { self.active_view = View::Topology; }
+                if i.key_pressed(egui::Key::Num9) { self.active_view = View::Account; }
+            });
+        }
+
+        // --- Autosave Background Job ---
+        if self.autosave_enabled {
+            let interval_secs = (self.autosave_interval_mins as f64) * 60.0;
+            if current_time - self.last_saved_time >= interval_secs {
+                let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology));
+                let ports = "Pioneer DDJ-400,Generic MIDI Keyboard".to_string();
+                let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMidiPorts({
+                    let mut b = [0u8; 128];
+                    let bytes = ports.as_bytes();
+                    b[..bytes.len().min(128)].copy_from_slice(&bytes[..bytes.len().min(128)]);
+                    b
+                })));
+                self.last_saved_time = current_time;
+                self.config_saved_time = Some(current_time);
+                self.autosave_triggered = Some(current_time);
+            }
+        }
+
         let is_focused = ctx.input(|i| i.focused);
 
         // Background Throttling: Skip telemetry processing if unfocused and updated recently (<100ms)
@@ -534,26 +628,38 @@ impl eframe::App for InspectorApp {
         if let Some(tab) = self.active_right_tab {
             egui::SidePanel::right("right_sidebar")
                 .resizable(true)
+                .min_width(280.0)
+                .max_width(600.0)
                 .default_width(450.0)
                 .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        if ui.selectable_label(self.active_right_tab == Some(RightTab::Library), "LIBRARY").clicked() {
-                            self.active_right_tab = Some(RightTab::Library);
-                        }
-                        if ui.selectable_label(self.active_right_tab == Some(RightTab::GeneticCloud), "CLOUD").clicked() {
-                            self.active_right_tab = Some(RightTab::GeneticCloud);
-                        }
-                        if ui.selectable_label(self.active_right_tab == Some(RightTab::Notifications), "AI & INSIGHTS").clicked() {
-                            self.active_right_tab = Some(RightTab::Notifications);
-                        }
-                        if ui.selectable_label(self.active_right_tab == Some(RightTab::Metrics), "SYSTEM").clicked() {
-                            self.active_right_tab = Some(RightTab::Metrics);
-                        }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("❌").clicked() { self.active_right_tab = None; }
+                    let tab_info = match tab {
+                        RightTab::Library => ("📂", "LIBRARY"),
+                        RightTab::GeneticCloud => ("☁", "GENETIC CLOUD"),
+                        RightTab::Notifications => ("🧠", "AI & INSIGHTS"),
+                        RightTab::Metrics => ("📊", "METRICS"),
+                    };
+
+                    egui::Frame::none()
+                        .fill(self.theme.bg_surface)
+                        .inner_margin(egui::Margin::symmetric(self.theme.space_md, self.theme.space_sm))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("{} {}", tab_info.0, tab_info.1))
+                                        .strong()
+                                        .color(self.theme.accent)
+                                        .size(self.theme.type_heading),
+                                );
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.button("❌").clicked() {
+                                        self.active_right_tab = None;
+                                    }
+                                });
+                            });
                         });
-                    });
+
                     ui.separator();
+                    ui.add_space(self.theme.space_sm);
 
                     match tab {
                         RightTab::Library => views::library::render(self, ui),

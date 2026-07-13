@@ -2,9 +2,6 @@ use egui::{Ui, Color32, Frame, Margin, Rounding, Stroke, RichText, Sense};
 use crate::{InspectorApp, widgets};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
-    ui.heading("System Metrics & Telemetry");
-    ui.add_space(10.0);
-
     let telemetry = app.last_telemetry.lock().unwrap().clone();
     let frame_width = ui.available_width().min(400.0);
     let theme = app.theme;
@@ -22,7 +19,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     let pressure_norm = (t.last_xrun_magnitude_ns as f32 / 1_000_000.0).clamp(0.0, 5.0) / 5.0;
                     ui.add(egui::ProgressBar::new(pressure_norm).fill(theme.accent).text("PRESSURE"));
 
-                    ui.add_space(5.0);
+                    ui.add_space(theme.space_xs);
                     ui.label(RichText::new("NODE PERFORMANCE BREAKDOWN").small().color(theme.text_secondary));
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), Sense::hover());
                     let node_w = rect.width() / 64.0;
@@ -37,7 +34,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 }
             });
 
-            ui.add_space(10.0);
+            ui.add_space(theme.space_sm);
 
             // 2. Analysis Section
             render_metric_group(ui, "SPECTRAL DOMAIN", frame_width, &theme, |ui| {
@@ -46,7 +43,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 }
             });
 
-            ui.add_space(10.0);
+            ui.add_space(theme.space_sm);
 
             render_metric_group(ui, "DNA LATENT SPACE PROJECTION", frame_width, &theme, |ui| {
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(frame_width, 150.0), Sense::hover());
@@ -68,11 +65,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 ui.painter().circle_filled(pos, 6.0, theme.accent);
                 ui.painter().circle_stroke(pos, 8.0, Stroke::new(1.0, theme.text_primary));
 
-                ui.add_space(5.0);
+                ui.add_space(theme.space_xs);
                 ui.label(RichText::new("TIMBRAL TRAJECTORY").small().color(theme.text_secondary));
             });
 
-            ui.add_space(10.0);
+            ui.add_space(theme.space_sm);
 
             render_metric_group(ui, "PHASE & CORRELATION", frame_width, &theme, |ui| {
                 if telemetry.is_some() {
@@ -80,7 +77,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 }
             });
 
-            ui.add_space(10.0);
+            ui.add_space(theme.space_sm);
 
             // 3. Distributed Execution Section
             render_metric_group(ui, "DISTRIBUTED EXECUTION (REMOTE NODES)", frame_width, &theme, |ui| {
@@ -101,7 +98,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 }
             });
 
-            ui.add_space(10.0);
+            ui.add_space(theme.space_sm);
 
             // 4. Thread Heatmap (Grounded)
             render_metric_group(ui, "EXECUTION PLANE THREADS (WORKERS)", frame_width, &theme, |ui| {
@@ -131,7 +128,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, format!("{}", i), egui::FontId::monospace(10.0), theme.text_primary);
                     }
                 });
-                ui.add_space(5.0);
+                ui.add_space(theme.space_xs);
                 ui.label(RichText::new("STABLE PARALLEL STAGE EXECUTION").small().color(theme.text_secondary));
             });
         });

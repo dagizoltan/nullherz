@@ -8,14 +8,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         // 1. Crates Navigation Pane
         ui.vertical(|ui| {
             ui.set_max_width(90.0);
-            ui.add_space(5.0);
+            ui.add_space(theme.space_xs);
             ui.label(RichText::new("📁 CRATES").size(theme.type_caption).strong().color(theme.text_secondary));
             ui.add_space(theme.space_sm);
 
             let is_all = app.active_crate.is_none();
             if ui.selectable_label(is_all, "📦 ALL").clicked() { app.active_crate = None; }
 
-            ui.add_space(4.0);
+            ui.add_space(theme.space_xs);
             let crates = app.library_db.list_crates().unwrap_or_default();
             for crate_name in crates {
                 let is_selected = app.active_crate.as_deref() == Some(crate_name.as_str());
@@ -54,7 +54,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
             // Library Toolbar
             ui.horizontal(|ui| {
-                ui.label(RichText::new("LIBRARY").strong().size(theme.type_heading));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui.button("🔄").on_hover_text("Refresh").clicked() { app.library_needs_refresh = true; }
                     ui.text_edit_singleline(&mut app.search_query);
@@ -93,7 +92,7 @@ fn render_smart_crate_builder(app: &mut InspectorApp, ui: &mut Ui) {
         .show(ui, |ui| {
             ui.vertical(|ui| {
                 ui.strong("SMART CRATE BUILDER");
-                ui.add_space(5.0);
+                ui.add_space(theme.space_xs);
                 ui.horizontal(|ui| {
                     ui.label("Name:");
                     ui.text_edit_singleline(&mut app.smart_crate_def.name);
@@ -206,7 +205,7 @@ fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
             }
 
             ui.child_ui(rect, Layout::left_to_right(Align::Center)).horizontal(|ui| {
-                ui.add_space(5.0);
+                ui.add_space(theme.space_xs);
                 let is_loaded = app.now_playing.iter().any(|np| np.as_ref() == Some(&track.id));
                 let text_color = if is_loaded { theme.accent } else { theme.text_primary };
 
@@ -218,7 +217,7 @@ fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
                          let _ = app.library_db.remove_track(track.id);
                          app.library_needs_refresh = true;
                     }
-                    ui.add_space(5.0);
+                    ui.add_space(theme.space_xs);
                     ui.label(RichText::new(format!("{:.0}", track.metadata.bpm)).monospace().size(theme.type_caption).color(theme.text_secondary));
 
                     // SoundDNA Sparkline
