@@ -52,6 +52,10 @@ pub struct Theme {
 
     // Helper Stroke for v2 compatibility
     pub border_stroke: egui::Stroke,
+
+    // Elevation shadows
+    pub shadow_sm: egui::epaint::Shadow,
+    pub shadow_md: egui::epaint::Shadow,
 }
 
 impl Default for Theme {
@@ -76,7 +80,7 @@ impl Default for Theme {
 
             accent_muted: egui::Color32::from_rgb(0, 100, 150),
 
-            success: egui::Color32::from_rgb(0, 255, 150),
+            success: egui::Color32::from_rgb(80, 220, 100),
             warning: egui::Color32::from_rgb(255, 200, 0),
             danger: egui::Color32::from_rgb(255, 50, 50),
 
@@ -123,6 +127,19 @@ impl Default for Theme {
             radius_lg: 12.0,
 
             border_stroke: egui::Stroke::new(1.0, border_color),
+
+            shadow_sm: egui::epaint::Shadow {
+                offset: egui::vec2(0.0, 1.0),
+                blur: 4.0,
+                spread: 0.0,
+                color: egui::Color32::from_black_alpha(60),
+            },
+            shadow_md: egui::epaint::Shadow {
+                offset: egui::vec2(0.0, 3.0),
+                blur: 12.0,
+                spread: 1.0,
+                color: egui::Color32::from_black_alpha(100),
+            },
         }
     }
 }

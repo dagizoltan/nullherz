@@ -66,7 +66,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 ui.add(egui::Slider::new(&mut app.sampler_waveform_zoom, 0.1..=10.0).text(""));
 
                 ui.add_space(theme.space_md);
-                if ui.button(RichText::new("⟲ RESET").size(theme.type_label)).clicked() {
+                if ui.button(RichText::new(format!("{} RESET", egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE)).size(theme.type_label)).clicked() {
                     app.sampler_waveform_zoom = 1.0;
                 }
             });
@@ -99,7 +99,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     ui.horizontal(|ui| {
                         let has_selection = app.editor_selection.is_some();
                         ui.add_enabled_ui(has_selection, |ui| {
-                            let btn = ui.button(RichText::new("✂ CROP").size(theme.type_label));
+                            let btn = ui.button(RichText::new(format!("{} CROP", egui_phosphor::regular::SCISSORS)).size(theme.type_label));
                             if btn.clicked() {
                                 if let Some((s, e)) = app.editor_selection {
                                     let (start, end) = if s < e { (s, e) } else { (e, s) };
@@ -113,10 +113,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             }
                         }).response.on_disabled_hover_text("Drag on the waveform to select a range first");
 
-                        if ui.button(RichText::new("⚡ NORMALIZE").size(theme.type_label)).clicked() {
+                        if ui.button(RichText::new(format!("{} NORMALIZE", egui_phosphor::regular::LIGHTNING)).size(theme.type_label)).clicked() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::Normalize { sample_id: track.id }));
                         }
-                        if ui.button(RichText::new("🧬 RE-ANALYZE DNA").size(theme.type_label)).clicked() {
+                        if ui.button(RichText::new(format!("{} RE-ANALYZE DNA", egui_phosphor::regular::DNA)).size(theme.type_label)).clicked() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ReAnalyze { sample_id: track.id }));
                         }
                     });
