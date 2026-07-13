@@ -55,7 +55,28 @@ pub struct Telemetry {
     pub node_map_values: [u32; 32],
     /// List of detected audio devices.
     pub audio_devices: [DeviceName; 16],
+    pub is_streaming: bool,
+    pub stream_bitrate: f32,
+    pub stream_uptime_sec: u32,
+    pub stream_dropped_frames: u32,
+    pub stream_viewers: u32,
+    pub mesh_peer_count: u32,
+    pub mesh_peer_names: [PeerName; 8],
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PeerName {
+    #[serde(with = "BigArray")]
+    pub name: [u8; 64],
+}
+
+impl Default for PeerName {
+    fn default() -> Self {
+        Self { name: [0u8; 64] }
+    }
+}
+
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
@@ -107,6 +128,13 @@ impl Default for Telemetry {
             node_map_keys: [[0u8; 32]; 32],
             node_map_values: [0u32; 32],
             audio_devices: [DeviceName::default(); 16],
+            is_streaming: false,
+            stream_bitrate: 0.0,
+            stream_uptime_sec: 0,
+            stream_dropped_frames: 0,
+            stream_viewers: 0,
+            mesh_peer_count: 0,
+            mesh_peer_names: [PeerName::default(); 8],
         }
     }
 }
