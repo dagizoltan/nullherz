@@ -4,13 +4,12 @@ use crate::InspectorApp;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
-    ui.label(RichText::new("GENETIC CLOUD").strong().color(theme.accent).size(theme.type_heading));
-    ui.add_space(theme.space_sm);
 
     // 1. Peer Registry
-    Frame::group(ui.style())
-        .fill(theme.bg_inset)
-        .rounding(Rounding::same(theme.radius_sm))
+    Frame::none()
+        .fill(theme.bg_surface)
+        .rounding(theme.radius_md)
+        .stroke(theme.border_stroke)
         .inner_margin(Margin::same(theme.space_sm))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
