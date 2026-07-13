@@ -31,6 +31,7 @@ impl MidiBridge {
 pub mod midir_backend {
     use super::*;
     use midir::{MidiInput, MidiInputConnection};
+    use std::error::Error;
 
     pub struct MidirSource {
         _connection: MidiInputConnection<()>,

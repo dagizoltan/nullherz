@@ -79,6 +79,7 @@ pub fn sidecar_builder(_item: TokenStream) -> TokenStream {
 
                 let mut inputs = Vec::new();
                 let mut outputs = Vec::new();
+                let sc_names = Vec::new(); // Sidechains empty by default for sidecar_builder
                 for i in 0..args.len() {
                     if args[i] == "--input-shm" && i + 1 < args.len() { inputs.push(args[i+1].clone()); }
                     if args[i] == "--output-shm" && i + 1 < args.len() { outputs.push(args[i+1].clone()); }
@@ -86,7 +87,7 @@ pub fn sidecar_builder(_item: TokenStream) -> TokenStream {
 
                 unsafe {
                     let _ = ipc_layer::pin_thread_to_core(1);
-                    let mut sidecar = sidecar_sdk::SidecarHost::new(cmd_shm, sig_shm, &inputs, &outputs, efd_val);
+                    let mut sidecar = sidecar_sdk::SidecarHost::new(cmd_shm, sig_shm, &inputs, &sc_names, &outputs, efd_val);
                     sidecar.run(processor);
                 }
             }
