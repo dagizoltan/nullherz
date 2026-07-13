@@ -1,6 +1,7 @@
 use nullherz_dna::GeneticLibrary;
 use egui::{Ui, Color32, RichText, Frame, Margin, Rounding, Stroke, ScrollArea, Vec2};
-use crate::{InspectorApp, widgets};
+use crate::InspectorApp;
+use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
 
 use super::{mixer, dna, transport, performance, waveform};
@@ -56,9 +57,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
 fn render_header(ui: &mut Ui, telemetry: &Option<Telemetry>, theme: &nullherz_ui_hal::Theme) {
     Frame::none()
-        .fill(theme.bg_canvas)
-        .rounding(Rounding::same(theme.radius_md))
-        .inner_margin(Margin::symmetric(16.0, 8.0))
+        .fill(theme.bg_surface)
+        .stroke(theme.border_stroke)
+        .rounding(theme.radius_md)
+        .inner_margin(Margin::symmetric(theme.space_md, theme.space_sm))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading(RichText::new("NULLHERZ DJ CONSOLE").strong().color(theme.text_primary).size(theme.type_heading).extra_letter_spacing(1.5));
@@ -72,9 +74,27 @@ fn render_header(ui: &mut Ui, telemetry: &Option<Telemetry>, theme: &nullherz_ui
         });
 }
 
+pub fn format_duration(samples: u64, sample_rate: f32) -> String {
+    if sample_rate <= 0.0 {
+        return "0:00".to_string();
+    }
+    let total_seconds = samples as f64 / sample_rate as f64;
+    let minutes = (total_seconds / 60.0).floor() as u32;
+    let seconds = (total_seconds % 60.0).floor() as u32;
+    format!("{}:{:02}", minutes, seconds)
+}
+
+pub fn render_time_display(ui: &mut egui::Ui, elapsed: &str, remaining: &str, accent_color: Color32) {
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(elapsed).monospace().size(13.0).color(Color32::from_gray(180)));
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new(format!("-{}", remaining)).monospace().size(13.0).color(accent_color));
+    });
+}
+
 fn render_waveform_lane(app: &mut InspectorApp, ui: &mut Ui, i: usize, lane_h: f32, telemetry: &Option<Telemetry>) {
     let theme = app.theme;
-    let deck_color = theme.deck_colors[i];
+    let deck_color = crate::InspectorApp::deck_color(&theme, i);
     let is_focused = app.focused_deck == i;
 
     let bg_color = if is_focused {
@@ -131,7 +151,7 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
     let deck_id_label = (b'A' + i as u8) as char;
     ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
         // Left padding for the left accent bar
-        ui.add_space(8.0);
+        ui.add_space(theme.space_sm);
 
         // Deck label
         let label_text = RichText::new(format!("DECK {}", deck_id_label)).strong().size(theme.type_caption).color(if is_focused { deck_color } else { theme.text_secondary });
@@ -139,7 +159,7 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
             app.focused_deck = i;
         }
 
-        ui.add_space(6.0);
+        ui.add_space(theme.space_xs);
 
         // Master Deck Toggle ("M")
         let is_master = app.master_deck == Some(i);
@@ -149,7 +169,7 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
              let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMasterDeck(deck_id_label)));
         }
 
-        ui.add_space(4.0);
+        ui.add_space(theme.space_xs);
 
         // Sync toggle
         let is_sync = app.channel_sync[i];
@@ -158,7 +178,7 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
             app.channel_sync[i] = !is_sync;
         }
 
-        ui.add_space(8.0);
+        ui.add_space(theme.space_sm);
 
         // Track metadata block
         let track_id = app.now_playing[i];
@@ -180,7 +200,7 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
             };
             ui.label(RichText::new(artist_text).size(theme.type_caption).color(theme.text_secondary));
 
-            ui.add_space(8.0);
+            ui.add_space(theme.space_sm);
 
             // Live BPM
             let playback_rate = telemetry.as_ref().map(|t| t.deck_playback_rates[i]).unwrap_or(1.0);
@@ -188,7 +208,7 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
             ui.label(RichText::new(format!("{:.1}", live_bpm)).monospace().strong().size(theme.type_caption).color(deck_color));
             ui.label(RichText::new("BPM").size(theme.type_caption).color(theme.text_secondary));
 
-            ui.add_space(8.0);
+            ui.add_space(theme.space_sm);
 
             // Native track key & genre
             let mut meta_text = String::new();
@@ -202,16 +222,16 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
 
             // Time Display on the far right
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(4.0); // right padding
+                ui.add_space(theme.space_xs); // right padding
                 let sample_rate = telemetry.as_ref().map(|t| t.sample_rate).unwrap_or(44100.0);
                 let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[i]).unwrap_or(0);
                 let total_samples = t.metadata.total_samples;
 
-                let elapsed_str = widgets::format_duration(elapsed_samples, sample_rate);
+                let elapsed_str = format_duration(elapsed_samples, sample_rate);
                 let remaining_samples = if total_samples >= elapsed_samples { total_samples - elapsed_samples } else { 0 };
-                let remaining_str = widgets::format_duration(remaining_samples, sample_rate);
+                let remaining_str = format_duration(remaining_samples, sample_rate);
 
-                widgets::render_time_display(ui, &elapsed_str, &remaining_str, deck_color);
+                render_time_display(ui, &elapsed_str, &remaining_str, deck_color);
             });
         } else {
             ui.label(RichText::new("NO TRACK LOADED").monospace().color(theme.text_disabled).size(theme.type_caption));
@@ -221,7 +241,7 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
 
 fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>) {
     let theme = app.theme;
-    let deck_color = theme.deck_colors[i];
+    let deck_color = crate::InspectorApp::deck_color(&theme, i);
     let is_focused = app.focused_deck == i;
 
     let bg_color = if is_focused {
@@ -243,8 +263,8 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
         Frame::none()
             .fill(bg_color)
             .stroke(Stroke::new(border_thickness, stroke_color))
-            .rounding(Rounding::same(theme.radius_md))
-            .inner_margin(Margin::symmetric(12.0, 10.0))
+            .rounding(theme.radius_md)
+            .inner_margin(Margin::symmetric(theme.space_sm, theme.space_md))
             .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     // Header (Selectable title/indicator for focus)
@@ -297,10 +317,10 @@ fn render_stereo_vu_meter(ui: &mut Ui, peak_l: f32, peak_r: f32, peak_hold: f32,
 fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
     let theme = app.theme;
     Frame::none()
-        .fill(theme.bg_canvas)
-        .stroke(Stroke::new(1.0, theme.border))
-        .rounding(Rounding::same(theme.radius_md))
-        .inner_margin(Margin::symmetric(12.0, 10.0))
+        .fill(theme.bg_surface)
+        .stroke(theme.border_stroke)
+        .rounding(theme.radius_md)
+        .inner_margin(Margin::symmetric(theme.space_sm, theme.space_md))
         .show(ui, |ui| {
             ui.vertical_centered(|ui| {
                 ui.set_width(210.0);
@@ -316,12 +336,12 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
                         ramp_duration_samples: 0,
                     }));
                 }
-                ui.add_space(2.0);
+                ui.add_space(theme.space_xs);
                 ui.horizontal(|ui| {
-                    ui.add_space(12.0);
+                    ui.add_space(theme.space_sm);
                     ui.label(RichText::new("A").size(theme.type_caption).color(theme.text_secondary));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add_space(12.0);
+                        ui.add_space(theme.space_sm);
                         ui.label(RichText::new("B").size(theme.type_caption).color(theme.text_secondary));
                     });
                 });
@@ -333,7 +353,7 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
 
                 // Master, Booth, and Rec Out with Stereo VU Meters
                 ui.label(RichText::new("OUTPUTS").strong().size(theme.type_body).color(theme.text_secondary));
-                ui.add_space(6.0);
+                ui.add_space(theme.space_xs);
 
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;

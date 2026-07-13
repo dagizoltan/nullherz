@@ -1,5 +1,6 @@
 use egui::{Ui, Color32, RichText};
-use crate::{InspectorApp, widgets};
+use crate::InspectorApp;
+use nullherz_ui_hal::widgets;
 
 pub fn render_deck_dna_panel(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
     let theme = app.theme;
@@ -16,7 +17,7 @@ pub fn render_deck_dna_panel(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
             ("AGGRESSIVE", 3, "aggressive"),
         ];
 
-        let deck_color = theme.deck_colors[i];
+        let deck_color = crate::InspectorApp::deck_color(&theme, i);
 
         egui::Grid::new(format!("dna_grid_{}", i)).num_columns(2).spacing([theme.space_xs, theme.space_xs]).show(ui, |ui| {
             for (label, idx, feature) in traits {

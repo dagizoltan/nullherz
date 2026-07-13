@@ -80,8 +80,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             for (idx, node) in app.graph.nodes.iter_mut().enumerate() {
                 let node_id = ui.make_persistent_id(format!("node_spatial_{}", idx));
 
-                // Hardened: Grid-based initial layout if coordinates are zero
-                if node.x == 0.0 && node.y == 0.0 {
+                // Hardened: Grid-based initial layout if coordinates are sentinel (negative)
+                if node.x < 0.0 || node.y < 0.0 {
                     node.x = 50.0 + (idx % 4) as f32 * 200.0;
                     node.y = 50.0 + (idx / 4) as f32 * 120.0;
                 }

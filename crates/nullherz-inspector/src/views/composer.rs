@@ -1,5 +1,6 @@
 use egui::{Ui, ScrollArea, Color32, Vec2, Sense, RichText, Stroke, Frame, Rounding, Margin};
-use crate::{InspectorApp, widgets};
+use crate::InspectorApp;
+use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
 use nullherz_traits::{Command, PerformanceCommand};
 pub use nullherz_conductor::pattern_manager::DnaSequencer;

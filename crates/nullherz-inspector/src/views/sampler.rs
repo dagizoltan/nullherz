@@ -1,6 +1,7 @@
 use nullherz_dna::GeneticLibrary;
 use egui::{Color32, Ui, Frame, Vec2, Sense, Stroke, RichText};
-use crate::{InspectorApp, widgets};
+use crate::InspectorApp;
+use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {

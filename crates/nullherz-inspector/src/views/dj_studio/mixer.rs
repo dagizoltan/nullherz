@@ -1,5 +1,6 @@
 use egui::{Ui, Color32};
-use crate::{InspectorApp, widgets};
+use crate::InspectorApp;
+use nullherz_ui_hal::widgets;
 
 pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_color: Color32) {
     let deck_id = (b'A' + i as u8) as char;
