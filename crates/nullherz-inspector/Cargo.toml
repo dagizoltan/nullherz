@@ -3,6 +3,10 @@ name = "nullherz-inspector"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["midi-backend"]
+midi-backend = ["dep:midir"]
+
 [dependencies]
 nullherz-traits = { path = "../../crates/nullherz-traits" }
 serde = { version = "1.0", features = ["derive"] }
@@ -18,5 +22,4 @@ nullherz-conductor = { path = "../nullherz-conductor" }
 nullherz-ui-hal = { path = "../nullherz-ui-hal" }
 egui-wgpu = "0.27"
 egui-phosphor = "0.5.0"
-
-midir = "0.9.1"
+midir = { version = "0.9.1", optional = true }

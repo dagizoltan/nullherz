@@ -46,24 +46,6 @@ impl TelemetryService {
             }
         }
 
-        // Sync Live Streaming Telemetry
-        telemetry.is_streaming = conductor.is_streaming;
-        telemetry.stream_bitrate = conductor.stream_bitrate;
-        telemetry.stream_uptime_sec = conductor.stream_start_time.map(|t| t.elapsed().as_secs() as u32).unwrap_or(0);
-        telemetry.stream_dropped_frames = conductor.stream_dropped_frames;
-        telemetry.stream_viewers = conductor.stream_viewers;
-
-        // Sync Live Mesh Peer Templates from Discovery Service
-        if let Ok(known) = conductor.sidecar_discovery.known_plugins.lock() {
-            telemetry.mesh_peer_count = known.len() as u32;
-            for (i, (name, _)) in known.iter().enumerate().take(8) {
-                let bytes = name.as_bytes();
-                let len = bytes.len().min(64);
-                telemetry.mesh_peer_names[i].name = [0u8; 64];
-                telemetry.mesh_peer_names[i].name[..len].copy_from_slice(&bytes[..len]);
-            }
-        }
-
         // Waveform Telemetry Extraction
         let decks = ['A', 'B', 'C', 'D'];
         for (i, &deck_id) in decks.iter().enumerate().take(4) {

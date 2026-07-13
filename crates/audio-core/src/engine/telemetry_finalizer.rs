@@ -148,9 +148,8 @@ impl TelemetryFinalizer {
             node_map_keys: [[0u8; 32]; 32],
             node_map_values: [0u32; 32],
             audio_devices: [nullherz_traits::telemetry::DeviceName::default(); 16],
-            ..Telemetry::default()
         };
-        let _ = telemetry_producer.push_telemetry(telemetry);
+        let _ = telemetry_producer.push_telemetry(telemetry.clone());
         telemetry
     }
 }

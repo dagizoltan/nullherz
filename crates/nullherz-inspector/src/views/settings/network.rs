@@ -3,15 +3,12 @@ use crate::InspectorApp;
 
 pub fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
-    let current_time = ui.input(|i| i.time);
-    let telemetry_opt = app.last_telemetry.lock().unwrap().clone();
-
     ui.strong("Distributed Sidecar Discovery");
     ui.add_space(theme.space_xs);
 
-    // Production-Grade Live Network Discovery Status
+    // Mock/planned disclosure for remote node discovery
     ui.horizontal(|ui| {
-        ui.label(RichText::new("✔ LIVE NETWORKING: Listening for gossip beacon packets on UDP port 9001. Sync service is active.").size(9.0).color(theme.success));
+        ui.label(RichText::new("ℹ NOTE: P2P Network Node Discovery is currently running in Mock/Simulated mode. Actual mesh/gossip node discovery is not yet fully exposed by the discovery.rs network backend.").size(9.0).color(theme.text_secondary));
     });
     ui.add_space(theme.space_xs);
 
@@ -27,54 +24,12 @@ pub fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
             ui.label("Remote Nodes Detected:");
             ui.add_space(theme.space_sm);
 
-            let mut list = app.discovered_sidecars.clone();
+            let remote_nodes = [
+                ("192.168.1.45 (Studio-PC-2)", true),
+                ("192.168.1.12 (MacBook-Pro-DSP)", false),
+            ];
 
-            // Fetch actual live mesh peer names from telemetry if present
-            if let Some(ref t) = telemetry_opt {
-                if t.mesh_peer_count > 0 {
-                    list.clear();
-                    for i in 0..(t.mesh_peer_count as usize).min(8) {
-                        let name_bytes = t.mesh_peer_names[i].name;
-                        if name_bytes[0] != 0 {
-                            let name = String::from_utf8_lossy(&name_bytes).trim_matches(char::from(0)).to_string();
-                            list.push(nullherz_traits::SidecarManifest {
-                                name,
-                                version: "1.0.0 (Live Mesh)".to_string(),
-                                author: "P2P Gossip Peer".to_string(),
-                                processor_type_id: 100,
-                                binary_name: "".to_string(),
-                                ui_controls: vec![],
-                            });
-                        }
-                    }
-                }
-            }
-
-            // Fallback list of remote nodes for testing/preview if empty
-            if list.is_empty() {
-                list.push(nullherz_traits::SidecarManifest {
-                    name: "Studio-PC-2 (192.168.1.45)".to_string(),
-                    version: "1.0.0".to_string(),
-                    author: "Secondary Workstation".to_string(),
-                    processor_type_id: 100,
-                    binary_name: "".to_string(),
-                    ui_controls: vec![],
-                });
-                list.push(nullherz_traits::SidecarManifest {
-                    name: "MacBook-Pro-DSP (192.168.1.12)".to_string(),
-                    version: "0.9.5".to_string(),
-                    author: "Producer Laptop".to_string(),
-                    processor_type_id: 100,
-                    binary_name: "".to_string(),
-                    ui_controls: vec![],
-                });
-            }
-
-            for (i, node) in list.iter().enumerate() {
-                // Determine simulated connection state based on index or simple interactivity
-                // (Even indices connected, odd disconnected by default)
-                let is_connected = i % 2 == 0;
-
+            for (name, is_connected) in remote_nodes {
                 Frame::none()
                     .fill(theme.bg_inset)
                     .rounding(theme.radius_md)
@@ -88,10 +43,10 @@ pub fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
                             ui.painter().circle_filled(dot_rect.center(), 4.0, dot_color);
                             ui.add_space(theme.space_xs);
 
-                            ui.label(&node.name);
+                            ui.label(name);
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui.button(if is_connected { "DISCONNECT" } else { "ATTACH" }).clicked() {
-                                    app.p2p_sync_success_toast = Some(current_time);
+                                    println!("Toggling node connection...");
                                 }
                             });
                         });

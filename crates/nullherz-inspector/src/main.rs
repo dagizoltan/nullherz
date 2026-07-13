@@ -170,9 +170,6 @@ pub struct InspectorApp {
     pub(crate) broadcast_bitrate: f32, // 64 to 512 kbps
     pub(crate) broadcast_state: usize, // 0: Offline, 1: Connecting, 2: Live, 3: Error
     pub(crate) broadcast_error_msg: String,
-    pub(crate) broadcast_start_time: Option<f64>,
-    pub(crate) p2p_sync_success_toast: Option<f64>,
-    pub(crate) export_passport_success_toast: Option<f64>,
     pub(crate) sampler_input_gain: f32,
     pub(crate) sampler_monitor_level: f32,
     pub(crate) sampler_is_recording: bool,
@@ -382,9 +379,6 @@ impl InspectorApp {
             broadcast_bitrate: 256.0,
             broadcast_state: 0,
             broadcast_error_msg: "Connection timed out (Socket error 111)".to_string(),
-            broadcast_start_time: None,
-            p2p_sync_success_toast: None,
-            export_passport_success_toast: None,
             sampler_input_gain: 1.0,
             sampler_monitor_level: 0.0,
             sampler_is_recording: false,
