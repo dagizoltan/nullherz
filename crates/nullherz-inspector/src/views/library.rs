@@ -85,10 +85,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
 fn render_smart_crate_builder(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
-    Frame::group(ui.style())
+    Frame::none()
         .fill(theme.bg_inset)
         .rounding(Rounding::same(theme.radius_md))
-        .inner_margin(Margin::same(10.0))
+        .stroke(theme.border_stroke)
+        .inner_margin(Margin::same(theme.space_md))
         .show(ui, |ui| {
             ui.vertical(|ui| {
                 ui.strong("SMART CRATE BUILDER");
@@ -115,9 +116,11 @@ fn render_smart_crate_builder(app: &mut InspectorApp, ui: &mut Ui) {
 fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
     let theme = app.theme;
     if let Ok(Some(mut track)) = app.library_db.get_track(track_id) {
-        Frame::group(ui.style())
+        Frame::none()
             .fill(theme.bg_inset)
             .rounding(Rounding::same(theme.radius_md))
+            .stroke(theme.border_stroke)
+            .inner_margin(Margin::same(theme.space_md))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {

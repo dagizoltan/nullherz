@@ -36,9 +36,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         }
 
         for track in cloud_tracks {
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
+            Frame::none()
+                .fill(theme.bg_inset)
+                .rounding(Rounding::same(theme.radius_md))
+                .stroke(theme.border_stroke)
+                .inner_margin(Margin::same(theme.space_sm))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(&track.title).strong().size(theme.type_body));
                             // Production Beta: Mock verification status check
@@ -49,17 +54,17 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         });
                         ui.label(RichText::new(&track.artist).size(theme.type_caption).color(theme.text_secondary));
                     });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(RichText::new("🧬").size(theme.type_label)).on_hover_text("Pollinate").clicked() {
-                            let mut local_copy = (*track).clone();
-                            local_copy.id = track.id ^ 0xFEED;
-                            local_copy.artist = "Imported Genesis".to_string();
-                            let _ = app.library_db.save_track(&local_copy);
-                            app.library_needs_refresh = true;
-                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(RichText::new("🧬").size(theme.type_label)).on_hover_text("Pollinate").clicked() {
+                                let mut local_copy = (*track).clone();
+                                local_copy.id = track.id ^ 0xFEED;
+                                local_copy.artist = "Imported Genesis".to_string();
+                                let _ = app.library_db.save_track(&local_copy);
+                                app.library_needs_refresh = true;
+                            }
+                        });
                     });
                 });
-            });
             ui.add_space(theme.space_xs);
         }
 
