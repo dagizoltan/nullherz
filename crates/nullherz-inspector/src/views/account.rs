@@ -1,5 +1,6 @@
 use egui::{Ui, RichText, Frame};
 use crate::InspectorApp;
+use sha2::{Sha256, Digest};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
@@ -8,26 +9,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
     ui.heading(RichText::new("User Account").size(theme.type_heading));
     ui.add_space(theme.space_md);
-
-    // Banners for Secure Transfers & Synced DNA
-    if let Some(t) = app.p2p_sync_success_toast {
-        if current_time - t < 4.0 {
-            Frame::none()
-                .fill(theme.success.linear_multiply(0.12))
-                .stroke(egui::Stroke::new(1.0, theme.success))
-                .rounding(theme.radius_md)
-                .inner_margin(theme.space_sm)
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(egui_phosphor::regular::CHECK_CIRCLE).color(theme.success));
-                        ui.label(RichText::new("SECURE P2P SYNCHRONIZATION COMPLETE: Genetic material and latent space weights updated across mesh!").color(theme.text_primary).strong().size(theme.type_caption));
-                    });
-                });
-            ui.add_space(theme.space_md);
-        } else {
-            app.p2p_sync_success_toast = None;
-        }
-    }
 
     if let Some(t) = app.export_passport_success_toast {
         if current_time - t < 4.0 {
@@ -45,6 +26,25 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             ui.add_space(theme.space_md);
         } else {
             app.export_passport_success_toast = None;
+        }
+    }
+
+    if let Some((t, err)) = app.export_passport_error_toast.clone() {
+        if current_time - t < 4.0 {
+            Frame::none()
+                .fill(theme.danger.linear_multiply(0.12))
+                .stroke(egui::Stroke::new(1.0, theme.danger))
+                .rounding(theme.radius_md)
+                .inner_margin(theme.space_sm)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(egui_phosphor::regular::X_CIRCLE).color(theme.danger));
+                        ui.label(RichText::new(format!("GENETIC PASSPORT EXPORT FAILED: {}", err)).color(theme.text_primary).strong().size(theme.type_caption));
+                    });
+                });
+            ui.add_space(theme.space_md);
+        } else {
+            app.export_passport_error_toast = None;
         }
     }
 
@@ -193,9 +193,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         ui.label(RichText::new(format!("{} - v{}", peer.author, peer.version)).size(theme.type_caption).color(theme.text_secondary));
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(RichText::new("SYNC DNA").size(theme.type_caption)).clicked() {
-                            app.p2p_sync_success_toast = Some(current_time);
-                        }
+                        ui.add_enabled_ui(false, |ui| {
+                            let response = ui.button(RichText::new("SYNC DNA").size(theme.type_caption));
+                            response.on_disabled_hover_text("P2P DNA push not yet implemented");
+                        });
                     });
                 });
                 if i < list.len() - 1 {
@@ -207,6 +208,65 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     ui.add_space(theme.space_lg);
 
     if ui.button(RichText::new("EXPORT GENETIC PASSPORT").size(theme.type_label)).clicked() {
-        app.export_passport_success_toast = Some(current_time);
+        if let Some(ref t) = telemetry_opt {
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            #[derive(serde::Serialize)]
+            struct GeneticPassport {
+                latent_space: [f32; 16],
+                timestamp: u64,
+                node_id: String,
+            }
+
+            let passport = GeneticPassport {
+                latent_space: t.dna_latent_space,
+                timestamp,
+                node_id: "Node-7742".to_string(),
+            };
+
+            match serde_json::to_vec(&passport) {
+                Ok(serialized) => {
+                    let mut hasher = Sha256::new();
+                    hasher.update(&serialized);
+                    let hash_result = hasher.finalize();
+                    let hash_hex: String = hash_result.iter().map(|b| format!("{:02x}", b)).collect();
+
+                    if let Some(proj_dirs) = directories_next::ProjectDirs::from("com", "nullherz", "nullherz") {
+                        let exports_dir = proj_dirs.data_dir().join("exports");
+                        if let Err(e) = std::fs::create_dir_all(&exports_dir) {
+                            app.export_passport_error_toast = Some((current_time, format!("Failed to create exports directory: {}", e)));
+                            app.export_passport_success_toast = None;
+                        } else {
+                            let filename = format!("genetic_passport_{}.json", timestamp);
+                            let file_path = exports_dir.join(filename);
+                            match std::fs::write(&file_path, &serialized) {
+                                Ok(_) => {
+                                    println!("Genetic Passport exported successfully to: {} with SHA-256: {}", file_path.to_string_lossy(), hash_hex);
+                                    app.export_passport_success_toast = Some(current_time);
+                                    app.export_passport_error_toast = None;
+                                }
+                                Err(e) => {
+                                    app.export_passport_error_toast = Some((current_time, format!("File write error: {}", e)));
+                                    app.export_passport_success_toast = None;
+                                }
+                            }
+                        }
+                    } else {
+                        app.export_passport_error_toast = Some((current_time, "Could not determine local storage directory".to_string()));
+                        app.export_passport_success_toast = None;
+                    }
+                }
+                Err(e) => {
+                    app.export_passport_error_toast = Some((current_time, format!("Serialization error: {}", e)));
+                    app.export_passport_success_toast = None;
+                }
+            }
+        } else {
+            app.export_passport_error_toast = Some((current_time, "No live DNA telemetry available. Run audio engine to capture real-time genetic state.".to_string()));
+            app.export_passport_success_toast = None;
+        }
     }
 }

@@ -179,6 +179,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             ui.add_space(15.0);
 
             ui.strong("Live Health Telemetry");
+            ui.add_space(2.0);
+            ui.label(RichText::new("(simulated preview — network broadcast not yet implemented)").size(app.theme.type_caption).color(app.theme.text_secondary));
             ui.add_space(4.0);
             Frame::none()
                 .fill(app.theme.bg_surface)
@@ -188,19 +190,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 .show(ui, |ui| {
                     if app.broadcast_state == 2 {
                         let mut live_start = app.broadcast_start_time.unwrap_or(current_time);
-                        let mut current_bitrate = app.broadcast_bitrate;
-                        let mut dropped = 0;
-                        let mut viewer_count = 42;
-
-                        // Override with actual telemetry if available
-                        let mut used_live = false;
                         if let Some(ref t) = telemetry_opt {
                             if t.is_streaming {
                                 live_start = current_time - t.stream_uptime_sec as f64;
-                                current_bitrate = t.stream_bitrate;
-                                dropped = t.stream_dropped_frames;
-                                viewer_count = t.stream_viewers;
-                                used_live = true;
                             }
                         }
 
@@ -208,23 +200,21 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         let min = uptime_sec / 60;
                         let sec = uptime_sec % 60;
 
-                        if !used_live {
-                            // Real-time jitter for bitrate in local fallback
-                            let bitrate_jitter = ((current_time * 3.5).cos() * 1.8) as f32;
-                            current_bitrate = app.broadcast_bitrate + bitrate_jitter;
+                        // Real-time jitter for bitrate in local fallback
+                        let bitrate_jitter = ((current_time * 3.5).cos() * 1.8) as f32;
+                        let current_bitrate = app.broadcast_bitrate + bitrate_jitter;
 
-                            // Simulated packets/dropped frames based on network quality in local fallback
-                            dropped = if app.broadcast_bitrate > 400.0 {
-                                (uptime_sec / 15) as u32
-                            } else {
-                                0
-                            };
+                        // Simulated packets/dropped frames based on network quality in local fallback
+                        let dropped = if app.broadcast_bitrate > 400.0 {
+                            (uptime_sec / 15) as u32
+                        } else {
+                            0
+                        };
 
-                            // Fluctuating viewer count in local fallback
-                            let viewer_base = 42;
-                            let viewer_modulation = ((current_time * 0.15).sin() * 3.0) as f32;
-                            viewer_count = (viewer_base as f32 + viewer_modulation).round() as u32;
-                        }
+                        // Fluctuating viewer count in local fallback
+                        let viewer_base = 42;
+                        let viewer_modulation = ((current_time * 0.15).sin() * 3.0) as f32;
+                        let viewer_count = (viewer_base as f32 + viewer_modulation).round() as u32;
 
                         ui.label(format!("Uptime: {:02}:{:02}", min, sec));
                         ui.label(format!("Outgoing Bitrate: {:.1} kbps", current_bitrate));
