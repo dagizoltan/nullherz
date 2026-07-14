@@ -105,6 +105,73 @@ impl JitterBuffer {
     }
 }
 
+/// Simulated InfiniBand/RDMA transport layer for high-density multi-machine studio setups.
+/// Bypasses CPU processing using direct memory regions (MR) and low-latency queue pairs (QP).
+pub struct RdmaMemoryRegion {
+    pub addr: u64,
+    pub size: usize,
+    pub rkey: u32,
+}
+
+pub struct RdmaQueuePair {
+    pub local_qp_num: u32,
+    pub remote_qp_num: u32,
+    pub state: String,
+}
+
+pub struct RdmaTransport {
+    pub memory_regions: Mutex<HashMap<u32, RdmaMemoryRegion>>,
+    pub active_qps: Mutex<HashMap<u32, RdmaQueuePair>>,
+}
+
+impl RdmaTransport {
+    pub fn new() -> Self {
+        Self {
+            memory_regions: Mutex::new(HashMap::new()),
+            active_qps: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn register_memory_region(&self, node_idx: u32, addr: u64, size: usize) -> u32 {
+        let rkey = node_idx.wrapping_mul(777) + 1234;
+        let mut mrs = self.memory_regions.lock().unwrap();
+        mrs.insert(node_idx, RdmaMemoryRegion { addr, size, rkey });
+        rkey
+    }
+
+    pub fn connect_qp(&self, node_idx: u32, remote_qp: u32) {
+        let mut qps = self.active_qps.lock().unwrap();
+        qps.insert(node_idx, RdmaQueuePair {
+            local_qp_num: node_idx * 10 + 1,
+            remote_qp_num: remote_qp,
+            state: "RTS".to_string(), // Ready to Send
+        });
+    }
+
+    /// Performs zero-copy bypass-CPU direct transfer of raw audio blocks into local memory region.
+    pub unsafe fn rdma_write_block(&self, node_idx: u32, block: &AudioBlock) -> Result<(), &'static str> {
+        let mrs = self.memory_regions.lock().unwrap();
+        let qps = self.active_qps.lock().unwrap();
+
+        if !qps.contains_key(&node_idx) {
+            return Err("RDMA Error: Queue Pair not connected");
+        }
+
+        if let Some(mr) = mrs.get(&node_idx) {
+            if mr.size < std::mem::size_of::<AudioBlock>() {
+                return Err("RDMA Error: Target memory region too small");
+            }
+            let dest_ptr = mr.addr as *mut AudioBlock;
+            unsafe {
+                std::ptr::copy_nonoverlapping(block as *const AudioBlock, dest_ptr, 1);
+            }
+            Ok(())
+        } else {
+            Err("RDMA Error: Memory Region not registered")
+        }
+    }
+}
+
 pub struct IpcAudioBridge {
     /// Maps node_idx to its audio return queue.
     pub return_queues: Arc<Mutex<HashMap<u32, IpcAudioProducer>>>,
@@ -114,6 +181,8 @@ pub struct IpcAudioBridge {
     pub jitter_buffers: Arc<Mutex<HashMap<u32, JitterBuffer>>>,
     /// SHM segments owned by the bridge.
     pub shm_segments: Arc<Mutex<HashMap<u32, Arc<SharedMemory>>>>,
+    /// High-performance RDMA transport layer.
+    pub rdma_transport: RdmaTransport,
 }
 
 impl Default for IpcAudioBridge {
@@ -129,6 +198,7 @@ impl IpcAudioBridge {
             send_queues: Arc::new(Mutex::new(HashMap::new())),
             jitter_buffers: Arc::new(Mutex::new(HashMap::new())),
             shm_segments: Arc::new(Mutex::new(HashMap::new())),
+            rdma_transport: RdmaTransport::new(),
         }
     }
 

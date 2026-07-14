@@ -327,6 +327,11 @@ impl CommandHandler {
                 conductor.transfusion_manager.commit_chaotic_breeding(parent_a_id, parent_b_id, bias, chaotic_strength, &lib);
                 true
             }
+            ResourceCommand::RhythmicTransfusion { source_id, target_id } => {
+                let lib = conductor.library.lock().unwrap();
+                conductor.transfusion_manager.execute_rhythmic_transfusion(source_id, target_id, &lib);
+                true
+            }
             ResourceCommand::RegisterCapture { .. } => {
                 if let Ok(engine_lock) = conductor.engine_coordinator.backend_manager.engine_handle.lock() {
                    if let Some(ref engine) = *engine_lock {

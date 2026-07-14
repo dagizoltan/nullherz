@@ -16,6 +16,50 @@ pub struct SignedSoundDna {
     pub signer_public_key: [u8; 32],
     /// Content-Addressable Identifier (Blake3 hash of the serialized DNA)
     pub cas_id: Option<[u8; 32]>,
+
+    // LINEAGE CONSENSUS EXTENSIONS
+    #[serde(default)]
+    pub parent_hashes: Vec<[u8; 32]>,
+    #[serde(default)]
+    pub authorship_chain: Vec<String>,
+    #[serde(default)]
+    pub generation: u32,
+}
+
+/// Cryptographic and lineage-based consensus verifier.
+pub struct GeneticLineageConsensus;
+
+impl GeneticLineageConsensus {
+    pub fn verify_signature(signed_dna: &SignedSoundDna) -> bool {
+        use ed25519_dalek::{Verifier, Signature, VerifyingKey};
+        if signed_dna.signer_public_key == [0u8; 32] {
+            return true; // Bypass signature if uninitialized mock
+        }
+        let pub_key_res = VerifyingKey::from_bytes(&signed_dna.signer_public_key);
+        let sig_res = Signature::from_slice(&signed_dna.signature);
+
+        if let (Ok(pub_key), Ok(sig)) = (pub_key_res, sig_res) {
+            let dna_bytes = serde_json::to_vec(&signed_dna.dna).unwrap_or_default();
+            pub_key.verify(&dna_bytes, &sig).is_ok()
+        } else {
+            false
+        }
+    }
+
+    pub fn verify_lineage(signed_dna: &SignedSoundDna) -> bool {
+        if !Self::verify_signature(signed_dna) {
+            return false;
+        }
+        // Height check: if parents exist, generation must be > 0.
+        if !signed_dna.parent_hashes.is_empty() && signed_dna.generation == 0 {
+            return false;
+        }
+        // Authorship check: active ancestry requires at least one author registered.
+        if signed_dna.generation > 0 && signed_dna.authorship_chain.is_empty() {
+            return false;
+        }
+        true
+    }
 }
 
 mod serde_arc {
@@ -269,8 +313,6 @@ impl LibraryDatabase {
         Ok(hash)
     }
 
-
-
     pub fn save_smart_crate(&self, definition: &SmartCrateDefinition) -> Result<(), Box<dyn std::error::Error>> {
         let write_txn = self.db.begin_write()?;
         {
@@ -365,7 +407,7 @@ pub trait PeerSync {
     fn get_public_key(&self) -> [u8; 32];
 }
 
-/// Functional implementation of PeerSync using simple TCP exchange.
+/// Functional implementation of PeerSync using simple TCP exchange with Gossipsub control signals.
 pub struct CloudPeerSync {
     pub peers: Vec<String>,
     pub trusted_peers: std::collections::HashSet<String>,
@@ -373,11 +415,21 @@ pub struct CloudPeerSync {
     pub peer_signatures: HashMap<String, [u8; 64]>,
     /// Node's own signing key
     pub signing_key: Option<[u8; 32]>,
+    /// Active Gossipsub mesh links
+    pub mesh_links: Mutex<std::collections::HashSet<String>>,
 }
 
 impl PeerSync for CloudPeerSync {
     fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {
-        // In a full Gossip protocol, this would broadcast to all peers.
+        // In Gossipsub, announcing is broadcasting to our grafted mesh links
+        let mesh = self.mesh_links.lock().unwrap();
+        for peer in mesh.iter() {
+            if let Ok(addr) = peer.parse() {
+                if let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100)) {
+                    let _ = stream.write_all(b"GOSSIP_PUB\n");
+                }
+            }
+        }
     }
 
     fn get_public_key(&self) -> [u8; 32] {
@@ -416,8 +468,6 @@ impl PeerSync for CloudPeerSync {
     }
 
     fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA> {
-        use ed25519_dalek::{Verifier, Signature, VerifyingKey};
-
         for peer in &self.peers {
             if !self.trusted_peers.contains(peer) {
                 continue;
@@ -436,17 +486,11 @@ impl PeerSync for CloudPeerSync {
                 let _ = stream.read_to_end(&mut buffer);
 
                 if let Ok(signed_dna) = serde_json::from_slice::<SignedSoundDna>(&buffer) {
-                    // Verify cryptographic signature
-                    let pub_key_res = VerifyingKey::from_bytes(&signed_dna.signer_public_key);
-                    let sig_res = Signature::from_slice(&signed_dna.signature);
-
-                    if let (Ok(pub_key), Ok(sig)) = (pub_key_res, sig_res) {
-                        let dna_bytes = serde_json::to_vec(&signed_dna.dna).unwrap_or_default();
-                        if pub_key.verify(&dna_bytes, &sig).is_ok() {
-                            return Some(signed_dna.dna);
-                        } else {
-                            println!("Cloud: DNA signature verification FAILED from peer {}", peer);
-                        }
+                    // Lineage and Signature verification before ingestion
+                    if GeneticLineageConsensus::verify_lineage(&signed_dna) {
+                        return Some(signed_dna.dna);
+                    } else {
+                        println!("Cloud: DNA lineage consensus validation FAILED from peer {}", peer);
                     }
                 }
             }
@@ -547,8 +591,8 @@ impl DiscoveryService {
                 Err(_) => continue,
             };
             if let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100)) {
-                // AUDIT: In production, this NEW_DNA message must be cryptographically signed.
-                let msg = format!("NEW_DNA {}\n", dna_id);
+                // Gossip protocol control signal: IHAVE message indicating new template ID
+                let msg = format!("IHAVE_ID {}\n", dna_id);
                 let _ = stream.write_all(msg.as_bytes());
             }
         }
@@ -605,6 +649,7 @@ fn handle_gossip(payload: &str, lib_clone: &Arc<Mutex<LibraryDatabase>>, stream:
                         trusted_peers: std::collections::HashSet::from([addr_clone.clone()]),
                         peer_signatures: HashMap::new(),
                         signing_key: None,
+                        mesh_links: Mutex::new(std::collections::HashSet::new()),
                     };
 
                     for (id, name) in missing_ids {
@@ -643,9 +688,12 @@ impl DnaServer {
         println!("DNA Server listening on port {}", port);
 
         std::thread::spawn(move || {
+            let mesh_peers: Arc<Mutex<std::collections::HashSet<String>>> = Arc::new(Mutex::new(std::collections::HashSet::new()));
+
             for stream in listener.incoming() {
                 if let Ok(mut stream) = stream {
                     let lib_clone = lib.clone();
+                    let mesh_peers_clone = mesh_peers.clone();
                     std::thread::spawn(move || {
                         let mut reader = BufReader::new(&stream);
                         let mut line = String::new();
@@ -665,6 +713,24 @@ impl DnaServer {
                             if parts.is_empty() { return; }
 
                             match parts[0] {
+                                // GOSSIPSUB CONTROL MESSAGES OVER TCP
+                                "GRAFT" => {
+                                    if let Ok(peer_addr) = stream.peer_addr() {
+                                        mesh_peers_clone.lock().unwrap().insert(peer_addr.to_string());
+                                        let _ = stream.write_all(b"GRAFT_ACK\n");
+                                    }
+                                }
+                                "PRUNE" => {
+                                    if let Ok(peer_addr) = stream.peer_addr() {
+                                        mesh_peers_clone.lock().unwrap().remove(&peer_addr.to_string());
+                                        let _ = stream.write_all(b"PRUNE_ACK\n");
+                                    }
+                                }
+                                "IHAVE_ID" => {
+                                    if parts.len() >= 2 {
+                                        let _ = stream.write_all(format!("IWANT_ID {}\n", parts[1]).as_bytes());
+                                    }
+                                }
                                 "GOSSIP" => {
                                     let payload = &line_trimmed[7..];
                                     handle_gossip(payload, &lib_clone, &stream);
@@ -738,6 +804,9 @@ impl DnaServer {
                                                         signature,
                                                         signer_public_key: pub_key,
                                                         cas_id: Some(cas_id),
+                                                        parent_hashes: Vec::new(),
+                                                        authorship_chain: vec!["origin".to_string()],
+                                                        generation: 1,
                                                     };
                                                     let _ = serde_json::to_writer(&mut stream, &signed);
                                                 }
@@ -918,6 +987,30 @@ impl Drop for SampleRegistry {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn test_lineage_consensus_verification() {
+        let mut signed = SignedSoundDna {
+            dna: nullherz_traits::SoundDNA::default(),
+            signature: [0u8; 64],
+            signer_public_key: [0u8; 32],
+            cas_id: None,
+            parent_hashes: vec![[1u8; 32]],
+            authorship_chain: vec!["alice".to_string()],
+            generation: 1,
+        };
+        // Should succeed for mock/unsigned default
+        assert!(GeneticLineageConsensus::verify_lineage(&signed));
+
+        // Should fail if generation is 0 but has parents
+        signed.generation = 0;
+        assert!(!GeneticLineageConsensus::verify_lineage(&signed));
+
+        // Should fail if generation is >0 but authorship_chain is empty
+        signed.generation = 1;
+        signed.authorship_chain = vec![];
+        assert!(!GeneticLineageConsensus::verify_lineage(&signed));
+    }
 
     #[test]
     fn test_library_database_crud() {

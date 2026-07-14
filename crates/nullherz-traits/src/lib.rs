@@ -310,6 +310,10 @@ pub enum ResourceCommand {
         feature_name: [u8; 32],
         strength: f32,
     },
+    RhythmicTransfusion {
+        source_id: u64,
+        target_id: u64,
+    },
 }
 
 #[repr(C)]

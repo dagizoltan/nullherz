@@ -281,6 +281,19 @@ impl BreederView {
                      }
                 }
             }).response.on_disabled_hover_text("Select both parents first");
+
+            ui.add_enabled_ui(has_parents, |ui| {
+                let btn = ui.button(RichText::new(format!("{} RHYTHMIC TRANSFUSION", egui_phosphor::regular::ARROW_RIGHT)).strong().size(theme.type_label));
+                if btn.clicked() {
+                    if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
+                        let cmd = Command::Resource(nullherz_traits::ResourceCommand::RhythmicTransfusion {
+                            source_id: id_a,
+                            target_id: id_b,
+                        });
+                        let _ = app.command_sender.send(cmd);
+                    }
+                }
+            }).response.on_disabled_hover_text("Select both parents first");
         });
     }
 
