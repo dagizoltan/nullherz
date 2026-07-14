@@ -1,4 +1,4 @@
-use egui::{Ui, Color32, Frame, RichText, Rounding, Margin};
+use egui::{Ui, Frame, RichText, Rounding, Margin};
 use crate::InspectorApp;
 use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
@@ -37,13 +37,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             });
     };
 
-    let mut render_right_panel = |ui: &mut Ui| {
+    let render_right_panel = |ui: &mut Ui| {
         ui.vertical(|ui| {
             ui.strong("Final Stage Analysis");
             ui.add_space(theme.space_sm);
             if let Some(t) = telemetry {
                 let layout_wide = ui.available_width() > 500.0;
-                let mut show_viz = |ui: &mut Ui| {
+                let show_viz = |ui: &mut Ui| {
                     ui.vertical(|ui| {
                         ui.label(RichText::new("Phase/Goniometer").size(theme.type_caption).color(theme.text_secondary));
                         widgets::render_goniometer(ui, &t.goniometer_pts, 200.0, theme.accent);

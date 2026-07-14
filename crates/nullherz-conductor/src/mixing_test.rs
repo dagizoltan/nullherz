@@ -37,9 +37,6 @@ mod tests {
             for t in 0..44100 {
                 let val = if (t % 200) < 100 { 0.5f32 } else { -0.5f32 };
                 writer_b.write_sample((val * 32767.0) as i16).unwrap();
-    use std::sync::Arc;
-
-
             }
         }
 

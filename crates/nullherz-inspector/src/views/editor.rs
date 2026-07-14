@@ -1,4 +1,4 @@
-use egui::{Ui, Vec2, Sense, RichText, Frame, Margin, Rounding};
+use egui::{Ui, Vec2, Sense, RichText, Frame, Margin};
 use crate::InspectorApp;
 use nullherz_dna::GeneticLibrary;
 

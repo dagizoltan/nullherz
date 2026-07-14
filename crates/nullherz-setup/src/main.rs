@@ -16,6 +16,7 @@ pub struct SystemConfig {
 fn main() {
     println!("--- nullherz Alpha Setup Wizard ---");
 
+    #[allow(unused_mut)]
     let mut config = SystemConfig {
         audio_backend: "ALSA".to_string(),
         midi_ports: Vec::new(),

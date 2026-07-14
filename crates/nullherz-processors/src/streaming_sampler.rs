@@ -131,7 +131,7 @@ impl AudioProcessor for StreamingSamplerProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nullherz_traits::ProcessContext;
+    use nullherz_traits::{ProcessContext, Command};
 
     #[test]
     fn test_streaming_sampler_playback_stereo() {
@@ -156,7 +156,7 @@ mod tests {
         let mut out_r = vec![0.0; 2];
         let mut out_l_ref = &mut out_l[..];
         let mut out_r_ref = &mut out_r[..];
-        let mut outputs: &mut [&mut [f32]] = &mut [&mut out_l_ref, &mut out_r_ref];
+        let outputs: &mut [&mut [f32]] = &mut [&mut out_l_ref, &mut out_r_ref];
 
         let mut context = ProcessContext {
             transport: None,

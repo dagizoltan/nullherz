@@ -1,4 +1,4 @@
-use egui::{Ui, Color32, Frame, Margin, Rounding, Stroke, RichText, Sense};
+use egui::{Ui, Frame, Margin, Rounding, Stroke, RichText, Sense};
 use crate::InspectorApp;
 use nullherz_ui_hal::widgets;
 

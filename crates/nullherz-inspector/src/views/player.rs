@@ -1,4 +1,4 @@
-use egui::{Ui, ScrollArea, Color32, Frame, Vec2, Sense, Stroke, RichText, Rounding, Margin};
+use egui::{Ui, ScrollArea, Color32, Frame, Vec2, Sense, Stroke, RichText, Margin};
 use crate::InspectorApp;
 use audio_core::Telemetry;
 use nullherz_dna::GeneticLibrary;

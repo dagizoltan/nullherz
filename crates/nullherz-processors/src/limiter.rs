@@ -219,7 +219,7 @@ mod tests {
             let inputs: &[&[f32]] = &[&input_left, &input_right];
             let mut out_l_ref = &mut out_left[..];
             let mut out_r_ref = &mut out_right[..];
-            let mut outputs: &mut [&mut [f32]] = &mut [&mut out_l_ref, &mut out_r_ref];
+            let outputs: &mut [&mut [f32]] = &mut [&mut out_l_ref, &mut out_r_ref];
             limiter.process(inputs, outputs, &mut context);
         }
 
