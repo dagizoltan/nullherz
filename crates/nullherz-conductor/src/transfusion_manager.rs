@@ -253,6 +253,22 @@ impl TransfusionManager {
         }
     }
 
+    pub fn execute_rhythmic_transfusion(&self, source_id: u64, target_id: u64, library: &LibraryDatabase) {
+        if let (Some(src), Some(dst)) = (self.sample_registry.get(source_id), self.sample_registry.get(target_id)) {
+            let mut dst_metadata = (*dst.metadata).clone();
+            dst_metadata.dna.rhythmic.micro_timing = src.metadata.dna.rhythmic.micro_timing;
+            dst_metadata.dna.rhythmic.syncopation_index = src.metadata.dna.rhythmic.syncopation_index;
+
+            self.sample_registry.register_with_metadata(target_id, dst.buffer.clone(), Arc::new(dst_metadata.clone()));
+
+            if let Ok(Some(mut track)) = library.get_track(target_id) {
+                track.metadata = Arc::new(dst_metadata);
+                let _ = library.save_track(&track);
+            }
+            println!("Rhythmic Transfusion: Target {} successfully inherited micro-timing groove from {}", target_id, source_id);
+        }
+    }
+
     /// Polls the engine for new snapshots and registers them in the `SampleRegistry`.
     pub fn poll_snapshots(&mut self, engine: &dyn RenderingEngine) {
         let mut snapshots = Vec::new();

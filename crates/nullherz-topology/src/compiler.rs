@@ -161,13 +161,19 @@ impl GraphCompiler {
                     if local_assignment != consumer_assignment {
                         let consumer_routing = &topo.routing[consumer_idx];
                         if consumer_routing.input_indices.iter().take(consumer_routing.input_count).any(|&v_in| v_in as usize == v_out) {
-                            // Boundary crossed! In a real graph, we insert a proxy node into the plan.
-                            // Since CompiledGraphPlan uses fixed-size arrays, we'd need to expand it or use reserved slots.
-                            // For now, we inject a virtual stage for the transfer.
-                            if plan.num_stages < MAX_NODES - 1 {
-                                let p_idx = plan.num_stages;
-                                plan.stages[p_idx].0[0] = next_proxy_id as u32; // PROXY_SEND or PROXY_RECV
-                                plan.stage_counts[p_idx] = 1;
+                            // Boundary crossed! We inject two distinct proxy nodes:
+                            // 1. A PROXY_SENDER on the source workstation
+                            // 2. A PROXY_RECEIVER on the target workstation
+                            if plan.num_stages < MAX_NODES - 2 {
+                                let p_sender_idx = plan.num_stages;
+                                plan.stages[p_sender_idx].0[0] = next_proxy_id; // PROXY_SENDER node
+                                plan.stage_counts[p_sender_idx] = 1;
+                                plan.num_stages += 1;
+                                next_proxy_id += 1;
+
+                                let p_receiver_idx = plan.num_stages;
+                                plan.stages[p_receiver_idx].0[0] = next_proxy_id; // PROXY_RECEIVER node
+                                plan.stage_counts[p_receiver_idx] = 1;
                                 plan.num_stages += 1;
                                 next_proxy_id += 1;
                             }

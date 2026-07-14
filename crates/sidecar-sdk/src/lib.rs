@@ -327,34 +327,67 @@ pub struct DnaKernel;
 
 impl DnaKernel {
     pub fn apply_spectral_personality(output: &mut [f32], input: &[f32], dna: &nullherz_traits::SoundDNA, bias: f32) {
-        use audio_dsp::simd_vec::{FloatX16, load_f32x16, store_f32x16};
-
         let n = output.len().min(input.len());
         let latent = dna.spectral.latent_space;
 
-        // Target gain derived from latent space, clamped to [0, 1]
-        let mut target_arr = [0.0f32; 16];
-        for i in 0..16 { target_arr[i] = latent[i].max(0.0).min(1.0); }
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            use core::arch::wasm32::*;
 
-        let v_target = FloatX16::new(target_arr);
-        let v_bias = FloatX16::splat(bias);
-        let v_inv_bias = FloatX16::splat(1.0 - bias);
+            let v_bias = f32x4_splat(bias);
+            let v_inv_bias = f32x4_splat(1.0 - bias);
 
-        // current_gain = (1.0 * (1.0 - bias)) + (target_gain * bias)
-        let v_gain = v_inv_bias + (v_target * v_bias);
+            for bin in (0..n).step_by(4).filter(|&b| b + 4 <= n) {
+                let in_val = unsafe { f32x4_load(input[bin..].as_ptr()) };
 
-        for bin in (0..n).step_by(16).filter(|&b| b + 16 <= n) {
-            let v_in = load_f32x16(input, bin);
-            let v_out = v_in * v_gain;
-            store_f32x16(output, bin, v_out);
+                let mut target_vals = [0.0f32; 4];
+                for i in 0..4 {
+                    target_vals[i] = latent[(bin + i) % 16].max(0.0).min(1.0);
+                }
+                let v_target = unsafe { f32x4_load(target_vals.as_ptr()) };
+
+                let v_gain = f32x4_add(v_inv_bias, f32x4_mul(v_target, v_bias));
+                let v_out = f32x4_mul(in_val, v_gain);
+                unsafe { f32x4_store(output[bin..].as_mut_ptr(), v_out) };
+            }
+
+            // Fallback for remaining samples
+            for i in (n - (n % 4))..n {
+                let dim = i % 16;
+                let target_gain = latent[dim].max(0.0).min(1.0);
+                let current_gain = (1.0 - bias) + (target_gain * bias);
+                output[i] = input[i] * current_gain;
+            }
         }
 
-        // Scalar fallback for remaining samples
-        for i in (n - (n % 16))..n {
-            let dim = i % 16;
-            let target_gain = latent[dim].max(0.0).min(1.0);
-            let current_gain = (1.0 - bias) + (target_gain * bias);
-            output[i] = input[i] * current_gain;
+        #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+        {
+            use audio_dsp::simd_vec::{FloatX16, load_f32x16, store_f32x16};
+
+            // Target gain derived from latent space, clamped to [0, 1]
+            let mut target_arr = [0.0f32; 16];
+            for i in 0..16 { target_arr[i] = latent[i].max(0.0).min(1.0); }
+
+            let v_target = FloatX16::new(target_arr);
+            let v_bias = FloatX16::splat(bias);
+            let v_inv_bias = FloatX16::splat(1.0 - bias);
+
+            // current_gain = (1.0 * (1.0 - bias)) + (target_gain * bias)
+            let v_gain = v_inv_bias + (v_target * v_bias);
+
+            for bin in (0..n).step_by(16).filter(|&b| b + 16 <= n) {
+                let v_in = load_f32x16(input, bin);
+                let v_out = v_in * v_gain;
+                store_f32x16(output, bin, v_out);
+            }
+
+            // Scalar fallback for remaining samples
+            for i in (n - (n % 16))..n {
+                let dim = i % 16;
+                let target_gain = latent[dim].max(0.0).min(1.0);
+                let current_gain = (1.0 - bias) + (target_gain * bias);
+                output[i] = input[i] * current_gain;
+            }
         }
     }
 
@@ -393,25 +426,57 @@ impl DnaKernel {
     /// SpectralWarp: Non-linear frequency shifter using Stage 6 SoundDNA latent space.
     /// Accelerated by WASM SIMD FloatX16 pathways.
     pub fn apply_spectral_warp(re: &mut [f32], im: &mut [f32], dna: &nullherz_traits::SoundDNA, warp_strength: f32) {
-        use audio_dsp::simd_vec::{FloatX16, load_f32x16, store_f32x16};
-
         let n = re.len();
         let latent = dna.spectral.latent_space;
 
-        for bin in (0..n).step_by(16).filter(|&b| b + 16 <= n) {
-            let v_re = load_f32x16(re, bin);
-            let v_im = load_f32x16(im, bin);
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            use core::arch::wasm32::*;
+            let v_strength = f32x4_splat(warp_strength);
+            let v_ones = f32x4_splat(1.0);
 
-            // Warp factor derived from latent space dimensions 0-15
-            let v_warp = FloatX16::new(latent);
-            let v_strength = FloatX16::splat(warp_strength);
+            for bin in (0..n).step_by(4).filter(|&b| b + 4 <= n) {
+                let v_re = unsafe { f32x4_load(re[bin..].as_ptr()) };
+                let v_im = unsafe { f32x4_load(im[bin..].as_ptr()) };
 
-            // Non-linear perturbation: re = re * (1 + warp*strength), im = im * (1 - warp*strength)
-            let v_res_re = v_re * (FloatX16::splat(1.0) + v_warp * v_strength);
-            let v_res_im = v_im * (FloatX16::splat(1.0) - v_warp * v_strength);
+                let mut warp_vals = [0.0f32; 4];
+                for i in 0..4 {
+                    warp_vals[i] = latent[(bin + i) % 16];
+                }
+                let v_warp = unsafe { f32x4_load(warp_vals.as_ptr()) };
 
-            store_f32x16(re, bin, v_res_re);
-            store_f32x16(im, bin, v_res_im);
+                // re = re * (1 + warp * strength)
+                let factor_re = f32x4_add(v_ones, f32x4_mul(v_warp, v_strength));
+                let v_res_re = f32x4_mul(v_re, factor_re);
+
+                // im = im * (1 - warp * strength)
+                let factor_im = f32x4_sub(v_ones, f32x4_mul(v_warp, v_strength));
+                let v_res_im = f32x4_mul(v_im, factor_im);
+
+                unsafe { f32x4_store(re[bin..].as_mut_ptr(), v_res_re) };
+                unsafe { f32x4_store(im[bin..].as_mut_ptr(), v_res_im) };
+            }
+        }
+
+        #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+        {
+            use audio_dsp::simd_vec::{FloatX16, load_f32x16, store_f32x16};
+
+            for bin in (0..n).step_by(16).filter(|&b| b + 16 <= n) {
+                let v_re = load_f32x16(re, bin);
+                let v_im = load_f32x16(im, bin);
+
+                // Warp factor derived from latent space dimensions 0-15
+                let v_warp = FloatX16::new(latent);
+                let v_strength = FloatX16::splat(warp_strength);
+
+                // Non-linear perturbation: re = re * (1 + warp*strength), im = im * (1 - warp*strength)
+                let v_res_re = v_re * (FloatX16::splat(1.0) + v_warp * v_strength);
+                let v_res_im = v_im * (FloatX16::splat(1.0) - v_warp * v_strength);
+
+                store_f32x16(re, bin, v_res_re);
+                store_f32x16(im, bin, v_res_im);
+            }
         }
     }
 }

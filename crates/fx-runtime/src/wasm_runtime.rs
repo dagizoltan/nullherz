@@ -70,6 +70,30 @@ impl WasmSidecarHost {
              0
         })?;
 
+        // Zero-copy direct pointer mapping to shared memory for commands and audio blocks
+        linker.func_wrap("nullherz", "get_shared_command_buffer_ptr", |caller: Caller<'_, WasmState>| -> i64 {
+             let state = caller.data();
+             state.cmd_buffer as i64
+        })?;
+
+        linker.func_wrap("nullherz", "get_shared_audio_input_ptr", |caller: Caller<'_, WasmState>, channel: i32| -> i64 {
+             let state = caller.data();
+             if let Some(&rb_ptr) = state.audio_inputs.get(channel as usize) {
+                 rb_ptr as i64
+             } else {
+                 0
+             }
+        })?;
+
+        linker.func_wrap("nullherz", "get_shared_audio_output_ptr", |caller: Caller<'_, WasmState>, channel: i32| -> i64 {
+             let state = caller.data();
+             if let Some(&rb_ptr) = state.audio_outputs.get(channel as usize) {
+                 rb_ptr as i64
+             } else {
+                 0
+             }
+        })?;
+
         linker.func_wrap("nullherz", "get_audio_input", |mut caller: Caller<'_, WasmState>, channel: i32, ptr: i32| -> i32 {
              let block = {
                  let state = caller.data_mut();

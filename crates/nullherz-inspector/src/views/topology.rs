@@ -209,12 +209,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     socket_positions.insert((idx as u32, true, out_idx as u32), socket_pos);
 
                     let socket_rect = egui::Rect::from_center_size(socket_pos, Vec2::splat(socket_radius * 2.5));
-                    let socket_resp = ui.interact(socket_rect, node_id.with(("out", out_idx)), Sense::click());
+                    let socket_resp = ui.interact(socket_rect, node_id.with(("out", out_idx)), Sense::click_and_drag());
 
                     ui.painter().circle_filled(socket_pos, socket_radius, theme.text_disabled);
                     ui.painter().circle_stroke(socket_pos, socket_radius, egui::Stroke::new(1.0, theme.text_primary));
 
-                    if socket_resp.clicked() {
+                    if socket_resp.clicked() || socket_resp.drag_started() {
                         app.active_connection_source = Some((idx as u32, out_idx as u32));
                     }
                 }
