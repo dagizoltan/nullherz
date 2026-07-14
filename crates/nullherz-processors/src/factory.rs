@@ -14,6 +14,7 @@ use crate::modulation::*;
 use crate::sequencer::*;
 use crate::transfusion::*;
 use crate::keysync::*;
+use crate::limiter::*;
 
 pub struct GainFactory;
 impl ProcessorFactory for GainFactory {
@@ -218,4 +219,13 @@ impl ProcessorFactory for DnaMorphFactory {
     }
     fn name(&self) -> &'static str { "DnaMorph" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::DNA_MORPH }
+}
+
+pub struct LimiterFactory;
+impl ProcessorFactory for LimiterFactory {
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(LimiterProcessor::new(node_idx as u64, sample_rate)))
+    }
+    fn name(&self) -> &'static str { "Limiter" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::LIMITER }
 }
