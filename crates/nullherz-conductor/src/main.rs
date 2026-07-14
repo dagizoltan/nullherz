@@ -14,12 +14,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (_midi_sidecar_prod, midi_sidecar_cons) = ipc_layer::RingBuffer::new(256).split();
     conductor.set_midi_consumer(midi_sidecar_cons);
 
-    // Start the backend
-    if let Err(e) = conductor.start_backend(nullherz_backends::AudioBackendType::Alsa) {
-        eprintln!("CRITICAL: Failed to start audio backend: {}", e);
-        return Err(e.into());
+    // --- AUDIO BACKEND RESOLUTION AND FALLBACK ---
+    // Load config to select the configured audio backend (falling back to ALSA by default)
+    let mut backend_type = nullherz_backends::AudioBackendType::Alsa;
+    let config_path = "system_config.json";
+    if std::path::Path::new(config_path).exists() {
+        if let Ok(content) = std::fs::read_to_string(config_path) {
+            if let Ok(config) = serde_json::from_str::<nullherz_conductor::persistence::SystemConfig>(&content) {
+                backend_type = match config.audio_backend.to_lowercase().as_str() {
+                    "alsa" => nullherz_backends::AudioBackendType::Alsa,
+                    "pipewire" => nullherz_backends::AudioBackendType::Pipewire,
+                    "jack" => nullherz_backends::AudioBackendType::Jack,
+                    "threaded" => nullherz_backends::AudioBackendType::Threaded,
+                    "mock" => nullherz_backends::AudioBackendType::Mock,
+                    _ => nullherz_backends::AudioBackendType::Alsa,
+                };
+                println!("System config loaded audio backend: {:?}", backend_type);
+            }
+        }
     }
-    println!("Audio engine started.");
+
+    println!("Starting audio backend: {:?}", backend_type);
+    if let Err(e) = conductor.start_backend(backend_type) {
+        eprintln!("Failed to start audio backend {:?}: {}. Attempting fallback to Threaded backend...", backend_type, e);
+        if let Err(fallback_err) = conductor.start_backend(nullherz_backends::AudioBackendType::Threaded) {
+            eprintln!("CRITICAL: Failed to start fallback Threaded backend: {}", fallback_err);
+            return Err(fallback_err.into());
+        }
+        println!("Fallback Threaded audio backend successfully started.");
+    } else {
+        println!("Audio engine started.");
+    }
 
     let cmd_prod_gateway = ipc_layer::NonRtProducer::from_boxed(context.command_producer);
     let lib_db = conductor.library.clone();

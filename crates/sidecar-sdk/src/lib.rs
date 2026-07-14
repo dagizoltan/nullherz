@@ -24,16 +24,30 @@ impl MemoryMapper for NativeMemoryMapper {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct WasmMapping {
+    pub ptr: *mut u8,
+    pub size: usize,
+}
+unsafe impl Send for WasmMapping {}
+unsafe impl Sync for WasmMapping {}
+
+impl AsRef<[u8]> for WasmMapping {
+    fn as_ref(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.size) }
+    }
+}
+
 /// WASM shared memory implementation that parses pointer addresses from the name.
 pub struct WasmMemoryMapper;
 impl MemoryMapper for WasmMemoryMapper {
-    type Mapping = *mut u8;
-    fn open(&self, name: &str, _size: usize) -> Result<Self::Mapping, String> {
+    type Mapping = WasmMapping;
+    fn open(&self, name: &str, size: usize) -> Result<Self::Mapping, String> {
         let ptr_val = name.parse::<usize>().map_err(|_| "WASM memory name must be a raw pointer integer string".to_string())?;
-        Ok(ptr_val as *mut u8)
+        Ok(WasmMapping { ptr: ptr_val as *mut u8, size })
     }
     fn ptr(&self, mapping: &Self::Mapping) -> *mut u8 {
-        *mapping
+        mapping.ptr
     }
 }
 
