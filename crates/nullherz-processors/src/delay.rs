@@ -6,7 +6,7 @@ pub struct DelayProcessor {
     pub id: u64,
     buffers: [Vec<f32>; MAX_CHANNELS],
     write_pos: usize,
-    delay_samples: usize,
+    delay_samples: f32,
     capacity: usize,
 }
 
@@ -18,13 +18,15 @@ impl DelayProcessor {
             id,
             buffers,
             write_pos: 0,
-            delay_samples: 0,
+            delay_samples: 0.0,
             capacity,
         }
     }
 
-    pub fn set_delay(&mut self, samples: usize) {
-        self.delay_samples = samples.min(self.capacity - 1);
+    pub fn set_delay(&mut self, samples: f32) {
+        // Clamp to ensure we have at least 1 sample of look-behind and 2 samples of look-ahead
+        // within the ring buffer capacity limits.
+        self.delay_samples = samples.clamp(0.0, self.capacity as f32 - 3.0);
     }
 }
 
@@ -34,13 +36,32 @@ impl SignalProcessor for DelayProcessor {
         if num_channels == 0 { return; }
 
         let len = inputs[0].len();
+        let integer_delay = self.delay_samples.floor() as usize;
+        let fraction = self.delay_samples - self.delay_samples.floor();
 
         for i in 0..len {
-            let read_pos = (self.write_pos + self.capacity - self.delay_samples) % self.capacity;
+            // idx_0 is the base read index
+            let idx_0 = (self.write_pos + self.capacity - integer_delay) % self.capacity;
+            let idx_m1 = (idx_0 + self.capacity - 1) % self.capacity;
+            let idx_1 = (idx_0 + 1) % self.capacity;
+            let idx_2 = (idx_0 + 2) % self.capacity;
 
             for ch in 0..num_channels {
                 self.buffers[ch][self.write_pos] = inputs[ch][i];
-                outputs[ch][i] = self.buffers[ch][read_pos];
+
+                let ym1 = self.buffers[ch][idx_m1];
+                let y0  = self.buffers[ch][idx_0];
+                let y1  = self.buffers[ch][idx_1];
+                let y2  = self.buffers[ch][idx_2];
+
+                // 3rd-order Hermite spline interpolation
+                let c0 = y0;
+                let c1 = 0.5 * (y1 - ym1);
+                let c2 = ym1 - 2.5 * y0 + 2.0 * y1 - 0.5 * y2;
+                let c3 = 0.5 * (y2 - ym1) + 1.5 * (y0 - y1);
+
+                let out = ((c3 * fraction + c2) * fraction + c1) * fraction + c0;
+                outputs[ch][i] = out;
             }
 
             self.write_pos = (self.write_pos + 1) % self.capacity;
@@ -66,7 +87,7 @@ impl AudioProcessor for DelayProcessor {
 
     fn set_parameter(&mut self, param_id: u32, value: f32, _ramp: u32) {
         if param_id == 0 {
-            self.set_delay(value as usize);
+            self.set_delay(value);
         }
     }
 
@@ -75,7 +96,7 @@ impl AudioProcessor for DelayProcessor {
             id: 0,
             name: [0; 32],
             min: 0.0,
-            max: self.capacity as f32 - 1.0,
+            max: self.capacity as f32 - 3.0,
             default: 0.0,
         }; 16];
 
