@@ -1,3 +1,4 @@
+#![deny(clippy::disallowed_methods, clippy::disallowed_types)]
 pub mod processors;
 pub mod engine;
 pub mod rt_logging;

@@ -14,8 +14,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (_midi_sidecar_prod, midi_sidecar_cons) = ipc_layer::RingBuffer::new(256).split();
     conductor.set_midi_consumer(midi_sidecar_cons);
 
-    // Start the backend (defaulting to threaded for safety in sandbox)
-    if let Err(e) = conductor.start_backend(nullherz_backends::AudioBackendType::Threaded) {
+    // Start the backend
+    if let Err(e) = conductor.start_backend(nullherz_backends::AudioBackendType::Alsa) {
         eprintln!("CRITICAL: Failed to start audio backend: {}", e);
         return Err(e.into());
     }

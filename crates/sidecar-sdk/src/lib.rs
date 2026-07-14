@@ -11,7 +11,9 @@ pub trait MemoryMapper {
 }
 
 /// Default native shared memory implementation.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct NativeMemoryMapper;
+#[cfg(not(target_arch = "wasm32"))]
 impl MemoryMapper for NativeMemoryMapper {
     type Mapping = SharedMemory;
     fn open(&self, name: &str, size: usize) -> Result<Self::Mapping, String> {
@@ -19,6 +21,19 @@ impl MemoryMapper for NativeMemoryMapper {
     }
     fn ptr(&self, mapping: &Self::Mapping) -> *mut u8 {
         mapping.ptr()
+    }
+}
+
+/// WASM shared memory implementation that parses pointer addresses from the name.
+pub struct WasmMemoryMapper;
+impl MemoryMapper for WasmMemoryMapper {
+    type Mapping = *mut u8;
+    fn open(&self, name: &str, _size: usize) -> Result<Self::Mapping, String> {
+        let ptr_val = name.parse::<usize>().map_err(|_| "WASM memory name must be a raw pointer integer string".to_string())?;
+        Ok(ptr_val as *mut u8)
+    }
+    fn ptr(&self, mapping: &Self::Mapping) -> *mut u8 {
+        *mapping
     }
 }
 
@@ -89,9 +104,21 @@ impl<M: MemoryMapper> SidecarHost<M> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl SidecarHost<NativeMemoryMapper> {
      pub unsafe fn new(cmd_name: &str, sig_name: &str, in_names: &[String], sc_names: &[String], out_names: &[String], efd: i32) -> Self {
          unsafe { Self::new_with_mapper(NativeMemoryMapper, cmd_name, sig_name, in_names, sc_names, out_names, efd) }
+     }
+}
+
+impl SidecarHost<WasmMemoryMapper> {
+     /// Creates a new SidecarHost specifically for the WASM environment using raw pointers.
+     /// The WASM host passes integer pointers into the linear memory for the shared structures.
+     pub unsafe fn new_wasm(cmd_ptr: usize, sig_ptr: usize, in_ptrs: &[usize], sc_ptrs: &[usize], out_ptrs: &[usize]) -> Self {
+         let in_names: Vec<String> = in_ptrs.iter().map(|p| p.to_string()).collect();
+         let sc_names: Vec<String> = sc_ptrs.iter().map(|p| p.to_string()).collect();
+         let out_names: Vec<String> = out_ptrs.iter().map(|p| p.to_string()).collect();
+         unsafe { Self::new_with_mapper(WasmMemoryMapper, &cmd_ptr.to_string(), &sig_ptr.to_string(), &in_names, &sc_names, &out_names, -1) }
      }
 }
 
@@ -115,6 +142,7 @@ pub struct SidecarContext<'a, P: AudioProcessor> {
 }
 
 impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(
         processor: P,
         shm_cmd: &'a SharedMemory,

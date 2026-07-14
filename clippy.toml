@@ -1,0 +1,12 @@
+disallowed-methods = [
+    "std::sync::Mutex::lock",
+    "std::sync::RwLock::write",
+    "std::sync::RwLock::read",
+    "std::thread::spawn",
+    "std::thread::sleep",
+]
+
+disallowed-types = [
+    "std::sync::Mutex",
+    "std::sync::RwLock",
+]

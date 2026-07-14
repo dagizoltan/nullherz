@@ -29,7 +29,7 @@ unsafe impl Send for AlsaLib {}
 impl AlsaLib {
     fn load() -> Result<Self, String> {
         unsafe {
-            let lib = libc::dlopen(c"libasound.so.2".as_ptr(), libc::RTLD_NOW);
+            let lib = libc::dlopen(c"libasound.so.2".as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL);
             if lib.is_null() { return Err("Could not load libasound.so.2".to_string()); }
             let load_sym = |name: &std::ffi::CStr| {
                 let sym = libc::dlsym(lib, name.as_ptr());
@@ -79,64 +79,98 @@ impl AudioBackend for AlsaBackend {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
 
-        let handle = thread::spawn(move || {
-            ipc_layer::setup_rt_thread(90, Some(0)); // Pin main RT thread to core 0
+        // =====================================================================
+        // CRITICAL: Open and configure PCM on the MAIN thread.
+        // PipeWire's ALSA plugin spawns internal IPC threads during snd_pcm_open.
+        // When called from a spawned thread, inherited scheduling state can cause
+        // a segfault inside PipeWire's initialization. Opening on the main thread
+        // avoids this entirely.
+        // =====================================================================
+        let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
+        let name = std::ffi::CString::new("default").unwrap();
 
-            let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
-            let name = std::ffi::CString::new("default").unwrap();
-            unsafe {
-                if (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) != 0 { return; }
+        let open_ret = unsafe { (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) };
+        if open_ret != 0 {
+            return Err(format!("snd_pcm_open failed with error code: {}", open_ret));
+        }
+        eprintln!("[ALSA] snd_pcm_open SUCCESS on 'default'");
 
-                const SND_PCM_ACCESS_RW_INTERLEAVED: i32 = 3;
-                const SND_PCM_FORMAT_S16_LE: i32 = 2;
-                const SND_PCM_FORMAT_FLOAT_LE: i32 = 14;
+        const SND_PCM_ACCESS_RW_INTERLEAVED: i32 = 3;
+        const SND_PCM_FORMAT_S16_LE: i32 = 2;
+        const SND_PCM_FORMAT_FLOAT_LE: i32 = 14;
 
-                let mut hw_params: *mut std::ffi::c_void = std::ptr::null_mut();
-                (alsa.snd_pcm_hw_params_malloc)(&mut hw_params);
-                (alsa.snd_pcm_hw_params_any)(pcm, hw_params);
-                (alsa.snd_pcm_hw_params_set_access)(pcm, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
+        let (is_float, rate, period_size);
 
-                let mut is_float = true;
-                if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_FLOAT_LE) != 0 {
-                    is_float = false;
-                    if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_S16_LE) != 0 {
-                        (alsa.snd_pcm_hw_params_free)(hw_params);
-                        (alsa.snd_pcm_close)(pcm);
-                        return;
-                    }
-                }
+        unsafe {
+            let mut hw_params: *mut std::ffi::c_void = std::ptr::null_mut();
+            (alsa.snd_pcm_hw_params_malloc)(&mut hw_params);
+            (alsa.snd_pcm_hw_params_any)(pcm, hw_params);
+            (alsa.snd_pcm_hw_params_set_access)(pcm, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
 
-                (alsa.snd_pcm_hw_params_set_channels)(pcm, hw_params, 2);
-
-                let mut target_rate = 44100u32;
-                let mut engine_arc_opt = None;
-                {
-                    let lock = engine_handle.lock().unwrap();
-                    if let Some(ref engine) = *lock {
-                        target_rate = engine.target_sample_rate() as u32;
-                        engine_arc_opt = Some(engine.clone());
-                    }
-                }
-
-                let mut rate = target_rate;
-                (alsa.snd_pcm_hw_params_set_rate_near)(pcm, hw_params, &mut rate, std::ptr::null_mut());
-
-                let mut period_size = 128u64;
-                let mut dir = 0;
-                (alsa.snd_pcm_hw_params_set_period_size_near)(pcm, hw_params, &mut period_size, &mut dir);
-                let mut max_period = ipc_layer::MAX_BLOCK_SIZE as u64;
-                (alsa.snd_pcm_hw_params_set_period_size_max)(pcm, hw_params, &mut max_period, &mut dir);
-                let mut buffer_size = period_size * 4;
-                (alsa.snd_pcm_hw_params_set_buffer_size_near)(pcm, hw_params, &mut buffer_size);
-
-                if (alsa.snd_pcm_hw_params)(pcm, hw_params) != 0 {
+            let mut float_ok = true;
+            if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_FLOAT_LE) != 0 {
+                float_ok = false;
+                if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_S16_LE) != 0 {
                     (alsa.snd_pcm_hw_params_free)(hw_params);
                     (alsa.snd_pcm_close)(pcm);
-                    return;
+                    return Err("Neither FLOAT_LE nor S16_LE format accepted".to_string());
                 }
-                (alsa.snd_pcm_hw_params_free)(hw_params);
-                (alsa.snd_pcm_prepare)(pcm);
+            }
+            is_float = float_ok;
+            eprintln!("[ALSA] Format: {}", if is_float { "FLOAT_LE" } else { "S16_LE" });
 
+            (alsa.snd_pcm_hw_params_set_channels)(pcm, hw_params, 2);
+
+            let mut target_rate = 44100u32;
+            {
+                let lock = engine_handle.lock().unwrap();
+                if let Some(ref engine) = *lock {
+                    target_rate = engine.target_sample_rate() as u32;
+                }
+            }
+
+            let mut r = target_rate;
+            (alsa.snd_pcm_hw_params_set_rate_near)(pcm, hw_params, &mut r, std::ptr::null_mut());
+            rate = r;
+
+            let mut ps = 128u64;
+            let mut dir = 0;
+            (alsa.snd_pcm_hw_params_set_period_size_near)(pcm, hw_params, &mut ps, &mut dir);
+            let mut max_period = ipc_layer::MAX_BLOCK_SIZE as u64;
+            (alsa.snd_pcm_hw_params_set_period_size_max)(pcm, hw_params, &mut max_period, &mut dir);
+            let mut buffer_size = ps * 4;
+            (alsa.snd_pcm_hw_params_set_buffer_size_near)(pcm, hw_params, &mut buffer_size);
+            period_size = ps;
+
+            eprintln!("[ALSA] Negotiated: rate={} period={} buffer={}", rate, period_size, buffer_size);
+
+            let hw_ret = (alsa.snd_pcm_hw_params)(pcm, hw_params);
+            if hw_ret != 0 {
+                (alsa.snd_pcm_hw_params_free)(hw_params);
+                (alsa.snd_pcm_close)(pcm);
+                return Err(format!("snd_pcm_hw_params failed with error code: {}", hw_ret));
+            }
+            (alsa.snd_pcm_hw_params_free)(hw_params);
+            (alsa.snd_pcm_prepare)(pcm);
+        }
+
+        eprintln!("[ALSA] PCM configured. Handing to audio thread...");
+
+        // Wrap the raw PCM pointer so we can send it across thread boundaries
+        let pcm_raw = pcm as usize; // usize is Send
+
+        let handle = thread::spawn(move || {
+            let pcm = pcm_raw as *mut std::ffi::c_void;
+
+            let mut engine_arc_opt = None;
+            {
+                let lock = engine_handle.lock().unwrap();
+                if let Some(ref engine) = *lock {
+                    engine_arc_opt = Some(engine.clone());
+                }
+            }
+
+            unsafe {
                 if let Some(ref engine_arc) = engine_arc_opt {
                      let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
                      (*engine_ptr).set_config(nullherz_traits::AudioConfig {
@@ -150,18 +184,31 @@ impl AudioBackend for AlsaBackend {
                 let mut interleaved_s16 = [0i16; ipc_layer::MAX_BLOCK_SIZE * 2];
 
                 let actual_period = period_size as usize;
+                let mut block_count: u64 = 0;
+                eprintln!("[ALSA] Audio thread running. period={} engine_bound={}", actual_period, engine_arc_opt.is_some());
+
                 while running.load(Ordering::SeqCst) {
                     if let Some(ref engine_arc) = engine_arc_opt {
                         let (ch1, ch2) = outputs_raw.split_at_mut(1);
                         let mut out_refs = [&mut ch1[0][..actual_period], &mut ch2[0][..actual_period]];
-                        // SAFETY: We have a local Arc clone, and RenderingEngine is Send/Sync.
-                        // We are the sole processor on this thread.
                         let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
                         (*engine_ptr).process_block(&[], &mut out_refs, actual_period);
                     } else {
                         outputs_raw[0].fill(0.0);
                         outputs_raw[1].fill(0.0);
                     }
+
+                    // Diagnostic: Log peak level every 500 blocks (~1.5s at 128/44100)
+                    if block_count % 500 == 0 {
+                        let mut peak_l: f32 = 0.0;
+                        let mut peak_r: f32 = 0.0;
+                        for i in 0..actual_period {
+                            peak_l = peak_l.max(outputs_raw[0][i].abs());
+                            peak_r = peak_r.max(outputs_raw[1][i].abs());
+                        }
+                        eprintln!("[ALSA] block={} peak_L={:.6} peak_R={:.6}", block_count, peak_l, peak_r);
+                    }
+                    block_count += 1;
 
                     let written = if is_float {
                         for i in 0..actual_period {
@@ -178,10 +225,12 @@ impl AudioBackend for AlsaBackend {
                     };
 
                     if written < 0 {
+                        eprintln!("[ALSA] snd_pcm_writei error: {}, recovering...", written);
                         (alsa.snd_pcm_recover)(pcm, written as i32, 1);
                         (alsa.snd_pcm_prepare)(pcm);
                     }
                 }
+                eprintln!("[ALSA] Audio loop exiting, closing PCM...");
                 (alsa.snd_pcm_close)(pcm);
             }
         });

@@ -373,7 +373,7 @@ impl InspectorApp {
             _automation_data: std::collections::HashMap::new(),
             sampler_waveform_zoom: 1.0,
             active_settings_tab: SettingsTab::General,
-            active_backend: nullherz_traits::AudioBackendType::Threaded,
+            active_backend: nullherz_traits::AudioBackendType::Alsa,
             active_midi_profile: "default".to_string(),
             config_saved_time: None,
             selected_hotload_node_idx: 0,

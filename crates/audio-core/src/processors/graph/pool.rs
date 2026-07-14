@@ -1,3 +1,4 @@
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering, AtomicBool, AtomicU64};
 use std::thread;

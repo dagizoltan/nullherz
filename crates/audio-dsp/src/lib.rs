@@ -1,3 +1,4 @@
+#![deny(clippy::disallowed_methods, clippy::disallowed_types)]
 pub mod filters;
 pub mod oscillators;
 pub mod spectral;
