@@ -226,6 +226,39 @@ fn render_horizontal_track_row(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
                     track_idx: 0,
                     mutation_strength: val,
                 }));
+
+                // Mutate the track's rhythmic onset mask in app.library_db using the fader value
+                if let Some(track_id) = app.now_playing[i % 4] {
+                    use nullherz_dna::GeneticLibrary;
+                    if let Ok(Some(mut track)) = app.library_db.get_track(track_id) {
+                        let mut updated_metadata = (*track.metadata).clone();
+                        for mask_idx in 0..4 {
+                            let original_mask = updated_metadata.dna.rhythmic.onset_mask[mask_idx];
+                            let mut mutated_mask = original_mask;
+                            for bit in 0..64 {
+                                let seed = (track_id as u32).wrapping_mul(256).wrapping_add(mask_idx as u32 * 64 + bit as u32);
+                                let rand_val = (seed.wrapping_mul(1103515245).wrapping_add(12345) as f32) / 4294967295.0;
+                                if rand_val < val {
+                                    mutated_mask ^= 1 << bit;
+                                }
+                            }
+                            updated_metadata.dna.rhythmic.onset_mask[mask_idx] = mutated_mask;
+                        }
+                        track.metadata = std::sync::Arc::new(updated_metadata);
+                        let _ = app.library_db.save_track(&track);
+                        app.library_needs_refresh = true;
+
+                        // Automatically populate and alternate the Breeder Map's parent_a_id and parent_b_id
+                        if app.breeding_view.parent_a_id.is_none() {
+                            app.breeding_view.parent_a_id = Some(track_id);
+                        } else if app.breeding_view.parent_b_id.is_none() || app.breeding_view.parent_b_id == app.breeding_view.parent_a_id {
+                            app.breeding_view.parent_b_id = Some(track_id);
+                        } else {
+                            app.breeding_view.parent_a_id = app.breeding_view.parent_b_id;
+                            app.breeding_view.parent_b_id = Some(track_id);
+                        }
+                    }
+                }
             }
         });
     });
