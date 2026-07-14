@@ -52,6 +52,7 @@ impl ProcessorTypeId {
     pub const PERSONALITY_INHERITANCE: Self = Self(150);
     pub const DNA_MORPH: Self = Self(190);
     pub const LIMITER: Self = Self(200);
+    pub const STREAMING_SAMPLER: Self = Self(210);
 }
 
 impl From<u32> for ProcessorTypeId {

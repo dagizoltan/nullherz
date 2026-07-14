@@ -46,6 +46,7 @@ impl ProcessorRegistry {
         self.register_factory(Box::new(PersonalityInheritanceFactory));
         self.register_factory(Box::new(DnaMorphFactory));
         self.register_factory(Box::new(LimiterFactory));
+        self.register_factory(Box::new(StreamingSamplerFactory));
     }
 
     pub fn register_factory(&mut self, factory: Box<dyn ProcessorFactory>) {

@@ -15,6 +15,8 @@ use crate::sequencer::*;
 use crate::transfusion::*;
 use crate::keysync::*;
 use crate::limiter::*;
+use crate::streaming_sampler::*;
+use std::sync::Arc;
 
 pub struct GainFactory;
 impl ProcessorFactory for GainFactory {
@@ -228,4 +230,21 @@ impl ProcessorFactory for LimiterFactory {
     }
     fn name(&self) -> &'static str { "Limiter" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::LIMITER }
+}
+
+pub struct StreamingSamplerFactory;
+impl ProcessorFactory for StreamingSamplerFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        // Initialize with a mock backing ShmRingBuffer for factory creation compatibility
+        let capacity = 1024;
+        let (layout, _) = ipc_layer::ShmRingBuffer::<f32>::layout(capacity);
+        let ptr = unsafe { std::alloc::alloc(layout) };
+        if ptr.is_null() { return None; }
+        let rb_ptr = unsafe { ipc_layer::ShmRingBuffer::<f32>::init(ptr, capacity) };
+        let mut sampler = StreamingSamplerProcessor::new(node_idx as u64, rb_ptr);
+        sampler._shm_holder = Some(unsafe { Vec::from_raw_parts(ptr, layout.size(), layout.size()) });
+        Some(Box::new(sampler))
+    }
+    fn name(&self) -> &'static str { "StreamingSampler" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::STREAMING_SAMPLER }
 }
