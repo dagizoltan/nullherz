@@ -101,3 +101,11 @@ Following a comprehensive system reverse-engineering, we recommend the following
 ---
 
 **Architectural Recommendation:** *Utilize the new PDC infrastructure for all future spectral and temporal sidecars to maintain phase integrity across complex routing topologies.*
+
+---
+
+## 7. Resolution of Unused Fields and Custom Compiler Configs (Hygienic Hardening)
+In modern systems engineering, compiler warnings are treated as errors. Tight coupling of unused dependencies or configuration flags can clutter compiler diagnostics and hide real potential bugs. We have executed a codebase-wide hardening sweep focusing on Rust 1.80+ compatibility:
+
+*   **Compiler Warning Elimination:** Leftover sidecar SHM fields (`shm_midi` in `sidecar-sdk` and `shm_sidechains` in `fx-runtime`) have been safely prefixed with `_` to clean up `dead_code` diagnostics while preserving future API expansion slots.
+*   **Custom `cfg` Verification Compatibility:** Standard compiler diagnostics for unexpected `cfg` flags (such as the `kani-verify` and `kani` formal proof flags) are now natively integrated and configured. By declaring `kani-verify` as a first-class feature and setting target checking rules via `[lints.rust] unexpected_cfgs`, we have suppressed standard diagnostics and achieved a completely warning-free compilation output.

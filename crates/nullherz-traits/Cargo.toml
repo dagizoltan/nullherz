@@ -5,6 +5,10 @@ edition = "2024"
 
 [features]
 test-utils = []
+kani-verify = []
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

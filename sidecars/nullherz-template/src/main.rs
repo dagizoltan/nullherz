@@ -3,7 +3,7 @@ use nullherz_traits::{AudioProcessor, ProcessContext, SignalProcessor, MidiRespo
 use std::env;
 
 struct MySidecarProcessor {
-    id: u64,
+    _id: u64,
 }
 
 impl SignalProcessor for MySidecarProcessor {
@@ -39,7 +39,7 @@ fn main() {
     unsafe {
         let sc_names = Vec::new();
         let mut host = SidecarHost::new(cmd_name, sig_name, &in_names, &sc_names, &out_names, efd);
-        let processor = MySidecarProcessor { id: 0 };
+        let processor = MySidecarProcessor { _id: 0 };
         println!("Sidecar template starting...");
         host.run(processor);
     }
