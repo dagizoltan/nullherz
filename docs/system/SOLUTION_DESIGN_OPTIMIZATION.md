@@ -78,7 +78,8 @@ Following a comprehensive system reverse-engineering, we recommend the following
     *   *Current State*: While multi-channel biquad processing (`SimdBiquad`) is fully vectorized, single-channel biquads (`BiquadFilter`) use scalar unrolling due to recursive sample dependencies.
     *   *Recommendation*: Implement a vectorized **Parallel Prefix Sum (Scan)** algorithm for single-channel biquads. This enables using vector lanes (AVX2/AVX-512) to compute recursive filter equations on a single mono stream, delivering up to a $3\times$ single-core performance increase for large block sizes.
 *   **Cache Alignment Safeguards**:
-    *   *Recommendation*: Pad or align all processing nodes within `ProcessorGraph` to 64-byte boundaries (the standard cache-line size) to prevent **false sharing** when worker threads in the `TaskPool` execute adjacent nodes in parallel.
+    *   *Current State*: Implemented! The `ProcessorNode` struct in `crates/audio-core/src/processors/graph/node.rs` is explicitly aligned to 64-byte boundaries with `#[repr(align(64))]`. This completely isolates adjacent nodes to independent CPU cache lines and prevents thread-thrashing false sharing during parallel execution in the topological `TaskPool`.
+    *   *Recommendation*: Align and pad any new high-frequency telemetry matrices or shared state pools to 64-byte boundaries to maintain optimal L1/L2 cache locality across execution threads.
 
 ### B. High-Fidelity Traditional DSP Extensions
 *   **Look-Ahead Dynamics & Mastering Limiter**:
