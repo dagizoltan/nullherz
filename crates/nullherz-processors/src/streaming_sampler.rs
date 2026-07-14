@@ -1,4 +1,4 @@
-use nullherz_traits::{AudioProcessor, SignalProcessor, ProcessContext, AudioConfig, ProcessorCommand, Command, MidiEvent, MidiResponder, SnapshotProvider};
+use nullherz_traits::{AudioProcessor, SignalProcessor, ProcessContext, ProcessorCommand, MidiResponder, SnapshotProvider};
 use ipc_layer::ShmRingBuffer;
 use crate::MAX_CHANNELS;
 
