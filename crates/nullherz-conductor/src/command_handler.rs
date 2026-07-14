@@ -209,10 +209,23 @@ impl CommandHandler {
                 println!("Conductor: Clearing Pattern for Track {}", track_idx);
                 true
             }
-            PerformanceCommand::Preview { sample_id } => {
+            PerformanceCommand::Preview { mut sample_id } => {
                 if let Some(ref mut prod) = conductor.topology_manager.topo_producer {
                     let preview_node_idx = conductor.mixer_manager.node_names.get("preview_node").cloned().unwrap_or(111);
-                    if let Some(sample) = conductor.transfusion_manager.sample_registry.get(sample_id) {
+
+                    // Quality-of-life fallback: if hardcoded sample_id 1 or 2 is not found in the registry,
+                    // fall back to the first or second available sample in the registry.
+                    let mut sample_opt = conductor.transfusion_manager.sample_registry.get(sample_id);
+                    if sample_opt.is_none() && (sample_id == 1 || sample_id == 2) {
+                        let ids = conductor.transfusion_manager.sample_registry.list_ids();
+                        if !ids.is_empty() {
+                            let fallback_idx = if sample_id == 2 { 1.min(ids.len() - 1) } else { 0 };
+                            sample_id = ids[fallback_idx];
+                            sample_opt = conductor.transfusion_manager.sample_registry.get(sample_id);
+                        }
+                    }
+
+                    if let Some(sample) = sample_opt {
                          let _ = prod.push(nullherz_traits::TopologyMutation::AddSource {
                             node_idx: preview_node_idx,
                             buffer: sample.buffer,
@@ -220,6 +233,8 @@ impl CommandHandler {
                             metadata: Some(sample.metadata.clone()),
                         });
                         let _ = Self::handle_performance_command(conductor, PerformanceCommand::PlayNode { node_idx: preview_node_idx });
+                    } else {
+                        eprintln!("Preview failed: sample_id {} not found in registry, and no fallback available.", sample_id);
                     }
                 }
                 true
