@@ -34,10 +34,10 @@ pub fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
 
     // Display appropriate live discovery status banner
     ui.horizontal(|ui| {
-        if midi_error.is_none() {
-            ui.label(RichText::new("✔ LIVE MIDI: Dynamic hot-plug port scanner is active via ALSA/Midir.").size(9.0).color(theme.success));
+        if let Some(ref err) = midi_error {
+            ui.label(RichText::new(format!("⚠ MIDI SCANNER WARNING: {} (Running in emulation fallback mode).", err)).size(9.0).color(theme.warning));
         } else {
-            ui.label(RichText::new(format!("⚠ MIDI SCANNER WARNING: {} (Running in emulation fallback mode).", midi_error.as_ref().unwrap())).size(9.0).color(theme.warning));
+            ui.label(RichText::new("✔ LIVE MIDI: Dynamic hot-plug port scanner is active via ALSA/Midir.").size(9.0).color(theme.success));
         }
     });
     ui.add_space(theme.space_xs);

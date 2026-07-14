@@ -5,7 +5,7 @@ use sha2::{Sha256, Digest};
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
     let current_time = ui.input(|i| i.time);
-    let telemetry_opt = app.last_telemetry.lock().unwrap().clone();
+    let telemetry_opt = *app.last_telemetry.lock();
 
     ui.heading(RichText::new("User Account").size(theme.type_heading));
     ui.add_space(theme.space_md);
@@ -145,22 +145,20 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             let mut list = app.discovered_sidecars.clone();
 
             // Intercept and populate actual live mesh peer names from telemetry if present
-            if let Some(ref t) = telemetry_opt {
-                if t.mesh_peer_count > 0 {
-                    list.clear();
-                    for i in 0..(t.mesh_peer_count as usize).min(8) {
-                        let name_bytes = t.mesh_peer_names[i].name;
-                        if name_bytes[0] != 0 {
-                            let name = String::from_utf8_lossy(&name_bytes).trim_matches(char::from(0)).to_string();
-                            list.push(nullherz_traits::SidecarManifest {
-                                name,
-                                version: "1.0.0 (Live Mesh)".to_string(),
-                                author: "P2P Gossip Peer".to_string(),
-                                processor_type_id: 100,
-                                binary_name: "".to_string(),
-                                ui_controls: vec![],
-                            });
-                        }
+            if let Some(t) = telemetry_opt.as_ref().filter(|t| t.mesh_peer_count > 0) {
+                list.clear();
+                for i in 0..(t.mesh_peer_count as usize).min(8) {
+                    let name_bytes = t.mesh_peer_names[i].name;
+                    if name_bytes[0] != 0 {
+                        let name = String::from_utf8_lossy(&name_bytes).trim_matches(char::from(0)).to_string();
+                        list.push(nullherz_traits::SidecarManifest {
+                            name,
+                            version: "1.0.0 (Live Mesh)".to_string(),
+                            author: "P2P Gossip Peer".to_string(),
+                            processor_type_id: 100,
+                            binary_name: "".to_string(),
+                            ui_controls: vec![],
+                        });
                     }
                 }
             }

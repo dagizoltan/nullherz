@@ -6,7 +6,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
 
     // Fetch live mesh peer names from telemetry if present
-    let telemetry_lock = app.last_telemetry.lock().unwrap();
+    let telemetry_lock = app.last_telemetry.lock();
     let mut peer_names = vec![];
     let mut is_mock = true;
 

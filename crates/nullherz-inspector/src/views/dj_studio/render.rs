@@ -228,7 +228,7 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
                 let total_samples = t.metadata.total_samples;
 
                 let elapsed_str = format_duration(elapsed_samples, sample_rate);
-                let remaining_samples = if total_samples >= elapsed_samples { total_samples - elapsed_samples } else { 0 };
+                let remaining_samples = total_samples.saturating_sub(elapsed_samples);
                 let remaining_str = format_duration(remaining_samples, sample_rate);
 
                 render_time_display(ui, &elapsed_str, &remaining_str, deck_color, &theme);

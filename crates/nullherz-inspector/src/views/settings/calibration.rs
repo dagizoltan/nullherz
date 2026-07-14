@@ -19,7 +19,7 @@ pub fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
                     let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CalibrateLatency));
                 }
 
-                if let Some(t) = app.last_telemetry.lock().unwrap().as_ref() {
+                if let Some(t) = app.last_telemetry.lock().as_ref() {
                     if t.calibration_samples > 0 {
                         let ms = t.calibration_samples as f32 / (t.sample_rate / 1000.0) ;
                         ui.label(format!("Current RTL: {:.1}ms ({} samples)", ms, t.calibration_samples));
@@ -41,7 +41,7 @@ pub fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
         .stroke(theme.border_stroke)
         .inner_margin(theme.space_md)
         .show(ui, |ui| {
-            if let Some(t) = app.last_telemetry.lock().unwrap().as_ref() {
+            if let Some(t) = app.last_telemetry.lock().as_ref() {
                 ui.horizontal(|ui| {
                     ui.label("Sync Status:");
                     if t.clock_jitter_ns < 1000 {

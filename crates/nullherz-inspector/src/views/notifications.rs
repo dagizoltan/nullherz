@@ -4,7 +4,7 @@ use crate::InspectorApp;
 
 pub fn render(app: &InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
-    let telemetry = app.last_telemetry.lock().unwrap();
+    let telemetry = app.last_telemetry.lock();
 
     ScrollArea::vertical().id_source("ai_scroll").show(ui, |ui| {
         ui.vertical(|ui| {

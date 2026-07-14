@@ -3313,6 +3313,7 @@ dependencies = [
  "nullherz-dna",
  "nullherz-traits",
  "nullherz-ui-hal",
+ "parking_lot",
  "serde",
  "serde_json",
  "sha2",
@@ -3414,6 +3415,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "nullherz-traits",
+ "parking_lot",
  "raw-window-handle 0.6.2",
  "wgpu",
 ]

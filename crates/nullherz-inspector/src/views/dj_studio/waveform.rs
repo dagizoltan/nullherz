@@ -13,13 +13,13 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
 
     if let Some(ref t) = track {
         if let Some(wf_lock) = &app.deck_waveform_renderers[i] {
-            let mut wf = wf_lock.lock().unwrap();
+            let mut wf = wf_lock.lock();
             let zoom = 1.0;
             let scroll = 0.0;
             let color = deck_color.to_array().map(|v| v as f32 / 255.0);
 
             if let Some(wgpu) = &app.wgpu_renderer {
-                let wgpu = wgpu.lock().unwrap();
+                let wgpu = wgpu.lock();
                 wf.update_globals(&wgpu.queue, scroll, zoom, color);
                 wf.update_from_mip_waveform(&wgpu.queue, &t.metadata.mip_waveform, zoom, rect.width() as u32);
             }

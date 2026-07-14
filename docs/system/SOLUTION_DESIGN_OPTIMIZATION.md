@@ -110,3 +110,8 @@ In modern systems engineering, compiler warnings are treated as errors. Tight co
 
 *   **Compiler Warning Elimination:** Leftover sidecar SHM fields (`shm_midi` in `sidecar-sdk` and `shm_sidechains` in `fx-runtime`) have been safely prefixed with `_` to clean up `dead_code` diagnostics while preserving future API expansion slots.
 *   **Custom `cfg` Verification Compatibility:** Standard compiler diagnostics for unexpected `cfg` flags (such as the `kani-verify` and `kani` formal proof flags) are now natively integrated and configured. By declaring `kani-verify` as a first-class feature and setting target checking rules via `[lints.rust] unexpected_cfgs`, we have suppressed standard diagnostics and achieved a completely warning-free compilation output.
+
+## 8. High-Performance Decoupled Synchronization (Synchronization Plane)
+**Focus:** Decoupled synchronization and real-time safety lints compliance.
+*   **Synchronization Decoupling:** Replaced the heavy, lock-poisoning `std::sync::Mutex` implementation with `parking_lot::Mutex` across `nullherz-inspector` and `nullherz-ui-hal` crates. This ensures fast, predictable lock acquisition, reduces heap allocations, and guarantees that lock poisoning states never cascade into crashing or locking the UI or orchestration loops.
+*   **Safety Lints Alignment:** By transitioning to `parking_lot` primitives, the workspace fully complies with the strict security/real-time `clippy.toml` which flags standard library blocking Mutexes as unsafe disallowed types/methods, guaranteeing consistent compilation and code hygiene.

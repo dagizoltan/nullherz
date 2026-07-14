@@ -10,3 +10,4 @@ egui-wgpu = "0.27"
 wgpu = "0.19"
 raw-window-handle = "0.6"
 bytemuck = { version = "1.13", features = ["derive"] }
+parking_lot = "0.12"
