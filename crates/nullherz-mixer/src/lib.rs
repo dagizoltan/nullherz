@@ -241,7 +241,7 @@ impl MixerManager {
         // 3. Master Limiter/Gain
         let lim_id = self.id_allocator.allocate_node_id();
         self.node_names.insert("master_limiter".to_string(), lim_id);
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: lim_id, processor_type_id: ProcessorTypeId::GAIN }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: lim_id, processor_type_id: ProcessorTypeId::LIMITER }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: lim_id, input_idx: 0, new_buffer_idx: comp_out_l }));
 
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: lim_id, output_idx: 0, new_buffer_idx: self.config.master_l as u32 }));

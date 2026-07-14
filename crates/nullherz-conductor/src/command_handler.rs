@@ -170,6 +170,7 @@ impl CommandHandler {
             }
             PerformanceCommand::EvolvePattern { node_idx, track_idx, mutation_strength } => {
                 let mut dna = nullherz_traits::RhythmicDNA::default();
+                let mut sample_id = None;
                 {
                     if let Ok(engine_lock) = conductor.engine_coordinator.backend_manager.engine_handle.lock() {
                         if let Some(ref engine) = *engine_lock {
@@ -177,10 +178,18 @@ impl CommandHandler {
                                 .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(node_idx))
                                 .and_then(|c| c.resource_id());
                             if let Some(rid) = resource_id {
+                                sample_id = Some(rid);
                                 if let Some(s) = conductor.transfusion_manager.sample_registry.get(rid) {
                                     dna = (*s.metadata).dna.rhythmic.clone();
                                 }
                             }
+                        }
+                    }
+                }
+                if let Some(rid) = sample_id {
+                    if let Ok(lib) = conductor.library.lock() {
+                        if let Ok(Some(track)) = lib.get_track(rid) {
+                            dna = track.metadata.dna.rhythmic.clone();
                         }
                     }
                 }

@@ -16,7 +16,6 @@ use crate::transfusion::*;
 use crate::keysync::*;
 use crate::limiter::*;
 use crate::streaming_sampler::*;
-use std::sync::Arc;
 
 pub struct GainFactory;
 impl ProcessorFactory for GainFactory {
