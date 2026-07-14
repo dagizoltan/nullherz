@@ -49,7 +49,10 @@ impl MoogLadder {
 }
 
 impl Filter for MoogLadder {
-    fn process_sample(&mut self, input: f32) -> f32 {
+    fn process_sample(&mut self, mut input: f32) -> f32 {
+        if !input.is_finite() {
+            input = 0.0;
+        }
         let g = self.g;
         let h = self.h;
         let res = self.resonance;
@@ -61,7 +64,7 @@ impl Filter for MoogLadder {
         let solver = crate::util::IterativeSolver::new(4, 1e-4);
 
         let s = self.s;
-        let u = solver.solve(input,
+        let mut u = solver.solve(input,
             |x| {
                 // Calculate y4 given input 'x'
                 let mut v = x;
@@ -77,6 +80,11 @@ impl Filter for MoogLadder {
             }
         );
 
+        if !u.is_finite() {
+            u = 0.0;
+            self.reset();
+        }
+
         // Apply stages with resolved feedback
         let mut x = u;
         for i in 0..4 {
@@ -84,6 +92,11 @@ impl Filter for MoogLadder {
             let y = v + self.s[i];
             self.s[i] = y + v;
             x = y;
+        }
+
+        if !x.is_finite() {
+            x = 0.0;
+            self.reset();
         }
 
         x
@@ -136,7 +149,8 @@ impl ZdfSvf {
         self.k = k;
     }
 
-    pub fn process_lp(&mut self, input: f32) -> f32 {
+    pub fn process_lp(&mut self, mut input: f32) -> f32 {
+        if !input.is_finite() { input = 0.0; }
         let g = self.g;
         let k = self.k;
         let a1 = 1.0 / (1.0 + g * (g + k));
@@ -149,11 +163,17 @@ impl ZdfSvf {
 
         self.s1 = 2.0 * v1 - self.s1;
         self.s2 = 2.0 * v2 - self.s2;
+
+        if !self.s1.is_finite() || !self.s2.is_finite() {
+            self.reset();
+            return 0.0;
+        }
 
         v2 // Lowpass
     }
 
-    pub fn process_hp(&mut self, input: f32) -> f32 {
+    pub fn process_hp(&mut self, mut input: f32) -> f32 {
+        if !input.is_finite() { input = 0.0; }
         let g = self.g;
         let k = self.k;
         let a1 = 1.0 / (1.0 + g * (g + k));
@@ -166,11 +186,17 @@ impl ZdfSvf {
 
         self.s1 = 2.0 * v1 - self.s1;
         self.s2 = 2.0 * v2 - self.s2;
+
+        if !self.s1.is_finite() || !self.s2.is_finite() {
+            self.reset();
+            return 0.0;
+        }
 
         input - k * v1 - v2 // Highpass
     }
 
-    pub fn process_bp(&mut self, input: f32) -> f32 {
+    pub fn process_bp(&mut self, mut input: f32) -> f32 {
+        if !input.is_finite() { input = 0.0; }
         let g = self.g;
         let k = self.k;
         let a1 = 1.0 / (1.0 + g * (g + k));
@@ -183,6 +209,11 @@ impl ZdfSvf {
 
         self.s1 = 2.0 * v1 - self.s1;
         self.s2 = 2.0 * v2 - self.s2;
+
+        if !self.s1.is_finite() || !self.s2.is_finite() {
+            self.reset();
+            return 0.0;
+        }
 
         v1 // Bandpass
     }
@@ -636,14 +667,7 @@ impl crate::DspKernel for DjIsolator {
     }
 
     fn reset(&mut self) {
-        self.low_pass_1.reset();
-        self.low_pass_2.reset();
-        self.high_pass_1.reset();
-        self.high_pass_2.reset();
-        self.mid_low_hp_1.reset();
-        self.mid_low_hp_2.reset();
-        self.mid_high_lp_1.reset();
-        self.mid_high_lp_2.reset();
+        self.reset();
     }
 
     fn set_parameter(&mut self, id: u32, value: f32, _ramp_samples: u32) {
@@ -706,7 +730,8 @@ impl DjIsolator {
         let g_h = self.gains[2];
 
         for i in 0..input.len() {
-            let s = input[i];
+            let mut s = input[i];
+            if !s.is_finite() { s = 0.0; }
 
             // 4th Order Low (2 cascaded LP)
             let l = self.low_pass_2.process_sample(self.low_pass_1.process_sample(s));
@@ -718,10 +743,26 @@ impl DjIsolator {
             let m_low = self.mid_low_hp_2.process_sample(self.mid_low_hp_1.process_sample(s));
             let m = self.mid_high_lp_2.process_sample(self.mid_high_lp_1.process_sample(m_low));
 
-            output[i] = l * g_l + m * g_m + h * g_h;
+            let out_sample = l * g_l + m * g_m + h * g_h;
+            if out_sample.is_finite() {
+                output[i] = out_sample;
+            } else {
+                output[i] = 0.0;
+                self.reset();
+            }
         }
     }
 
+    pub fn reset(&mut self) {
+        self.low_pass_1.reset();
+        self.low_pass_2.reset();
+        self.high_pass_1.reset();
+        self.high_pass_2.reset();
+        self.mid_low_hp_1.reset();
+        self.mid_low_hp_2.reset();
+        self.mid_high_lp_1.reset();
+        self.mid_high_lp_2.reset();
+    }
 }
 
 impl crate::DspKernel for BiquadFilter {
@@ -777,12 +818,14 @@ impl EnvelopeFollower {
         let release = self.release_coeff;
 
         for i in 0..input.len().min(sidechain.len()) {
-            let rect = sidechain[i].abs();
+            let mut rect = sidechain[i].abs();
+            if !rect.is_finite() { rect = 0.0; }
             if rect > env {
                 env = rect + attack * (env - rect);
             } else {
                 env = rect + release * (env - rect);
             }
+            if !env.is_finite() { env = 0.0; }
             output[i] = env;
         }
         self.envelope = env;

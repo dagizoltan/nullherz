@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn test_topology_cycle_detection() {
-        let mut mixer = MixerManager::new();
+        let mixer = MixerManager::new();
         let node_a = 0;
         let node_b = 1;
         let buf_a = 10;

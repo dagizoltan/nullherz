@@ -1,4 +1,4 @@
-use egui::{Ui, Frame, Margin, Rounding, Stroke, RichText, Color32};
+use egui::{Ui, Frame, Margin, Rounding, Stroke, RichText};
 use crate::InspectorApp;
 use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;

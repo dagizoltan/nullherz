@@ -1,4 +1,4 @@
-use egui::{Ui, Color32, RichText};
+use egui::{Ui, RichText};
 use crate::InspectorApp;
 use nullherz_ui_hal::widgets;
 

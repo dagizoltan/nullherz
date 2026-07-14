@@ -1,4 +1,4 @@
-use egui::{Ui, Frame, RichText};
+use egui::{Ui, RichText};
 use crate::{InspectorApp, SettingsTab};
 
 pub mod general;
@@ -9,7 +9,7 @@ pub mod network;
 pub mod calibration;
 
 pub use general::render_general;
-pub use preferences::{render_preferences, view_label};
+pub use preferences::render_preferences;
 pub use audio::render_audio;
 pub use midi::render_midi;
 pub use network::render_network;

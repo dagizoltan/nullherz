@@ -7,30 +7,30 @@ pub fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
     ui.add_space(theme.space_xs);
 
     // Query actual MIDI ports dynamically using midir if enabled
+    #[allow(unused_mut)]
     let mut actual_ports: Vec<String> = Vec::new();
-    let mut midi_error: Option<String> = None;
 
-    #[cfg(feature = "midi-backend")]
-    {
-        match midir::MidiInput::new("Nullherz Inspector MIDI Scan") {
-            Ok(midi_in) => {
-                let ports: Vec<midir::MidiInputPort> = midi_in.ports();
-                for port in &ports {
-                    if let Ok(name) = midi_in.port_name(port) {
-                        actual_ports.push(name);
+    let midi_error: Option<String> = {
+        #[cfg(feature = "midi-backend")]
+        {
+            match midir::MidiInput::new("Nullherz Inspector MIDI Scan") {
+                Ok(midi_in) => {
+                    let ports: Vec<midir::MidiInputPort> = midi_in.ports();
+                    for port in &ports {
+                        if let Ok(name) = midi_in.port_name(port) {
+                            actual_ports.push(name);
+                        }
                     }
+                    None
                 }
-            }
-            Err(e) => {
-                midi_error = Some(e.to_string());
+                Err(e) => Some(e.to_string()),
             }
         }
-    }
-
-    #[cfg(not(feature = "midi-backend"))]
-    {
-        midi_error = Some("Midir backend is disabled. Build with default features to enable live MIDI.".to_string());
-    }
+        #[cfg(not(feature = "midi-backend"))]
+        {
+            Some("Midir backend is disabled. Build with default features to enable live MIDI.".to_string())
+        }
+    };
 
     // Display appropriate live discovery status banner
     ui.horizontal(|ui| {

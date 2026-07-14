@@ -1,4 +1,4 @@
-use egui::{Ui, RichText, Color32};
+use egui::{Ui, RichText};
 use crate::InspectorApp;
 
 pub fn render_deck_transport(app: &mut InspectorApp, ui: &mut Ui, i: usize) {

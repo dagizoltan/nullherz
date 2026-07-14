@@ -1,4 +1,4 @@
-use egui::{Ui, Vec2, Stroke, Sense, RichText, Frame, Margin, Rounding};
+use egui::{Ui, Vec2, Stroke, Sense, RichText, Frame, Margin};
 use nullherz_traits::{Command, DnaCommand};
 use nullherz_dna::GeneticLibrary;
 

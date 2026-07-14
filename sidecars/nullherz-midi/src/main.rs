@@ -15,13 +15,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut shm_name = "";
     let mut _port_filter = "";
-    let mut map_path = "";
+    let mut _map_path = "";
 
     for i in 0..args.len() {
         match args[i].as_str() {
             "--shm" if i + 1 < args.len() => shm_name = &args[i+1],
             "--port" if i + 1 < args.len() => _port_filter = &args[i+1],
-            "--map" if i + 1 < args.len() => map_path = &args[i+1],
+            "--map" if i + 1 < args.len() => _map_path = &args[i+1],
             _ => {}
         }
     }
@@ -57,8 +57,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             println!("Connecting to MIDI port: {}", midi_in.port_name(port)?);
 
-            if !map_path.is_empty() {
-                println!("Loading MIDI map from: {}", map_path);
+            if !_map_path.is_empty() {
+                println!("Loading MIDI map from: {}", _map_path);
             }
 
             // 3. Start MIDI Loop
