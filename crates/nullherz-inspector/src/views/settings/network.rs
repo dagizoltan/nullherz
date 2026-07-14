@@ -4,7 +4,7 @@ use crate::InspectorApp;
 pub fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
     let current_time = ui.input(|i| i.time);
-    let telemetry_opt = app.last_telemetry.lock().unwrap().clone();
+    let telemetry_opt = *app.last_telemetry.lock();
 
     ui.strong("Distributed Sidecar Discovery");
     ui.add_space(theme.space_xs);

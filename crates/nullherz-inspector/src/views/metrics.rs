@@ -3,7 +3,7 @@ use crate::InspectorApp;
 use nullherz_ui_hal::widgets;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
-    let telemetry = app.last_telemetry.lock().unwrap().clone();
+    let telemetry = *app.last_telemetry.lock();
     let frame_width = ui.available_width().min(400.0);
     let theme = app.theme;
 

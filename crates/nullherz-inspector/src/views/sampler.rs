@@ -27,8 +27,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             let (rect, _response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 160.0), Sense::hover());
 
             if let (Some(wgpu_mtx), Some(wf_mtx)) = (&app.wgpu_renderer, &app.waveform_renderer) {
-                 let _wgpu = wgpu_mtx.lock().unwrap();
-                 let mut wf = wf_mtx.lock().unwrap();
+                 let _wgpu = wgpu_mtx.lock();
+                 let mut wf = wf_mtx.lock();
 
                  let deck_idx = app.focused_deck;
                  if let Some(track_id) = app.now_playing[deck_idx] {

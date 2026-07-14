@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use eframe::egui;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use audio_core::Telemetry;
 use nullherz_traits::Command;
 use std::sync::mpsc;
@@ -276,40 +277,38 @@ impl InspectorApp {
                     nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase")
                 });
                 // Seed demo tracks if database is empty
-                if let Ok(tracks) = db.list_tracks() {
-                    if tracks.is_empty() {
-                        let mut metadata_a = nullherz_traits::SampleMetadata::new_empty();
-                        metadata_a.bpm = 120.0;
-                        metadata_a.total_samples = 44100 * 60 * 3; // 3 minutes
-                        metadata_a.root_key = Some(5.0);
-                        let track_a = nullherz_dna::LibraryTrack {
-                            id: 1,
-                            path: "tracks/track_a.wav".to_string(),
-                            title: "Demo Track A".to_string(),
-                            artist: "Nullherz".to_string(),
-                            album: "Demo Album".to_string(),
-                            genre: "Techno".to_string(),
-                            energy_level: 0.8,
-                            metadata: std::sync::Arc::new(metadata_a),
-                        };
-                        let _ = db.save_track(&track_a);
+                if db.list_tracks().is_ok_and(|t| t.is_empty()) {
+                    let mut metadata_a = nullherz_traits::SampleMetadata::new_empty();
+                    metadata_a.bpm = 120.0;
+                    metadata_a.total_samples = 44100 * 60 * 3; // 3 minutes
+                    metadata_a.root_key = Some(5.0);
+                    let track_a = nullherz_dna::LibraryTrack {
+                        id: 1,
+                        path: "tracks/track_a.wav".to_string(),
+                        title: "Demo Track A".to_string(),
+                        artist: "Nullherz".to_string(),
+                        album: "Demo Album".to_string(),
+                        genre: "Techno".to_string(),
+                        energy_level: 0.8,
+                        metadata: std::sync::Arc::new(metadata_a),
+                    };
+                    let _ = db.save_track(&track_a);
 
-                        let mut metadata_b = nullherz_traits::SampleMetadata::new_empty();
-                        metadata_b.bpm = 124.0;
-                        metadata_b.total_samples = 44100 * 60 * 3; // 3 minutes
-                        metadata_b.root_key = Some(8.0);
-                        let track_b = nullherz_dna::LibraryTrack {
-                            id: 2,
-                            path: "tracks/track_b.wav".to_string(),
-                            title: "Demo Track B".to_string(),
-                            artist: "Nullherz".to_string(),
-                            album: "Demo Album".to_string(),
-                            genre: "House".to_string(),
-                            energy_level: 0.6,
-                            metadata: std::sync::Arc::new(metadata_b),
-                        };
-                        let _ = db.save_track(&track_b);
-                    }
+                    let mut metadata_b = nullherz_traits::SampleMetadata::new_empty();
+                    metadata_b.bpm = 124.0;
+                    metadata_b.total_samples = 44100 * 60 * 3; // 3 minutes
+                    metadata_b.root_key = Some(8.0);
+                    let track_b = nullherz_dna::LibraryTrack {
+                        id: 2,
+                        path: "tracks/track_b.wav".to_string(),
+                        title: "Demo Track B".to_string(),
+                        artist: "Nullherz".to_string(),
+                        album: "Demo Album".to_string(),
+                        genre: "House".to_string(),
+                        energy_level: 0.6,
+                        metadata: std::sync::Arc::new(metadata_b),
+                    };
+                    let _ = db.save_track(&track_b);
                 }
                 db
             },
@@ -650,7 +649,7 @@ impl InspectorApp {
                     }
 
                     ui.separator();
-                    ui.toggle_value(&mut self.is_streaming, &format!("{} BROADCAST", egui_phosphor::regular::BROADCAST));
+                    ui.toggle_value(&mut self.is_streaming, format!("{} BROADCAST", egui_phosphor::regular::BROADCAST));
                 });
             });
         });
@@ -736,7 +735,7 @@ impl eframe::App for InspectorApp {
 
         let telemetry = if should_process {
             self.last_update_time = current_time;
-            self.last_telemetry.lock().ok().and_then(|t| t.clone())
+            *self.last_telemetry.lock()
         } else {
             None
         };
@@ -834,8 +833,10 @@ impl eframe::App for InspectorApp {
 }
 
 fn main() -> eframe::Result<()> {
-    let mut native_options = eframe::NativeOptions::default();
-    native_options.renderer = eframe::Renderer::Wgpu;
+    let native_options = eframe::NativeOptions {
+        renderer: eframe::Renderer::Wgpu,
+        ..Default::default()
+    };
 
     eframe::run_native(
         "nullherz Studio",
@@ -862,13 +863,13 @@ fn main() -> eframe::Result<()> {
                 app.waveform_renderer = Some(Arc::new(Mutex::new(wf_renderer)));
 
                 let mut deck_wfs = [None, None, None, None];
-                for i in 0..4 {
+                for wf_slot in &mut deck_wfs {
                     let wf = nullherz_ui_hal::render::waveform_renderer::WaveformRenderer::new(
                         &render_state.device,
                         render_state.target_format,
                         1024
                     );
-                    deck_wfs[i] = Some(Arc::new(Mutex::new(wf)));
+                    *wf_slot = Some(Arc::new(Mutex::new(wf)));
                 }
                 app.deck_waveform_renderers = deck_wfs;
             }

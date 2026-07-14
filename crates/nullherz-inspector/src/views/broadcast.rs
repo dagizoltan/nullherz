@@ -3,7 +3,7 @@ use crate::InspectorApp;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let current_time = ui.input(|i| i.time);
-    let telemetry_opt = app.last_telemetry.lock().unwrap().clone();
+    let telemetry_opt = *app.last_telemetry.lock();
 
     // Synchronize local state with live telemetry if active
     if let Some(ref t) = telemetry_opt {

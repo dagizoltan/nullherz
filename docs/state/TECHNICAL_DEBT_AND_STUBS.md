@@ -14,6 +14,7 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 - **UI Placeholders**: [RESOLVED] Account and Metrics views now utilize live telemetry instead of mocks.
 - **Waveform Rendering**: [OPTIMIZED] Implemented precise LOD selection in `waveform_renderer.rs`.
 - **DNA Transfusion Builder**: [RESOLVED] Implemented `DnaCommand::pack_transfusion` to eliminate unsafe byte-packing in the Breeder view.
+- **Decoupled Synchronization**: [RESOLVED] Replaced standard library blocking and lock-poisoning `std::sync::Mutex` with high-performance `parking_lot::Mutex` across UI and rendering components to comply with real-time safety lints and avoid poisoning states.
 
 ---
 

@@ -129,8 +129,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                     if let Some(ref t) = track {
                         if let (Some(wgpu_mtx), Some(wf_mtx)) = (&app.wgpu_renderer, &app.deck_waveform_renderers[deck_idx]) {
-                            let _wgpu = wgpu_mtx.lock().unwrap();
-                            let mut wf = wf_mtx.lock().unwrap();
+                            let _wgpu = wgpu_mtx.lock();
+                            let mut wf = wf_mtx.lock();
                             let zoom = 1.0;
                             let scroll = 0.0;
                             let color = deck_color.to_array().map(|v| v as f32 / 255.0);

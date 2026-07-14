@@ -23,7 +23,8 @@ pub struct WaveformRenderer {
     _max_peaks: usize,
 }
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 
 pub struct WaveformCallback {
     pub renderer: Arc<Mutex<WaveformRenderer>>,
@@ -31,10 +32,9 @@ pub struct WaveformCallback {
 
 impl egui_wgpu::CallbackTrait for WaveformCallback {
     fn paint<'a>(&'a self, _info: egui::PaintCallbackInfo, render_pass: &mut wgpu::RenderPass<'a>, _resources: &egui_wgpu::CallbackResources) {
-        if let Ok(wf) = self.renderer.lock() {
-            let wf_ptr: *const WaveformRenderer = &*wf;
-            unsafe { (*wf_ptr).render(render_pass); }
-        }
+        let wf = self.renderer.lock();
+        let wf_ptr: *const WaveformRenderer = &*wf;
+        unsafe { (*wf_ptr).render(render_pass); }
     }
 }
 

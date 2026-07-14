@@ -165,8 +165,7 @@ impl MixerCommand {
     pub fn pack_bundle(updates: &[(u64, u32, f32)]) -> Self {
         let mut data = [0u8; 128];
         let count = updates.len().min(8);
-        for i in 0..count {
-            let (target_id, param_id, value) = updates[i];
+        for (i, &(target_id, param_id, value)) in updates.iter().take(count).enumerate() {
             let offset = i * 16;
             data[offset..offset + 8].copy_from_slice(&target_id.to_le_bytes());
             data[offset + 8..offset + 12].copy_from_slice(&param_id.to_le_bytes());
@@ -343,13 +342,12 @@ impl DnaCommand {
         payload[..64].copy_from_slice(bytemuck::cast_slice(latent));
 
         // 2. Rhythmic Micro-timing (64-75)
-        for i in 0..12 {
-            payload[64 + i] = (micro_timing[i] as i8) as u8;
+        for (i, &timing) in micro_timing.iter().enumerate().take(12) {
+            payload[64 + i] = (timing as i8) as u8;
         }
 
         // 3. Rhythmic Onset Mask (76-107)
-        for i in 0..4 {
-            let mask = onset_mask[i];
+        for (i, &mask) in onset_mask.iter().enumerate().take(4) {
             for j in 0..8 {
                 payload[76 + i * 8 + j] = ((mask >> (j * 8)) & 0xFF) as u8;
             }
@@ -563,14 +561,8 @@ pub struct CrossfadeState {
     pub total_samples: u32,
 }
 
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Default)]
 pub struct NodeAssignment(#[serde(with = "BigArray")] pub [u8; 32]);
-
-impl Default for NodeAssignment {
-    fn default() -> Self {
-        Self([0; 32])
-    }
-}
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct NodeAssignmentArray(#[serde(with = "BigArray")] pub [NodeAssignment; MAX_NODES]);
@@ -1123,7 +1115,7 @@ impl PtpClockProvider {
         use std::os::unix::io::AsRawFd;
 
         let fd = socket(AddressFamily::Inet, SockType::Datagram, SockFlag::empty(), None)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
 
         // Enable hardware and software timestamping
         let flags = TimestampingFlag::SOF_TIMESTAMPING_TX_HARDWARE
@@ -1133,11 +1125,11 @@ impl PtpClockProvider {
             | TimestampingFlag::SOF_TIMESTAMPING_RAW_HARDWARE;
 
         setsockopt(&fd, sockopt::Timestamping, &flags)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
 
         // Bind to interface (simplified for PTP example)
         let addr = std::net::SocketAddrV4::new(std::net::Ipv4Addr::new(0,0,0,0), 319);
-        bind(fd.as_raw_fd(), &nix::sys::socket::SockaddrIn::from(addr)).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        bind(fd.as_raw_fd(), &nix::sys::socket::SockaddrIn::from(addr)).map_err(std::io::Error::other)?;
 
         Ok(Self {
             _socket_fd: fd.as_raw_fd(),
@@ -1426,19 +1418,13 @@ impl Default for SoundDNA {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Default)]
 #[archive(check_bytes)]
 pub struct MipWaveform {
     /// Level 0 is full resolution peaks.
     /// Subsequent levels are downsampled by powers of 2.
     #[serde(skip)]
     pub levels: Vec<Arc<Vec<f32>>>,
-}
-
-impl Default for MipWaveform {
-    fn default() -> Self {
-        Self { levels: vec![] }
-    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
