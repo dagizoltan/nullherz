@@ -179,23 +179,34 @@ impl AudioBackend for AlsaBackend {
                     });
                 }
 
-                let mut outputs_raw = [[0.0f32; ipc_layer::MAX_BLOCK_SIZE]; 2];
-                let mut interleaved_f32 = [0.0f32; ipc_layer::MAX_BLOCK_SIZE * 2];
-                let mut interleaved_s16 = [0i16; ipc_layer::MAX_BLOCK_SIZE * 2];
-
                 let actual_period = period_size as usize;
+
+                // Dynamically allocated buffers to support any ALSA period size negotiated by PipeWire or local driver
+                let mut outputs_raw = vec![vec![0.0f32; actual_period]; 2];
+                let mut interleaved_f32 = vec![0.0f32; actual_period * 2];
+                let mut interleaved_s16 = vec![0i16; actual_period * 2];
+
                 let mut block_count: u64 = 0;
                 eprintln!("[ALSA] Audio thread running. period={} engine_bound={}", actual_period, engine_arc_opt.is_some());
 
                 while running.load(Ordering::SeqCst) {
-                    if let Some(ref engine_arc) = engine_arc_opt {
-                        let (ch1, ch2) = outputs_raw.split_at_mut(1);
-                        let mut out_refs = [&mut ch1[0][..actual_period], &mut ch2[0][..actual_period]];
-                        let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-                        (*engine_ptr).process_block(&[], &mut out_refs, actual_period);
-                    } else {
-                        outputs_raw[0].fill(0.0);
-                        outputs_raw[1].fill(0.0);
+                    let mut offset = 0;
+                    while offset < actual_period {
+                        let chunk_size = (actual_period - offset).min(ipc_layer::MAX_BLOCK_SIZE);
+
+                        if let Some(ref engine_arc) = engine_arc_opt {
+                            let (ch1, ch2) = outputs_raw.split_at_mut(1);
+                            let mut out_refs = [
+                                &mut ch1[0][offset..offset + chunk_size],
+                                &mut ch2[0][offset..offset + chunk_size],
+                            ];
+                            let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
+                            (*engine_ptr).process_block(&[], &mut out_refs, chunk_size);
+                        } else {
+                            outputs_raw[0][offset..offset + chunk_size].fill(0.0);
+                            outputs_raw[1][offset..offset + chunk_size].fill(0.0);
+                        }
+                        offset += chunk_size;
                     }
 
                     // Diagnostic: Log peak level every 500 blocks (~1.5s at 128/44100)
