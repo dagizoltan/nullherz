@@ -3302,6 +3302,7 @@ name = "nullherz-inspector"
 version = "0.1.0"
 dependencies = [
  "audio-core",
+ "directories-next",
  "eframe",
  "egui",
  "egui-phosphor",
@@ -3314,6 +3315,7 @@ dependencies = [
  "nullherz-ui-hal",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-tungstenite",
 ]

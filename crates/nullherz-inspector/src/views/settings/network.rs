@@ -50,8 +50,10 @@ pub fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
                 }
             }
 
+            let mut is_fallback = false;
             // Fallback list of remote nodes for testing/preview if empty
             if list.is_empty() {
+                is_fallback = true;
                 list.push(nullherz_traits::SidecarManifest {
                     name: "Studio-PC-2 (192.168.1.45)".to_string(),
                     version: "1.0.0".to_string(),
@@ -68,6 +70,11 @@ pub fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
                     binary_name: "".to_string(),
                     ui_controls: vec![],
                 });
+            }
+
+            if is_fallback {
+                ui.label(RichText::new("No remote nodes detected. Presenting mock nodes for emulation:").size(theme.type_caption).color(theme.text_secondary));
+                ui.add_space(theme.space_xs);
             }
 
             for (i, node) in list.iter().enumerate() {
