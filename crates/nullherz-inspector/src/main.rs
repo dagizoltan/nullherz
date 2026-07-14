@@ -199,6 +199,7 @@ pub struct InspectorApp {
     pub(crate) autosave_triggered: Option<f64>,
     pub(crate) shortcuts_enabled: bool,
     pub(crate) global_playing: bool,
+    pub(crate) auto_pollinate_enabled: bool,
 }
 
 impl InspectorApp {
@@ -411,6 +412,7 @@ impl InspectorApp {
             autosave_triggered: None,
             shortcuts_enabled: true,
             global_playing: false,
+            auto_pollinate_enabled: false,
             node_map: [
                 ("deck_a_sampler".to_string(), 0), ("deck_a_gain".to_string(), 4), ("deck_a_filter".to_string(), 3),
                 ("deck_b_sampler".to_string(), 4), ("deck_b_gain".to_string(), 8), ("deck_b_filter".to_string(), 7),
