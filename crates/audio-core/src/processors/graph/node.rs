@@ -1,5 +1,6 @@
 use crate::processors::AudioProcessor;
 
+#[repr(align(64))]
 pub struct ProcessorNode {
     pub processor: std::cell::UnsafeCell<Box<dyn AudioProcessor>>,
 }

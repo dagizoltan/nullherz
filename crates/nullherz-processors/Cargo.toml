@@ -15,3 +15,6 @@ bytemuck = "1.15"
 
 [features]
 test-utils = ["nullherz-traits/test-utils"]
+
+[dev-dependencies]
+nullherz-traits = { path = "../nullherz-traits", features = ["test-utils"] }

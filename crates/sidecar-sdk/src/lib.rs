@@ -55,7 +55,7 @@ impl MemoryMapper for WasmMemoryMapper {
 pub struct SidecarHost<M: MemoryMapper = NativeMemoryMapper> {
     mapper: M,
     shm_cmd: M::Mapping,
-    shm_midi: Option<M::Mapping>,
+    _shm_midi: Option<M::Mapping>,
     shm_signal: M::Mapping,
     shm_inputs: Vec<M::Mapping>,
     shm_sidechains: Vec<M::Mapping>,
@@ -93,7 +93,7 @@ impl<M: MemoryMapper> SidecarHost<M> {
         Self {
             mapper,
             shm_cmd,
-            shm_midi: None,
+            _shm_midi: None,
             shm_signal,
             shm_inputs,
             shm_sidechains,
