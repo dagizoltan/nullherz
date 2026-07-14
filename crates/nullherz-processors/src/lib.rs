@@ -1,6 +1,7 @@
 pub mod sidecar;
 pub mod delay;
 pub mod compressor;
+pub mod limiter;
 pub mod stereo_utility;
 pub mod analysis;
 pub mod streaming_sampler;
@@ -31,6 +32,7 @@ pub use nullherz_traits::{MAX_CHANNELS, MAX_NODES};
 pub use sidecar::SidecarProcessor;
 pub use delay::DelayProcessor;
 pub use compressor::CompressorProcessor;
+pub use limiter::LimiterProcessor;
 pub use stereo_utility::StereoUtilityProcessor;
 pub use analysis::AnalysisProcessor;
 pub use streaming_sampler::StreamingSamplerProcessor;
