@@ -110,12 +110,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 ui.painter().rect_filled(header_rect, theme.radius_sm, theme.bg_inset);
                 ui.painter().text(header_rect.left_center() + egui::vec2(5.0, 0.0), egui::Align2::LEFT_CENTER, &node.name, egui::FontId::proportional(theme.type_caption), theme.text_primary);
 
-                // Host Assignment Badge
+                // Host Assignment Badge (Spatially adjusted to avoid overlaps)
                 let host_assignment_raw = &app.graph.node_assignments.0[idx].0;
                 let host_assignment = if host_assignment_raw[0] == 0 { "local" } else {
                     std::str::from_utf8(host_assignment_raw).unwrap_or("local").trim_matches(char::from(0))
                 };
-                let host_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(75.0, 0.0), egui::vec2(50.0, 14.0));
+                let host_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(68.0, 0.0), egui::vec2(40.0, 14.0));
                 let host_color = if host_assignment == "local" { theme.accent_muted } else { theme.accent };
 
                 let host_resp = ui.interact(host_rect, node_id.with("host_migrate"), Sense::click());
@@ -133,7 +133,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 ui.painter().text(host_rect.center(), egui::Align2::CENTER_CENTER, host_assignment.to_uppercase(), egui::FontId::monospace(8.0), host_color);
 
                 // Bypass Toggle in header
-                let bypass_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(25.0, 0.0), egui::vec2(40.0, 14.0));
+                let bypass_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(32.0, 0.0), egui::vec2(24.0, 14.0));
                 let bypass_id = node_id.with("bypass");
                 let bypassed = app.bypassed_nodes.contains(&(idx as u32));
 
@@ -153,6 +153,19 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 let bypass_color = if bypassed { theme.danger } else { theme.text_disabled };
                 ui.painter().rect_filled(bypass_rect, 2.0, bypass_color);
                 ui.painter().text(bypass_rect.center(), egui::Align2::CENTER_CENTER, "BYP", egui::FontId::monospace(9.0), theme.text_primary);
+
+                // Delete Node Button (Far Right of header)
+                let delete_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(10.0, 0.0), egui::vec2(14.0, 14.0));
+                let delete_id = node_id.with("delete");
+                let delete_resp = ui.interact(delete_rect, delete_id, Sense::click());
+                if delete_resp.clicked() {
+                    let _ = app.command_sender.send(Command::Topology(TopologyCommand::RemoveNode {
+                        node_idx: idx as u32,
+                    }));
+                }
+                let delete_color = if delete_resp.hovered() { theme.danger } else { theme.text_disabled };
+                ui.painter().circle_filled(delete_rect.center(), 6.0, delete_color);
+                ui.painter().text(delete_rect.center(), egui::Align2::CENTER_CENTER, "×", egui::FontId::monospace(10.0), theme.text_primary);
 
                 // Industrial Sockets (Circular)
                 let socket_radius = 6.0;
