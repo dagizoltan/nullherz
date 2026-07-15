@@ -91,6 +91,7 @@ impl GraphExecutor {
         telemetry_node_times_cycles: &[std::sync::atomic::AtomicU64; crate::MAX_NODES],
         pdc_lines: &mut crate::processors::graph::buffer_pool::PdcLines,
         pdc_write_pos: usize,
+        faulted_states: &[std::sync::atomic::AtomicBool; crate::MAX_NODES],
     ) {
         let stage = &topo.plan.stages[s_idx].0[..topo.plan.stage_counts[s_idx] as usize];
         // SAFETY: buffers_ptr and x_buffers_ptr are used to reconstruct disjoint slices in worker threads.
@@ -182,7 +183,7 @@ impl GraphExecutor {
                     *resolved_out = topo.virtual_to_physical[v_idx] as usize;
                 }
 
-                let is_bypassed = topo.bypass_states[n_idx];
+                let is_bypassed = topo.bypass_states[n_idx] || faulted_states[n_idx].load(Ordering::Relaxed);
 
 
                 let telemetry_ptr = if let Some(p_mut) = pool.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
@@ -210,7 +211,7 @@ impl GraphExecutor {
                     host_ptr: host.map(|h| h as *const dyn nullherz_traits::Host),
                     is_last_sub_block,
                     is_bypassed,
-                    bypass_state_ptr: &topo.bypass_states[n_idx] as *const _ as *mut bool,
+                    bypass_state_ptr: &faulted_states[n_idx] as *const std::sync::atomic::AtomicBool,
                     pdc_lines_ptr: pdc_lines,
                     pdc_write_pos,
                 };
@@ -298,7 +299,7 @@ impl GraphExecutor {
                     }
                 }
 
-                if topo.bypass_states[n_idx] {
+                if topo.bypass_states[n_idx] || faulted_states[n_idx].load(Ordering::Relaxed) {
                     if input_count > 0 {
                         let input = node_inputs_storage[0];
                         for output in node_outputs_reconstructed.iter_mut().take(output_count) {
@@ -333,8 +334,7 @@ impl GraphExecutor {
                         }
 
                         // Permanently bypass the node
-                        let topo_mut = topo as *const GraphTopology as *mut GraphTopology;
-                        unsafe { (*topo_mut).bypass_states[n_idx] = true; }
+                        faulted_states[n_idx].store(true, Ordering::Relaxed);
                     } else {
                         for output in node_outputs_reconstructed.iter().take(output_count) {
                             crate::assert_finite_block!(output, n_idx);

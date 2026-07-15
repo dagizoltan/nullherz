@@ -38,6 +38,7 @@ pub struct ProcessorGraph {
     pub(crate) garbage_producer: Option<Box<dyn nullherz_traits::GarbageProducer>>,
     pub(crate) pending_mutations: [Option<TopologyMutation>; crate::MAX_MUTATIONS],
     pub(crate) pending_mutation_count: usize,
+    pub(crate) faulted_states: Arc<[std::sync::atomic::AtomicBool; crate::MAX_NODES]>,
 }
 
 impl ProcessorGraph {
@@ -67,6 +68,8 @@ impl ProcessorGraph {
             processor: std::cell::UnsafeCell::new(Box::new(DummyProcessor) as Box<dyn AudioProcessor>),
         }));
 
+        let faulted_states = Arc::new(std::array::from_fn(|_| std::sync::atomic::AtomicBool::new(false)));
+
         Self {
             nodes,
             node_count: 0,
@@ -82,6 +85,7 @@ impl ProcessorGraph {
             garbage_producer: None,
             pending_mutations: std::array::from_fn(|_| None),
             pending_mutation_count: 0,
+            faulted_states,
         }
     }
 
@@ -269,6 +273,7 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                     &self.telemetry.node_times_cycles,
                     pdc_lines,
                     self.buffer_pool.pdc_write_pos,
+                    &self.faulted_states,
                 );
             }
         }
@@ -291,6 +296,7 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                 &self.telemetry.node_times_cycles,
                 pdc_lines,
                 self.buffer_pool.pdc_write_pos,
+                &self.faulted_states,
             );
         }
 
@@ -749,8 +755,8 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         let p_idx_3 = graph.topology_coordinator.topologies[active_idx_0].virtual_to_physical[3] as usize;
         assert!(graph.buffer_pool.buffers[p_idx_3].data.iter().all(|&x| x == 0.0));
 
-        // Assert Node 1 is permanently bypassed in active topology
-        assert!(graph.topology_coordinator.topologies[active_idx_0].bypass_states[1], "Node 1 must be marked as bypassed");
+        // Assert Node 1 is permanently bypassed in active topology via faulted_states AtomicBool
+        assert!(graph.faulted_states[1].load(Ordering::Relaxed), "Node 1 must be marked as bypassed");
 
         // 2. Run second block execution
         // Clear outputs before processing

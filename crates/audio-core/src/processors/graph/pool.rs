@@ -25,7 +25,7 @@ pub struct Job {
     pub host_ptr: Option<*const dyn nullherz_traits::Host>,
     pub is_last_sub_block: bool,
     pub is_bypassed: bool,
-    pub bypass_state_ptr: *mut bool,
+    pub bypass_state_ptr: *const std::sync::atomic::AtomicBool,
     pub pdc_lines_ptr: *mut crate::processors::graph::buffer_pool::PdcLines,
     pub pdc_write_pos: usize,
 }
@@ -240,7 +240,7 @@ impl TaskPool {
 
                                 // Permanently bypass the node
                                 if !job.bypass_state_ptr.is_null() {
-                                    unsafe { *job.bypass_state_ptr = true; }
+                                    unsafe { (*job.bypass_state_ptr).store(true, Ordering::Relaxed); }
                                 }
                             } else {
                                 for output in node_outputs_reconstructed.iter().take(output_count) {
