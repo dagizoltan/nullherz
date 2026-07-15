@@ -423,7 +423,7 @@ impl Conductor {
         if now % 60 == 0 && self.last_autosave_secs != now {
             self.last_autosave_secs = now;
             let state = self.capture_state();
-            tokio::spawn(async move {
+            tokio::task::spawn_blocking(move || {
                 let _ = state.save_to_file("autosave.json");
                 let _ = state.save_to_rkyv("autosave.rkyv");
                 println!("Conductor: Background Auto-Save complete.");

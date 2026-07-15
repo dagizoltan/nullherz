@@ -29,6 +29,31 @@ impl StreamingManager {
         self.is_streaming = true;
         self.start_time = Some(std::time::Instant::now());
 
+        // Create a bounded channel for double-buffered blocks of samples (each block is e.g. 1024 samples)
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(64);
+
+        // 1. Spawn high-priority feeder thread to drain intermediate channel and fill shared-memory ring buffer
+        let ring_buffer_clone = ring_buffer.clone();
+        thread::spawn(move || {
+            while let Ok(block) = rx.recv() {
+                if Arc::strong_count(&ring_buffer_clone) == 1 {
+                    break;
+                }
+                for &sample in &block {
+                    // Poll ring-buffer capacity and write next chunk
+                    while let Err(_failed_sample) = ring_buffer_clone.push(sample) {
+                        if Arc::strong_count(&ring_buffer_clone) == 1 {
+                            break;
+                        }
+                        thread::sleep(std::time::Duration::from_millis(2));
+                    }
+                }
+            }
+        });
+
+        // 2. Spawn disk decoder thread to run file reading and symphonia decoding
+        // Decoder thread holds a Weak reference to ShmRingBuffer to accurately detect when the consumer releases its Arc
+        let ring_buffer_weak = Arc::downgrade(&ring_buffer);
         thread::spawn(move || {
             use symphonia::core::audio::Signal;
 
@@ -43,9 +68,10 @@ impl StreamingManager {
                     if let Some(track) = probed.format.default_track() {
                         if let Ok(mut decoder) = symphonia::default::get_codecs().make(&track.codec_params, &Default::default()) {
                             let mut sample_buf = None;
+                            let mut current_block = Vec::with_capacity(1024);
 
                             while let Ok(packet) = probed.format.next_packet() {
-                                if Arc::strong_count(&ring_buffer) == 1 {
+                                if ring_buffer_weak.strong_count() <= 1 {
                                     break;
                                 }
 
@@ -59,7 +85,7 @@ impl StreamingManager {
                                     let chan_len = buf.frames();
                                     let num_chans = buf.spec().channels.count();
                                     for i in 0..chan_len {
-                                        if Arc::strong_count(&ring_buffer) == 1 {
+                                        if ring_buffer_weak.strong_count() <= 1 {
                                             break;
                                         }
 
@@ -69,15 +95,19 @@ impl StreamingManager {
                                         }
                                         sample /= num_chans as f32;
 
-                                        // Poll ring-buffer capacity and write next chunk
-                                        while let Err(_failed_sample) = ring_buffer.push(sample) {
-                                            if Arc::strong_count(&ring_buffer) == 1 {
+                                        current_block.push(sample);
+                                        if current_block.len() >= 1024 {
+                                            let block_to_send = std::mem::replace(&mut current_block, Vec::with_capacity(1024));
+                                            if tx.send(block_to_send).is_err() {
                                                 break;
                                             }
-                                            thread::sleep(std::time::Duration::from_millis(5));
                                         }
                                     }
                                 }
+                            }
+                            // Send any remaining samples in the final partial block
+                            if !current_block.is_empty() {
+                                let _ = tx.send(current_block);
                             }
                         }
                     }
