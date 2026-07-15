@@ -201,6 +201,8 @@ pub struct InspectorApp {
     pub(crate) shortcuts_enabled: bool,
     pub(crate) global_playing: bool,
     pub(crate) auto_pollinate_enabled: bool,
+    pub(crate) selected_topology_node: Option<u32>,
+    pub(crate) undo_redo_toast: Option<(f64, String)>,
 }
 
 impl InspectorApp {
@@ -412,6 +414,8 @@ impl InspectorApp {
             shortcuts_enabled: true,
             global_playing: false,
             auto_pollinate_enabled: false,
+            selected_topology_node: None,
+            undo_redo_toast: None,
             node_map: [
                 ("deck_a_sampler".to_string(), 0), ("deck_a_gain".to_string(), 4), ("deck_a_filter".to_string(), 3),
                 ("deck_b_sampler".to_string(), 4), ("deck_b_gain".to_string(), 8), ("deck_b_filter".to_string(), 7),
@@ -671,11 +675,14 @@ impl InspectorApp {
                 if i.key_pressed(egui::Key::Z) && i.modifiers.command {
                     if i.modifiers.shift {
                         let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Redo));
+                        self.undo_redo_toast = Some((current_time, "Redid last operation".to_string()));
                     } else {
                         let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Undo));
+                        self.undo_redo_toast = Some((current_time, "Undid last operation".to_string()));
                     }
                 } else if i.key_pressed(egui::Key::Y) && i.modifiers.command {
                     let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Redo));
+                    self.undo_redo_toast = Some((current_time, "Redid last operation".to_string()));
                 }
                 if i.key_pressed(egui::Key::S) && i.modifiers.command {
                     let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology));
@@ -836,6 +843,30 @@ impl eframe::App for InspectorApp {
                  View::Broadcast => views::broadcast::render(self, ui),
                  View::Settings => views::settings::render(self, ui),
                  _ => { ui.label("View coming soon..."); }
+             }
+
+             // Float transient visual toast notifications for Undo/Redo
+             if let Some((t, msg)) = self.undo_redo_toast.clone() {
+                 if current_time - t < 3.0 {
+                     egui::Area::new(egui::Id::new("undo_redo_toast"))
+                         .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -40.0))
+                         .show(ctx, |ui| {
+                             egui::Frame::none()
+                                 .fill(self.theme.accent.linear_multiply(0.15))
+                                 .stroke(egui::Stroke::new(1.0, self.theme.accent))
+                                 .rounding(self.theme.radius_md)
+                                 .inner_margin(self.theme.space_md)
+                                 .show(ui, |ui| {
+                                     ui.horizontal(|ui| {
+                                         ui.label(egui::RichText::new(egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE).color(self.theme.accent));
+                                         ui.label(egui::RichText::new(msg).strong().color(self.theme.text_primary));
+                                     });
+                                 });
+                         });
+                     ctx.request_repaint(); // Keep repainting while toast is active
+                 } else {
+                     self.undo_redo_toast = None;
+                 }
              }
         });
     }

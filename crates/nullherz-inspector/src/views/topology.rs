@@ -5,7 +5,45 @@ use nullherz_traits::{Command, TopologyCommand};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     let theme = app.theme;
-    ui.heading(RichText::new("System Topology").size(theme.type_heading));
+
+    // Bounds check selected_topology_node
+    if let Some(selected_idx) = app.selected_topology_node {
+        if selected_idx as usize >= app.graph.nodes.len() {
+            app.selected_topology_node = None;
+        }
+    }
+
+    // Keyboard Delete / Backspace Shortcut
+    if let Some(selected_idx) = app.selected_topology_node {
+        let delete_pressed = ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace));
+        if delete_pressed {
+            let _ = app.command_sender.send(Command::Topology(TopologyCommand::RemoveNode {
+                node_idx: selected_idx,
+            }));
+            app.selected_topology_node = None;
+        }
+    }
+
+    ui.horizontal(|ui| {
+        ui.heading(RichText::new("System Topology").size(theme.type_heading));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Redo button
+            let redo_btn = ui.button(RichText::new(format!("{} REDO", egui_phosphor::regular::ARROW_CLOCKWISE)).size(theme.type_label))
+                .on_hover_text("Redo last undone action (Ctrl+Shift+Z or Ctrl+Y)");
+            if redo_btn.clicked() {
+                let _ = app.command_sender.send(Command::Core(nullherz_traits::CoreCommand::Redo));
+                app.undo_redo_toast = Some((ui.input(|i| i.time), "Redid last operation".to_string()));
+            }
+
+            // Undo button
+            let undo_btn = ui.button(RichText::new(format!("{} UNDO", egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE)).size(theme.type_label))
+                .on_hover_text("Undo last action (Ctrl+Z)");
+            if undo_btn.clicked() {
+                let _ = app.command_sender.send(Command::Core(nullherz_traits::CoreCommand::Undo));
+                app.undo_redo_toast = Some((ui.input(|i| i.time), "Undid last operation".to_string()));
+            }
+        });
+    });
     ui.add_space(theme.space_sm);
 
     let mut socket_positions = std::collections::HashMap::new(); // (node_idx, is_out, socket_idx) -> pos
@@ -77,6 +115,25 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             let (canvas_rect, _response) = ui.allocate_at_least(egui::vec2(ui.available_width(), 400.0), Sense::hover());
             ui.painter().rect_filled(canvas_rect, theme.radius_md, theme.bg_inset);
 
+            // Pointer click detection on canvas for selection
+            let pointer_clicked = ui.input(|i| i.pointer.any_click());
+            if pointer_clicked {
+                let mut clicked_node = None;
+                if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                    if canvas_rect.contains(pos) {
+                        for (idx, node) in app.graph.nodes.iter().enumerate() {
+                            let node_pos = canvas_rect.min + egui::vec2(node.x, node.y);
+                            let node_rect = egui::Rect::from_min_size(node_pos, egui::vec2(160.0, 80.0));
+                            if node_rect.contains(pos) {
+                                clicked_node = Some(idx as u32);
+                                break;
+                            }
+                        }
+                        app.selected_topology_node = clicked_node;
+                    }
+                }
+            }
+
             for (idx, node) in app.graph.nodes.iter_mut().enumerate() {
                 let node_id = ui.make_persistent_id(format!("node_spatial_{}", idx));
 
@@ -90,7 +147,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 let node_size = egui::vec2(160.0, 80.0);
                 let node_rect = egui::Rect::from_min_size(node_pos, node_size);
 
-                let node_resp = ui.interact(node_rect, node_id, Sense::drag());
+                let node_resp = ui.interact(node_rect, node_id, Sense::click_and_drag());
                 if node_resp.dragged() {
                     node.x += node_resp.drag_delta().x;
                     node.y += node_resp.drag_delta().y;
@@ -101,9 +158,26 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     }));
                 }
 
+                // Node context menu for deletion
+                node_resp.context_menu(|ui| {
+                    if ui.button("Delete Node").clicked() {
+                        let _ = app.command_sender.send(Command::Topology(TopologyCommand::RemoveNode {
+                            node_idx: idx as u32,
+                        }));
+                        ui.close_menu();
+                    }
+                });
+
                 // Draw Node Card
+                let is_selected = app.selected_topology_node == Some(idx as u32);
+                let card_stroke = if is_selected {
+                    egui::Stroke::new(2.0, theme.accent)
+                } else {
+                    theme.border_stroke
+                };
+
                 ui.painter().rect_filled(node_rect, theme.radius_sm, theme.bg_surface);
-                ui.painter().rect_stroke(node_rect, theme.radius_sm, theme.border_stroke);
+                ui.painter().rect_stroke(node_rect, theme.radius_sm, card_stroke);
 
                 // Node Header
                 let header_rect = egui::Rect::from_min_size(node_pos, egui::vec2(node_size.x, 20.0));
@@ -115,7 +189,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 let host_assignment = if host_assignment_raw[0] == 0 { "local" } else {
                     std::str::from_utf8(host_assignment_raw).unwrap_or("local").trim_matches(char::from(0))
                 };
-                let host_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(75.0, 0.0), egui::vec2(50.0, 14.0));
+                let host_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(82.0, 0.0), egui::vec2(45.0, 14.0));
                 let host_color = if host_assignment == "local" { theme.accent_muted } else { theme.accent };
 
                 let host_resp = ui.interact(host_rect, node_id.with("host_migrate"), Sense::click());
@@ -133,7 +207,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 ui.painter().text(host_rect.center(), egui::Align2::CENTER_CENTER, host_assignment.to_uppercase(), egui::FontId::monospace(8.0), host_color);
 
                 // Bypass Toggle in header
-                let bypass_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(25.0, 0.0), egui::vec2(40.0, 14.0));
+                let bypass_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(38.0, 0.0), egui::vec2(30.0, 14.0));
                 let bypass_id = node_id.with("bypass");
                 let bypassed = app.bypassed_nodes.contains(&(idx as u32));
 
@@ -153,6 +227,18 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 let bypass_color = if bypassed { theme.danger } else { theme.text_disabled };
                 ui.painter().rect_filled(bypass_rect, 2.0, bypass_color);
                 ui.painter().text(bypass_rect.center(), egui::Align2::CENTER_CENTER, "BYP", egui::FontId::monospace(9.0), theme.text_primary);
+
+                // Delete Button "x" in header
+                let delete_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(10.0, 0.0), egui::vec2(14.0, 14.0));
+                let delete_id = node_id.with("delete");
+                let delete_resp = ui.interact(delete_rect, delete_id, Sense::click());
+                if delete_resp.clicked() {
+                    let _ = app.command_sender.send(Command::Topology(TopologyCommand::RemoveNode {
+                        node_idx: idx as u32,
+                    }));
+                }
+                let delete_color = if delete_resp.hovered() { theme.danger } else { theme.text_disabled };
+                ui.painter().text(delete_rect.center(), egui::Align2::CENTER_CENTER, egui_phosphor::regular::X, egui::FontId::monospace(10.0), delete_color);
 
                 // Industrial Sockets (Circular)
                 let socket_radius = 6.0;
