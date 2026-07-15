@@ -109,7 +109,7 @@ pub struct InspectorApp {
     pub(crate) quantize_enabled: bool,
     pub(crate) master_gain: f32,
     pub(crate) crossfader_pos: f32,
-    pub(crate) library_db: nullherz_dna::LibraryDatabase,
+    pub(crate) library_db: std::sync::Arc<nullherz_dna::LibraryDatabase>,
     pub(crate) active_crate: Option<String>,
     pub(crate) search_query: String,
     pub(crate) is_streaming: bool,
@@ -134,6 +134,8 @@ pub struct InspectorApp {
     pub(crate) sampler_slicer_mode: bool,
     pub(crate) _playlists: Vec<Playlist>,
     pub(crate) cached_library: Vec<nullherz_dna::LibraryTrack>,
+    pub(crate) cached_library_raw: Vec<nullherz_dna::LibraryTrack>,
+    pub(crate) bg_library_loader: Option<std::sync::mpsc::Receiver<Vec<nullherz_dna::LibraryTrack>>>,
     pub(crate) library_needs_refresh: bool,
     pub(crate) breeding_view: views::breeder::BreederView,
     pub(crate) wgpu_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::wgpu_backend::WgpuRenderer>>>,
@@ -205,6 +207,23 @@ pub struct InspectorApp {
 }
 
 impl InspectorApp {
+    pub fn trigger_library_refresh(&mut self) {
+        self.library_needs_refresh = true;
+        let db = self.library_db.clone();
+        let crate_name = self.active_crate.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.bg_library_loader = Some(rx);
+
+        std::thread::spawn(move || {
+            let tracks = if let Some(ref name) = crate_name {
+                db.get_tracks_in_crate(name).unwrap_or_default()
+            } else {
+                db.list_tracks().unwrap_or_default()
+            };
+            let _ = tx.send(tracks);
+        });
+    }
+
     pub fn get_node_id(&self, name: &str) -> u32 {
         *self.node_map.get(name).unwrap_or(&0)
     }
@@ -254,7 +273,7 @@ impl InspectorApp {
 
         let (cmd_tx, _cmd_rx) = mpsc::channel::<Command>();
         let default_view = View::Console;
-        Self {
+        let mut app = Self {
             graph,
             command_sender: cmd_tx,
             last_telemetry: Arc::new(Mutex::new(None)),
@@ -311,7 +330,7 @@ impl InspectorApp {
                     };
                     let _ = db.save_track(&track_b);
                 }
-                db
+                std::sync::Arc::new(db)
             },
             active_crate: None,
             search_query: String::new(),
@@ -337,6 +356,8 @@ impl InspectorApp {
             sampler_slicer_mode: false,
             _playlists: vec![],
             cached_library: vec![],
+            cached_library_raw: vec![],
+            bg_library_loader: None,
             library_needs_refresh: true,
             breeding_view: views::breeder::BreederView::new(),
             wgpu_renderer: None,
@@ -422,7 +443,9 @@ impl InspectorApp {
                 ("master_sum".to_string(), 30), ("master_crossfader".to_string(), 20), ("master_limiter".to_string(), 35),
                 ("capture_node".to_string(), 110), ("sequencer_node".to_string(), 70), ("sampler_node".to_string(), 100),
             ].into_iter().collect(),
-        }
+        };
+        app.trigger_library_refresh();
+        app
     }
 
     pub fn deck_color(theme: &nullherz_ui_hal::Theme, i: usize) -> egui::Color32 {
@@ -727,6 +750,18 @@ impl InspectorApp {
 impl eframe::App for InspectorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let current_time = ctx.input(|i| i.time);
+
+        // --- Background Library Loader Polling ---
+        if let Some(ref rx) = self.bg_library_loader {
+            if let Ok(tracks) = rx.try_recv() {
+                self.cached_library_raw = tracks.clone();
+                self.cached_library = tracks;
+                self.library_needs_refresh = false;
+                self.bg_library_loader = None;
+            }
+        } else if self.library_needs_refresh {
+            self.trigger_library_refresh();
+        }
 
         // Initialize last_saved_time on first loop run if it's 0.0
         if self.last_saved_time == 0.0 {

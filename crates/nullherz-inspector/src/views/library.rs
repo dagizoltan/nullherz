@@ -158,10 +158,10 @@ fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
                             let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::Preview { sample_id: track.id }));
                         }
                         if ui.button("⚡ ENERGY MATCH").on_hover_text("Generate smart crate with similar energy").clicked() {
-                            let tracks = app.library_db.list_tracks().unwrap_or_default();
+                            let tracks = app.cached_library_raw.clone();
                             let new_crate = nullherz_dna::SmartCrateManager::generate_energy_matched_crate(&track, tracks, 0.7);
                             let _ = app.library_db.save_smart_crate(&new_crate);
-                            app.library_needs_refresh = true;
+                            app.trigger_library_refresh();
                         }
                     });
                 });
@@ -187,23 +187,20 @@ fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
 fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
     if app.library_needs_refresh {
-        let mut tracks = if let Some(ref crate_name) = app.active_crate {
-            app.library_db.get_tracks_in_crate(crate_name).unwrap_or_default()
-        } else {
-            app.library_db.list_tracks().unwrap_or_default()
-        };
-
-        if !app.search_query.is_empty() {
-            let q = app.search_query.to_lowercase();
-            tracks.retain(|t| t.title.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q));
+        if app.bg_library_loader.is_none() {
+            app.trigger_library_refresh();
         }
+    }
 
-        app.cached_library = tracks;
-        app.library_needs_refresh = false;
+    // Apply client-side search query filtering on top of cached_library
+    let mut displayed_tracks = app.cached_library.clone();
+    if !app.search_query.is_empty() {
+        let q = app.search_query.to_lowercase();
+        displayed_tracks.retain(|t| t.title.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q));
     }
 
     ScrollArea::vertical().id_source("lib_scroll").show(ui, |ui| {
-        for track in &app.cached_library {
+        for track in &displayed_tracks {
             let (rect, res) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), egui::Sense::click());
 
             // Hover effect
