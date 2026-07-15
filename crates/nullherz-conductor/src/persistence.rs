@@ -173,6 +173,19 @@ impl ProjectState {
             }
         }
 
+        if state.nodes.is_empty() {
+            // Fallback to active_node_types in conductor when the audio engine is not active/running
+            for (&node_idx, &type_id) in &conductor.topology_manager.active_node_types {
+                let position = topo.node_positions[node_idx as usize];
+                state.nodes.push(NodeState {
+                    id: node_idx,
+                    type_id,
+                    params: Vec::new(),
+                    position,
+                });
+            }
+        }
+
         for n_idx in 0..topo.node_count {
             let routing = &topo.routing[n_idx];
             for i in 0..routing.input_count {
@@ -202,6 +215,20 @@ impl ProjectState {
     }
 
     pub fn apply(&self, conductor: &mut crate::orchestrator::Conductor) -> std::io::Result<()> {
+        // Compute which node_idx values currently exist in the live topology but are NOT present in self.nodes,
+        // and issue a RemoveNode command for each before proceeding with the existing add/update logic.
+        let incoming_node_ids: std::collections::HashSet<u32> = self.nodes.iter().map(|n| n.id).collect();
+        let existing_node_ids: Vec<u32> = conductor.topology_manager.active_node_types.keys().copied().collect();
+
+        for existing_id in existing_node_ids {
+            if !incoming_node_ids.contains(&existing_id) {
+                let remove_cmd = Command::Topology(nullherz_traits::TopologyCommand::RemoveNode {
+                    node_idx: existing_id,
+                });
+                conductor.topology_manager.handle_topology_command(&remove_cmd);
+            }
+        }
+
         for node in &self.nodes {
             let cmd = Command::Topology(nullherz_traits::TopologyCommand::AddNode {
                 processor_type_id: node.type_id.into(),

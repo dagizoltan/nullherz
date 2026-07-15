@@ -29,6 +29,101 @@ fn test_project_persistence_roundtrip() {
 }
 
 #[test]
+fn test_conductor_undo_redo() {
+    use nullherz_traits::Command;
+    let mut conductor = Conductor::new();
+
+    // Initialize the topology mutation producer so handle_topology_command works in unit/integration test mode
+    let mpsc_buf = std::sync::Arc::new(ipc_layer::MpscRingBuffer::new(128));
+    conductor.topology_manager.topo_producer = Some(ipc_layer::NonRtProducer::from_mpsc(mpsc_buf));
+
+    // 1. Initial State: Empty Graph. Save/checkpoint this initial state.
+    // Ensure active_node_types is empty
+    assert!(conductor.topology_manager.active_node_types.is_empty());
+
+    // 2. Perform a structural topology edit: AddNode GAIN (node 0)
+    // Note: apply_mixer_commands automatically calls checkpoint() for Topology commands!
+    let cmd_add = Command::Topology(nullherz_traits::TopologyCommand::AddNode {
+        processor_type_id: ProcessorTypeId::GAIN,
+        node_idx: 0,
+    });
+    conductor.apply_mixer_commands(vec![cmd_add]);
+
+    // Verify Node 0 is now active
+    assert!(conductor.topology_manager.active_node_types.contains_key(&0));
+
+    // Ensure undo stack has exactly 1 checkpoint (the empty state before addition)
+    assert_eq!(conductor.undo_stack.len(), 1);
+
+    // 3. Call undo()!
+    let undone = conductor.undo();
+    assert!(undone);
+
+    // Verify Node 0 is now GONE (restored back to empty state, exercise node-removal path)
+    assert!(!conductor.topology_manager.active_node_types.contains_key(&0));
+    assert!(conductor.topology_manager.active_node_types.is_empty());
+
+    // Ensure redo stack has exactly 1 checkpoint (the state with Node 0)
+    assert_eq!(conductor.redo_stack.len(), 1);
+
+    // 4. Call redo()!
+    let redone = conductor.redo();
+    assert!(redone);
+
+    // Verify Node 0 is BACK!
+    assert!(conductor.topology_manager.active_node_types.contains_key(&0));
+}
+
+#[test]
+fn test_project_state_restore_node_removal() {
+    use nullherz_traits::Command;
+    let mut conductor = Conductor::new();
+
+    // Initialize the topology mutation producer so handle_topology_command works in unit/integration test mode
+    let mpsc_buf = std::sync::Arc::new(ipc_layer::MpscRingBuffer::new(128));
+    conductor.topology_manager.topo_producer = Some(ipc_layer::NonRtProducer::from_mpsc(mpsc_buf));
+
+    // 1. Build a small graph with 1 node (e.g., node 0, GAIN)
+    let cmd_add = Command::Topology(nullherz_traits::TopologyCommand::AddNode {
+        processor_type_id: ProcessorTypeId::GAIN,
+        node_idx: 0,
+    });
+    conductor.topology_manager.handle_topology_command(&cmd_add);
+    conductor.topology_manager.handle_topology_command(&Command::Core(nullherz_traits::CoreCommand::CommitTopology));
+
+    // Ensure the node is there
+    assert!(conductor.topology_manager.active_node_types.contains_key(&0));
+
+    // 2. Capture the current state (manually built state_before representing the captured state with only Node 0)
+    let mut state_before = ProjectState::empty();
+    state_before.nodes.push(NodeState {
+        id: 0,
+        type_id: ProcessorTypeId::GAIN.0,
+        params: vec![],
+        position: None,
+    });
+
+    // 3. Add another node (e.g., node 1, SAMPLER)
+    let cmd_add_2 = Command::Topology(nullherz_traits::TopologyCommand::AddNode {
+        processor_type_id: ProcessorTypeId::SAMPLER,
+        node_idx: 1,
+    });
+    conductor.topology_manager.handle_topology_command(&cmd_add_2);
+    conductor.topology_manager.handle_topology_command(&Command::Core(nullherz_traits::CoreCommand::CommitTopology));
+
+    // Ensure BOTH nodes are there
+    assert!(conductor.topology_manager.active_node_types.contains_key(&0));
+    assert!(conductor.topology_manager.active_node_types.contains_key(&1));
+
+    // 4. Restore/apply the captured state_before
+    state_before.apply(&mut conductor).expect("Failed to apply state");
+
+    // 5. Verify the added node (node 1) is gone, and node 0 remains
+    assert!(conductor.topology_manager.active_node_types.contains_key(&0));
+    assert!(!conductor.topology_manager.active_node_types.contains_key(&1));
+}
+
+#[test]
 fn test_project_persistence_newer_version_error() {
     let temp_path = "test_project_new_version.json";
     fs::remove_file(temp_path).ok();

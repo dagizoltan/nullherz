@@ -50,6 +50,18 @@ impl CommandHandler {
 
     fn handle_core_command(conductor: &mut Conductor, cmd: CoreCommand) -> bool {
         match cmd {
+            CoreCommand::Undo => {
+                conductor.undo();
+                true
+            }
+            CoreCommand::Redo => {
+                conductor.redo();
+                true
+            }
+            CoreCommand::CheckpointParameterEdit => {
+                conductor.checkpoint_parameter_edit();
+                true
+            }
             CoreCommand::SwitchBackend(backend_type) => {
                 let _ = conductor.switch_backend(backend_type);
                 true

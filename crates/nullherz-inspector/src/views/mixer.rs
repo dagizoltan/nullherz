@@ -23,7 +23,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                         // Fader & VU meter side-by-side
                         ui.horizontal(|ui| {
-                            if widgets::render_fader(ui, &mut app.channel_faders[i], 0.0..=1.2, deck_color, 120.0, 30.0).changed() {
+                            let r_fader = widgets::render_fader(ui, &mut app.channel_faders[i], 0.0..=1.2, deck_color, 120.0, 30.0);
+                            if r_fader.changed() {
                                 let target_id = (10 + i) as u64; // Example mapping
                                 let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                     target_id,
@@ -31,6 +32,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     value: app.channel_faders[i],
                                     ramp_duration_samples: 128,
                                 }));
+                            }
+                            if r_fader.drag_stopped() || r_fader.lost_focus() {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CheckpointParameterEdit));
                             }
 
                             if let Some(t) = telemetry {

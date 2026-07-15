@@ -136,7 +136,7 @@ impl ProcessorGraph {
         if !self.topology_coordinator.has_active_crossfades() {
             for i in 0..self.pending_mutation_count {
                 if let Some(m) = self.pending_mutations[i].take() {
-                    self.topology_coordinator.apply_mutation(m, self.nodes.as_mut(), &mut self.node_count, &self.garbage_producer);
+                    self.topology_coordinator.apply_mutation(m, self.nodes.as_mut(), &mut self.node_count, &self.garbage_producer, &self.faulted_states);
                 }
             }
             self.pending_mutation_count = 0;
@@ -515,7 +515,11 @@ pub(crate) mod tests {
     }
     impl nullherz_traits::SignalProcessor for IdentityProcessor {
 fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
-            for i in 0..inputs.len().min(outputs.len()) { outputs[i].copy_from_slice(inputs[i]); }
+            for i in 0..inputs.len().min(outputs.len()) {
+                if inputs[i].as_ptr() != outputs[i].as_ptr() {
+                    outputs[i].copy_from_slice(inputs[i]);
+                }
+            }
         }
 }
 
@@ -771,5 +775,52 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
         // Assert Node 2 (virtual buffer 0 / out_data) now processes and receives data correctly from bypassed Node 1 (ones)
         assert!(out_data.iter().all(|&x| x == 1.0));
+    }
+
+    #[test]
+    fn test_graph_node_removal() {
+        let mut graph = ProcessorGraph::new();
+        // Add three nodes: 0 (Identity) -> 1 (Identity) -> 2 (Identity)
+        graph.add_node(Box::new(IdentityProcessor), vec![10], vec![11]); // Node 0
+        graph.add_node(Box::new(IdentityProcessor), vec![11], vec![12]); // Node 1
+        graph.add_node(Box::new(IdentityProcessor), vec![12], vec![0]);  // Node 2
+
+        // Process a block to verify it runs end-to-end
+        let mut input_data = [0.0f32; 256];
+        for i in 0..256 { input_data[i] = i as f32; }
+        graph.buffer_pool.buffers[10].data.copy_from_slice(&input_data);
+
+        let mut out_data = [0.0f32; 100];
+        {
+            let out_slice = &mut out_data[..];
+            let mut outputs = [out_slice];
+            let mut context = ProcessContext { transport: None, host: None, sub_block_offset: 0, is_last_sub_block: false };
+            graph.process(&[], &mut outputs, &mut context);
+        }
+        for i in 0..50 { assert_eq!(out_data[i], i as f32); }
+
+        // Now remove Node 1!
+        graph.apply_topology_mutation(TopologyMutation::RemoveNode { node_idx: 1 });
+        // Drain/apply pending mutation to inactive topology
+        graph.commit_graph();
+        // Recalculate stages and compile the new inactive topology
+        graph.calculate_stages();
+        // Commit the inactive topology to active
+        graph.commit_graph();
+
+        // Verify Node 1's routing is cleared
+        let active_idx = graph.topology_coordinator.active_idx();
+        let topo = &graph.topology_coordinator.topologies[active_idx];
+        assert_eq!(topo.routing[1].input_count, 0);
+        assert_eq!(topo.routing[1].output_count, 0);
+
+        // Verify Node 1's processor is indeed a DummyProcessor (so it is no longer processed)
+        let proc_ptr = graph.nodes[1].processor.get();
+        let is_dummy = unsafe { (*proc_ptr).as_any().is::<crate::processors::graph::DummyProcessor>() };
+        assert!(is_dummy, "Node 1's processor must be replaced with DummyProcessor");
+
+        // Verify Node 0's output (which pointed to buffer 11) is gone, and Node 2's input (which pointed to buffer 12) is gone!
+        assert_eq!(topo.routing[0].output_indices[0], 0);
+        assert_eq!(topo.routing[2].input_indices[0], 0);
     }
 }

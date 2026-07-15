@@ -668,6 +668,15 @@ impl InspectorApp {
                         self.global_playing = true;
                     }
                 }
+                if i.key_pressed(egui::Key::Z) && i.modifiers.command {
+                    if i.modifiers.shift {
+                        let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Redo));
+                    } else {
+                        let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Undo));
+                    }
+                } else if i.key_pressed(egui::Key::Y) && i.modifiers.command {
+                    let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Redo));
+                }
                 if i.key_pressed(egui::Key::S) && i.modifiers.command {
                     let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology));
                     let ports = "Pioneer DDJ-400,Generic MIDI Keyboard".to_string();

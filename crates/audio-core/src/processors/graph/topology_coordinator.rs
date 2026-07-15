@@ -66,9 +66,104 @@ impl TopologyCoordinator {
         self.active_topology().crossfades.iter().any(|x| x.is_some())
     }
 
-    pub fn apply_mutation(&mut self, mutation: crate::processors::TopologyMutation, nodes: &mut [super::node::ProcessorNode; crate::MAX_NODES], node_count: &mut usize, garbage_producer: &Option<Box<dyn nullherz_traits::GarbageProducer>>) {
+    pub fn apply_mutation(&mut self, mutation: crate::processors::TopologyMutation, nodes: &mut [super::node::ProcessorNode; crate::MAX_NODES], node_count: &mut usize, garbage_producer: &Option<Box<dyn nullherz_traits::GarbageProducer>>, faulted_states: &[std::sync::atomic::AtomicBool; crate::MAX_NODES]) {
         use crate::processors::TopologyMutation;
         match mutation {
+            TopologyMutation::RemoveNode { node_idx } => {
+                let idx = node_idx as usize;
+                if idx < crate::MAX_NODES {
+                    // 1. Swap with DummyProcessor and send the old one to garbage_producer
+                    let dummy = Box::new(super::DummyProcessor) as Box<dyn nullherz_traits::AudioProcessor>;
+                    let old_proc = unsafe { std::ptr::replace(nodes[idx].processor.get(), dummy) };
+                    if let Some(prod) = garbage_producer {
+                        let mut cloned = dyn_clone::clone_box(&**prod);
+                        if let Err(leaked) = cloned.push_processor(old_proc) { std::mem::forget(leaked); }
+                    } else { std::mem::forget(old_proc); }
+
+                    // 2. Clear faulted state for this node_idx
+                    faulted_states[idx].store(false, Ordering::Relaxed);
+
+                    // 3. Call inactive_topology_mut first to ensure inactive topology is initialized & cloned.
+                    self.inactive_topology_mut();
+
+                    let active = self.active_idx();
+                    let inactive = (active + 1) % 2;
+
+                    // Disconnect any edges (input or output) that reference this node_idx's buffers
+                    let mut buffers_to_clear = std::collections::HashSet::new();
+
+                    {
+                        let topo = &mut self.topologies[inactive];
+                        let r = &topo.routing[idx];
+                        for &buf_idx in r.output_indices.iter().take(r.output_count) {
+                            if buf_idx != 0 {
+                                buffers_to_clear.insert(buf_idx);
+                            }
+                        }
+                        for &buf_idx in r.input_indices.iter().take(r.input_count) {
+                            if buf_idx != 0 {
+                                buffers_to_clear.insert(buf_idx);
+                            }
+                        }
+
+                        // Clear node's own routing
+                        topo.routing[idx].input_indices.fill(0);
+                        topo.routing[idx].output_indices.fill(0);
+                        topo.routing[idx].sidechain_indices.fill(0);
+                        topo.routing[idx].input_count = 0;
+                        topo.routing[idx].output_count = 0;
+                        topo.routing[idx].sidechain_count = 0;
+                        topo.routing[idx].input_delays.fill(0.0);
+
+                        // Clear from other nodes
+                        for other_idx in 0..crate::MAX_NODES {
+                            if other_idx == idx { continue; }
+                            let other_routing = &mut topo.routing[other_idx];
+                            for i in 0..other_routing.input_count {
+                                if buffers_to_clear.contains(&other_routing.input_indices[i]) {
+                                    other_routing.input_indices[i] = 0;
+                                }
+                            }
+                            for i in 0..other_routing.output_count {
+                                if buffers_to_clear.contains(&other_routing.output_indices[i]) {
+                                    other_routing.output_indices[i] = 0;
+                                }
+                            }
+                        }
+                    }
+
+                    // Clear position, bypass states on active AND inactive topologies
+                    self.topologies[active].node_positions[idx] = None;
+                    self.topologies[active].bypass_states[idx] = false;
+                    self.topologies[inactive].node_positions[idx] = None;
+                    self.topologies[inactive].bypass_states[idx] = false;
+                    self.topologies[active].node_assignments[idx] = nullherz_traits::NodeAssignment([0; 32]);
+                    self.topologies[inactive].node_assignments[idx] = nullherz_traits::NodeAssignment([0; 32]);
+
+                    // Update node_count for nodes and topologies
+                    let mut max_idx = 0;
+                    for i in (0..*node_count).rev() {
+                        let proc_ptr = nodes[i].processor.get();
+                        let is_dummy = unsafe { (*proc_ptr).as_any().is::<super::DummyProcessor>() };
+                        if !is_dummy {
+                            max_idx = i + 1;
+                            break;
+                        }
+                    }
+                    *node_count = max_idx;
+
+                    let mut max_topo_idx = 0;
+                    for i in (0..self.topologies[inactive].node_count).rev() {
+                        let proc_ptr = nodes[i].processor.get();
+                        let is_dummy = unsafe { (*proc_ptr).as_any().is::<super::DummyProcessor>() };
+                        if !is_dummy {
+                            max_topo_idx = i + 1;
+                            break;
+                        }
+                    }
+                    self.topologies[inactive].node_count = max_topo_idx;
+                }
+            }
             TopologyMutation::LoadProcessorState { node_idx, state_data } => {
                 if let Some(node) = nodes.get_mut(node_idx as usize) {
                     let proc = unsafe { &mut *node.processor.get() };

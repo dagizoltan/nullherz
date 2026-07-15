@@ -120,6 +120,9 @@ pub enum CoreCommand {
         filename: [u8; 64],
         duration_seconds: f32,
     },
+    Undo,
+    Redo,
+    CheckpointParameterEdit,
 }
 
 #[repr(C)]
@@ -415,6 +418,9 @@ pub enum Command {
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]
 pub enum TopologyCommand {
+    RemoveNode {
+        node_idx: u32,
+    },
     AddNode {
         processor_type_id: ProcessorTypeId,
         node_idx: u32,
@@ -724,6 +730,9 @@ pub struct GraphTopology {
 }
 
 pub enum TopologyMutation {
+    RemoveNode {
+        node_idx: u32,
+    },
     SetNodePosition {
         node_idx: u32,
         x: f32,
