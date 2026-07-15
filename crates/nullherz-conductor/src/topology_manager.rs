@@ -56,6 +56,67 @@ impl TopologyManager {
         let sr = self.current_sample_rate;
 
         match *cmd {
+            Command::Topology(nullherz_traits::TopologyCommand::RemoveNode { node_idx }) => {
+                let idx = node_idx as usize;
+                if idx < nullherz_traits::MAX_NODES {
+                    self.active_node_types.remove(&node_idx);
+
+                    // Note: Indices allocated by IdAllocator are monotonically increasing and are never reused
+                    // for safety and simplicity, avoiding index collision issues.
+
+                    let mut buffers_to_clear = std::collections::HashSet::new();
+                    let r = &self.current_topology.routing[idx];
+                    for &buf_idx in r.output_indices.iter().take(r.output_count) {
+                        if buf_idx != 0 {
+                            buffers_to_clear.insert(buf_idx);
+                        }
+                    }
+                    for &buf_idx in r.input_indices.iter().take(r.input_count) {
+                        if buf_idx != 0 {
+                            buffers_to_clear.insert(buf_idx);
+                        }
+                    }
+
+                    self.current_topology.routing[idx].input_indices.fill(0);
+                    self.current_topology.routing[idx].output_indices.fill(0);
+                    self.current_topology.routing[idx].sidechain_indices.fill(0);
+                    self.current_topology.routing[idx].input_count = 0;
+                    self.current_topology.routing[idx].output_count = 0;
+                    self.current_topology.routing[idx].sidechain_count = 0;
+                    self.current_topology.routing[idx].input_delays.fill(0.0);
+
+                    for other_idx in 0..nullherz_traits::MAX_NODES {
+                        if other_idx == idx { continue; }
+                        let other_routing = &mut self.current_topology.routing[other_idx];
+                        for i in 0..other_routing.input_count {
+                            if buffers_to_clear.contains(&other_routing.input_indices[i]) {
+                                other_routing.input_indices[i] = 0;
+                            }
+                        }
+                        for i in 0..other_routing.output_count {
+                            if buffers_to_clear.contains(&other_routing.output_indices[i]) {
+                                other_routing.output_indices[i] = 0;
+                            }
+                        }
+                    }
+
+                    self.current_topology.node_positions[idx] = None;
+                    self.current_topology.bypass_states[idx] = false;
+                    self.current_topology.node_assignments[idx] = nullherz_traits::NodeAssignment([0; 32]);
+
+                    let mut max_topo_idx = 0;
+                    for i in (0..self.current_topology.node_count).rev() {
+                        if self.active_node_types.contains_key(&(i as u32)) {
+                            max_topo_idx = i + 1;
+                            break;
+                        }
+                    }
+                    self.current_topology.node_count = max_topo_idx;
+
+                    let _ = prod.push(TopologyMutation::RemoveNode { node_idx });
+                    return true;
+                }
+            }
             Command::Topology(nullherz_traits::TopologyCommand::AddNode {  processor_type_id, node_idx }) => {
                 if let Some(processor) = self.registry.create_by_id(processor_type_id.0, node_idx, sr) {
                     self.active_node_types.insert(node_idx, processor_type_id.0);

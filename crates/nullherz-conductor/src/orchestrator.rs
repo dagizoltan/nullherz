@@ -41,6 +41,8 @@ pub struct Conductor {
     pub last_genetic_evolve_secs: u64,
     pub focused_node_idx: Option<u32>,
     pub active_transitions: Vec<DnaTransition>,
+    pub undo_stack: Vec<crate::persistence::ProjectState>,
+    pub redo_stack: Vec<crate::persistence::ProjectState>,
     // --- Live RTMP/Opus Broadcast Streaming ---
     pub is_streaming: bool,
     pub stream_start_time: Option<std::time::Instant>,
@@ -117,6 +119,8 @@ impl Conductor {
             last_genetic_evolve_secs: 0,
             focused_node_idx: None,
             active_transitions: Vec::new(),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
             is_streaming: false,
             stream_start_time: None,
             stream_bitrate: 256.0,
@@ -365,6 +369,10 @@ impl Conductor {
     }
 
     pub fn apply_mixer_commands(&mut self, commands: Vec<Command>) {
+        let has_topology = commands.iter().any(|cmd| matches!(cmd, Command::Topology(_)));
+        if has_topology {
+            self.checkpoint();
+        }
         crate::command_handler::CommandHandler::apply_mixer_commands(self, commands);
     }
 
@@ -559,6 +567,53 @@ impl Conductor {
 
     pub fn capture_state(&self) -> crate::persistence::ProjectState {
         crate::persistence::ProjectState::capture(self)
+    }
+
+    pub fn checkpoint(&mut self) {
+        let state = self.capture_state();
+        self.undo_stack.push(state);
+        self.redo_stack.clear();
+        while self.undo_stack.len() > 50 {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    pub fn checkpoint_parameter_edit(&mut self) {
+        self.checkpoint();
+    }
+
+    pub fn undo(&mut self) -> bool {
+        if self.undo_stack.is_empty() {
+            return false;
+        }
+        let current = self.capture_state();
+        self.redo_stack.push(current);
+        while self.redo_stack.len() > 50 {
+            self.redo_stack.remove(0);
+        }
+        if let Some(popped) = self.undo_stack.pop() {
+            self.apply_state(popped);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn redo(&mut self) -> bool {
+        if self.redo_stack.is_empty() {
+            return false;
+        }
+        let current = self.capture_state();
+        self.undo_stack.push(current);
+        while self.undo_stack.len() > 50 {
+            self.undo_stack.remove(0);
+        }
+        if let Some(popped) = self.redo_stack.pop() {
+            self.apply_state(popped);
+            true
+        } else {
+            false
+        }
     }
 
     pub fn save_project(&self, path: &str) -> std::io::Result<()> {

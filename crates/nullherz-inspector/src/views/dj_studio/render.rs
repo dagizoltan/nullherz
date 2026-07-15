@@ -328,13 +328,17 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
                 // Crossfader
                 ui.label(RichText::new("CROSSFADER").size(theme.type_caption).color(theme.text_secondary));
                 ui.add_space(theme.space_xs);
-                if widgets::render_horizontal_fader(ui, &mut app.crossfader_pos, 0.0..=1.0, theme.text_primary, 160.0, 32.0).changed() {
+                let r_cross = widgets::render_horizontal_fader(ui, &mut app.crossfader_pos, 0.0..=1.0, theme.text_primary, 160.0, 32.0);
+                if r_cross.changed() {
                     let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                         target_id: app.get_node_id("master_crossfader") as u64,
                         param_id: 0,
                         value: app.crossfader_pos,
                         ramp_duration_samples: 0,
                     }));
+                }
+                if r_cross.drag_stopped() || r_cross.lost_focus() {
+                    let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CheckpointParameterEdit));
                 }
                 ui.add_space(theme.space_xs);
                 ui.horizontal(|ui| {
@@ -379,13 +383,17 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
                     // Master Gain Fader
                     ui.vertical(|ui| {
                         ui.label(RichText::new("GAIN").size(theme.type_caption).color(theme.text_secondary));
-                        if widgets::render_fader(ui, &mut app.master_gain, 0.0..=1.5, theme.text_primary, 100.0, 18.0).changed() {
+                        let r_master = widgets::render_fader(ui, &mut app.master_gain, 0.0..=1.5, theme.text_primary, 100.0, 18.0);
+                        if r_master.changed() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                 target_id: app.get_node_id("master_sum") as u64,
                                 param_id: 0,
                                 value: app.master_gain,
                                 ramp_duration_samples: 0,
                             }));
+                        }
+                        if r_master.drag_stopped() || r_master.lost_focus() {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CheckpointParameterEdit));
                         }
                     });
                 });

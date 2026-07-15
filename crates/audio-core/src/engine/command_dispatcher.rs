@@ -48,7 +48,7 @@ impl CommandDispatcher {
             Command::Mixer(MixerCommand::Bundle { count, data }) => {
                 Self::handle_bundle_command_with_context(transport, sub_block_offset, is_last_sub_block, host, graph, *count, *data);
             }
-            Command::Topology(TopologyCommand::AddNode { .. }) | Command::Topology(TopologyCommand::SwapProcessor { .. }) => {
+            Command::Topology(TopologyCommand::AddNode { .. }) | Command::Topology(TopologyCommand::SwapProcessor { .. }) | Command::Topology(TopologyCommand::RemoveNode { .. }) => {
                 // Ignore structural mutations in RT command loop.
             }
             Command::Topology(TopologyCommand::SetBypass { node_idx, enabled }) => {
