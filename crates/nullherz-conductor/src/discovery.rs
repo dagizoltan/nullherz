@@ -73,16 +73,16 @@ impl SidecarDiscoveryService {
 
                     let lib_lock = lib_db.lock().unwrap();
 
-                    let trusted_peers = {
+                    let (trusted_peers, signing_key) = {
                         let d = discovery_mutex.lock().unwrap();
-                        d.trusted_peers.clone()
+                        (d.trusted_peers.clone(), d.signing_key)
                     };
 
                     let sync = nullherz_dna::CloudPeerSync {
                         peers,
                         trusted_peers,
                         peer_signatures: std::collections::HashMap::new(),
-                        signing_key: None,
+                        signing_key,
                         mesh_links: std::sync::Mutex::new(std::collections::HashSet::new()),
                     };
                     let _ = lib_lock.sync_with_cloud(&sync);
