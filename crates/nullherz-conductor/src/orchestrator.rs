@@ -186,7 +186,8 @@ impl Conductor {
 
             // Start Federated DNA Server (TCP pull)
             let lib = self.library.clone();
-            let _ = nullherz_dna::DnaServer::start(lib, 9003, None);
+            let signing_key = self.sidecar_discovery.dna_discovery.lock().unwrap().signing_key;
+            let _ = nullherz_dna::DnaServer::start(lib, 9003, signing_key);
         }
 
         crate::EngineContext {

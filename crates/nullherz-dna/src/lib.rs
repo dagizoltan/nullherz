@@ -439,6 +439,14 @@ impl PeerSync for CloudPeerSync {
     }
 
     fn gossip_metadata(&self, known_ids: &[(u64, String)]) {
+        let sk_bytes = match self.signing_key {
+            Some(key) => key,
+            None => {
+                let mut csprng = rand::rngs::OsRng;
+                let sk = ed25519_dalek::SigningKey::generate(&mut csprng);
+                sk.to_bytes()
+            }
+        };
         for peer in &self.peers {
             let addr = match peer.parse() {
                 Ok(a) => a,
@@ -449,15 +457,11 @@ impl PeerSync for CloudPeerSync {
                 std::time::Duration::from_millis(100)
             ) {
                 if let Ok(payload) = serde_json::to_string(known_ids) {
-                let msg = if let Some(sk_bytes) = self.signing_key {
-                        use ed25519_dalek::Signer;
-                        let sk = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
-                        let sig = sk.sign(payload.as_bytes());
-                        // Format: GOSSIP_SIGNED <sig_hex> <pk_hex> <payload_json>
-                        format!("GOSSIP_SIGNED {} {} {}\n", hex::encode(sig.to_bytes()), hex::encode(sk.verifying_key().to_bytes()), payload)
-                    } else {
-                        format!("GOSSIP {}\n", payload)
-                    };
+                    use ed25519_dalek::Signer;
+                    let sk = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
+                    let sig = sk.sign(payload.as_bytes());
+                    // Format: GOSSIP_SIGNED <sig_hex> <pk_hex> <payload_json>
+                    let msg = format!("GOSSIP_SIGNED {} {} {}\n", hex::encode(sig.to_bytes()), hex::encode(sk.verifying_key().to_bytes()), payload);
                     let _ = stream.write_all(msg.as_bytes());
                 }
             }
@@ -525,6 +529,7 @@ pub struct DiscoveryService {
     pub trusted_peers: std::collections::HashSet<String>,
     mdns: Option<mdns_sd::ServiceDaemon>,
     service_type: &'static str,
+    pub signing_key: Option<[u8; 32]>,
 }
 
 impl DiscoveryService {
@@ -534,11 +539,15 @@ impl DiscoveryService {
         trusted_peers.insert("127.0.0.1:9003".to_string());
         trusted_peers.insert("localhost:9003".to_string());
 
+        let mut csprng = rand::rngs::OsRng;
+        let sk = ed25519_dalek::SigningKey::generate(&mut csprng);
+
         Self {
             known_peers: Vec::new(),
             trusted_peers,
             mdns: mdns_sd::ServiceDaemon::new().ok(),
             service_type: "_nullherz-dna._udp.local.",
+            signing_key: Some(sk.to_bytes()),
         }
     }
 
@@ -597,6 +606,14 @@ impl DiscoveryService {
 
     /// Performs a Gossip cycle with a random subset of known peers.
     pub fn gossip_cycle(&self, lib: &LibraryDatabase) {
+        let sk_bytes = match self.signing_key {
+            Some(key) => key,
+            None => {
+                let mut csprng = rand::rngs::OsRng;
+                let sk = ed25519_dalek::SigningKey::generate(&mut csprng);
+                sk.to_bytes()
+            }
+        };
         if let Ok(tracks) = lib.list_tracks() {
             let metadata: Vec<(u64, String)> = tracks.into_iter().map(|t| (t.id, t.title)).collect();
             // Select a random peer (simplified)
@@ -610,7 +627,11 @@ impl DiscoveryService {
                     std::time::Duration::from_millis(200)
                 ) {
                     if let Ok(payload) = serde_json::to_string(&metadata) {
-                        let msg = format!("GOSSIP {}\n", payload);
+                        use ed25519_dalek::Signer;
+                        let sk = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
+                        let sig = sk.sign(payload.as_bytes());
+                        // Format: GOSSIP_SIGNED <sig_hex> <pk_hex> <payload_json>
+                        let msg = format!("GOSSIP_SIGNED {} {} {}\n", hex::encode(sig.to_bytes()), hex::encode(sk.verifying_key().to_bytes()), payload);
                         let _ = stream.write_all(msg.as_bytes());
                     }
                 }
@@ -729,8 +750,7 @@ impl DnaServer {
                                     }
                                 }
                                 "GOSSIP" => {
-                                    let payload = &line_trimmed[7..];
-                                    handle_gossip(payload, &lib_clone, &stream);
+                                    eprintln!("DNA Server: GOSSIP payload rejected because it was unsigned.");
                                 }
                                 "GOSSIP_SIGNED" => {
                                     if parts.len() >= 4 {
@@ -1185,6 +1205,71 @@ mod tests {
         // Chaotic transfusion should produce different latent spaces due to mutations
         assert_ne!(normal.spectral.latent_space, chaotic.spectral.latent_space);
         assert!(chaotic.artifacts.glitch_density > normal.artifacts.glitch_density);
+    }
+
+    #[test]
+    fn test_gossip_signature_enforcement_server() {
+        use std::net::TcpStream;
+        use std::io::Write;
+        use ed25519_dalek::{SigningKey, Signer};
+
+        let mut port = 18200;
+        let listener = loop {
+            match std::net::TcpListener::bind(format!("127.0.0.1:{}", port)) {
+                Ok(l) => break l,
+                Err(_) => {
+                    port += 1;
+                    if port > 19200 {
+                        panic!("Failed to find free port for test");
+                    }
+                }
+            }
+        };
+        let actual_port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let db_path = format!("test_gossip_srv_{}.redb", actual_port);
+        let _ = fs::remove_file(&db_path);
+        let lib = Arc::new(Mutex::new(LibraryDatabase::load(&db_path).unwrap()));
+
+        let mut csprng = rand::rngs::OsRng;
+        let sk = SigningKey::generate(&mut csprng);
+        let sk_bytes = sk.to_bytes();
+
+        DnaServer::start(lib.clone(), actual_port, Some(sk_bytes)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // 1. Send unsigned GOSSIP
+        {
+            let mut stream = TcpStream::connect(format!("127.0.0.1:{}", actual_port)).unwrap();
+            let payload = "[(1, \"Unsigned Track\")]";
+            let msg = format!("GOSSIP {}\n", payload);
+            stream.write_all(msg.as_bytes()).unwrap();
+            stream.flush().unwrap();
+            // Connection will be closed by server
+            let mut buf = Vec::new();
+            stream.read_to_end(&mut buf).unwrap();
+        }
+
+        // 2. Send GOSSIP_SIGNED
+        {
+            let mut stream = TcpStream::connect(format!("127.0.0.1:{}", actual_port)).unwrap();
+            let payload = "[(2, \"Signed Track\")]";
+            let sig = sk.sign(payload.as_bytes());
+            let msg = format!(
+                "GOSSIP_SIGNED {} {} {}\n",
+                hex::encode(sig.to_bytes()),
+                hex::encode(sk.verifying_key().to_bytes()),
+                payload
+            );
+            stream.write_all(msg.as_bytes()).unwrap();
+            stream.flush().unwrap();
+            // Connection will be closed by server
+            let mut buf = Vec::new();
+            stream.read_to_end(&mut buf).unwrap();
+        }
+
+        let _ = fs::remove_file(&db_path);
     }
 }
 
