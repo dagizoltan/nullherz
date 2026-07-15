@@ -32,9 +32,6 @@ pub struct GeneticLineageConsensus;
 impl GeneticLineageConsensus {
     pub fn verify_signature(signed_dna: &SignedSoundDna) -> bool {
         use ed25519_dalek::{Verifier, Signature, VerifyingKey};
-        if signed_dna.signer_public_key == [0u8; 32] {
-            return true; // Bypass signature if uninitialized mock
-        }
         let pub_key_res = VerifyingKey::from_bytes(&signed_dna.signer_public_key);
         let sig_res = Signature::from_slice(&signed_dna.signature);
 
@@ -990,17 +987,31 @@ mod tests {
 
     #[test]
     fn test_lineage_consensus_verification() {
+        use ed25519_dalek::{SigningKey, Signer};
+        let mut csprng = rand::rngs::OsRng;
+        let signing_key = SigningKey::generate(&mut csprng);
+        let verifying_key = signing_key.verifying_key();
+
+        let dna = nullherz_traits::SoundDNA::default();
+        let dna_bytes = serde_json::to_vec(&dna).unwrap_or_default();
+        let signature = signing_key.sign(&dna_bytes);
+
         let mut signed = SignedSoundDna {
-            dna: nullherz_traits::SoundDNA::default(),
-            signature: [0u8; 64],
-            signer_public_key: [0u8; 32],
+            dna,
+            signature: signature.to_bytes(),
+            signer_public_key: verifying_key.to_bytes(),
             cas_id: None,
             parent_hashes: vec![[1u8; 32]],
             authorship_chain: vec!["alice".to_string()],
             generation: 1,
         };
-        // Should succeed for mock/unsigned default
+        // Should succeed for a properly signed lineage record
         assert!(GeneticLineageConsensus::verify_lineage(&signed));
+
+        // Should fail if signature is invalid
+        signed.signature[0] ^= 1;
+        assert!(!GeneticLineageConsensus::verify_lineage(&signed));
+        signed.signature[0] ^= 1; // restore
 
         // Should fail if generation is 0 but has parents
         signed.generation = 0;

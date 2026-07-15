@@ -24,10 +24,15 @@ pub struct SequencerProcessor {
     pub quantize_amount: f32, // 0.0 to 1.0
     pub swing: f32,           // 0.0 to 1.0
     bpm: f32,
+    pub track_targets: [u64; 16],
 }
 
 impl SequencerProcessor {
     pub fn new(id: u32, sample_rate: f32, bpm: f32) -> Self {
+        let mut track_targets = [0u64; 16];
+        for track in 0..16 {
+            track_targets[track] = 70 + track as u64;
+        }
         Self {
             id,
             sample_rate,
@@ -37,6 +42,7 @@ impl SequencerProcessor {
             quantize_amount: 1.0,
             swing: 0.0,
             bpm,
+            track_targets,
         }
     }
 }
@@ -94,7 +100,7 @@ fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &
                             host.push_command(
                                 self.current_sample + final_offset.min(block_len - 1),
                                 nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: (70 + track as u64), // Placeholder targeting
+                                    target_id: self.track_targets[track],
                                     param_id: 0, // Gain/Velocity
                                     value: velocity,
                                     ramp_duration_samples: 0,
@@ -146,6 +152,10 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
             }
             2 => self.quantize_amount = value.clamp(0.0, 1.0),
             3 => self.swing = value.clamp(0.0, 1.0),
+            10..=25 => {
+                let track = (param_id - 10) as usize;
+                self.track_targets[track] = value.round() as u64;
+            }
             _ => {}
         }
     }
@@ -154,6 +164,12 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
         match param_id {
             0 => self.active_pattern as f32,
             1 => self.patterns[self.active_pattern].len as f32,
+            2 => self.quantize_amount,
+            3 => self.swing,
+            10..=25 => {
+                let track = (param_id - 10) as usize;
+                self.track_targets[track] as f32
+            }
             _ => 0.0
         }
     }
@@ -169,6 +185,9 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
                 }
             }
         }
+        for target in &self.track_targets {
+            data.extend_from_slice(&target.to_le_bytes());
+        }
         data
     }
 
@@ -176,7 +195,8 @@ fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
     fn load_state(&mut self, data: &[u8]) {
-        if data.len() < 1 + 16 * (1 + 16 * 64 * 4) { return; }
+        let expected_min_len = 1 + 16 * (1 + 16 * 64 * 4);
+        if data.len() < expected_min_len { return; }
         self.active_pattern = data[0] as usize;
         let mut cursor = 1;
         for p in self.patterns.iter_mut() {
@@ -189,6 +209,14 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
                     p.grid[track][step] = f32::from_le_bytes(b);
                     cursor += 4;
                 }
+            }
+        }
+        if data.len() >= cursor + 16 * 8 {
+            for target in self.track_targets.iter_mut() {
+                let mut b = [0u8; 8];
+                b.copy_from_slice(&data[cursor..cursor+8]);
+                *target = u64::from_le_bytes(b);
+                cursor += 8;
             }
         }
     }
@@ -220,5 +248,50 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             num_parameters: 4,
             parameters,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nullherz_traits::AudioProcessor;
+
+    #[test]
+    fn test_sequencer_dynamic_targets_and_persistence() {
+        let mut seq = SequencerProcessor::new(1, 44100.0, 120.0);
+
+        // Verify defaults
+        for track in 0..16 {
+            assert_eq!(seq.track_targets[track], 70 + track as u64);
+            assert_eq!(seq.get_parameter(10 + track as u32), (70 + track) as f32);
+        }
+
+        // Set custom target IDs using parameter setters
+        seq.set_parameter(10, 500.0, 0); // track 0 -> target 500
+        seq.set_parameter(15, 600.0, 0); // track 5 -> target 600
+        seq.set_parameter(25, 700.0, 0); // track 15 -> target 700
+
+        // Verify getters
+        assert_eq!(seq.track_targets[0], 500);
+        assert_eq!(seq.get_parameter(10), 500.0);
+        assert_eq!(seq.track_targets[5], 600);
+        assert_eq!(seq.get_parameter(15), 600.0);
+        assert_eq!(seq.track_targets[15], 700);
+        assert_eq!(seq.get_parameter(25), 700.0);
+
+        // Serialize state
+        let state = seq.serialize_state();
+
+        // Load state into a brand new sequencer
+        let mut new_seq = SequencerProcessor::new(2, 44100.0, 120.0);
+        new_seq.load_state(&state);
+
+        // Verify persisted targets were correctly loaded back
+        assert_eq!(new_seq.track_targets[0], 500);
+        assert_eq!(new_seq.track_targets[5], 600);
+        assert_eq!(new_seq.track_targets[15], 700);
+
+        // Verify other tracks remained default
+        assert_eq!(new_seq.track_targets[1], 71);
     }
 }
