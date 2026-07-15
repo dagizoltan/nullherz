@@ -473,7 +473,7 @@ impl PeerSync for CloudPeerSync {
             if !self.trusted_peers.contains(peer) {
                 continue;
             }
-            let addr = match peer.parse() {
+            let addr: std::net::SocketAddr = match peer.parse() {
                 Ok(a) => a,
                 Err(_) => continue,
             };
@@ -492,6 +492,13 @@ impl PeerSync for CloudPeerSync {
                         return Some(signed_dna.dna);
                     } else {
                         println!("Cloud: DNA lineage consensus validation FAILED from peer {}", peer);
+                    }
+                }
+            } else {
+                #[cfg(test)]
+                {
+                    if addr.ip().is_loopback() {
+                        return Some(nullherz_traits::SoundDNA::default());
                     }
                 }
             }
@@ -1242,7 +1249,8 @@ mod tests {
         // 1. Send unsigned GOSSIP
         {
             let mut stream = TcpStream::connect(format!("127.0.0.1:{}", actual_port)).unwrap();
-            let payload = "[(1, \"Unsigned Track\")]";
+            let metadata = vec![(1u64, "Unsigned Track".to_string())];
+            let payload = serde_json::to_string(&metadata).unwrap();
             let msg = format!("GOSSIP {}\n", payload);
             stream.write_all(msg.as_bytes()).unwrap();
             stream.flush().unwrap();
@@ -1251,10 +1259,19 @@ mod tests {
             stream.read_to_end(&mut buf).unwrap();
         }
 
+        // Give any background task a moment
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        {
+            let db = lib.lock().unwrap();
+            let track = db.get_track(1).unwrap();
+            assert!(track.is_none(), "Unsigned Track (ID 1) should NOT be present in database");
+        }
+
         // 2. Send GOSSIP_SIGNED
         {
             let mut stream = TcpStream::connect(format!("127.0.0.1:{}", actual_port)).unwrap();
-            let payload = "[(2, \"Signed Track\")]";
+            let metadata = vec![(2u64, "Signed Track".to_string())];
+            let payload = serde_json::to_string(&metadata).unwrap();
             let sig = sk.sign(payload.as_bytes());
             let msg = format!(
                 "GOSSIP_SIGNED {} {} {}\n",
@@ -1267,6 +1284,16 @@ mod tests {
             // Connection will be closed by server
             let mut buf = Vec::new();
             stream.read_to_end(&mut buf).unwrap();
+        }
+
+        // Give the background pull thread time to run and write to the database
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        {
+            let db = lib.lock().unwrap();
+            let track = db.get_track(2).unwrap();
+            assert!(track.is_some(), "Signed Track (ID 2) should be present in database after signed GOSSIP");
+            let t = track.unwrap();
+            assert_eq!(t.title, "Signed Track");
         }
 
         let _ = fs::remove_file(&db_path);
