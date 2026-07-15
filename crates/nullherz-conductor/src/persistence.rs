@@ -1,20 +1,13 @@
 use serde::{Serialize, Deserialize};
 use serde_with::serde_as;
 
-pub fn default_coordinate() -> f32 {
-    -1.0
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]
 pub struct NodeState {
     pub id: u32,
     pub type_id: u32,
     pub params: Vec<(u32, f32)>,
-    #[serde(default = "default_coordinate")]
-    pub x: f32,
-    #[serde(default = "default_coordinate")]
-    pub y: f32,
+    pub position: Option<(f32, f32)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -125,13 +118,12 @@ impl ProjectState {
                             params.push((p_id, child.get_parameter(p_id)));
                         }
 
-                        let (x, y) = topo.node_positions[node_idx as usize].unwrap_or((-1.0, -1.0));
+                        let position = topo.node_positions[node_idx as usize];
                         state.nodes.push(NodeState {
                             id: node_idx,
                             type_id,
                             params,
-                            x,
-                            y,
+                            position,
                         });
 
                         let state_data = child.serialize_state();
@@ -206,6 +198,15 @@ impl ProjectState {
                 node_idx: node.id,
             });
             conductor.topology_manager.handle_topology_command(&cmd);
+
+            if let Some((x, y)) = node.position {
+                let pos_cmd = Command::Topology(nullherz_traits::TopologyCommand::SetNodePosition {
+                    node_idx: node.id,
+                    x,
+                    y,
+                });
+                conductor.topology_manager.handle_topology_command(&pos_cmd);
+            }
 
             if let Some(ref mut prod) = conductor.engine_coordinator.command_producer {
                 for (param_id, value) in &node.params {

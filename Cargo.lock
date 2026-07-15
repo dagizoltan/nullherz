@@ -3265,6 +3265,7 @@ dependencies = [
  "hex",
  "mdns-sd",
  "nullherz-traits",
+ "rand 0.8.6",
  "rayon",
  "redb",
  "serde",
