@@ -1279,13 +1279,9 @@ mod tests {
             }
         });
 
-        // 1. Send unsigned GOSSIP
+        // 1. Send unsigned GOSSIP (does not need to bind to client_addr since server rejects unsigned gossip immediately)
         {
             let client_sock = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
-            client_sock.set_reuse_address(true).unwrap();
-            #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
-            let _ = client_sock.set_reuse_port(true);
-            client_sock.bind(&client_addr.into()).unwrap();
             client_sock.connect(&server_addr.into()).unwrap();
             let mut stream: TcpStream = client_sock.into();
 
