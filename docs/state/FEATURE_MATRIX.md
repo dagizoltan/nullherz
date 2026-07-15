@@ -10,6 +10,8 @@
 | Feature | Status | Description |
 | :--- | :---: | :--- |
 | **Declarative Topology** | ✅ | Kahn's algorithm for off-thread graph compilation and atomic commit. |
+| **Node Removal**         | ✅ | Off-thread double-buffered node removal and dangling edge cleanup. |
+| **Undo/Redo System**     | ✅ | Snapshot-based session undo/redo with parameter drag rate limiting. |
 | **Lifecycle Management** | ✅ | Node lifecycle, sidecar supervisor, and graceful process teardown. |
 | **Project Persistence** | ✅ | Bincode (.bin) and JSON serialization for full session recovery. |
 | **Hardware Calibration** | ✅ | RTL measurement with dynamic sample-rate adjustment (10ms offset). |
