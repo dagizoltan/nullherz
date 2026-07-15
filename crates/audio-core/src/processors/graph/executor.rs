@@ -210,6 +210,7 @@ impl GraphExecutor {
                     host_ptr: host.map(|h| h as *const dyn nullherz_traits::Host),
                     is_last_sub_block,
                     is_bypassed,
+                    bypass_state_ptr: &topo.bypass_states[n_idx] as *const _ as *mut bool,
                     pdc_lines_ptr: pdc_lines,
                     pdc_write_pos,
                 };
@@ -309,9 +310,35 @@ impl GraphExecutor {
                         }
                     }
                 } else {
-                    unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count + sidechain_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
-                    for output in node_outputs_reconstructed.iter().take(output_count) {
-                        crate::assert_finite_block!(output, n_idx);
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        unsafe {
+                            (*node.processor.get()).process(
+                                &node_inputs_storage[..input_count + sidechain_count],
+                                &mut node_outputs_reconstructed[..output_count],
+                                &mut inner_context
+                            );
+                        }
+                    }));
+
+                    if result.is_err() {
+                        eprintln!(
+                            "Audio Engine: caught panic in process() of node_idx {} (processor type: '{}')",
+                            n_idx,
+                            unsafe { (*node.processor.get()).processor_type() }
+                        );
+
+                        // Zero-fill reconstructed outputs
+                        for output in node_outputs_reconstructed.iter_mut().take(output_count) {
+                            output.fill(0.0);
+                        }
+
+                        // Permanently bypass the node
+                        let topo_mut = topo as *const GraphTopology as *mut GraphTopology;
+                        unsafe { (*topo_mut).bypass_states[n_idx] = true; }
+                    } else {
+                        for output in node_outputs_reconstructed.iter().take(output_count) {
+                            crate::assert_finite_block!(output, n_idx);
+                        }
                     }
                 }
 
