@@ -60,9 +60,17 @@ pub struct SystemConfig {
     pub calibration_samples: u32,
 }
 
+pub const CURRENT_PROJECT_VERSION: u32 = 1;
+
+pub fn default_project_version() -> u32 {
+    0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]
 pub struct ProjectState {
+    #[serde(default = "default_project_version")]
+    pub version: u32,
     pub active_master_deck: char,
     pub nodes: Vec<NodeState>,
     pub edges: Vec<EdgeState>,
@@ -84,6 +92,7 @@ use nullherz_traits::{Command, TimestampedCommand, TopologyMutation, ProcessorTy
 impl ProjectState {
     pub fn empty() -> Self {
         Self {
+            version: CURRENT_PROJECT_VERSION,
             active_master_deck: 'A',
             nodes: Vec::new(),
             edges: Vec::new(),
@@ -101,6 +110,7 @@ impl ProjectState {
 
     pub fn capture(conductor: &crate::orchestrator::Conductor) -> Self {
         let mut state = Self::empty();
+        state.version = CURRENT_PROJECT_VERSION;
         let topo = &conductor.topology_manager.current_topology;
 
         // Use try_lock for non-blocking capture in auto-save context
@@ -269,9 +279,36 @@ impl ProjectState {
         std::fs::rename(temp_path, path)
     }
 
+    fn check_version(version: u32) -> std::io::Result<()> {
+        if version == CURRENT_PROJECT_VERSION {
+            Ok(())
+        } else if version < CURRENT_PROJECT_VERSION {
+            match version {
+                0 => {
+                    println!("Loading project saved with older version 0 (predates versioning), no migration needed yet.");
+                }
+                _ => {
+                    println!("Loading project saved with older version {}, no migration needed yet.", version);
+                }
+            }
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Cannot load project: file was saved with a newer version ({}) than the current supported version ({})",
+                    version,
+                    CURRENT_PROJECT_VERSION
+                )
+            ))
+        }
+    }
+
     pub fn load_from_file(path: &str) -> std::io::Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        serde_json::from_str(&content).map_err(|e| std::io::Error::other(e))
+        let state: Self = serde_json::from_str(&content).map_err(|e| std::io::Error::other(e))?;
+        Self::check_version(state.version)?;
+        Ok(state)
     }
 
     pub fn save_to_rkyv(&self, path: &str) -> std::io::Result<()> {
@@ -286,6 +323,7 @@ impl ProjectState {
         let archived = rkyv::check_archived_root::<Self>(&bytes[..])
             .map_err(|e| std::io::Error::other(format!("rkyv validation error: {}", e)))?;
         let deserialized: Self = rkyv::Deserialize::<Self, _>::deserialize(archived, &mut rkyv::Infallible).map_err(|e| std::io::Error::other(format!("rkyv deserialize error: {}", e)))?;
+        Self::check_version(deserialized.version)?;
         Ok(deserialized)
     }
 }

@@ -751,6 +751,7 @@ impl DnaServer {
                                 }
                                 "GOSSIP" => {
                                     eprintln!("DNA Server: GOSSIP payload rejected because it was unsigned.");
+                                    return;
                                 }
                                 "GOSSIP_SIGNED" => {
                                     if parts.len() >= 4 {
