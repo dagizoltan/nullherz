@@ -494,13 +494,6 @@ impl PeerSync for CloudPeerSync {
                         println!("Cloud: DNA lineage consensus validation FAILED from peer {}", peer);
                     }
                 }
-            } else {
-                #[cfg(test)]
-                {
-                    if addr.ip().is_loopback() {
-                        return Some(nullherz_traits::SoundDNA::default());
-                    }
-                }
             }
         }
         None
@@ -1216,24 +1209,19 @@ mod tests {
 
     #[test]
     fn test_gossip_signature_enforcement_server() {
-        use std::net::TcpStream;
-        use std::io::Write;
+        use std::net::{TcpStream, TcpListener, SocketAddr};
+        use std::io::{Write, Read, BufRead, BufReader};
         use ed25519_dalek::{SigningKey, Signer};
+        use socket2::{Socket, Domain, Type, Protocol};
 
-        let mut port = 18200;
-        let listener = loop {
-            match std::net::TcpListener::bind(format!("127.0.0.1:{}", port)) {
-                Ok(l) => break l,
-                Err(_) => {
-                    port += 1;
-                    if port > 19200 {
-                        panic!("Failed to find free port for test");
-                    }
-                }
-            }
+        let actual_port = {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
         };
-        let actual_port = listener.local_addr().unwrap().port();
-        drop(listener);
+        let client_port = {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
 
         let db_path = format!("test_gossip_srv_{}.redb", actual_port);
         let _ = fs::remove_file(&db_path);
@@ -1246,9 +1234,60 @@ mod tests {
         DnaServer::start(lib.clone(), actual_port, Some(sk_bytes)).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(100));
 
+        let server_addr: SocketAddr = format!("127.0.0.1:{}", actual_port).parse().unwrap();
+        let client_addr: SocketAddr = format!("127.0.0.1:{}", client_port).parse().unwrap();
+
+        // 1. Create client listener to accept the server's connect_timeout back on client_port
+        let client_listener_sock = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
+        client_listener_sock.set_reuse_address(true).unwrap();
+        #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
+        let _ = client_listener_sock.set_reuse_port(true);
+        client_listener_sock.bind(&client_addr.into()).unwrap();
+        client_listener_sock.listen(128).unwrap();
+        let client_listener: TcpListener = client_listener_sock.into();
+
+        // Spawn mock client DNA provider loop in background to serve GET DNA requests
+        let client_listener_clone = client_listener.try_clone().unwrap();
+        let mock_provider_thread = std::thread::spawn(move || {
+            if let Ok((mut incoming_stream, _)) = client_listener_clone.accept() {
+                let mut reader = BufReader::new(&incoming_stream);
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_ok() {
+                    let line_trimmed = line.trim();
+                    if line_trimmed.starts_with("GET DNA ") {
+                        // Let's sign and return a valid SignedSoundDna for track 2
+                        use ed25519_dalek::{SigningKey, Signer};
+                        let mut csprng = rand::rngs::OsRng;
+                        let sk = SigningKey::generate(&mut csprng);
+                        let dna = nullherz_traits::SoundDNA::default();
+                        let dna_bytes = serde_json::to_vec(&dna).unwrap_or_default();
+                        let sig = sk.sign(&dna_bytes);
+
+                        let signed = SignedSoundDna {
+                            dna,
+                            signature: sig.to_bytes(),
+                            signer_public_key: sk.verifying_key().to_bytes(),
+                            cas_id: None,
+                            parent_hashes: Vec::new(),
+                            authorship_chain: vec!["origin".to_string()],
+                            generation: 1,
+                        };
+                        let _ = serde_json::to_writer(&mut incoming_stream, &signed);
+                    }
+                }
+            }
+        });
+
         // 1. Send unsigned GOSSIP
         {
-            let mut stream = TcpStream::connect(format!("127.0.0.1:{}", actual_port)).unwrap();
+            let client_sock = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
+            client_sock.set_reuse_address(true).unwrap();
+            #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
+            let _ = client_sock.set_reuse_port(true);
+            client_sock.bind(&client_addr.into()).unwrap();
+            client_sock.connect(&server_addr.into()).unwrap();
+            let mut stream: TcpStream = client_sock.into();
+
             let metadata = vec![(1u64, "Unsigned Track".to_string())];
             let payload = serde_json::to_string(&metadata).unwrap();
             let msg = format!("GOSSIP {}\n", payload);
@@ -1269,7 +1308,14 @@ mod tests {
 
         // 2. Send GOSSIP_SIGNED
         {
-            let mut stream = TcpStream::connect(format!("127.0.0.1:{}", actual_port)).unwrap();
+            let client_sock = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
+            client_sock.set_reuse_address(true).unwrap();
+            #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
+            let _ = client_sock.set_reuse_port(true);
+            client_sock.bind(&client_addr.into()).unwrap();
+            client_sock.connect(&server_addr.into()).unwrap();
+            let mut stream: TcpStream = client_sock.into();
+
             let metadata = vec![(2u64, "Signed Track".to_string())];
             let payload = serde_json::to_string(&metadata).unwrap();
             let sig = sk.sign(payload.as_bytes());
@@ -1286,8 +1332,10 @@ mod tests {
             stream.read_to_end(&mut buf).unwrap();
         }
 
-        // Give the background pull thread time to run and write to the database
+        // Wait for mock DNA provider to finish and background sync thread to save to the database
+        let _ = mock_provider_thread.join();
         std::thread::sleep(std::time::Duration::from_millis(250));
+
         {
             let db = lib.lock().unwrap();
             let track = db.get_track(2).unwrap();
