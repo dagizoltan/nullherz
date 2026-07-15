@@ -652,6 +652,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             host_ptr: None,
             is_last_sub_block: false,
             is_bypassed: false,
+            bypass_state_ptr: std::ptr::null_mut(),
             pdc_lines_ptr: std::ptr::null_mut(),
             pdc_write_pos: 0,
         });
@@ -680,6 +681,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             host_ptr: None,
             is_last_sub_block: false,
             is_bypassed: false,
+            bypass_state_ptr: std::ptr::null_mut(),
             pdc_lines_ptr: std::ptr::null_mut(),
             pdc_write_pos: 0,
         });
@@ -687,5 +689,81 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         let target_2 = start_count_2 + 1;
         while completion.load(Ordering::Acquire) < target_2 { pool.completion_fd.wait(); }
         assert_eq!(completion.load(Ordering::Relaxed), 2);
+    }
+
+    pub struct PanickingProcessor {
+        pub count: Arc<std::sync::atomic::AtomicUsize>,
+    }
+    impl std::fmt::Debug for PanickingProcessor {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "PanickingProcessor") }
+    }
+    impl nullherz_traits::SignalProcessor for PanickingProcessor {
+        fn process(&mut self, _inputs: &[&[f32]], _outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
+            self.count.fetch_add(1, Ordering::Relaxed);
+            panic!("Deliberate DSP panic!");
+        }
+    }
+    impl nullherz_traits::MidiResponder for PanickingProcessor {}
+    impl nullherz_traits::SnapshotProvider for PanickingProcessor {}
+    impl AudioProcessor for PanickingProcessor {
+        fn as_any(&self) -> &dyn std::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+        fn processor_type(&self) -> &'static str { "panicker" }
+    }
+
+    #[test]
+    fn test_graph_panic_isolation() {
+        let mut graph = ProcessorGraph::new();
+
+        // Node 0: Upstream Identity (reads from 2, writes to 1)
+        graph.add_node(Box::new(IdentityProcessor), vec![2], vec![1]);
+
+        // Node 1: Panicker (reads from 1, writes to 3)
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let panicking_proc = PanickingProcessor { count: Arc::clone(&count) };
+        graph.add_node(Box::new(panicking_proc), vec![1], vec![3]);
+
+        // Node 2: Downstream Identity (reads from 3, writes to 0)
+        graph.add_node(Box::new(IdentityProcessor), vec![3], vec![0]);
+
+        // 1. Run first block execution
+        // Populate input buffer 2 with ones
+        let active_idx_0 = graph.topology_coordinator.active_idx();
+        let p_idx_2 = graph.topology_coordinator.topologies[active_idx_0].virtual_to_physical[2] as usize;
+        graph.buffer_pool.buffers[p_idx_2].data.fill(1.0);
+
+        let mut out_data = [0.0f32; 100];
+        let out_slice = &mut out_data[..];
+        let mut outputs = [out_slice];
+        let mut context = ProcessContext { transport: None, host: None, sub_block_offset: 0, is_last_sub_block: false };
+
+        // Assert process doesn't propagate panic
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            graph.process(&[], &mut outputs, &mut context);
+        })).expect("Graph execution must not propagate panic");
+
+        // Assert panicking node was called exactly once
+        assert_eq!(count.load(Ordering::Relaxed), 1);
+
+        // Assert Node 1's outputs (virtual buffer 3) were zero-filled/silenced
+        let p_idx_3 = graph.topology_coordinator.topologies[active_idx_0].virtual_to_physical[3] as usize;
+        assert!(graph.buffer_pool.buffers[p_idx_3].data.iter().all(|&x| x == 0.0));
+
+        // Assert Node 1 is permanently bypassed in active topology
+        assert!(graph.topology_coordinator.topologies[active_idx_0].bypass_states[1], "Node 1 must be marked as bypassed");
+
+        // 2. Run second block execution
+        // Clear outputs before processing
+        outputs[0].fill(0.0);
+        // Re-populate input buffer 2 with ones
+        graph.buffer_pool.buffers[p_idx_2].data.fill(1.0);
+
+        graph.process(&[], &mut outputs, &mut context);
+
+        // Assert panicking node was NOT called again (bypassed)
+        assert_eq!(count.load(Ordering::Relaxed), 1);
+
+        // Assert Node 2 (virtual buffer 0 / out_data) now processes and receives data correctly from bypassed Node 1 (ones)
+        assert!(out_data.iter().all(|&x| x == 1.0));
     }
 }

@@ -25,6 +25,7 @@ pub struct Job {
     pub host_ptr: Option<*const dyn nullherz_traits::Host>,
     pub is_last_sub_block: bool,
     pub is_bypassed: bool,
+    pub bypass_state_ptr: *mut bool,
     pub pdc_lines_ptr: *mut crate::processors::graph::buffer_pool::PdcLines,
     pub pdc_write_pos: usize,
 }
@@ -215,9 +216,36 @@ impl TaskPool {
                                 }
                             }
                         } else {
-                            unsafe { (*node.processor.get()).process(&node_inputs_storage[..input_count + sidechain_count], &mut node_outputs_reconstructed[..output_count], &mut inner_context); }
-                            for output in node_outputs_reconstructed.iter().take(output_count) {
-                                crate::assert_finite_block!(output, job.node_idx);
+                            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                unsafe {
+                                    (*node.processor.get()).process(
+                                        &node_inputs_storage[..input_count + sidechain_count],
+                                        &mut node_outputs_reconstructed[..output_count],
+                                        &mut inner_context
+                                    );
+                                }
+                            }));
+
+                            if result.is_err() {
+                                eprintln!(
+                                    "Audio Engine: caught panic in process() of node_idx {} (processor type: '{}')",
+                                    job.node_idx,
+                                    unsafe { (*node.processor.get()).processor_type() }
+                                );
+
+                                // Zero-fill reconstructed outputs
+                                for output in node_outputs_reconstructed.iter_mut().take(output_count) {
+                                    output.fill(0.0);
+                                }
+
+                                // Permanently bypass the node
+                                if !job.bypass_state_ptr.is_null() {
+                                    unsafe { *job.bypass_state_ptr = true; }
+                                }
+                            } else {
+                                for output in node_outputs_reconstructed.iter().take(output_count) {
+                                    crate::assert_finite_block!(output, job.node_idx);
+                                }
                             }
                         }
 
