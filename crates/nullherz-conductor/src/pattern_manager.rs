@@ -113,7 +113,7 @@ impl DnaSequencer {
 
     pub fn mutate_pattern(
         dna: &nullherz_traits::RhythmicDNA,
-        current_grid: &[[f32; 64]; 16],
+        current_grid: &[Vec<f32>; 16],
         node_idx: u32,
         track_idx: u32,
         mutation_probability: f32
@@ -123,7 +123,7 @@ impl DnaSequencer {
             for bit in 0..64 {
                 let step = (i * 64) + bit;
                 let dna_value = if (mask >> bit) & 1 == 1 { 1.0 } else { 0.0 };
-                let current_value = current_grid[track_idx as usize][step];
+                let current_value = current_grid[track_idx as usize].get(step).copied().unwrap_or(0.0);
 
                 // Deterministic pseudo-randomness for stable evolution
                 let seed = (track_idx as u32).wrapping_mul(256).wrapping_add(step as u32);
