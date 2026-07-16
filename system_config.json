@@ -1,0 +1,8 @@
+{
+  "audio_backend": "ALSA",
+  "midi_ports": [],
+  "sample_rate": 44100,
+  "block_size": 256,
+  "calibration_samples": 0,
+  "period_size": 128
+}
