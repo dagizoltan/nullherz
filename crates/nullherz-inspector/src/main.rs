@@ -109,7 +109,7 @@ pub struct InspectorApp {
     pub(crate) quantize_enabled: bool,
     pub(crate) master_gain: f32,
     pub(crate) crossfader_pos: f32,
-    pub(crate) library_db: std::sync::Arc<nullherz_dna::LibraryDatabase>,
+    pub(crate) library_db: SharedLibraryDb,
     pub(crate) active_crate: Option<String>,
     pub(crate) search_query: String,
     pub(crate) is_streaming: bool,
@@ -204,6 +204,7 @@ pub struct InspectorApp {
     pub(crate) shortcuts_enabled: bool,
     pub(crate) global_playing: bool,
     pub(crate) auto_pollinate_enabled: bool,
+    pub(crate) _conductor_thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl InspectorApp {
@@ -271,12 +272,59 @@ impl InspectorApp {
 
         cc.egui_ctx.set_fonts(fonts);
 
-        let (cmd_tx, _cmd_rx) = mpsc::channel::<Command>();
+        let (cmd_tx, cmd_rx) = mpsc::channel::<Command>();
+        let last_telemetry = Arc::new(Mutex::new(None));
+
+        let raw_db = nullherz_dna::LibraryDatabase::load("library.redb").unwrap_or_else(|e| {
+            eprintln!("Warning: Failed to load library.redb ({}). Using transient storage.", e);
+            nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase")
+        });
+        // Seed demo tracks if database is empty
+        if raw_db.list_tracks().is_ok_and(|t| t.is_empty()) {
+            let mut metadata_a = nullherz_traits::SampleMetadata::new_empty();
+            metadata_a.bpm = 120.0;
+            metadata_a.total_samples = 44100 * 60 * 3; // 3 minutes
+            metadata_a.root_key = Some(5.0);
+            let track_a = nullherz_dna::LibraryTrack {
+                id: 1,
+                path: "tracks/track_a.wav".to_string(),
+                title: "Demo Track A".to_string(),
+                artist: "Nullherz".to_string(),
+                album: "Demo Album".to_string(),
+                genre: "Techno".to_string(),
+                energy_level: 0.8,
+                metadata: std::sync::Arc::new(metadata_a),
+            };
+            let _ = raw_db.save_track(&track_a);
+
+            let mut metadata_b = nullherz_traits::SampleMetadata::new_empty();
+            metadata_b.bpm = 124.0;
+            metadata_b.total_samples = 44100 * 60 * 3; // 3 minutes
+            metadata_b.root_key = Some(8.0);
+            let track_b = nullherz_dna::LibraryTrack {
+                id: 2,
+                path: "tracks/track_b.wav".to_string(),
+                title: "Demo Track B".to_string(),
+                artist: "Nullherz".to_string(),
+                album: "Demo Album".to_string(),
+                genre: "House".to_string(),
+                energy_level: 0.6,
+                metadata: std::sync::Arc::new(metadata_b),
+            };
+            let _ = raw_db.save_track(&track_b);
+        }
+
+        let db_arc = Arc::new(std::sync::Mutex::new(raw_db));
+        let library_db_wrapper = SharedLibraryDb(db_arc.clone());
+
+        let (conductor_thread, _conductor) = start_in_process_conductor(cmd_rx, last_telemetry.clone(), db_arc);
+
         let default_view = View::Console;
         let mut app = Self {
             graph,
             command_sender: cmd_tx,
-            last_telemetry: Arc::new(Mutex::new(None)),
+            last_telemetry,
+            _conductor_thread: Some(conductor_thread),
             active_view: default_view,
             channel_faders: [1.0; 4],
             channel_eq_high: [1.0; 4],
@@ -291,47 +339,7 @@ impl InspectorApp {
             quantize_enabled: true,
             master_gain: 1.0,
             crossfader_pos: 0.5,
-            library_db: {
-                let db = nullherz_dna::LibraryDatabase::load("library.redb").unwrap_or_else(|e| {
-                    eprintln!("Warning: Failed to load library.redb ({}). Using transient storage.", e);
-                    nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase")
-                });
-                // Seed demo tracks if database is empty
-                if db.list_tracks().is_ok_and(|t| t.is_empty()) {
-                    let mut metadata_a = nullherz_traits::SampleMetadata::new_empty();
-                    metadata_a.bpm = 120.0;
-                    metadata_a.total_samples = 44100 * 60 * 3; // 3 minutes
-                    metadata_a.root_key = Some(5.0);
-                    let track_a = nullherz_dna::LibraryTrack {
-                        id: 1,
-                        path: "tracks/track_a.wav".to_string(),
-                        title: "Demo Track A".to_string(),
-                        artist: "Nullherz".to_string(),
-                        album: "Demo Album".to_string(),
-                        genre: "Techno".to_string(),
-                        energy_level: 0.8,
-                        metadata: std::sync::Arc::new(metadata_a),
-                    };
-                    let _ = db.save_track(&track_a);
-
-                    let mut metadata_b = nullherz_traits::SampleMetadata::new_empty();
-                    metadata_b.bpm = 124.0;
-                    metadata_b.total_samples = 44100 * 60 * 3; // 3 minutes
-                    metadata_b.root_key = Some(8.0);
-                    let track_b = nullherz_dna::LibraryTrack {
-                        id: 2,
-                        path: "tracks/track_b.wav".to_string(),
-                        title: "Demo Track B".to_string(),
-                        artist: "Nullherz".to_string(),
-                        album: "Demo Album".to_string(),
-                        genre: "House".to_string(),
-                        energy_level: 0.6,
-                        metadata: std::sync::Arc::new(metadata_b),
-                    };
-                    let _ = db.save_track(&track_b);
-                }
-                std::sync::Arc::new(db)
-            },
+            library_db: library_db_wrapper,
             active_crate: None,
             search_query: String::new(),
             is_streaming: false,
@@ -923,4 +931,213 @@ fn main() -> eframe::Result<()> {
             Box::new(app)
         }),
     )
+}
+
+#[derive(Clone)]
+pub struct SharedLibraryDb(pub Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>);
+
+impl SharedLibraryDb {
+    pub fn list_smart_crates(&self) -> Result<Vec<nullherz_dna::SmartCrateDefinition>, Box<dyn std::error::Error>> {
+        self.0.lock().unwrap().list_smart_crates()
+    }
+    pub fn save_smart_crate(&self, def: &nullherz_dna::SmartCrateDefinition) -> Result<(), Box<dyn std::error::Error>> {
+        self.0.lock().unwrap().save_smart_crate(def)
+    }
+}
+
+impl nullherz_dna::GeneticLibrary for SharedLibraryDb {
+    fn get_track(&self, id: u64) -> Result<Option<nullherz_dna::LibraryTrack>, Box<dyn std::error::Error>> {
+        self.0.lock().unwrap().get_track(id)
+    }
+    fn list_tracks(&self) -> Result<Vec<nullherz_dna::LibraryTrack>, Box<dyn std::error::Error>> {
+        self.0.lock().unwrap().list_tracks()
+    }
+    fn save_track(&self, track: &nullherz_dna::LibraryTrack) -> Result<(), Box<dyn std::error::Error>> {
+        self.0.lock().unwrap().save_track(track)
+    }
+    fn add_to_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>> {
+        self.0.lock().unwrap().add_to_crate(crate_name, track_id)
+    }
+    fn remove_from_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>> {
+        self.0.lock().unwrap().remove_from_crate(crate_name, track_id)
+    }
+    fn list_crates(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        self.0.lock().unwrap().list_crates()
+    }
+    fn get_tracks_in_crate(&self, crate_name: &str) -> Result<Vec<nullherz_dna::LibraryTrack>, Box<dyn std::error::Error>> {
+        self.0.lock().unwrap().get_tracks_in_crate(crate_name)
+    }
+    fn query_tracks(&self, genre: Option<&str>, min_bpm: Option<f32>, max_bpm: Option<f32>, root_key: Option<f32>) -> Result<Vec<nullherz_dna::LibraryTrack>, Box<dyn std::error::Error>> {
+        self.0.lock().unwrap().query_tracks(genre, min_bpm, max_bpm, root_key)
+    }
+    fn suggest_matches(&self, target_dna: &nullherz_traits::SoundDNA, limit: usize) -> Result<Vec<(u64, f32)>, Box<dyn std::error::Error>> {
+        self.0.lock().unwrap().suggest_matches(target_dna, limit)
+    }
+    fn remove_track(&self, id: u64) -> Result<(), Box<dyn std::error::Error>> {
+        self.0.lock().unwrap().remove_track(id)
+    }
+}
+
+pub fn start_in_process_conductor(
+    cmd_rx: mpsc::Receiver<Command>,
+    last_telemetry: Arc<Mutex<Option<Telemetry>>>,
+    db_arc: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>,
+) -> (std::thread::JoinHandle<()>, Arc<Mutex<nullherz_conductor::Conductor>>) {
+    let conductor = nullherz_conductor::Conductor::with_library(db_arc);
+    let conductor_arc = Arc::new(Mutex::new(conductor));
+    let conductor_clone = conductor_arc.clone();
+
+    let join_handle = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to build tokio runtime");
+        let _guard = rt.enter();
+
+        // Perform setup inside the Tokio context!
+        let mut context = {
+            let mut cond = conductor_clone.lock();
+            let _ = cond.load_system_config();
+            let context = cond.setup_engine();
+
+            // Bootstrapping 4-Channel DJ Mixer...
+            let mut mixer = nullherz_mixer::MixerManager::new();
+            let bootstrap_commands = mixer.create_4channel_mixer();
+            cond.apply_mixer_commands(bootstrap_commands);
+
+            if let Some(worker) = cond.analysis_worker.take() {
+                worker.start();
+            }
+
+            if let Some(monitor) = cond.folder_monitor.take() {
+                monitor.start_auto_scan("tracks".to_string());
+            }
+
+            cond.sidecar_discovery.start_watcher();
+
+            // Start backend
+            let mut backend_type = nullherz_backends::AudioBackendType::Alsa;
+            let config_path = "system_config.json";
+            if std::path::Path::new(config_path).exists() {
+                if let Ok(content) = std::fs::read_to_string(config_path) {
+                    if let Ok(config) = serde_json::from_str::<nullherz_conductor::persistence::SystemConfig>(&content) {
+                        backend_type = match config.audio_backend.to_lowercase().as_str() {
+                            "alsa" => nullherz_backends::AudioBackendType::Alsa,
+                            "pipewire" => nullherz_backends::AudioBackendType::Pipewire,
+                            "jack" => nullherz_backends::AudioBackendType::Jack,
+                            "threaded" => nullherz_backends::AudioBackendType::Threaded,
+                            "mock" => nullherz_backends::AudioBackendType::Mock,
+                            _ => nullherz_backends::AudioBackendType::Alsa,
+                        };
+                    }
+                }
+            }
+
+            // Try starting the preferred backend. If it fails, fallback to Threaded.
+            if let Err(e) = cond.start_backend(backend_type) {
+                eprintln!(
+                    "Failed to start audio backend {:?}: {}. Attempting fallback to Threaded backend...",
+                    backend_type, e
+                );
+                if let Err(fallback_err) = cond.start_backend(nullherz_backends::AudioBackendType::Threaded) {
+                    eprintln!("CRITICAL: Failed to start fallback Threaded backend: {}", fallback_err);
+                }
+            }
+            context
+        };
+
+        let mut ticker = std::time::Instant::now();
+        loop {
+            let mut disconnected = false;
+            // Scope for locking conductor
+            {
+                let mut cond = conductor_clone.lock();
+
+                // 1. Process any incoming commands
+                loop {
+                    match cmd_rx.try_recv() {
+                        Ok(cmd) => {
+                            cond.apply_mixer_commands(vec![cmd]);
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {
+                            break;
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            disconnected = true;
+                            break;
+                        }
+                    }
+                }
+
+                if !disconnected {
+                    // 2. Tick conductor
+                    cond.tick();
+
+                    // 3. Process telemetry
+                    while let Some(mut tel) = context.telemetry_consumer.pop() {
+                        cond.update_timeline(&mut tel);
+                        *last_telemetry.lock() = Some(tel);
+                    }
+                }
+            }
+
+            if disconnected {
+                break;
+            }
+
+            let elapsed = ticker.elapsed();
+            if elapsed < std::time::Duration::from_millis(16) {
+                std::thread::sleep(std::time::Duration::from_millis(16) - elapsed);
+            }
+            ticker = std::time::Instant::now();
+        }
+    });
+
+    (join_handle, conductor_arc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_inspector_command_routing_to_conductor() {
+        let (cmd_tx, cmd_rx) = mpsc::channel::<Command>();
+        let last_telemetry = Arc::new(Mutex::new(None));
+
+        // Create an in-memory transient LibraryDatabase for testing to avoid lock files
+        let raw_db = nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase");
+        let db_arc = Arc::new(std::sync::Mutex::new(raw_db));
+
+        // Start the in-process conductor thread
+        let (_conductor_thread, conductor_arc) = start_in_process_conductor(cmd_rx, last_telemetry, db_arc);
+
+        // Initial state check
+        {
+            let cond = conductor_arc.lock();
+            assert_eq!(cond.active_master_deck, 'A'); // Starts as 'A' by default
+        }
+
+        // Send a Command to mutate conductor's state
+        cmd_tx.send(Command::Core(nullherz_traits::CoreCommand::SetMasterDeck('C'))).unwrap();
+
+        // Wait for the background thread loop to tick and process the command (approx 100ms for extra safety)
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Verify state mutation on Conductor
+        {
+            let cond = conductor_arc.lock();
+            assert_eq!(cond.active_master_deck, 'C'); // Should have been mutated to 'C'!
+        }
+
+        // Send another Command
+        cmd_tx.send(Command::Core(nullherz_traits::CoreCommand::SetMasterDeck('D'))).unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        {
+            let cond = conductor_arc.lock();
+            assert_eq!(cond.active_master_deck, 'D'); // Should have been mutated to 'D'!
+        }
+    }
 }
