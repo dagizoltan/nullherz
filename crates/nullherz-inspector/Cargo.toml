@@ -20,6 +20,8 @@ futures-util = "0.3"
 nullherz-dna = { path = "../nullherz-dna" }
 nullherz-conductor = { path = "../nullherz-conductor" }
 nullherz-ui-hal = { path = "../nullherz-ui-hal" }
+nullherz-mixer = { path = "../nullherz-mixer" }
+nullherz-backends = { path = "../nullherz-backends" }
 egui-wgpu = "0.27"
 egui-phosphor = "0.5.0"
 midir = { version = "0.9.1", optional = true }

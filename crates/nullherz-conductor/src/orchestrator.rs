@@ -70,6 +70,54 @@ impl Conductor {
         Self::with_library_path("library.redb")
     }
 
+    pub fn with_library(library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>) -> Self {
+        let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
+        let sidecar_discovery = crate::discovery::SidecarDiscoveryService::new("plugins").with_library(library.clone());
+        let dna_discovery = sidecar_discovery.dna_discovery.clone();
+
+        let mut transfusion_manager = TransfusionManager::new(sample_registry.clone());
+        transfusion_manager.discovery_service = Some(dna_discovery);
+        transfusion_manager = transfusion_manager.with_library(library.clone());
+
+        Self {
+            engine_coordinator: EngineCoordinator::new(),
+            topology_manager: TopologyManager::new(),
+            transfusion_manager,
+            mixer_bridge: MixerBridge::new(),
+            sidecar_supervisor: SidecarSupervisor::new(),
+            pattern_manager: PatternManager::new(),
+            clip_orchestrator: ClipOrchestrator::new(),
+            modulation_matrix: ModulationMatrix::new(),
+            audio_bridge: Arc::new(IpcAudioBridge::new()),
+            sidecar_discovery,
+            midi_mapper: MidiMapper::new(),
+            midi_clock: crate::midi_clock::MidiClockTracker::new(),
+            analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
+            folder_monitor: Some(crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())),
+            library,
+            mixer_manager: nullherz_mixer::MixerManager::new(),
+            midi_consumer: None,
+            external_midi_consumer: None,
+            midi_child: None,
+            midi_shm: None,
+            matchmaking_suggestions: Arc::new(Mutex::new(Vec::new())),
+            active_master_deck: 'A',
+            calibration_samples: 0,
+            ptp_clock: None,
+            last_autosave_secs: 0,
+            last_genetic_evolve_secs: 0,
+            focused_node_idx: None,
+            active_transitions: Vec::new(),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            is_streaming: false,
+            stream_start_time: None,
+            stream_bitrate: 256.0,
+            stream_dropped_frames: 0,
+            stream_viewers: 42,
+        }
+    }
+
     pub fn with_library_path(path: &str) -> Self {
         let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
         let library = match nullherz_dna::LibraryDatabase::load(path) {

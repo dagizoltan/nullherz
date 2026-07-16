@@ -284,7 +284,16 @@ impl GeneticLibrary for LibraryDatabase {
 
 impl LibraryDatabase {
     pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let db = Database::create(path)?;
+        let db_path = if path == ":memory:" {
+            let mut temp = std::env::temp_dir();
+            static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            temp.push(format!("nullherz_transient_{}_{}_{}.redb", std::process::id(), count, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()));
+            temp.to_string_lossy().to_string()
+        } else {
+            path.to_string()
+        };
+        let db = Database::create(&db_path)?;
         // Ensure table exists
         let write_txn = db.begin_write()?;
         {
