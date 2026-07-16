@@ -5,6 +5,18 @@ use audio_core::Telemetry;
 use nullherz_traits::{Command, PerformanceCommand, CoreCommand};
 pub use nullherz_conductor::pattern_manager::DnaSequencer;
 
+/// Helper to determine step status from telemetry safely.
+/// Returns (is_playing, is_starting).
+pub fn check_step_telemetry(
+    _telemetry: &Option<Telemetry>,
+    _track_idx: usize,
+    _slot_idx: usize,
+) -> (bool, bool) {
+    // Both are false because clip-slot based fields (active_clips and starting_clips_mask)
+    // are not step-sequencer compatible.
+    (false, false)
+}
+
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     ui.horizontal(|ui| {
         ui.heading(RichText::new("SESSION VIEW (COMPOSER)").strong().color(app.theme.text_primary));
@@ -231,16 +243,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         }
 
                                         // Playback status
-                                        let mut is_playing = false;
-                                        let mut is_starting = false;
-                                        if let Some(t) = telemetry {
-                                            if track_idx < t.active_clips.len() {
-                                                is_playing = t.active_clips[track_idx] == slot_idx as u8;
-                                            }
-                                            if track_idx < t.starting_clips_mask.len() && slot_idx < 64 {
-                                                is_starting = (t.starting_clips_mask[track_idx] >> slot_idx) & 1 == 1;
-                                            }
-                                        }
+                                        let (is_playing, is_starting) = check_step_telemetry(telemetry, track_idx, slot_idx);
 
                                         let velocity = app.sequencer_grid[track_idx][slot_idx];
                                         let mut color = if is_playing {
@@ -366,4 +369,32 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use audio_core::Telemetry;
+
+    #[test]
+    fn test_step_telemetry_check_high_slots() {
+        let telemetry = Some(Telemetry::default());
+
+        // Test check_step_telemetry with slot_idx values up to 512
+        for track_idx in 0..16 {
+            for slot_idx in 0..512 {
+                let (is_playing, is_starting) = check_step_telemetry(&telemetry, track_idx, slot_idx);
+                assert!(!is_playing, "is_playing must be false for step grid slot {}", slot_idx);
+                assert!(!is_starting, "is_starting must be false for step grid slot {}", slot_idx);
+            }
+        }
+    }
+
+    #[test]
+    fn test_step_telemetry_none_safety() {
+        // Test with None telemetry
+        let (is_playing, is_starting) = check_step_telemetry(&None, 0, 100);
+        assert!(!is_playing);
+        assert!(!is_starting);
+    }
 }

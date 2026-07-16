@@ -50,6 +50,10 @@ pub struct ProcessorState {
     pub state_data: Vec<u8>,
 }
 
+pub fn default_period_size() -> u64 {
+    128
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemConfig {
     pub audio_backend: String,
@@ -58,6 +62,8 @@ pub struct SystemConfig {
     pub block_size: u32,
     #[serde(default)]
     pub calibration_samples: u32,
+    #[serde(default = "default_period_size")]
+    pub period_size: u64,
 }
 
 pub const CURRENT_PROJECT_VERSION: u32 = 1;

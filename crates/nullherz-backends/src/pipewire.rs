@@ -76,6 +76,7 @@ pub struct PipewireBackendInner {
     lib: Option<PwLib>,
     events: Option<Box<PwStreamEvents>>,
     listener: [u64; 8],
+    period_size: u64,
 }
 
 unsafe impl Send for PipewireBackend {}
@@ -100,6 +101,7 @@ impl PipewireBackend {
                 lib: None,
                 events: None,
                 listener: [0; 8],
+                period_size: 128,
             })
         }
     }
@@ -224,7 +226,7 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
     let pw_buf = unsafe { &*(buffer as *const PwBuffer) };
     let spa_buf = unsafe { &*pw_buf.buffer };
 
-    let mut num_samples = 128;
+    let mut num_samples = backend.period_size as usize;
     if spa_buf.n_datas > 0 {
         let first_data = unsafe { &*spa_buf.datas.add(0) };
         let mut size_bytes = first_data.maxsize;
@@ -301,17 +303,18 @@ unsafe extern "C" fn pw_param_changed(_data: *mut std::ffi::c_void, id: u32, _pa
 }
 
 impl AudioBackend for PipewireBackend {
-    fn start(&mut self, engine_handle: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>) -> Result<(), String> {
+    fn start(&mut self, engine_handle: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>, period_size: u64) -> Result<(), String> {
         unsafe {
             let inner = &mut *self.inner;
             if inner.lib.is_none() { inner.lib = Some(PwLib::load()?); }
+            inner.period_size = period_size;
 
             let mut target_rate = 44100u32;
             {
                 if let Some(ref engine_arc) = *engine_handle.lock().unwrap() {
                     target_rate = engine_arc.target_sample_rate() as u32;
                     let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-                    (*engine_ptr).set_config(nullherz_traits::AudioConfig { sample_rate: target_rate as f32, block_size: 128 });
+                    (*engine_ptr).set_config(nullherz_traits::AudioConfig { sample_rate: target_rate as f32, block_size: period_size as usize });
                 }
             }
 

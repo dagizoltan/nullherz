@@ -74,7 +74,7 @@ impl AlsaBackend {
     pub fn new() -> Self { Self { running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), handle: None } }
 }
 impl AudioBackend for AlsaBackend {
-    fn start(&mut self, engine_handle: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>) -> Result<(), String> {
+    fn start(&mut self, engine_handle: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>, requested_period_size: u64) -> Result<(), String> {
         let alsa = AlsaLib::load()?;
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
@@ -133,7 +133,7 @@ impl AudioBackend for AlsaBackend {
             (alsa.snd_pcm_hw_params_set_rate_near)(pcm, hw_params, &mut r, std::ptr::null_mut());
             rate = r;
 
-            let mut ps = 128u64;
+            let mut ps = requested_period_size;
             let mut dir = 0;
             (alsa.snd_pcm_hw_params_set_period_size_near)(pcm, hw_params, &mut ps, &mut dir);
             let mut max_period = ipc_layer::MAX_BLOCK_SIZE as u64;
