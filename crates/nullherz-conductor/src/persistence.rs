@@ -134,7 +134,11 @@ impl ProjectState {
                             params.push((p_id, child.get_parameter(p_id)));
                         }
 
-                        let position = topo.node_positions[node_idx as usize];
+                        let position = if (node_idx as usize) < topo.node_positions.len() {
+                            topo.node_positions[node_idx as usize]
+                        } else {
+                            None
+                        };
                         state.nodes.push(NodeState {
                             id: node_idx,
                             type_id,
@@ -182,7 +186,11 @@ impl ProjectState {
         if state.nodes.is_empty() {
             // Fallback to active_node_types in conductor when the audio engine is not active/running
             for (&node_idx, &type_id) in &conductor.topology_manager.active_node_types {
-                let position = topo.node_positions[node_idx as usize];
+                let position = if (node_idx as usize) < topo.node_positions.len() {
+                    topo.node_positions[node_idx as usize]
+                } else {
+                    None
+                };
                 state.nodes.push(NodeState {
                     id: node_idx,
                     type_id,
