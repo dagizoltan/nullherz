@@ -10,6 +10,15 @@ pub struct FolderMonitor {
     library: Arc<std::sync::Mutex<LibraryDatabase>>,
 }
 
+impl Clone for FolderMonitor {
+    fn clone(&self) -> Self {
+        Self {
+            sample_registry: self.sample_registry.clone(),
+            library: self.library.clone(),
+        }
+    }
+}
+
 impl FolderMonitor {
     pub fn new(sample_registry: Arc<dyn SampleRegistry>, library: Arc<std::sync::Mutex<LibraryDatabase>>) -> Self {
         Self {
@@ -19,6 +28,14 @@ impl FolderMonitor {
     }
 
     pub fn scan_folder(&self, path: &str) {
+        let path_str = path.to_string();
+        let self_cloned = self.clone();
+        std::thread::spawn(move || {
+            self_cloned.scan_folder_sync(&path_str);
+        });
+    }
+
+    pub fn scan_folder_sync(&self, path: &str) {
         use rayon::prelude::*;
         let path_obj = Path::new(path);
         if !path_obj.is_dir() { return; }
@@ -126,7 +143,7 @@ impl FolderMonitor {
     pub fn start_auto_scan(self, path: String) {
         std::thread::spawn(move || {
             loop {
-                self.scan_folder(&path);
+                self.scan_folder_sync(&path);
                 std::thread::sleep(Duration::from_secs(10));
             }
         });

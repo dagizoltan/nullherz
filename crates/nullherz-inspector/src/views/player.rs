@@ -343,13 +343,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     ui.add_space(theme.space_sm);
 
     ScrollArea::vertical().show(ui, |ui| {
-        if app.cached_library.is_empty() && app.library_needs_refresh {
-            if let Ok(tracks) = app.library_db.list_tracks() {
-                app.cached_library = tracks;
-                app.library_needs_refresh = false;
-            }
-        }
-
         egui::Grid::new("library_grid").num_columns(5).spacing([theme.space_lg, theme.space_sm]).striped(true).show(ui, |ui| {
             ui.label(RichText::new("TITLE").strong().size(theme.type_label));
             ui.label(RichText::new("ARTIST").strong().size(theme.type_label));

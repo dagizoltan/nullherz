@@ -76,6 +76,8 @@ impl AnalysisWorker {
                 })
             }).collect();
 
+        let mut tracks_to_save = Vec::new();
+
         for (id, mut metadata, buffer) in results {
             // --- WAVEFORM MIP-MAPPING GENERATION ---
             let mip_data = audio_dsp::util::WaveformProcessor::generate_mip_levels(&metadata.peaks, 5);
@@ -83,16 +85,22 @@ impl AnalysisWorker {
 
             self.sample_registry.register_with_metadata(id, buffer, Arc::new(metadata.clone()));
 
-            if let Some(ref lib_mutex) = self.library {
-                let lib = lib_mutex.lock().unwrap();
-                if let Ok(Some(mut track)) = lib.get_track(id) {
-                    track.metadata = Arc::new(metadata);
-                    let _ = lib.save_track(&track);
-                }
-            }
+            tracks_to_save.push((id, metadata));
             self.processed_ids.insert(id);
             self.dirty_ids.insert(id);
-            println!("AnalysisWorker: Enriched metadata for ID={}", id);
+        }
+
+        if !tracks_to_save.is_empty() {
+            if let Some(ref lib_mutex) = self.library {
+                let lib = lib_mutex.lock().unwrap();
+                for (id, metadata) in tracks_to_save {
+                    if let Ok(Some(mut track)) = lib.get_track(id) {
+                        track.metadata = Arc::new(metadata);
+                        let _ = lib.save_track(&track);
+                        println!("AnalysisWorker: Enriched metadata for ID={}", id);
+                    }
+                }
+            }
         }
     }
 

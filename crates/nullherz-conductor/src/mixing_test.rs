@@ -44,8 +44,19 @@ mod tests {
             monitor.scan_folder(test_tracks_dir);
         }
 
-        // Wait a bit for registration to complete (it's synchronous in scan_folder)
-        let tracks = conductor.library.lock().unwrap().list_tracks().unwrap();
+        // Wait a bit for registration to complete (asynchronous scan)
+        let mut tracks = Vec::new();
+        for _ in 0..100 {
+            if let Ok(lib) = conductor.library.lock() {
+                if let Ok(t) = lib.list_tracks() {
+                    tracks = t;
+                    if tracks.len() >= 2 {
+                        break;
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         assert!(tracks.len() >= 2, "Expected at least 2 tracks, found {}", tracks.len());
 
         let track_a = tracks.iter().find(|t| t.title == "track_a.wav").unwrap().clone();
