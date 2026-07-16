@@ -36,6 +36,7 @@ pub struct Conductor {
     pub matchmaking_suggestions: Arc<Mutex<Vec<(u64, f32)>>>,
     pub active_master_deck: char,
     pub calibration_samples: u32,
+    pub period_size: u64,
     pub ptp_clock: Option<Arc<nullherz_traits::PtpClockProvider>>,
     last_autosave_secs: u64,
     pub last_genetic_evolve_secs: u64,
@@ -103,6 +104,7 @@ impl Conductor {
             matchmaking_suggestions: Arc::new(Mutex::new(Vec::new())),
             active_master_deck: 'A',
             calibration_samples: 0,
+            period_size: 128,
             ptp_clock: None,
             last_autosave_secs: 0,
             last_genetic_evolve_secs: 0,
@@ -162,6 +164,7 @@ impl Conductor {
             matchmaking_suggestions: Arc::new(Mutex::new(Vec::new())),
             active_master_deck: 'A',
             calibration_samples: 0,
+            period_size: 128,
             ptp_clock: None,
             last_autosave_secs: 0,
             last_genetic_evolve_secs: 0,
@@ -266,7 +269,7 @@ impl Conductor {
     }
 
     pub fn start_backend(&mut self, backend_type: nullherz_traits::AudioBackendType) -> Result<(), String> {
-        self.engine_coordinator.backend_manager.start(backend_type)
+        self.engine_coordinator.backend_manager.start(backend_type, self.period_size)
     }
 
     pub fn stop_backend(&mut self) {
@@ -289,6 +292,7 @@ impl Conductor {
             let content = std::fs::read_to_string(path)?;
             if let Ok(config) = serde_json::from_str::<crate::persistence::SystemConfig>(&content) {
                 self.calibration_samples = config.calibration_samples;
+                self.period_size = config.period_size;
             }
         }
         Ok(())
@@ -304,6 +308,7 @@ impl Conductor {
                 sample_rate: 44100,
                 block_size: 256,
                 calibration_samples: 0,
+                period_size: 128,
             })
         } else {
             crate::persistence::SystemConfig {
@@ -312,6 +317,7 @@ impl Conductor {
                 sample_rate: 44100,
                 block_size: 256,
                 calibration_samples: 0,
+                period_size: 128,
             }
         };
 
@@ -325,6 +331,7 @@ impl Conductor {
             config.calibration_samples = c;
             self.calibration_samples = c;
         }
+        config.period_size = self.period_size;
 
         let json = serde_json::to_string_pretty(&config).map_err(|e| std::io::Error::other(e))?;
         std::fs::write(path, json)

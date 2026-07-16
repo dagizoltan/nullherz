@@ -5,12 +5,18 @@ use midir::MidiInput;
 #[cfg(feature = "cpal-backend")]
 use cpal::traits::HostTrait;
 
+pub fn default_period_size() -> u64 {
+    128
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SystemConfig {
     pub audio_backend: String,
     pub midi_ports: Vec<String>,
     pub sample_rate: u32,
     pub block_size: u32,
+    #[serde(default = "default_period_size")]
+    pub period_size: u64,
 }
 
 fn main() {
@@ -22,6 +28,7 @@ fn main() {
         midi_ports: Vec::new(),
         sample_rate: 44100,
         block_size: 256,
+        period_size: 128,
     };
 
     // 1. Detect Audio Backends

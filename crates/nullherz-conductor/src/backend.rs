@@ -17,13 +17,13 @@ impl Default for BackendManager {
 }
 
 impl BackendManager {
-    pub fn start(&mut self, backend_type: AudioBackendType) -> Result<(), String> {
+    pub fn start(&mut self, backend_type: AudioBackendType, period_size: u64) -> Result<(), String> {
         // Move current process to high-priority Cgroup
         let _ = ipc_layer::move_to_cgroup("nullherz", std::process::id() as i32);
 
         let mut backend = nullherz_backends::BackendFactory::create(backend_type);
 
-        backend.start(self.engine_handle.clone())?;
+        backend.start(self.engine_handle.clone(), period_size)?;
         self.backend = Some(backend);
         Ok(())
     }
@@ -34,9 +34,9 @@ impl BackendManager {
         }
     }
 
-    pub fn switch(&mut self, backend_type: AudioBackendType) -> Result<(), String> {
+    pub fn switch(&mut self, backend_type: AudioBackendType, period_size: u64) -> Result<(), String> {
         self.stop();
         std::thread::sleep(std::time::Duration::from_millis(50));
-        self.start(backend_type)
+        self.start(backend_type, period_size)
     }
 }

@@ -108,7 +108,7 @@ unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_
 }
 
 impl AudioBackend for JackBackend {
-    fn start(&mut self, engine_handle: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>) -> Result<(), String> {
+    fn start(&mut self, engine_handle: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>, _period_size: u64) -> Result<(), String> {
         unsafe {
             let inner = &mut *self.inner;
             if inner.lib.is_none() { inner.lib = Some(JackLib::load()?); }
