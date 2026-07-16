@@ -157,6 +157,7 @@ pub struct InspectorApp {
     pub(crate) track_mutes: [bool; 16],
     pub(crate) track_solos: [bool; 16],
     pub(crate) track_volumes: [f32; 16],
+    pub(crate) track_targets: [String; 16],
     pub(crate) deck_playing: [bool; 4],
     pub(crate) record_automation: bool,
     pub(crate) _automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>, // target_id -> [(beat, value)]
@@ -227,6 +228,13 @@ impl InspectorApp {
 
     pub fn get_node_id(&self, name: &str) -> u32 {
         *self.node_map.get(name).unwrap_or(&0)
+    }
+
+    pub(crate) fn node_names(&self) -> Vec<(String, u32)> {
+        // NOTE: We don't try to filter this down to "instrument-only" nodes yet — there's no
+        // processor-type metadata exposed to the UI to do that reliably right now.
+        // Routing to a non-instrument node just won't produce sound; it won't crash anything.
+        self.node_map.iter().map(|(k, v)| (k.clone(), *v)).collect()
     }
 
     pub fn new(graph: GraphJson, cc: &eframe::CreationContext<'_>) -> Self {
@@ -398,6 +406,7 @@ impl InspectorApp {
             track_mutes: [false; 16],
             track_solos: [false; 16],
             track_volumes: [1.0; 16],
+            track_targets: std::array::from_fn(|_| "(default)".to_string()),
             deck_playing: [false; 4],
             record_automation: false,
             _automation_data: std::collections::HashMap::new(),

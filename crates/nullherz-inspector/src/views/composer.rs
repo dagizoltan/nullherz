@@ -2,7 +2,7 @@ use egui::{Ui, ScrollArea, Vec2, Sense, RichText, Stroke, Frame, Rounding, Margi
 use crate::InspectorApp;
 use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
-use nullherz_traits::{Command, PerformanceCommand, CoreCommand};
+use nullherz_traits::{Command, PerformanceCommand, CoreCommand, MixerCommand};
 pub use nullherz_conductor::pattern_manager::DnaSequencer;
 
 /// Helper to determine step status from telemetry safely.
@@ -151,7 +151,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 .inner_margin(Margin::same(4.0))
                                 .show(ui, |ui| {
                                     ui.set_width(90.0);
-                                    ui.set_height(50.0);
+                                    ui.set_height(80.0);
                                     ui.vertical_centered(|ui| {
                                         ui.horizontal(|ui| {
                                             // Activator ON/OFF Mute
@@ -176,6 +176,40 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: app.get_node_id("sequencer_node"), track_idx: track_idx as u32 }));
                                             }
                                         });
+
+                                        ui.add_space(4.0);
+
+                                        // Sequencer routing target dropdown
+                                        let current_target = app.track_targets[track_idx].clone();
+                                        let mut sorted_nodes = app.node_names();
+                                        sorted_nodes.sort_by(|a, b| a.0.cmp(&b.0));
+
+                                        let mut changed = false;
+                                        let mut selected_name = current_target.clone();
+                                        let mut selected_node_idx = 0u32;
+
+                                        egui::ComboBox::from_id_source(format!("seq_tgt_{}", track_idx))
+                                            .width(80.0)
+                                            .selected_text(&current_target)
+                                            .show_ui(ui, |ui| {
+                                                for (name, node_idx) in sorted_nodes {
+                                                    if ui.selectable_label(current_target == name, &name).clicked() {
+                                                        selected_name = name;
+                                                        selected_node_idx = node_idx;
+                                                        changed = true;
+                                                    }
+                                                }
+                                            });
+
+                                        if changed {
+                                            app.track_targets[track_idx] = selected_name;
+                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
+                                                target_id: app.get_node_id("sequencer_node") as u64,
+                                                param_id: 10 + track_idx as u32,
+                                                value: selected_node_idx as f32,
+                                                ramp_duration_samples: 0,
+                                            }));
+                                        }
                                     });
                                 });
                         }
@@ -396,5 +430,156 @@ mod tests {
         let (is_playing, is_starting) = check_step_telemetry(&None, 0, 100);
         assert!(!is_playing);
         assert!(!is_starting);
+    }
+
+    #[test]
+    fn test_composer_track_targets_update() {
+        let (cmd_tx, _cmd_rx) = std::sync::mpsc::channel();
+        let raw_db = nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase");
+        let db_arc = std::sync::Arc::new(std::sync::Mutex::new(raw_db));
+        let library_db_wrapper = crate::SharedLibraryDb(db_arc);
+
+        let mut app = InspectorApp {
+            graph: crate::GraphJson { nodes: vec![], edges: vec![], node_assignments: Default::default() },
+            command_sender: cmd_tx,
+            last_telemetry: std::sync::Arc::new(parking_lot::Mutex::new(None)),
+            active_view: crate::View::Composer,
+            channel_faders: [1.0; 4],
+            channel_eq_high: [1.0; 4],
+            channel_eq_mid: [1.0; 4],
+            channel_eq_low: [1.0; 4],
+            channel_filter: [0.5; 4],
+            channel_personality_metallic: [0.0; 4],
+            channel_personality_organic: [0.0; 4],
+            channel_personality_warm: [0.0; 4],
+            channel_personality_aggressive: [0.0; 4],
+            channel_sync: [false; 4],
+            quantize_enabled: true,
+            master_gain: 1.0,
+            crossfader_pos: 0.5,
+            library_db: library_db_wrapper,
+            active_crate: None,
+            search_query: String::new(),
+            is_streaming: false,
+            active_right_tab: None,
+            master_deck: None,
+            now_playing: [None; 4],
+            global_bpm: 120.0,
+            macros: [0.0; 8],
+            _macro_names: std::array::from_fn(|i| format!("MACRO {}", i + 1)),
+            channel_peak_hold: [0.0; 4],
+            master_peak_hold: 0.0,
+            _booth_peak_hold: 0.0,
+            _rec_peak_hold: 0.0,
+            mastering_eq_enabled: false,
+            mastering_eq_low: 1.0,
+            mastering_eq_mid: 1.0,
+            mastering_eq_high: 1.0,
+            spectral_window_shape: 0,
+            sequencer_grid: std::array::from_fn(|_| vec![0.0; 64]),
+            selected_composer_track: None,
+            sequencer_active_step: 0,
+            sampler_slicer_mode: false,
+            _playlists: vec![],
+            cached_library: vec![],
+            cached_library_raw: vec![],
+            bg_library_loader: None,
+            library_needs_refresh: false,
+            breeding_view: crate::views::breeder::BreederView::new(),
+            wgpu_renderer: None,
+            waveform_renderer: None,
+            deck_waveform_renderers: [None, None, None, None],
+            active_connection_source: None,
+            active_node_drag: None,
+            smart_crate_builder_open: false,
+            smart_crate_def: nullherz_dna::SmartCrateDefinition {
+                name: "New Smart Crate".into(),
+                target_dna: None,
+                threshold: 0.5,
+                spectral_tilt_range: None,
+                rhythmic_syncopation_range: None,
+                glitch_density_range: None,
+                genre: None,
+                bpm_range: None,
+                energy_range: None,
+                root_key: None,
+            },
+            visualizer_damping: 0.1,
+            damped_spectrum: [0.0; 128],
+            damped_goniometer: [0.0; 128],
+            damped_latent: [0.0; 16],
+            damped_peaks: [0.0; 4],
+            damped_master_peaks: [0.0; 2],
+            discovered_sidecars: vec![],
+            personality_macro_mode: false,
+            focused_deck: 0,
+            track_mutes: [false; 16],
+            track_solos: [false; 16],
+            track_volumes: [1.0; 16],
+            track_targets: std::array::from_fn(|_| "(default)".to_string()),
+            deck_playing: [false; 4],
+            record_automation: false,
+            _automation_data: std::collections::HashMap::new(),
+            sampler_waveform_zoom: 1.0,
+            active_settings_tab: crate::SettingsTab::General,
+            active_backend: nullherz_traits::AudioBackendType::Alsa,
+            active_midi_profile: "default".to_string(),
+            config_saved_time: None,
+            selected_hotload_node_idx: 0,
+            broadcast_url: String::new(),
+            broadcast_key: String::new(),
+            broadcast_reveal_key: false,
+            broadcast_codec: 0,
+            broadcast_bitrate: 128.0,
+            broadcast_state: 0,
+            broadcast_error_msg: String::new(),
+            broadcast_start_time: None,
+            p2p_sync_success_toast: None,
+            export_passport_success_toast: None,
+            export_passport_error_toast: None,
+            sampler_input_gain: 1.0,
+            sampler_monitor_level: 0.0,
+            sampler_is_recording: false,
+            sampler_is_stereo: false,
+            sampler_input_source: 0,
+            selected_library_track: None,
+            bypassed_nodes: std::collections::HashSet::new(),
+            theme: nullherz_ui_hal::Theme::default(),
+            last_update_time: 0.0,
+            ingestion_path: String::new(),
+            playlist_queue: std::collections::VecDeque::new(),
+            evolution_strengths: [0.0; 16],
+            next_sample_id: 1,
+            editor_selection: None,
+            audio_devices: vec![],
+            selected_audio_device: String::new(),
+            restore_last_session: false,
+            default_view_on_launch: crate::View::Composer,
+            autosave_enabled: false,
+            autosave_interval_mins: 5,
+            last_saved_time: 0.0,
+            autosave_triggered: None,
+            shortcuts_enabled: false,
+            global_playing: false,
+            auto_pollinate_enabled: false,
+            node_map: [
+                ("sampler_node".to_string(), 100),
+                ("sequencer_node".to_string(), 70),
+            ].into_iter().collect(),
+            _conductor_thread: None,
+        };
+
+        // Assert initial states
+        assert_eq!(app.track_targets[0], "(default)");
+        assert_eq!(app.track_targets[15], "(default)");
+
+        // Verify node_names retrieval
+        let mut names = app.node_names();
+        names.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(names, vec![("sampler_node".to_string(), 100), ("sequencer_node".to_string(), 70)]);
+
+        // Update a track target
+        app.track_targets[3] = "sampler_node".to_string();
+        assert_eq!(app.track_targets[3], "sampler_node");
     }
 }
