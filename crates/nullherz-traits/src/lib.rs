@@ -317,6 +317,13 @@ pub enum ResourceCommand {
         source_id: u64,
         target_id: u64,
     },
+    TimeStretch {
+        sample_id: u64,
+        ratio: f32,
+    },
+    ChopByTransient {
+        sample_id: u64,
+    },
 }
 
 #[repr(C)]

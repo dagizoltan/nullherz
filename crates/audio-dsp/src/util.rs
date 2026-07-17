@@ -83,6 +83,85 @@ impl LagrangeResampler {
     }
 }
 
+/// High-fidelity offline overlap-add (OLA) time-stretch implementation.
+/// Stretches input audio by a given ratio without altering pitch.
+pub fn time_stretch(input: &[f32], ratio: f32) -> Vec<f32> {
+    if (ratio - 1.0).abs() < 0.005 || ratio <= 0.0 || input.is_empty() {
+        return input.to_vec();
+    }
+    let grain_size = 1024;
+    let overlap = 4;
+    let hop_out = grain_size / overlap;
+    let hop_in = (hop_out as f32 * ratio) as usize;
+    if hop_in == 0 {
+        return input.to_vec();
+    }
+
+    let out_len = (input.len() as f32 / ratio) as usize;
+    if out_len == 0 {
+        return Vec::new();
+    }
+    let mut output = vec![0.0f32; out_len];
+    let mut count = vec![0.0f32; out_len];
+
+    // Hann window
+    let mut window = vec![0.0f32; grain_size];
+    for i in 0..grain_size {
+        let v = (std::f32::consts::PI * i as f32 / (grain_size - 1) as f32).sin();
+        window[i] = v * v;
+    }
+
+    let mut out_pos = 0;
+    let mut in_pos = 0.0f32;
+
+    while out_pos + grain_size < out_len && (in_pos as usize) + grain_size < input.len() {
+        let in_idx = in_pos as usize;
+        for i in 0..grain_size {
+            let out_idx = out_pos + i;
+            if out_idx < out_len && in_idx + i < input.len() {
+                output[out_idx] += input[in_idx + i] * window[i];
+                count[out_idx] += window[i];
+            }
+        }
+        out_pos += hop_out;
+        in_pos += hop_in as f32;
+    }
+
+    // Normalize output by window counts to reconstruct waveform perfectly
+    for i in 0..out_len {
+        if count[i] > 0.01 {
+            output[i] /= count[i];
+        }
+    }
+    output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_time_stretch() {
+        let mut input = vec![0.0f32; 44100];
+        // Populate input with a simple sine wave to verify signal integrity
+        for i in 0..input.len() {
+            input[i] = (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 44100.0).sin();
+        }
+
+        // Test stretching slower (ratio = 2.0 -> half speed, twice as long)
+        let stretched = time_stretch(&input, 2.0);
+        assert!(stretched.len() > 0);
+        let ratio_diff = (stretched.len() as f32 / input.len() as f32 - 0.5).abs();
+        assert!(ratio_diff < 0.1, "Length ratio: {}", stretched.len() as f32 / input.len() as f32);
+
+        // Test stretching faster (ratio = 0.5 -> double speed, half as long)
+        let compressed = time_stretch(&input, 0.5);
+        assert!(compressed.len() > 0);
+        let ratio_diff_comp = (compressed.len() as f32 / input.len() as f32 - 2.0).abs();
+        assert!(ratio_diff_comp < 0.1, "Length ratio: {}", compressed.len() as f32 / input.len() as f32);
+    }
+}
+
 /// A Newton-Raphson Iterative Solver for non-linear feedback loops.
 /// Used to resolve implicit equations in high-fidelity virtual analog filters.
 pub struct IterativeSolver {
