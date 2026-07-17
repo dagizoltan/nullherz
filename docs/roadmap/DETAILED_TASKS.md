@@ -1,37 +1,23 @@
-# Next Session: Stage 6 Expansion & Federated Genetics
+# Next Steps: Stage 7 Optimization & Distributed Scale
 
-**Objective**: Leverage the Neural Transfusion model and WASM runtime to build a global genetic cloud and cross-platform DSP ecosystem.
+**Objective**: Leverage the Neural Transfusion model, WASM runtime, and Gossip consensus network to scale the multi-machine live performance platform.
 
-## Task 1: Federated P2P Genetic Cloud
-- **Gossip Protocol**: Implement the `libp2p` gossipsub logic for `PeerSync` to allow real-time SoundDNA template exchange across the network.
-- **Genetic Authority**: Implement a consensus mechanism to track the "lineage" of bred sounds across different user libraries.
+## Task 1: WASM SDK Optimization & Guest Plugin Ecosystem
+- **Sandbox Hardening**: Enhance the WASM runtime in `wasm_runtime.rs` to support dynamic compilation memory safety checks during guest plugin runtime.
+- **Sidecar SIMD expansion**: Extend `wasm_simd128` auto-vectorized paths to standard biquad, limiter, and delay-based guest sidecars.
 
-## Task 2: WASM SDK Optimization
-- **SHM Host Exports**: Finalize the command and audio buffer memory mapping in `wasm_runtime.rs` to allow guest plugins to read/write shared memory segments directly.
-- **SIMD for WASM**: Implement `wasm_simd128` pathways for the `DnaKernel` to ensure high-performance spectral shaping within the WebAssembly environment.
+## Task 2: Advanced Distributed Routing & High-Frequency Resource Sync
+- **Dynamic Port Re-allocation**: Allow local/remote TCP & UDP connections to automatically negotiate available loopback/socket ports when a port collision occurs during local testing.
+- **DNA Binary Protocol**: Finalize replacing transient JSON with native `rkyv` binary schemas across high-frequency IPC ring buffers and broadcast network streams.
 
-## Task 3: Intelligent DJ Mixing
-- **Auto-Sync Logic**: Extend the `Conductor`'s deck loading bridge to automatically trigger `SetBpm` and `KeySync` commands based on the loaded track's metadata.
-- **Transition Macro**: Implement a "Smart Transition" command that utilizes `NeuralTransfuser` to smoothly morph the spectral personality between Deck A and Deck B during a crossfade.
+## Task 3: Intelligent DJ Mixing & Transition Macros
+- **Harmonic Transition Macros**: Implement a "Smart Transition" macro that smoothly morphs filter resonance, isolator crossover parameters, and deck playback speeds automatically during a crossfade.
+- **Energy-Match Smart Crates**: Enhance smart-crating rules to dynamically construct recommendations based on real-time neural latent distances during live performance sets.
 
-## Task 4: Hardware RDMA Foundation
-- **InfiniBand/RDMA**: Research and prototype the RDMA return path for `AudioBlock` transmission to achieve zero-CPU network audio distribution for high-density multi-machine setups.
+## Task 4: Hardware RDMA Foundation (Long-term R&D)
+- **InfiniBand/RDMA**: Research and prototype a zero-copy direct memory access transport layer for physical RDMA network cards, achieving sub-100 microsecond network audio distribution for high-density multi-machine setups.
 
-## Task 1: Genetic Sequencer Evolution
-- **DNA-Aware Patterns**: Implement a "Genetic Sequencer" in `nullherz-conductor` that mutates and evolves MIDI patterns based on the loaded sample's Rhythmic DNA (using the 64-step onset mask and micro-timing profile).
-- **Rhythmic Transfusion**: Allow one sequencer track to "inherit" the groove of another track via the Breeder UI.
-
-## Task 2: High-Frequency Resource Sync
-- **Binary Mirroring**: Finalize the `ensure_sample_mirrored` pipeline by implementing the receiver side in the `distributed-sidecar` to store and register incoming binary blobs in a local `SampleRegistry`.
-- **DNA Binary Protocol**: Implement an efficient binary serialization for `SoundDNA` and `TimestampedCommand` to replace JSON in high-throughput network scenarios.
-
-## Task 3: Distributed Summing & Routing
-- **Audio Return Path**: Implement the logic for remote sidecars to stream processed `AudioBlock` data back to the conductor for mixing.
-- **Remote Topology**: Extend Kahn's algorithm to account for network nodes, inserting "Network Send/Receive" proxy nodes automatically into the execution graph.
-
-## Task 4: UI Refinement
-- **Interactive Topology**: Implement the "Edge Connections" editor in the `TopologyView` to allow users to draw custom routing between nodes.
-- **Multi-Node Telemetry**: Add a "Node Health" dashboard to monitor CPU load, latency, and memory pressure for every attached remote sidecar.
+---
 
 ## Constraints & Architectural Invariants
 - Maintain strict "Triple-Plane Isolation."
