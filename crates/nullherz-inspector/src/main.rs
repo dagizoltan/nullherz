@@ -288,12 +288,43 @@ impl InspectorApp {
             eprintln!("Warning: Failed to load library.redb ({}). Using transient storage.", e);
             nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase")
         });
-        // Seed demo tracks if database is empty
-        if raw_db.list_tracks().is_ok_and(|t| t.is_empty()) {
+        // Seed or update demo tracks with visual peak metadata
+        let mut repair_demo_tracks = false;
+        if let Ok(tracks) = raw_db.list_tracks() {
+            if tracks.is_empty() {
+                repair_demo_tracks = true;
+            } else {
+                for t in &tracks {
+                    if (t.id == 1 || t.id == 2) && t.metadata.peaks.is_empty() {
+                        repair_demo_tracks = true;
+                    }
+                }
+            }
+        } else {
+            repair_demo_tracks = true;
+        }
+
+        if repair_demo_tracks {
+            println!("Seeding / Repairing demo tracks with visual waveform peaks...");
+
+            // Demo Track A (120 BPM Techno Groove)
             let mut metadata_a = nullherz_traits::SampleMetadata::new_empty();
             metadata_a.bpm = 120.0;
             metadata_a.total_samples = 44100 * 60 * 3; // 3 minutes
             metadata_a.root_key = Some(5.0);
+
+            let mut peaks_a = Vec::with_capacity(2000);
+            for i in 0..2000 {
+                let beat_phase = (i as f32 * 0.1) % 1.0;
+                let kick = (-10.0 * beat_phase).exp();
+                let hat = if i % 4 == 2 { (-5.0 * beat_phase).exp() * 0.3 } else { 0.0 };
+                let synth = (i as f32 * 0.02).sin().abs() * 0.2;
+                peaks_a.push((kick + hat + synth).min(1.0));
+            }
+            metadata_a.peaks = std::sync::Arc::new(peaks_a);
+            let mip_data_a = audio_dsp::util::WaveformProcessor::generate_mip_levels(&metadata_a.peaks, 5);
+            metadata_a.mip_waveform.levels = mip_data_a.into_iter().map(std::sync::Arc::new).collect();
+
             let track_a = nullherz_dna::LibraryTrack {
                 id: 1,
                 path: "tracks/track_a.wav".to_string(),
@@ -306,10 +337,24 @@ impl InspectorApp {
             };
             let _ = raw_db.save_track(&track_a);
 
+            // Demo Track B (124 BPM House Groove)
             let mut metadata_b = nullherz_traits::SampleMetadata::new_empty();
             metadata_b.bpm = 124.0;
             metadata_b.total_samples = 44100 * 60 * 3; // 3 minutes
             metadata_b.root_key = Some(8.0);
+
+            let mut peaks_b = Vec::with_capacity(2000);
+            for i in 0..2000 {
+                let beat_phase = (i as f32 * 0.08) % 1.0;
+                let kick = (-12.0 * beat_phase).exp();
+                let snare = if i % 8 == 4 { (-6.0 * beat_phase).exp() * 0.5 } else { 0.0 };
+                let bass = (i as f32 * 0.03).cos().abs() * 0.15;
+                peaks_b.push((kick + snare + bass).min(1.0));
+            }
+            metadata_b.peaks = std::sync::Arc::new(peaks_b);
+            let mip_data_b = audio_dsp::util::WaveformProcessor::generate_mip_levels(&metadata_b.peaks, 5);
+            metadata_b.mip_waveform.levels = mip_data_b.into_iter().map(std::sync::Arc::new).collect();
+
             let track_b = nullherz_dna::LibraryTrack {
                 id: 2,
                 path: "tracks/track_b.wav".to_string(),
