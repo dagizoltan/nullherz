@@ -362,11 +362,50 @@ impl CommandHandler {
                              slice_points.push(t);
                          }
                      }
+
+                     // If transients list is empty or single-point, run a real time-domain onset detector across the whole sample buffer!
+                     if slice_points.len() <= 2 {
+                         let win_size = 256;
+                         if sample.buffer.len() >= win_size * 4 {
+                             let mut last_transient = 0u64;
+                             let min_gap = 44100 / 10; // min 100ms between transients
+                             let threshold = 1.8f32;
+                             let mut env = 0.0f32;
+
+                             let mut short_term_energy = vec![0.0f32; sample.buffer.len() / win_size];
+                             for chunk_idx in 0..short_term_energy.len() {
+                                 let start = chunk_idx * win_size;
+                                 let mut sum_sq = 0.0f32;
+                                 for j in 0..win_size {
+                                     let s = sample.buffer[start + j];
+                                     sum_sq += s * s;
+                                 }
+                                 short_term_energy[chunk_idx] = (sum_sq / win_size as f32).sqrt();
+                             }
+
+                             for idx in 1..short_term_energy.len() {
+                                 let energy = short_term_energy[idx];
+                                 let prev_energy = short_term_energy[idx - 1];
+                                 env = env * 0.95 + prev_energy * 0.05;
+
+                                 if energy > env * threshold && energy > 0.02 {
+                                     let sample_pos = (idx * win_size) as u64;
+                                     if sample_pos > last_transient + min_gap as u64 && sample_pos < sample.buffer.len() as u64 {
+                                         slice_points.push(sample_pos);
+                                         last_transient = sample_pos;
+                                     }
+                                 }
+                             }
+                         }
+                     }
+
                      slice_points.push(sample.buffer.len() as u64);
                      slice_points.sort();
                      slice_points.dedup();
 
+                     // If still only 2 points, fall back to equal 4-way split, with honest disclosure in log
                      if slice_points.len() <= 2 {
+                         println!("[ChopByTransient] NOTICE: No transients detected, falling back to equal 4-way split.");
                          let chunk = sample.buffer.len() / 4;
                          slice_points = vec![
                              0,
