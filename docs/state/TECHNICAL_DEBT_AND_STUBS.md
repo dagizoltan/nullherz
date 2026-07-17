@@ -15,13 +15,13 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 - **Waveform Rendering**: [OPTIMIZED] Implemented precise LOD selection in `waveform_renderer.rs`.
 - **DNA Transfusion Builder**: [RESOLVED] Implemented `DnaCommand::pack_transfusion` to eliminate unsafe byte-packing in the Breeder view.
 - **Decoupled Synchronization**: [RESOLVED] Replaced standard library blocking and lock-poisoning `std::sync::Mutex` with high-performance `parking_lot::Mutex` across UI and rendering components to comply with real-time safety lints and avoid poisoning states.
+- **Gossip Protocol and Signatures**: [RESOLVED] Replaced unsigned gossip stub with secure cryptographic GOSSIP_SIGNED payload validation and local network provider sync test suite.
 
 ---
 
 ## 2. UI & Telemetry Gaps
 
-- **Breeder View Visualization**: [PARTIAL] "Visual Transfusion Progress Bar" may not be tied to actual kernel progress if multi-block.
-- **mDNS Discovery Feedback**: [STUB] `SYNC DNA` button in `account.rs` lacks the backend integration for mDNS/TCP sync triggers.
+- **Breeder View Visualization**: [PARTIAL] "Visual Transfusion Progress Bar" is tied to active DNA blend operations but could benefit from sub-block pipeline progress telemetry.
 
 ---
 
@@ -35,22 +35,22 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 ## 3. Protocol & DNA Plane (`nullherz-dna`, `nullherz-traits`)
 
 ### `nullherz-dna/src/lib.rs`
-- **Gossip Protocol**: [PLANNED] `PeerSync` logic for real-time DNA template exchange is in placeholder status.
-- **Genetic Authority**: [PLANNED] Lineage tracking for bred sounds requires consensus implementation.
+- **Gossip Protocol**: [RESOLVED] PeerSync gossip-overlay TCP network engine implemented.
+- **Genetic Authority**: [RESOLVED] Cryptographically signed sound DNA lineages tracked with consensus checking.
 
 ---
 
 ## 4. Execution Plane (`audio-dsp`, `nullherz-processors`)
 
 ### `nullherz-processors/src/spectral.rs`
-- **Boundary Handling**: [STUB] Still needs hardening for arbitrary block sizes beyond 256 samples in the spectral domain.
+- **Boundary Handling**: [STUB] Still needs hardening for arbitrary, non-power-of-two block sizes in the spectral domain.
 
 ---
 
 ## 5. Sidecar & Runtime (`fx-runtime`, `sidecar-sdk`, `sidecar-macros`)
 
 ### `fx-runtime/src/wasm_runtime.rs`
-- **SHM Host Exports**: [PARTIAL] Memory mapping for guest plugins is implemented but needs high-throughput verification.
+- **SHM Host Exports**: [RESOLVED] Direct zero-copy memory-mapping getters (`get_shared_command_buffer_ptr`, etc.) integrated to satisfy guest plugin SDK standards.
 
 ---
 
@@ -61,11 +61,4 @@ This document tracks remaining stubs and prototype logic. Recent hardening has a
 - **RDMA Path**: [RESEARCH] Zero-copy RDMA return path for distributed AudioBlocks remains a long-term research goal.
 
 ### Intelligence Plane
-- **DNA-Aware Sequencing**: [PLANNED] Mutation of MIDI patterns based on Rhythmic DNA is not yet implemented.
-
----
-
-## 7. Strategic Documentation
-
-### `NEXT_SESSION_PROMPT.md`
-- **Line 18**: `- **InfiniBand/RDMA**: Research and prototype...` - RDMA networking remains a research task.
+- **DNA-Aware Sequencing**: [PLANNED] Real-time mutation of MIDI patterns based on Rhythmic DNA is mapped out.

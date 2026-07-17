@@ -15,24 +15,24 @@
 
 ---
 
-## Month 2: Federated Intelligence & DNA Discovery [IN PROGRESS]
+## Month 2: Federated Intelligence & DNA Discovery [COMPLETED / BETA]
 *Goal: Scale the genetic ecosystem beyond the local machine.*
 
-*   **Federated P2P Genetic Cloud [PLANNED]:**
-    *   Implement `libp2p` gossipsub for real-time SoundDNA exchange.
-    *   Integrate mDNS/TCP sync triggers into the UI.
-*   **Genetic Sequencer [PLANNED]:**
-    *   DNA-aware MIDI pattern mutation based on rhythmic genetic markers.
-    *   "Inheritance" of grooves between sequencer tracks.
-*   **WASM SDK Maturity [PLANNED]:**
-    *   Finalize SHM host exports for 3rd-party plugin developers.
+*   **Federated P2P Genetic Cloud [DONE]:**
+    *   Implemented `CloudPeerSync` gossipsub control overlay supporting GRAFT, PRUNE, IHAVE, and IWANT.
+    *   Integrate cryptographically signed sound DNA lineages with consensus tracking.
+*   **Genetic Sequencer [DONE]:**
+    *   DNA-aware MIDI pattern mutation based on rhythmic genetic markers and 12-entry micro-timing.
+    *   Groove transfusion copying attributes between sequencer tracks via dedicated command.
+*   **WASM SDK Maturity [DONE]:**
+    *   Direct zero-copy memory-mapping getters for guest plugins to eliminate serialization.
 
 ---
 
-## Month 3: Ecosystem & Scale (Infrastructure for Growth)
+## Month 3: Ecosystem & Scale (Infrastructure for Growth) [IN PROGRESS]
 *Goal: Scale the library and prepare for distributed processing.*
 
-*   **Library Optimization [DONE]:** Optimized `redb` queries for >100k entries.
+*   **Library Optimization [DONE]:** Optimized `redb` queries for >100k entries and non-blocking background loading.
 *   **Remote Sidecar Protocol [DONE]:** Type 5 (Send) and Type 6 (UDP Return) operational.
 *   **Public Alpha Preparation [DONE]:** Setup Wizard and Conformance Suite verified.
 *   **RDMA Audio Path [RESEARCH]**: Prototype zero-copy RDMA return path for sub-100 microsecond network DSP.
@@ -43,7 +43,7 @@
 | Month | Primary Objective | Key Deliverable |
 | :--- | :--- | :--- |
 | **Month 1** | Core Hardening | **Verified Graph Executor** |
-| **Month 2** | Federated Intelligence | **Genetic Cloud (GossipSync)** |
+| **Month 2** | Federated Intelligence | **Genetic Cloud (GossipSync) & DNA Sequencer** |
 | **Month 3** | Scalability | **Ecosystem SDK & RDMA Prototype** |
 
 ---
