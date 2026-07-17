@@ -129,6 +129,7 @@ pub struct LibraryDatabase {
     db: Database,
     /// Merkle-DAG Root Hash representing the entire library state.
     pub merkle_root: Mutex<[u8; 32]>,
+    transient_path: Option<String>,
 }
 
 impl GeneticLibrary for LibraryDatabase {
@@ -284,7 +285,8 @@ impl GeneticLibrary for LibraryDatabase {
 
 impl LibraryDatabase {
     pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let db_path = if path == ":memory:" {
+        let is_transient = path == ":memory:";
+        let db_path = if is_transient {
             let mut temp = std::env::temp_dir();
             static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
             let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -302,7 +304,11 @@ impl LibraryDatabase {
             let _ = write_txn.open_table(SMART_CRATES_TABLE)?;
         }
         write_txn.commit()?;
-        Ok(Self { db, merkle_root: Mutex::new([0u8; 32]) })
+        Ok(Self {
+            db,
+            merkle_root: Mutex::new([0u8; 32]),
+            transient_path: if is_transient { Some(db_path) } else { None },
+        })
     }
 
     pub fn update_merkle_root(&self) -> Result<[u8; 32], Box<dyn std::error::Error>> {
@@ -400,6 +406,14 @@ impl LibraryDatabase {
             }
         }
         Ok(())
+    }
+}
+
+impl Drop for LibraryDatabase {
+    fn drop(&mut self) {
+        if let Some(ref path) = self.transient_path {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
 

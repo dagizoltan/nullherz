@@ -521,6 +521,7 @@ mod tests {
             record_automation: false,
             _automation_data: std::collections::HashMap::new(),
             sampler_waveform_zoom: 1.0,
+            editor_time_stretch_ratio: 1.0,
             active_settings_tab: crate::SettingsTab::General,
             active_backend: nullherz_traits::AudioBackendType::Alsa,
             active_midi_profile: "default".to_string(),

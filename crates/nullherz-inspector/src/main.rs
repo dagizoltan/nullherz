@@ -162,6 +162,7 @@ pub struct InspectorApp {
     pub(crate) record_automation: bool,
     pub(crate) _automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>, // target_id -> [(beat, value)]
     pub(crate) sampler_waveform_zoom: f32,
+    pub(crate) editor_time_stretch_ratio: f32,
     pub(crate) active_settings_tab: SettingsTab,
     pub(crate) active_backend: nullherz_traits::AudioBackendType,
     pub(crate) active_midi_profile: String,
@@ -411,6 +412,7 @@ impl InspectorApp {
             record_automation: false,
             _automation_data: std::collections::HashMap::new(),
             sampler_waveform_zoom: 1.0,
+            editor_time_stretch_ratio: 1.0,
             active_settings_tab: SettingsTab::General,
             active_backend: nullherz_traits::AudioBackendType::Alsa,
             active_midi_profile: "default".to_string(),

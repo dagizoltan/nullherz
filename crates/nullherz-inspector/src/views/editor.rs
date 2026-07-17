@@ -60,6 +60,20 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_lock.clone());
             }
 
+            // Draw visual transient markers
+            let total_samples = track.metadata.total_samples;
+            if total_samples > 0 {
+                let transient_stroke = egui::Stroke::new(1.5, theme.success.linear_multiply(0.8));
+                for &t in track.metadata.transients.iter() {
+                    let ratio = t as f32 / total_samples as f32;
+                    let x = rect.left() + ratio * rect.width();
+                    ui.painter().line_segment(
+                        [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+                        transient_stroke,
+                    );
+                }
+            }
+
             ui.add_space(theme.space_md);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("ZOOM").size(theme.type_body));
@@ -118,6 +132,28 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         }
                         if ui.button(RichText::new(format!("{} RE-ANALYZE DNA", egui_phosphor::regular::DNA)).size(theme.type_label)).clicked() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ReAnalyze { sample_id: track.id }));
+                        }
+                    });
+
+                    ui.add_space(theme.space_sm);
+
+                    ui.horizontal(|ui| {
+                        // Transient Chopping Action
+                        if ui.button(RichText::new(format!("{} CHOP BY TRANSIENT", egui_phosphor::regular::KNIFE)).size(theme.type_label)).clicked() {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ChopByTransient { sample_id: track.id }));
+                        }
+
+                        ui.add_space(theme.space_md);
+
+                        // Time Stretching Actions
+                        ui.label(RichText::new("Ratio:").size(theme.type_body));
+                        ui.add(egui::Slider::new(&mut app.editor_time_stretch_ratio, 0.5..=2.0).text(""));
+
+                        if ui.button(RichText::new(format!("{} TIME STRETCH", egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE)).size(theme.type_label)).clicked() {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::TimeStretch {
+                                sample_id: track.id,
+                                ratio: app.editor_time_stretch_ratio,
+                            }));
                         }
                     });
                 });

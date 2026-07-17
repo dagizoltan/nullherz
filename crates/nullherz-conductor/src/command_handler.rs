@@ -298,6 +298,7 @@ impl CommandHandler {
                 true
             }
             ResourceCommand::Normalize { sample_id } => {
+                conductor.checkpoint();
                 if let Some(sample) = conductor.transfusion_manager.sample_registry.get(sample_id) {
                     let mut max_peak = 0.0f32;
                     for &s in sample.buffer.iter() { max_peak = max_peak.max(s.abs()); }
@@ -311,6 +312,7 @@ impl CommandHandler {
                 true
             }
             ResourceCommand::Crop { sample_id, start_samples, end_samples } => {
+                 conductor.checkpoint();
                  if let Some(sample) = conductor.transfusion_manager.sample_registry.get(sample_id) {
                      let start = start_samples as usize;
                      let end = (end_samples as usize).min(sample.buffer.len());
@@ -318,6 +320,99 @@ impl CommandHandler {
                          let cropped = sample.buffer[start..end].to_vec();
                          conductor.transfusion_manager.sample_registry.register_with_metadata(sample_id, Arc::new(cropped), sample.metadata);
                      }
+                 }
+                 true
+            }
+            ResourceCommand::TimeStretch { sample_id, ratio } => {
+                 conductor.checkpoint();
+                 if let Some(sample) = conductor.transfusion_manager.sample_registry.get(sample_id) {
+                     let stretched = audio_dsp::util::time_stretch(&sample.buffer, ratio);
+                     let mut new_metadata = (*sample.metadata).clone();
+                     new_metadata.total_samples = stretched.len() as u64;
+
+                     let mut new_transients = Vec::new();
+                     for &t in (*sample.metadata.transients).iter() {
+                         new_transients.push((t as f32 / ratio) as u64);
+                     }
+                     new_metadata.transients = Arc::new(new_transients);
+
+                     conductor.transfusion_manager.sample_registry.register_with_metadata(
+                         sample_id,
+                         Arc::new(stretched),
+                         Arc::new(new_metadata.clone()),
+                     );
+
+                     if let Ok(lib) = conductor.library.lock() {
+                         if let Ok(Some(mut track)) = lib.get_track(sample_id) {
+                             track.metadata = Arc::new(new_metadata);
+                             let _ = lib.save_track(&track);
+                         }
+                     }
+                 }
+                 true
+            }
+            ResourceCommand::ChopByTransient { sample_id } => {
+                 conductor.checkpoint();
+                 if let Some(sample) = conductor.transfusion_manager.sample_registry.get(sample_id) {
+                     let transients = &sample.metadata.transients;
+                     let mut slice_points = Vec::new();
+                     slice_points.push(0u64);
+                     for &t in transients.iter() {
+                         if t > 0 && t < sample.buffer.len() as u64 {
+                             slice_points.push(t);
+                         }
+                     }
+                     slice_points.push(sample.buffer.len() as u64);
+                     slice_points.sort();
+                     slice_points.dedup();
+
+                     if slice_points.len() <= 2 {
+                         let chunk = sample.buffer.len() / 4;
+                         slice_points = vec![
+                             0,
+                             chunk as u64,
+                             (chunk * 2) as u64,
+                             (chunk * 3) as u64,
+                             sample.buffer.len() as u64,
+                         ];
+                     }
+
+                     static SLICE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(50000);
+                     let mut slice_ids = Vec::new();
+                     for i in 0..slice_points.len() - 1 {
+                         let start = slice_points[i] as usize;
+                         let end = slice_points[i+1] as usize;
+                         if start < end {
+                             let slice_data = sample.buffer[start..end].to_vec();
+                             let slice_id = SLICE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                             slice_ids.push(slice_id);
+
+                             let mut slice_metadata = (*sample.metadata).clone();
+                             slice_metadata.total_samples = slice_data.len() as u64;
+                             slice_metadata.transients = Arc::new(Vec::new());
+
+                             conductor.transfusion_manager.sample_registry.register_with_metadata(
+                                 slice_id,
+                                 Arc::new(slice_data),
+                                 Arc::new(slice_metadata.clone()),
+                             );
+
+                             if let Ok(lib) = conductor.library.lock() {
+                                 let track = nullherz_dna::LibraryTrack {
+                                     id: slice_id,
+                                     path: format!("slice://{}/{}", sample_id, i),
+                                     title: format!("Slice {} [{}]", i + 1, sample_id),
+                                     artist: "Slice Editor".to_string(),
+                                     album: "Chops".to_string(),
+                                     genre: "Sample Slice".to_string(),
+                                     energy_level: 0.5,
+                                     metadata: Arc::new(slice_metadata),
+                                 };
+                                 let _ = lib.save_track(&track);
+                             }
+                         }
+                     }
+                     println!("Conductor: Chopped sample {} into {} slices: {:?}", sample_id, slice_ids.len(), slice_ids);
                  }
                  true
             }

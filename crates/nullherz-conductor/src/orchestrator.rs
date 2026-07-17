@@ -42,8 +42,14 @@ pub struct Conductor {
     pub last_genetic_evolve_secs: u64,
     pub focused_node_idx: Option<u32>,
     pub active_transitions: Vec<DnaTransition>,
-    pub undo_stack: Vec<crate::persistence::ProjectState>,
-    pub redo_stack: Vec<crate::persistence::ProjectState>,
+    pub undo_stack: Vec<(
+        crate::persistence::ProjectState,
+        std::collections::HashMap<u64, (std::sync::Arc<Vec<f32>>, std::sync::Arc<nullherz_traits::SampleMetadata>)>,
+    )>,
+    pub redo_stack: Vec<(
+        crate::persistence::ProjectState,
+        std::collections::HashMap<u64, (std::sync::Arc<Vec<f32>>, std::sync::Arc<nullherz_traits::SampleMetadata>)>,
+    )>,
     // --- Live RTMP/Opus Broadcast Streaming ---
     pub is_streaming: bool,
     pub stream_start_time: Option<std::time::Instant>,
@@ -626,7 +632,14 @@ impl Conductor {
 
     pub fn checkpoint(&mut self) {
         let state = self.capture_state();
-        self.undo_stack.push(state);
+        let mut sample_history = std::collections::HashMap::new();
+        let ids = self.transfusion_manager.sample_registry.list_ids();
+        for id in ids {
+            if let Some(sample) = self.transfusion_manager.sample_registry.get(id) {
+                sample_history.insert(id, (sample.buffer.clone(), sample.metadata.clone()));
+            }
+        }
+        self.undo_stack.push((state, sample_history));
         self.redo_stack.clear();
         while self.undo_stack.len() > 50 {
             self.undo_stack.remove(0);
@@ -641,13 +654,23 @@ impl Conductor {
         if self.undo_stack.is_empty() {
             return false;
         }
-        let current = self.capture_state();
-        self.redo_stack.push(current);
+        let current_state = self.capture_state();
+        let mut current_sample_history = std::collections::HashMap::new();
+        let ids = self.transfusion_manager.sample_registry.list_ids();
+        for id in ids {
+            if let Some(sample) = self.transfusion_manager.sample_registry.get(id) {
+                current_sample_history.insert(id, (sample.buffer.clone(), sample.metadata.clone()));
+            }
+        }
+        self.redo_stack.push((current_state, current_sample_history));
         while self.redo_stack.len() > 50 {
             self.redo_stack.remove(0);
         }
-        if let Some(popped) = self.undo_stack.pop() {
-            self.apply_state(popped);
+        if let Some((popped_state, popped_history)) = self.undo_stack.pop() {
+            for (id, (buffer, metadata)) in popped_history {
+                self.transfusion_manager.sample_registry.register_with_metadata(id, buffer, metadata);
+            }
+            self.apply_state(popped_state);
             true
         } else {
             false
@@ -658,13 +681,23 @@ impl Conductor {
         if self.redo_stack.is_empty() {
             return false;
         }
-        let current = self.capture_state();
-        self.undo_stack.push(current);
+        let current_state = self.capture_state();
+        let mut current_sample_history = std::collections::HashMap::new();
+        let ids = self.transfusion_manager.sample_registry.list_ids();
+        for id in ids {
+            if let Some(sample) = self.transfusion_manager.sample_registry.get(id) {
+                current_sample_history.insert(id, (sample.buffer.clone(), sample.metadata.clone()));
+            }
+        }
+        self.undo_stack.push((current_state, current_sample_history));
         while self.undo_stack.len() > 50 {
             self.undo_stack.remove(0);
         }
-        if let Some(popped) = self.redo_stack.pop() {
-            self.apply_state(popped);
+        if let Some((popped_state, popped_history)) = self.redo_stack.pop() {
+            for (id, (buffer, metadata)) in popped_history {
+                self.transfusion_manager.sample_registry.register_with_metadata(id, buffer, metadata);
+            }
+            self.apply_state(popped_state);
             true
         } else {
             false
@@ -687,7 +720,22 @@ impl Conductor {
             crate::persistence::ProjectState::load_from_file(path)?
         } else {
             let rkyv_path = if path.ends_with(".rkyv") { path.to_string() } else { format!("{}.rkyv", path) };
-            crate::persistence::ProjectState::load_from_rkyv(&rkyv_path)?
+            match crate::persistence::ProjectState::load_from_rkyv(&rkyv_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Warning: Failed to load .rkyv project ({}), discarding / trying JSON fallback: {}", rkyv_path, e);
+                    // Discard the incompatible .rkyv file
+                    let _ = std::fs::remove_file(&rkyv_path);
+
+                    // Attempt fallback to corresponding .json if it exists
+                    let json_path = rkyv_path.replace(".rkyv", ".json");
+                    if std::path::Path::new(&json_path).exists() {
+                        crate::persistence::ProjectState::load_from_file(&json_path)?
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
         };
         self.apply_state(state);
         Ok(())

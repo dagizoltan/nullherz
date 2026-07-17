@@ -44,7 +44,9 @@ impl AudioBackend for ThreadedBackend {
 
             let mut outputs_raw = vec![vec![0.0f32; period_size as usize]; 4];
             while running.load(Ordering::SeqCst) {
+                let mut sample_rate = 44100.0f64;
                 if let Some(ref engine_arc) = *engine_handle.lock().unwrap() {
+                    sample_rate = engine_arc.target_sample_rate() as f64;
                     let (out0, rest) = outputs_raw.split_at_mut(1);
                     let (out1, rest) = rest.split_at_mut(1);
                     let (out2, out3) = rest.split_at_mut(1);
@@ -60,7 +62,7 @@ impl AudioBackend for ThreadedBackend {
                     }
                 }
                 // Simulate audio hardware clock
-                let sleep_ns = ((period_size as f64) / 44100.0 * 1_000_000_000.0) as u64;
+                let sleep_ns = ((period_size as f64) / sample_rate * 1_000_000_000.0) as u64;
                 thread::sleep(std::time::Duration::from_nanos(sleep_ns));
             }
         });
