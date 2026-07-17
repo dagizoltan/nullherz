@@ -3409,6 +3409,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde-big-array",
+ "serde_json",
 ]
 
 [[package]]

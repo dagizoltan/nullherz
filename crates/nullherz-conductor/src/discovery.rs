@@ -49,6 +49,22 @@ impl SidecarDiscoveryService {
         self
     }
 
+    fn manifest_exists_in_dir(dir: &str, name: &str, manifest: &nullherz_traits::SidecarManifest) -> bool {
+        let manifest_path = std::path::Path::new(dir).join(format!("{}.json", name));
+        let manifest_alt_path = std::path::Path::new(dir).join(format!("{}.json", manifest.binary_name));
+        if manifest_path.exists() || manifest_alt_path.exists() {
+            return true;
+        }
+
+        let expected_name = format!("{}.json", name).to_lowercase();
+        std::fs::read_dir(dir).ok().map_or(false, |entries| {
+            entries.filter_map(Result::ok).any(|entry| {
+                entry.path().extension().and_then(|s| s.to_str()).map(|ext| ext.eq_ignore_ascii_case("json")).unwrap_or(false)
+                    && entry.path().file_name().and_then(|n| n.to_str()).map(|fname| fname.to_lowercase() == expected_name).unwrap_or(false)
+            })
+        })
+    }
+
     pub fn start_watcher(&self) {
         self.start_p2p_sync();
         self.start_local_watcher();
@@ -136,11 +152,10 @@ impl SidecarDiscoveryService {
                     // Clean up disappeared plugins
                     known_lock.retain(|name, manifest| {
                         let binary_path = std::path::Path::new(&dir).join(&manifest.binary_name);
-                        // WASM plugins might not have a .json manifest
                         let is_wasm = manifest.version.contains("wasm");
-                        let manifest_path = std::path::Path::new(&dir).join(format!("{}.json", name));
+                        let manifest_exists = is_wasm || Self::manifest_exists_in_dir(&dir, name, manifest);
 
-                        let exists = binary_path.exists() && (is_wasm || manifest_path.exists());
+                        let exists = binary_path.exists() && manifest_exists;
                         if !exists {
                             println!("Discovery: Sidecar plugin removed: {} (binary: {:?})", name, binary_path);
                             false
@@ -152,5 +167,40 @@ impl SidecarDiscoveryService {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::io::Write;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn test_manifest_exists_in_dir_case_insensitive_json_filename() {
+        let tmp_dir = std::env::temp_dir().join(format!("nullherz-plugin-test-{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&tmp_dir).expect("failed to create temp dir");
+
+        let manifest = nullherz_traits::SidecarManifest {
+            name: "Bitcrusher".to_string(),
+            version: "0.1.0".to_string(),
+            author: "Nullherz Reference".to_string(),
+            processor_type_id: 210,
+            binary_name: "bitcrusher".to_string(),
+            ui_controls: Vec::new(),
+        };
+
+        let manifest_path = tmp_dir.join("bitcrusher.json");
+        let mut file = File::create(&manifest_path).expect("failed to create manifest file");
+        file.write_all(serde_json::to_string(&manifest).unwrap().as_bytes()).expect("failed to write manifest");
+        file.flush().expect("failed to flush manifest file");
+
+        let binary_path = tmp_dir.join("bitcrusher");
+        File::create(&binary_path).expect("failed to create binary file");
+
+        assert!(SidecarDiscoveryService::manifest_exists_in_dir(tmp_dir.to_str().unwrap(), &manifest.name, &manifest));
+
+        fs::remove_dir_all(&tmp_dir).expect("failed to clean up temp dir");
     }
 }

@@ -126,7 +126,7 @@ impl WaveformRenderer {
 
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Waveform Vertex Buffer"),
-            size: (max_peaks * std::mem::size_of::<WaveformVertex>()) as u64,
+            size: (max_peaks * 2 * std::mem::size_of::<WaveformVertex>()) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -142,11 +142,11 @@ impl WaveformRenderer {
     }
 
     pub fn update_peaks(&mut self, queue: &wgpu::Queue, peaks: &[f32]) {
-        let mut vertices = Vec::with_capacity(peaks.len() * 2);
-        let peak_count = peaks.len();
+        let peak_count = peaks.len().min(self._max_peaks);
         if peak_count == 0 { return; }
 
-        for (i, &peak) in peaks.iter().enumerate() {
+        let mut vertices = Vec::with_capacity(peak_count * 2);
+        for (i, &peak) in peaks.iter().take(peak_count).enumerate() {
             // Normalized X in range [0, 2] instead of [-1, 1] to allow easier zooming from start
             let x = (i as f32 / peak_count as f32) * 2.0;
             vertices.push(WaveformVertex { position: [x, peak] });

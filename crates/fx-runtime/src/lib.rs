@@ -430,6 +430,27 @@ mod tests {
     }
 
     #[test]
+    fn test_spawn_bitcrusher_sidecar() {
+        let mut supervisor = SidecarSupervisor::new();
+        let binary_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../plugins/bitcrusher")
+            .canonicalize()
+            .expect("Failed to resolve plugin binary path");
+        assert!(binary_path.exists(), "Bitcrusher plugin binary must exist");
+
+        let sidecar_name = format!("bitcrusher_test_{}", std::process::id());
+        let result = supervisor.spawn_sidecar(
+            &sidecar_name,
+            binary_path.to_str().expect("Binary path invalid UTF-8"),
+            0,
+            2,
+            FailurePolicy::AutoRestart,
+        );
+
+        assert!(result.is_ok(), "Expected bitcrusher sidecar to spawn successfully");
+    }
+
+    #[test]
     fn test_supervisor_initial_state() {
         let supervisor = SidecarSupervisor::new();
         assert_eq!(supervisor.active_sidecars.len(), 0);

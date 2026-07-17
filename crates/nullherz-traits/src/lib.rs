@@ -6,6 +6,50 @@ pub mod error;
 use std::sync::Arc;
 pub use serde_big_array::BigArray;
 
+mod serde_arc {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::sync::Arc;
+
+    pub fn serialize<T, S>(val: &Arc<T>, s: S) -> Result<S::Ok, S::Error>
+    where
+        T: Serialize,
+        S: Serializer,
+    {
+        val.as_ref().serialize(s)
+    }
+
+    pub fn deserialize<'de, T, D>(d: D) -> Result<Arc<T>, D::Error>
+    where
+        T: Deserialize<'de>,
+        D: Deserializer<'de>,
+    {
+        T::deserialize(d).map(Arc::new)
+    }
+}
+
+mod serde_arc_vec {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::sync::Arc;
+
+    pub fn serialize<T, S>(val: &Vec<Arc<T>>, s: S) -> Result<S::Ok, S::Error>
+    where
+        T: Serialize,
+        S: Serializer,
+    {
+        let temp: Vec<&T> = val.iter().map(|arc| arc.as_ref()).collect();
+        temp.serialize(s)
+    }
+
+    pub fn deserialize<'de, T, D>(d: D) -> Result<Vec<Arc<T>>, D::Error>
+    where
+        T: Deserialize<'de>,
+        D: Deserializer<'de>,
+    {
+        let temp: Vec<T> = Vec::deserialize(d)?;
+        Ok(temp.into_iter().map(Arc::new).collect())
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct AudioConfig {
     pub sample_rate: f32,
@@ -1443,7 +1487,7 @@ impl Default for SoundDNA {
 pub struct MipWaveform {
     /// Level 0 is full resolution peaks.
     /// Subsequent levels are downsampled by powers of 2.
-    #[serde(skip)]
+    #[serde(with = "serde_arc_vec")]
     pub levels: Vec<Arc<Vec<f32>>>,
 }
 
@@ -1457,7 +1501,7 @@ pub struct SampleMetadata {
     pub hot_cues: [Option<u64>; 8],
     pub loop_points: Option<(u64, u64)>,
     pub beat_grid_offset: u64,
-    #[serde(skip)]
+    #[serde(with = "serde_arc")]
     pub peaks: Arc<Vec<f32>>,
     pub total_samples: u64,
     pub mip_waveform: MipWaveform,
@@ -1644,6 +1688,33 @@ impl Default for IdAllocator { fn default() -> Self { Self::new(0, 12) } }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sample_metadata_serialization_preserves_waveform() {
+        let metadata = SampleMetadata {
+            bpm: 120.0,
+            transients: Arc::new(vec![0, 1024, 2048]),
+            root_key: Some(60.0),
+            hot_cues: [Some(0), None, None, None, None, None, None, None],
+            loop_points: Some((0, 44100)),
+            beat_grid_offset: 0,
+            peaks: Arc::new((0..1024).map(|i| (i as f32 / 1024.0).sin().abs()).collect()),
+            total_samples: 44100,
+            mip_waveform: MipWaveform {
+                levels: vec![Arc::new(vec![0.0, 0.5, 1.0])],
+            },
+            dna: SoundDNA::default(),
+            midi_map: None,
+        };
+
+        let serialized = serde_json::to_string(&metadata).expect("serialize metadata");
+        let deserialized: SampleMetadata = serde_json::from_str(&serialized).expect("deserialize metadata");
+
+        assert_eq!(deserialized.bpm, 120.0);
+        assert_eq!(deserialized.peaks.len(), 1024);
+        assert_eq!(deserialized.mip_waveform.levels.len(), 1);
+        assert_eq!(deserialized.mip_waveform.levels[0].as_slice(), &[0.0, 0.5, 1.0]);
+    }
 
     #[test]
     fn test_mip_waveform_default() {
