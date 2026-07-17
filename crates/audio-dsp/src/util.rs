@@ -92,12 +92,12 @@ pub fn time_stretch(input: &[f32], ratio: f32) -> Vec<f32> {
     let grain_size = 1024;
     let overlap = 4;
     let hop_out = grain_size / overlap;
-    let hop_in = (hop_out as f32 * ratio) as usize;
+    let hop_in = (hop_out as f32 / ratio) as usize;
     if hop_in == 0 {
         return input.to_vec();
     }
 
-    let out_len = (input.len() as f32 / ratio) as usize;
+    let out_len = (input.len() as f32 * ratio) as usize;
     if out_len == 0 {
         return Vec::new();
     }
@@ -151,13 +151,13 @@ mod tests {
         // Test stretching slower (ratio = 2.0 -> half speed, twice as long)
         let stretched = time_stretch(&input, 2.0);
         assert!(stretched.len() > 0);
-        let ratio_diff = (stretched.len() as f32 / input.len() as f32 - 0.5).abs();
+        let ratio_diff = (stretched.len() as f32 / input.len() as f32 - 2.0).abs();
         assert!(ratio_diff < 0.1, "Length ratio: {}", stretched.len() as f32 / input.len() as f32);
 
         // Test stretching faster (ratio = 0.5 -> double speed, half as long)
         let compressed = time_stretch(&input, 0.5);
         assert!(compressed.len() > 0);
-        let ratio_diff_comp = (compressed.len() as f32 / input.len() as f32 - 2.0).abs();
+        let ratio_diff_comp = (compressed.len() as f32 / input.len() as f32 - 0.5).abs();
         assert!(ratio_diff_comp < 0.1, "Length ratio: {}", compressed.len() as f32 / input.len() as f32);
     }
 }
