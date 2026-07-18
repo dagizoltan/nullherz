@@ -38,7 +38,7 @@ pub fn render_deck_transport(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
 
         // SYNC
         if ui.add_sized([36.0, 44.0], egui::Button::new(RichText::new("SYNC").size(theme.type_caption).strong()).fill(theme.accent_muted)).clicked() {
-            let master_deck_id = (b'A' + app.master_deck.unwrap_or(0) as u8) as char;
+            let master_deck_id = (b'A' + app.decks.master_deck.unwrap_or(0) as u8) as char;
             let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::SyncDecks {
                 source_deck: master_deck_id,
                 target_deck: deck_id,

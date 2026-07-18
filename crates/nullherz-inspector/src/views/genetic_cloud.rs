@@ -79,7 +79,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             local_copy.id = track.id ^ 0xFEED;
                             local_copy.artist = "Imported Genesis".to_string();
                             let _ = app.library_db.save_track(&local_copy);
-                            app.library_needs_refresh = true;
+                            app.library.library_needs_refresh = true;
                         }
                     });
                 });
@@ -89,10 +89,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
         ui.add_space(theme.space_lg);
         ui.horizontal(|ui| {
-            if ui.button(RichText::new("REFRESH CLOUD").size(theme.type_label)).clicked() { app.library_needs_refresh = true; }
+            if ui.button(RichText::new("REFRESH CLOUD").size(theme.type_label)).clicked() { app.library.library_needs_refresh = true; }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Bug Fixed: Now bound to actual InspectorApp field instead of per-frame transient local throwaway variable!
-                ui.checkbox(&mut app.auto_pollinate_enabled, "Auto-Pollinate");
+                ui.checkbox(&mut app.composer.auto_pollinate_enabled, "Auto-Pollinate");
             });
         });
     });

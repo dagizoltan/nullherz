@@ -21,7 +21,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
                 ui.label("Global Spectral Window");
                 ui.add_space(theme.space_xs);
 
-                let prev_shape = app.spectral_window_shape;
+                let prev_shape = app.mixer.spectral_window_shape;
                 let options = [
                     (0, "HANN"),
                     (1, "HAMMING"),
@@ -32,16 +32,16 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
                 nullherz_ui_hal::widgets::render_segmented_control(
                     ui,
                     &theme,
-                    &mut app.spectral_window_shape,
+                    &mut app.mixer.spectral_window_shape,
                     &options,
                 );
 
-                if app.spectral_window_shape != prev_shape {
+                if app.mixer.spectral_window_shape != prev_shape {
                      let _ = app.command_sender.send(nullherz_traits::Command::Extension(nullherz_traits::OpaqueEnvelope {
                         domain_id: 0x53504543, // "SPEC"
                         target_id: 100, // Assuming spectral morph node
                         opcode: 0x01,
-                        data: [app.spectral_window_shape as u8, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                        data: [app.mixer.spectral_window_shape as u8, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
                      }));
                 }
             });
@@ -114,12 +114,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
             ui.horizontal(|ui| {
                 for i in 0..8 {
                     ui.vertical(|ui| {
-                        let prev_val = app.macros[i];
-                        nullherz_ui_hal::widgets::render_knob(ui, &mut app.macros[i], 0.0..=1.0, &format!("M{}", i+1), theme.accent);
-                        if app.macros[i] != prev_val {
+                        let prev_val = app.mixer.macros[i];
+                        nullherz_ui_hal::widgets::render_knob(ui, &mut app.mixer.macros[i], 0.0..=1.0, &format!("M{}", i+1), theme.accent);
+                        if app.mixer.macros[i] != prev_val {
                             let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetMacro {
                                 macro_id: i as u32,
-                                value: app.macros[i],
+                                value: app.mixer.macros[i],
                             }));
                         }
                     });

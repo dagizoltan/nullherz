@@ -37,13 +37,13 @@ impl BreederView {
                 .collapsible(false).resizable(true).show(ui.ctx(), |ui| {
 
                 ui.horizontal(|ui| {
-                    ui.text_edit_singleline(&mut app.search_query);
+                    ui.text_edit_singleline(&mut app.library.search_query);
                     if ui.button("CLOSE").clicked() { state.selecting_parent = None; }
                 });
                 ui.separator();
 
                 egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
-                    let mut tracks = app.cached_library.clone();
+                    let mut tracks = app.library.cached_library.clone();
 
                     // Matchmaking Sort (Genetic Matchmaker UI)
                     let other_dna = if parent_idx == 0 {
@@ -82,7 +82,7 @@ impl BreederView {
                                 } else {
                                     state.parent_b_id = Some(track.id);
                                 }
-                                app.library_needs_refresh = true;
+                                app.library.library_needs_refresh = true;
                                 state.selecting_parent = None;
                             }
                         });
@@ -204,7 +204,7 @@ impl BreederView {
                     .inner_margin(Margin::same(theme.space_sm))
                     .show(ui, |ui| {
                         if telemetry.is_some() {
-                            nullherz_ui_hal::widgets::render_spectrum_analyzer(ui, &app.damped_spectrum, theme.accent, 100.0);
+                            nullherz_ui_hal::widgets::render_spectrum_analyzer(ui, &app.viz.damped_spectrum, theme.accent, 100.0);
                         } else {
                             ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
                             ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "NO SIGNAL", egui::FontId::new(theme.type_body, egui::FontFamily::Proportional), theme.text_secondary);
@@ -220,7 +220,7 @@ impl BreederView {
                     .inner_margin(Margin::same(theme.space_sm))
                     .show(ui, |ui| {
                         if telemetry.is_some() {
-                            nullherz_ui_hal::widgets::render_goniometer(ui, &app.damped_goniometer, 200.0, theme.accent);
+                            nullherz_ui_hal::widgets::render_goniometer(ui, &app.viz.damped_goniometer, 200.0, theme.accent);
                         } else {
                             ui.allocate_at_least(Vec2::new(200.0, 100.0), Sense::hover());
                             ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "GONIOMETER", egui::FontId::new(theme.type_body, egui::FontFamily::Proportional), theme.text_secondary);
@@ -268,7 +268,7 @@ impl BreederView {
                              let child_rhythmic = nullherz_dna::transfuse_dna(&track_a.metadata.dna, &track_b.metadata.dna, state.transfusion_bias_y).rhythmic;
                              let commands = crate::views::composer::DnaSequencer::mutate_pattern(
                                  &child_rhythmic,
-                                 &app.sequencer_grid,
+                                 &app.composer.sequencer_grid,
                                  70, // Sequencer default ID
                                  0,  // Target track 0
                                  0.2 // 20% mutation probability

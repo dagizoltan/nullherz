@@ -77,17 +77,17 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    let tracks = app.cached_library.len();
+                    let tracks = app.library.cached_library.len();
                     ui.label(RichText::new("LIBRARY AGGREGATE").size(theme.type_caption).color(theme.text_secondary));
                     ui.label(format!("Genetic Material: {} samples", tracks));
 
                     // Mock genetic traits based on cached library
                     let mut avg_tilt = 0.0;
-                    if !app.cached_library.is_empty() {
-                        for t in &app.cached_library {
+                    if !app.library.cached_library.is_empty() {
+                        for t in &app.library.cached_library {
                             avg_tilt += t.metadata.dna.spectral.tilt;
                         }
-                        avg_tilt /= app.cached_library.len() as f32;
+                        avg_tilt /= app.library.cached_library.len() as f32;
                     }
 
                     ui.label(format!("Dominant Trait: {}", if avg_tilt > 0.0 { "High-Frequency Clarity" } else { "Sub-Heavy Warmth" }));

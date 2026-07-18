@@ -24,14 +24,14 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                 ];
 
                 for (backend, label) in backends {
-                    let is_active = app.active_backend == backend;
+                    let is_active = app.settings.active_backend == backend;
                     let mut btn = egui::Button::new(label);
                     if is_active {
                         btn = btn.fill(theme.accent.linear_multiply(0.12))
                                  .stroke(egui::Stroke::new(1.0, theme.accent));
                     }
                     if ui.add(btn).clicked() {
-                        app.active_backend = backend;
+                        app.settings.active_backend = backend;
                         let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(backend)));
                     }
                 }
@@ -41,10 +41,10 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
             ui.horizontal(|ui| {
                 ui.label("Device:");
                 egui::ComboBox::from_id_source("audio_device_select")
-                    .selected_text(&app.selected_audio_device)
+                    .selected_text(&app.settings.selected_audio_device)
                     .show_ui(ui, |ui| {
-                        for dev in &app.audio_devices {
-                            ui.selectable_value(&mut app.selected_audio_device, dev.clone(), dev);
+                        for dev in &app.settings.audio_devices {
+                            ui.selectable_value(&mut app.settings.selected_audio_device, dev.clone(), dev);
                         }
                     });
 

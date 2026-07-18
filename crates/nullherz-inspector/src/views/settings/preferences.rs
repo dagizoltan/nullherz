@@ -17,7 +17,7 @@ pub fn render_preferences(app: &mut InspectorApp, ui: &mut Ui) {
         .show(ui, |ui| {
             // Restore session (disabled/mocked)
             ui.add_enabled_ui(false, |ui| {
-                ui.checkbox(&mut app.restore_last_session, "Restore last session on launch")
+                ui.checkbox(&mut app.settings.restore_last_session, "Restore last session on launch")
                     .on_hover_text("Planned / Not yet functional: actual session persistence is under development");
             });
             ui.add_space(theme.space_sm);
@@ -26,7 +26,7 @@ pub fn render_preferences(app: &mut InspectorApp, ui: &mut Ui) {
             ui.horizontal(|ui| {
                 ui.label("Default view on launch:");
                 egui::ComboBox::from_id_source("default_view_select")
-                    .selected_text(view_label(app.default_view_on_launch))
+                    .selected_text(view_label(app.settings.default_view_on_launch))
                     .show_ui(ui, |ui| {
                         let views = [
                             View::Console,
@@ -41,7 +41,7 @@ pub fn render_preferences(app: &mut InspectorApp, ui: &mut Ui) {
                             View::Settings,
                         ];
                         for v in views {
-                            ui.selectable_value(&mut app.default_view_on_launch, v, view_label(v));
+                            ui.selectable_value(&mut app.settings.default_view_on_launch, v, view_label(v));
                         }
                     });
             });
@@ -58,11 +58,11 @@ pub fn render_preferences(app: &mut InspectorApp, ui: &mut Ui) {
         .stroke(theme.border_stroke)
         .inner_margin(theme.space_md)
         .show(ui, |ui| {
-            ui.checkbox(&mut app.autosave_enabled, "Enable background autosave");
+            ui.checkbox(&mut app.settings.autosave_enabled, "Enable background autosave");
             ui.add_space(theme.space_sm);
             ui.horizontal(|ui| {
                 ui.label("Save Interval (minutes):");
-                ui.add(egui::Slider::new(&mut app.autosave_interval_mins, 1..=30).show_value(true));
+                ui.add(egui::Slider::new(&mut app.settings.autosave_interval_mins, 1..=30).show_value(true));
             });
         });
 
@@ -77,7 +77,7 @@ pub fn render_preferences(app: &mut InspectorApp, ui: &mut Ui) {
         .stroke(theme.border_stroke)
         .inner_margin(theme.space_md)
         .show(ui, |ui| {
-            ui.checkbox(&mut app.shortcuts_enabled, "Enable keyboard shortcuts");
+            ui.checkbox(&mut app.settings.shortcuts_enabled, "Enable keyboard shortcuts");
             ui.add_space(theme.space_sm);
 
             ui.label(RichText::new("Reference List").strong().color(theme.text_secondary));

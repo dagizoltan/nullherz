@@ -4,10 +4,10 @@ use audio_core::Telemetry;
 use nullherz_dna::GeneticLibrary;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
-    if app.focused_deck >= 4 {
-        app.focused_deck = 0;
+    if app.decks.focused_deck >= 4 {
+        app.decks.focused_deck = 0;
     }
-    let deck_idx = app.focused_deck;
+    let deck_idx = app.decks.focused_deck;
     let deck_char = (b'A' + deck_idx as u8) as char;
     let theme = app.theme;
     let deck_color = crate::InspectorApp::deck_color(&theme, deck_idx);
@@ -23,7 +23,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     // Deck Tab Selector
     ui.horizontal(|ui| {
         for i in 0..4 {
-            let active = i == app.focused_deck;
+            let active = i == app.decks.focused_deck;
             let d_char = (b'A' + i as u8) as char;
             let d_color = crate::InspectorApp::deck_color(&theme, i);
             let btn_text = format!("DECK {}", d_char);
@@ -35,7 +35,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             };
 
             if ui.add_sized([100.0, 24.0], btn).clicked() {
-                app.focused_deck = i;
+                app.decks.focused_deck = i;
             }
             ui.add_space(theme.space_xs);
         }
@@ -94,7 +94,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     ui.set_width(ui.available_width());
 
                     // OLED Status Display
-                    let track_id = app.now_playing[deck_idx];
+                    let track_id = app.decks.now_playing[deck_idx];
                     let track = track_id.and_then(|id| app.library_db.get_track(id).ok().flatten());
                     let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[deck_idx]).unwrap_or(0);
 
@@ -179,7 +179,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpByBeats { node_idx, beats: -4.0 }));
                                 }
 
-                                let is_deck_playing = app.deck_playing[deck_idx];
+                                let is_deck_playing = app.decks.deck_playing[deck_idx];
                                 let play_btn = if is_deck_playing {
                                     egui::Button::new(RichText::new(egui_phosphor::regular::PAUSE).size(theme.type_heading)).fill(theme.accent_muted)
                                 } else {
@@ -187,8 +187,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 };
 
                                 if ui.add(play_btn).clicked() {
-                                    app.deck_playing[deck_idx] = !is_deck_playing;
-                                    if app.deck_playing[deck_idx] {
+                                    app.decks.deck_playing[deck_idx] = !is_deck_playing;
+                                    if app.decks.deck_playing[deck_idx] {
                                         let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id: deck_char }));
                                     } else {
                                         let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::StopDeck { deck_id: deck_char }));
@@ -210,9 +210,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 ui.separator();
 
                                 // Slip mode toggle
-                                let is_slip = app.channel_sync[deck_idx]; // Reuse sync array or represent slip
+                                let is_slip = app.mixer.channel_sync[deck_idx]; // Reuse sync array or represent slip
                                 if ui.selectable_label(is_slip, "SLIP").clicked() {
-                                    app.channel_sync[deck_idx] = !is_slip;
+                                    app.mixer.channel_sync[deck_idx] = !is_slip;
                                     let node_name = match deck_idx {
                                         0 => "deck_a_sampler",
                                         1 => "deck_b_sampler",
@@ -303,7 +303,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             let target_beat = current_bar + (pad_idx as f64 * 0.5); // 1/2 beat slice offsets
                                             let mut beats_to_jump = target_beat - current_beat;
 
-                                            if app.quantize_enabled {
+                                            if app.mixer.quantize_enabled {
                                                 // Quantize jump to the nearest 1/8th of a beat
                                                 beats_to_jump = (beats_to_jump * 8.0).round() / 8.0;
                                             }
@@ -336,7 +336,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     ui.horizontal(|ui| {
         ui.heading(RichText::new("Precision Library Browser").size(theme.type_heading));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.text_edit_singleline(&mut app.search_query);
+            ui.text_edit_singleline(&mut app.library.search_query);
             ui.label(egui_phosphor::regular::MAGNIFYING_GLASS);
         });
     });
@@ -351,8 +351,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             ui.label("");
             ui.end_row();
 
-            let query = app.search_query.to_lowercase();
-            for track in &app.cached_library {
+            let query = app.library.search_query.to_lowercase();
+            for track in &app.library.cached_library {
                 if !query.is_empty() && !track.title.to_lowercase().contains(&query) && !track.artist.to_lowercase().contains(&query) {
                     continue;
                 }
@@ -368,10 +368,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             deck_id: deck_char,
                             sample_id: track.id,
                         }));
-                        app.now_playing[deck_idx] = Some(track.id);
+                        app.decks.now_playing[deck_idx] = Some(track.id);
                     }
                     if ui.button(RichText::new("QUEUE").size(theme.type_caption)).clicked() {
-                        app.playlist_queue.push_back(track.id);
+                        app.library.playlist_queue.push_back(track.id);
                     }
                 });
                 ui.end_row();
@@ -381,7 +381,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         ui.add_space(theme.space_lg);
         ui.heading(RichText::new("Playlist Queue").size(theme.type_heading));
         let mut to_remove = None;
-        for (idx, &track_id) in app.playlist_queue.iter().enumerate() {
+        for (idx, &track_id) in app.library.playlist_queue.iter().enumerate() {
             if let Ok(Some(track)) = app.library_db.get_track(track_id) {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(format!("{}. {} - {}", idx + 1, track.artist, track.title)).size(theme.type_body));
@@ -389,6 +389,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 });
             }
         }
-        if let Some(idx) = to_remove { app.playlist_queue.remove(idx); }
+        if let Some(idx) = to_remove { app.library.playlist_queue.remove(idx); }
     });
 }

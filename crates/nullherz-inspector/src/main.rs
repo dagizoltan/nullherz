@@ -11,6 +11,7 @@ use std::sync::mpsc;
 use nullherz_dna::GeneticLibrary;
 
 mod views;
+pub(crate) mod state;
 
 pub fn default_coordinate() -> f32 {
     -1.0
@@ -99,126 +100,40 @@ pub struct InspectorApp {
     pub(crate) command_sender: mpsc::Sender<Command>,
     pub(crate) last_telemetry: Arc<Mutex<Option<Telemetry>>>,
     pub(crate) active_view: View,
-    pub(crate) channel_faders: [f32; 4],
-    pub(crate) channel_eq_high: [f32; 4],
-    pub(crate) channel_eq_mid: [f32; 4],
-    pub(crate) channel_eq_low: [f32; 4],
-    pub(crate) channel_filter: [f32; 4],
-    pub(crate) channel_personality_metallic: [f32; 4],
-    pub(crate) channel_personality_organic: [f32; 4],
-    pub(crate) channel_personality_warm: [f32; 4],
-    pub(crate) channel_personality_aggressive: [f32; 4],
-    pub(crate) channel_sync: [bool; 4],
-    pub(crate) quantize_enabled: bool,
-    pub(crate) master_gain: f32,
-    pub(crate) crossfader_pos: f32,
+    // Per-domain view state (see state.rs)
+    pub(crate) mixer: state::MixerState,
+    pub(crate) decks: state::DeckState,
+    pub(crate) library: state::LibraryState,
+    pub(crate) composer: state::ComposerState,
+    pub(crate) sampler: state::SamplerState,
+    pub(crate) editor: state::EditorState,
+    pub(crate) broadcast: state::BroadcastState,
+    pub(crate) settings: state::SettingsState,
+    pub(crate) viz: state::VizState,
+    pub(crate) topo: state::TopologyViewState,
     pub(crate) library_db: SharedLibraryDb,
-    pub(crate) active_crate: Option<String>,
-    pub(crate) search_query: String,
-    pub(crate) is_streaming: bool,
     pub(crate) active_right_tab: Option<RightTab>,
-    pub(crate) master_deck: Option<usize>,
-    pub(crate) now_playing: [Option<u64>; 4],
-    pub(crate) global_bpm: f32,
-    pub(crate) macros: [f32; 8],
-    pub(crate) _macro_names: [String; 8],
-    pub(crate) channel_peak_hold: [f32; 4],
-    pub(crate) master_peak_hold: f32,
-    pub(crate) _booth_peak_hold: f32,
-    pub(crate) _rec_peak_hold: f32,
-    pub(crate) mastering_eq_enabled: bool,
-    pub(crate) mastering_eq_low: f32,
-    pub(crate) mastering_eq_mid: f32,
-    pub(crate) mastering_eq_high: f32,
-    pub(crate) spectral_window_shape: u32,
-    pub(crate) sequencer_grid: [Vec<f32>; 16],
-    pub(crate) selected_composer_track: Option<usize>,
-    pub(crate) sequencer_active_step: usize,
-    pub(crate) sampler_slicer_mode: bool,
-    pub(crate) _playlists: Vec<Playlist>,
-    pub(crate) cached_library: Vec<nullherz_dna::LibraryTrack>,
-    pub(crate) cached_library_raw: Vec<nullherz_dna::LibraryTrack>,
-    pub(crate) bg_library_loader: Option<std::sync::mpsc::Receiver<Vec<nullherz_dna::LibraryTrack>>>,
-    pub(crate) library_needs_refresh: bool,
     pub(crate) breeding_view: views::breeder::BreederView,
     pub(crate) wgpu_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::wgpu_backend::WgpuRenderer>>>,
     pub(crate) waveform_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>>,
     pub(crate) deck_waveform_renderers: [Option<Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>>; 4],
-    pub(crate) active_connection_source: Option<(u32, u32)>, // (node_idx, output_idx)
-    pub(crate) active_node_drag: Option<u32>,
-    pub(crate) smart_crate_builder_open: bool,
-    pub(crate) smart_crate_def: nullherz_dna::SmartCrateDefinition,
-    pub(crate) visualizer_damping: f32,
-    pub(crate) damped_spectrum: [f32; 128],
-    pub(crate) damped_goniometer: [f32; 128],
-    pub(crate) damped_latent: [f32; 16],
-    pub(crate) damped_peaks: [f32; 4],
-    pub(crate) damped_master_peaks: [f32; 2],
     pub(crate) discovered_sidecars: Vec<nullherz_traits::SidecarManifest>,
-    pub(crate) personality_macro_mode: bool,
-    pub(crate) focused_deck: usize,
-    pub(crate) track_mutes: [bool; 16],
-    pub(crate) track_solos: [bool; 16],
-    pub(crate) track_volumes: [f32; 16],
-    pub(crate) track_targets: [String; 16],
-    pub(crate) deck_playing: [bool; 4],
-    pub(crate) record_automation: bool,
-    pub(crate) _automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>, // target_id -> [(beat, value)]
-    pub(crate) sampler_waveform_zoom: f32,
-    pub(crate) editor_time_stretch_ratio: f32,
-    pub(crate) active_settings_tab: SettingsTab,
-    pub(crate) active_backend: nullherz_traits::AudioBackendType,
-    pub(crate) active_midi_profile: String,
-    pub(crate) config_saved_time: Option<f64>,
-    pub(crate) selected_hotload_node_idx: usize,
     // --- Broadcast Settings State ---
-    pub(crate) broadcast_url: String,
-    pub(crate) broadcast_key: String,
-    pub(crate) broadcast_reveal_key: bool,
-    pub(crate) broadcast_codec: usize, // 0: Opus, 1: AAC, 2: FLAC
-    pub(crate) broadcast_bitrate: f32, // 64 to 512 kbps
-    pub(crate) broadcast_state: usize, // 0: Offline, 1: Connecting, 2: Live, 3: Error
-    pub(crate) broadcast_error_msg: String,
-    pub(crate) broadcast_start_time: Option<f64>,
     pub(crate) p2p_sync_success_toast: Option<f64>,
     pub(crate) export_passport_success_toast: Option<f64>,
     pub(crate) export_passport_error_toast: Option<(f64, String)>,
-    pub(crate) sampler_input_gain: f32,
-    pub(crate) sampler_monitor_level: f32,
-    pub(crate) sampler_is_recording: bool,
-    pub(crate) sampler_is_stereo: bool,
-    pub(crate) sampler_input_source: usize, // 0: Master, 1-4: Decks, 5: External
-    pub(crate) selected_library_track: Option<u64>,
-    pub(crate) bypassed_nodes: std::collections::HashSet<u32>,
     pub(crate) theme: nullherz_ui_hal::Theme,
     pub(crate) last_update_time: f64,
-    pub(crate) ingestion_path: String,
-    pub(crate) node_map: std::collections::HashMap<String, u32>,
-    pub(crate) playlist_queue: std::collections::VecDeque<u64>,
-    pub(crate) evolution_strengths: [f32; 16],
-    pub(crate) next_sample_id: u64,
-    pub(crate) editor_selection: Option<(f32, f32)>, // normalized (start, end)
-    pub(crate) audio_devices: Vec<String>,
-    pub(crate) selected_audio_device: String,
-    pub(crate) restore_last_session: bool,
-    pub(crate) default_view_on_launch: View,
-    pub(crate) autosave_enabled: bool,
-    pub(crate) autosave_interval_mins: u32,
-    pub(crate) last_saved_time: f64,
-    pub(crate) autosave_triggered: Option<f64>,
-    pub(crate) shortcuts_enabled: bool,
-    pub(crate) global_playing: bool,
-    pub(crate) auto_pollinate_enabled: bool,
     pub(crate) _conductor_thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl InspectorApp {
     pub fn trigger_library_refresh(&mut self) {
-        self.library_needs_refresh = true;
+        self.library.library_needs_refresh = true;
         let db = self.library_db.clone();
-        let crate_name = self.active_crate.clone();
+        let crate_name = self.library.active_crate.clone();
         let (tx, rx) = std::sync::mpsc::channel();
-        self.bg_library_loader = Some(rx);
+        self.library.bg_library_loader = Some(rx);
 
         std::thread::spawn(move || {
             let tracks = if let Some(ref name) = crate_name {
@@ -231,14 +146,14 @@ impl InspectorApp {
     }
 
     pub fn get_node_id(&self, name: &str) -> u32 {
-        *self.node_map.get(name).unwrap_or(&0)
+        *self.topo.node_map.get(name).unwrap_or(&0)
     }
 
     pub(crate) fn node_names(&self) -> Vec<(String, u32)> {
         // NOTE: We don't try to filter this down to "instrument-only" nodes yet — there's no
         // processor-type metadata exposed to the UI to do that reliably right now.
         // Routing to a non-instrument node just won't produce sound; it won't crash anything.
-        self.node_map.iter().map(|(k, v)| (k.clone(), *v)).collect()
+        self.topo.node_map.iter().map(|(k, v)| (k.clone(), *v)).collect()
     }
 
     pub fn new(graph: GraphJson, cc: &eframe::CreationContext<'_>) -> Self {
@@ -383,133 +298,28 @@ impl InspectorApp {
             last_telemetry,
             _conductor_thread: Some(conductor_thread),
             active_view: default_view,
-            channel_faders: [1.0; 4],
-            channel_eq_high: [1.0; 4],
-            channel_eq_mid: [1.0; 4],
-            channel_eq_low: [1.0; 4],
-            channel_filter: [0.5; 4],
-            channel_personality_metallic: [0.0; 4],
-            channel_personality_organic: [0.0; 4],
-            channel_personality_warm: [0.0; 4],
-            channel_personality_aggressive: [0.0; 4],
-            channel_sync: [false; 4],
-            quantize_enabled: true,
-            master_gain: 1.0,
-            crossfader_pos: 0.5,
+            mixer: Default::default(),
+            decks: Default::default(),
+            library: Default::default(),
+            composer: Default::default(),
+            sampler: Default::default(),
+            editor: Default::default(),
+            broadcast: Default::default(),
+            settings: Default::default(),
+            viz: Default::default(),
+            topo: Default::default(),
             library_db: library_db_wrapper,
-            active_crate: None,
-            search_query: String::new(),
-            is_streaming: false,
             active_right_tab: Some(RightTab::Library),
-            master_deck: Some(0),
-            now_playing: [Some(1), Some(2), None, None],
-            global_bpm: 128.0,
-            macros: [0.0; 8],
-            _macro_names: std::array::from_fn(|i| format!("MACRO {}", i + 1)),
-            channel_peak_hold: [0.0; 4],
-            master_peak_hold: 0.0,
-            _booth_peak_hold: 0.0,
-            _rec_peak_hold: 0.0,
-            mastering_eq_enabled: true,
-            mastering_eq_low: 1.0,
-            mastering_eq_mid: 1.0,
-            mastering_eq_high: 1.0,
-            spectral_window_shape: 0,
-            sequencer_grid: std::array::from_fn(|_| vec![0.0; 64]),
-            selected_composer_track: None,
-            sequencer_active_step: 0,
-            sampler_slicer_mode: false,
-            _playlists: vec![],
-            cached_library: vec![],
-            cached_library_raw: vec![],
-            bg_library_loader: None,
-            library_needs_refresh: true,
             breeding_view: views::breeder::BreederView::new(),
             wgpu_renderer: None,
             waveform_renderer: None,
             deck_waveform_renderers: [None, None, None, None],
-            active_connection_source: None,
-            active_node_drag: None,
-            smart_crate_builder_open: false,
-            smart_crate_def: nullherz_dna::SmartCrateDefinition {
-                name: "New Smart Crate".into(),
-                target_dna: None,
-                threshold: 0.5,
-                spectral_tilt_range: None,
-                rhythmic_syncopation_range: None,
-                glitch_density_range: None,
-                genre: None,
-                bpm_range: None,
-                energy_range: None,
-                root_key: None,
-            },
-            visualizer_damping: 0.1,
-            damped_spectrum: [0.0; 128],
-            damped_goniometer: [0.0; 128],
-            damped_latent: [0.0; 16],
-            damped_peaks: [0.0; 4],
-            damped_master_peaks: [0.0; 2],
             discovered_sidecars: vec![],
-            personality_macro_mode: false,
-            focused_deck: 0, // Default to focus Deck A
-            track_mutes: [false; 16],
-            track_solos: [false; 16],
-            track_volumes: [1.0; 16],
-            track_targets: std::array::from_fn(|_| "(default)".to_string()),
-            deck_playing: [false; 4],
-            record_automation: false,
-            _automation_data: std::collections::HashMap::new(),
-            sampler_waveform_zoom: 1.0,
-            editor_time_stretch_ratio: 1.0,
-            active_settings_tab: SettingsTab::General,
-            active_backend: nullherz_traits::AudioBackendType::Alsa,
-            active_midi_profile: "default".to_string(),
-            config_saved_time: None,
-            selected_hotload_node_idx: 0,
-            broadcast_url: "rtmp://gossip.genetic.cloud/live".to_string(),
-            broadcast_key: "live_73819283_ab781c981d39281a".to_string(),
-            broadcast_reveal_key: false,
-            broadcast_codec: 0,
-            broadcast_bitrate: 256.0,
-            broadcast_state: 0,
-            broadcast_error_msg: "Connection timed out (Socket error 111)".to_string(),
-            broadcast_start_time: None,
             p2p_sync_success_toast: None,
             export_passport_success_toast: None,
             export_passport_error_toast: None,
-            sampler_input_gain: 1.0,
-            sampler_monitor_level: 0.0,
-            sampler_is_recording: false,
-            sampler_is_stereo: true,
-            sampler_input_source: 0,
-            selected_library_track: None,
-            bypassed_nodes: std::collections::HashSet::new(),
             theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
-            ingestion_path: "tracks/".to_string(),
-            playlist_queue: std::collections::VecDeque::new(),
-            evolution_strengths: [0.0; 16],
-            next_sample_id: 1000,
-            editor_selection: None,
-            audio_devices: vec!["default".to_string()],
-            selected_audio_device: "default".to_string(),
-            restore_last_session: false,
-            default_view_on_launch: default_view,
-            autosave_enabled: false,
-            autosave_interval_mins: 5,
-            last_saved_time: 0.0,
-            autosave_triggered: None,
-            shortcuts_enabled: true,
-            global_playing: false,
-            auto_pollinate_enabled: false,
-            node_map: [
-                ("deck_a_sampler".to_string(), 0), ("deck_a_gain".to_string(), 4), ("deck_a_filter".to_string(), 3),
-                ("deck_b_sampler".to_string(), 4), ("deck_b_gain".to_string(), 8), ("deck_b_filter".to_string(), 7),
-                ("deck_c_sampler".to_string(), 8), ("deck_c_gain".to_string(), 12), ("deck_c_filter".to_string(), 11),
-                ("deck_d_sampler".to_string(), 12), ("deck_d_gain".to_string(), 16), ("deck_d_filter".to_string(), 15),
-                ("master_sum".to_string(), 30), ("master_crossfader".to_string(), 20), ("master_limiter".to_string(), 35),
-                ("capture_node".to_string(), 110), ("sequencer_node".to_string(), 70), ("sampler_node".to_string(), 100),
-            ].into_iter().collect(),
         };
         app.trigger_library_refresh();
         app
@@ -741,7 +551,7 @@ impl InspectorApp {
                     }
 
                     ui.separator();
-                    ui.toggle_value(&mut self.is_streaming, format!("{} BROADCAST", egui_phosphor::regular::BROADCAST));
+                    ui.toggle_value(&mut self.broadcast.is_streaming, format!("{} BROADCAST", egui_phosphor::regular::BROADCAST));
                 });
             });
         });
@@ -749,15 +559,15 @@ impl InspectorApp {
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         let current_time = ctx.input(|i| i.time);
-        if self.shortcuts_enabled {
+        if self.settings.shortcuts_enabled {
             ctx.input(|i| {
                 if i.key_pressed(egui::Key::Space) {
-                    if self.global_playing {
+                    if self.decks.global_playing {
                         let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop));
-                        self.global_playing = false;
+                        self.decks.global_playing = false;
                     } else {
                         let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Play));
-                        self.global_playing = true;
+                        self.decks.global_playing = true;
                     }
                 }
                 if i.key_pressed(egui::Key::Z) && i.modifiers.command {
@@ -778,8 +588,8 @@ impl InspectorApp {
                         b[..bytes.len().min(128)].copy_from_slice(&bytes[..bytes.len().min(128)]);
                         b
                     })));
-                    self.config_saved_time = Some(current_time);
-                    self.autosave_triggered = None;
+                    self.settings.config_saved_time = Some(current_time);
+                    self.settings.autosave_triggered = None;
                 }
                 if i.key_pressed(egui::Key::Num1) { self.active_view = View::Player; }
                 if i.key_pressed(egui::Key::Num2) { self.active_view = View::Console; }
@@ -795,9 +605,9 @@ impl InspectorApp {
     }
 
     fn handle_autosave(&mut self, current_time: f64) {
-        if self.autosave_enabled {
-            let interval_secs = (self.autosave_interval_mins as f64) * 60.0;
-            if current_time - self.last_saved_time >= interval_secs {
+        if self.settings.autosave_enabled {
+            let interval_secs = (self.settings.autosave_interval_mins as f64) * 60.0;
+            if current_time - self.settings.last_saved_time >= interval_secs {
                 let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology));
                 let ports = "Pioneer DDJ-400,Generic MIDI Keyboard".to_string();
                 let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMidiPorts({
@@ -806,9 +616,9 @@ impl InspectorApp {
                     b[..bytes.len().min(128)].copy_from_slice(&bytes[..bytes.len().min(128)]);
                     b
                 })));
-                self.last_saved_time = current_time;
-                self.config_saved_time = Some(current_time);
-                self.autosave_triggered = Some(current_time);
+                self.settings.last_saved_time = current_time;
+                self.settings.config_saved_time = Some(current_time);
+                self.settings.autosave_triggered = Some(current_time);
             }
         }
     }
@@ -819,20 +629,20 @@ impl eframe::App for InspectorApp {
         let current_time = ctx.input(|i| i.time);
 
         // --- Background Library Loader Polling ---
-        if let Some(ref rx) = self.bg_library_loader {
+        if let Some(ref rx) = self.library.bg_library_loader {
             if let Ok(tracks) = rx.try_recv() {
-                self.cached_library_raw = tracks.clone();
-                self.cached_library = tracks;
-                self.library_needs_refresh = false;
-                self.bg_library_loader = None;
+                self.library.cached_library_raw = tracks.clone();
+                self.library.cached_library = tracks;
+                self.library.library_needs_refresh = false;
+                self.library.bg_library_loader = None;
             }
-        } else if self.library_needs_refresh {
+        } else if self.library.library_needs_refresh {
             self.trigger_library_refresh();
         }
 
         // Initialize last_saved_time on first loop run if it's 0.0
-        if self.last_saved_time == 0.0 {
-            self.last_saved_time = current_time;
+        if self.settings.last_saved_time == 0.0 {
+            self.settings.last_saved_time = current_time;
         }
 
         // --- Keyboard Shortcuts ---
@@ -856,35 +666,35 @@ impl eframe::App for InspectorApp {
         // Update Damping (Liquid Asymmetrical Damping: Fast Attack, Slow Decay)
         if let Some(ref t) = telemetry {
             // Synchronize Master Deck from Telemetry
-            self.master_deck = Some((t.active_master_deck as u8 - b'A') as usize);
+            self.decks.master_deck = Some((t.active_master_deck as u8 - b'A') as usize);
 
-            let d = self.visualizer_damping.clamp(0.01, 1.0);
+            let d = self.viz.visualizer_damping.clamp(0.01, 1.0);
             let decay = d * 0.5; // Slower decay for "liquid" feel
 
             // Optimized damping using Lerp formula: current + (target - current) * alpha
             for i in 0..128 {
                 let target_spec = t.spectrum[i];
-                let alpha = if target_spec > self.damped_spectrum[i] { d } else { decay };
-                self.damped_spectrum[i] += (target_spec - self.damped_spectrum[i]) * alpha;
+                let alpha = if target_spec > self.viz.damped_spectrum[i] { d } else { decay };
+                self.viz.damped_spectrum[i] += (target_spec - self.viz.damped_spectrum[i]) * alpha;
 
                 let target_gonio = t.goniometer_pts[i];
-                let alpha_g = if target_gonio.abs() > self.damped_goniometer[i].abs() { d } else { decay };
-                self.damped_goniometer[i] += (target_gonio - self.damped_goniometer[i]) * alpha_g;
+                let alpha_g = if target_gonio.abs() > self.viz.damped_goniometer[i].abs() { d } else { decay };
+                self.viz.damped_goniometer[i] += (target_gonio - self.viz.damped_goniometer[i]) * alpha_g;
             }
             for i in 0..16 {
                 let target_latent = t.dna_latent_space[i];
-                let alpha_l = if target_latent.abs() > self.damped_latent[i].abs() { d } else { decay };
-                self.damped_latent[i] += (target_latent - self.damped_latent[i]) * alpha_l;
+                let alpha_l = if target_latent.abs() > self.viz.damped_latent[i].abs() { d } else { decay };
+                self.viz.damped_latent[i] += (target_latent - self.viz.damped_latent[i]) * alpha_l;
             }
             for i in 0..4 {
                 let target_peak = t.peak_levels[i];
-                let alpha_p = if target_peak > self.damped_peaks[i] { 1.0 } else { decay * 0.5 };
-                self.damped_peaks[i] += (target_peak - self.damped_peaks[i]) * alpha_p;
+                let alpha_p = if target_peak > self.viz.damped_peaks[i] { 1.0 } else { decay * 0.5 };
+                self.viz.damped_peaks[i] += (target_peak - self.viz.damped_peaks[i]) * alpha_p;
             }
             for i in 0..2 {
                 let target_m_peak = t.peak_levels[i];
-                let alpha_mp = if target_m_peak > self.damped_master_peaks[i] { 1.0 } else { decay * 0.5 };
-                self.damped_master_peaks[i] += (target_m_peak - self.damped_master_peaks[i]) * alpha_mp;
+                let alpha_mp = if target_m_peak > self.viz.damped_master_peaks[i] { 1.0 } else { decay * 0.5 };
+                self.viz.damped_master_peaks[i] += (target_m_peak - self.viz.damped_master_peaks[i]) * alpha_mp;
             }
 
             // Sync node map from telemetry
@@ -892,7 +702,7 @@ impl eframe::App for InspectorApp {
                 let key_bytes = t.node_map_keys[i];
                 if key_bytes[0] != 0 {
                     let name = String::from_utf8_lossy(&key_bytes).trim_matches(char::from(0)).to_string();
-                    self.node_map.insert(name, t.node_map_values[i]);
+                    self.topo.node_map.insert(name, t.node_map_values[i]);
                 }
             }
 
@@ -905,7 +715,7 @@ impl eframe::App for InspectorApp {
                 }
             }
             if !devs.is_empty() {
-                self.audio_devices = devs;
+                self.settings.audio_devices = devs;
             }
         }
 

@@ -10,14 +10,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
     let mut socket_positions = std::collections::HashMap::new(); // (node_idx, is_out, socket_idx) -> pos
 
-    if let Some((src_node, src_out)) = app.active_connection_source {
+    if let Some((src_node, src_out)) = app.topo.active_connection_source {
         ui.label(RichText::new(format!("DRAGGING CONNECTION FROM NODE {} OUT {}", src_node, src_out)).color(theme.warning).size(theme.type_body));
-        if ui.button("CANCEL").clicked() { app.active_connection_source = None; }
+        if ui.button("CANCEL").clicked() { app.topo.active_connection_source = None; }
     }
 
-    if let Some(src_node) = app.active_node_drag {
+    if let Some(src_node) = app.topo.active_node_drag {
         ui.label(RichText::new(format!("DRAGGING NODE {} (Release over remote card to migrate)", src_node)).color(theme.accent_muted).size(theme.type_body));
-        if ui.button("CANCEL DRAG").clicked() { app.active_node_drag = None; }
+        if ui.button("CANCEL DRAG").clicked() { app.topo.active_node_drag = None; }
     }
 
     // 1. Semantic Color Legend strip
@@ -135,15 +135,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 // Bypass Toggle in header
                 let bypass_rect = egui::Rect::from_center_size(header_rect.right_center() - egui::vec2(32.0, 0.0), egui::vec2(24.0, 14.0));
                 let bypass_id = node_id.with("bypass");
-                let bypassed = app.bypassed_nodes.contains(&(idx as u32));
+                let bypassed = app.topo.bypassed_nodes.contains(&(idx as u32));
 
                 let bypass_resp = ui.interact(bypass_rect, bypass_id, Sense::click());
                 if bypass_resp.clicked() {
                     let new_state = !bypassed;
                     if new_state {
-                        app.bypassed_nodes.insert(idx as u32);
+                        app.topo.bypassed_nodes.insert(idx as u32);
                     } else {
-                        app.bypassed_nodes.remove(&(idx as u32));
+                        app.topo.bypassed_nodes.remove(&(idx as u32));
                     }
                     let _ = app.command_sender.send(Command::Topology(TopologyCommand::SetBypass {
                         node_idx: idx as u32,
@@ -179,7 +179,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     let is_occupied = app.graph.edges.iter().any(|e| e.to == idx as u32 && e.input_idx == in_idx as u32);
                     let color = if is_occupied { theme.accent } else { theme.socket_color };
 
-                    let is_compatible = app.active_connection_source.is_some();
+                    let is_compatible = app.topo.active_connection_source.is_some();
                     let stroke = if is_compatible {
                         egui::Stroke::new(2.0, theme.warning) // Gold/warning stroke for compatible inputs
                     } else {
@@ -195,14 +195,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     if socket_resp.hovered() {
                         ui.painter().circle_stroke(socket_pos, socket_radius + 2.0, egui::Stroke::new(1.0, theme.warning));
                         if ui.input(|i| i.pointer.any_released())
-                            && let Some((src_node, src_out)) = app.active_connection_source {
+                            && let Some((src_node, src_out)) = app.topo.active_connection_source {
                                 let _ = app.command_sender.send(Command::Topology(TopologyCommand::Connect {
                                     src_node_idx: src_node,
                                     src_output_idx: src_out,
                                     dst_node_idx: idx as u32,
                                     dst_input_idx: in_idx as u32,
                                 }));
-                                app.active_connection_source = None;
+                                app.topo.active_connection_source = None;
                             }
                     }
 
@@ -227,7 +227,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     ui.painter().circle_stroke(socket_pos, socket_radius, egui::Stroke::new(1.0, theme.text_primary));
 
                     if socket_resp.clicked() || socket_resp.drag_started() {
-                        app.active_connection_source = Some((idx as u32, out_idx as u32));
+                        app.topo.active_connection_source = Some((idx as u32, out_idx as u32));
                     }
                 }
 
@@ -280,7 +280,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     }
 
     // Draw active drag cable (Cubic Bezier for consistency)
-    if let Some((src_node, src_out)) = app.active_connection_source
+    if let Some((src_node, src_out)) = app.topo.active_connection_source
         && let Some(&start) = socket_positions.get(&(src_node, true, src_out))
             && let Some(mouse_pos) = ui.input(|i| i.pointer.latest_pos()) {
                 let cp1 = start + egui::vec2(50.0, 0.0);
@@ -362,10 +362,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     ui.horizontal(|ui| {
                         ui.label("Hot-Load Target Node:");
                         egui::ComboBox::from_id_source("hotload_target_select")
-                            .selected_text(app.graph.nodes.get(app.selected_hotload_node_idx).map(|n| n.name.as_str()).unwrap_or("Select Target Node"))
+                            .selected_text(app.graph.nodes.get(app.topo.selected_hotload_node_idx).map(|n| n.name.as_str()).unwrap_or("Select Target Node"))
                             .show_ui(ui, |ui| {
                                 for (n_idx, n) in app.graph.nodes.iter().enumerate() {
-                                    ui.selectable_value(&mut app.selected_hotload_node_idx, n_idx, &n.name);
+                                    ui.selectable_value(&mut app.topo.selected_hotload_node_idx, n_idx, &n.name);
                                 }
                             });
                     });
@@ -393,7 +393,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                                          let _ = app.command_sender.send(Command::Core(nullherz_traits::CoreCommand::HotLoadSidecar {
                                              name: name_buf,
-                                             node_idx: app.selected_hotload_node_idx as u32, // Dynamically targeted!
+                                             node_idx: app.topo.selected_hotload_node_idx as u32, // Dynamically targeted!
                                          }));
                                      }
                                 });

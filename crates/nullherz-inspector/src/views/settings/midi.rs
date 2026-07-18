@@ -82,14 +82,14 @@ pub fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
             ui.horizontal(|ui| {
                 let options = ["default", "pioneer_ddj400", "akai_mpk_mini"];
                 for opt in options {
-                    let is_active = app.active_midi_profile == opt;
+                    let is_active = app.settings.active_midi_profile == opt;
                     let mut btn = egui::Button::new(format!("Load {}", opt));
                     if is_active {
                         btn = btn.fill(theme.accent.linear_multiply(0.12))
                                  .stroke(egui::Stroke::new(1.0, theme.accent));
                     }
                     if ui.add(btn).clicked() {
-                        app.active_midi_profile = opt.to_string();
+                        app.settings.active_midi_profile = opt.to_string();
                         let mut buffer = [0u8; 32];
                         let bytes = opt.as_bytes();
                         let len = bytes.len().min(32);

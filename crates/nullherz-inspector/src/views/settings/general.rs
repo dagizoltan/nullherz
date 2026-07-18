@@ -13,13 +13,13 @@ pub fn render_general(app: &mut InspectorApp, ui: &mut Ui) {
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Global BPM:");
-                if ui.add(egui::DragValue::new(&mut app.global_bpm).clamp_range(40.0..=300.0)).changed() {
-                    let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetBpm(app.global_bpm)));
+                if ui.add(egui::DragValue::new(&mut app.decks.global_bpm).clamp_range(40.0..=300.0)).changed() {
+                    let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetBpm(app.decks.global_bpm)));
                 }
             });
             ui.add_space(theme.space_sm);
-            if ui.checkbox(&mut app.quantize_enabled, "Quantize Commands").changed() {
-                 let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetSafeMode(app.quantize_enabled)));
+            if ui.checkbox(&mut app.mixer.quantize_enabled, "Quantize Commands").changed() {
+                 let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetSafeMode(app.mixer.quantize_enabled)));
             }
         });
 }
