@@ -635,8 +635,14 @@ impl eframe::App for InspectorApp {
                 self.library.cached_library = tracks;
                 self.library.library_needs_refresh = false;
                 self.library.bg_library_loader = None;
+                self.library.last_refresh_time = current_time;
             }
         } else if self.library.library_needs_refresh {
+            self.trigger_library_refresh();
+        } else if current_time - self.library.last_refresh_time > 2.0 {
+            // Periodic re-poll: the folder monitor analyzes tracks AFTER the
+            // first refresh completed; a one-shot load left the panel
+            // permanently empty on a fresh library ("can't load the track").
             self.trigger_library_refresh();
         }
 
