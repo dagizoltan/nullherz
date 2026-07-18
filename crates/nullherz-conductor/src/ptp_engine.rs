@@ -33,7 +33,7 @@ impl PtpMessage {
     pub fn parse(buf: &[u8]) -> Option<PtpMessage> {
         match buf {
             // Legacy: bare u64 master timestamp
-            [b @ ..] if b.len() == 8 => Some(PtpMessage::Sync { t1: u64::from_le_bytes(b.try_into().ok()?) }),
+            b if b.len() == 8 => Some(PtpMessage::Sync { t1: u64::from_le_bytes(b.try_into().ok()?) }),
             [MSG_SYNC, rest @ ..] if rest.len() == 8 => {
                 Some(PtpMessage::Sync { t1: u64::from_le_bytes(rest.try_into().ok()?) })
             }
@@ -90,7 +90,7 @@ pub fn compute_rtt_ns(t1: u64, t2: u64, t3: u64, t4: u64) -> Option<u64> {
     let leg_a = (t2 as i64).wrapping_sub(t1 as i64);
     let leg_b = (t4 as i64).wrapping_sub(t3 as i64);
     let rtt = leg_a.checked_add(leg_b)?;
-    if rtt < 0 || rtt > MAX_PLAUSIBLE_RTT_NS {
+    if !(0..=MAX_PLAUSIBLE_RTT_NS).contains(&rtt) {
         return None;
     }
     Some(rtt as u64)

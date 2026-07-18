@@ -142,5 +142,5 @@ Key invariants observed in code:
 
 - **127 `#[test]` functions** across the workspace (all green in CI); conformance `Gauntlet` (`nullherz-traits/src/test_kit`) runs every registered processor through NaN ingestion, buffer-size oscillation, sub-block consistency, reset determinism, parameter reachability, and snapshot safety.
 - **Kani proof harnesses** (3, behind the `kani-verify` feature): PI clock-servo integral clamping (`nullherz-traits`), jitter-buffer size invariance (`conductor/ipc_audio_bridge.rs`), and parallel graph-execution safety (`audio-core/processors/graph/verification.rs`).
-- **Warning-free**: `cargo check --workspace --all-targets` completes with zero warnings; enforced by CI with `-D warnings` (`.github/workflows/ci.yml`). Weekly Kani proofs run via `.github/workflows/kani.yml`.
+- **Warning-free**: `cargo check --workspace --all-targets` completes with zero warnings. The gate is `scripts/verify.sh` (check with `-D warnings` + full test suite; `--full` adds the advisory clippy count), enforceable as a pre-push hook via `git config core.hooksPath .githooks`. The GitHub Actions workflows (`ci.yml`, `kani.yml`) mirror it for whenever Actions is available.
 - Integration/decoupling test suites live in `audio-core` (`integration_tests.rs`, `decoupling_tests.rs`, `engine_tests.rs`) and `conductor` (`mixing_test.rs`).
