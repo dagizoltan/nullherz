@@ -429,12 +429,50 @@ pub trait PeerSync {
 pub struct CloudPeerSync {
     pub peers: Vec<String>,
     pub trusted_peers: std::collections::HashSet<String>,
-    /// Mock for cryptographic signatures: peer_addr -> signature
-    pub peer_signatures: HashMap<String, [u8; 64]>,
+    /// Verified peer identity keys (peer_addr -> ed25519 public key), pinned
+    /// trust-on-first-use via the HANDSHAKE/IDENTITY exchange. A peer whose key
+    /// changes after pinning is rejected.
+    pub peer_keys: Mutex<HashMap<String, [u8; 32]>>,
     /// Node's own signing key
     pub signing_key: Option<[u8; 32]>,
     /// Active Gossipsub mesh links
     pub mesh_links: Mutex<std::collections::HashSet<String>>,
+}
+
+impl CloudPeerSync {
+    /// HANDSHAKE with a peer and pin its identity key (trust-on-first-use).
+    /// Returns the peer's pinned public key, or None if the peer is unreachable,
+    /// presents no identity, or presents a key that conflicts with the pin.
+    pub fn handshake(&self, peer: &str) -> Option<[u8; 32]> {
+        let addr: std::net::SocketAddr = peer.parse().ok()?;
+        let mut stream = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)).ok()?;
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(1000)));
+        let our_pk = hex::encode(self.get_public_key());
+        stream.write_all(format!("HANDSHAKE {}\n", our_pk).as_bytes()).ok()?;
+
+        let mut reader = BufReader::new(&stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).ok()?;
+        let parts: Vec<&str> = line.trim().split_whitespace().collect();
+        if parts.len() < 2 || parts[0] != "IDENTITY" || parts[1] == "none" {
+            return None;
+        }
+        let key_bytes: [u8; 32] = hex::decode(parts[1]).ok()?.try_into().ok()?;
+        // Reject keys that are not valid ed25519 points.
+        ed25519_dalek::VerifyingKey::from_bytes(&key_bytes).ok()?;
+
+        let mut keys = self.peer_keys.lock();
+        match keys.get(peer) {
+            Some(pinned) if *pinned != key_bytes => {
+                eprintln!("Cloud: peer {} presented a DIFFERENT identity key than pinned — rejecting.", peer);
+                None
+            }
+            _ => {
+                keys.insert(peer.to_string(), key_bytes);
+                Some(key_bytes)
+            }
+        }
+    }
 }
 
 impl PeerSync for CloudPeerSync {
@@ -507,10 +545,22 @@ impl PeerSync for CloudPeerSync {
 
                 if let Ok(signed_dna) = serde_json::from_slice::<SignedSoundDna>(&buffer) {
                     // Lineage and Signature verification before ingestion
-                    if GeneticLineageConsensus::verify_lineage(&signed_dna) {
-                        return Some(signed_dna.dna);
-                    } else {
+                    if !GeneticLineageConsensus::verify_lineage(&signed_dna) {
                         println!("Cloud: DNA lineage consensus validation FAILED from peer {}", peer);
+                        continue;
+                    }
+                    // Identity check: the payload must be signed by the key
+                    // pinned for this peer (pinned on first contact).
+                    let pinned = { self.peer_keys.lock().get(peer).copied() }
+                        .or_else(|| self.handshake(peer));
+                    match pinned {
+                        Some(key) if key == signed_dna.signer_public_key => return Some(signed_dna.dna),
+                        Some(_) => {
+                            println!("Cloud: DNA from peer {} signed by a key that does not match its pinned identity — rejected.", peer);
+                        }
+                        None => {
+                            println!("Cloud: peer {} has no verifiable identity — rejected.", peer);
+                        }
                     }
                 }
             }
@@ -689,7 +739,7 @@ fn handle_gossip(payload: &str, lib_clone: &Arc<Mutex<LibraryDatabase>>, stream:
                     let sync_client = CloudPeerSync {
                         peers: vec![addr_clone.clone()],
                         trusted_peers: std::collections::HashSet::from([addr_clone.clone()]),
-                        peer_signatures: HashMap::new(),
+                        peer_keys: Mutex::new(HashMap::new()),
                         signing_key: None,
                         mesh_links: Mutex::new(std::collections::HashSet::new()),
                     };
@@ -809,7 +859,11 @@ impl DnaServer {
                                     if parts.len() >= 2 => {
                                         let pk_hex = parts[1];
                                         println!("DNA Server: Peer handshake with public key {}", pk_hex);
-                                        let resp = signing_key.map(|k| hex::encode(&k[..])).unwrap_or_else(|| "none".to_string());
+                                        // Respond with the PUBLIC verifying key only — the
+                                        // signing key must never leave this node.
+                                        let resp = signing_key
+                                            .map(|k| hex::encode(ed25519_dalek::SigningKey::from_bytes(&k).verifying_key().to_bytes()))
+                                            .unwrap_or_else(|| "none".to_string());
                                         let _ = stream.write_all(format!("IDENTITY {}\n", resp).as_bytes());
                                     }
                                 "GET"
@@ -1450,6 +1504,50 @@ mod tests {
     }
 
     #[test]
+    fn test_handshake_pins_public_key_not_private() {
+        use std::net::TcpListener;
+        use ed25519_dalek::SigningKey;
+
+        let actual_port = {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let db_path = format!("test_handshake_{}.redb", actual_port);
+        let _ = fs::remove_file(&db_path);
+        let lib = Arc::new(Mutex::new(LibraryDatabase::load(&db_path).unwrap()));
+
+        let mut csprng = rand::rngs::OsRng;
+        let sk = SigningKey::generate(&mut csprng);
+        let sk_bytes = sk.to_bytes();
+        let expected_pk = sk.verifying_key().to_bytes();
+
+        DnaServer::start(lib, actual_port, Some(sk_bytes)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        let peer = format!("127.0.0.1:{}", actual_port);
+        let sync = CloudPeerSync {
+            peers: vec![peer.clone()],
+            trusted_peers: std::collections::HashSet::from([peer.clone()]),
+            peer_keys: Mutex::new(HashMap::new()),
+            signing_key: None,
+            mesh_links: Mutex::new(std::collections::HashSet::new()),
+        };
+
+        // First contact pins the server's PUBLIC key — and must never be the
+        // private signing key (regression: IDENTITY used to leak the secret).
+        let pinned = sync.handshake(&peer).expect("handshake should succeed");
+        assert_eq!(pinned, expected_pk);
+        assert_ne!(pinned, sk_bytes, "IDENTITY must not expose the private signing key");
+        assert_eq!(sync.peer_keys.lock().get(&peer).copied(), Some(expected_pk));
+
+        // A peer whose identity key changes after pinning is rejected.
+        sync.peer_keys.lock().insert(peer.clone(), [7u8; 32]);
+        assert!(sync.handshake(&peer).is_none(), "key change after pinning must be rejected");
+
+        let _ = fs::remove_file(&db_path);
+    }
+
+    #[test]
     fn test_genetic_similarity() {
         use nullherz_traits::SoundDNA;
         let mut dna_a = SoundDNA::default();
@@ -1563,33 +1661,54 @@ mod tests {
         client_listener_sock.listen(128).unwrap();
         let client_listener: TcpListener = client_listener_sock.into();
 
-        // Spawn mock client DNA provider loop in background to serve GET DNA requests
+        // Spawn mock client DNA provider loop in background. It serves GET DNA
+        // requests and answers HANDSHAKE with a consistent identity key — the
+        // server's pull path pins peer identities and rejects DNA whose signer
+        // does not match the pinned key.
         let client_listener_clone = client_listener.try_clone().unwrap();
         let mock_provider_thread = std::thread::spawn(move || {
-            if let Ok((mut incoming_stream, _)) = client_listener_clone.accept() {
+            use ed25519_dalek::{SigningKey, Signer};
+            let mut csprng = rand::rngs::OsRng;
+            let client_sk = SigningKey::generate(&mut csprng);
+
+            client_listener_clone.set_nonblocking(true).unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            let mut served_get = false;
+            let mut served_handshake = false;
+            while std::time::Instant::now() < deadline && !(served_get && served_handshake) {
+                let (mut incoming_stream, _) = match client_listener_clone.accept() {
+                    Ok(conn) => conn,
+                    Err(_) => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                };
+                incoming_stream.set_nonblocking(false).unwrap();
                 let mut reader = BufReader::new(&incoming_stream);
                 let mut line = String::new();
                 if reader.read_line(&mut line).is_ok() {
                     let line_trimmed = line.trim();
-                    if line_trimmed.starts_with("GET DNA ") {
-                        // Let's sign and return a valid SignedSoundDna for track 2
-                        use ed25519_dalek::{SigningKey, Signer};
-                        let mut csprng = rand::rngs::OsRng;
-                        let sk = SigningKey::generate(&mut csprng);
+                    if line_trimmed.starts_with("HANDSHAKE") {
+                        let pk_hex = hex::encode(client_sk.verifying_key().to_bytes());
+                        let _ = incoming_stream.write_all(format!("IDENTITY {}\n", pk_hex).as_bytes());
+                        served_handshake = true;
+                    } else if line_trimmed.starts_with("GET DNA ") {
+                        // Sign and return a valid SignedSoundDna for track 2
                         let dna = nullherz_traits::SoundDNA::default();
                         let dna_bytes = serde_json::to_vec(&dna).unwrap_or_default();
-                        let sig = sk.sign(&dna_bytes);
+                        let sig = client_sk.sign(&dna_bytes);
 
                         let signed = SignedSoundDna {
                             dna,
                             signature: sig.to_bytes(),
-                            signer_public_key: sk.verifying_key().to_bytes(),
+                            signer_public_key: client_sk.verifying_key().to_bytes(),
                             cas_id: None,
                             parent_hashes: Vec::new(),
                             authorship_chain: vec!["origin".to_string()],
                             generation: 1,
                         };
                         let _ = serde_json::to_writer(&mut incoming_stream, &signed);
+                        served_get = true;
                     }
                 }
             }

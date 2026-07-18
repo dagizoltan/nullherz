@@ -97,7 +97,7 @@ impl SidecarDiscoveryService {
                     let sync = nullherz_dna::CloudPeerSync {
                         peers,
                         trusted_peers,
-                        peer_signatures: std::collections::HashMap::new(),
+                        peer_keys: parking_lot::Mutex::new(std::collections::HashMap::new()),
                         signing_key,
                         mesh_links: parking_lot::Mutex::new(std::collections::HashSet::new()),
                     };
