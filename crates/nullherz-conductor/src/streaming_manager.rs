@@ -79,10 +79,7 @@ impl StreamingManager {
                                 }
 
                                 if let Ok(decoded) = decoder.decode(&packet) {
-                                    if sample_buf.is_none() {
-                                        sample_buf = Some(symphonia::core::audio::AudioBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec()));
-                                    }
-                                    let buf = sample_buf.as_mut().unwrap();
+                                    let buf = sample_buf.get_or_insert_with(|| symphonia::core::audio::AudioBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec()));
                                     decoded.convert(buf);
 
                                     let chan_len = buf.frames();

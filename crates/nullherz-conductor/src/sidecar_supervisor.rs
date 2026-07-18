@@ -204,7 +204,7 @@ impl SidecarSupervisor {
 
                                             // Handle Audio Return Blocks (Type 3)
                                             if buffer.len() >= 5 && buffer[0] == 3 {
-                                                let node_idx = u32::from_be_bytes(buffer[1..5].try_into().unwrap());
+                                                let node_idx = u32::from_be_bytes([buffer[1], buffer[2], buffer[3], buffer[4]]);
                                                 let block_data = &buffer[5..];
                                                 if block_data.len() == std::mem::size_of::<nullherz_traits::AudioBlock>() {
                                                      let block: nullherz_traits::AudioBlock = bytemuck::pod_read_unaligned(block_data);
@@ -259,7 +259,7 @@ impl SidecarSupervisor {
             loop {
                 if let Ok((len, _addr)) = socket.recv_from(&mut buf) {
                     if len >= 5 && buf[0] == 6 {
-                        let node_idx = u32::from_be_bytes(buf[1..5].try_into().unwrap());
+                        let node_idx = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]);
                         let block_data = &buf[5..len];
                         if block_data.len() == std::mem::size_of::<nullherz_traits::AudioBlock>() {
                             let block: nullherz_traits::AudioBlock = bytemuck::pod_read_unaligned(block_data);
@@ -303,7 +303,7 @@ impl SidecarSupervisor {
 
                                 // Handle Audio Return Blocks (Type 3)
                                 if buffer.len() >= 5 && buffer[0] == 3 {
-                                    let node_idx = u32::from_be_bytes(buffer[1..5].try_into().unwrap());
+                                    let node_idx = u32::from_be_bytes([buffer[1], buffer[2], buffer[3], buffer[4]]);
                                     let block_data = &buffer[5..];
                                     if block_data.len() == std::mem::size_of::<nullherz_traits::AudioBlock>() {
                                          let block: nullherz_traits::AudioBlock = bytemuck::pod_read_unaligned(block_data);

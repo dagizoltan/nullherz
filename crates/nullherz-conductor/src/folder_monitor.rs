@@ -83,10 +83,7 @@ impl FolderMonitor {
 
                         while let Ok(packet) = probed.format.next_packet() {
                             if let Ok(decoded) = decoder.decode(&packet) {
-                                if sample_buf.is_none() {
-                                    sample_buf = Some(symphonia::core::audio::AudioBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec()));
-                                }
-                                let buf = sample_buf.as_mut().unwrap();
+                                let buf = sample_buf.get_or_insert_with(|| symphonia::core::audio::AudioBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec()));
                                 decoded.convert(buf);
 
                                 // Multi-channel support: Interleave channels for the registry
@@ -130,7 +127,7 @@ impl FolderMonitor {
         let track = LibraryTrack {
             id,
             path: path.to_string(),
-            title: Path::new(path).file_name().unwrap().to_str().unwrap().to_string(),
+            title: Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string()),
             artist: "Unknown".to_string(),
             album: "Unknown".to_string(),
             genre: "Unknown".to_string(),

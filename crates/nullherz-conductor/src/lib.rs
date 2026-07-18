@@ -1,3 +1,8 @@
+// Panic-freedom policy: the conductor is the process that must survive a
+// stage hour. unwrap() is banned outside tests; use total_cmp for floats,
+// graceful degradation with a log line, or error propagation. expect() is
+// allowed only for documented can't-fail invariants.
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 pub mod timeline;
 pub mod backend;
 pub mod orchestrator;

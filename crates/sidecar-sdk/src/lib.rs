@@ -120,6 +120,10 @@ impl<M: MemoryMapper> SidecarHost<M> {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl SidecarHost<NativeMemoryMapper> {
+     /// # Safety
+     /// Every name must refer to a shared-memory segment created by the host
+     /// with the layout this SDK version expects (`ShmRingBuffer`/`ShmSignal`);
+     /// `efd` must be a valid eventfd owned by the host or -1.
      pub unsafe fn new(cmd_name: &str, sig_name: &str, in_names: &[String], sc_names: &[String], out_names: &[String], efd: i32) -> Self {
          unsafe { Self::new_with_mapper(NativeMemoryMapper, cmd_name, sig_name, in_names, sc_names, out_names, efd) }
      }
@@ -128,6 +132,10 @@ impl SidecarHost<NativeMemoryMapper> {
 impl SidecarHost<WasmMemoryMapper> {
      /// Creates a new SidecarHost specifically for the WASM environment using raw pointers.
      /// The WASM host passes integer pointers into the linear memory for the shared structures.
+     /// # Safety
+     /// Every pointer must be a valid offset into this module's linear memory,
+     /// pointing at host-initialized `ShmRingBuffer`/`ShmSignal` structures that
+     /// outlive the returned host.
      pub unsafe fn new_wasm(cmd_ptr: usize, sig_ptr: usize, in_ptrs: &[usize], sc_ptrs: &[usize], out_ptrs: &[usize]) -> Self {
          let in_names: Vec<String> = in_ptrs.iter().map(|p| p.to_string()).collect();
          let sc_names: Vec<String> = sc_ptrs.iter().map(|p| p.to_string()).collect();
