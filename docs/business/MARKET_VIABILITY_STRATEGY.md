@@ -6,6 +6,8 @@
 
 ---
 
+> **Addendum (July 18, 2026):** the verdict below is now **conditional**, not unconditional. See the [Strategic Assessment](./STRATEGIC_ASSESSMENT_2026_07.md): market share is realistic only through one of three narrower identities (engine infrastructure, genetic instrument, or distributed live audio), each gated by falsifiable validation tests — not as a hybrid DJ/DAW.
+
 ## 1. The Core Question: Is Real Market Share Realistic?
 **Verdict: YES.** But not by competing head-on with incumbents on their home turf. Nullherz wins by **Category Innovation** and **Technical Superiority** in a stagnant market.
 

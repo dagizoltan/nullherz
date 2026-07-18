@@ -31,6 +31,7 @@ Strategic direction and detailed task orchestration.
 
 ## 💼 [Business & Strategy](./business/)
 Financial planning, market analysis, and ecosystem growth.
+- [Strategic Assessment: Where the True Potential Is](./business/STRATEGIC_ASSESSMENT_2026_07.md) — **read first**: candid verdict, three candidate identities, validation tests
 - [Financial Plan: Eatbrain Strategic Proposal](./business/FINANCIAL_PLAN_EATBRAIN.md)
 - [Market Comparison & Evaluation](./business/MARKET_COMPARISON.md)
 - [Market Viability Strategy](./business/MARKET_VIABILITY_STRATEGY.md)
