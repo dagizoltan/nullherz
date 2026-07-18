@@ -2,7 +2,7 @@
 
 **Author:** Senior Lead Audio & Rust Systems Architect
 **Status:** PRODUCTION BETA
-**Date:** 2026-07-07
+**Date:** 2026-07-17 (verified against code; see [ARCHITECTURE.md](../system/ARCHITECTURE.md) for the full reverse-engineered reference)
 
 ---
 
@@ -42,7 +42,7 @@ The Nullherz engine is built upon a strict separation of concerns, ensuring that
 - **DSP Safety Pass**: All critical kernels (Gain, Biquad, Spectral) are hardened against non-finite float values.
 
 ### 2.3 Hardware & Distributed Orchestration
-- **Universal Backend Switching**: Real-time hot-swapping between ALSA, JACK, and Threaded backends without process restarts.
+- **Universal Backend Switching**: Real-time hot-swapping between ALSA, PipeWire, JACK, Threaded, and Mock backends without process restarts; automatic fallback to Threaded on boot failure. Period size is now configurable via `system_config.json` (`period_size`).
 - **Latency Calibration**: Integrated RTL (Round Trip Latency) measurement routine to compensate for sidecar and hardware delays.
 - **Targeted Distributed Routing**: Protocol Type 5 (Send) and Type 6 (UDP Return) enable efficient, low-jitter offloading of heavy DSP nodes to remote machines.
 - **Thread Pinning**: RT threads are automatically pinned to performance cores via `sched_setaffinity` to maximize L3 cache locality.
@@ -84,18 +84,22 @@ While the Nullherz engine is architecturally hardened, the transition to a "Valu
 
 | Subsystem | Readiness | Evidence |
 |-----------|-----------|----------|
-| **Core Engine** | Production Beta | Parallel execution formally verified with Kani. |
-| **Clock Sync** | Production Beta | PTP/IEEE 1588 foundations with PI Clock Servo. |
+| **Core Engine** | Production Beta | Parallel execution covered by a Kani proof harness (`kani-verify` feature; graph, jitter buffer, and PI-servo harnesses). |
+| **Clock Sync** | Prototype+ | Simplified PTP: UDP :319 master broadcast, PI clock servo (Kani-proved clamp), hardware RX timestamps. Fixed 1 ms wire-delay assumption — no Delay_Req/Resp yet. |
 | **Topology Manager** | Production Beta | Thread-safe, off-audio DAG compilation. |
-| **Genetic Cloud** | Production Beta | Gossip-based DNA exchange over signed payloads and secure discovery consensus. |
-| **DSP Kernels** | Production Beta | Wasm-SIMD128 optimized spectral and neural kernels. |
+| **Genetic Cloud** | Active | TCP Gossipsub-style DNA exchange with ed25519 `GOSSIP_SIGNED` payloads; peer-signature cache still partially mocked. |
+| **DSP Kernels** | Production Beta | Wasm-SIMD128 optimized spectral kernels; OLA time-stretch and transient detectors added (July 2026). |
 | **Mixer Console** | Active | 4-channel DJ topology with harmonic auto-sync. |
+| **Audio Editor** | Active | Waveform selection, OLA time-stretch, transient chop, non-destructive undo (July 2026). |
+| **Composer** | Active | Endless-scroll step grid with sequencer routing and live per-step telemetry. |
 | **Curation** | Active | Intelligent "Energy Match" smart crating logic. |
 
 ---
 
 ## 6. Conclusion
 
-The Nullherz engine has transitioned to a **Production Beta** state. It now features a formally verified execution plane, high-precision distributed clock discipline, a resilient and secured genetic DNA protocol, and completely warning-free builds.
+The Nullherz engine has transitioned to a **Production Beta** state. It features a Kani-covered execution plane, distributed clock discipline (simplified PTP), a signed genetic DNA gossip protocol, and warning-free builds (`cargo check --workspace`, 0 warnings, 2026-07-17).
+
+**Known issue:** `test_inspector_command_routing_to_conductor` fails deterministically due to sleep-based test synchronization against real backend boot (117/117 pass excluding the inspector crate). See [TECHNICAL_DEBT_AND_STUBS.md](./TECHNICAL_DEBT_AND_STUBS.md) §1.
 
 **Architecture Status:** PRODUCTION BETA.
