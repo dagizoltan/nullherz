@@ -914,3 +914,147 @@ mod tests {
         assert_eq!(rb.pop(), None);
     }
 }
+
+#[cfg(test)]
+mod ring_buffer_tests {
+    use super::*;
+
+    #[test]
+    fn test_spsc_fifo_fill_reject_drain() {
+        // Capacity N holds N-1 items (one slot kept open to distinguish full/empty).
+        let (mut prod, mut cons) = RingBuffer::new(8).split();
+        for i in 0..7u64 {
+            assert!(prod.push(i).is_ok(), "slot {} must fit", i);
+        }
+        assert_eq!(prod.push(99), Err(99), "full buffer must reject and return the item");
+
+        for i in 0..7u64 {
+            assert_eq!(cons.pop(), Some(i), "strict FIFO order");
+        }
+        assert_eq!(cons.pop(), None, "drained buffer is empty");
+    }
+
+    #[test]
+    fn test_spsc_wraparound_preserves_order() {
+        let (mut prod, mut cons) = RingBuffer::new(4).split();
+        // Cycle far more items than capacity so head/tail wrap many times.
+        for i in 0..1000u64 {
+            assert!(prod.push(i).is_ok());
+            assert_eq!(cons.pop(), Some(i));
+        }
+        assert_eq!(cons.pop(), None);
+    }
+
+    #[test]
+    fn test_spsc_cross_thread_transfers_every_item_in_order() {
+        const N: u64 = 50_000;
+        let (mut prod, mut cons) = RingBuffer::new(64).split();
+
+        let producer = std::thread::spawn(move || {
+            for i in 0..N {
+                let mut item = i;
+                loop {
+                    match prod.push(item) {
+                        Ok(()) => break,
+                        Err(back) => {
+                            item = back;
+                            std::hint::spin_loop();
+                        }
+                    }
+                }
+            }
+        });
+
+        let mut expected = 0u64;
+        while expected < N {
+            if let Some(v) = cons.pop() {
+                assert_eq!(v, expected, "items must arrive exactly once, in order");
+                expected += 1;
+            } else {
+                std::hint::spin_loop();
+            }
+        }
+        producer.join().unwrap();
+        assert_eq!(cons.pop(), None, "nothing left after all items accounted for");
+    }
+
+    #[test]
+    fn test_mpsc_capacity_reject_and_reuse() {
+        let buf = MpscRingBuffer::new(8);
+        for i in 0..8u64 {
+            assert!(buf.push(i).is_ok());
+        }
+        assert_eq!(buf.push(99), Err(99), "full MPSC queue must reject");
+        assert_eq!(buf.pop(), Some(0));
+        assert!(buf.push(100).is_ok(), "freed slot must be reusable");
+        // Remaining order: 1..=7 then 100
+        for i in 1..8u64 {
+            assert_eq!(buf.pop(), Some(i));
+        }
+        assert_eq!(buf.pop(), Some(100));
+        assert_eq!(buf.pop(), None);
+    }
+
+    #[test]
+    fn test_mpsc_concurrent_producers_lose_nothing() {
+        const PRODUCERS: u64 = 4;
+        const PER_PRODUCER: u64 = 10_000;
+        let buf = std::sync::Arc::new(MpscRingBuffer::new(256));
+
+        let handles: Vec<_> = (0..PRODUCERS)
+            .map(|p| {
+                let buf = buf.clone();
+                std::thread::spawn(move || {
+                    for i in 0..PER_PRODUCER {
+                        // Tag items with the producer id in the high bits.
+                        let mut item = (p << 32) | i;
+                        loop {
+                            match buf.push(item) {
+                                Ok(()) => break,
+                                Err(back) => {
+                                    item = back;
+                                    std::hint::spin_loop();
+                                }
+                            }
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        let mut next_expected = [0u64; PRODUCERS as usize];
+        let mut received = 0u64;
+        while received < PRODUCERS * PER_PRODUCER {
+            if let Some(v) = buf.pop() {
+                let producer = (v >> 32) as usize;
+                let seq = v & 0xFFFF_FFFF;
+                assert_eq!(
+                    seq, next_expected[producer],
+                    "each producer's items must arrive in that producer's order"
+                );
+                next_expected[producer] += 1;
+                received += 1;
+            } else {
+                std::hint::spin_loop();
+            }
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(buf.pop(), None, "exactly N*P items, no duplicates");
+    }
+
+    #[test]
+    fn test_shm_signal_flag_and_heartbeat() {
+        let sig = ShmSignal::new();
+        assert!(!sig.check_and_clear(), "starts clear");
+        sig.notify();
+        assert!(sig.check_and_clear(), "notify sets the flag");
+        assert!(!sig.check_and_clear(), "check clears it (edge-triggered)");
+
+        let h0 = sig.get_heartbeat();
+        sig.pulse_heartbeat();
+        sig.pulse_heartbeat();
+        assert_eq!(sig.get_heartbeat(), h0 + 2, "heartbeat is a monotonic counter");
+    }
+}

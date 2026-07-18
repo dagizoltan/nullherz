@@ -146,3 +146,80 @@ impl DnaSequencer {
         commands
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nullherz_traits::CoreCommand;
+
+    fn arrangement(beats: &[f64]) -> SongArrangement {
+        SongArrangement {
+            events: beats
+                .iter()
+                .map(|&beat| ArrangementEvent {
+                    beat,
+                    command: Command::Core(CoreCommand::SetBpm(beat as f32)),
+                })
+                .collect(),
+        }
+    }
+
+    fn bpm_of(cmd: &Command) -> f32 {
+        match cmd {
+            Command::Core(CoreCommand::SetBpm(v)) => *v,
+            other => panic!("unexpected command {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_events_fire_in_order_and_only_once() {
+        let mut pm = PatternManager::new();
+        pm.set_arrangement(arrangement(&[1.0, 2.0, 4.0]));
+
+        assert!(pm.tick(0.5).is_empty(), "nothing before the first event");
+
+        let fired = pm.tick(2.5);
+        assert_eq!(fired.len(), 2, "beats 1.0 and 2.0 due by 2.5");
+        assert_eq!(bpm_of(&fired[0]), 1.0);
+        assert_eq!(bpm_of(&fired[1]), 2.0);
+
+        assert!(pm.tick(3.9).is_empty(), "no re-fire between events");
+
+        let fired = pm.tick(4.0);
+        assert_eq!(fired.len(), 1, "event exactly on the tick beat fires");
+        assert_eq!(bpm_of(&fired[0]), 4.0);
+
+        assert!(pm.tick(100.0).is_empty(), "arrangement exhausted");
+    }
+
+    #[test]
+    fn test_set_arrangement_sorts_unsorted_events() {
+        let mut pm = PatternManager::new();
+        pm.set_arrangement(arrangement(&[4.0, 1.0, 2.0]));
+        let fired = pm.tick(5.0);
+        let bpms: Vec<f32> = fired.iter().map(bpm_of).collect();
+        assert_eq!(bpms, vec![1.0, 2.0, 4.0], "events must fire in beat order regardless of insertion order");
+    }
+
+    /// Documented semantic: jumping backwards (loop/seek) rewinds the cursor
+    /// and re-fires every event up to the new position, re-establishing
+    /// arrangement state after the jump.
+    #[test]
+    fn test_jump_back_refires_past_events() {
+        let mut pm = PatternManager::new();
+        pm.set_arrangement(arrangement(&[1.0, 2.0]));
+        assert_eq!(pm.tick(3.0).len(), 2);
+        let refired = pm.tick(1.5);
+        assert_eq!(refired.len(), 1, "jump back to 1.5 re-fires the beat-1.0 event");
+        assert_eq!(bpm_of(&refired[0]), 1.0);
+    }
+
+    #[test]
+    fn test_reset_replays_from_start() {
+        let mut pm = PatternManager::new();
+        pm.set_arrangement(arrangement(&[1.0]));
+        assert_eq!(pm.tick(2.0).len(), 1);
+        pm.reset();
+        assert_eq!(pm.tick(2.0).len(), 1, "after reset the arrangement replays");
+    }
+}

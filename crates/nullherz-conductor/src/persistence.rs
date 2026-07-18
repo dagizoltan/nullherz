@@ -368,3 +368,76 @@ impl ProjectState {
         Ok(deserialized)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nullherz_traits::CoreCommand;
+
+    fn non_trivial_state() -> ProjectState {
+        let mut state = ProjectState::empty();
+        state.active_master_deck = 'C';
+        state.bpm = 174.0;
+        state.transport_playing = true;
+        state.node_names.insert("deck_a_sampler".to_string(), 4);
+        state.modulation_matrix.add_mapping(1, 10, 0, 0.5, 64);
+        state.arrangement.events.push(crate::pattern_manager::ArrangementEvent {
+            beat: 8.0,
+            command: Command::Core(CoreCommand::SetBpm(140.0)),
+        });
+        state
+    }
+
+    fn assert_state_survives(loaded: &ProjectState) {
+        assert_eq!(loaded.version, CURRENT_PROJECT_VERSION);
+        assert_eq!(loaded.active_master_deck, 'C');
+        assert_eq!(loaded.bpm, 174.0);
+        assert!(loaded.transport_playing);
+        assert_eq!(loaded.node_names.get("deck_a_sampler"), Some(&4));
+        assert_eq!(loaded.arrangement.events.len(), 1);
+        assert_eq!(loaded.arrangement.events[0].beat, 8.0);
+        let expanded = loaded.modulation_matrix.expand_macro(1, 1.0, 0.0);
+        assert!(!expanded.is_empty(), "modulation matrix must survive the round trip");
+    }
+
+    #[test]
+    fn test_project_state_json_round_trip() {
+        let path = std::env::temp_dir().join(format!("nullherz_persist_json_{}.json", std::process::id()));
+        let path = path.to_str().unwrap();
+        non_trivial_state().save_to_file(path).unwrap();
+        let loaded = ProjectState::load_from_file(path).unwrap();
+        assert_state_survives(&loaded);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_project_state_rkyv_round_trip() {
+        let path = std::env::temp_dir().join(format!("nullherz_persist_rkyv_{}.bin", std::process::id()));
+        let path = path.to_str().unwrap();
+        non_trivial_state().save_to_rkyv(path).unwrap();
+        let loaded = ProjectState::load_from_rkyv(path).unwrap();
+        assert_state_survives(&loaded);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_newer_version_is_rejected_older_is_migrated() {
+        let path = std::env::temp_dir().join(format!("nullherz_persist_ver_{}.json", std::process::id()));
+        let path = path.to_str().unwrap();
+
+        // A file from the future must be refused, not half-loaded.
+        let mut future = ProjectState::empty();
+        future.version = CURRENT_PROJECT_VERSION + 1;
+        future.save_to_file(path).unwrap();
+        assert!(ProjectState::load_from_file(path).is_err());
+
+        // A pre-versioning file (version field absent -> default 0) must load.
+        let mut json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        json.as_object_mut().unwrap().remove("version");
+        std::fs::write(path, serde_json::to_string(&json).unwrap()).unwrap();
+        let loaded = ProjectState::load_from_file(path).unwrap();
+        assert_eq!(loaded.version, 0, "missing version field defaults to 0 and loads");
+
+        let _ = std::fs::remove_file(path);
+    }
+}
