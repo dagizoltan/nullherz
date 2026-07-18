@@ -491,3 +491,213 @@ pub fn handle_extension(processor: &mut dyn AudioProcessor, envelope: &nullherz_
     // Fallback to standard processor command handling if needed
     processor.apply_command(&nullherz_traits::Command::Extension(*envelope));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nullherz_traits::{Command, CoreCommand, OpaqueEnvelope, TimestampedCommand};
+    use std::alloc::Layout;
+
+    /// Heap-backed stand-in for shared memory: same layout, no /dev/shm.
+    /// Lets the tests drive the exact code path a real sidecar runs.
+    struct HeapRegion {
+        ptr: *mut u8,
+        layout: Layout,
+    }
+    unsafe impl Send for HeapRegion {}
+    impl AsRef<[u8]> for HeapRegion {
+        fn as_ref(&self) -> &[u8] {
+            unsafe { std::slice::from_raw_parts(self.ptr, self.layout.size()) }
+        }
+    }
+    impl Drop for HeapRegion {
+        fn drop(&mut self) {
+            unsafe { std::alloc::dealloc(self.ptr, self.layout) };
+        }
+    }
+
+    struct HeapMapper;
+    impl MemoryMapper for HeapMapper {
+        type Mapping = HeapRegion;
+        fn open(&self, _name: &str, size: usize) -> Result<HeapRegion, String> {
+            let layout = Layout::from_size_align(size, 64).map_err(|e| e.to_string())?;
+            let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+            Ok(HeapRegion { ptr, layout })
+        }
+        fn ptr(&self, mapping: &HeapRegion) -> *mut u8 {
+            mapping.ptr
+        }
+    }
+
+    fn ring_region<T: Copy>(capacity: usize) -> HeapRegion {
+        let (layout, _) = ShmRingBuffer::<T>::layout(capacity);
+        let layout = layout.align_to(64).unwrap();
+        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+        unsafe { ShmRingBuffer::<T>::init(ptr, capacity) };
+        HeapRegion { ptr, layout }
+    }
+
+    fn signal_region() -> HeapRegion {
+        let layout = Layout::new::<ShmSignal>().align_to(64).unwrap();
+        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+        unsafe { std::ptr::write(ptr as *mut ShmSignal, ShmSignal::new()) };
+        HeapRegion { ptr, layout }
+    }
+
+    /// Minimal gain processor: multiplies input by `gain`; any SetBpm command
+    /// received through the bus rewrites the gain (used to prove command routing).
+    struct TestGain {
+        gain: f32,
+        extension_seen: bool,
+    }
+    impl nullherz_traits::SignalProcessor for TestGain {
+        fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut ProcessContext) {
+            for (inp, out) in inputs.iter().zip(outputs.iter_mut()) {
+                for (i, o) in inp.iter().zip(out.iter_mut()) {
+                    *o = i * self.gain;
+                }
+            }
+        }
+    }
+    impl nullherz_traits::MidiResponder for TestGain {}
+    impl nullherz_traits::SnapshotProvider for TestGain {}
+    impl AudioProcessor for TestGain {
+        fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+            if let Command::Core(CoreCommand::SetBpm(v)) = command {
+                self.gain = *v;
+            }
+        }
+        fn as_any(&self) -> &dyn std::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    }
+
+    fn make_block(value: f32, len: u32) -> AudioBlock {
+        let mut b = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len, _pad: [0; 15] };
+        b.data[..len as usize].fill(value);
+        b
+    }
+
+    #[test]
+    fn test_process_once_end_to_end_gain_path() {
+        let cmd = ring_region::<TimestampedCommand>(16);
+        let sig = signal_region();
+        let inputs = [ring_region::<AudioBlock>(4)];
+        let outputs = [ring_region::<AudioBlock>(4)];
+        let sidechains: [HeapRegion; 0] = [];
+
+        let mut ctx = SidecarContext::new_with_mapper(
+            &HeapMapper,
+            TestGain { gain: 2.0, extension_seen: false },
+            &cmd, &sig, &inputs, &sidechains, &outputs,
+            None,
+        );
+
+        // Feed one block of 0.25 and process.
+        let in_rb = unsafe { &*(inputs[0].ptr as *const ShmRingBuffer<AudioBlock>) };
+        in_rb.push(make_block(0.25, 256)).ok().unwrap();
+        ctx.process_once();
+
+        let out_rb = unsafe { &*(outputs[0].ptr as *const ShmRingBuffer<AudioBlock>) };
+        let out = out_rb.pop().expect("one processed block must come back");
+        assert_eq!(out.len, 256, "block length must be preserved");
+        assert!(out.data[..256].iter().all(|&v| (v - 0.5).abs() < 1e-6), "gain 2.0 applied");
+
+        // No input queued -> no output produced.
+        ctx.process_once();
+        assert!(out_rb.pop().is_none(), "no phantom blocks without input");
+    }
+
+    #[test]
+    fn test_commands_route_to_processor_before_audio() {
+        let cmd = ring_region::<TimestampedCommand>(16);
+        let sig = signal_region();
+        let inputs = [ring_region::<AudioBlock>(4)];
+        let outputs = [ring_region::<AudioBlock>(4)];
+        let sidechains: [HeapRegion; 0] = [];
+
+        let mut ctx = SidecarContext::new_with_mapper(
+            &HeapMapper,
+            TestGain { gain: 1.0, extension_seen: false },
+            &cmd, &sig, &inputs, &sidechains, &outputs,
+            None,
+        );
+
+        let cmd_rb = unsafe { &*(cmd.ptr as *const ShmRingBuffer<TimestampedCommand>) };
+        cmd_rb.push(TimestampedCommand {
+            timestamp_samples: 0,
+            command: Command::Core(CoreCommand::SetBpm(3.0)),
+        }).ok().unwrap();
+        let in_rb = unsafe { &*(inputs[0].ptr as *const ShmRingBuffer<AudioBlock>) };
+        in_rb.push(make_block(1.0, 64)).ok().unwrap();
+
+        ctx.process_once();
+
+        let out_rb = unsafe { &*(outputs[0].ptr as *const ShmRingBuffer<AudioBlock>) };
+        let out = out_rb.pop().unwrap();
+        assert!((out.data[0] - 3.0).abs() < 1e-6, "command must apply before the same cycle's audio");
+    }
+
+    #[test]
+    fn test_heartbeat_pulses_every_cycle() {
+        let cmd = ring_region::<TimestampedCommand>(16);
+        let sig = signal_region();
+        let inputs: [HeapRegion; 0] = [];
+        let outputs: [HeapRegion; 0] = [];
+        let sidechains: [HeapRegion; 0] = [];
+
+        let mut ctx = SidecarContext::new_with_mapper(
+            &HeapMapper,
+            TestGain { gain: 1.0, extension_seen: false },
+            &cmd, &sig, &inputs, &sidechains, &outputs,
+            None,
+        );
+
+        let signal = unsafe { &*(sig.ptr as *const ShmSignal) };
+        let h0 = signal.get_heartbeat();
+        ctx.process_once();
+        ctx.process_once();
+        assert_eq!(signal.get_heartbeat(), h0 + 2, "supervisor liveness depends on this pulse");
+    }
+
+    struct MarkingHandler {
+        seen: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    }
+    impl SidecarExtensionHandler for MarkingHandler {
+        fn handle_extension(&mut self, processor: &mut dyn AudioProcessor, envelope: &OpaqueEnvelope) {
+            self.seen.store(envelope.opcode, std::sync::atomic::Ordering::SeqCst);
+            if let Some(gain) = processor.as_any_mut().downcast_mut::<TestGain>() {
+                gain.extension_seen = true;
+            }
+        }
+    }
+
+    #[test]
+    fn test_extension_commands_route_to_handler() {
+        let cmd = ring_region::<TimestampedCommand>(16);
+        let sig = signal_region();
+        let inputs: [HeapRegion; 0] = [];
+        let outputs: [HeapRegion; 0] = [];
+        let sidechains: [HeapRegion; 0] = [];
+
+        let ctx = SidecarContext::new_with_mapper(
+            &HeapMapper,
+            TestGain { gain: 1.0, extension_seen: false },
+            &cmd, &sig, &inputs, &sidechains, &outputs,
+            None,
+        );
+        let seen = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let mut ctx = ctx.with_extension_handler(Box::new(MarkingHandler { seen: seen.clone() }));
+
+        let cmd_rb = unsafe { &*(cmd.ptr as *const ShmRingBuffer<TimestampedCommand>) };
+        cmd_rb.push(TimestampedCommand {
+            timestamp_samples: 0,
+            command: Command::Extension(OpaqueEnvelope { domain_id: 7, target_id: 0, opcode: 1, data: [0; 32] }),
+        }).ok().unwrap();
+
+        ctx.process_once();
+        assert_eq!(
+            seen.load(std::sync::atomic::Ordering::SeqCst), 1,
+            "Extension envelope must be delivered to the registered handler with its opcode"
+        );
+    }
+}
