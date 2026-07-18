@@ -1,3 +1,6 @@
+// Non-RT plane (gossip/discovery network threads): thread spawn/sleep are sanctioned here.
+// The disallowed-methods lint exists to protect the audio hot path only.
+#![allow(clippy::disallowed_methods)]
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};

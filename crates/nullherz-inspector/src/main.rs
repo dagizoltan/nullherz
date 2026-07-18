@@ -1,3 +1,6 @@
+// Non-RT plane (UI-side conductor thread and test sync): thread spawn/sleep are sanctioned here.
+// The disallowed-methods lint exists to protect the audio hot path only.
+#![allow(clippy::disallowed_methods)]
 use serde::{Deserialize, Serialize};
 use eframe::egui;
 use std::sync::Arc;

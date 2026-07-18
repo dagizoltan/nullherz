@@ -1,3 +1,6 @@
+// Non-RT plane (software-clocked backend loop): thread spawn/sleep are sanctioned here.
+// The disallowed-methods lint exists to protect the audio hot path only.
+#![allow(clippy::disallowed_methods)]
 use nullherz_traits::RenderingEngine;
 use crate::AudioBackend;
 use std::thread;

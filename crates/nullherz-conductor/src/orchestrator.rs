@@ -1,3 +1,6 @@
+// Non-RT plane (orchestration-tick pacing): thread spawn/sleep are sanctioned here.
+// The disallowed-methods lint exists to protect the audio hot path only.
+#![allow(clippy::disallowed_methods)]
 use crate::engine_coordinator::EngineCoordinator;
 use crate::topology_manager::TopologyManager;
 use crate::transfusion_manager::TransfusionManager;

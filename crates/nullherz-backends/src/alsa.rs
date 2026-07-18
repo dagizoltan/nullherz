@@ -1,3 +1,6 @@
+// Non-RT plane (device recovery backoff): thread spawn/sleep are sanctioned here.
+// The disallowed-methods lint exists to protect the audio hot path only.
+#![allow(clippy::disallowed_methods)]
 use std::thread;
 use std::sync::Arc;
 use parking_lot::Mutex;

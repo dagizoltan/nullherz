@@ -1,3 +1,6 @@
+// Non-RT plane (test-only synchronization): thread spawn/sleep are sanctioned here.
+// The disallowed-methods lint exists to protect the audio hot path only.
+#![allow(clippy::disallowed_methods)]
 
 #[cfg(test)]
 mod tests {
