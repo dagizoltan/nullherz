@@ -4,6 +4,12 @@ use crate::processors::graph::topology_types::GraphTopology;
 use nullherz_topology::GraphCompiler;
 
 pub struct TopologyCoordinator {
+    /// True while the mutation ring is still mid-stream (the per-block drain
+    /// hit its cap). Committing mid-stream made the double-buffered sides
+    /// diverge nondeterministically (decks randomly missing); holding the
+    /// commit until the final partial chunk applies the whole streamed batch
+    /// atomically. Set each block by the engine's input handler.
+    pub(crate) stream_pending: bool,
     pub(crate) topologies: Box<[GraphTopology; 2]>,
     pub(crate) active_idx: Arc<AtomicUsize>,
     pub(crate) needs_commit: bool,
@@ -15,6 +21,7 @@ impl TopologyCoordinator {
             topologies: Box::new([initial_topo.clone(), initial_topo]),
             active_idx: Arc::new(AtomicUsize::new(0)),
             needs_commit: false,
+            stream_pending: false,
         }
     }
 
@@ -50,6 +57,11 @@ impl TopologyCoordinator {
     }
 
     pub fn commit(&mut self) -> Result<(), String> {
+        // Mid-stream: the input handler saw a full drain chunk, more
+        // mutations are queued — apply them all before swapping.
+        if self.stream_pending {
+            return Ok(());
+        }
         let active = self.active_idx();
         let inactive = (active + 1) % 2;
 

@@ -190,11 +190,19 @@ async fn main() {
     {
         let t0 = Instant::now();
         let mut last_tel = None;
-        while t0.elapsed() < Duration::from_secs(3) {
+        let mut next_probe = 0u64;
+        while t0.elapsed() < Duration::from_secs(6) {
             conductor.tick();
             while let Some(mut tel) = context.telemetry_consumer.pop() {
                 conductor.update_timeline(&mut tel);
                 last_tel = Some(tel);
+            }
+            if t0.elapsed().as_secs() >= next_probe {
+                next_probe += 1;
+                let handle = conductor.engine_coordinator.backend_manager.engine_handle.lock();
+                let children = handle.as_ref().map(|e| e.list_children().len()).unwrap_or(usize::MAX);
+                let hot: Vec<usize> = last_tel.as_ref().map(|t| t.peak_levels.iter().enumerate().filter(|(_, p)| **p > 1e-6).map(|(i, _)| i).collect()).unwrap_or_default();
+                eprintln!("PROBE t={}s children={} hot={:?}", t0.elapsed().as_secs(), children, hot);
             }
             std::thread::sleep(Duration::from_millis(16));
         }
