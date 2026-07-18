@@ -107,7 +107,7 @@ impl CommandHandler {
             CoreCommand::CalibrateLatency => {
                 let sample_rate = {
                     let engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
-                    engine_lock.ok().and_then(|lock| lock.as_ref().map(|e| e.target_sample_rate())).unwrap_or(44100.0)
+                    engine_lock.as_ref().map(|e| e.target_sample_rate()).unwrap_or(44100.0)
                 };
                 let samples = (sample_rate * 0.01) as u32;
                 conductor.calibration_samples = samples;
@@ -118,7 +118,7 @@ impl CommandHandler {
                 let plugin_name = String::from_utf8_lossy(&name).trim_matches(char::from(0)).to_string();
                 let manifest = {
                     let known = conductor.sidecar_discovery.known_plugins.lock();
-                    known.ok().and_then(|lock| lock.get(&plugin_name).cloned())
+                    known.get(&plugin_name).cloned()
                 };
                 if let Some(m) = manifest {
                     let binary_path = format!("plugins/{}", m.binary_name);
@@ -184,7 +184,7 @@ impl CommandHandler {
                 let mut dna = nullherz_traits::RhythmicDNA::default();
                 let mut sample_id = None;
                 {
-                    if let Ok(engine_lock) = conductor.engine_coordinator.backend_manager.engine_handle.lock() {
+                    { let engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
                         if let Some(ref engine) = *engine_lock {
                             let resource_id = engine.list_children().iter()
                                 .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(node_idx))
@@ -199,7 +199,7 @@ impl CommandHandler {
                     }
                 }
                 if let Some(rid) = sample_id {
-                    if let Ok(lib) = conductor.library.lock() {
+                    { let lib = conductor.library.lock();
                         if let Ok(Some(track)) = lib.get_track(rid) {
                             dna = track.metadata.dna.rhythmic.clone();
                         }
@@ -257,11 +257,11 @@ impl CommandHandler {
 
                 if let (Some(src_idx), Some(dst_idx)) = (src_sampler_id, dst_sampler_id) {
                     let mut src_bpm = 0.0;
-                    if let Ok(engine_lock) = conductor.engine_coordinator.backend_manager.engine_handle.lock() {
+                    { let engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
                         if let Some(ref engine) = *engine_lock {
                              if let Some(src_proc) = engine.list_children().iter().find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(src_idx)) {
                                  if let Some(rid) = src_proc.resource_id() {
-                                     if let Ok(lib) = conductor.library.lock() {
+                                     { let lib = conductor.library.lock();
                                          if let Ok(Some(track)) = lib.get_track(rid) {
                                              src_bpm = (*track.metadata).bpm;
                                          }
@@ -342,7 +342,7 @@ impl CommandHandler {
                          Arc::new(new_metadata.clone()),
                      );
 
-                     if let Ok(lib) = conductor.library.lock() {
+                     { let lib = conductor.library.lock();
                          if let Ok(Some(mut track)) = lib.get_track(sample_id) {
                              track.metadata = Arc::new(new_metadata);
                              let _ = lib.save_track(&track);
@@ -436,7 +436,7 @@ impl CommandHandler {
                                  Arc::new(slice_metadata.clone()),
                              );
 
-                             if let Ok(lib) = conductor.library.lock() {
+                             { let lib = conductor.library.lock();
                                  let track = nullherz_dna::LibraryTrack {
                                      id: slice_id,
                                      path: format!("slice://{}/{}", sample_id, i),
@@ -464,22 +464,22 @@ impl CommandHandler {
                  true
             }
             ResourceCommand::CommitBreeding { parent_a_id, parent_b_id, bias } => {
-                let lib = conductor.library.lock().unwrap();
+                let lib = conductor.library.lock();
                 conductor.transfusion_manager.commit_breeding(parent_a_id, parent_b_id, bias, &lib);
                 true
             }
             ResourceCommand::CommitChaoticBreeding { parent_a_id, parent_b_id, bias, chaotic_strength } => {
-                let lib = conductor.library.lock().unwrap();
+                let lib = conductor.library.lock();
                 conductor.transfusion_manager.commit_chaotic_breeding(parent_a_id, parent_b_id, bias, chaotic_strength, &lib);
                 true
             }
             ResourceCommand::RhythmicTransfusion { source_id, target_id } => {
-                let lib = conductor.library.lock().unwrap();
+                let lib = conductor.library.lock();
                 conductor.transfusion_manager.execute_rhythmic_transfusion(source_id, target_id, &lib);
                 true
             }
             ResourceCommand::RegisterCapture { .. } => {
-                if let Ok(engine_lock) = conductor.engine_coordinator.backend_manager.engine_handle.lock() {
+                { let engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
                    if let Some(ref engine) = *engine_lock {
                        conductor.transfusion_manager.poll_snapshots(engine.as_ref());
                    }

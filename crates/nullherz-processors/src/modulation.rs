@@ -26,39 +26,6 @@ impl ModulationProcessor {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use nullherz_traits::{Command, MixerCommand, AudioProcessor};
-
-    #[test]
-    fn test_modulation_processor_retargeting() {
-        let mut proc = ModulationProcessor::new(100, 200, 1, 0.5, 0.0);
-
-        // Retarget to scale 2.0
-        let cmd = Command::Mixer(MixerCommand::SetParam {
-            target_id: 100,
-            param_id: 2, // scale
-            value: 2.0,
-            ramp_duration_samples: 0,
-        });
-
-        proc.apply_command(&cmd);
-        assert_eq!(proc.scale, 2.0);
-
-        // Retarget target_id to 300
-        let cmd2 = Command::Mixer(MixerCommand::SetParam {
-            target_id: 100,
-            param_id: 0, // target_id
-            value: 300.0,
-            ramp_duration_samples: 0,
-        });
-
-        proc.apply_command(&cmd2);
-        assert_eq!(proc.target_id, 300);
-    }
-}
-
 impl nullherz_traits::SignalProcessor for ModulationProcessor {
 fn reset(&mut self) {
         self.last_sent_value = f32::NAN;
@@ -94,11 +61,10 @@ impl AudioProcessor for ModulationProcessor {
 fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 fn apply_command(&mut self, command: &nullherz_traits::Command) {
-        if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, .. }) = command {
-            if *target_id == self.id {
+        if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, .. }) = command
+            && *target_id == self.id {
                 self.set_parameter(*param_id, *value, 0);
             }
-        }
     }
 fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
         match param_id {
@@ -141,5 +107,38 @@ fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
             num_parameters: 5,
             parameters,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nullherz_traits::{Command, MixerCommand, AudioProcessor};
+
+    #[test]
+    fn test_modulation_processor_retargeting() {
+        let mut proc = ModulationProcessor::new(100, 200, 1, 0.5, 0.0);
+
+        // Retarget to scale 2.0
+        let cmd = Command::Mixer(MixerCommand::SetParam {
+            target_id: 100,
+            param_id: 2, // scale
+            value: 2.0,
+            ramp_duration_samples: 0,
+        });
+
+        proc.apply_command(&cmd);
+        assert_eq!(proc.scale, 2.0);
+
+        // Retarget target_id to 300
+        let cmd2 = Command::Mixer(MixerCommand::SetParam {
+            target_id: 100,
+            param_id: 0, // target_id
+            value: 300.0,
+            ramp_duration_samples: 0,
+        });
+
+        proc.apply_command(&cmd2);
+        assert_eq!(proc.target_id, 300);
     }
 }

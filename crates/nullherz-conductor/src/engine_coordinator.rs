@@ -52,7 +52,7 @@ impl EngineCoordinator {
         self.bundle_garbage_consumer = handle.bundle_garbage_consumer.clone();
         self.bundle_overflow_consumer = handle.bundle_overflow_consumer.clone();
 
-        *self.backend_manager.engine_handle.lock().unwrap() = Some(engine);
+        *self.backend_manager.engine_handle.lock() = Some(engine);
 
         handle
     }

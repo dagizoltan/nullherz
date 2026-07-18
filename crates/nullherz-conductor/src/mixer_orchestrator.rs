@@ -4,7 +4,8 @@ use nullherz_mixer::MixerManager;
 pub struct MixerOrchestrator;
 
 use nullherz_dna::{LibraryDatabase, GeneticLibrary};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 
 impl MixerOrchestrator {
     pub fn translate_command(cmd: &Command, mixer_manager: &MixerManager, library: &Arc<Mutex<LibraryDatabase>>) -> Vec<Command> {
@@ -18,7 +19,7 @@ impl MixerOrchestrator {
                     }));
 
                     // Intelligent Auto-Sync: Resolve track BPM and notify target deck
-                    if let Ok(lib) = library.lock() {
+                    { let lib = library.lock();
                         if let Ok(Some(track)) = lib.get_track(*sample_id) {
                             if track.metadata.bpm > 0.0 {
                                 translated.push(Command::Core(nullherz_traits::CoreCommand::SetBpm(track.metadata.bpm)));

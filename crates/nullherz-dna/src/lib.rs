@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicPtr, Ordering};
 use redb::{Database, TableDefinition, ReadableTable, TableError};
 
@@ -238,18 +238,14 @@ impl GeneticLibrary for LibraryDatabase {
     fn query_tracks(&self, genre: Option<&str>, min_bpm: Option<f32>, max_bpm: Option<f32>, root_key: Option<f32>) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
         let all_tracks = self.list_tracks()?;
         let results = all_tracks.into_iter().filter(|t| {
-            if let Some(g) = genre {
-                if t.genre != g { return false; }
-            }
-            if let Some(min) = min_bpm {
-                if (*t.metadata).bpm < min { return false; }
-            }
-            if let Some(max) = max_bpm {
-                if (*t.metadata).bpm > max { return false; }
-            }
-            if let Some(key) = root_key {
-                if (*t.metadata).root_key != Some(key) { return false; }
-            }
+            if let Some(g) = genre
+                && t.genre != g { return false; }
+            if let Some(min) = min_bpm
+                && t.metadata.bpm < min { return false; }
+            if let Some(max) = max_bpm
+                && t.metadata.bpm > max { return false; }
+            if let Some(key) = root_key
+                && t.metadata.root_key != Some(key) { return false; }
             true
         }).collect();
         Ok(results)
@@ -316,11 +312,11 @@ impl LibraryDatabase {
         let tracks = self.list_tracks()?;
         let mut hasher = Sha256::new();
         for track in tracks {
-            let dna_bytes = serde_json::to_vec(&(*track.metadata).dna)?;
+            let dna_bytes = serde_json::to_vec(&track.metadata.dna)?;
             hasher.update(&dna_bytes);
         }
         let hash: [u8; 32] = hasher.finalize().into();
-        let mut root = self.merkle_root.lock().unwrap();
+        let mut root = self.merkle_root.lock();
         *root = hash;
         Ok(hash)
     }
@@ -380,13 +376,13 @@ impl LibraryDatabase {
     pub fn sync_with_cloud(&self, sync_service: &dyn PeerSync) -> Result<(), Box<dyn std::error::Error>> {
         let tracks = self.list_tracks()?;
         for track in tracks {
-            sync_service.announce_dna(&(*track.metadata).dna);
+            sync_service.announce_dna(&track.metadata.dna);
         }
 
         let remote_dna = sync_service.list_peer_dna();
         for (id, name) in remote_dna {
-            if self.get_track(id)?.is_none() {
-                if let Some(dna) = sync_service.request_dna(id) {
+            if self.get_track(id)?.is_none()
+                && let Some(dna) = sync_service.request_dna(id) {
                     println!("Sync: Inherited SoundDNA '{}' from cloud peer.", name);
                     let track = LibraryTrack {
                         id,
@@ -403,7 +399,6 @@ impl LibraryDatabase {
                     };
                     self.save_track(&track)?;
                 }
-            }
         }
         Ok(())
     }
@@ -442,13 +437,12 @@ pub struct CloudPeerSync {
 impl PeerSync for CloudPeerSync {
     fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {
         // In Gossipsub, announcing is broadcasting to our grafted mesh links
-        let mesh = self.mesh_links.lock().unwrap();
+        let mesh = self.mesh_links.lock();
         for peer in mesh.iter() {
-            if let Ok(addr) = peer.parse() {
-                if let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100)) {
+            if let Ok(addr) = peer.parse()
+                && let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100)) {
                     let _ = stream.write_all(b"GOSSIP_PUB\n");
                 }
-            }
         }
     }
 
@@ -478,8 +472,8 @@ impl PeerSync for CloudPeerSync {
             if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
                 &addr,
                 std::time::Duration::from_millis(100)
-            ) {
-                if let Ok(payload) = serde_json::to_string(known_ids) {
+            )
+                && let Ok(payload) = serde_json::to_string(known_ids) {
                     use ed25519_dalek::Signer;
                     let sk = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
                     let sig = sk.sign(payload.as_bytes());
@@ -487,7 +481,6 @@ impl PeerSync for CloudPeerSync {
                     let msg = format!("GOSSIP_SIGNED {} {} {}\n", hex::encode(sig.to_bytes()), hex::encode(sk.verifying_key().to_bytes()), payload);
                     let _ = stream.write_all(msg.as_bytes());
                 }
-            }
         }
     }
 
@@ -555,6 +548,12 @@ pub struct DiscoveryService {
     pub signing_key: Option<[u8; 32]>,
 }
 
+impl Default for DiscoveryService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DiscoveryService {
     pub fn new() -> Self {
         let mut trusted_peers = std::collections::HashSet::new();
@@ -594,8 +593,8 @@ impl DiscoveryService {
 
     /// Listens for new peers in the local genetic cloud
     pub fn listen(&mut self) {
-        if let Some(mdns) = &self.mdns {
-            if let Ok(browser) = mdns.browse(self.service_type) {
+        if let Some(mdns) = &self.mdns
+            && let Ok(browser) = mdns.browse(self.service_type) {
                 while let Ok(event) = browser.recv_timeout(std::time::Duration::from_millis(10)) {
                     if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
                         let addr = info.get_addresses().iter().next()
@@ -609,7 +608,6 @@ impl DiscoveryService {
                     }
                 }
             }
-        }
     }
 
     /// Proactively announces a new SoundDNA availability to known peers.
@@ -648,8 +646,8 @@ impl DiscoveryService {
                 if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
                     &addr,
                     std::time::Duration::from_millis(200)
-                ) {
-                    if let Ok(payload) = serde_json::to_string(&metadata) {
+                )
+                    && let Ok(payload) = serde_json::to_string(&metadata) {
                         use ed25519_dalek::Signer;
                         let sk = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
                         let sig = sk.sign(payload.as_bytes());
@@ -657,7 +655,6 @@ impl DiscoveryService {
                         let msg = format!("GOSSIP_SIGNED {} {} {}\n", hex::encode(sig.to_bytes()), hex::encode(sk.verifying_key().to_bytes()), payload);
                         let _ = stream.write_all(msg.as_bytes());
                     }
-                }
             }
         }
     }
@@ -672,7 +669,8 @@ fn handle_gossip(payload: &str, lib_clone: &Arc<Mutex<LibraryDatabase>>, stream:
 
             // 1. Identify missing IDs without holding the lock for networking
             let mut missing_ids = Vec::new();
-            if let Ok(lib) = lib_clone.lock() {
+            {
+                let lib = lib_clone.lock();
                 for (id, name) in remote_metadata {
                     if lib.get_track(id).map(|t| t.is_none()).unwrap_or(false) {
                         missing_ids.push((id, name));
@@ -709,7 +707,8 @@ fn handle_gossip(payload: &str, lib_clone: &Arc<Mutex<LibraryDatabase>>, stream:
                                     ..nullherz_traits::SampleMetadata::new_empty()
                                 }),
                             };
-                            if let Ok(lib) = lib_c.lock() {
+                            {
+                                let lib = lib_c.lock();
                                 let _ = lib.save_track(&track);
                                 println!("Gossip: Successfully synchronized DNA '{}' from cloud.", id);
                             }
@@ -741,11 +740,10 @@ impl DnaServer {
                         if reader.read_line(&mut line).is_ok() {
                             let line_trimmed = line.trim();
                             if line_trimmed == "LIST" {
-                                if let Ok(lib) = lib_clone.lock() {
-                                    if let Ok(tracks) = lib.list_tracks() {
-                                        let list: Vec<(u64, String)> = tracks.into_iter().map(|t| (t.id, t.title)).collect();
-                                        let _ = serde_json::to_writer(&mut stream, &list);
-                                    }
+                                let lib = lib_clone.lock();
+                                if let Ok(tracks) = lib.list_tracks() {
+                                    let list: Vec<(u64, String)> = tracks.into_iter().map(|t| (t.id, t.title)).collect();
+                                    let _ = serde_json::to_writer(&mut stream, &list);
                                 }
                                 return;
                             }
@@ -757,27 +755,25 @@ impl DnaServer {
                                 // GOSSIPSUB CONTROL MESSAGES OVER TCP
                                 "GRAFT" => {
                                     if let Ok(peer_addr) = stream.peer_addr() {
-                                        mesh_peers_clone.lock().unwrap().insert(peer_addr.to_string());
+                                        mesh_peers_clone.lock().insert(peer_addr.to_string());
                                         let _ = stream.write_all(b"GRAFT_ACK\n");
                                     }
                                 }
                                 "PRUNE" => {
                                     if let Ok(peer_addr) = stream.peer_addr() {
-                                        mesh_peers_clone.lock().unwrap().remove(&peer_addr.to_string());
+                                        mesh_peers_clone.lock().remove(&peer_addr.to_string());
                                         let _ = stream.write_all(b"PRUNE_ACK\n");
                                     }
                                 }
-                                "IHAVE_ID" => {
-                                    if parts.len() >= 2 {
+                                "IHAVE_ID"
+                                    if parts.len() >= 2 => {
                                         let _ = stream.write_all(format!("IWANT_ID {}\n", parts[1]).as_bytes());
                                     }
-                                }
                                 "GOSSIP" => {
                                     eprintln!("DNA Server: GOSSIP payload rejected because it was unsigned.");
-                                    return;
                                 }
-                                "GOSSIP_SIGNED" => {
-                                    if parts.len() >= 4 {
+                                "GOSSIP_SIGNED"
+                                    if parts.len() >= 4 => {
                                         let sig_hex = parts[1];
                                         let pk_hex = parts[2];
                                         // Find start of payload. It's after "GOSSIP_SIGNED <sig> <pk> "
@@ -806,28 +802,26 @@ impl DnaServer {
                                             }
                                         }
                                     }
-                                }
-                                "HANDSHAKE" => {
-                                    if parts.len() >= 2 {
+                                "HANDSHAKE"
+                                    if parts.len() >= 2 => {
                                         let pk_hex = parts[1];
                                         println!("DNA Server: Peer handshake with public key {}", pk_hex);
                                         let resp = signing_key.map(|k| hex::encode(&k[..])).unwrap_or_else(|| "none".to_string());
                                         let _ = stream.write_all(format!("IDENTITY {}\n", resp).as_bytes());
                                     }
-                                }
-                                "GET" => {
-                                    if parts.len() >= 3 && parts[1] == "DNA" {
+                                "GET"
+                                    if parts.len() >= 3 && parts[1] == "DNA" => {
                                         let id_str = parts[2];
                                         if let Ok(id) = id_str.parse::<u64>() {
-                                            if let Ok(lib) = lib_clone.lock() {
-                                                if let Ok(Some(track)) = lib.get_track(id) {
+                                            let lib = lib_clone.lock();
+                                            if let Ok(Some(track)) = lib.get_track(id) {
                                                     // Production Beta: Sign DNA payload and calculate CAS-ID
                                                     use ed25519_dalek::{Signer, SigningKey};
                                                     use sha2::{Sha256, Digest};
 
                                                     let mut signature = [0u8; 64];
                                                     let mut pub_key = [0u8; 32];
-                                                    let dna_bytes = serde_json::to_vec(&(*track.metadata).dna).unwrap_or_default();
+                                                    let dna_bytes = serde_json::to_vec(&track.metadata.dna).unwrap_or_default();
 
                                                     let mut hasher = Sha256::new();
                                                     hasher.update(&dna_bytes);
@@ -841,7 +835,7 @@ impl DnaServer {
                                                     }
 
                                                     let signed = SignedSoundDna {
-                                                        dna: (*track.metadata).dna.clone(),
+                                                        dna: track.metadata.dna.clone(),
                                                         signature,
                                                         signer_public_key: pub_key,
                                                         cas_id: Some(cas_id),
@@ -850,11 +844,9 @@ impl DnaServer {
                                                         generation: 1,
                                                     };
                                                     let _ = serde_json::to_writer(&mut stream, &signed);
-                                                }
                                             }
                                         }
                                     }
-                                }
                                 _ => {}
                             }
                         }
@@ -882,7 +874,7 @@ impl SmartCrateManager {
         // 2. Filter by Spectral Tilt
         if let Some((min, max)) = def.spectral_tilt_range {
             results.retain(|t| {
-                let val = (*t.metadata).dna.spectral.tilt;
+                let val = t.metadata.dna.spectral.tilt;
                 val >= min && val <= max
             });
         }
@@ -890,7 +882,7 @@ impl SmartCrateManager {
         // 3. Filter by Rhythmic Syncopation
         if let Some((min, max)) = def.rhythmic_syncopation_range {
             results.retain(|t| {
-                let val = (*t.metadata).dna.rhythmic.syncopation_index;
+                let val = t.metadata.dna.rhythmic.syncopation_index;
                 val >= min && val <= max
             });
         }
@@ -898,7 +890,7 @@ impl SmartCrateManager {
         // 4. Filter by Glitch Density
         if let Some((min, max)) = def.glitch_density_range {
             results.retain(|t| {
-                let val = (*t.metadata).dna.artifacts.glitch_density;
+                let val = t.metadata.dna.artifacts.glitch_density;
                 val >= min && val <= max
             });
         }
@@ -910,7 +902,7 @@ impl SmartCrateManager {
 
         // 6. Filter by BPM range
         if let Some((min, max)) = def.bpm_range {
-            results.retain(|t| (*t.metadata).bpm >= min && (*t.metadata).bpm <= max);
+            results.retain(|t| t.metadata.bpm >= min && t.metadata.bpm <= max);
         }
 
         // 7. Filter by Energy level
@@ -920,7 +912,7 @@ impl SmartCrateManager {
 
         // 8. Filter by Root Key
         if let Some(key) = def.root_key {
-            results.retain(|t| (*t.metadata).root_key == Some(key));
+            results.retain(|t| t.metadata.root_key == Some(key));
         }
 
         results
@@ -930,15 +922,15 @@ impl SmartCrateManager {
     pub fn generate_energy_matched_crate(seed_track: &LibraryTrack, _all_tracks: Vec<LibraryTrack>, threshold: f32) -> SmartCrateDefinition {
         SmartCrateDefinition {
             name: format!("Energy Match: {}", seed_track.title),
-            target_dna: Some((*seed_track.metadata).dna.clone()),
+            target_dna: Some(seed_track.metadata.dna.clone()),
             threshold,
             spectral_tilt_range: None,
             rhythmic_syncopation_range: None,
             glitch_density_range: None,
             genre: Some(seed_track.genre.clone()),
-            bpm_range: Some(((*seed_track.metadata).bpm - 5.0, (*seed_track.metadata).bpm + 5.0)),
+            bpm_range: Some((seed_track.metadata.bpm - 5.0, seed_track.metadata.bpm + 5.0)),
             energy_range: Some((seed_track.energy_level - 0.2, seed_track.energy_level + 0.2)),
-            root_key: (*seed_track.metadata).root_key,
+            root_key: seed_track.metadata.root_key,
         }
     }
 }
@@ -967,7 +959,7 @@ impl nullherz_traits::SampleRegistry for SampleRegistry {
     }
 
     fn register_with_metadata(&self, id: u64, buffer: SampleBuffer, metadata: Arc<nullherz_traits::SampleMetadata>) {
-        let _lock = self.write_lock.lock().unwrap();
+        let _lock = self.write_lock.lock();
 
         let old_ptr = self.inner.load(Ordering::Acquire);
         let mut new_map = unsafe { (*old_ptr).clone() };
@@ -975,12 +967,12 @@ impl nullherz_traits::SampleRegistry for SampleRegistry {
 
         let new_ptr = Box::into_raw(Box::new(new_map));
         self.inner.store(new_ptr, Ordering::Release);
-        self.garbage.lock().unwrap().push(old_ptr);
+        self.garbage.lock().push(old_ptr);
     }
 
     fn drain_garbage(&self) {
         if self.readers.load(Ordering::SeqCst) > 0 { return; }
-        let mut g = self.garbage.lock().unwrap();
+        let mut g = self.garbage.lock();
         for ptr in g.drain(..) {
             unsafe { drop(Box::from_raw(ptr)); }
         }
@@ -1021,6 +1013,304 @@ impl Drop for SampleRegistry {
         let ptr = self.inner.load(Ordering::Acquire);
         unsafe { drop(Box::from_raw(ptr)); }
         self.drain_garbage();
+    }
+}
+
+pub struct NeuralTransfuser;
+
+impl NeuralTransfuser {
+    pub fn interpolate_latent(dest: &mut [f32; 16], src_a: &[f32; 16], src_b: &[f32; 16], bias: f32) {
+        use audio_dsp::simd_vec::FloatX16;
+        let v_inv_bias = FloatX16::splat(1.0 - bias);
+        let v_bias = FloatX16::splat(bias);
+
+        let v_a = FloatX16::new(*src_a);
+        let v_b = FloatX16::new(*src_b);
+
+        // Linear interpolation in latent space
+        let mut v_res = (v_a * v_inv_bias) + (v_b * v_bias);
+
+        // Stage 6: Apply neural shaping (tanh activation) for better transfusion semantics
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            v_res.parts[0] = audio_dsp::simd_vec::tanh_simd(v_res.parts[0]);
+            v_res.parts[1] = audio_dsp::simd_vec::tanh_simd(v_res.parts[1]);
+            v_res.parts[2] = audio_dsp::simd_vec::tanh_simd(v_res.parts[2]);
+            v_res.parts[3] = audio_dsp::simd_vec::tanh_simd(v_res.parts[3]);
+        }
+        #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+        {
+            // Fallback for non-wasm or missing SIMD128
+            let mut arr: [f32; 16] = v_res.into();
+            for val in arr.iter_mut() { *val = val.tanh(); }
+            v_res = FloatX16::new(arr);
+        }
+
+        *dest = v_res.into();
+    }
+}
+
+pub trait NeuralEncoder {
+    fn encode(&self, audio: &[f32]) -> [f32; 16];
+    fn decode(&self, latent: &[f32; 16]) -> Vec<f32>;
+}
+
+/// Standard Stage 6 Neural Encoder using SIMD-optimized feature extraction.
+pub struct StandardNeuralEncoder {
+    /// Projection matrix for latent space reduction (mocked)
+    pub projection: [[f32; 128]; 16],
+}
+
+impl NeuralEncoder for StandardNeuralEncoder {
+    fn encode(&self, audio: &[f32]) -> [f32; 16] {
+        use audio_dsp::simd_vec::load_f32x8;
+        let mut latent = [0.0f32; 16];
+
+        // 1. Decimate audio to 128 feature bins (simplified)
+        let mut features = [0.0f32; 128];
+        let step = audio.len() / 128;
+        if step > 0 {
+            for i in 0..128 {
+                features[i] = audio[i * step].abs();
+            }
+        }
+
+        // 2. Linear projection to 16-dim latent space using SIMD
+        for i in 0..16 {
+            let mut sum = 0.0f32;
+            let proj_row = &self.projection[i];
+
+            let mut j = 0;
+            while j + 8 <= 128 {
+                let v_feat = load_f32x8(&features, j);
+                let v_proj = load_f32x8(proj_row, j);
+                let v_res = v_feat * v_proj;
+                let arr: [f32; 8] = v_res.into();
+                sum += arr.iter().sum::<f32>();
+                j += 8;
+            }
+            latent[i] = sum.tanh();
+        }
+
+        latent
+    }
+
+    fn decode(&self, _latent: &[f32; 16]) -> Vec<f32> {
+        // Generative reconstruction (Stage 7)
+        Vec::new()
+    }
+}
+
+impl Default for StandardNeuralEncoder {
+    fn default() -> Self {
+        let mut projection = [[0.0f32; 128]; 16];
+        for i in 0..16 {
+            for j in 0..128 {
+                projection[i][j] = ((i * j) as f32).sin() * 0.1;
+            }
+        }
+        Self { projection }
+    }
+}
+
+pub struct FeatureMutator;
+
+impl FeatureMutator {
+    pub fn mutate(dna: &mut nullherz_traits::SoundDNA, feature_name: &str, strength: f32) {
+        match feature_name {
+            "metallic" => {
+                // Metallic textures often involve high-frequency resonances.
+                // We simulate this by perturbing specific dimensions of the latent space.
+                dna.spectral.latent_space[2] = (dna.spectral.latent_space[2] + 0.2 * strength).clamp(0.0, 1.0);
+                dna.spectral.latent_space[7] = (dna.spectral.latent_space[7] + 0.3 * strength).clamp(0.0, 1.0);
+                dna.artifacts.glitch_density = (dna.artifacts.glitch_density + 0.1 * strength).clamp(0.0, 1.0);
+            }
+            "organic" => {
+                // Organic sounds often have smoother spectral tilts and lower glitch density.
+                dna.spectral.tilt = (dna.spectral.tilt - 0.1 * strength).clamp(-1.0, 1.0);
+                dna.artifacts.glitch_density = (dna.artifacts.glitch_density - 0.2 * strength).clamp(0.0, 1.0);
+                dna.spectral.latent_space[0] = (dna.spectral.latent_space[0] + 0.1 * strength).clamp(0.0, 1.0);
+            }
+            "warm" => {
+                dna.spectral.tilt = (dna.spectral.tilt - 0.2 * strength).clamp(-1.0, 1.0);
+                dna.spectral.latent_space[1] = (dna.spectral.latent_space[1] + 0.15 * strength).clamp(0.0, 1.0);
+            }
+            "aggressive" => {
+                dna.artifacts.noise_floor_db = (dna.artifacts.noise_floor_db + 6.0 * strength).clamp(-96.0, 12.0);
+                dna.spectral.latent_space[5] = (dna.spectral.latent_space[5] + 0.25 * strength).clamp(0.0, 1.0);
+            }
+            _ => {
+                // Default: minor random perturbation of feature vector
+                for i in 0..8 {
+                    dna.feature_vector[i] = (dna.feature_vector[i] + 0.05 * strength).clamp(0.0, 1.0);
+                }
+            }
+        }
+    }
+}
+
+pub fn calculate_similarity(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA) -> f32 {
+    // Stage 6 Intelligent Similarity: Weighted combination of Latent Distance and Feature Correlation
+
+    // 1. Spectral Latent Similarity (SIMD Optimized Euclidean Distance)
+    use audio_dsp::simd_vec::FloatX16;
+    let v_a = FloatX16::new(dna_a.spectral.latent_space);
+    let v_b = FloatX16::new(dna_b.spectral.latent_space);
+    let v_diff = v_a - v_b;
+    let v_sq = v_diff * v_diff;
+
+    let sq_arr: [f32; 16] = v_sq.into();
+    let sum_sq: f32 = sq_arr.iter().sum();
+    let dist = sum_sq.sqrt();
+    // Normalize distance (max distance in 16D unit cube is 4.0)
+    let spectral_sim = (1.0 - (dist / 4.0)).max(0.0);
+
+    // 2. Feature Vector Correlation (Cosine-like) - SIMD Optimized
+    use audio_dsp::simd_vec::load_f32x8;
+    let v_fv_a = load_f32x8(&dna_a.feature_vector, 0);
+    let v_fv_b = load_f32x8(&dna_b.feature_vector, 0);
+
+    let v_dot = v_fv_a * v_fv_b;
+    let v_mag_a = v_fv_a * v_fv_a;
+    let v_mag_b = v_fv_b * v_fv_b;
+
+    let dot_arr: [f32; 8] = v_dot.into();
+    let mag_a_arr: [f32; 8] = v_mag_a.into();
+    let mag_b_arr: [f32; 8] = v_mag_b.into();
+
+    let feature_dot: f32 = dot_arr.iter().sum();
+    let mag_a: f32 = mag_a_arr.iter().sum();
+    let mag_b: f32 = mag_b_arr.iter().sum();
+    let feature_sim = if mag_a > 0.0 && mag_b > 0.0 {
+        feature_dot / (mag_a.sqrt() * mag_b.sqrt())
+    } else {
+        1.0 // Both empty vectors are "similar"
+    };
+
+    let rhythmic_sim = 1.0 - (dna_a.rhythmic.syncopation_index - dna_b.rhythmic.syncopation_index).abs();
+
+    // Weighted final score
+    (spectral_sim * 0.5) + (feature_sim * 0.3) + (rhythmic_sim * 0.2)
+}
+
+pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA, bias: f32) -> nullherz_traits::SoundDNA {
+    let mut child = nullherz_traits::SoundDNA::default();
+    let inv_bias = 1.0 - bias;
+
+    // 0. Feature Vector Transfusion - SIMD Optimized
+    use audio_dsp::simd_vec::{FloatX8, load_f32x8, store_f32x8};
+    let v_inv_bias_8 = FloatX8::from(inv_bias);
+    let v_bias_8 = FloatX8::from(bias);
+    let v_fv_a = load_f32x8(&dna_a.feature_vector, 0);
+    let v_fv_b = load_f32x8(&dna_b.feature_vector, 0);
+    let v_fv_res = (v_fv_a * v_inv_bias_8) + (v_fv_b * v_bias_8);
+    store_f32x8(&mut child.feature_vector, 0, v_fv_res);
+
+    // 1. Spectral Transfusion (Neural/Latent SIMD Optimized)
+    NeuralTransfuser::interpolate_latent(&mut child.spectral.latent_space, &dna_a.spectral.latent_space, &dna_b.spectral.latent_space, bias);
+
+    child.spectral.tilt = dna_a.spectral.tilt * inv_bias + dna_b.spectral.tilt * bias;
+
+    // 2. Rhythmic Transfusion
+    for i in 0..4 {
+        // Probabilistic bitmask merge
+        let mask_a = dna_a.rhythmic.onset_mask[i];
+        let mask_b = dna_b.rhythmic.onset_mask[i];
+        let mut child_mask = 0u64;
+        for bit in 0..64 {
+            let bit_a = (mask_a >> bit) & 1;
+            let bit_b = (mask_b >> bit) & 1;
+            let prob = if bit_a == 1 && bit_b == 1 { 1.0 }
+                      else if bit_a == 1 { inv_bias }
+                      else if bit_b == 1 { bias }
+                      else { 0.0 };
+
+            if (i as u32).wrapping_mul(bit as u32).wrapping_mul(1103515245).wrapping_add(12345) as f32 / 4294967295.0 < prob {
+                child_mask |= 1 << bit;
+            }
+        }
+        child.rhythmic.onset_mask[i] = child_mask;
+    }
+    child.rhythmic.syncopation_index = dna_a.rhythmic.syncopation_index * inv_bias + dna_b.rhythmic.syncopation_index * bias;
+    for i in 0..12 {
+        child.rhythmic.micro_timing[i] = (dna_a.rhythmic.micro_timing[i] as f32 * inv_bias + dna_b.rhythmic.micro_timing[i] as f32 * bias) as i16;
+    }
+
+    // 3. Artifact Transfusion
+    child.artifacts.noise_floor_db = dna_a.artifacts.noise_floor_db * inv_bias + dna_b.artifacts.noise_floor_db * bias;
+    child.artifacts.glitch_density = dna_a.artifacts.glitch_density * inv_bias + dna_b.artifacts.glitch_density * bias;
+
+    // 4. Spatial Transfusion
+    child.spatial.stereo_width = dna_a.spatial.stereo_width * inv_bias + dna_b.spatial.stereo_width * bias;
+    child.spatial.room_size = dna_a.spatial.room_size * inv_bias + dna_b.spatial.room_size * bias;
+
+    child
+}
+
+
+/// Chaotic Transfusion: Implements Layer 5 "Error Rehabilitation" theory.
+/// Uses a logistic map to create non-linear trait inheritance and digital mutations.
+pub fn chaotic_transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA, bias: f32, chaotic_strength: f32) -> nullherz_traits::SoundDNA {
+    let mut child = transfuse_dna(dna_a, dna_b, bias);
+
+    // Logistic Map for chaotic bias modulation: x_{n+1} = r * x_n * (1 - x_n)
+    // r = 3.9 is in the chaotic regime
+    let r = 3.7 + (chaotic_strength * 0.29); // Scale r based on strength
+    let mut x = bias.max(0.01).min(0.99);
+
+    // Apply chaotic perturbations to spectral latent space
+    for i in 0..16 {
+        x = r * x * (1.0 - x);
+        if x > 0.8 {
+            // "Evolutionary Mutation": Perturb latent dimensions
+            child.spectral.latent_space[i] += (x - 0.5) * chaotic_strength;
+        }
+    }
+
+    // Chaotic artifact injection
+    child.artifacts.glitch_density = (child.artifacts.glitch_density + (x * chaotic_strength)).clamp(0.0, 1.0);
+    child.artifacts.noise_floor_db += x * 12.0 * chaotic_strength;
+
+    child
+}
+
+pub struct Matchmaker;
+
+impl Matchmaker {
+    pub fn rank_compatibility(target: &nullherz_traits::SoundDNA, candidates: &[LibraryTrack], limit: usize) -> Vec<(u64, f32)> {
+        use rayon::prelude::*;
+        let mut scores: Vec<(u64, f32)> = candidates.par_iter()
+            .map(|track| {
+                let score = calculate_similarity(target, &track.metadata.dna);
+                (track.id, score)
+            })
+            .collect();
+
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores.truncate(limit);
+        scores
+    }
+
+    pub fn find_matches_above_threshold(target: &nullherz_traits::SoundDNA, candidates: &[LibraryTrack], threshold: f32) -> Vec<(u64, f32)> {
+        use rayon::prelude::*;
+        let mut results: Vec<(u64, f32)> = candidates.par_iter()
+            .filter_map(|track| {
+                let score = calculate_similarity(target, &track.metadata.dna);
+                if score >= threshold {
+                    Some((track.id, score))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results
+    }
+
+    pub fn find_best_matches(db: &LibraryDatabase, target: &nullherz_traits::SoundDNA, limit: usize) -> Result<Vec<(u64, f32)>, Box<dyn std::error::Error>> {
+        let tracks = db.list_tracks()?;
+        Ok(Self::rank_compatibility(target, &tracks, limit))
     }
 }
 
@@ -1321,7 +1611,7 @@ mod tests {
         // Give any background task a moment
         std::thread::sleep(std::time::Duration::from_millis(100));
         {
-            let db = lib.lock().unwrap();
+            let db = lib.lock();
             let track = db.get_track(1).unwrap();
             assert!(track.is_none(), "Unsigned Track (ID 1) should NOT be present in database");
         }
@@ -1357,7 +1647,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(250));
 
         {
-            let db = lib.lock().unwrap();
+            let db = lib.lock();
             let track = db.get_track(2).unwrap();
             assert!(track.is_some(), "Signed Track (ID 2) should be present in database after signed GOSSIP");
             let t = track.unwrap();
@@ -1365,303 +1655,5 @@ mod tests {
         }
 
         let _ = fs::remove_file(&db_path);
-    }
-}
-
-pub struct NeuralTransfuser;
-
-impl NeuralTransfuser {
-    pub fn interpolate_latent(dest: &mut [f32; 16], src_a: &[f32; 16], src_b: &[f32; 16], bias: f32) {
-        use audio_dsp::simd_vec::FloatX16;
-        let v_inv_bias = FloatX16::splat(1.0 - bias);
-        let v_bias = FloatX16::splat(bias);
-
-        let v_a = FloatX16::new(*src_a);
-        let v_b = FloatX16::new(*src_b);
-
-        // Linear interpolation in latent space
-        let mut v_res = (v_a * v_inv_bias) + (v_b * v_bias);
-
-        // Stage 6: Apply neural shaping (tanh activation) for better transfusion semantics
-        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-        {
-            v_res.parts[0] = audio_dsp::simd_vec::tanh_simd(v_res.parts[0]);
-            v_res.parts[1] = audio_dsp::simd_vec::tanh_simd(v_res.parts[1]);
-            v_res.parts[2] = audio_dsp::simd_vec::tanh_simd(v_res.parts[2]);
-            v_res.parts[3] = audio_dsp::simd_vec::tanh_simd(v_res.parts[3]);
-        }
-        #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
-        {
-            // Fallback for non-wasm or missing SIMD128
-            let mut arr: [f32; 16] = v_res.into();
-            for val in arr.iter_mut() { *val = val.tanh(); }
-            v_res = FloatX16::new(arr);
-        }
-
-        *dest = v_res.into();
-    }
-}
-
-pub trait NeuralEncoder {
-    fn encode(&self, audio: &[f32]) -> [f32; 16];
-    fn decode(&self, latent: &[f32; 16]) -> Vec<f32>;
-}
-
-/// Standard Stage 6 Neural Encoder using SIMD-optimized feature extraction.
-pub struct StandardNeuralEncoder {
-    /// Projection matrix for latent space reduction (mocked)
-    pub projection: [[f32; 128]; 16],
-}
-
-impl NeuralEncoder for StandardNeuralEncoder {
-    fn encode(&self, audio: &[f32]) -> [f32; 16] {
-        use audio_dsp::simd_vec::load_f32x8;
-        let mut latent = [0.0f32; 16];
-
-        // 1. Decimate audio to 128 feature bins (simplified)
-        let mut features = [0.0f32; 128];
-        let step = audio.len() / 128;
-        if step > 0 {
-            for i in 0..128 {
-                features[i] = audio[i * step].abs();
-            }
-        }
-
-        // 2. Linear projection to 16-dim latent space using SIMD
-        for i in 0..16 {
-            let mut sum = 0.0f32;
-            let proj_row = &self.projection[i];
-
-            let mut j = 0;
-            while j + 8 <= 128 {
-                let v_feat = load_f32x8(&features, j);
-                let v_proj = load_f32x8(proj_row, j);
-                let v_res = v_feat * v_proj;
-                let arr: [f32; 8] = v_res.into();
-                sum += arr.iter().sum::<f32>();
-                j += 8;
-            }
-            latent[i] = sum.tanh();
-        }
-
-        latent
-    }
-
-    fn decode(&self, _latent: &[f32; 16]) -> Vec<f32> {
-        // Generative reconstruction (Stage 7)
-        Vec::new()
-    }
-}
-
-impl Default for StandardNeuralEncoder {
-    fn default() -> Self {
-        let mut projection = [[0.0f32; 128]; 16];
-        for i in 0..16 {
-            for j in 0..128 {
-                projection[i][j] = ((i * j) as f32).sin() * 0.1;
-            }
-        }
-        Self { projection }
-    }
-}
-
-pub struct FeatureMutator;
-
-impl FeatureMutator {
-    pub fn mutate(dna: &mut nullherz_traits::SoundDNA, feature_name: &str, strength: f32) {
-        match feature_name {
-            "metallic" => {
-                // Metallic textures often involve high-frequency resonances.
-                // We simulate this by perturbing specific dimensions of the latent space.
-                dna.spectral.latent_space[2] = (dna.spectral.latent_space[2] + 0.2 * strength).clamp(0.0, 1.0);
-                dna.spectral.latent_space[7] = (dna.spectral.latent_space[7] + 0.3 * strength).clamp(0.0, 1.0);
-                dna.artifacts.glitch_density = (dna.artifacts.glitch_density + 0.1 * strength).clamp(0.0, 1.0);
-            }
-            "organic" => {
-                // Organic sounds often have smoother spectral tilts and lower glitch density.
-                dna.spectral.tilt = (dna.spectral.tilt - 0.1 * strength).clamp(-1.0, 1.0);
-                dna.artifacts.glitch_density = (dna.artifacts.glitch_density - 0.2 * strength).clamp(0.0, 1.0);
-                dna.spectral.latent_space[0] = (dna.spectral.latent_space[0] + 0.1 * strength).clamp(0.0, 1.0);
-            }
-            "warm" => {
-                dna.spectral.tilt = (dna.spectral.tilt - 0.2 * strength).clamp(-1.0, 1.0);
-                dna.spectral.latent_space[1] = (dna.spectral.latent_space[1] + 0.15 * strength).clamp(0.0, 1.0);
-            }
-            "aggressive" => {
-                dna.artifacts.noise_floor_db = (dna.artifacts.noise_floor_db + 6.0 * strength).clamp(-96.0, 12.0);
-                dna.spectral.latent_space[5] = (dna.spectral.latent_space[5] + 0.25 * strength).clamp(0.0, 1.0);
-            }
-            _ => {
-                // Default: minor random perturbation of feature vector
-                for i in 0..8 {
-                    dna.feature_vector[i] = (dna.feature_vector[i] + 0.05 * strength).clamp(0.0, 1.0);
-                }
-            }
-        }
-    }
-}
-
-pub fn calculate_similarity(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA) -> f32 {
-    // Stage 6 Intelligent Similarity: Weighted combination of Latent Distance and Feature Correlation
-
-    // 1. Spectral Latent Similarity (SIMD Optimized Euclidean Distance)
-    use audio_dsp::simd_vec::FloatX16;
-    let v_a = FloatX16::new(dna_a.spectral.latent_space);
-    let v_b = FloatX16::new(dna_b.spectral.latent_space);
-    let v_diff = v_a - v_b;
-    let v_sq = v_diff * v_diff;
-
-    let sq_arr: [f32; 16] = v_sq.into();
-    let sum_sq: f32 = sq_arr.iter().sum();
-    let dist = sum_sq.sqrt();
-    // Normalize distance (max distance in 16D unit cube is 4.0)
-    let spectral_sim = (1.0 - (dist / 4.0)).max(0.0);
-
-    // 2. Feature Vector Correlation (Cosine-like) - SIMD Optimized
-    use audio_dsp::simd_vec::load_f32x8;
-    let v_fv_a = load_f32x8(&dna_a.feature_vector, 0);
-    let v_fv_b = load_f32x8(&dna_b.feature_vector, 0);
-
-    let v_dot = v_fv_a * v_fv_b;
-    let v_mag_a = v_fv_a * v_fv_a;
-    let v_mag_b = v_fv_b * v_fv_b;
-
-    let dot_arr: [f32; 8] = v_dot.into();
-    let mag_a_arr: [f32; 8] = v_mag_a.into();
-    let mag_b_arr: [f32; 8] = v_mag_b.into();
-
-    let feature_dot: f32 = dot_arr.iter().sum();
-    let mag_a: f32 = mag_a_arr.iter().sum();
-    let mag_b: f32 = mag_b_arr.iter().sum();
-    let feature_sim = if mag_a > 0.0 && mag_b > 0.0 {
-        feature_dot / (mag_a.sqrt() * mag_b.sqrt())
-    } else {
-        1.0 // Both empty vectors are "similar"
-    };
-
-    let rhythmic_sim = 1.0 - (dna_a.rhythmic.syncopation_index - dna_b.rhythmic.syncopation_index).abs();
-
-    // Weighted final score
-    (spectral_sim * 0.5) + (feature_sim * 0.3) + (rhythmic_sim * 0.2)
-}
-
-pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA, bias: f32) -> nullherz_traits::SoundDNA {
-    let mut child = nullherz_traits::SoundDNA::default();
-    let inv_bias = 1.0 - bias;
-
-    // 0. Feature Vector Transfusion - SIMD Optimized
-    use audio_dsp::simd_vec::{FloatX8, load_f32x8, store_f32x8};
-    let v_inv_bias_8 = FloatX8::from(inv_bias);
-    let v_bias_8 = FloatX8::from(bias);
-    let v_fv_a = load_f32x8(&dna_a.feature_vector, 0);
-    let v_fv_b = load_f32x8(&dna_b.feature_vector, 0);
-    let v_fv_res = (v_fv_a * v_inv_bias_8) + (v_fv_b * v_bias_8);
-    store_f32x8(&mut child.feature_vector, 0, v_fv_res);
-
-    // 1. Spectral Transfusion (Neural/Latent SIMD Optimized)
-    NeuralTransfuser::interpolate_latent(&mut child.spectral.latent_space, &dna_a.spectral.latent_space, &dna_b.spectral.latent_space, bias);
-
-    child.spectral.tilt = dna_a.spectral.tilt * inv_bias + dna_b.spectral.tilt * bias;
-
-    // 2. Rhythmic Transfusion
-    for i in 0..4 {
-        // Probabilistic bitmask merge
-        let mask_a = dna_a.rhythmic.onset_mask[i];
-        let mask_b = dna_b.rhythmic.onset_mask[i];
-        let mut child_mask = 0u64;
-        for bit in 0..64 {
-            let bit_a = (mask_a >> bit) & 1;
-            let bit_b = (mask_b >> bit) & 1;
-            let prob = if bit_a == 1 && bit_b == 1 { 1.0 }
-                      else if bit_a == 1 { inv_bias }
-                      else if bit_b == 1 { bias }
-                      else { 0.0 };
-
-            if (i as u32).wrapping_mul(bit as u32).wrapping_mul(1103515245).wrapping_add(12345) as f32 / 4294967295.0 < prob {
-                child_mask |= 1 << bit;
-            }
-        }
-        child.rhythmic.onset_mask[i] = child_mask;
-    }
-    child.rhythmic.syncopation_index = dna_a.rhythmic.syncopation_index * inv_bias + dna_b.rhythmic.syncopation_index * bias;
-    for i in 0..12 {
-        child.rhythmic.micro_timing[i] = (dna_a.rhythmic.micro_timing[i] as f32 * inv_bias + dna_b.rhythmic.micro_timing[i] as f32 * bias) as i16;
-    }
-
-    // 3. Artifact Transfusion
-    child.artifacts.noise_floor_db = dna_a.artifacts.noise_floor_db * inv_bias + dna_b.artifacts.noise_floor_db * bias;
-    child.artifacts.glitch_density = dna_a.artifacts.glitch_density * inv_bias + dna_b.artifacts.glitch_density * bias;
-
-    // 4. Spatial Transfusion
-    child.spatial.stereo_width = dna_a.spatial.stereo_width * inv_bias + dna_b.spatial.stereo_width * bias;
-    child.spatial.room_size = dna_a.spatial.room_size * inv_bias + dna_b.spatial.room_size * bias;
-
-    child
-}
-
-
-/// Chaotic Transfusion: Implements Layer 5 "Error Rehabilitation" theory.
-/// Uses a logistic map to create non-linear trait inheritance and digital mutations.
-pub fn chaotic_transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA, bias: f32, chaotic_strength: f32) -> nullherz_traits::SoundDNA {
-    let mut child = transfuse_dna(dna_a, dna_b, bias);
-
-    // Logistic Map for chaotic bias modulation: x_{n+1} = r * x_n * (1 - x_n)
-    // r = 3.9 is in the chaotic regime
-    let r = 3.7 + (chaotic_strength * 0.29); // Scale r based on strength
-    let mut x = bias.max(0.01).min(0.99);
-
-    // Apply chaotic perturbations to spectral latent space
-    for i in 0..16 {
-        x = r * x * (1.0 - x);
-        if x > 0.8 {
-            // "Evolutionary Mutation": Perturb latent dimensions
-            child.spectral.latent_space[i] += (x - 0.5) * chaotic_strength;
-        }
-    }
-
-    // Chaotic artifact injection
-    child.artifacts.glitch_density = (child.artifacts.glitch_density + (x * chaotic_strength)).clamp(0.0, 1.0);
-    child.artifacts.noise_floor_db += x * 12.0 * chaotic_strength;
-
-    child
-}
-
-pub struct Matchmaker;
-
-impl Matchmaker {
-    pub fn rank_compatibility(target: &nullherz_traits::SoundDNA, candidates: &[LibraryTrack], limit: usize) -> Vec<(u64, f32)> {
-        use rayon::prelude::*;
-        let mut scores: Vec<(u64, f32)> = candidates.par_iter()
-            .map(|track| {
-                let score = calculate_similarity(target, &(*track.metadata).dna);
-                (track.id, score)
-            })
-            .collect();
-
-        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        scores.truncate(limit);
-        scores
-    }
-
-    pub fn find_matches_above_threshold(target: &nullherz_traits::SoundDNA, candidates: &[LibraryTrack], threshold: f32) -> Vec<(u64, f32)> {
-        use rayon::prelude::*;
-        let mut results: Vec<(u64, f32)> = candidates.par_iter()
-            .filter_map(|track| {
-                let score = calculate_similarity(target, &(*track.metadata).dna);
-                if score >= threshold {
-                    Some((track.id, score))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        results
-    }
-
-    pub fn find_best_matches(db: &LibraryDatabase, target: &nullherz_traits::SoundDNA, limit: usize) -> Result<Vec<(u64, f32)>, Box<dyn std::error::Error>> {
-        let tracks = db.list_tracks()?;
-        Ok(Self::rank_compatibility(target, &tracks, limit))
     }
 }

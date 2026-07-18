@@ -75,7 +75,7 @@ fn main() {
         resources,
         Box::new(graph),
         Arc::new(nullherz_dna::SampleRegistry::new()), Arc::new(audio_core::rt_logging::RtLogger::new(256)),
-        audio_core::engine::processing_kernel::StandardKernel::default()
+        audio_core::engine::processing_kernel::StandardKernel
     );
 
     println!("Engine with decoupled traits initialized successfully.");

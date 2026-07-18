@@ -47,7 +47,7 @@ mod tests {
         // Wait a bit for registration to complete (asynchronous scan)
         let mut tracks = Vec::new();
         for _ in 0..100 {
-            if let Ok(lib) = conductor.library.lock() {
+            { let lib = conductor.library.lock();
                 if let Ok(t) = lib.list_tracks() {
                     tracks = t;
                     if tracks.len() >= 2 {
@@ -67,7 +67,7 @@ mod tests {
         let mut meta_b = (*track_b.metadata).clone(); meta_b.root_key = Some(5.0); let mut track_b = track_b.clone(); track_b.metadata = std::sync::Arc::new(meta_b);
 
         {
-            let lib = conductor.library.lock().unwrap();
+            let lib = conductor.library.lock();
             lib.save_track(&track_a).unwrap();
             lib.save_track(&track_b).unwrap();
         }

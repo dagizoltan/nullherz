@@ -13,7 +13,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             ui.add_space(theme.space_sm);
 
             let is_all = app.active_crate.is_none();
-            if ui.selectable_label(is_all, &format!("{} ALL", egui_phosphor::regular::PACKAGE)).clicked() { app.active_crate = None; }
+            if ui.selectable_label(is_all, format!("{} ALL", egui_phosphor::regular::PACKAGE)).clicked() { app.active_crate = None; }
 
             ui.add_space(theme.space_xs);
             let crates = app.library_db.list_crates().unwrap_or_default();
@@ -186,11 +186,10 @@ fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
 
 fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
-    if app.library_needs_refresh {
-        if app.bg_library_loader.is_none() {
+    if app.library_needs_refresh
+        && app.bg_library_loader.is_none() {
             app.trigger_library_refresh();
         }
-    }
 
     // Apply client-side search query filtering on top of cached_library
     let mut displayed_tracks = app.cached_library.clone();

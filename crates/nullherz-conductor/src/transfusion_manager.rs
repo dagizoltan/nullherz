@@ -7,17 +7,17 @@ use audio_dsp::TransientDetector;
 /// This component acts as the non-RT side of the 'Transfusion' synthesis layer.
 pub struct EvolutionaryBreeder {
     sample_registry: Arc<dyn SampleRegistry>,
-    library: Arc<std::sync::Mutex<LibraryDatabase>>,
-    discovery_service: Option<Arc<std::sync::Mutex<nullherz_dna::DiscoveryService>>>,
+    library: Arc<parking_lot::Mutex<LibraryDatabase>>,
+    discovery_service: Option<Arc<parking_lot::Mutex<nullherz_dna::DiscoveryService>>>,
 }
 
 impl EvolutionaryBreeder {
-    pub fn new(sample_registry: Arc<dyn SampleRegistry>, library: Arc<std::sync::Mutex<LibraryDatabase>>) -> Self {
+    pub fn new(sample_registry: Arc<dyn SampleRegistry>, library: Arc<parking_lot::Mutex<LibraryDatabase>>) -> Self {
         Self { sample_registry, library, discovery_service: None }
     }
 
     pub fn run_breeding_cycle(&self) {
-        let lib = self.library.lock().unwrap();
+        let lib = self.library.lock();
         if let Ok(tracks) = lib.list_tracks() {
             if tracks.len() < 2 { return; }
 
@@ -84,7 +84,7 @@ impl EvolutionaryBreeder {
             self.sample_registry.register_with_metadata(child_id, Arc::new(child_buffer), child_metadata.clone());
 
             if let Some(ref discovery) = self.discovery_service {
-                if let Ok(discovery) = discovery.lock() {
+                { let discovery = discovery.lock();
                     discovery.announce_push(child_id);
                 }
             }
@@ -112,7 +112,7 @@ pub struct TransfusionManager {
     /// The global registry where captured samples are stored for use by other processors.
     pub sample_registry: Arc<dyn SampleRegistry>,
     pub evolutionary_breeder: Option<EvolutionaryBreeder>,
-    pub discovery_service: Option<Arc<std::sync::Mutex<nullherz_dna::DiscoveryService>>>,
+    pub discovery_service: Option<Arc<parking_lot::Mutex<nullherz_dna::DiscoveryService>>>,
     transient_detector: TransientDetector,
 }
 
@@ -126,7 +126,7 @@ impl TransfusionManager {
         }
     }
 
-    pub fn with_library(mut self, library: Arc<std::sync::Mutex<LibraryDatabase>>) -> Self {
+    pub fn with_library(mut self, library: Arc<parking_lot::Mutex<LibraryDatabase>>) -> Self {
         let mut breeder = EvolutionaryBreeder::new(self.sample_registry.clone(), library);
         breeder.discovery_service = self.discovery_service.clone();
         self.evolutionary_breeder = Some(breeder);
@@ -172,7 +172,7 @@ impl TransfusionManager {
         if let (Some(parent_a), Some(parent_b)) = (self.sample_registry.get(parent_a_id), self.sample_registry.get(parent_b_id)) {
             // 0. Trigger federated announcement if possible
             if let Some(ref discovery) = self.discovery_service {
-                 if let Ok(discovery) = discovery.lock() {
+                 { let discovery = discovery.lock();
                      discovery.announce_push(parent_a_id ^ parent_b_id); // Heuristic ID for now
                  }
             }
@@ -315,11 +315,11 @@ impl TransfusionManager {
                     energy_level: 0.5,
                     metadata,
                 };
-                let _ = breeder.library.lock().unwrap().save_track(&track);
+                let _ = breeder.library.lock().save_track(&track);
             }
 
             if let Some(ref discovery) = self.discovery_service {
-                if let Ok(discovery) = discovery.lock() {
+                { let discovery = discovery.lock();
                     discovery.announce_push(sample_id);
                 }
             }

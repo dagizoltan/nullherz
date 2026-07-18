@@ -31,11 +31,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                  let mut wf = wf_mtx.lock();
 
                  let deck_idx = app.focused_deck;
-                 if let Some(track_id) = app.now_playing[deck_idx] {
-                     if let Ok(Some(track)) = app.library_db.get_track(track_id) {
+                 if let Some(track_id) = app.now_playing[deck_idx]
+                     && let Ok(Some(track)) = app.library_db.get_track(track_id) {
                          wf.update_from_mip_waveform(&_wgpu.queue, &track.metadata.mip_waveform, app.sampler_waveform_zoom, rect.width() as u32);
                      }
-                 }
 
                  if let Some(t) = telemetry {
                      let scroll = (t.get_interpolated_beat_position() as f32 % 4.0) / 4.0 * 2.0;

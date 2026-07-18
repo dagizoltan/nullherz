@@ -18,9 +18,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load config to select the configured audio backend (falling back to ALSA by default)
     let mut backend_type = nullherz_backends::AudioBackendType::Alsa;
     let config_path = "system_config.json";
-    if std::path::Path::new(config_path).exists() {
-        if let Ok(content) = std::fs::read_to_string(config_path) {
-            if let Ok(config) = serde_json::from_str::<nullherz_conductor::persistence::SystemConfig>(&content) {
+    if std::path::Path::new(config_path).exists()
+        && let Ok(content) = std::fs::read_to_string(config_path)
+            && let Ok(config) = serde_json::from_str::<nullherz_conductor::persistence::SystemConfig>(&content) {
                 backend_type = match config.audio_backend.to_lowercase().as_str() {
                     "alsa" => nullherz_backends::AudioBackendType::Alsa,
                     "pipewire" => nullherz_backends::AudioBackendType::Pipewire,
@@ -31,8 +31,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 println!("System config loaded audio backend: {:?}", backend_type);
             }
-        }
-    }
 
     println!("Starting audio backend: {:?}", backend_type);
     if let Err(e) = conductor.start_backend(backend_type) {

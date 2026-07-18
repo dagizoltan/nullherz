@@ -368,7 +368,7 @@ impl InspectorApp {
             let _ = raw_db.save_track(&track_b);
         }
 
-        let db_arc = Arc::new(std::sync::Mutex::new(raw_db));
+        let db_arc = Arc::new(parking_lot::Mutex::new(raw_db));
         let library_db_wrapper = SharedLibraryDb(db_arc.clone());
 
         let (conductor_thread, _conductor) = start_in_process_conductor(cmd_rx, last_telemetry.clone(), db_arc, None);
@@ -990,54 +990,54 @@ fn main() -> eframe::Result<()> {
 }
 
 #[derive(Clone)]
-pub struct SharedLibraryDb(pub Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>);
+pub struct SharedLibraryDb(pub Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>);
 
 impl SharedLibraryDb {
     pub fn list_smart_crates(&self) -> Result<Vec<nullherz_dna::SmartCrateDefinition>, Box<dyn std::error::Error>> {
-        self.0.lock().unwrap().list_smart_crates()
+        self.0.lock().list_smart_crates()
     }
     pub fn save_smart_crate(&self, def: &nullherz_dna::SmartCrateDefinition) -> Result<(), Box<dyn std::error::Error>> {
-        self.0.lock().unwrap().save_smart_crate(def)
+        self.0.lock().save_smart_crate(def)
     }
 }
 
 impl nullherz_dna::GeneticLibrary for SharedLibraryDb {
     fn get_track(&self, id: u64) -> Result<Option<nullherz_dna::LibraryTrack>, Box<dyn std::error::Error>> {
-        self.0.lock().unwrap().get_track(id)
+        self.0.lock().get_track(id)
     }
     fn list_tracks(&self) -> Result<Vec<nullherz_dna::LibraryTrack>, Box<dyn std::error::Error>> {
-        self.0.lock().unwrap().list_tracks()
+        self.0.lock().list_tracks()
     }
     fn save_track(&self, track: &nullherz_dna::LibraryTrack) -> Result<(), Box<dyn std::error::Error>> {
-        self.0.lock().unwrap().save_track(track)
+        self.0.lock().save_track(track)
     }
     fn add_to_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>> {
-        self.0.lock().unwrap().add_to_crate(crate_name, track_id)
+        self.0.lock().add_to_crate(crate_name, track_id)
     }
     fn remove_from_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>> {
-        self.0.lock().unwrap().remove_from_crate(crate_name, track_id)
+        self.0.lock().remove_from_crate(crate_name, track_id)
     }
     fn list_crates(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        self.0.lock().unwrap().list_crates()
+        self.0.lock().list_crates()
     }
     fn get_tracks_in_crate(&self, crate_name: &str) -> Result<Vec<nullherz_dna::LibraryTrack>, Box<dyn std::error::Error>> {
-        self.0.lock().unwrap().get_tracks_in_crate(crate_name)
+        self.0.lock().get_tracks_in_crate(crate_name)
     }
     fn query_tracks(&self, genre: Option<&str>, min_bpm: Option<f32>, max_bpm: Option<f32>, root_key: Option<f32>) -> Result<Vec<nullherz_dna::LibraryTrack>, Box<dyn std::error::Error>> {
-        self.0.lock().unwrap().query_tracks(genre, min_bpm, max_bpm, root_key)
+        self.0.lock().query_tracks(genre, min_bpm, max_bpm, root_key)
     }
     fn suggest_matches(&self, target_dna: &nullherz_traits::SoundDNA, limit: usize) -> Result<Vec<(u64, f32)>, Box<dyn std::error::Error>> {
-        self.0.lock().unwrap().suggest_matches(target_dna, limit)
+        self.0.lock().suggest_matches(target_dna, limit)
     }
     fn remove_track(&self, id: u64) -> Result<(), Box<dyn std::error::Error>> {
-        self.0.lock().unwrap().remove_track(id)
+        self.0.lock().remove_track(id)
     }
 }
 
 pub fn start_in_process_conductor(
     cmd_rx: mpsc::Receiver<Command>,
     last_telemetry: Arc<Mutex<Option<Telemetry>>>,
-    db_arc: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>,
+    db_arc: Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>,
     backend_override: Option<nullherz_backends::AudioBackendType>,
 ) -> (std::thread::JoinHandle<()>, Arc<Mutex<nullherz_conductor::Conductor>>) {
     let conductor = nullherz_conductor::Conductor::with_library(db_arc);
@@ -1078,9 +1078,9 @@ pub fn start_in_process_conductor(
                 backend_type = override_type;
             } else {
                 let config_path = "system_config.json";
-                if std::path::Path::new(config_path).exists() {
-                    if let Ok(content) = std::fs::read_to_string(config_path) {
-                        if let Ok(config) = serde_json::from_str::<nullherz_conductor::persistence::SystemConfig>(&content) {
+                if std::path::Path::new(config_path).exists()
+                    && let Ok(content) = std::fs::read_to_string(config_path)
+                        && let Ok(config) = serde_json::from_str::<nullherz_conductor::persistence::SystemConfig>(&content) {
                             backend_type = match config.audio_backend.to_lowercase().as_str() {
                                 "alsa" => nullherz_backends::AudioBackendType::Alsa,
                                 "pipewire" => nullherz_backends::AudioBackendType::Pipewire,
@@ -1090,8 +1090,6 @@ pub fn start_in_process_conductor(
                                 _ => nullherz_backends::AudioBackendType::Alsa,
                             };
                         }
-                    }
-                }
             }
 
             // Try starting the preferred backend. If it fails, fallback to Threaded.
@@ -1194,7 +1192,7 @@ mod tests {
 
         // Create an in-memory transient LibraryDatabase for testing to avoid lock files
         let raw_db = nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase");
-        let db_arc = Arc::new(std::sync::Mutex::new(raw_db));
+        let db_arc = Arc::new(parking_lot::Mutex::new(raw_db));
 
         // Start the in-process conductor thread on the Mock backend: no audio hardware
         // dependency, and CI runners have no sound card.

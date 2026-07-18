@@ -69,15 +69,14 @@ impl WgpuRenderer {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
-        if width > 0 && height > 0 {
-            if let Some(config) = &mut self.config {
+        if width > 0 && height > 0
+            && let Some(config) = &mut self.config {
                 config.width = width;
                 config.height = height;
                 if let Some(surface) = &self.surface {
                     surface.configure(&self.device, config);
                 }
             }
-        }
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {

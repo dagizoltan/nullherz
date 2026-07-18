@@ -78,7 +78,7 @@ fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &
                 let pattern = &self.patterns[self.active_pattern];
 
                 // Real-time Quantize & Swing
-                let is_even_step = next_step_idx % 2 == 0;
+                let is_even_step = next_step_idx.is_multiple_of(2);
                 let swing_offset_samples = if !is_even_step {
                     (self.swing as f64 * samples_per_step * 0.5) as u64
                 } else {

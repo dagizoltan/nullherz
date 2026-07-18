@@ -130,12 +130,11 @@ impl GraphExecutor {
                 } else {
                     // Try to use cached assignment if available
                     let mut cached = false;
-                    if let Some(p_mut) = pool.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
-                        if let Some(assignment) = p_mut.assignment_cache[n_idx] {
+                    if let Some(p_mut) = pool.as_any().downcast_mut::<crate::processors::graph::TaskPool>()
+                        && let Some(assignment) = p_mut.assignment_cache[n_idx] {
                             worker_idx = assignment.worker_idx as usize;
                             cached = true;
                         }
-                    }
 
                     if !cached {
                         let mut min_cost = u64::MAX;

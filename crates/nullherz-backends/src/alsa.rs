@@ -1,6 +1,6 @@
 use std::thread;
 use std::sync::Arc;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::sync::atomic::Ordering;
 use nullherz_traits::RenderingEngine;
 use crate::AudioBackend;
@@ -123,7 +123,7 @@ impl AudioBackend for AlsaBackend {
 
             let mut target_rate = 44100u32;
             {
-                let lock = engine_handle.lock().unwrap();
+                let lock = engine_handle.lock();
                 if let Some(ref engine) = *lock {
                     target_rate = engine.target_sample_rate() as u32;
                 }
@@ -164,7 +164,7 @@ impl AudioBackend for AlsaBackend {
 
             let mut engine_arc_opt = None;
             {
-                let lock = engine_handle.lock().unwrap();
+                let lock = engine_handle.lock();
                 if let Some(ref engine) = *lock {
                     engine_arc_opt = Some(engine.clone());
                 }
@@ -210,7 +210,7 @@ impl AudioBackend for AlsaBackend {
                     }
 
                     // Diagnostic: Log peak level every 500 blocks (~1.5s at 128/44100)
-                    if block_count % 500 == 0 {
+                    if block_count.is_multiple_of(500) {
                         let mut peak_l: f32 = 0.0;
                         let mut peak_r: f32 = 0.0;
                         for i in 0..actual_period {

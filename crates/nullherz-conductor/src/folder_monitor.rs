@@ -7,7 +7,7 @@ use std::time::Duration;
 
 pub struct FolderMonitor {
     sample_registry: Arc<dyn SampleRegistry>,
-    library: Arc<std::sync::Mutex<LibraryDatabase>>,
+    library: Arc<parking_lot::Mutex<LibraryDatabase>>,
 }
 
 impl Clone for FolderMonitor {
@@ -20,7 +20,7 @@ impl Clone for FolderMonitor {
 }
 
 impl FolderMonitor {
-    pub fn new(sample_registry: Arc<dyn SampleRegistry>, library: Arc<std::sync::Mutex<LibraryDatabase>>) -> Self {
+    pub fn new(sample_registry: Arc<dyn SampleRegistry>, library: Arc<parking_lot::Mutex<LibraryDatabase>>) -> Self {
         Self {
             sample_registry,
             library,
@@ -118,7 +118,7 @@ impl FolderMonitor {
         path.hash(&mut hasher);
         let id = hasher.finish();
 
-        let lib = self.library.lock().unwrap();
+        let lib = self.library.lock();
         if let Ok(Some(_)) = lib.get_track(id) { return; }
 
         let mut metadata = SampleMetadata::new_empty();
@@ -161,7 +161,7 @@ mod tests {
         let db_path = "test_folder_monitor.redb";
         let _ = std::fs::remove_file(db_path);
         let library_db = LibraryDatabase::load(db_path).unwrap();
-        let library = Arc::new(std::sync::Mutex::new(library_db));
+        let library = Arc::new(parking_lot::Mutex::new(library_db));
 
         let monitor = FolderMonitor::new(sample_registry, library);
 

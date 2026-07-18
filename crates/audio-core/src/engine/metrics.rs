@@ -56,7 +56,7 @@ impl EngineMetrics {
             if start_lock.is_none() {
                 *start_lock = Some(Instant::now());
                 self.calibration_start_cycles.store(crate::get_cycles(), Ordering::Relaxed);
-            } else if sample_counter > 0 && sample_counter % (num_samples as u64 * 1024) == 0 {
+            } else if sample_counter > 0 && sample_counter.is_multiple_of(num_samples as u64 * 1024) {
                 let start_inst = start_lock.unwrap();
                 let elapsed = start_inst.elapsed().as_nanos() as f64;
                 let start_c = self.calibration_start_cycles.load(Ordering::Relaxed);
@@ -85,7 +85,7 @@ impl EngineMetrics {
         }
 
         let peak = nullherz_traits::telemetry::TelemetryProcessor::update_peak(&self.peak_ns, current_ns);
-        if sample_counter > 0 && sample_counter % (num_samples as u64 * 1024) == 0 {
+        if sample_counter > 0 && sample_counter.is_multiple_of(num_samples as u64 * 1024) {
             self.peak_ns.store(current_ns, Ordering::Relaxed);
         }
         peak

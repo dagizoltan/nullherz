@@ -2723,6 +2723,7 @@ dependencies = [
  "libc",
  "nix 0.29.0",
  "nullherz-traits",
+ "parking_lot",
  "proptest",
  "serde",
  "serde_json",
@@ -3210,6 +3211,7 @@ dependencies = [
  "ipc-layer",
  "libc",
  "nullherz-traits",
+ "parking_lot",
 ]
 
 [[package]]
@@ -3258,6 +3260,7 @@ dependencies = [
  "nullherz-processors",
  "nullherz-topology",
  "nullherz-traits",
+ "parking_lot",
  "rayon",
  "rkyv",
  "serde",
@@ -3279,6 +3282,7 @@ dependencies = [
  "hex",
  "mdns-sd",
  "nullherz-traits",
+ "parking_lot",
  "rand 0.8.6",
  "rayon",
  "redb",
@@ -3307,6 +3311,7 @@ dependencies = [
  "ipc-layer",
  "nullherz-dna",
  "nullherz-traits",
+ "parking_lot",
  "serde",
  "serde_json",
  "tokio",

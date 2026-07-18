@@ -2,7 +2,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use futures_util::{StreamExt, SinkExt};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use nullherz_traits::{TimestampedCommand, SoundDNA};
 use ipc_layer::{Consumer, RingBuffer};
 use nullherz_traits::telemetry::Telemetry;
@@ -44,7 +45,7 @@ pub struct TelemetryBroadcaster {
 
 impl TelemetryProvider for TelemetryBroadcaster {
     fn get_telemetry(&self) -> Option<Telemetry> {
-        *self.current.lock().unwrap()
+        *self.current.lock()
     }
 }
 
@@ -67,7 +68,7 @@ pub async fn run_gateway(
     tokio::spawn(async move {
         loop {
             while let Some(tel) = tel_cons.pop() {
-                *broadcaster_clone.current.lock().unwrap() = Some(tel);
+                *broadcaster_clone.current.lock() = Some(tel);
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
         }
@@ -111,9 +112,8 @@ async fn handle_connection(
             let tel = tel_provider.get_telemetry();
             if let Some(t) = tel
                 && t.sample_counter != last_sample_counter {
-                    if let Ok(json) = serde_json::to_string(&t) {
-                        if tx_telemetry.send(Message::Text(json.into())).await.is_err() { break; }
-                    }
+                    if let Ok(json) = serde_json::to_string(&t)
+                        && tx_telemetry.send(Message::Text(json.into())).await.is_err() { break; }
                     last_sample_counter = t.sample_counter;
                 }
             tokio::time::sleep(tokio::time::Duration::from_millis(16)).await;
@@ -138,7 +138,7 @@ async fn handle_connection(
                                 let mut matches: Vec<(u64, f32)> = Vec::new();
                                 let mut success = false;
                                 {
-                                    let lib = lib_mutex.lock().unwrap();
+                                    let lib = lib_mutex.lock();
                                     if let Ok(m) = nullherz_dna::Matchmaker::find_best_matches(&lib, &target_dna, limit) {
                                         matches = m;
                                         success = true;

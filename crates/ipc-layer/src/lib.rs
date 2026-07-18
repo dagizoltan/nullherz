@@ -442,9 +442,9 @@ pub struct RingBuffer<T> {
 unsafe impl<T: Send> Sync for RingBuffer<T> {}
 
 pub enum NonRtProducerInner<T> {
-    Spsc(std::sync::Mutex<Producer<T>>),
+    Spsc(parking_lot::Mutex<Producer<T>>),
     Mpsc(Arc<MpscRingBuffer<T>>),
-    Boxed(std::sync::Mutex<Box<dyn nullherz_traits::CommandProducer>>),
+    Boxed(parking_lot::Mutex<Box<dyn nullherz_traits::CommandProducer>>),
 }
 
 pub struct NonRtProducer<T> {
@@ -453,7 +453,7 @@ pub struct NonRtProducer<T> {
 
 impl<T> NonRtProducer<T> {
     pub fn new(producer: Producer<T>) -> Self {
-        Self { inner: Arc::new(NonRtProducerInner::Spsc(std::sync::Mutex::new(producer))) }
+        Self { inner: Arc::new(NonRtProducerInner::Spsc(parking_lot::Mutex::new(producer))) }
     }
 
     pub fn from_mpsc(buffer: Arc<MpscRingBuffer<T>>) -> Self {
@@ -461,13 +461,13 @@ impl<T> NonRtProducer<T> {
     }
 
     pub fn from_boxed(producer: Box<dyn nullherz_traits::CommandProducer>) -> Self {
-        Self { inner: Arc::new(NonRtProducerInner::Boxed(std::sync::Mutex::new(producer))) }
+        Self { inner: Arc::new(NonRtProducerInner::Boxed(parking_lot::Mutex::new(producer))) }
     }
 
     pub fn push(&self, item: T) -> Result<(), T> {
         match self.inner.as_ref() {
             NonRtProducerInner::Spsc(m) => {
-                let mut producer = m.lock().unwrap();
+                let mut producer = m.lock();
                 producer.push(item)
             }
             NonRtProducerInner::Mpsc(b) => {
@@ -484,14 +484,14 @@ impl NonRtProducer<nullherz_traits::TimestampedCommand> {
     pub fn push_command(&self, item: nullherz_traits::TimestampedCommand) -> Result<(), nullherz_traits::Command> {
         match self.inner.as_ref() {
             NonRtProducerInner::Spsc(m) => {
-                let mut producer = m.lock().unwrap();
+                let mut producer = m.lock();
                 producer.push(item).map_err(|c| c.command)
             }
             NonRtProducerInner::Mpsc(b) => {
                 b.push(item).map_err(|c| c.command)
             }
             NonRtProducerInner::Boxed(m) => {
-                let producer = m.lock().unwrap();
+                let producer = m.lock();
                 producer.push_command(item)
             }
         }
@@ -639,6 +639,139 @@ impl<T> MpscRingBuffer<T> {
     }
 }
 
+pub fn pin_thread_to_core(core_id: usize) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        use nix::sched::{sched_setaffinity, CpuSet};
+        use nix::unistd::Pid;
+        let mut cpu_set = CpuSet::new();
+        cpu_set.set(core_id).map_err(|e: nix::Error| e.to_string())?;
+        sched_setaffinity(Pid::from_raw(0), &cpu_set).map_err(|e: nix::Error| e.to_string())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = core_id;
+        Ok(())
+    }
+}
+
+pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
+    thread_local! {
+        static INITIALIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    if INITIALIZED.with(|i| i.get()) && cpu_id.is_none() {
+        return;
+    }
+
+    nullherz_traits::mark_as_rt_thread();
+    let _ = crate::set_rt_priority(priority);
+
+    if let Some(id) = cpu_id {
+        let _ = pin_thread_to_core(id);
+    }
+
+    // Set permanent FTZ/DAZ for the thread
+    FpControlGuard::apply_ftz_daz();
+
+    INITIALIZED.with(|i| i.set(true));
+}
+
+/// RAII guard for floating-point control state.
+/// Ensures FTZ/DAZ are set during the lifetime of the guard and restored afterwards.
+pub struct FpControlGuard {
+    #[cfg(target_arch = "x86_64")]
+    original_mxcsr: u32,
+    #[cfg(target_arch = "aarch64")]
+    original_fpcr: u64,
+}
+
+impl FpControlGuard {
+    #[inline(always)]
+    pub fn apply_ftz_daz() {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            let mut mxcsr: u32 = 0;
+            std::arch::asm!("stmxcsr [{}]", in(reg) &mut mxcsr);
+            // Enable Flush-to-Zero (bit 15) and Denormals-Are-Zero (bit 6)
+            mxcsr |= 0x8000 | 0x0040;
+            std::arch::asm!("ldmxcsr [{}]", in(reg) &mxcsr);
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            let mut fpcr: u64;
+            std::arch::asm!("mrs {}, fpcr", out(reg) fpcr);
+            // Bit 24 is FZ (Flush-to-Zero)
+            fpcr |= 1 << 24;
+            std::arch::asm!("msr fpcr, {}", in(reg) fpcr);
+        }
+    }
+
+    #[inline(always)]
+    pub fn new() -> Self {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            let mut original_mxcsr: u32 = 0;
+            std::arch::asm!("stmxcsr [{}]", in(reg) &mut original_mxcsr);
+            Self::apply_ftz_daz();
+            Self { original_mxcsr }
+        }
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            let mut original_fpcr: u64 = 0;
+            std::arch::asm!("mrs {}, fpcr", out(reg) original_fpcr);
+            Self::apply_ftz_daz();
+            Self { original_fpcr }
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        { Self {} }
+    }
+}
+
+impl Default for FpControlGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for FpControlGuard {
+    #[inline(always)]
+    fn drop(&mut self) {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            std::arch::asm!("ldmxcsr [{}]", in(reg) &self.original_mxcsr);
+        }
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            std::arch::asm!("msr fpcr, {}", in(reg) self.original_fpcr);
+        }
+    }
+}
+
+/// Prototype for zero-copy RDMA distribution.
+/// This will facilitate high-density DSP offloading in Stage 7.
+pub struct RdmaBridge {
+    pub is_connected: bool,
+}
+
+impl RdmaBridge {
+    pub fn new() -> Self {
+        Self { is_connected: false }
+    }
+
+    pub fn push_block_zero_copy(&self, _node_idx: u32, _block: &AudioBlock) -> Result<(), String> {
+        // Implementation pending: libibverbs / rdma-core integration
+        Err("RDMA implementation pending Stage 7 finalization".to_string())
+    }
+}
+
+impl Default for RdmaBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(all(feature = "kani-verify", kani))]
 #[allow(unexpected_cfgs)]
 mod proofs {
@@ -776,138 +909,5 @@ mod tests {
         assert_eq!(rb.pop(), Some(10));
         assert_eq!(rb.pop(), Some(20));
         assert_eq!(rb.pop(), None);
-    }
-}
-
-pub fn pin_thread_to_core(core_id: usize) -> Result<(), String> {
-    #[cfg(target_os = "linux")]
-    {
-        use nix::sched::{sched_setaffinity, CpuSet};
-        use nix::unistd::Pid;
-        let mut cpu_set = CpuSet::new();
-        cpu_set.set(core_id).map_err(|e: nix::Error| e.to_string())?;
-        sched_setaffinity(Pid::from_raw(0), &cpu_set).map_err(|e: nix::Error| e.to_string())
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = core_id;
-        Ok(())
-    }
-}
-
-pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
-    thread_local! {
-        static INITIALIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    }
-
-    if INITIALIZED.with(|i| i.get()) && cpu_id.is_none() {
-        return;
-    }
-
-    nullherz_traits::mark_as_rt_thread();
-    let _ = crate::set_rt_priority(priority);
-
-    if let Some(id) = cpu_id {
-        let _ = pin_thread_to_core(id);
-    }
-
-    // Set permanent FTZ/DAZ for the thread
-    FpControlGuard::apply_ftz_daz();
-
-    INITIALIZED.with(|i| i.set(true));
-}
-
-/// RAII guard for floating-point control state.
-/// Ensures FTZ/DAZ are set during the lifetime of the guard and restored afterwards.
-pub struct FpControlGuard {
-    #[cfg(target_arch = "x86_64")]
-    original_mxcsr: u32,
-    #[cfg(target_arch = "aarch64")]
-    original_fpcr: u64,
-}
-
-impl FpControlGuard {
-    #[inline(always)]
-    pub fn apply_ftz_daz() {
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            let mut mxcsr: u32 = 0;
-            std::arch::asm!("stmxcsr [{}]", in(reg) &mut mxcsr);
-            // Enable Flush-to-Zero (bit 15) and Denormals-Are-Zero (bit 6)
-            mxcsr |= 0x8000 | 0x0040;
-            std::arch::asm!("ldmxcsr [{}]", in(reg) &mxcsr);
-        }
-
-        #[cfg(target_arch = "aarch64")]
-        unsafe {
-            let mut fpcr: u64;
-            std::arch::asm!("mrs {}, fpcr", out(reg) fpcr);
-            // Bit 24 is FZ (Flush-to-Zero)
-            fpcr |= 1 << 24;
-            std::arch::asm!("msr fpcr, {}", in(reg) fpcr);
-        }
-    }
-
-    #[inline(always)]
-    pub fn new() -> Self {
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            let mut original_mxcsr: u32 = 0;
-            std::arch::asm!("stmxcsr [{}]", in(reg) &mut original_mxcsr);
-            Self::apply_ftz_daz();
-            Self { original_mxcsr }
-        }
-        #[cfg(target_arch = "aarch64")]
-        unsafe {
-            let mut original_fpcr: u64 = 0;
-            std::arch::asm!("mrs {}, fpcr", out(reg) original_fpcr);
-            Self::apply_ftz_daz();
-            Self { original_fpcr }
-        }
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        { Self {} }
-    }
-}
-
-impl Default for FpControlGuard {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Drop for FpControlGuard {
-    #[inline(always)]
-    fn drop(&mut self) {
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            std::arch::asm!("ldmxcsr [{}]", in(reg) &self.original_mxcsr);
-        }
-        #[cfg(target_arch = "aarch64")]
-        unsafe {
-            std::arch::asm!("msr fpcr, {}", in(reg) self.original_fpcr);
-        }
-    }
-}
-
-/// Prototype for zero-copy RDMA distribution.
-/// This will facilitate high-density DSP offloading in Stage 7.
-pub struct RdmaBridge {
-    pub is_connected: bool,
-}
-
-impl RdmaBridge {
-    pub fn new() -> Self {
-        Self { is_connected: false }
-    }
-
-    pub fn push_block_zero_copy(&self, _node_idx: u32, _block: &AudioBlock) -> Result<(), String> {
-        // Implementation pending: libibverbs / rdma-core integration
-        Err("RDMA implementation pending Stage 7 finalization".to_string())
-    }
-}
-
-impl Default for RdmaBridge {
-    fn default() -> Self {
-        Self::new()
     }
 }

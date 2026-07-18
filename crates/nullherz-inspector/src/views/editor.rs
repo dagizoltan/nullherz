@@ -114,8 +114,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         let has_selection = app.editor_selection.is_some();
                         ui.add_enabled_ui(has_selection, |ui| {
                             let btn = ui.button(RichText::new(format!("{} CROP", egui_phosphor::regular::SCISSORS)).size(theme.type_label));
-                            if btn.clicked() {
-                                if let Some((s, e)) = app.editor_selection {
+                            if btn.clicked()
+                                && let Some((s, e)) = app.editor_selection {
                                     let (start, end) = if s < e { (s, e) } else { (e, s) };
                                     let total_samples = track.metadata.total_samples as f32;
                                     let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::Crop {
@@ -124,7 +124,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                                         end_samples: (end * total_samples) as u64,
                                     }));
                                 }
-                            }
                         }).response.on_disabled_hover_text("Drag on the waveform to select a range first");
 
                         if ui.button(RichText::new(format!("{} NORMALIZE", egui_phosphor::regular::LIGHTNING)).size(theme.type_label)).clicked() {

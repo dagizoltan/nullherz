@@ -9,7 +9,8 @@ use crate::pattern_manager::PatternManager;
 use crate::clip_orchestrator::ClipOrchestrator;
 use crate::modulation_matrix::ModulationMatrix;
 use nullherz_traits::{Command, telemetry::Telemetry};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use nullherz_dna::{ GeneticLibrary};
 
 pub struct Conductor {
@@ -27,7 +28,7 @@ pub struct Conductor {
     pub midi_clock: crate::midi_clock::MidiClockTracker,
     pub analysis_worker: Option<crate::analysis_worker::AnalysisWorker>,
     pub folder_monitor: Option<crate::folder_monitor::FolderMonitor>,
-    pub library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>,
+    pub library: Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>,
     pub mixer_manager: nullherz_mixer::MixerManager,
     pub midi_consumer: Option<ipc_layer::Consumer<nullherz_traits::MidiEvent>>,
     pub external_midi_consumer: Option<ipc_layer::IpcMidiConsumer>,
@@ -77,7 +78,7 @@ impl Conductor {
         Self::with_library_path("library.redb")
     }
 
-    pub fn with_library(library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>) -> Self {
+    pub fn with_library(library: Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>) -> Self {
         let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
         let sidecar_discovery = crate::discovery::SidecarDiscoveryService::new("plugins").with_library(library.clone());
         let dna_discovery = sidecar_discovery.dna_discovery.clone();
@@ -129,7 +130,7 @@ impl Conductor {
     pub fn with_library_path(path: &str) -> Self {
         let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
         let library = match nullherz_dna::LibraryDatabase::load(path) {
-            Ok(db) => Arc::new(std::sync::Mutex::new(db)),
+            Ok(db) => Arc::new(parking_lot::Mutex::new(db)),
             Err(_) => {
                 // If it's already open (e.g. in tests), we load it with a unique path
                 // to avoid concurrent database access/locking collisions in tests.
@@ -137,7 +138,7 @@ impl Conductor {
                 let count = FALLBACK_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let fallback_path = std::env::temp_dir()
                     .join(format!("nullherz_fallback_{}_{}.redb", std::process::id(), count));
-                Arc::new(std::sync::Mutex::new(
+                Arc::new(parking_lot::Mutex::new(
                     nullherz_dna::LibraryDatabase::load(fallback_path.to_str().unwrap()).unwrap(),
                 ))
             }
@@ -250,7 +251,7 @@ impl Conductor {
 
             // Start Federated DNA Server (TCP pull)
             let lib = self.library.clone();
-            let signing_key = self.sidecar_discovery.dna_discovery.lock().unwrap().signing_key;
+            let signing_key = self.sidecar_discovery.dna_discovery.lock().signing_key;
             let _ = nullherz_dna::DnaServer::start(lib, 9003, signing_key);
         }
 
@@ -403,7 +404,7 @@ impl Conductor {
             // Resolve the resource_id (sample_id) currently loaded in the master sampler
             let mut current_sample_id = None;
             {
-                if let Ok(engine_lock) = self.engine_coordinator.backend_manager.engine_handle.lock() {
+                { let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock();
                     if let Some(ref engine) = *engine_lock {
                         current_sample_id = engine.list_children().iter()
                             .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(sampler_node_idx))
@@ -414,10 +415,10 @@ impl Conductor {
 
             if let Some(id) = current_sample_id {
                 tokio::spawn(async move {
-                    if let Ok(lib_lock) = lib.lock() {
+                    { let lib_lock = lib.lock();
                         if let Ok(Some(track)) = lib_lock.get_track(id) {
                             if let Ok(matches) = nullherz_dna::Matchmaker::find_best_matches(&lib_lock, &track.metadata.dna, 3) {
-                                if let Ok(mut sugg_lock) = suggestions.lock() {
+                                { let mut sugg_lock = suggestions.lock();
                                     *sugg_lock = matches;
                                 }
                             }
@@ -589,7 +590,7 @@ impl Conductor {
     }
 
     fn handle_transfusion_registrations(&mut self) {
-        if let Ok(engine_lock) = self.engine_coordinator.backend_manager.engine_handle.lock() {
+        { let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock();
             if let Some(ref engine) = *engine_lock {
                 self.transfusion_manager.poll_snapshots(engine.as_ref());
             }
@@ -597,12 +598,12 @@ impl Conductor {
     }
 
     fn sync_sampler_metadata(&mut self) {
-        if let Ok(engine_lock) = self.engine_coordinator.backend_manager.engine_handle.lock() {
+        { let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock();
             if let Some(ref engine) = *engine_lock {
                 for child in engine.list_children() {
                     if let Some(id) = child.resource_id() {
                         // Reconcile with LibraryDatabase for persistent metadata updates
-                        let lib_lock = if let Ok(l) = self.library.lock() { l } else { continue; };
+                        let lib_lock = self.library.lock();
                         if let Ok(Some(track)) = lib_lock.get_track(id) {
                             if let Some(m) = child.metadata() {
                                 if let Some(ref mut prod) = self.topology_manager.topo_producer {

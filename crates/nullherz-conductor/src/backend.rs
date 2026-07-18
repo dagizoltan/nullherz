@@ -1,4 +1,5 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use nullherz_traits::{RenderingEngine, AudioBackendType};
 use nullherz_backends::AudioBackend;
 

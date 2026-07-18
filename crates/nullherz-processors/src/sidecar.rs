@@ -281,14 +281,12 @@ impl nullherz_traits::SignalProcessor for NetworkProxyReceive {
                 block_received = true;
             }
         } else {
-            if self.stream.is_none() {
-                if let Some(ref l) = self.listener {
-                    if let Ok((s, _)) = l.accept() {
+            if self.stream.is_none()
+                && let Some(ref l) = self.listener
+                    && let Ok((s, _)) = l.accept() {
                         let _ = s.set_nonblocking(true);
                         self.stream = Some(s);
                     }
-                }
-            }
 
             if let Some(ref mut stream) = self.stream {
                 use std::io::Read;

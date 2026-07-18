@@ -10,7 +10,7 @@ impl TelemetryService {
         conductor.clip_orchestrator.collect_telemetry(&mut telemetry.active_clips, &mut telemetry.starting_clips_mask);
 
         // Update Matchmaking Suggestions
-        if let Ok(sugg) = conductor.matchmaking_suggestions.try_lock() {
+        if let Some(sugg) = conductor.matchmaking_suggestions.try_lock() {
             for (i, (id, score)) in sugg.iter().enumerate().take(4) {
                 telemetry.suggestions[i] = (*id, *score);
             }
@@ -54,7 +54,7 @@ impl TelemetryService {
         telemetry.stream_viewers = conductor.stream_viewers;
 
         // Sync Live Mesh Peer Templates from Discovery Service
-        if let Ok(known) = conductor.sidecar_discovery.known_plugins.lock() {
+        { let known = conductor.sidecar_discovery.known_plugins.lock();
             telemetry.mesh_peer_count = known.len() as u32;
             for (i, (name, _)) in known.iter().enumerate().take(8) {
                 let bytes = name.as_bytes();
@@ -68,14 +68,14 @@ impl TelemetryService {
         let decks = ['A', 'B', 'C', 'D'];
         for (i, &deck_id) in decks.iter().enumerate().take(4) {
             if let Some(nodes) = conductor.mixer_manager.deck_mappings.get(&deck_id) {
-                if let Ok(engine_lock) = conductor.engine_coordinator.backend_manager.engine_handle.lock() {
+                { let engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
                     if let Some(ref engine) = *engine_lock {
                         let resource_id = engine.list_children().iter()
                             .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(nodes.sampler_id))
                             .and_then(|c| c.resource_id());
 
                         if let Some(rid) = resource_id {
-                            if let Ok(lib) = conductor.library.lock() {
+                            { let lib = conductor.library.lock();
                                 if let Ok(Some(track)) = lib.get_track(rid) {
                                     if let Some(level) = track.metadata.mip_waveform.levels.get(4) {
                                         let offset = i * 64;

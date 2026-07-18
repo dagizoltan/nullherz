@@ -89,11 +89,10 @@ impl ProcessingKernel for StandardKernel {
             Self::process_sub_block_and_advance_transport(graph, transport, host, pool, inputs, outputs, sb);
         }
 
-        if let Some(remaining) = cmd {
-            if pending_command.is_none() {
+        if let Some(remaining) = cmd
+            && pending_command.is_none() {
                 *pending_command = Some(remaining);
             }
-        }
     }
 }
 

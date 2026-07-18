@@ -1,7 +1,8 @@
 use nullherz_traits::RenderingEngine;
 use crate::AudioBackend;
 use std::thread;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct ThreadedBackend {
@@ -31,7 +32,7 @@ impl AudioBackend for ThreadedBackend {
         let handle = thread::spawn(move || {
             ipc_layer::setup_rt_thread(90, Some(0));
             {
-                if let Some(ref engine_arc) = *engine_handle.lock().unwrap() {
+                if let Some(ref engine_arc) = *engine_handle.lock() {
                     let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
                     unsafe {
                         (*engine_ptr).set_config(nullherz_traits::AudioConfig {
@@ -45,7 +46,7 @@ impl AudioBackend for ThreadedBackend {
             let mut outputs_raw = vec![vec![0.0f32; period_size as usize]; 4];
             while running.load(Ordering::SeqCst) {
                 let mut sample_rate = 44100.0f64;
-                if let Some(ref engine_arc) = *engine_handle.lock().unwrap() {
+                if let Some(ref engine_arc) = *engine_handle.lock() {
                     sample_rate = engine_arc.target_sample_rate() as f64;
                     let (out0, rest) = outputs_raw.split_at_mut(1);
                     let (out1, rest) = rest.split_at_mut(1);

@@ -125,11 +125,10 @@ impl ProcessorGraph {
                 self.morph_samples_remaining = self.morph_samples_total;
             }
 
-            if let Err(msg) = self.topology_coordinator.commit() {
-                if let Some(ref logger) = self.logger {
+            if let Err(msg) = self.topology_coordinator.commit()
+                && let Some(ref logger) = self.logger {
                     logger.log(crate::rt_logging::RtLogLevel::Error, &format!("Refusing to commit hazardous topology: {}", msg), 0);
                 }
-            }
         }
 
         // Drain pending mutations if crossfades finished
@@ -245,13 +244,11 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
         let host = context.host;
 
 
-        if let Some(ref mut p) = pool {
-            if self.topology_coordinator.needs_commit {
-                if let Some(p_mut) = p.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
+        if let Some(ref mut p) = pool
+            && self.topology_coordinator.needs_commit
+                && let Some(p_mut) = p.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
                     p_mut.clear_cache();
                 }
-            }
-        }
 
         if self.morph_samples_remaining > 0 {
             let inactive_idx = (active_idx + 1) % 2;
@@ -359,8 +356,8 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                 self.buffer_pool.capture_old_buffers();
             }
 
-        if let Some(ref mut p) = pool {
-             if let Some(p_mut) = p.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
+        if let Some(ref mut p) = pool
+             && let Some(p_mut) = p.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
                  use std::sync::atomic::Ordering;
                  // Sum worker-local telemetry into the main graph accumulator
                  let num_w = p_mut.worker_producers.len();
@@ -373,7 +370,6 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                      }
                  }
              }
-        }
 
         self.telemetry.update_peak_levels(topo, &self.buffer_pool.buffers, offset, num_samples);
     }

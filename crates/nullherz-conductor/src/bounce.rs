@@ -46,7 +46,7 @@ impl OfflineRenderer {
             self.conductor.tick();
 
             // 2. Process block via backend engine handle
-            let mut engine_lock = self.conductor.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+            let mut engine_lock = self.conductor.engine_coordinator.backend_manager.engine_handle.lock();
             if let Some(ref mut engine_arc) = *engine_lock {
                 // In offline mode, the conductor and engine are both owned by the OfflineRenderer.
                 // Since we need &mut RenderingEngine to process_block, we try to get a mutable reference.
