@@ -454,7 +454,11 @@ impl Conductor {
     /// every Performance command that resolves a deck (LoadTrackToDeck,
     /// PlayDeck, SyncDecks, master-deck sampler resolution).
     pub fn bootstrap_4channel_mixer(&mut self) {
-        let commands = self.mixer_manager.create_4channel_mixer();
+        let mut commands = self.mixer_manager.create_4channel_mixer();
+        // The engine executes only what the compiled plan stages; without this
+        // commit the first partial plan (bounded per-block mutation drain)
+        // stays live forever and everything past it renders silence.
+        commands.push(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology));
         self.apply_mixer_commands(commands);
     }
 

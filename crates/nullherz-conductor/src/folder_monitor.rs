@@ -67,59 +67,29 @@ impl FolderMonitor {
     fn load_and_register(&self, path: &str) {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
-        use symphonia::core::audio::Signal;
 
-        // Use symphonia for multi-format support with panic-safe fallback bounds checks
-        let buffer = if let Ok(file) = std::fs::File::open(path) {
-            let mss = symphonia::core::io::MediaSourceStream::new(Box::new(file), Default::default());
-            let hint = symphonia::core::probe::Hint::new();
-
-            if let Ok(probed_res) = symphonia::default::get_probe().format(&hint, mss, &Default::default(), &Default::default()) {
-                let mut probed = probed_res;
-                if let Some(track) = probed.format.default_track() {
-                    if let Ok(mut decoder) = symphonia::default::get_codecs().make(&track.codec_params, &Default::default()) {
-                        let mut samples = Vec::new();
-                        let mut sample_buf = None;
-
-                        while let Ok(packet) = probed.format.next_packet() {
-                            if let Ok(decoded) = decoder.decode(&packet) {
-                                let buf = sample_buf.get_or_insert_with(|| symphonia::core::audio::AudioBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec()));
-                                decoded.convert(buf);
-
-                                // Multi-channel support: Interleave channels for the registry
-                                let chan_len = buf.frames();
-                                let num_chans = buf.spec().channels.count();
-                                for i in 0..chan_len {
-                                    for c in 0..num_chans {
-                                        samples.push(buf.chan(c)[i]);
-                                    }
-                                }
-                            }
-                        }
-                        Arc::new(samples)
-                    } else {
-                        eprintln!("FolderMonitor: Unsupported codec for: {}", path);
-                        Arc::new(vec![0.0f32; 44100 * 5])
-                    }
-                } else {
-                    eprintln!("FolderMonitor: No default track for: {}", path);
-                    Arc::new(vec![0.0f32; 44100 * 5])
-                }
-            } else {
-                eprintln!("FolderMonitor: Unsupported format or corrupt audio: {}", path);
-                Arc::new(vec![0.0f32; 44100 * 5])
-            }
-        } else {
-            eprintln!("FolderMonitor: Failed to open file: {}", path);
-            Arc::new(vec![0.0f32; 44100 * 5]) // Fallback to silent buffer
-        };
+        let buffer = decode_audio_file(path);
 
         let mut hasher = DefaultHasher::new();
         path.hash(&mut hasher);
         let id = hasher.finish();
 
+        // The SampleRegistry is in-memory and empty on EVERY boot; the library
+        // is persistent. A library hit must still hydrate the registry, or every
+        // deck load after the first-ever scan silently resolves to no buffer
+        // (the "eternal silence on second boot" bug). A content change at the
+        // same path (regenerated demo tracks) must fall through and re-analyze,
+        // or stale metadata/waveforms live forever.
+        let existing = { let lib = self.library.lock(); lib.get_track(id).ok().flatten() };
+        if let Some(track) = existing {
+            if track.metadata.total_samples == buffer.len() as u64 {
+                self.sample_registry.register_with_metadata(id, buffer, track.metadata.clone());
+                println!("FolderMonitor: Hydrated registry for {}", path);
+                return;
+            }
+            println!("FolderMonitor: Content changed for {}; re-analyzing.", path);
+        }
         let lib = self.library.lock();
-        if let Ok(Some(_)) = lib.get_track(id) { return; }
 
         let mut metadata = SampleMetadata::new_empty();
         metadata.total_samples = buffer.len() as u64;
@@ -148,6 +118,47 @@ impl FolderMonitor {
             }
         });
     }
+}
+
+
+/// Decode any supported audio file to an interleaved f32 buffer.
+/// Non-RT; used by the scanner and by on-demand deck-load hydration.
+pub fn decode_audio_file(path: &str) -> Arc<Vec<f32>> {
+    use symphonia::core::audio::Signal;
+    if let Ok(file) = std::fs::File::open(path) {
+        let mss = symphonia::core::io::MediaSourceStream::new(Box::new(file), Default::default());
+        let hint = symphonia::core::probe::Hint::new();
+        if let Ok(mut probed) = symphonia::default::get_probe().format(&hint, mss, &Default::default(), &Default::default()) {
+            if let Some(track) = probed.format.default_track() {
+                if let Ok(mut decoder) = symphonia::default::get_codecs().make(&track.codec_params, &Default::default()) {
+                    let mut samples = Vec::new();
+                    let mut sample_buf = None;
+                    while let Ok(packet) = probed.format.next_packet() {
+                        if let Ok(decoded) = decoder.decode(&packet) {
+                            let buf = sample_buf.get_or_insert_with(|| symphonia::core::audio::AudioBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec()));
+                            decoded.convert(buf);
+                            let chan_len = buf.frames();
+                            let num_chans = buf.spec().channels.count();
+                            for i in 0..chan_len {
+                                for c in 0..num_chans {
+                                    samples.push(buf.chan(c)[i]);
+                                }
+                            }
+                        }
+                    }
+                    return Arc::new(samples);
+                }
+                eprintln!("decode_audio_file: Unsupported codec for: {}", path);
+            } else {
+                eprintln!("decode_audio_file: No default track for: {}", path);
+            }
+        } else {
+            eprintln!("decode_audio_file: Unsupported format or corrupt audio: {}", path);
+        }
+    } else {
+        eprintln!("decode_audio_file: Failed to open file: {}", path);
+    }
+    Arc::new(vec![0.0f32; 44100 * 5]) // silent fallback
 }
 
 #[cfg(test)]

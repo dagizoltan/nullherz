@@ -276,6 +276,14 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
         }
 
         let num_stages = self.topology_coordinator.topologies[active_idx].plan.num_stages;
+        {
+            static ONCE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if ONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 2000 == 500 {
+                let topo_dbg = &self.topology_coordinator.topologies[active_idx];
+                let staged: u32 = topo_dbg.plan.stage_counts[..num_stages].iter().sum();
+                eprintln!("TRACE exec: node_count={} num_stages={} staged_nodes={}", topo_dbg.node_count, num_stages, staged);
+            }
+        }
         for s_idx in 0..num_stages {
             GraphExecutor::execute_stage(
                 &self.nodes,

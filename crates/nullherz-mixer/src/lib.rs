@@ -10,6 +10,8 @@ pub use common::*;
 #[derive(Debug, Clone, Default)]
 pub struct DeckNodes {
     pub sampler_id: u32,
+    pub out_l: u32,
+    pub out_r: u32,
     pub isolator_id: u32,
     pub gain_id: u32,
     pub filter_id: u32,
@@ -182,6 +184,32 @@ impl MixerManager {
         for &deck in &decks {
             let bus = if deck == 'A' || deck == 'C' { 'A' } else { 'B' };
             commands.extend(self.create_dj_deck(deck, &[1], bus));
+        }
+
+        // Bus summing: each deck renders to its own buffers; SUMMING nodes mix
+        // them onto the shared bus. Two decks writing the same buffer would
+        // OVERWRITE each other (executor gives exclusive write slices) — the
+        // silent deck erases the playing one ("buses always zero" bug).
+        {
+            let deck_out = |mapping: &std::collections::HashMap<char, DeckNodes>, d: char| {
+                let n = &mapping[&d];
+                (n.out_l, n.out_r)
+            };
+            let (a_l, a_r) = deck_out(&self.deck_mappings, 'A');
+            let (c_l, c_r) = deck_out(&self.deck_mappings, 'C');
+            let (b_l, b_r) = deck_out(&self.deck_mappings, 'B');
+            let (d_l, d_r) = deck_out(&self.deck_mappings, 'D');
+            let mut bus_sum = |in_a: u32, in_b: u32, out: u32, commands: &mut Vec<Command>| {
+                let id = self.id_allocator.allocate_node_id();
+                commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: id, processor_type_id: ProcessorTypeId::SUMMING }));
+                commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: id, input_idx: 0, new_buffer_idx: in_a }));
+                commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: id, input_idx: 1, new_buffer_idx: in_b }));
+                commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: id, output_idx: 0, new_buffer_idx: out }));
+            };
+            bus_sum(a_l, c_l, self.config.dj_a_l as u32, &mut commands);
+            bus_sum(a_r, c_r, self.config.dj_a_r as u32, &mut commands);
+            bus_sum(b_l, d_l, self.config.dj_b_l as u32, &mut commands);
+            bus_sum(b_r, d_r, self.config.dj_b_r as u32, &mut commands);
         }
 
         // --- MASTER CROSSFADER (Stereo) ---

@@ -26,6 +26,15 @@ fn set_safe_mode(&mut self, enabled: bool) {
     }
 fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext) {
         self.inner.process(inputs, outputs, context);
+        {
+            static ONCE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if ONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 4000 == 1000 {
+                let inp = inputs.first().map(|c| c.iter().fold(0.0f32, |a, &v| a.max(v.abs()))).unwrap_or(-1.0);
+                let outp = outputs.first().map(|c| c.iter().fold(0.0f32, |a, &v| a.max(v.abs()))).unwrap_or(-1.0);
+                eprintln!("TRACE biquad in_ch={} out_ch={} in={:.5} out={:.5}", inputs.len(), outputs.len(), inp, outp);
+            }
+        }
+
     }
 fn reset(&mut self) {
         self.inner.reset();

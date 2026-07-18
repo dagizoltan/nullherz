@@ -11,6 +11,10 @@ pub struct SamplerProcessor {
     metadata: Option<std::sync::Arc<nullherz_traits::SampleMetadata>>,
     quantize_enabled: bool,
     playback_rate: f32,
+    /// PlayNode arrived before the sample buffer (command-bus ordering:
+    /// AddSource rides the sample-accurate queue, PlayNode the bundle bus).
+    /// Fire the trigger as soon as the source lands.
+    pending_play: bool,
     pub slicer_mode: bool,
     pub slice_grid_beats: f32,
     pub beats_per_bar: f32,
@@ -28,6 +32,7 @@ impl SamplerProcessor {
             metadata: None,
             quantize_enabled: true,
             playback_rate: 1.0,
+            pending_play: false,
             slicer_mode: false,
             slice_grid_beats: 0.25,
             beats_per_bar: 4.0,
@@ -205,6 +210,12 @@ fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutatio
                 self.sample_buffer = buffer;
                 self.sample_id = Some(sample_id);
                 self.metadata = metadata;
+                if self.pending_play && !self.sample_buffer.is_empty() {
+                    self.pending_play = false;
+                    if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
+                        voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, 0.0, 0.0);
+                    }
+                }
             }
             nullherz_traits::TopologyMutation::UpdateMetadata { node_idx: _, metadata } => {
                 self.metadata = Some(metadata);
@@ -321,12 +332,15 @@ impl SamplerProcessor {
                 }
             }
             Command::Performance(PerformanceCommand::PlayNode { .. }) => {
-                if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
+                if self.sample_buffer.is_empty() {
+                    self.pending_play = true;
+                } else if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
                     let beat_pos = context.and_then(|c| c.transport).map(|t| t.beat_position).unwrap_or(0.0);
                     voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, 0.0, beat_pos);
                 }
             }
             Command::Performance(PerformanceCommand::StopNode { .. }) => {
+                self.pending_play = false;
                 self.reset();
             }
             Command::Performance(PerformanceCommand::SetSlipMode { node_idx: _, enabled }) => {

@@ -162,6 +162,21 @@ async fn main() {
         std::process::exit(2);
     }
 
+    // Diagnostic: what does the ENGINE actually contain at this point?
+    {
+        let handle = conductor.engine_coordinator.backend_manager.engine_handle.lock();
+        if let Some(engine) = handle.as_ref() {
+            let children = engine.list_children();
+            println!("DIAG: engine has {} child processors: {:?}",
+                children.len(),
+                children.iter().map(|c| c.processor_type()).collect::<Vec<_>>());
+        } else {
+            println!("DIAG: engine handle is EMPTY");
+        }
+        println!("DIAG: deck_mappings: {:?}",
+            conductor.mixer_manager.deck_mappings.iter().map(|(k,v)| (*k, v.sampler_id)).collect::<Vec<_>>());
+        println!("DIAG: registry ids: {:?}", conductor.transfusion_manager.sample_registry.list_ids());
+    }
     println!("Loading track {} -> Deck A, track {} -> Deck B; starting playback.", track_ids[0], track_ids[1]);
     use nullherz_traits::{Command, PerformanceCommand};
     conductor.apply_mixer_commands(vec![
@@ -170,6 +185,44 @@ async fn main() {
         Command::Performance(PerformanceCommand::PlayDeck { deck_id: 'A' }),
         Command::Performance(PerformanceCommand::PlayDeck { deck_id: 'B' }),
     ]);
+
+    // Diagnostic: give the engine 3s, then ask the samplers what they hold.
+    {
+        let t0 = Instant::now();
+        let mut last_tel = None;
+        while t0.elapsed() < Duration::from_secs(3) {
+            conductor.tick();
+            while let Some(mut tel) = context.telemetry_consumer.pop() {
+                conductor.update_timeline(&mut tel);
+                last_tel = Some(tel);
+            }
+            std::thread::sleep(Duration::from_millis(16));
+        }
+        let handle = conductor.engine_coordinator.backend_manager.engine_handle.lock();
+        if let Some(engine) = handle.as_ref() {
+            for child in engine.list_children() {
+                if child.processor_type() == "sampler" {
+                    println!("DIAG: sampler resource_id={:?} playhead={}",
+                        child.resource_id(), child.get_playback_position());
+                }
+            }
+        }
+        drop(handle);
+        if let Some(tel) = last_tel.as_ref() {
+            let hot: Vec<(usize, f32)> = tel.peak_levels.iter().enumerate()
+                .filter(|(_, p)| **p > 1e-6).map(|(i, p)| (i, *p)).collect();
+            println!("DIAG: node peaks (nonzero): {:?}", hot);
+        }
+        {
+            let topo = &conductor.topology_manager.current_topology;
+            for idx in 0..topo.node_count.min(64) {
+                let r = &topo.routing[idx];
+                let ins: Vec<u32> = r.input_indices[..r.input_count].to_vec();
+                let outs: Vec<u32> = r.output_indices[..r.output_count].to_vec();
+                println!("DIAG: node {:2} in={:?} out={:?}", idx, ins, outs);
+            }
+        }
+    }
 
     // --- Main survival loop ---
     let run_duration = Duration::from_secs(args.minutes * 60);

@@ -22,6 +22,15 @@ impl nullherz_traits::SignalProcessor for SummingProcessor {
 fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if outputs.is_empty() { return; }
         self.inner.process_16_to_1_simd(inputs, outputs[0]);
+        {
+            static ONCE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if ONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 4000 == 1000 {
+                let i0 = inputs.first().map(|c| c.iter().fold(0.0f32,|a,&v| a.max(v.abs()))).unwrap_or(-1.0);
+                let i1 = inputs.get(1).map(|c| c.iter().fold(0.0f32,|a,&v| a.max(v.abs()))).unwrap_or(-1.0);
+                let o = outputs[0].iter().fold(0.0f32,|a,&v| a.max(v.abs()));
+                eprintln!("TRACE summing n_in={} in0={:.5} in1={:.5} out={:.5}", inputs.len(), i0, i1, o);
+            }
+        }
 
         if self.soft_clip {
             let threshold = self.threshold;
