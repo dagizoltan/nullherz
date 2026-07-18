@@ -149,6 +149,12 @@ impl RdmaTransport {
     }
 
     /// Performs zero-copy bypass-CPU direct transfer of raw audio blocks into local memory region.
+    ///
+    /// # Safety
+    /// The registered memory region for `node_idx` must outlive this call and
+    /// must not be concurrently written by the remote peer; the caller must
+    /// ensure the queue pair was established for this region (RDMA writes
+    /// bypass all CPU-side bounds and aliasing checks).
     pub unsafe fn rdma_write_block(&self, node_idx: u32, block: &AudioBlock) -> Result<(), &'static str> {
         let mrs = self.memory_regions.lock();
         let qps = self.active_qps.lock();

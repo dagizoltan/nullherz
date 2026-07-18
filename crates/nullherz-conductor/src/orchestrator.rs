@@ -141,9 +141,13 @@ impl Conductor {
                 let count = FALLBACK_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let fallback_path = std::env::temp_dir()
                     .join(format!("nullherz_fallback_{}_{}.redb", std::process::id(), count));
-                Arc::new(parking_lot::Mutex::new(
-                    nullherz_dna::LibraryDatabase::load(fallback_path.to_str().unwrap()).unwrap(),
-                ))
+                let fallback = nullherz_dna::LibraryDatabase::load(&fallback_path.to_string_lossy())
+                    .or_else(|e| {
+                        eprintln!("Library fallback DB failed ({}); using in-memory library.", e);
+                        nullherz_dna::LibraryDatabase::load(":memory:")
+                    })
+                    .expect("in-memory library database cannot fail to open");
+                Arc::new(parking_lot::Mutex::new(fallback))
             }
         };
         let sidecar_discovery = crate::discovery::SidecarDiscoveryService::new("plugins").with_library(library.clone());
@@ -272,8 +276,8 @@ impl Conductor {
         if let Some(f) = port_filter { cmd.arg("--port").arg(f); }
 
         if let Ok(child) = cmd.spawn() {
+            println!("MIDI Bridge process spawned (PID: {})", child.id());
             self.midi_child = Some(child);
-            println!("MIDI Bridge process spawned (PID: {})", self.midi_child.as_ref().unwrap().id());
         }
     }
 

@@ -24,7 +24,7 @@ impl EvolutionaryBreeder {
             // Intelligent Matchmaking: Select parents with a 'genetic sweet-spot'
             // We want parents that are similar enough to be compatible, but different enough to mutate.
             use std::time::{SystemTime, UNIX_EPOCH};
-            let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as usize;
+            let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as usize;
             let idx_a = seed % tracks.len();
             let track_a = &tracks[idx_a];
 
@@ -36,7 +36,9 @@ impl EvolutionaryBreeder {
                 .find(|(id, score)| *id != track_a.id && *score >= 0.4 && *score <= 0.7);
 
             if let Some((id_b, score)) = partner {
-                let track_b = tracks.iter().find(|t| t.id == *id_b).unwrap();
+                // The library can change between ranking and lookup; a vanished
+                // partner skips this cycle rather than killing the conductor.
+                let Some(track_b) = tracks.iter().find(|t| t.id == *id_b) else { return; };
                 if self.sample_registry.get(track_a.id).is_some() && self.sample_registry.get(track_b.id).is_some() {
                     println!("Evolutionary Breeder: Intelligent Match (score={:.2}) -> Breeding {} x {}", score, track_a.title, track_b.title);
                     self.perform_breeding(track_a.id, track_b.id, &lib);
@@ -189,7 +191,7 @@ impl TransfusionManager {
 
             // 3. Register child
             use std::time::{SystemTime, UNIX_EPOCH};
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
             let child_id = (parent_a_id ^ parent_b_id).wrapping_add(now);
             let mut child_metadata_struct = (*parent_a.metadata).clone();
             child_metadata_struct.dna = child_dna;
@@ -228,7 +230,7 @@ impl TransfusionManager {
 
             // 3. Register child
             use std::time::{SystemTime, UNIX_EPOCH};
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
             let child_id = (parent_a_id ^ parent_b_id).wrapping_add(now);
             let mut child_metadata_struct = (*parent_a.metadata).clone();
             child_metadata_struct.dna = child_dna;

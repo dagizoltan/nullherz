@@ -65,7 +65,8 @@ impl PatternManager {
     pub fn set_arrangement(&mut self, arrangement: SongArrangement) {
         self.arrangement = arrangement;
         // Sort events by beat to ensure correct sequential processing
-        self.arrangement.events.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
+        // total_cmp: a NaN beat in a loaded/imported arrangement must sort, not panic
+        self.arrangement.events.sort_by(|a, b| a.beat.total_cmp(&b.beat));
         self.reset();
     }
 }
@@ -212,6 +213,22 @@ mod tests {
         let refired = pm.tick(1.5);
         assert_eq!(refired.len(), 1, "jump back to 1.5 re-fires the beat-1.0 event");
         assert_eq!(bpm_of(&refired[0]), 1.0);
+    }
+
+    /// Regression: a NaN beat (corrupt/imported project data) used to panic
+    /// the conductor inside sort_by(partial_cmp().unwrap()). total_cmp gives
+    /// NaN a defined position instead of a defined crash.
+    #[test]
+    fn test_nan_beat_does_not_panic_the_sort() {
+        let mut pm = PatternManager::new();
+        let mut arr = arrangement(&[2.0, 1.0]);
+        arr.events.push(ArrangementEvent {
+            beat: f64::NAN,
+            command: Command::Core(CoreCommand::SetBpm(0.0)),
+        });
+        pm.set_arrangement(arr); // must not panic
+        let fired = pm.tick(3.0);
+        assert!(fired.len() >= 2, "finite-beat events still fire in order");
     }
 
     #[test]

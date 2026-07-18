@@ -13,8 +13,17 @@ impl DiscoveryBeacon {
 
     pub fn start_broadcast(self) {
         tokio::spawn(async move {
-            let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind UDP socket");
-            socket.set_broadcast(true).expect("Failed to set UDP broadcast");
+            let socket = match UdpSocket::bind("0.0.0.0:0") {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Discovery beacon disabled: could not bind UDP socket ({})", e);
+                    return;
+                }
+            };
+            if let Err(e) = socket.set_broadcast(true) {
+                eprintln!("Discovery beacon disabled: could not enable broadcast ({})", e);
+                return;
+            }
 
             let msg = format!("nullherz_conductor:{}", self.port);
             let addr = "255.255.255.255:9001";
