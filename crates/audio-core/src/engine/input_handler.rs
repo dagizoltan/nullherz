@@ -31,11 +31,17 @@ impl EngineInputHandler {
         }
 
         if let Some(cons) = topology_consumer {
+            // Chunked drain (16/block) bounds RT work; commit-until-
+            // SetTopology gating in the coordinator makes the streamed batch
+            // atomic regardless of chunking.
             let mut topo_processed = 0;
             while let Some(topo_mut) = cons.pop() {
                 graph.apply_topology_mutation(topo_mut);
                 topo_processed += 1;
                 if topo_processed >= 16 { break; }
+            }
+            if let Some(g) = graph.as_any_mut().downcast_mut::<crate::processors::graph::ProcessorGraph>() {
+                g.set_topology_stream_pending(topo_processed >= 16);
             }
         }
 

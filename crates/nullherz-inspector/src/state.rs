@@ -103,6 +103,9 @@ pub struct LibraryState {
     pub playlist_queue: std::collections::VecDeque<u64>,
     pub ingestion_path: String,
     pub _playlists: Vec<crate::Playlist>,
+    /// Last background-refresh completion time; drives periodic re-polling so
+    /// tracks analyzed AFTER startup appear without user action.
+    pub last_refresh_time: f64,
 }
 
 impl Default for LibraryState {
@@ -131,6 +134,7 @@ impl Default for LibraryState {
             playlist_queue: std::collections::VecDeque::new(),
             ingestion_path: "tracks/".to_string(),
             _playlists: vec![],
+            last_refresh_time: 0.0,
         }
     }
 }

@@ -109,6 +109,12 @@ impl ProcessorGraph {
         }
     }
 
+    /// Engine input handler reports whether the topology mutation ring is
+    /// still mid-stream this block (drain hit its cap).
+    pub fn set_topology_stream_pending(&mut self, pending: bool) {
+        self.topology_coordinator.stream_pending = pending;
+    }
+
     pub fn commit_graph(&mut self) {
         // RT-9: Stateful Transition Queue
         // Prevent structural commits while crossfades are still active to maintain
