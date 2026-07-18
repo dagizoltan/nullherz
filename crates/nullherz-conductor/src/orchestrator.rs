@@ -135,8 +135,11 @@ impl Conductor {
                 // to avoid concurrent database access/locking collisions in tests.
                 static FALLBACK_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
                 let count = FALLBACK_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let fallback_path = format!("fallback_{}_{}.redb", std::process::id(), count);
-                Arc::new(std::sync::Mutex::new(nullherz_dna::LibraryDatabase::load(&fallback_path).unwrap()))
+                let fallback_path = std::env::temp_dir()
+                    .join(format!("nullherz_fallback_{}_{}.redb", std::process::id(), count));
+                Arc::new(std::sync::Mutex::new(
+                    nullherz_dna::LibraryDatabase::load(fallback_path.to_str().unwrap()).unwrap(),
+                ))
             }
         };
         let sidecar_discovery = crate::discovery::SidecarDiscoveryService::new("plugins").with_library(library.clone());

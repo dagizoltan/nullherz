@@ -1591,6 +1591,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "distributed-sidecar"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "bytemuck",
+ "ipc-layer",
+ "nullherz-dna",
+ "nullherz-traits",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "dlib"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

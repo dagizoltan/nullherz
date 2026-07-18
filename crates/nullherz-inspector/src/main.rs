@@ -371,7 +371,7 @@ impl InspectorApp {
         let db_arc = Arc::new(std::sync::Mutex::new(raw_db));
         let library_db_wrapper = SharedLibraryDb(db_arc.clone());
 
-        let (conductor_thread, _conductor) = start_in_process_conductor(cmd_rx, last_telemetry.clone(), db_arc);
+        let (conductor_thread, _conductor) = start_in_process_conductor(cmd_rx, last_telemetry.clone(), db_arc, None);
 
         let default_view = View::Console;
         let mut app = Self {
@@ -1038,6 +1038,7 @@ pub fn start_in_process_conductor(
     cmd_rx: mpsc::Receiver<Command>,
     last_telemetry: Arc<Mutex<Option<Telemetry>>>,
     db_arc: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>,
+    backend_override: Option<nullherz_backends::AudioBackendType>,
 ) -> (std::thread::JoinHandle<()>, Arc<Mutex<nullherz_conductor::Conductor>>) {
     let conductor = nullherz_conductor::Conductor::with_library(db_arc);
     let conductor_arc = Arc::new(Mutex::new(conductor));
@@ -1071,20 +1072,24 @@ pub fn start_in_process_conductor(
 
             cond.sidecar_discovery.start_watcher();
 
-            // Start backend
+            // Start backend (override wins over system_config.json; tests use Mock)
             let mut backend_type = nullherz_backends::AudioBackendType::Alsa;
-            let config_path = "system_config.json";
-            if std::path::Path::new(config_path).exists() {
-                if let Ok(content) = std::fs::read_to_string(config_path) {
-                    if let Ok(config) = serde_json::from_str::<nullherz_conductor::persistence::SystemConfig>(&content) {
-                        backend_type = match config.audio_backend.to_lowercase().as_str() {
-                            "alsa" => nullherz_backends::AudioBackendType::Alsa,
-                            "pipewire" => nullherz_backends::AudioBackendType::Pipewire,
-                            "jack" => nullherz_backends::AudioBackendType::Jack,
-                            "threaded" => nullherz_backends::AudioBackendType::Threaded,
-                            "mock" => nullherz_backends::AudioBackendType::Mock,
-                            _ => nullherz_backends::AudioBackendType::Alsa,
-                        };
+            if let Some(override_type) = backend_override {
+                backend_type = override_type;
+            } else {
+                let config_path = "system_config.json";
+                if std::path::Path::new(config_path).exists() {
+                    if let Ok(content) = std::fs::read_to_string(config_path) {
+                        if let Ok(config) = serde_json::from_str::<nullherz_conductor::persistence::SystemConfig>(&content) {
+                            backend_type = match config.audio_backend.to_lowercase().as_str() {
+                                "alsa" => nullherz_backends::AudioBackendType::Alsa,
+                                "pipewire" => nullherz_backends::AudioBackendType::Pipewire,
+                                "jack" => nullherz_backends::AudioBackendType::Jack,
+                                "threaded" => nullherz_backends::AudioBackendType::Threaded,
+                                "mock" => nullherz_backends::AudioBackendType::Mock,
+                                _ => nullherz_backends::AudioBackendType::Alsa,
+                            };
+                        }
                     }
                 }
             }
@@ -1156,6 +1161,32 @@ pub fn start_in_process_conductor(
 mod tests {
     use super::*;
 
+    /// Polls the conductor until `active_master_deck` matches `expected`, panicking after
+    /// `timeout`. The conductor thread boots the engine before its command-drain loop starts,
+    /// so a fixed sleep races setup; polling makes the test independent of boot time.
+    fn wait_for_master_deck(
+        conductor_arc: &Arc<Mutex<nullherz_conductor::Conductor>>,
+        expected: char,
+        timeout: std::time::Duration,
+    ) {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            {
+                let cond = conductor_arc.lock();
+                if cond.active_master_deck == expected {
+                    return;
+                }
+                if std::time::Instant::now() >= deadline {
+                    panic!(
+                        "Timed out waiting for active_master_deck == '{}' (still '{}')",
+                        expected, cond.active_master_deck
+                    );
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn test_inspector_command_routing_to_conductor() {
         let (cmd_tx, cmd_rx) = mpsc::channel::<Command>();
@@ -1165,8 +1196,14 @@ mod tests {
         let raw_db = nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase");
         let db_arc = Arc::new(std::sync::Mutex::new(raw_db));
 
-        // Start the in-process conductor thread
-        let (_conductor_thread, conductor_arc) = start_in_process_conductor(cmd_rx, last_telemetry, db_arc);
+        // Start the in-process conductor thread on the Mock backend: no audio hardware
+        // dependency, and CI runners have no sound card.
+        let (_conductor_thread, conductor_arc) = start_in_process_conductor(
+            cmd_rx,
+            last_telemetry,
+            db_arc,
+            Some(nullherz_backends::AudioBackendType::Mock),
+        );
 
         // Initial state check
         {
@@ -1174,26 +1211,12 @@ mod tests {
             assert_eq!(cond.active_master_deck, 'A'); // Starts as 'A' by default
         }
 
-        // Send a Command to mutate conductor's state
+        // Send a Command to mutate conductor's state and wait for the drain loop to apply it
         cmd_tx.send(Command::Core(nullherz_traits::CoreCommand::SetMasterDeck('C'))).unwrap();
-
-        // Wait for the background thread loop to tick and process the command (approx 100ms for extra safety)
-        std::thread::sleep(std::time::Duration::from_millis(100));
-
-        // Verify state mutation on Conductor
-        {
-            let cond = conductor_arc.lock();
-            assert_eq!(cond.active_master_deck, 'C'); // Should have been mutated to 'C'!
-        }
+        wait_for_master_deck(&conductor_arc, 'C', std::time::Duration::from_secs(10));
 
         // Send another Command
         cmd_tx.send(Command::Core(nullherz_traits::CoreCommand::SetMasterDeck('D'))).unwrap();
-
-        std::thread::sleep(std::time::Duration::from_millis(100));
-
-        {
-            let cond = conductor_arc.lock();
-            assert_eq!(cond.active_master_deck, 'D'); // Should have been mutated to 'D'!
-        }
+        wait_for_master_deck(&conductor_arc, 'D', std::time::Duration::from_secs(10));
     }
 }

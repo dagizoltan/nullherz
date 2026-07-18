@@ -1,0 +1,27 @@
+name: Kani Proofs
+
+# The Kani harnesses (PI clock-servo clamp, jitter-buffer invariance, parallel
+# graph execution) are slow model-checking runs, so they run weekly and on
+# demand rather than per-PR. The kani-verify feature exists only on the three
+# crates that carry harnesses, hence per-crate invocations.
+on:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays 04:00 UTC
+  workflow_dispatch:
+
+jobs:
+  kani:
+    name: Model-check RT invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Kani
+        run: cargo install kani-verifier && cargo kani setup
+      - name: Verify nullherz-traits (PI servo clamp)
+        run: cargo kani -p nullherz-traits --features kani-verify
+      - name: Verify audio-core (parallel graph execution)
+        run: cargo kani -p audio-core --features kani-verify
+      - name: Verify nullherz-conductor (jitter buffer invariance)
+        run: cargo kani -p nullherz-conductor --features kani-verify

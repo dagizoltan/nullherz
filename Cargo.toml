@@ -14,6 +14,7 @@ members = [
     "crates/nullherz-bench", "sidecars/nullherz-dummy", "sidecars/spectral-transfuser",
     "sidecars/nullherz-template",
     "sidecars/reference_dsp",
+    "sidecars/distributed-sidecar",
     "crates/nullherz-gateway",
     "crates/nullherz-topology",
     "crates/nullherz-setup",
