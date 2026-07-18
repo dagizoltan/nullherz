@@ -37,7 +37,7 @@
 | **Modular Hierarchy** | ✅ | Command sets split into Core/Mixer/Perf/Resource/Dna/Topology with decoupled translation logic. |
 | **Zero-Allocation Serialization**| ✅ | `bincode::serialize_into` used on audio hot-paths for guest-host IPC. |
 | **RT Thread Hardening** | ✅ | FTZ/DAZ flags, `SCHED_FIFO` priority, core pinning, cgroup memory limits (`ipc-layer`). |
-| **Clock Sync (Simplified PTP)** | 🧪 | UDP :319 master broadcast + PI clock servo (Kani-proved integral clamp). Fixed 1ms wire-delay assumption; no Delay_Req/Resp exchange yet. |
+| **Clock Sync (PTP)** | 🔶 | Typed SYNC/DELAY_REQ/DELAY_RESP protocol on UDP :319; measured round-trip (offset-free, 1/8-EMA, ≤100ms plausibility clamp) + PI servo (Kani-proved clamp). SO_TIMESTAMPING and BMC election pending. |
 | **rkyv Integration** | 💤 | Proposed for zero-copy project persistence. |
 
 ---
@@ -70,7 +70,7 @@
 | **Chaotic Transfusion** | ✅ | Logistic Map mutation logic for non-linear trait inheritance. |
 | **Smart Crates** | ✅ | Genetic similarity and range-based trait filtering (redb backend). |
 | **P2P Discovery** | ✅ | mDNS-style genetic cloud discovery and synchronization. |
-| **Gossip Protocol** | 🔶 | TCP Gossipsub-style overlay (GRAFT mesh, `GOSSIP_SIGNED` ed25519 payloads) implemented; peer-signature cache still contains mock elements. `libp2p` migration planned. |
+| **Gossip Protocol** | 🔶 | TCP Gossipsub-style overlay (GRAFT mesh, `GOSSIP_SIGNED` ed25519 payloads) with TOFU peer-identity pinning and key-change rejection. `libp2p` migration planned. |
 
 ---
 

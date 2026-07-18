@@ -1,20 +1,19 @@
-# Nullherz Technical Debt & Stubs Report (Updated July 17, 2026)
+# Nullherz Technical Debt & Stubs Report (Updated July 18, 2026)
 
-This document tracks remaining stubs and prototype logic, verified against the code during the July 17 reverse-engineering pass. Items are listed with file evidence so they can be re-checked cheaply.
+This document tracks remaining stubs and prototype logic, verified against the code. Items are listed with file evidence so they can be re-checked cheaply. Full suite: **127/127 green** as of 2026-07-18.
 
 ---
 
 ## 1. Open Items (Verified in Code)
 
-### Test Suite
-- **`test_inspector_command_routing_to_conductor` fails deterministically** (`crates/nullherz-inspector/src/main.rs`, in-crate test). It synchronizes with a fixed 100 ms `sleep` while the in-process Conductor is still booting a real ALSA backend, scanning `tracks/`, and binding the DNA server on :9003 — so the `SetMasterDeck('C')` assertion races setup and loses. The command handler itself is correct (`command_handler.rs` `CoreCommand::SetMasterDeck`). Fix: replace sleep-based sync with a readiness signal (or poll with timeout) and use the Mock backend in tests. Until then, "100% test-suite passing" claims must exclude this test (workspace excluding inspector: 117/117 pass as of 2026-07-17).
-
 ### Clock Sync (`nullherz-conductor/src/ptp_engine.rs`, `nullherz-traits`)
-- **Simplified PTP, not IEEE 1588**: master broadcasts a raw `u64` timestamp to `255.255.255.255:319` at 1 Hz; slaves apply a **fixed 1 ms wire-delay assumption**. There is no Delay_Req/Delay_Resp path-delay measurement. `nullherz-traits/src/lib.rs` still carries a "Placeholder for PTP sync logic" in the default `ClockProvider` path. The PI servo integral clamp is Kani-proved; the delay model is not yet real.
+- **SO_TIMESTAMPING not wired into the sync engine**: the rewritten `PtpEngine` (typed SYNC/DELAY_REQ/DELAY_RESP protocol, measured path delay) timestamps arrivals with `ClockProvider::get_system_time_ns()`; `PtpClockProvider::recv_with_timestamp` (hardware RX timestamps) exists but reads from its own socket and is not yet integrated into the engine's recv path. Software timestamps bound accuracy to scheduler latency (~tens of µs).
+- **`SystemClockProvider::synchronize_with_master` is a no-op** (`nullherz-traits/src/lib.rs`, "Placeholder for PTP sync logic") — only `PtpClockProvider` actually disciplines.
+- **No Best-Master-Clock election**: master/slave roles are static constructor flags.
 
 ### Genetic Cloud (`nullherz-dna/src/lib.rs`)
-- **Peer signature cache is mocked**: `CloudPeerSync.peer_signatures` is documented in-code as "Mock for cryptographic signatures". Payload signing/verification (`GOSSIP_SIGNED`, ed25519) is real, but per-peer trust bookkeeping is not production-grade. `libp2p` migration remains the Q3 directive.
 - **Latent-space projection matrix is mocked** (`lib.rs` ~line 1412) for dimensionality reduction.
+- **Identity pinning is TOFU**: peer keys are pinned trust-on-first-use with key-change rejection; there is no out-of-band verification or revocation. `libp2p` migration remains the Q3 directive.
 
 ### WASM Runtime (`fx-runtime/src/wasm_runtime.rs`)
 - **Zero-copy SHM mapping is a placeholder** (~line 64): guest access to the shared command buffer currently goes through a copy; "true zero-copy mapping" is noted in-code as pending.
@@ -28,14 +27,26 @@ This document tracks remaining stubs and prototype logic, verified against the c
 - **Session restore is disabled/mocked** (`views/settings/preferences.rs`).
 - **Breeder View**: transfusion progress bar tracks active DNA blends but lacks sub-block pipeline progress telemetry.
 
-### Repo Hygiene
-- **`fallback_*.redb` litter**: 12 transient database files (~1.5 MB each) from fallback/test runs sit in the repo root. They are safe to delete; the fallback DB path should point at a temp/cache dir and the pattern should be gitignored.
-- **`alsa_test.rs`** (repo root): ad-hoc `dlopen` probe outside any crate; move into `nullherz-backends` tests or delete.
-- **`sidecars/distributed-sidecar` is not a workspace member** (built independently); consider adding it to the root `Cargo.toml` members so `cargo check --workspace` covers it.
+### Lint Backlog
+- **174 clippy style lints** (collapsible_if let-chains, auto-deref, type_complexity, needless_range_loop, missing `# Safety` docs). The CI clippy job is advisory until these reach zero, then flips to a hard gate. All RT-safety (disallowed-methods/types) lints are resolved or explicitly scoped.
 
 ---
 
 ## 2. Resolved Items (Hardened — kept for history)
+
+### July 18, 2026 hardening pass
+- **Inspector routing test**: [RESOLVED] `test_inspector_command_routing_to_conductor` now uses the Mock backend and poll-with-timeout instead of sleep-based sync; suite fully green.
+- **PTP path delay**: [RESOLVED] `PtpEngine` rewritten with a typed SYNC/DELAY_REQ/DELAY_RESP protocol; round-trip is measured (offset-free four-timestamp computation), EMA-filtered (1/8), plausibility-clamped (≤100 ms), replacing the fixed 1 ms assumption. Legacy 8-byte SYNC still accepted.
+- **PTP engine never ran on Linux**: [RESOLVED] `PtpClockProvider` and `PtpEngine` both bound `0.0.0.0:319`; the second bind failed with EADDRINUSE and was silently discarded. The engine socket now sets SO_REUSEADDR/SO_REUSEPORT.
+- **Peer signature cache**: [RESOLVED] Replaced the write-only `peer_signatures` mock with `peer_keys` — per-peer ed25519 identities pinned trust-on-first-use via HANDSHAKE/IDENTITY, with key-change rejection; `request_dna` requires the DNA signer to match the pinned identity.
+- **Private key disclosure (security)**: [RESOLVED] The DnaServer HANDSHAKE handler responded with the node's *private* signing key as its IDENTITY; it now sends only the derived public verifying key. Regression-tested.
+- **parking_lot migration**: [RESOLVED] All remaining `std::sync::Mutex` usage in the orchestration/UI/network planes migrated to `parking_lot::Mutex` (192 lint hits); `tokio::sync::Mutex` async sites untouched.
+- **`fallback_*.redb` litter**: [RESOLVED] Fallback library DBs now go to the system temp dir; root files deleted.
+- **`alsa_test.rs`**: [RESOLVED] Moved to `crates/nullherz-backends/examples/alsa_dlopen_probe.rs` (CI-compiled).
+- **distributed-sidecar workspace coverage**: [RESOLVED] Added to workspace members; latent rot (missing trait import, `AudioBlock` `_pad`, non-`Send` futures) fixed.
+- **CI gate**: [ADDED] check with `-D warnings`, full test suite on Mock backend, advisory clippy, weekly Kani proofs.
+
+### Earlier passes
 
 - **Orchestrator Calibration**: [RESOLVED] Dynamic calculation based on engine sample rate implemented.
 - **Remote Audio Send**: [RESOLVED] Refactored from per-block `tokio::spawn` to efficient batching.
