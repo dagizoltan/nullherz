@@ -1,3 +1,7 @@
+# NOTE: GitHub Actions is currently unavailable on this repo (plan limits).
+# The authoritative gate is the identical local script: scripts/verify.sh,
+# enforced as a pre-push hook via `git config core.hooksPath .githooks`.
+# This workflow is kept so CI resumes automatically if Actions comes back.
 name: CI
 
 on:
