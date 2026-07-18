@@ -1068,77 +1068,6 @@
       "position": null
     },
     {
-      "id": 16,
-      "type_id": 1,
-      "params": [
-        [
-          0,
-          0.0
-        ],
-        [
-          1,
-          0.0
-        ],
-        [
-          2,
-          0.0
-        ],
-        [
-          3,
-          0.0
-        ],
-        [
-          4,
-          0.0
-        ],
-        [
-          5,
-          0.0
-        ],
-        [
-          6,
-          0.0
-        ],
-        [
-          7,
-          0.0
-        ],
-        [
-          8,
-          0.0
-        ],
-        [
-          9,
-          0.0
-        ],
-        [
-          10,
-          0.0
-        ],
-        [
-          11,
-          0.0
-        ],
-        [
-          12,
-          0.0
-        ],
-        [
-          13,
-          0.0
-        ],
-        [
-          14,
-          0.0
-        ],
-        [
-          15,
-          0.0
-        ]
-      ],
-      "position": null
-    },
-    {
       "id": 18,
       "type_id": 2,
       "params": [
@@ -1993,6 +1922,77 @@
     {
       "id": 31,
       "type_id": 190,
+      "params": [
+        [
+          0,
+          0.0
+        ],
+        [
+          1,
+          0.0
+        ],
+        [
+          2,
+          0.0
+        ],
+        [
+          3,
+          0.0
+        ],
+        [
+          4,
+          0.0
+        ],
+        [
+          5,
+          0.0
+        ],
+        [
+          6,
+          0.0
+        ],
+        [
+          7,
+          0.0
+        ],
+        [
+          8,
+          0.0
+        ],
+        [
+          9,
+          0.0
+        ],
+        [
+          10,
+          0.0
+        ],
+        [
+          11,
+          0.0
+        ],
+        [
+          12,
+          0.0
+        ],
+        [
+          13,
+          0.0
+        ],
+        [
+          14,
+          0.0
+        ],
+        [
+          15,
+          0.0
+        ]
+      ],
+      "position": null
+    },
+    {
+      "id": 32,
+      "type_id": 140,
       "params": [
         [
           0,
@@ -3695,19 +3695,19 @@
   "bpm": 120.0,
   "transport_playing": true,
   "node_names": {
-    "deck_c_filter": 24,
-    "preview_node": 111,
-    "deck_d_sampler": 30,
-    "deck_d_filter": 34,
-    "master_limiter": 48,
-    "deck_a_filter": 4,
-    "deck_a_sampler": 0,
-    "deck_d_gain": 33,
-    "deck_c_gain": 23,
-    "deck_a_gain": 3,
     "deck_b_filter": 14,
+    "deck_b_gain": 13,
     "deck_c_sampler": 20,
+    "deck_c_filter": 24,
+    "deck_c_gain": 23,
+    "preview_node": 111,
+    "master_limiter": 48,
+    "deck_d_gain": 33,
+    "deck_a_gain": 3,
+    "deck_a_filter": 4,
     "deck_b_sampler": 10,
-    "deck_b_gain": 13
+    "deck_d_filter": 34,
+    "deck_a_sampler": 0,
+    "deck_d_sampler": 30
   }
 }

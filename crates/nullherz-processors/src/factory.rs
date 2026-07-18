@@ -38,8 +38,12 @@ impl ProcessorFactory for DelayFactory {
 pub struct BiquadFactory;
 impl ProcessorFactory for BiquadFactory {
     fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        // Identity (bypass) by default: a freshly created filter must be
+        // sonically neutral until parameters arrive. The old arbitrary
+        // lowpass {0.1,0.2,0.1,-0.5,0.2} silently cost ~5dB and treble at
+        // EVERY biquad in the graph (deck filter, FX slot, master EQ).
         let coeffs = audio_dsp::BiquadCoefficients {
-            b0: 0.1, b1: 0.2, b2: 0.1, a1: -0.5, a2: 0.2
+            b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0
         };
         Some(Box::new(BiquadProcessor::new(node_idx as u64, coeffs)))
     }

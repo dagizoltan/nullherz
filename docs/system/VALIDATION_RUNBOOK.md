@@ -23,7 +23,20 @@ order:
    analysis per path; after regenerating `tracks/*.wav`, back up and delete
    `library.redb` so the folder monitor re-analyzes (BPM, transients,
    waveform mips).
-4. **OS-level check** if still silent: `aplay /usr/share/sounds/alsa/Front_Center.wav`
+4. **Realtime priority (the underrun fix).** The ALSA thread requests
+   SCHED_FIFO directly and, when that is denied (unprivileged sessions have
+   `ulimit -r` = 0), falls back to **RTKit** over D-Bus
+   (`MakeThreadRealtimeWithPID`) — the same mechanism PipeWire clients use,
+   available on any stock desktop running rtkit-daemon, no sudo or group
+   changes required. The outcome prints at startup; measured on the
+   reference x270 under full 3-core adversarial load: 411 underruns/18s
+   without RT, **0 with it** (and 0 in the release GUI). If you ever see
+   `RT scheduling: DENIED`, rtkit-daemon is missing — then either install
+   it or add an rtprio limits entry (`sudo usermod -aG pipewire $USER`
+   piggybacks on the stock PipeWire rule). Buffer slack is 8 periods
+   (~46 ms) by default, tunable via `NULLHERZ_BUFFER_PERIODS` (2–32; lower
+   = less latency, only safe with RT acquired).
+5. **OS-level check** if still silent: `aplay /usr/share/sounds/alsa/Front_Center.wav`
    and `pactl get-sink-mute @DEFAULT_SINK@`.
 
 Demo tracks are generated, deterministic, and regenerable with

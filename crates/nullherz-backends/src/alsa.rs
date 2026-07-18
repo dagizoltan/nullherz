@@ -102,7 +102,7 @@ impl AudioBackend for AlsaBackend {
         const SND_PCM_FORMAT_S16_LE: i32 = 2;
         const SND_PCM_FORMAT_FLOAT_LE: i32 = 14;
 
-        let (is_float, rate, period_size);
+        let (is_float, rate, period_size, negotiated_buffer);
 
         unsafe {
             let mut hw_params: *mut std::ffi::c_void = std::ptr::null_mut();
@@ -141,11 +141,20 @@ impl AudioBackend for AlsaBackend {
             (alsa.snd_pcm_hw_params_set_period_size_near)(pcm, hw_params, &mut ps, &mut dir);
             let mut max_period = ipc_layer::MAX_BLOCK_SIZE as u64;
             (alsa.snd_pcm_hw_params_set_period_size_max)(pcm, hw_params, &mut max_period, &mut dir);
-            let mut buffer_size = ps * 4;
+            // Buffer depth = scheduling slack. period*4 (~23ms at 256/44k1) is
+            // not enough on a loaded 2-core desktop (measured: 411 underruns in
+            // 18s under stress); default to 8 periods (~46ms), overridable via
+            // NULLHERZ_BUFFER_PERIODS for low-latency setups with RT privileges.
+            let buffer_periods: u64 = std::env::var("NULLHERZ_BUFFER_PERIODS")
+                .ok().and_then(|v| v.parse().ok()).filter(|&v| (2..=32).contains(&v)).unwrap_or(8);
+            let mut buffer_size = ps * buffer_periods;
             (alsa.snd_pcm_hw_params_set_buffer_size_near)(pcm, hw_params, &mut buffer_size);
             period_size = ps;
 
+            negotiated_buffer = buffer_size;
             eprintln!("[ALSA] Negotiated: rate={} period={} buffer={}", rate, period_size, buffer_size);
+            #[cfg(debug_assertions)]
+            eprintln!("[ALSA] WARNING: DEBUG build — DSP runs 10-30x slower and WILL underrun. Use --release.");
 
             let hw_ret = (alsa.snd_pcm_hw_params)(pcm, hw_params);
             if hw_ret != 0 {
@@ -164,6 +173,14 @@ impl AudioBackend for AlsaBackend {
 
         let handle = thread::spawn(move || {
             let pcm = pcm_raw as *mut std::ffi::c_void;
+
+            // RT scheduling is the difference between riding out scheduler
+            // gaps and drowning in them; report the outcome loudly so a
+            // denied request is never mistaken for an engine problem.
+            match ipc_layer::set_rt_priority(80) {
+                Ok(()) => eprintln!("[ALSA] RT scheduling: ACQUIRED (SCHED_FIFO direct or SCHED_RR via RTKit)"),
+                Err(_) => eprintln!("[ALSA] RT scheduling: DENIED — running at normal priority. Underruns likely under load. Fix: add '@audio - rtprio 95' to /etc/security/limits.d/audio.conf and re-login."),
+            }
 
             let mut engine_arc_opt = None;
             {
@@ -190,6 +207,22 @@ impl AudioBackend for AlsaBackend {
                 let mut interleaved_s16 = vec![0i16; actual_period * 2];
 
                 let mut block_count: u64 = 0;
+                // Pre-fill the device buffer with silence: starting (or
+                // recovering) with a full buffer of slack instead of one
+                // period is what breaks the endless underrun-recover loop.
+                let prefill = |alsa: &AlsaLib, pcm: *mut std::ffi::c_void, silence_f32: &[f32], silence_s16: &[i16], periods: u64| {
+                    for _ in 0..periods.saturating_sub(1) {
+                        if is_float {
+                            (alsa.snd_pcm_writei)(pcm, silence_f32.as_ptr() as *const _, (silence_f32.len() / 2) as u64);
+                        } else {
+                            (alsa.snd_pcm_writei)(pcm, silence_s16.as_ptr() as *const _, (silence_s16.len() / 2) as u64);
+                        }
+                    }
+                };
+                let silence_f32 = vec![0.0f32; actual_period * 2];
+                let silence_s16 = vec![0i16; actual_period * 2];
+                let n_periods = (negotiated_buffer / period_size).max(2);
+                prefill(&alsa, pcm, &silence_f32, &silence_s16, n_periods);
                 eprintln!("[ALSA] Audio thread running. period={} engine_bound={}", actual_period, engine_arc_opt.is_some());
 
                 while running.load(Ordering::SeqCst) {
@@ -242,6 +275,7 @@ impl AudioBackend for AlsaBackend {
                         eprintln!("[ALSA] snd_pcm_writei error: {}, recovering...", written);
                         (alsa.snd_pcm_recover)(pcm, written as i32, 1);
                         (alsa.snd_pcm_prepare)(pcm);
+                        prefill(&alsa, pcm, &silence_f32, &silence_s16, n_periods);
                     }
                 }
                 eprintln!("[ALSA] Audio loop exiting, closing PCM...");

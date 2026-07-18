@@ -18,6 +18,10 @@ pub struct DnaMorpher {
 
     // Parameters
     morph_pos: f32, // 0.0 (A) to 1.0 (B)
+    /// Spectral resynthesis replaces bin magnitudes with the latent vector —
+    /// with default (zero) DNA that silences/whitens the signal. Stay a dry
+    /// passthrough until real DNA has been loaded.
+    pub(crate) engaged: bool,
 }
 
 impl DnaMorpher {
@@ -29,6 +33,7 @@ impl DnaMorpher {
             dna_b: Arc::new(SoundDNA::default()),
             current_latent: [0.0; 16],
             morph_pos: 0.5,
+            engaged: false,
         }
     }
 
@@ -45,6 +50,15 @@ impl DnaMorpher {
 impl nullherz_traits::SignalProcessor for DnaMorpher {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
+
+        if !self.engaged {
+            // Dry passthrough on every channel until a transfusion engages.
+            for (inp, out) in inputs.iter().zip(outputs.iter_mut()) {
+                let n = inp.len().min(out.len());
+                out[..n].copy_from_slice(&inp[..n]);
+            }
+            return;
+        }
 
         self.update_morph();
 
@@ -95,6 +109,8 @@ impl AudioProcessor for DnaMorpher {
             // For DnaMorpher, we might treat updates as setting Slot B
             self.dna_a = self.dna_b.clone();
             self.dna_b = Arc::new(metadata.dna.clone());
+            // Real DNA has arrived; the morpher may now shape the signal.
+            self.engaged = true;
         }
     }
 
@@ -122,5 +138,43 @@ impl AudioProcessor for DnaMorpher {
             num_parameters: 1,
             parameters,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nullherz_traits::SignalProcessor;
+
+    /// Regression: with no DNA loaded, the morpher must be bit-transparent.
+    /// Its spectral resynthesis with default (zero) latent used to replace
+    /// the whole deck signal with near-silence — the "-45dB mush" bug.
+    #[test]
+    fn test_unengaged_morpher_is_bit_transparent() {
+        let mut m = DnaMorpher::new(1, 1024);
+        let input: Vec<f32> = (0..512).map(|i| ((i as f32) * 0.13).sin() * 0.8).collect();
+        let mut output = vec![0.0f32; 512];
+        let mut ctx = nullherz_traits::ProcessContext {
+            transport: None, host: None, sub_block_offset: 0, is_last_sub_block: true,
+        };
+        let inp: [&[f32]; 1] = [&input];
+        let mut out: [&mut [f32]; 1] = [&mut output];
+        m.process(&inp, &mut out, &mut ctx);
+        assert_eq!(output, input, "unengaged morpher must pass audio through unchanged");
+    }
+
+    /// Loading real DNA (UpdateMetadata) engages the resynthesis path.
+    #[test]
+    fn test_update_metadata_engages_morpher() {
+        use nullherz_traits::AudioProcessor;
+        let mut m = DnaMorpher::new(1, 1024);
+        assert!(!m.engaged);
+        let mut meta = nullherz_traits::SampleMetadata::new_empty();
+        meta.dna.spectral.latent_space = [0.5; 16];
+        m.apply_topology_mutation(nullherz_traits::TopologyMutation::UpdateMetadata {
+            node_idx: 1,
+            metadata: std::sync::Arc::new(meta),
+        });
+        assert!(m.engaged, "real DNA must engage the morpher");
     }
 }

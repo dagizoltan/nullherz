@@ -51,6 +51,7 @@ mod tests {
         morpher.dna_b = std::sync::Arc::new(dna_b);
 
         morpher.set_parameter(0, 0.5, 0); // morph_pos = 0.5
+        morpher.engaged = true; // DNA is hand-loaded above; process() gates on engagement
 
         // At 0.5 morph between orthogonal unit vectors, both should be equal and roughly 0.707
         // (Since Slerp preserves magnitude)
