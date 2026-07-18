@@ -5,8 +5,15 @@ use wgpu::util::DeviceExt;
 struct WaveformGlobals {
     scroll_offset: f32,
     zoom: f32,
+    // WGSL uniform layout: vec4<f32> is 16-byte aligned, so the shader-side
+    // struct is 32 bytes. Without this padding Rust packs 24 bytes and wgpu
+    // rejects the bind group at draw time ("bound with size 24, expects 32").
+    _pad: [f32; 2],
     accent_color: [f32; 4],
 }
+
+// Compile-time guard: must match the WGSL Globals struct in waveform.wgsl.
+const _: () = assert!(std::mem::size_of::<WaveformGlobals>() == 32);
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -51,6 +58,7 @@ impl WaveformRenderer {
             contents: bytemuck::cast_slice(&[WaveformGlobals {
                 scroll_offset: 0.0,
                 zoom: 1.0,
+                _pad: [0.0; 2],
                 accent_color: [0.0, 1.0, 0.8, 1.0],
             }]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -63,7 +71,7 @@ impl WaveformRenderer {
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: None,
+                    min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<WaveformGlobals>() as u64),
                 },
                 count: None,
             }],
@@ -185,6 +193,7 @@ impl WaveformRenderer {
         let globals = WaveformGlobals {
             scroll_offset: scroll,
             zoom,
+            _pad: [0.0; 2],
             accent_color: color,
         };
         queue.write_buffer(&self.globals_buffer, 0, bytemuck::cast_slice(&[globals]));
