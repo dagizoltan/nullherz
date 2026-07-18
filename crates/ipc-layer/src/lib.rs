@@ -372,7 +372,43 @@ impl Drop for EventFd {
 }
 
 pub fn set_rt_priority(priority: i32) -> Result<(), IpcError> {
-    set_rt_priority_for(0, priority)
+    if set_rt_priority_for(0, priority).is_ok() {
+        return Ok(());
+    }
+    // Fallback: RTKit grants SCHED_RR to unprivileged threads via D-Bus —
+    // the standard desktop-audio path (it is how PipeWire clients get RT
+    // without rlimit entries). RTKit requires a finite RLIMIT_RTTIME on the
+    // requesting process before it will grant.
+    rtkit_make_realtime(priority)
+}
+
+/// Ask rtkit-daemon (if present) to make the current thread realtime.
+/// Non-RT setup path: spawning dbus-send here is deliberate and fine.
+fn rtkit_make_realtime(priority: i32) -> Result<(), IpcError> {
+    unsafe {
+        // RTKit refuses processes with unlimited RTTIME (runaway-RT guard).
+        let lim = libc::rlimit { rlim_cur: 200_000_000, rlim_max: 200_000_000 }; // 200ms
+        libc::setrlimit(libc::RLIMIT_RTTIME, &lim);
+    }
+    let tid = unsafe { libc::syscall(libc::SYS_gettid) } as u64;
+    let prio = priority.clamp(1, 99) as u32;
+    let out = std::process::Command::new("dbus-send")
+        .args([
+            "--system", "--print-reply", "--type=method_call",
+            "--dest=org.freedesktop.RealtimeKit1",
+            "/org/freedesktop/RealtimeKit1",
+            "org.freedesktop.RealtimeKit1.MakeThreadRealtimeWithPID",
+        ])
+        .arg(format!("uint64:{}", std::process::id()))
+        .arg(format!("uint64:{}", tid))
+        .arg(format!("uint32:{}", prio.min(20)))
+        .output();
+    match out {
+        Ok(o) if o.status.success() => Ok(()),
+        Ok(o) => Err(IpcError::PriorityFailed(format!(
+            "rtkit refused: {}", String::from_utf8_lossy(&o.stderr).trim()))),
+        Err(e) => Err(IpcError::PriorityFailed(format!("rtkit unavailable: {}", e))),
+    }
 }
 
 pub fn set_rt_priority_for(pid: i32, priority: i32) -> Result<(), IpcError> {
