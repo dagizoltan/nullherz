@@ -43,7 +43,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             nullherz_ui_hal::widgets::render_segmented_control_vertical(
                 ui,
                 &theme,
-                &mut app.active_settings_tab,
+                &mut app.settings.active_settings_tab,
                 &options_str,
                 160.0,
             );
@@ -58,7 +58,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         let right_ui = &mut columns[1];
         egui::ScrollArea::vertical().id_source("settings_pane_scroll").show(right_ui, |ui| {
             ui.set_min_width(380.0);
-            match app.active_settings_tab {
+            match app.settings.active_settings_tab {
                 SettingsTab::General => render_general(app, ui),
                 SettingsTab::Audio => render_audio(app, ui),
                 SettingsTab::Midi => render_midi(app, ui),
@@ -88,13 +88,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                  b[..bytes.len().min(128)].copy_from_slice(&bytes[..bytes.len().min(128)]);
                  b
              })));
-             app.config_saved_time = Some(ui.input(|i| i.time));
+             app.settings.config_saved_time = Some(ui.input(|i| i.time));
         }
 
-        if let Some(saved_t) = app.config_saved_time {
+        if let Some(saved_t) = app.settings.config_saved_time {
             let current_t = ui.input(|i| i.time);
             if current_t - saved_t < 1.5 {
-                let text = if app.autosave_triggered.is_some() {
+                let text = if app.settings.autosave_triggered.is_some() {
                     format!("Autosaved {}", egui_phosphor::regular::CHECK)
                 } else {
                     format!("Saved {}", egui_phosphor::regular::CHECK)
@@ -102,8 +102,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 ui.label(RichText::new(text).strong().color(theme.success));
                 ui.ctx().request_repaint(); // Keep repainting while banner is active
             } else {
-                app.config_saved_time = None;
-                app.autosave_triggered = None;
+                app.settings.config_saved_time = None;
+                app.settings.autosave_triggered = None;
             }
         }
     });

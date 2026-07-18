@@ -29,15 +29,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     // Global Transport & Master Controls
     ui.horizontal(|ui| {
         // Global PLAY / STOP
-        let play_btn = ui.selectable_label(app.global_playing, RichText::new("▶ PLAY").strong().color(if app.global_playing { app.theme.success } else { app.theme.text_secondary }));
+        let play_btn = ui.selectable_label(app.decks.global_playing, RichText::new("▶ PLAY").strong().color(if app.decks.global_playing { app.theme.success } else { app.theme.text_secondary }));
         if play_btn.clicked() {
-            app.global_playing = true;
+            app.decks.global_playing = true;
             let _ = app.command_sender.send(Command::Core(CoreCommand::Play));
         }
 
-        let stop_btn = ui.selectable_label(!app.global_playing, RichText::new("■ STOP").strong().color(if !app.global_playing { app.theme.danger } else { app.theme.text_secondary }));
+        let stop_btn = ui.selectable_label(!app.decks.global_playing, RichText::new("■ STOP").strong().color(if !app.decks.global_playing { app.theme.danger } else { app.theme.text_secondary }));
         if stop_btn.clicked() {
-            app.global_playing = false;
+            app.decks.global_playing = false;
             let _ = app.command_sender.send(Command::Core(CoreCommand::Stop));
         }
 
@@ -45,28 +45,28 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         // Global BPM
         ui.label(RichText::new("BPM").strong().size(app.theme.type_caption).color(app.theme.text_secondary));
-        let mut bpm = app.global_bpm;
+        let mut bpm = app.decks.global_bpm;
         if ui.add(egui::DragValue::new(&mut bpm).speed(0.1).clamp_range(20.0..=300.0)).changed() {
-            app.global_bpm = bpm;
+            app.decks.global_bpm = bpm;
             let _ = app.command_sender.send(Command::Core(CoreCommand::SetBpm(bpm)));
         }
 
         ui.add_space(app.theme.space_md);
 
-        let is_recording = app.record_automation;
-        ui.toggle_value(&mut app.record_automation, RichText::new("🔴 RECORD AUTOMATION").color(if is_recording { app.theme.danger } else { app.theme.text_secondary }));
+        let is_recording = app.composer.record_automation;
+        ui.toggle_value(&mut app.composer.record_automation, RichText::new("🔴 RECORD AUTOMATION").color(if is_recording { app.theme.danger } else { app.theme.text_secondary }));
         ui.add_space(app.theme.space_md);
 
         if ui.button("STOP ALL CLIPS").clicked() {
             for i in 0..16 {
                  let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: app.get_node_id("sequencer_node"), track_idx: i as u32 }));
-                 app.sequencer_grid[i].fill(0.0);
+                 app.composer.sequencer_grid[i].fill(0.0);
             }
         }
 
         ui.add_space(app.theme.space_md);
         ui.label(RichText::new("MASTER VOL").size(app.theme.type_caption).color(app.theme.text_secondary));
-        widgets::render_horizontal_fader(ui, &mut app.master_gain, 0.0..=1.5, app.theme.text_primary, 100.0, 12.0);
+        widgets::render_horizontal_fader(ui, &mut app.mixer.master_gain, 0.0..=1.5, app.theme.text_primary, 100.0, 12.0);
     });
     ui.add_space(app.theme.space_sm);
 
@@ -90,7 +90,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         .inner_margin(Margin::same(app.theme.space_sm))
         .show(ui, |ui| {
             let mut extend_grid = false;
-            let steps_count = app.sequencer_grid[0].len();
+            let steps_count = app.composer.sequencer_grid[0].len();
 
             ui.horizontal(|ui| {
                 // 1. LEFT SIDE: Stationary Track Headers column (100.0px width)
@@ -101,8 +101,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                     for track_idx in 0..16 {
                         let track_color = app.theme.track_colors[track_idx];
-                        let is_muted = app.track_mutes[track_idx];
-                        let is_selected = app.selected_composer_track == Some(track_idx);
+                        let is_muted = app.composer.track_mutes[track_idx];
+                        let is_selected = app.composer.selected_composer_track == Some(track_idx);
 
                         let header_bg = if is_selected {
                             track_color.gamma_multiply(0.4)
@@ -135,9 +135,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         let response = ui.interact(rect, ui.make_persistent_id(format!("trk_hdr_{}", track_idx)), Sense::click());
                         if response.clicked() {
                             if is_selected {
-                                app.selected_composer_track = None;
+                                app.composer.selected_composer_track = None;
                             } else {
-                                app.selected_composer_track = Some(track_idx);
+                                app.composer.selected_composer_track = Some(track_idx);
                             }
                         }
 
@@ -157,22 +157,22 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             // Activator ON/OFF Mute
                                             let activator_color = if !is_muted { app.theme.warning } else { app.theme.bg_inset };
                                             if ui.add_sized([22.0, 18.0], egui::Button::new(RichText::new("ON").size(app.theme.type_caption).strong()).fill(activator_color)).clicked() {
-                                                app.track_mutes[track_idx] = !is_muted;
-                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackMute { node_idx: app.get_node_id("sequencer_node"), track_idx: track_idx as u32, muted: app.track_mutes[track_idx] }));
+                                                app.composer.track_mutes[track_idx] = !is_muted;
+                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackMute { node_idx: app.get_node_id("sequencer_node"), track_idx: track_idx as u32, muted: app.composer.track_mutes[track_idx] }));
                                             }
 
                                             // Solo Button
-                                            let is_soloed = app.track_solos[track_idx];
+                                            let is_soloed = app.composer.track_solos[track_idx];
                                             let solo_color = if is_soloed { app.theme.track_colors[1] } else { app.theme.bg_inset };
                                             if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("S").size(app.theme.type_caption).strong()).fill(solo_color)).clicked() {
-                                                app.track_solos[track_idx] = !is_soloed;
-                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackSolo { node_idx: app.get_node_id("sequencer_node"), track_idx: track_idx as u32, soloed: app.track_solos[track_idx] }));
+                                                app.composer.track_solos[track_idx] = !is_soloed;
+                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackSolo { node_idx: app.get_node_id("sequencer_node"), track_idx: track_idx as u32, soloed: app.composer.track_solos[track_idx] }));
                                             }
 
                                             // Stop Clip button (compact)
                                             let stop_btn = egui::Button::new(RichText::new("■").size(app.theme.type_caption).strong()).fill(app.theme.bg_inset);
                                             if ui.add_sized([18.0, 18.0], stop_btn).on_hover_text("Stop clip").clicked() {
-                                                app.sequencer_grid[track_idx].fill(0.0);
+                                                app.composer.sequencer_grid[track_idx].fill(0.0);
                                                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: app.get_node_id("sequencer_node"), track_idx: track_idx as u32 }));
                                             }
                                         });
@@ -180,7 +180,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         ui.add_space(4.0);
 
                                         // Sequencer routing target dropdown
-                                        let current_target = app.track_targets[track_idx].clone();
+                                        let current_target = app.composer.track_targets[track_idx].clone();
                                         let mut sorted_nodes = app.node_names();
                                         sorted_nodes.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -202,7 +202,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             });
 
                                         if changed {
-                                            app.track_targets[track_idx] = selected_name;
+                                            app.composer.track_targets[track_idx] = selected_name;
                                             let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
                                                 target_id: app.get_node_id("sequencer_node") as u64,
                                                 param_id: 10 + track_idx as u32,
@@ -256,8 +256,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             // Render 16 horizontal step rows
                             for track_idx in 0..16 {
                                 let track_color = app.theme.track_colors[track_idx];
-                                let is_muted = app.track_mutes[track_idx];
-                                let is_selected = app.selected_composer_track == Some(track_idx);
+                                let is_muted = app.composer.track_mutes[track_idx];
+                                let is_selected = app.composer.selected_composer_track == Some(track_idx);
 
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
@@ -278,7 +278,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         // Playback status
                                         let (is_playing, is_starting) = check_step_telemetry(telemetry, track_idx, slot_idx);
 
-                                        let velocity = app.sequencer_grid[track_idx][slot_idx];
+                                        let velocity = app.composer.sequencer_grid[track_idx][slot_idx];
                                         let mut color = if is_playing {
                                             app.theme.success
                                         } else if is_starting {
@@ -289,7 +289,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             track_color.gamma_multiply(0.04)
                                         };
 
-                                        if slot_idx == app.sequencer_active_step {
+                                        if slot_idx == app.composer.sequencer_active_step {
                                             color = color.linear_multiply(1.4);
                                         }
 
@@ -309,9 +309,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         }
 
                                         if response.clicked() {
-                                            let is_on = app.sequencer_grid[track_idx][slot_idx] == 0.0;
+                                            let is_on = app.composer.sequencer_grid[track_idx][slot_idx] == 0.0;
                                             let val = if is_on { 1.0 } else { 0.0 };
-                                            app.sequencer_grid[track_idx][slot_idx] = val;
+                                            app.composer.sequencer_grid[track_idx][slot_idx] = val;
                                             let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
                                                 node_idx: app.get_node_id("sequencer_node"),
                                                 track: track_idx as u32,
@@ -335,25 +335,25 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             ui.horizontal(|ui| {
                                                 ui.label(RichText::new("VOLUME").size(app.theme.type_caption).color(app.theme.text_secondary));
                                                 let volume_color = if is_muted { app.theme.bg_inset } else { track_color };
-                                                widgets::render_horizontal_fader(ui, &mut app.track_volumes[track_idx], 0.0..=1.0, volume_color, 80.0, 10.0)
+                                                widgets::render_horizontal_fader(ui, &mut app.composer.track_volumes[track_idx], 0.0..=1.0, volume_color, 80.0, 10.0)
                                                     .on_hover_text("VOLUME");
 
                                                 ui.add_space(app.theme.space_md);
 
                                                 ui.label(RichText::new("GENE EVOLVE").size(app.theme.type_caption).color(app.theme.text_secondary));
-                                                let mut val = app.evolution_strengths[track_idx];
+                                                let mut val = app.composer.evolution_strengths[track_idx];
                                                 if widgets::render_horizontal_fader(ui, &mut val, 0.0..=1.0, app.theme.accent, 80.0, 10.0)
                                                     .on_hover_text("GENE EVOLVE")
                                                     .changed()
                                                 {
-                                                    app.evolution_strengths[track_idx] = val;
+                                                    app.composer.evolution_strengths[track_idx] = val;
                                                     let _ = app.command_sender.send(Command::Performance(PerformanceCommand::EvolvePattern {
                                                         node_idx: track_idx as u32,
                                                         track_idx: 0,
                                                         mutation_strength: val,
                                                     }));
 
-                                                    if let Some(track_id) = app.now_playing[track_idx % 4] {
+                                                    if let Some(track_id) = app.decks.now_playing[track_idx % 4] {
                                                         use nullherz_dna::GeneticLibrary;
                                                         if let Ok(Some(mut track)) = app.library_db.get_track(track_id) {
                                                             let mut updated_metadata = (*track.metadata).clone();
@@ -371,7 +371,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                             }
                                                             track.metadata = std::sync::Arc::new(updated_metadata);
                                                             let _ = app.library_db.save_track(&track);
-                                                            app.library_needs_refresh = true;
+                                                            app.library.library_needs_refresh = true;
 
                                                             if app.breeding_view.parent_a_id.is_none() {
                                                                 app.breeding_view.parent_a_id = Some(track_id);
@@ -398,7 +398,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
             if extend_grid {
                 for i in 0..16 {
-                    app.sequencer_grid[i].resize(steps_count + 16, 0.0);
+                    app.composer.sequencer_grid[i].resize(steps_count + 16, 0.0);
                 }
             }
         });
@@ -443,135 +443,152 @@ mod tests {
             command_sender: cmd_tx,
             last_telemetry: std::sync::Arc::new(parking_lot::Mutex::new(None)),
             active_view: crate::View::Composer,
-            channel_faders: [1.0; 4],
-            channel_eq_high: [1.0; 4],
-            channel_eq_mid: [1.0; 4],
-            channel_eq_low: [1.0; 4],
-            channel_filter: [0.5; 4],
-            channel_personality_metallic: [0.0; 4],
-            channel_personality_organic: [0.0; 4],
-            channel_personality_warm: [0.0; 4],
-            channel_personality_aggressive: [0.0; 4],
-            channel_sync: [false; 4],
-            quantize_enabled: true,
-            master_gain: 1.0,
-            crossfader_pos: 0.5,
+            mixer: crate::state::MixerState {
+                channel_faders: [1.0; 4],
+                channel_eq_high: [1.0; 4],
+                channel_eq_mid: [1.0; 4],
+                channel_eq_low: [1.0; 4],
+                channel_filter: [0.5; 4],
+                channel_personality_metallic: [0.0; 4],
+                channel_personality_organic: [0.0; 4],
+                channel_personality_warm: [0.0; 4],
+                channel_personality_aggressive: [0.0; 4],
+                channel_sync: [false; 4],
+                quantize_enabled: true,
+                master_gain: 1.0,
+                crossfader_pos: 0.5,
+                macros: [0.0; 8],
+                _macro_names: std::array::from_fn(|i| format!("MACRO {}", i + 1)),
+                channel_peak_hold: [0.0; 4],
+                master_peak_hold: 0.0,
+                _booth_peak_hold: 0.0,
+                _rec_peak_hold: 0.0,
+                mastering_eq_enabled: false,
+                mastering_eq_low: 1.0,
+                mastering_eq_mid: 1.0,
+                mastering_eq_high: 1.0,
+                spectral_window_shape: 0,
+                personality_macro_mode: false,
+                ..Default::default()
+            },
+            decks: crate::state::DeckState {
+                master_deck: None,
+                now_playing: [None; 4],
+                global_bpm: 120.0,
+                focused_deck: 0,
+                deck_playing: [false; 4],
+                global_playing: false,
+                ..Default::default()
+            },
+            library: crate::state::LibraryState {
+                active_crate: None,
+                search_query: String::new(),
+                _playlists: vec![],
+                cached_library: vec![],
+                cached_library_raw: vec![],
+                bg_library_loader: None,
+                library_needs_refresh: false,
+                smart_crate_builder_open: false,
+                // smart_crate_def: group default is fine for this test
+                selected_library_track: None,
+                ingestion_path: String::new(),
+                playlist_queue: std::collections::VecDeque::new(),
+                ..Default::default()
+            },
+            composer: crate::state::ComposerState {
+                sequencer_grid: std::array::from_fn(|_| vec![0.0; 64]),
+                selected_composer_track: None,
+                sequencer_active_step: 0,
+                track_mutes: [false; 16],
+                track_solos: [false; 16],
+                track_volumes: [1.0; 16],
+                track_targets: std::array::from_fn(|_| "(default)".to_string()),
+                record_automation: false,
+                _automation_data: std::collections::HashMap::new(),
+                evolution_strengths: [0.0; 16],
+                auto_pollinate_enabled: false,
+                ..Default::default()
+            },
+            sampler: crate::state::SamplerState {
+                sampler_slicer_mode: false,
+                sampler_waveform_zoom: 1.0,
+                sampler_input_gain: 1.0,
+                sampler_monitor_level: 0.0,
+                sampler_is_recording: false,
+                sampler_is_stereo: false,
+                sampler_input_source: 0,
+                next_sample_id: 1,
+                ..Default::default()
+            },
+            editor: crate::state::EditorState {
+                editor_time_stretch_ratio: 1.0,
+                editor_selection: None,
+                ..Default::default()
+            },
+            broadcast: crate::state::BroadcastState {
+                is_streaming: false,
+                broadcast_url: String::new(),
+                broadcast_key: String::new(),
+                broadcast_reveal_key: false,
+                broadcast_codec: 0,
+                broadcast_bitrate: 128.0,
+                broadcast_state: 0,
+                broadcast_error_msg: String::new(),
+                broadcast_start_time: None,
+                ..Default::default()
+            },
+            settings: crate::state::SettingsState {
+                active_settings_tab: crate::SettingsTab::General,
+                active_backend: nullherz_traits::AudioBackendType::Alsa,
+                active_midi_profile: "default".to_string(),
+                config_saved_time: None,
+                audio_devices: vec![],
+                selected_audio_device: String::new(),
+                restore_last_session: false,
+                default_view_on_launch: crate::View::Composer,
+                autosave_enabled: false,
+                autosave_interval_mins: 5,
+                last_saved_time: 0.0,
+                autosave_triggered: None,
+                shortcuts_enabled: false,
+                ..Default::default()
+            },
+            viz: crate::state::VizState {
+                visualizer_damping: 0.1,
+                damped_spectrum: [0.0; 128],
+                damped_goniometer: [0.0; 128],
+                damped_latent: [0.0; 16],
+                damped_peaks: [0.0; 4],
+                damped_master_peaks: [0.0; 2],
+                ..Default::default()
+            },
+            topo: crate::state::TopologyViewState {
+                active_connection_source: None,
+                active_node_drag: None,
+                selected_hotload_node_idx: 0,
+                bypassed_nodes: std::collections::HashSet::new(),
+                node_map: [("sequencer_node".to_string(), 70), ("sampler_node".to_string(), 100)]
+                    .into_iter().collect(),
+                ..Default::default()
+            },
             library_db: library_db_wrapper,
-            active_crate: None,
-            search_query: String::new(),
-            is_streaming: false,
             active_right_tab: None,
-            master_deck: None,
-            now_playing: [None; 4],
-            global_bpm: 120.0,
-            macros: [0.0; 8],
-            _macro_names: std::array::from_fn(|i| format!("MACRO {}", i + 1)),
-            channel_peak_hold: [0.0; 4],
-            master_peak_hold: 0.0,
-            _booth_peak_hold: 0.0,
-            _rec_peak_hold: 0.0,
-            mastering_eq_enabled: false,
-            mastering_eq_low: 1.0,
-            mastering_eq_mid: 1.0,
-            mastering_eq_high: 1.0,
-            spectral_window_shape: 0,
-            sequencer_grid: std::array::from_fn(|_| vec![0.0; 64]),
-            selected_composer_track: None,
-            sequencer_active_step: 0,
-            sampler_slicer_mode: false,
-            _playlists: vec![],
-            cached_library: vec![],
-            cached_library_raw: vec![],
-            bg_library_loader: None,
-            library_needs_refresh: false,
             breeding_view: crate::views::breeder::BreederView::new(),
             wgpu_renderer: None,
             waveform_renderer: None,
             deck_waveform_renderers: [None, None, None, None],
-            active_connection_source: None,
-            active_node_drag: None,
-            smart_crate_builder_open: false,
-            smart_crate_def: nullherz_dna::SmartCrateDefinition {
-                name: "New Smart Crate".into(),
-                target_dna: None,
-                threshold: 0.5,
-                spectral_tilt_range: None,
-                rhythmic_syncopation_range: None,
-                glitch_density_range: None,
-                genre: None,
-                bpm_range: None,
-                energy_range: None,
-                root_key: None,
-            },
-            visualizer_damping: 0.1,
-            damped_spectrum: [0.0; 128],
-            damped_goniometer: [0.0; 128],
-            damped_latent: [0.0; 16],
-            damped_peaks: [0.0; 4],
-            damped_master_peaks: [0.0; 2],
             discovered_sidecars: vec![],
-            personality_macro_mode: false,
-            focused_deck: 0,
-            track_mutes: [false; 16],
-            track_solos: [false; 16],
-            track_volumes: [1.0; 16],
-            track_targets: std::array::from_fn(|_| "(default)".to_string()),
-            deck_playing: [false; 4],
-            record_automation: false,
-            _automation_data: std::collections::HashMap::new(),
-            sampler_waveform_zoom: 1.0,
-            editor_time_stretch_ratio: 1.0,
-            active_settings_tab: crate::SettingsTab::General,
-            active_backend: nullherz_traits::AudioBackendType::Alsa,
-            active_midi_profile: "default".to_string(),
-            config_saved_time: None,
-            selected_hotload_node_idx: 0,
-            broadcast_url: String::new(),
-            broadcast_key: String::new(),
-            broadcast_reveal_key: false,
-            broadcast_codec: 0,
-            broadcast_bitrate: 128.0,
-            broadcast_state: 0,
-            broadcast_error_msg: String::new(),
-            broadcast_start_time: None,
             p2p_sync_success_toast: None,
             export_passport_success_toast: None,
             export_passport_error_toast: None,
-            sampler_input_gain: 1.0,
-            sampler_monitor_level: 0.0,
-            sampler_is_recording: false,
-            sampler_is_stereo: false,
-            sampler_input_source: 0,
-            selected_library_track: None,
-            bypassed_nodes: std::collections::HashSet::new(),
             theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
-            ingestion_path: String::new(),
-            playlist_queue: std::collections::VecDeque::new(),
-            evolution_strengths: [0.0; 16],
-            next_sample_id: 1,
-            editor_selection: None,
-            audio_devices: vec![],
-            selected_audio_device: String::new(),
-            restore_last_session: false,
-            default_view_on_launch: crate::View::Composer,
-            autosave_enabled: false,
-            autosave_interval_mins: 5,
-            last_saved_time: 0.0,
-            autosave_triggered: None,
-            shortcuts_enabled: false,
-            global_playing: false,
-            auto_pollinate_enabled: false,
-            node_map: [
-                ("sampler_node".to_string(), 100),
-                ("sequencer_node".to_string(), 70),
-            ].into_iter().collect(),
             _conductor_thread: None,
         };
 
         // Assert initial states
-        assert_eq!(app.track_targets[0], "(default)");
-        assert_eq!(app.track_targets[15], "(default)");
+        assert_eq!(app.composer.track_targets[0], "(default)");
+        assert_eq!(app.composer.track_targets[15], "(default)");
 
         // Verify node_names retrieval
         let mut names = app.node_names();
@@ -579,7 +596,7 @@ mod tests {
         assert_eq!(names, vec![("sampler_node".to_string(), 100), ("sequencer_node".to_string(), 70)]);
 
         // Update a track target
-        app.track_targets[3] = "sampler_node".to_string();
-        assert_eq!(app.track_targets[3], "sampler_node");
+        app.composer.track_targets[3] = "sampler_node".to_string();
+        assert_eq!(app.composer.track_targets[3], "sampler_node");
     }
 }

@@ -40,7 +40,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             // 2. Analysis Section
             render_metric_group(ui, "SPECTRAL DOMAIN", frame_width, &theme, |ui| {
                 if telemetry.is_some() {
-                    widgets::render_spectrum_analyzer(ui, &app.damped_spectrum, theme.accent, 100.0);
+                    widgets::render_spectrum_analyzer(ui, &app.viz.damped_spectrum, theme.accent, 100.0);
                 }
             });
 
@@ -58,8 +58,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 let mut y = 0.0;
                 for i in 0..16 {
                     let angle = (i as f32 / 16.0) * std::f32::consts::PI * 2.0;
-                    x += app.damped_latent[i] * angle.cos();
-                    y += app.damped_latent[i] * angle.sin();
+                    x += app.viz.damped_latent[i] * angle.cos();
+                    y += app.viz.damped_latent[i] * angle.sin();
                 }
 
                 let pos = center + egui::vec2(x * scale, y * scale);
@@ -74,7 +74,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
             render_metric_group(ui, "PHASE & CORRELATION", frame_width, &theme, |ui| {
                 if telemetry.is_some() {
-                    widgets::render_goniometer(ui, &app.damped_goniometer, 180.0, theme.accent);
+                    widgets::render_goniometer(ui, &app.viz.damped_goniometer, 180.0, theme.accent);
                 }
             });
 

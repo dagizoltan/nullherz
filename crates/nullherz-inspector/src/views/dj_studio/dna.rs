@@ -7,7 +7,7 @@ pub fn render_deck_dna_panel(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
             ui.label(RichText::new("DNA").size(theme.type_caption).color(theme.text_secondary));
-            ui.checkbox(&mut app.personality_macro_mode, "🔗");
+            ui.checkbox(&mut app.mixer.personality_macro_mode, "🔗");
         });
 
         let traits = [
@@ -24,10 +24,10 @@ pub fn render_deck_dna_panel(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
                 ui.vertical(|ui| {
                     ui.set_max_width(32.0);
                     let val = match idx {
-                        0 => &mut app.channel_personality_metallic[i],
-                        1 => &mut app.channel_personality_organic[i],
-                        2 => &mut app.channel_personality_warm[i],
-                        _ => &mut app.channel_personality_aggressive[i],
+                        0 => &mut app.mixer.channel_personality_metallic[i],
+                        1 => &mut app.mixer.channel_personality_organic[i],
+                        2 => &mut app.mixer.channel_personality_warm[i],
+                        _ => &mut app.mixer.channel_personality_aggressive[i],
                     };
 
                     if widgets::render_knob(ui, val, 0.0..=1.0, "", deck_color).changed() {
@@ -44,19 +44,19 @@ pub fn render_deck_dna_panel(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
 
 fn emit_personality_mutation(app: &mut InspectorApp, deck_idx: usize, trait_idx: usize, feature: &str, strength: f32) {
     let mut targets = vec![];
-    if app.personality_macro_mode {
+    if app.mixer.personality_macro_mode {
         for i in 0..4 {
-            if let Some(id) = app.now_playing[i] {
+            if let Some(id) = app.decks.now_playing[i] {
                 targets.push(id);
                 match trait_idx {
-                    0 => app.channel_personality_metallic[i] = strength,
-                    1 => app.channel_personality_organic[i] = strength,
-                    2 => app.channel_personality_warm[i] = strength,
-                    _ => app.channel_personality_aggressive[i] = strength,
+                    0 => app.mixer.channel_personality_metallic[i] = strength,
+                    1 => app.mixer.channel_personality_organic[i] = strength,
+                    2 => app.mixer.channel_personality_warm[i] = strength,
+                    _ => app.mixer.channel_personality_aggressive[i] = strength,
                 }
             }
         }
-    } else if let Some(id) = app.now_playing[deck_idx] {
+    } else if let Some(id) = app.decks.now_playing[deck_idx] {
         targets.push(id);
     }
 

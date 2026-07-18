@@ -7,7 +7,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     ui.heading(RichText::new("Audio Editor").size(theme.type_heading));
     ui.add_space(theme.space_sm);
 
-    if let Some(track_id) = app.selected_library_track {
+    if let Some(track_id) = app.library.selected_library_track {
         if let Ok(Some(track)) = app.library_db.get_track(track_id) {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&track.title).strong().size(theme.type_heading));
@@ -26,19 +26,19 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             if response.dragged() {
                 let current_pos = ui.input(|i| i.pointer.latest_pos()).unwrap_or(egui::pos2(0.0, 0.0));
                 let x_norm = ((current_pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-                if let Some((start, _)) = app.editor_selection {
-                    app.editor_selection = Some((start, x_norm));
+                if let Some((start, _)) = app.editor.editor_selection {
+                    app.editor.editor_selection = Some((start, x_norm));
                 } else {
-                    app.editor_selection = Some((x_norm, x_norm));
+                    app.editor.editor_selection = Some((x_norm, x_norm));
                 }
             }
             if response.clicked() {
                 let current_pos = ui.input(|i| i.pointer.latest_pos()).unwrap_or(egui::pos2(0.0, 0.0));
                 let x_norm = ((current_pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-                app.editor_selection = Some((x_norm, x_norm));
+                app.editor.editor_selection = Some((x_norm, x_norm));
             }
 
-            if let Some((start, end)) = app.editor_selection {
+            if let Some((start, end)) = app.editor.editor_selection {
                 let left = rect.left() + start.min(end) * rect.width();
                 let right = rect.left() + start.max(end) * rect.width();
                 let sel_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(right, rect.bottom()));
@@ -47,7 +47,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
             if let Some(wf_lock) = &app.waveform_renderer {
                 let mut wf = wf_lock.lock();
-                let zoom = app.sampler_waveform_zoom;
+                let zoom = app.sampler.sampler_waveform_zoom;
                 let scroll = 0.0;
                 let color = theme.accent.to_array().map(|v| v as f32 / 255.0);
 
@@ -77,11 +77,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             ui.add_space(theme.space_md);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("ZOOM").size(theme.type_body));
-                ui.add(egui::Slider::new(&mut app.sampler_waveform_zoom, 0.1..=10.0).text(""));
+                ui.add(egui::Slider::new(&mut app.sampler.sampler_waveform_zoom, 0.1..=10.0).text(""));
 
                 ui.add_space(theme.space_md);
                 if ui.button(RichText::new(format!("{} RESET", egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE)).size(theme.type_label)).clicked() {
-                    app.sampler_waveform_zoom = 1.0;
+                    app.sampler.sampler_waveform_zoom = 1.0;
                 }
             });
 
@@ -111,11 +111,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 ui.vertical(|ui| {
                     ui.label(RichText::new("ACTIONS").size(theme.type_body).strong());
                     ui.horizontal(|ui| {
-                        let has_selection = app.editor_selection.is_some();
+                        let has_selection = app.editor.editor_selection.is_some();
                         ui.add_enabled_ui(has_selection, |ui| {
                             let btn = ui.button(RichText::new(format!("{} CROP", egui_phosphor::regular::SCISSORS)).size(theme.type_label));
                             if btn.clicked()
-                                && let Some((s, e)) = app.editor_selection {
+                                && let Some((s, e)) = app.editor.editor_selection {
                                     let (start, end) = if s < e { (s, e) } else { (e, s) };
                                     let total_samples = track.metadata.total_samples as f32;
                                     let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::Crop {
@@ -146,12 +146,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
                         // Time Stretching Actions
                         ui.label(RichText::new("Ratio:").size(theme.type_body));
-                        ui.add(egui::Slider::new(&mut app.editor_time_stretch_ratio, 0.5..=2.0).text(""));
+                        ui.add(egui::Slider::new(&mut app.editor.editor_time_stretch_ratio, 0.5..=2.0).text(""));
 
                         if ui.button(RichText::new(format!("{} TIME STRETCH", egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE)).size(theme.type_label)).clicked() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::TimeStretch {
                                 sample_id: track.id,
-                                ratio: app.editor_time_stretch_ratio,
+                                ratio: app.editor.editor_time_stretch_ratio,
                             }));
                         }
                     });
@@ -160,7 +160,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
         } else {
             ui.label(RichText::new("Track not found in library.").color(theme.danger).size(theme.type_body));
-            if ui.button(RichText::new("Deselect").size(theme.type_label)).clicked() { app.selected_library_track = None; }
+            if ui.button(RichText::new("Deselect").size(theme.type_label)).clicked() { app.library.selected_library_track = None; }
         }
     } else {
         ui.vertical_centered(|ui| {
