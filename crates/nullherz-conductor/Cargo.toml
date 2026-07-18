@@ -35,3 +35,6 @@ kani-verify = ["nullherz-traits/kani-verify", "audio-core/kani-verify"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
+[dev-dependencies]
+proptest = "1"

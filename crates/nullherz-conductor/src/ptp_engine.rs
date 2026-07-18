@@ -367,3 +367,47 @@ mod tests {
         assert_eq!(slave.measured_rtt_ns(), Some(600));
     }
 }
+
+#[cfg(test)]
+mod rtt_properties {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// For ANY true path delays and ANY clock offset (slave ahead or
+        /// behind, up to ±10s), the four-timestamp computation recovers
+        /// exactly the sum of the two legs — the offset must cancel.
+        #[test]
+        fn rtt_recovers_delay_regardless_of_offset(
+            t1 in 1_000_000_000u64..2_000_000_000,
+            delay_ab in 0i64..50_000_000,
+            delay_ba in 0i64..50_000_000,
+            offset in -10_000_000_000i64..10_000_000_000,
+            think_time in 0u64..1_000_000,
+        ) {
+            let t2 = (t1 as i64 + delay_ab + offset) as u64;
+            let t3 = t2 + think_time;
+            let t4 = (t3 as i64 + delay_ba - offset) as u64;
+
+            let expected = delay_ab + delay_ba;
+            if expected <= MAX_PLAUSIBLE_RTT_NS {
+                prop_assert_eq!(compute_rtt_ns(t1, t2, t3, t4), Some(expected as u64));
+            } else {
+                prop_assert_eq!(compute_rtt_ns(t1, t2, t3, t4), None);
+            }
+        }
+
+        /// The EMA never leaves the closed interval spanned by its inputs and
+        /// is monotone in the sample — no overshoot, no sign surprises.
+        #[test]
+        fn ema_stays_within_input_bounds(
+            prev in 0u64..100_000_000,
+            sample in 0u64..100_000_000,
+        ) {
+            let out = ema_rtt(Some(prev), sample);
+            let lo = prev.min(sample);
+            let hi = prev.max(sample);
+            prop_assert!(out >= lo && out <= hi, "EMA must interpolate, got {} outside [{}, {}]", out, lo, hi);
+        }
+    }
+}

@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod golden_render_tests;
 pub mod sidecar;
 pub mod delay;
 pub mod compressor;

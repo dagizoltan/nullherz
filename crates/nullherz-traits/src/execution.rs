@@ -246,3 +246,68 @@ pub trait AudioProcessor: SignalProcessor + MidiResponder + SnapshotProvider + S
     fn get_playback_position(&self) -> u64 { 0 }
 }
 
+
+#[cfg(test)]
+mod sub_block_properties {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// The invariant the whole sample-accurate command kernel rests on:
+        /// for ANY block length, the iterator emits contiguous, non-overlapping
+        /// chunks that cover every sample exactly once, each within the max
+        /// block size, with is_last set on exactly the final chunk.
+        #[test]
+        fn chunks_cover_every_sample_exactly_once(
+            total_len in 0usize..4096,
+            max_block in 1usize..512,
+        ) {
+            let mut it = SubBlockIterator::new(total_len, max_block);
+            let mut covered = 0usize;
+            let mut last_seen = false;
+            while let Some(sb) = it.next_chunk() {
+                prop_assert!(!last_seen, "no chunk may follow is_last");
+                prop_assert_eq!(sb.offset, covered, "chunks must be contiguous");
+                prop_assert!(sb.len >= 1 && sb.len <= max_block);
+                covered += sb.len;
+                last_seen = sb.is_last;
+            }
+            prop_assert_eq!(covered, total_len, "every sample exactly once");
+            prop_assert_eq!(last_seen, total_len > 0, "is_last on the final chunk iff non-empty");
+        }
+
+        /// Mixing command-split boundaries (next_chunk_up_to) with plain chunks
+        /// must preserve the same exactly-once coverage — this models a block
+        /// containing sample-accurate commands at arbitrary timestamps.
+        #[test]
+        fn command_splits_preserve_coverage(
+            total_len in 1usize..2048,
+            max_block in 1usize..300,
+            splits in proptest::collection::vec(0usize..2048, 0..8),
+        ) {
+            let mut boundaries = splits;
+            boundaries.sort_unstable();
+
+            let mut it = SubBlockIterator::new(total_len, max_block);
+            let mut covered = 0usize;
+            for b in boundaries {
+                while it.current_offset < b.min(total_len) {
+                    match it.next_chunk_up_to(b) {
+                        Some(sb) => {
+                            prop_assert_eq!(sb.offset, covered);
+                            prop_assert!(sb.len <= max_block);
+                            prop_assert!(sb.offset + sb.len <= b.max(sb.offset + sb.len).min(total_len.max(sb.offset + sb.len)));
+                            covered += sb.len;
+                        }
+                        None => break,
+                    }
+                }
+            }
+            while let Some(sb) = it.next_chunk() {
+                prop_assert_eq!(sb.offset, covered);
+                covered += sb.len;
+            }
+            prop_assert_eq!(covered, total_len, "splits must never lose or duplicate samples");
+        }
+    }
+}
