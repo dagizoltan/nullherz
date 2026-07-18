@@ -86,6 +86,10 @@ struct Stats {
     resource_leaks_final: u64,
     sample_rate: f32,
     samples_processed: u64,
+    /// Blocks whose process time exceeded the period budget: (elapsed, block ns).
+    /// Timing tells load spikes (first seconds) apart from steady-state trouble.
+    overrun_events: Vec<(Duration, u64)>,
+    overrun_count: u64,
 }
 
 #[tokio::main]
@@ -174,6 +178,13 @@ async fn main() {
     let mut stats = Stats::default();
     let mut last_xrun_count = 0u32;
     let mut last_progress = Instant::now();
+    let budget_ns: u64 = {
+        let cfg_budget = std::fs::read_to_string("system_config.json")
+            .ok()
+            .and_then(|c| serde_json::from_str::<nullherz_conductor::persistence::SystemConfig>(&c).ok())
+            .map(|cfg| (cfg.period_size as f64 / cfg.sample_rate.max(1) as f64 * 1e9) as u64);
+        cfg_budget.unwrap_or(0)
+    };
     // A silent telemetry stream means the audio thread is dead (e.g. an RT
     // panic) — that must read as FAIL, never as a quiet PASS.
     let mut last_frame_at = Instant::now();
@@ -196,6 +207,12 @@ async fn main() {
             stats.samples_processed = tel.sample_counter;
             stats.sum_process_time_ns += tel.process_time_ns;
             stats.peak_process_time_ns = stats.peak_process_time_ns.max(tel.peak_process_time_ns);
+            if budget_ns > 0 && tel.process_time_ns > budget_ns {
+                stats.overrun_count += 1;
+                if stats.overrun_events.len() < 64 {
+                    stats.overrun_events.push((started.elapsed(), tel.process_time_ns));
+                }
+            }
             stats.resource_leaks_final = tel.resource_leaks;
             if tel.xrun_count != last_xrun_count {
                 let elapsed = started.elapsed();
@@ -266,12 +283,23 @@ async fn main() {
         period_budget_us,
         stats.resource_leaks_final,
         if pass { "PASS" } else { "FAIL" },
-        if stats.xrun_events.is_empty() {
-            String::new()
-        } else {
-            let mut s = String::from("## Xrun log\n\n| Elapsed (s) | Count | Magnitude (ns) |\n| --: | --: | --: |\n");
-            for (at, count, mag) in &stats.xrun_events {
-                s.push_str(&format!("| {:.1} | {} | {} |\n", at.as_secs_f64(), count, mag));
+        {
+            let mut s = String::new();
+            if !stats.xrun_events.is_empty() {
+                s.push_str("## Xrun log\n\n| Elapsed (s) | Count | Magnitude (ns) |\n| --: | --: | --: |\n");
+                for (at, count, mag) in &stats.xrun_events {
+                    s.push_str(&format!("| {:.1} | {} | {} |\n", at.as_secs_f64(), count, mag));
+                }
+            }
+            if !stats.overrun_events.is_empty() {
+                s.push_str(&format!(
+                    "\n## Budget overruns ({} total, first {} shown)\n\n| Elapsed (s) | Block time (µs) |\n| --: | --: |\n",
+                    stats.overrun_count,
+                    stats.overrun_events.len()
+                ));
+                for (at, ns) in &stats.overrun_events {
+                    s.push_str(&format!("| {:.2} | {} |\n", at.as_secs_f64(), ns / 1000));
+                }
             }
             s
         }

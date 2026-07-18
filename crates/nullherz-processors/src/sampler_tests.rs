@@ -61,3 +61,50 @@ fn test_sampler_sync_logic() {
     // Since we don't, we'll just verify the processor handles commands without crashing.
     sampler.process(&[], &mut outputs, &mut context);
 }
+
+/// Regression: AddSource on the RT thread must adopt the shared Arc, not
+/// deep-clone the track. The old `(*buffer).clone()` memcpy'd the entire
+/// sample (tens of MB for a full song) on the audio thread, producing
+/// multi-millisecond block spikes at deck load (caught by the survival
+/// harness). Adopting an Arc is O(1); we assert a generous ceiling that a
+/// deep copy of 100 MB cannot meet even on fast hardware.
+#[test]
+fn test_add_source_is_o1_no_deep_clone() {
+    let mut sampler = SamplerProcessor::new(0);
+    sampler.setup(AudioConfig { sample_rate: 44100.0, block_size: 256 });
+
+    // ~100 MB buffer. Constructing it is slow; adopting it must not be.
+    let big = Arc::new(vec![0.25f32; 25_000_000]);
+    let metadata = Arc::new(SampleMetadata {
+        bpm: 174.0,
+        transients: Arc::new(Vec::new()),
+        root_key: None,
+        hot_cues: [None; 8],
+        loop_points: None,
+        beat_grid_offset: 0,
+        peaks: Arc::new(Vec::new()),
+        total_samples: big.len() as u64,
+        mip_waveform: nullherz_traits::MipWaveform::default(),
+        dna: SoundDNA::default(),
+        midi_map: None,
+    });
+
+    let start = std::time::Instant::now();
+    sampler.apply_topology_mutation(nullherz_traits::TopologyMutation::AddSource {
+        node_idx: 0,
+        buffer: big.clone(),
+        sample_id: 7,
+        metadata: Some(metadata),
+    });
+    let elapsed = start.elapsed();
+
+    // An Arc adoption is nanoseconds; a 100 MB clone is >10 ms. 2 ms leaves
+    // plenty of headroom for CI noise while still failing any deep copy.
+    assert!(
+        elapsed < std::time::Duration::from_millis(2),
+        "AddSource took {:?} — a deep clone has crept back into the RT path",
+        elapsed
+    );
+    // And the buffer must actually be shared, not copied.
+    assert_eq!(Arc::strong_count(&big), 2, "sampler must hold the same Arc");
+}
