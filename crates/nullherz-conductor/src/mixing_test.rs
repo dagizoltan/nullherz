@@ -8,14 +8,44 @@ mod tests {
     use nullherz_traits::{PerformanceCommand, Command, MixerCommand, DeckParamType};
     use nullherz_dna::GeneticLibrary;
 
+    /// Regression: both shipped binaries used to bootstrap the console on a
+    /// throwaway MixerManager, leaving the conductor's own deck_mappings empty
+    /// — which silently dropped every LoadTrackToDeck/PlayDeck command.
+    #[test]
+    fn test_bootstrap_populates_deck_mappings() {
+        let mut conductor = Conductor::with_library_path(":memory:");
+        assert!(conductor.mixer_manager.deck_mappings.is_empty());
+
+        conductor.bootstrap_4channel_mixer();
+
+        for deck in ['A', 'B', 'C', 'D'] {
+            assert!(
+                conductor.mixer_manager.deck_mappings.contains_key(&deck),
+                "deck {} must be mapped after bootstrap",
+                deck
+            );
+        }
+
+        // A deck-addressed Performance command must now translate to real work.
+        let cmd = Command::Performance(PerformanceCommand::PlayDeck { deck_id: 'A' });
+        let translated = crate::mixer_orchestrator::MixerOrchestrator::translate_command(
+            &cmd,
+            &conductor.mixer_manager,
+            &conductor.library,
+        );
+        assert!(
+            !translated.is_empty(),
+            "PlayDeck must translate against a populated deck map"
+        );
+    }
+
     #[tokio::test]
     async fn test_mixing_two_tracks() {
         let mut conductor = Conductor::with_library_path("test_mixing.redb");
 
-        // 1. Bootstrap Mixer
-        let mut mixer = nullherz_mixer::MixerManager::new();
-        let bootstrap_commands = mixer.create_4channel_mixer();
-        conductor.apply_mixer_commands(bootstrap_commands);
+        // 1. Bootstrap Mixer (on the conductor's own MixerManager so deck
+        // command translation resolves)
+        conductor.bootstrap_4channel_mixer();
 
         // 2. Ensure test tracks exist and Scan
         let test_tracks_dir = "test_tracks_mixing";

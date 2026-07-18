@@ -27,6 +27,11 @@ This document tracks remaining stubs and prototype logic, verified against the c
 - **Session restore is disabled/mocked** (`views/settings/preferences.rs`).
 - **Breeder View**: transfusion progress bar tracks active DNA blends but lacks sub-block pipeline progress telemetry.
 
+### Execution Plane (found by the survival harness, July 18)
+- **Period sizes above `MAX_BLOCK_SIZE` (256) crash the RT thread**: the graph indexes its internal `AudioBlock` buffers with period-global offsets, so the second sub-block of a 512-sample period overruns them (`graph/mod.rs` slice panic). Now clamped with a warning at `BackendManager::start`; the deeper fix (per-sub-block internal indexing or larger pool blocks) is open if >256 periods are ever needed.
+- **Threaded backend is xrun-blind**: it software-clocks the callback and cannot detect budget overruns, so a survival PASS on Threaded is provisional (the harness prints a warning when peak block time exceeds the period budget). Real xrun accounting requires ALSA/PipeWire runs.
+- **Startup block-time spike**: first blocks after deck load peaked at ~19 ms vs a 5.8 ms budget in the smoke run (steady-state mean 1.2 ms). Likely allocation/page-faulting on track load; worth profiling before the 1-hour hardware run.
+
 ### Lint Backlog
 - **174 clippy style lints** (collapsible_if let-chains, auto-deref, type_complexity, needless_range_loop, missing `# Safety` docs). The CI clippy job is advisory until these reach zero, then flips to a hard gate. All RT-safety (disallowed-methods/types) lints are resolved or explicitly scoped.
 

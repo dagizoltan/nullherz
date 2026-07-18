@@ -22,6 +22,21 @@ impl Default for BackendManager {
 
 impl BackendManager {
     pub fn start(&mut self, backend_type: AudioBackendType, period_size: u64) -> Result<(), String> {
+        // The graph indexes its internal AudioBlock buffers with period-global
+        // offsets, so a period longer than MAX_BLOCK_SIZE overruns them on the
+        // second sub-block (RT panic). Clamp here — the single choke point
+        // every backend start/switch goes through.
+        let max_period = nullherz_traits::MAX_BLOCK_SIZE as u64;
+        let period_size = if period_size > max_period {
+            eprintln!(
+                "WARN: configured period_size {} exceeds engine MAX_BLOCK_SIZE {}; clamping to {}.",
+                period_size, max_period, max_period
+            );
+            max_period
+        } else {
+            period_size
+        };
+
         // Move current process to high-priority Cgroup
         let _ = ipc_layer::move_to_cgroup("nullherz", std::process::id() as i32);
 

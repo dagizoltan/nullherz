@@ -444,6 +444,16 @@ impl Conductor {
         crate::command_handler::CommandHandler::apply_mixer_commands(self, commands);
     }
 
+    /// Builds the 4-channel DJ console on the conductor's OWN MixerManager so
+    /// that `deck_mappings` is populated. Bootstrapping through a throwaway
+    /// MixerManager leaves the conductor's map empty, which silently kills
+    /// every Performance command that resolves a deck (LoadTrackToDeck,
+    /// PlayDeck, SyncDecks, master-deck sampler resolution).
+    pub fn bootstrap_4channel_mixer(&mut self) {
+        let commands = self.mixer_manager.create_4channel_mixer();
+        self.apply_mixer_commands(commands);
+    }
+
     pub fn handle_midi_events(&mut self, events: Vec<nullherz_traits::MidiEvent>) {
         for event in events {
             // Handle System Real-time (Clock, Start, Stop)
