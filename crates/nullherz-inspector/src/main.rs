@@ -1060,10 +1060,9 @@ pub fn start_in_process_conductor(
             let _ = cond.load_system_config();
             let context = cond.setup_engine();
 
-            // Bootstrapping 4-Channel DJ Mixer...
-            let mut mixer = nullherz_mixer::MixerManager::new();
-            let bootstrap_commands = mixer.create_4channel_mixer();
-            cond.apply_mixer_commands(bootstrap_commands);
+            // Bootstrapping 4-Channel DJ Mixer (on the conductor's own
+            // MixerManager so deck_mappings resolve at runtime)...
+            cond.bootstrap_4channel_mixer();
 
             if let Some(worker) = cond.analysis_worker.take() {
                 worker.start();

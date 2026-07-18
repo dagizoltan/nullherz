@@ -54,9 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- DJ PLATFORM BOOTSTRAP ---
     println!("Bootstrapping 4-Channel DJ Mixer...");
-    let mut mixer = nullherz_mixer::MixerManager::new();
-    let bootstrap_commands = mixer.create_4channel_mixer();
-    conductor.apply_mixer_commands(bootstrap_commands);
+    conductor.bootstrap_4channel_mixer();
 
     if let Some(worker) = conductor.analysis_worker.take() {
         worker.start();

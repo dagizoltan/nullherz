@@ -13,6 +13,7 @@ Core technical specifications and engineering principles.
 - [Engineering Hardening Manifesto](./system/ENGINEERING_HARDENING_MANIFESTO.md)
 - [Solution Design & Optimization](./system/SOLUTION_DESIGN_OPTIMIZATION.md)
 - [Verification & QA Strategy](./system/VERIFICATION_AND_QA_STRATEGY.md)
+- [Validation Runbook (Survival & RTL)](./system/VALIDATION_RUNBOOK.md) — procedures for the Validation Gate's blocking tests
 
 ## 📊 [Current State & Health](./state/)
 Real-time tracking of system maturity and technical debt.
