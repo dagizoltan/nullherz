@@ -8,7 +8,7 @@ pub struct SamplerProcessor {
     sample_buffer: std::sync::Arc<Vec<f32>>,
     render_buffer: [f32; ipc_layer::MAX_BLOCK_SIZE],
     sample_id: Option<u64>,
-    metadata: Option<nullherz_traits::SampleMetadata>,
+    metadata: Option<std::sync::Arc<nullherz_traits::SampleMetadata>>,
     quantize_enabled: bool,
     playback_rate: f32,
     pub slicer_mode: bool,
@@ -199,12 +199,15 @@ fn get_parameter(&self, param_id: u32) -> f32 {
 fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutation) {
         match mutation {
             nullherz_traits::TopologyMutation::AddSource { node_idx: _, buffer, sample_id, metadata } => {
-                self.set_sample((*buffer).clone());
+                // RT path: adopt the shared buffers — deep-cloning a full track
+                // here (malloc + tens-of-MB memcpy on the audio thread) caused
+                // multi-ms block spikes at deck load.
+                self.sample_buffer = buffer;
                 self.sample_id = Some(sample_id);
-                self.metadata = metadata.map(|m| (*m).clone());
+                self.metadata = metadata;
             }
             nullherz_traits::TopologyMutation::UpdateMetadata { node_idx: _, metadata } => {
-                self.metadata = Some((*metadata).clone());
+                self.metadata = Some(metadata);
             }
             _ => {}
         }
