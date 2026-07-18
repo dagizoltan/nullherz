@@ -1809,3 +1809,82 @@ mod tests {
         assert_eq!(results[1], (101, 3, 1.6, 0));
     }
 }
+
+#[cfg(test)]
+mod modulation_matrix_tests {
+    use super::*;
+
+    fn collect(matrix: &ModulationMatrix, macro_id: u32, value: f32, beat: f64) -> Vec<(u64, u32, f32, u32)> {
+        let mut out = Vec::new();
+        matrix.expand_macro(macro_id, value, beat, |t, p, v, r| out.push((t, p, v, r)));
+        out
+    }
+
+    #[test]
+    fn test_expand_macro_scales_and_fans_out() {
+        let mut m = ModulationMatrix::new();
+        m.add_mapping(1, 10, 0, 0.5, 64, None);
+        m.add_mapping(1, 20, 3, -1.0, 0, None);
+        m.add_mapping(2, 30, 0, 1.0, 0, None); // different macro, must not fire
+
+        let fired = collect(&m, 1, 0.8, 0.0);
+        assert_eq!(fired.len(), 2, "macro 1 fans out to its two targets only");
+        assert_eq!(fired[0], (10, 0, 0.4, 64));
+        assert_eq!(fired[1], (20, 3, -0.8, 0));
+    }
+
+    #[test]
+    fn test_add_mapping_updates_existing_slot_in_place() {
+        let mut m = ModulationMatrix::new();
+        m.add_mapping(1, 10, 0, 0.5, 0, None);
+        m.add_mapping(1, 10, 0, 2.0, 32, None); // same triple: update, not duplicate
+
+        let fired = collect(&m, 1, 1.0, 0.0);
+        assert_eq!(fired.len(), 1, "re-adding the same mapping must not duplicate it");
+        assert_eq!(fired[0], (10, 0, 2.0, 32));
+    }
+
+    #[test]
+    fn test_remove_mapping_frees_slot() {
+        let mut m = ModulationMatrix::new();
+        m.add_mapping(1, 10, 0, 1.0, 0, None);
+        m.remove_mapping(1, 10, 0);
+        assert!(collect(&m, 1, 1.0, 0.0).is_empty());
+
+        // The freed slot is reusable
+        m.add_mapping(3, 99, 7, 1.0, 0, None);
+        assert_eq!(collect(&m, 3, 0.5, 0.0), vec![(99, 7, 0.5, 0)]);
+    }
+
+    #[test]
+    fn test_temporal_shapes_modulate_over_the_beat() {
+        let mut m = ModulationMatrix::new();
+        m.add_mapping(1, 10, 0, 1.0, 0, Some(TemporalShape::Square));
+
+        // Square: +1 in the first half of the beat, -1 in the second.
+        assert_eq!(collect(&m, 1, 0.7, 0.25)[0].2, 0.7);
+        assert_eq!(collect(&m, 1, 0.7, 0.75)[0].2, -0.7);
+
+        // Sine: zero crossing at phase 0, positive peak at phase 0.25.
+        let mut m = ModulationMatrix::new();
+        m.add_mapping(1, 10, 0, 1.0, 0, Some(TemporalShape::Sine));
+        assert!(collect(&m, 1, 1.0, 0.0)[0].2.abs() < 1e-6);
+        assert!((collect(&m, 1, 1.0, 0.25)[0].2 - 1.0).abs() < 1e-6);
+
+        // Triangle: -1 at phase 0, +1 at phase 0.5, back to -1 at 1.0-eps.
+        let mut m = ModulationMatrix::new();
+        m.add_mapping(1, 10, 0, 1.0, 0, Some(TemporalShape::Triangle));
+        assert!((collect(&m, 1, 1.0, 0.0)[0].2 - -1.0).abs() < 1e-6);
+        assert!((collect(&m, 1, 1.0, 0.5)[0].2 - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_matrix_capacity_is_bounded_and_silent_on_overflow() {
+        let mut m = ModulationMatrix::new();
+        for i in 0..(MAX_MOD_MAPPINGS as u64 + 10) {
+            m.add_mapping(1, i, 0, 1.0, 0, None);
+        }
+        let fired = collect(&m, 1, 1.0, 0.0);
+        assert_eq!(fired.len(), MAX_MOD_MAPPINGS, "overflow must be dropped, not panic or overwrite");
+    }
+}
