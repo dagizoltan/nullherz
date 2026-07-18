@@ -23,7 +23,8 @@ As the `SpectralPersonality` and `RhythmicDNA` schemas evolve, old samples must 
 
 ## 3. The "Black Box" Flight Recorder (RT-Debugging)
 Audio glitches (X-RUNS) are notoriously hard to debug.
-*   **Glitch Capture:** When an X-RUN is detected, the Conductor will dump the last 512ms of telemetry, command bus history, and CPU heatmap to a `glitch_report.json`.
+*   **First increment shipped (July 18, 2026):** the survival harness (`cargo run -p nullherz-conductor --bin survival`) records every xrun with timestamp and magnitude plus a budget-overrun timeline (elapsed + block time for each block exceeding the period budget) into a markdown report — enough to distinguish load spikes from steady-state trouble. It already caught two shipping bugs on its first run.
+*   **Glitch Capture (next increment):** when an X-RUN is detected in normal (non-harness) operation, the Conductor dumps the last 512ms of telemetry, command-bus history, and CPU heatmap to a `glitch_report.json`.
 *   **Developer Value:** This allows Sidecar developers to see exactly which parameter update or topology shift triggered the engine's instability.
 
 ---

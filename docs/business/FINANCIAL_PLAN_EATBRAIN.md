@@ -15,6 +15,8 @@ Eatbrain isn't just a label; it's a technical standard in drum & bass. Nullherz 
 *   **Artist Synergies:** The Sampler and Sequencer are perfect for the complex rhythmic structures of neurofunk.
 *   **Branded Hardware Potential:** Licensing the engine for a "Limited Edition Eatbrain Controller/Groovebox."
 
+> **Evidence alignment (July 18, 2026)** — before this document goes in front of a counterparty, two claims above must be softened to match the [R&D Strategy](./R_AND_D_STRATEGY.md) status labels: "neural timbral embeddings" are currently a schema + placeholder projection (real 16-D latent pipeline, not yet neural), and RDMA is parked research (shipped: measured-path-delay clock sync + remote sidecar DSP over UDP — itself genuinely unique, see [Market Comparison §6](./MARKET_COMPARISON.md)). What has *strengthened* since June and belongs in the pitch: 157-test verified engine, CI + weekly formal proofs, crash-isolation test-pinned, signed-DNA security shipped, and a survival/latency harness producing publishable numbers. Pitch the verified engine hard and the R&D as roadmap — not the reverse.
+
 ---
 
 ## 2. Proposed Pricing Models

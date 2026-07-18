@@ -21,7 +21,8 @@ Most competitors sell "Features." We sell a **Philosophy.** The "Sound Transfusi
 ### 2.1 The "Rust Advantage" (Architectural Moat)
 Legacy competitors (Traktor, Ableton, Serato) are built on millions of lines of aging C++. They suffer from "legacy drag"—fear of refactoring critical RT paths.
 *   **Nullherz** is built on a modern, memory-safe foundation. Our **Triple-Plane Model** and **Sidecar Isolation** solve the #1 complaint of professional performers: **System Crashes.**
-*   **Market Play:** Position Nullherz as the "Mission Critical" engine. If the software crashes, the career is at risk. We offer the first "Uncrashable" DJ/Studio hybrid.
+*   **Evidence status (July 18, 2026):** the isolation claims are now *test-pinned*, not aspirational — per-node process isolation with heartbeat fallback, safe mode, and supervisor restart are covered by the 157-test suite and CI; the survival harness measures stage-worthiness directly. Two honest caveats before using "mission critical" in outward material: (a) the orchestrator still contains ~50 panic-capable `unwrap` sites (a scheduled hardening pass), and (b) no 1-hour hardware Survival run has been published yet. Say "crash-isolated," not "uncrashable," until both close.
+*   **Market Play:** Position Nullherz as the "Mission Critical" engine — *after* the Validation Gate produces the published numbers to back it.
 
 ### 2.2 Workflow Convergence (Product Moat)
 Nullherz realizes the AnaWaves vision of **Cyclic Evolution**. Current workflows are linear: idea → export → end. In Nullherz, the "Export" is a "Birth." By allowing a DJ to capture their live performance, re-inject it into the granular engine, and evolve it in real-time, we eliminate the bifurcated market of "DJ Tools" vs "DAWs."
@@ -51,14 +52,18 @@ As iPads and mobile devices become powerful enough for pro-audio, our engine (wh
 | **Hardware Support** | Implement a "Universal MIDI Mapping Engine" (Month 1 Roadmap) and pursue official partnerships with controller manufacturers. |
 | **Ecosystem Inertia** | Open-source the Sidecar SDK early. Create a "Transfusion" marketplace for high-quality samples and patterns. |
 | **UI Familiarity** | Use our modular UI system to offer "Skins" or layouts that mimic classic workflows while introducing our unique innovations gradually. |
+| **Unproven core experience** *(added 07/2026)* | The SoundDNA workflow has never been tested on an outside musician. The Stranger test (Strategic Assessment §3) gates any instrument-identity investment. |
+| **Bus factor / solo maintainership** *(added 07/2026)* | The verification infrastructure (CI gate, 157 tests, Kani proofs, survival harness) is deliberately built so correctness doesn't live in one person's head; docs hub keeps architecture knowledge explicit. |
+| **Linux-only audience ceiling** *(added 07/2026)* | Acceptable for identities 1 and 3 (developers, installations); a hard constraint to price into identity 2. Portability is real but unscheduled. |
 
 ---
 
-## 5. Conclusion: The Roadmap to 5% Market Share
-1.  **Year 1:** Secure the "Technical Pro" niche. Win the respect of the engineering community.
-2.  **Year 2:** Expand into the "Pro-Producer" space via the hybrid Studio features.
-3.  **Year 3:** Licensing the engine to 3rd-party hardware manufacturers.
+## 5. Conclusion: Sequenced by Validation, Not by Calendar
+The original year-by-year ladder assumed the hybrid DJ/DAW identity. Post-assessment, sequencing follows the Validation Gate instead:
+1.  **Gate:** Survival + RTL numbers on real hardware; Stranger test on the Breeder; Adoption probe for the engine crate.
+2.  **Then:** commit to one identity and let it own the next two quarters (the other two become supporting features, not co-equal products).
+3.  **Licensing/hardware conversations** (§3.2) only make sense *after* published latency numbers exist — they are the sales collateral.
 
-Nullherz isn't just another DJ app; it's the **Operating System for the next 10 years of Audio Performance.**
+Nullherz's honest present-tense claim: **the most verification-hardened open Rust audio engine we know of, with one genuinely original interaction idea attached.** Everything larger is earned through the gate.
 
-**Strategic Rating:** **STRONG BUY / HIGH GROWTH POTENTIAL**
+**Strategic Rating:** **CONDITIONAL — HIGH POTENTIAL, GATED ON VALIDATION** (see [Strategic Assessment](./STRATEGIC_ASSESSMENT_2026_07.md))
