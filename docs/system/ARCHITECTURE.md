@@ -118,7 +118,7 @@ Key invariants observed in code:
 | :--- | :--- | :--- |
 | Sidecar Protocol V2 | SHM rings + eventfd; TCP/UDP for remote | Message types 1–8 (commands, sample mirroring, audio return, heartbeat, remote send, UDP return, experimental RDMA, MIDI fast-path). See [SIDECAR_PROTOCOL_V2.md](./SIDECAR_PROTOCOL_V2.md). |
 | Gateway | WebSocket, `127.0.0.1:9001` | JSON telemetry broadcast (fan-out to N clients), JSON command ingest, library queries. |
-| Clock sync | UDP broadcast `:319` | Master broadcasts a `u64` LE nanosecond timestamp at 1 Hz; slaves discipline a PI clock servo. **Simplified PTP**: fixed 1 ms wire-delay assumption, no Delay_Req/Delay_Resp exchange yet. Hardware RX timestamps used when `PtpClockProvider` is active. |
+| Clock sync | UDP `:319` | Typed protocol: SYNC `[0x01][t1]` broadcast at 1 Hz, DELAY_REQ `[0x02][id]`, DELAY_RESP `[0x03][id][t4]` (legacy bare-u64 SYNC accepted). Slaves measure the round trip offset-free from the four timestamps, EMA-filter (1/8) with a 100 ms plausibility clamp, and discipline a PI clock servo. Engine socket uses SO_REUSEADDR/PORT to coexist with `PtpClockProvider`'s SO_TIMESTAMPING socket. |
 | Discovery | UDP broadcast beacon | `DiscoveryBeacon` announces conductor presence; `distributed-sidecar` listens; `SidecarDiscoveryService` also watches `plugins/` for drop-in manifests. |
 | DNA gossip | TCP overlay | Gossipsub-style GRAFT/mesh links; `GOSSIP_SIGNED` payloads verified with ed25519. |
 
@@ -134,13 +134,13 @@ Key invariants observed in code:
 | `mappings/default.json` | `midi_mapper` | MIDI CC → command mappings. |
 | `plugins/` | discovery service | Drop-in sidecar manifests (e.g. `bitcrusher.json` + binary dir). |
 | `tracks/` | demo assets | `track_a.wav`, `track_b.wav`. |
-| `fallback_<pid>_<n>.redb` | test/fallback runs | **Transient artifacts** — safe to delete; should be gitignored/relocated (tracked in [TECHNICAL_DEBT_AND_STUBS.md](../state/TECHNICAL_DEBT_AND_STUBS.md)). |
+| `$TMPDIR/nullherz_fallback_*.redb` | test/fallback runs | Transient fallback library DBs, written to the system temp dir (never the repo root). |
 
 ---
 
 ## 5. Verification Infrastructure
 
-- **121 `#[test]` functions** across the workspace; conformance `Gauntlet` (`nullherz-traits/src/test_kit`) runs every registered processor through NaN ingestion, buffer-size oscillation, sub-block consistency, reset determinism, parameter reachability, and snapshot safety.
+- **127 `#[test]` functions** across the workspace (all green in CI); conformance `Gauntlet` (`nullherz-traits/src/test_kit`) runs every registered processor through NaN ingestion, buffer-size oscillation, sub-block consistency, reset determinism, parameter reachability, and snapshot safety.
 - **Kani proof harnesses** (3, behind the `kani-verify` feature): PI clock-servo integral clamping (`nullherz-traits`), jitter-buffer size invariance (`conductor/ipc_audio_bridge.rs`), and parallel graph-execution safety (`audio-core/processors/graph/verification.rs`).
-- **Warning-free**: `cargo check --workspace` completes with zero warnings (verified 2026-07-17).
+- **Warning-free**: `cargo check --workspace --all-targets` completes with zero warnings; enforced by CI with `-D warnings` (`.github/workflows/ci.yml`). Weekly Kani proofs run via `.github/workflows/kani.yml`.
 - Integration/decoupling test suites live in `audio-core` (`integration_tests.rs`, `decoupling_tests.rs`, `engine_tests.rs`) and `conductor` (`mixing_test.rs`).

@@ -85,9 +85,9 @@ While the Nullherz engine is architecturally hardened, the transition to a "Valu
 | Subsystem | Readiness | Evidence |
 |-----------|-----------|----------|
 | **Core Engine** | Production Beta | Parallel execution covered by a Kani proof harness (`kani-verify` feature; graph, jitter buffer, and PI-servo harnesses). |
-| **Clock Sync** | Prototype+ | Simplified PTP: UDP :319 master broadcast, PI clock servo (Kani-proved clamp), hardware RX timestamps. Fixed 1 ms wire-delay assumption — no Delay_Req/Resp yet. |
+| **Clock Sync** | Active | Typed PTP protocol with Delay_Req/Delay_Resp measured path delay (offset-free, EMA-filtered, plausibility-clamped), PI clock servo (Kani-proved clamp). Remaining: SO_TIMESTAMPING integration, BMC election. |
 | **Topology Manager** | Production Beta | Thread-safe, off-audio DAG compilation. |
-| **Genetic Cloud** | Active | TCP Gossipsub-style DNA exchange with ed25519 `GOSSIP_SIGNED` payloads; peer-signature cache still partially mocked. |
+| **Genetic Cloud** | Active | TCP Gossipsub-style DNA exchange with ed25519 `GOSSIP_SIGNED` payloads and TOFU peer-identity pinning (HANDSHAKE/IDENTITY, key-change rejection). |
 | **DSP Kernels** | Production Beta | Wasm-SIMD128 optimized spectral kernels; OLA time-stretch and transient detectors added (July 2026). |
 | **Mixer Console** | Active | 4-channel DJ topology with harmonic auto-sync. |
 | **Audio Editor** | Active | Waveform selection, OLA time-stretch, transient chop, non-destructive undo (July 2026). |
@@ -98,8 +98,6 @@ While the Nullherz engine is architecturally hardened, the transition to a "Valu
 
 ## 6. Conclusion
 
-The Nullherz engine has transitioned to a **Production Beta** state. It features a Kani-covered execution plane, distributed clock discipline (simplified PTP), a signed genetic DNA gossip protocol, and warning-free builds (`cargo check --workspace`, 0 warnings, 2026-07-17).
-
-**Known issue:** `test_inspector_command_routing_to_conductor` fails deterministically due to sleep-based test synchronization against real backend boot (117/117 pass excluding the inspector crate). See [TECHNICAL_DEBT_AND_STUBS.md](./TECHNICAL_DEBT_AND_STUBS.md) §1.
+The Nullherz engine has transitioned to a **Production Beta** state. It features a Kani-covered execution plane, distributed clock discipline with measured path delay, a signed genetic DNA gossip protocol with peer-identity pinning, warning-free builds (`cargo check --workspace --all-targets -D warnings`), a CI gate, and a fully green test suite (**127/127**, 2026-07-18).
 
 **Architecture Status:** PRODUCTION BETA.

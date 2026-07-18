@@ -3267,6 +3267,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "smallvec",
+ "socket2 0.5.10",
  "symphonia",
  "tokio",
  "walkdir",
