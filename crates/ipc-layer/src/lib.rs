@@ -1058,3 +1058,94 @@ mod ring_buffer_tests {
         assert_eq!(sig.get_heartbeat(), h0 + 2, "heartbeat is a monotonic counter");
     }
 }
+
+#[cfg(test)]
+mod ring_buffer_properties {
+    use super::*;
+    use proptest::prelude::*;
+
+    #[derive(Debug, Clone)]
+    enum Op {
+        Push(u64),
+        Pop,
+    }
+
+    fn op_strategy() -> impl Strategy<Value = Op> {
+        prop_oneof![
+            (0u64..1000).prop_map(Op::Push),
+            Just(Op::Pop),
+        ]
+    }
+
+    proptest! {
+        /// Model-based check: under ANY single-threaded interleaving of pushes
+        /// and pops, the SPSC ring behaves exactly like a bounded FIFO queue —
+        /// same accepts, same rejects, same pop order. (Cross-thread ordering
+        /// is covered by the stress tests; this pins the sequential semantics
+        /// they assume.)
+        #[test]
+        fn spsc_matches_bounded_fifo_model(
+            capacity in 2usize..32,
+            ops in proptest::collection::vec(op_strategy(), 0..200),
+        ) {
+            let (mut prod, mut cons) = RingBuffer::new(capacity).split();
+            let mut model: std::collections::VecDeque<u64> = std::collections::VecDeque::new();
+            let usable = capacity - 1; // one slot kept open to distinguish full/empty
+
+            for op in ops {
+                match op {
+                    Op::Push(v) => {
+                        let real = prod.push(v);
+                        if model.len() < usable {
+                            prop_assert!(real.is_ok(), "model accepts, ring must too");
+                            model.push_back(v);
+                        } else {
+                            prop_assert_eq!(real, Err(v), "model full, ring must reject");
+                        }
+                    }
+                    Op::Pop => {
+                        prop_assert_eq!(cons.pop(), model.pop_front(), "pop order must match FIFO");
+                    }
+                }
+            }
+            // Drain: remaining contents must match exactly.
+            while let Some(expected) = model.pop_front() {
+                prop_assert_eq!(cons.pop(), Some(expected));
+            }
+            prop_assert_eq!(cons.pop(), None);
+        }
+
+        /// Same model check for the MPSC (Vyukov) queue in sequential use —
+        /// full capacity usable, strict FIFO.
+        #[test]
+        fn mpsc_matches_bounded_fifo_model(
+            cap_pow in 1u32..6,
+            ops in proptest::collection::vec(op_strategy(), 0..200),
+        ) {
+            let capacity = 1usize << cap_pow;
+            let buf = MpscRingBuffer::new(capacity);
+            let mut model: std::collections::VecDeque<u64> = std::collections::VecDeque::new();
+
+            for op in ops {
+                match op {
+                    Op::Push(v) => {
+                        let real = buf.push(v);
+                        if model.len() < capacity {
+                            prop_assert!(real.is_ok());
+                            model.push_back(v);
+                        } else {
+                            prop_assert_eq!(real, Err(v));
+                        }
+                    }
+                    Op::Pop => {
+                        prop_assert_eq!(buf.pop(), model.pop_front());
+                    }
+                }
+            }
+            while let Some(expected) = model.pop_front() {
+                prop_assert_eq!(buf.pop(), Some(expected));
+            }
+            prop_assert_eq!(buf.pop(), None);
+        }
+    }
+}
