@@ -10,7 +10,9 @@
 
 This report provides a formal evaluation and reverse-engineered assessment of the **Nullherz** audio engine and workspace platform. Nullherz is a next-generation real-time audio workstation, live performance tool, and evolutionary synthesis engine designed for ultra-low latency, stability, and high-performance DSP orchestration.
 
-Through rigorous design analysis, we have reverse engineered the system components across the Orchestration, Protocol, and Execution planes. Recent hardening passes have successfully eliminated critical architectural bottlenecks, bringing the system into a high-fidelity **Production Beta** state with warning-free compiling and 100% test-suite passing.
+Through rigorous design analysis, we have reverse engineered the system components across the Orchestration, Protocol, and Execution planes. Recent hardening passes have successfully eliminated critical architectural bottlenecks, bringing the system into a high-fidelity **Production Beta** state with warning-free compiling.
+
+> **Correction (2026-07-17):** the full test suite is *not* 100% green — `test_inspector_command_routing_to_conductor` fails deterministically due to sleep-based synchronization against real ALSA backend boot (117/117 pass excluding the inspector crate). See [TECHNICAL_DEBT_AND_STUBS.md](./TECHNICAL_DEBT_AND_STUBS.md) §1. The crate-map ground truth now lives in [ARCHITECTURE.md](../system/ARCHITECTURE.md).
 
 ---
 
