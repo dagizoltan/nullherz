@@ -4,6 +4,37 @@
 
 ---
 
+## 0. Getting Sound At All (First-Run Checklist)
+
+Diagnosed on the reference machine (x270, July 18, 2026): the stack is
+**PipeWire** (pipewire + wireplumber); Nullherz's ALSA backend opens
+`default`, which routes through PipeWire's ALSA layer — this works and is
+the supported default. "No sound" is almost never the driver; check in
+order:
+
+1. **Release build.** Debug DSP is 10–30× slower and blows the period
+   budget every block (the endless `snd_pcm_writei error: -32` loop):
+   `cargo run --release --bin nullherz-inspector -- --gui ./graph.json`
+2. **Something must be playing.** The engine outputs silence until a track
+   is loaded onto a deck and the deck plays (telemetry `peak_L=0.000000`
+   means exactly this). Library panel → select a track → load to Deck A →
+   press play in the Player/DJ view.
+3. **Fresh analysis after changing demo tracks.** The library caches
+   analysis per path; after regenerating `tracks/*.wav`, back up and delete
+   `library.redb` so the folder monitor re-analyzes (BPM, transients,
+   waveform mips).
+4. **OS-level check** if still silent: `aplay /usr/share/sounds/alsa/Front_Center.wav`
+   and `pactl get-sink-mute @DEFAULT_SINK@`.
+
+Demo tracks are generated, deterministic, and regenerable with
+`python3 scripts/gen_demo_tracks.py` — track_a is a 174 BPM neurofunk loop
+(two-step kick/snare, 1/16 hats, reese + sub), track_b a 128 BPM house
+loop (four-on-the-floor, offbeat hats, sub bassline, stabs). Both have
+real transients so waveform LOD, BPM detection, and transient analysis
+have material to work with.
+
+---
+
 ## 1. Survival Test (1 hour, 0 xruns)
 
 **Harness:** `crates/nullherz-conductor/src/bin/survival.rs` — headless; boots the full 4-channel DJ topology, loads the first two analyzed tracks onto decks A/B, plays them, tracks xruns and block times from live telemetry, writes a markdown report, and exits non-zero on any xrun.

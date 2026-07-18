@@ -20,7 +20,16 @@ impl nullherz_traits::RtSafe for StereoUtilityProcessor {}
 
 impl nullherz_traits::SignalProcessor for StereoUtilityProcessor {
 fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
-        if inputs.len() < 2 || outputs.len() < 2 { return; }
+        // Mono-wired instances (deck strips) must pass audio through, not
+        // silently eat it: an early return here leaves the output buffer
+        // zeroed and starves everything downstream.
+        if inputs.len() < 2 || outputs.len() < 2 {
+            if let (Some(inp), Some(out)) = (inputs.first(), outputs.first_mut()) {
+                let n = inp.len().min(out.len());
+                out[..n].copy_from_slice(&inp[..n]);
+            }
+            return;
+        }
         let len = inputs[0].len();
 
         let pan = self.pan;

@@ -38,7 +38,7 @@ impl Default for EngineBuilder<StandardKernel> {
             command_buffer_size: 1024,
             midi_buffer_size: 256,
             bundle_buffer_size: 64,
-            topology_buffer_size: 64,
+            topology_buffer_size: 256,
             telemetry_buffer_size: 1024,
             garbage_buffer_size: 1024,
             initial_graph: None,

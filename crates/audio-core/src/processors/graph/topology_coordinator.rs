@@ -33,6 +33,11 @@ impl TopologyCoordinator {
             self.topologies[inactive] = self.topologies[active].clone();
             self.needs_commit = true;
         }
+        // Structural mutation invalidates the (cloned, now stale) plan so
+        // commit() recompiles from current routing. Reusing a stale plan is
+        // how the engine ends up executing only the first bootstrap batch's
+        // nodes forever ("plan ping-pong" silence bug).
+        self.topologies[inactive].plan.num_stages = 0;
         &mut self.topologies[inactive]
     }
 

@@ -1,8 +1,29 @@
+// Non-RT plane (topology backpressure pacing): thread sleep is sanctioned here.
+#![allow(clippy::disallowed_methods)]
 use nullherz_topology::GraphCompiler;
 use std::sync::Arc;
 use nullherz_processors::ProcessorRegistry;
 use audio_core::processors::{TopologyMutation, GraphTopology, NodeRouting};
 use nullherz_traits::Command;
+
+
+/// Push a topology mutation with backpressure. The engine drains a bounded
+/// number of mutations per audio block, so a large bootstrap (4 decks + buses
+/// + master chain) can outrun the ring; dropping a structural mutation leaves
+/// the graph permanently half-built (the "no master chain = eternal silence"
+/// bug). This is the non-RT side, so briefly waiting is correct.
+fn push_mutation(prod: &mut ipc_layer::NonRtProducer<TopologyMutation>, mut m: TopologyMutation) {
+    for _ in 0..500 {
+        match prod.push(m) {
+            Ok(()) => return,
+            Err(back) => {
+                m = back;
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+    }
+    eprintln!("TopologyManager: DROPPED mutation after 1s of backpressure — graph may be incomplete!");
+}
 
 pub struct TopologyManager {
     pub registry: ProcessorRegistry,
@@ -113,7 +134,7 @@ impl TopologyManager {
                     }
                     self.current_topology.node_count = max_topo_idx;
 
-                    let _ = prod.push(TopologyMutation::RemoveNode { node_idx });
+                    push_mutation(prod, TopologyMutation::RemoveNode { node_idx });
                     return true;
                 }
             }
@@ -128,14 +149,14 @@ impl TopologyManager {
                             self.current_topology.node_count = idx + 1;
                         }
                     }
-                    let _ = prod.push(TopologyMutation::AddNode { node_idx, processor });
+                    push_mutation(prod, TopologyMutation::AddNode { node_idx, processor });
                     return true;
                 }
             }
             Command::Topology(nullherz_traits::TopologyCommand::SwapProcessor {  node_idx, processor_type_id }) => {
                 if let Some(processor) = self.registry.create_by_id(processor_type_id.0, node_idx, sr) {
                     self.active_node_types.insert(node_idx, processor_type_id.0);
-                    let _ = prod.push(TopologyMutation::SwapProcessor { node_idx, processor });
+                    push_mutation(prod, TopologyMutation::SwapProcessor { node_idx, processor });
                     return true;
                 }
             }
@@ -148,7 +169,7 @@ impl TopologyManager {
                         self.current_topology.routing[n_idx].input_count = i_idx + 1;
                     }
                 }
-                let _ = prod.push(TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx });
+                push_mutation(prod, TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx });
                 return true;
             }
             Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge {   node_idx, output_idx, new_buffer_idx }) => {
@@ -160,7 +181,7 @@ impl TopologyManager {
                         self.current_topology.routing[n_idx].output_count = o_idx + 1;
                     }
                 }
-                let _ = prod.push(TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx });
+                push_mutation(prod, TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx });
                 return true;
             }
             Command::Topology(nullherz_traits::TopologyCommand::Connect { src_node_idx, src_output_idx, dst_node_idx, dst_input_idx }) => {
@@ -202,7 +223,7 @@ impl TopologyManager {
                 if n_idx < nullherz_traits::MAX_NODES {
                     self.current_topology.bypass_states[n_idx] = enabled;
                 }
-                let _ = prod.push(TopologyMutation::SetBypass { node_idx, enabled });
+                push_mutation(prod, TopologyMutation::SetBypass { node_idx, enabled });
                 return true;
             }
             Command::Topology(nullherz_traits::TopologyCommand::SetNodePosition { node_idx, x, y }) => {
@@ -210,7 +231,7 @@ impl TopologyManager {
                 if n_idx < nullherz_traits::MAX_NODES {
                     self.current_topology.node_positions[n_idx] = Some((x, y));
                 }
-                let _ = prod.push(TopologyMutation::SetNodePosition { node_idx, x, y });
+                push_mutation(prod, TopologyMutation::SetNodePosition { node_idx, x, y });
                 return true;
             }
             Command::Topology(nullherz_traits::TopologyCommand::MigrateNode { node_idx, destination }) => {
@@ -227,11 +248,8 @@ impl TopologyManager {
                 match GraphCompiler::compile(&self.current_topology) {
                     Ok(plan) => {
                         self.current_topology.plan = plan;
-                        if let Err(_e) = prod.push(TopologyMutation::SetTopology(Arc::new(self.current_topology.clone()))) {
-                            eprintln!("Topology Commit failed: Mutation producer rejected SetTopology");
-                        } else {
-                            return true;
-                        }
+                        push_mutation(prod, TopologyMutation::SetTopology(Arc::new(self.current_topology.clone())));
+                        return true;
                     }
                     Err(e) => {
                         eprintln!("Off-thread compilation failed: {}", e);

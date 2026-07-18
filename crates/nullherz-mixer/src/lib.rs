@@ -10,6 +10,8 @@ pub use common::*;
 #[derive(Debug, Clone, Default)]
 pub struct DeckNodes {
     pub sampler_id: u32,
+    pub out_l: u32,
+    pub out_r: u32,
     pub isolator_id: u32,
     pub gain_id: u32,
     pub filter_id: u32,
@@ -184,6 +186,32 @@ impl MixerManager {
             commands.extend(self.create_dj_deck(deck, &[1], bus));
         }
 
+        // Bus summing: each deck renders to its own buffers; SUMMING nodes mix
+        // them onto the shared bus. Two decks writing the same buffer would
+        // OVERWRITE each other (executor gives exclusive write slices) — the
+        // silent deck erases the playing one ("buses always zero" bug).
+        {
+            let deck_out = |mapping: &std::collections::HashMap<char, DeckNodes>, d: char| {
+                let n = &mapping[&d];
+                (n.out_l, n.out_r)
+            };
+            let (a_l, a_r) = deck_out(&self.deck_mappings, 'A');
+            let (c_l, c_r) = deck_out(&self.deck_mappings, 'C');
+            let (b_l, b_r) = deck_out(&self.deck_mappings, 'B');
+            let (d_l, d_r) = deck_out(&self.deck_mappings, 'D');
+            let bus_sum = |in_a: u32, in_b: u32, out: u32, commands: &mut Vec<Command>| {
+                let id = self.id_allocator.allocate_node_id();
+                commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: id, processor_type_id: ProcessorTypeId::SUMMING }));
+                commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: id, input_idx: 0, new_buffer_idx: in_a }));
+                commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: id, input_idx: 1, new_buffer_idx: in_b }));
+                commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: id, output_idx: 0, new_buffer_idx: out }));
+            };
+            bus_sum(a_l, c_l, self.config.dj_a_l as u32, &mut commands);
+            bus_sum(a_r, c_r, self.config.dj_a_r as u32, &mut commands);
+            bus_sum(b_l, d_l, self.config.dj_b_l as u32, &mut commands);
+            bus_sum(b_r, d_r, self.config.dj_b_r as u32, &mut commands);
+        }
+
         // --- MASTER CROSSFADER (Stereo) ---
         let xf_l_id = self.id_allocator.allocate_node_id();
         let xf_r_id = self.id_allocator.allocate_node_id();
@@ -222,25 +250,33 @@ impl MixerManager {
 
         // --- MASTER FX CHAIN ---
 
+        // Master FX chain runs STEREO end-to-end: every node reads and writes
+        // both channels (MultiChannelDspProcessor handles N channels). Mono
+        // wiring here was the "right channel silent" bug — the limiter wrote
+        // out ch1 from an input that never existed.
+
         // 1. Master EQ (Biquad)
         let eq_id = self.id_allocator.allocate_node_id();
         let eq_out_l = self.id_allocator.allocate_buffer_id(1);
+        let eq_out_r = self.id_allocator.allocate_buffer_id(1);
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: eq_id, processor_type_id: ProcessorTypeId::BIQUAD }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: eq_id, input_idx: 0, new_buffer_idx: sum_out_l }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: eq_id, input_idx: 1, new_buffer_idx: sum_out_r }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: eq_id, output_idx: 0, new_buffer_idx: eq_out_l }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: eq_id, output_idx: 1, new_buffer_idx: eq_out_r }));
 
-        // 2. Master Compressor (Envelope Follower)
-        let comp_id = self.id_allocator.allocate_node_id();
-        let comp_out_l = self.id_allocator.allocate_buffer_id(1);
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: comp_id, processor_type_id: ProcessorTypeId::ENVELOPE_FOLLOWER }));
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: comp_id, input_idx: 0, new_buffer_idx: eq_out_l }));
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: comp_id, output_idx: 0, new_buffer_idx: comp_out_l }));
-
-        // 3. Master Limiter/Gain
+        // 2. Master Limiter/Gain — directly after the EQ.
+        // NOTE: the former "Master Compressor" (ENVELOPE_FOLLOWER) is removed
+        // from the audio path: an envelope follower OUTPUTS the envelope
+        // (near-DC control signal), not audio — in-path it replaced the mix
+        // with a ~constant level (the frozen peak_L=0.0069 bug). Real dynamics
+        // control on the master is the limiter's job; the follower belongs in
+        // sidechain/metering roles.
         let lim_id = self.id_allocator.allocate_node_id();
         self.node_names.insert("master_limiter".to_string(), lim_id);
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: lim_id, processor_type_id: ProcessorTypeId::LIMITER }));
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: lim_id, input_idx: 0, new_buffer_idx: comp_out_l }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: lim_id, input_idx: 0, new_buffer_idx: eq_out_l }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: lim_id, input_idx: 1, new_buffer_idx: eq_out_r }));
 
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: lim_id, output_idx: 0, new_buffer_idx: self.config.master_l as u32 }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: lim_id, output_idx: 1, new_buffer_idx: self.config.master_r as u32 }));

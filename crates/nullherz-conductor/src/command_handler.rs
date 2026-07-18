@@ -9,6 +9,27 @@ impl CommandHandler {
     pub fn apply_mixer_commands(conductor: &mut Conductor, commands: Vec<Command>) {
         let mut final_commands = Vec::new();
 
+        // 0. On-demand registry hydration: a deck load referencing a library
+        // track whose buffer is not in the (boot-empty, in-memory) registry
+        // would silently no-op in the engine. Decode it here, off the RT
+        // thread, so ANY library entry is playable regardless of which
+        // scanner or seeder created it.
+        for cmd in &commands {
+            if let Command::Performance(PerformanceCommand::LoadTrackToDeck { sample_id, .. }) = cmd {
+                if conductor.transfusion_manager.sample_registry.get(*sample_id).is_none() {
+                    let track = { conductor.library.lock().get_track(*sample_id).ok().flatten() };
+                    if let Some(track) = track {
+                        println!("CommandHandler: Hydrating sample {} from {}", sample_id, track.path);
+                        let buffer = crate::folder_monitor::decode_audio_file(&track.path);
+                        conductor.transfusion_manager.sample_registry.register_with_metadata(
+                            *sample_id, buffer, track.metadata.clone());
+                    } else {
+                        eprintln!("CommandHandler: LoadTrackToDeck {} has no library entry; the deck will stay silent.", sample_id);
+                    }
+                }
+            }
+        }
+
         // 1. Intercept DJ Deck Commands and Translate them
         let mut translated_commands = Vec::new();
         for cmd in &commands {

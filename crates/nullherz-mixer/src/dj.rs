@@ -62,9 +62,13 @@ pub fn create_dj_deck(
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: prev_id, output_idx: 0, new_buffer_idx: eq_buf }));
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: eq_id, input_idx: 0, new_buffer_idx: eq_buf }));
 
-    let target_l = if bus_assignment == 'A' { config.dj_a_l } else { config.dj_b_l };
-    let target_r = if bus_assignment == 'A' { config.dj_a_r } else { config.dj_b_r };
-    println!("Routing Deck {} to Buffers {}-{}", deck_id, target_l, target_r);
+    // Unique per-deck output buffers; the bus SUMMING nodes (added by
+    // create_4channel_mixer) mix decks onto the shared bus. (bus_assignment
+    // decides which summing pair picks these up.)
+    let _ = bus_assignment;
+    let target_l = id_allocator.allocate_buffer_id(1) as usize;
+    let target_r = id_allocator.allocate_buffer_id(1) as usize;
+    println!("Routing Deck {} to private buffers {}-{}", deck_id, target_l, target_r);
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: eq_id, output_idx: 0, new_buffer_idx: target_l as u32 }));
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: eq_id, output_idx: 1, new_buffer_idx: target_r as u32 }));
 
@@ -82,6 +86,8 @@ pub fn create_dj_deck(
 
     let nodes = crate::DeckNodes {
         sampler_id: resample_id,
+        out_l: target_l as u32,
+        out_r: target_r as u32,
         isolator_id: eq_id,
         gain_id,
         filter_id,
