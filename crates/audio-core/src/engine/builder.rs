@@ -43,7 +43,7 @@ impl Default for EngineBuilder<StandardKernel> {
             garbage_buffer_size: 1024,
             initial_graph: None,
             sample_registry: None,
-            kernel: StandardKernel::default(),
+            kernel: StandardKernel,
         }
     }
 }

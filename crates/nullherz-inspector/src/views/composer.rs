@@ -270,11 +270,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         let (rect, response) = ui.allocate_exact_size(Vec2::new(24.0, 22.0), Sense::click());
 
                                         // Dynamic Grid Extension Check: if the last element is visible, mark extend_grid
-                                        if slot_idx == steps_count - 1 {
-                                            if ui.is_rect_visible(rect) && steps_count < 512 {
+                                        if slot_idx == steps_count - 1
+                                            && ui.is_rect_visible(rect) && steps_count < 512 {
                                                 extend_grid = true;
                                             }
-                                        }
 
                                         // Playback status
                                         let (is_playing, is_starting) = check_step_telemetry(telemetry, track_idx, slot_idx);
@@ -436,7 +435,7 @@ mod tests {
     fn test_composer_track_targets_update() {
         let (cmd_tx, _cmd_rx) = std::sync::mpsc::channel();
         let raw_db = nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase");
-        let db_arc = std::sync::Arc::new(std::sync::Mutex::new(raw_db));
+        let db_arc = std::sync::Arc::new(parking_lot::Mutex::new(raw_db));
         let library_db_wrapper = crate::SharedLibraryDb(db_arc);
 
         let mut app = InspectorApp {

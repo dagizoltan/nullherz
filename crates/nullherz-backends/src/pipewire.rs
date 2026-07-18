@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::sync::atomic::Ordering;
 use nullherz_traits::RenderingEngine;
 use crate::AudioBackend;
@@ -289,7 +289,7 @@ unsafe extern "C" fn pw_param_changed(_data: *mut std::ffi::c_void, id: u32, _pa
         let mut rate = 0u32;
         if parse_spa_format_rate(param, &mut rate) {
              if let Some(ref handle) = backend.engine_handle {
-                if let Some(ref engine_arc) = *handle.lock().unwrap() {
+                if let Some(ref engine_arc) = *handle.lock() {
                     let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
                     (*engine_ptr).set_config(nullherz_traits::AudioConfig {
                         sample_rate: rate as f32,
@@ -311,7 +311,7 @@ impl AudioBackend for PipewireBackend {
 
             let mut target_rate = 44100u32;
             {
-                if let Some(ref engine_arc) = *engine_handle.lock().unwrap() {
+                if let Some(ref engine_arc) = *engine_handle.lock() {
                     target_rate = engine_arc.target_sample_rate() as u32;
                     let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
                     (*engine_ptr).set_config(nullherz_traits::AudioConfig { sample_rate: target_rate as f32, block_size: period_size as usize });
@@ -319,7 +319,7 @@ impl AudioBackend for PipewireBackend {
             }
 
             inner.engine_handle = Some(engine_handle.clone());
-            inner.engine_arc = engine_handle.lock().unwrap().clone();
+            inner.engine_arc = engine_handle.lock().clone();
             inner.running.store(true, Ordering::SeqCst);
 
             let pw = inner.lib.as_ref().unwrap();

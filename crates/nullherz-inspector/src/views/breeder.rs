@@ -249,8 +249,8 @@ impl BreederView {
 
             ui.add_enabled_ui(has_parents, |ui| {
                 let btn = ui.button(RichText::new(format!("{} EVOLVE PERMANENTLY", egui_phosphor::regular::DNA)).strong().size(theme.type_label));
-                if btn.clicked() {
-                    if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
+                if btn.clicked()
+                    && let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
                         let cmd = Command::Resource(nullherz_traits::ResourceCommand::CommitBreeding {
                             parent_a_id: id_a,
                             parent_b_id: id_b,
@@ -258,14 +258,13 @@ impl BreederView {
                         });
                         let _ = app.command_sender.send(cmd);
                     }
-                }
             }).response.on_disabled_hover_text("Select both parents first");
 
             ui.add_enabled_ui(has_parents, |ui| {
                 let btn = ui.button(RichText::new(format!("{} MUTATE PATTERN", egui_phosphor::regular::PIANO_KEYS)).strong().size(theme.type_label));
-                if btn.clicked() {
-                     if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
-                         if let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
+                if btn.clicked()
+                     && let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id)
+                         && let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
                              let child_rhythmic = nullherz_dna::transfuse_dna(&track_a.metadata.dna, &track_b.metadata.dna, state.transfusion_bias_y).rhythmic;
                              let commands = crate::views::composer::DnaSequencer::mutate_pattern(
                                  &child_rhythmic,
@@ -278,28 +277,25 @@ impl BreederView {
                                  let _ = app.command_sender.send(cmd);
                              }
                          }
-                     }
-                }
             }).response.on_disabled_hover_text("Select both parents first");
 
             ui.add_enabled_ui(has_parents, |ui| {
                 let btn = ui.button(RichText::new(format!("{} RHYTHMIC TRANSFUSION", egui_phosphor::regular::ARROW_RIGHT)).strong().size(theme.type_label));
-                if btn.clicked() {
-                    if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
+                if btn.clicked()
+                    && let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
                         let cmd = Command::Resource(nullherz_traits::ResourceCommand::RhythmicTransfusion {
                             source_id: id_a,
                             target_id: id_b,
                         });
                         let _ = app.command_sender.send(cmd);
                     }
-                }
             }).response.on_disabled_hover_text("Select both parents first");
         });
     }
 
     fn emit_dna_command(&self, app: &crate::InspectorApp) {
-        if let (Some(id_a), Some(id_b)) = (self.parent_a_id, self.parent_b_id) {
-            if let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
+        if let (Some(id_a), Some(id_b)) = (self.parent_a_id, self.parent_b_id)
+            && let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
 
                 // 1. Spectral Transfusion
                 let mut latent = [0.0f32; 16];
@@ -331,6 +327,5 @@ impl BreederView {
 
                 let _ = app.command_sender.send(cmd);
             }
-        }
     }
 }

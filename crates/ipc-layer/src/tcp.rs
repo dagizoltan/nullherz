@@ -21,7 +21,7 @@ impl TcpIpcProducer {
     }
 
     pub async fn send_command(&self, cmd: TimestampedCommand) -> Result<(), std::io::Error> {
-        let serialized = bincode::serialize(&cmd).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let serialized = bincode::serialize(&cmd).map_err(std::io::Error::other)?;
         let mut stream = self.stream.lock().await;
         stream.write_u32(serialized.len() as u32).await?;
         stream.write_all(&serialized).await?;

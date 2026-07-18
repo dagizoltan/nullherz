@@ -10,8 +10,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let mut peer_names = vec![];
     let mut is_mock = true;
 
-    if let Some(ref t) = *telemetry_lock {
-        if t.mesh_peer_count > 0 {
+    if let Some(ref t) = *telemetry_lock
+        && t.mesh_peer_count > 0 {
             is_mock = false;
             for i in 0..(t.mesh_peer_count as usize).min(8) {
                 let name_bytes = t.mesh_peer_names[i].name;
@@ -21,7 +21,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 }
             }
         }
-    }
 
     if is_mock {
         peer_names.push("Studio-PC-2".to_string());

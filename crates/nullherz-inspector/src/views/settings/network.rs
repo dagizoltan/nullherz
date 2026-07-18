@@ -30,8 +30,8 @@ pub fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
             let mut list = app.discovered_sidecars.clone();
 
             // Fetch actual live mesh peer names from telemetry if present
-            if let Some(ref t) = telemetry_opt {
-                if t.mesh_peer_count > 0 {
+            if let Some(ref t) = telemetry_opt
+                && t.mesh_peer_count > 0 {
                     list.clear();
                     for i in 0..(t.mesh_peer_count as usize).min(8) {
                         let name_bytes = t.mesh_peer_names[i].name;
@@ -48,7 +48,6 @@ pub fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
                         }
                     }
                 }
-            }
 
             let mut is_fallback = false;
             // Fallback list of remote nodes for testing/preview if empty

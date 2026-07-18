@@ -1,3 +1,6 @@
+// Non-RT plane (benchmark harness pacing): thread spawn/sleep are sanctioned here.
+// The disallowed-methods lint exists to protect the audio hot path only.
+#![allow(clippy::disallowed_methods)]
 use std::sync::Arc;
 use nullherz_dna::GeneticLibrary;
 use nullherz_traits::TimestampedCommand;

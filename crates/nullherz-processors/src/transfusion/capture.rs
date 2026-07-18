@@ -135,9 +135,8 @@ impl AudioProcessor for CaptureProcessor {
                     self.is_recording.store(false, Ordering::Release);
                 }
             }
-            4 => {
-                if value > 0.5 { self.reset(); }
-            }
+            4
+                if value > 0.5 => { self.reset(); }
             _ => {}
         }
     }

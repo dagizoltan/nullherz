@@ -62,14 +62,12 @@ impl MixerManager {
         }
 
         for cmd in commands {
-            if let Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx, new_buffer_idx, .. }) = cmd {
-                if let Some(&src_node) = buffer_producers.get(new_buffer_idx) {
-                    if src_node != *node_idx {
+            if let Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx, new_buffer_idx, .. }) = cmd
+                && let Some(&src_node) = buffer_producers.get(new_buffer_idx)
+                    && src_node != *node_idx {
                         adj.entry(src_node).or_insert_with(Vec::new).push(*node_idx);
                         *in_degree.entry(*node_idx).or_insert(0) += 1;
                     }
-                }
-            }
         }
 
         let mut queue = std::collections::VecDeque::new();

@@ -74,21 +74,18 @@ impl AudioProcessor for StreamingSamplerProcessor {
     fn apply_command(&mut self, command: &ProcessorCommand) {
         use nullherz_traits::{Command, PerformanceCommand};
         match command {
-            Command::Performance(PerformanceCommand::PlayNode { node_idx }) => {
-                if *node_idx as u64 == self.id {
+            Command::Performance(PerformanceCommand::PlayNode { node_idx })
+                if *node_idx as u64 == self.id => {
                     self.is_playing = true;
                 }
-            }
-            Command::Performance(PerformanceCommand::StopNode { node_idx }) => {
-                if *node_idx as u64 == self.id {
+            Command::Performance(PerformanceCommand::StopNode { node_idx })
+                if *node_idx as u64 == self.id => {
                     self.is_playing = false;
                 }
-            }
-            Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, .. }) => {
-                if *target_id == self.id {
+            Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, .. })
+                if *target_id == self.id => {
                     self.set_parameter(*param_id, *value, 0);
                 }
-            }
             _ => {}
         }
     }
@@ -152,8 +149,8 @@ mod tests {
         sampler._shm_holder = Some(mem);
         sampler.apply_command(&Command::Performance(nullherz_traits::PerformanceCommand::PlayNode { node_idx: 1 }));
 
-        let mut out_l = vec![0.0; 2];
-        let mut out_r = vec![0.0; 2];
+        let mut out_l = [0.0; 2];
+        let mut out_r = [0.0; 2];
         let mut out_l_ref = &mut out_l[..];
         let mut out_r_ref = &mut out_r[..];
         let outputs: &mut [&mut [f32]] = &mut [&mut out_l_ref, &mut out_r_ref];

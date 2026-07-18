@@ -6,12 +6,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let telemetry_opt = *app.last_telemetry.lock();
 
     // Synchronize local state with live telemetry if active
-    if let Some(ref t) = telemetry_opt {
-        if t.is_streaming {
+    if let Some(ref t) = telemetry_opt
+        && t.is_streaming {
             app.broadcast_state = 2; // Force to live if backend is actively streaming
             app.is_streaming = true;
         }
-    }
 
     // Dynamic State Machine Transition Simulator (Connecting -> Live)
     if app.broadcast_state == 1 {
@@ -190,11 +189,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 .show(ui, |ui| {
                     if app.broadcast_state == 2 {
                         let mut live_start = app.broadcast_start_time.unwrap_or(current_time);
-                        if let Some(ref t) = telemetry_opt {
-                            if t.is_streaming {
+                        if let Some(ref t) = telemetry_opt
+                            && t.is_streaming {
                                 live_start = current_time - t.stream_uptime_sec as f64;
                             }
-                        }
 
                         let uptime_sec = (current_time - live_start) as u32;
                         let min = uptime_sec / 60;
@@ -206,7 +204,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
                         // Simulated packets/dropped frames based on network quality in local fallback
                         let dropped = if app.broadcast_bitrate > 400.0 {
-                            (uptime_sec / 15) as u32
+                            uptime_sec / 15 
                         } else {
                             0
                         };

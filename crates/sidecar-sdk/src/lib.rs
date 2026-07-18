@@ -484,14 +484,10 @@ impl DnaKernel {
 /// Example of how to handle Opaque Envelope extensions in a Sidecar.
 pub fn handle_extension(processor: &mut dyn AudioProcessor, envelope: &nullherz_traits::OpaqueEnvelope) {
     // Domain 0x53444B31 is "SDK1"
-    if envelope.domain_id == 0x53444B31 {
-        match envelope.opcode {
-            0x01 => {
-                // Custom SDK Command implementation
-            }
-            _ => {}
+    if envelope.domain_id == 0x53444B31
+        && envelope.opcode == 0x01 {
+            // Custom SDK Command implementation
         }
-    }
     // Fallback to standard processor command handling if needed
     processor.apply_command(&nullherz_traits::Command::Extension(*envelope));
 }

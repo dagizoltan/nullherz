@@ -146,7 +146,7 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
             let mut i = 0;
             while i + 8 <= num_samples {
                 let v = load_f32x8(render_slice, i);
-                store_f32x8(*output, i, v);
+                store_f32x8(output, i, v);
                 i += 8;
             }
             while i < num_samples {

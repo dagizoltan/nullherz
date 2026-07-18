@@ -1,3 +1,6 @@
+// Non-RT plane (MIDI polling loop): thread spawn/sleep are sanctioned here.
+// The disallowed-methods lint exists to protect the audio hot path only.
+#![allow(clippy::disallowed_methods)]
 use nullherz_traits::MidiEvent;
 use ipc_layer::{SharedMemory, ShmRingBuffer, ShmProducer};
 #[cfg(feature = "midir-backend")]

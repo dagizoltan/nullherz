@@ -1,5 +1,5 @@
 use nullherz_traits::{MidiEvent, Command, MidiMap, MidiTarget};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 pub struct MidiMapper {
     pub active_map: Option<MidiMap>,
@@ -32,7 +32,7 @@ impl MidiMapper {
     }
 
     fn check_soft_takeover(&self, target_id: u64, param_id: u32, new_value: f32) -> bool {
-        let mut cache = self.parameter_cache.lock().unwrap();
+        let mut cache = self.parameter_cache.lock();
         if let Some(&last_val) = cache.get(&(target_id, param_id)) {
             // Tolerance for "crossing" the value (approx 5% window)
             if (new_value - last_val).abs() < 0.05 {
@@ -48,7 +48,7 @@ impl MidiMapper {
     }
 
     pub fn update_parameter_cache(&self, target_id: u64, param_id: u32, value: f32) {
-        let mut cache = self.parameter_cache.lock().unwrap();
+        let mut cache = self.parameter_cache.lock();
         cache.insert((target_id, param_id), value);
     }
 
@@ -77,7 +77,7 @@ impl MidiMapper {
                 // 1. Handle 14-bit CC Pairing (Stage 2 High-Res)
                 if event.data1 < 32 {
                     // MSB received, cache it and wait for LSB (or use as coarse if no LSB follows)
-                    let mut msb_cache = self.pending_14bit_msb.lock().unwrap();
+                    let mut msb_cache = self.pending_14bit_msb.lock();
                     msb_cache.insert(event.data1, event.data2);
                 }
 
@@ -87,7 +87,7 @@ impl MidiMapper {
                         if event.data1 >= 32 && event.data1 < 64 {
                             let msb_cc = event.data1 - 32;
                             let msb_val_opt = {
-                                let msb_cache = self.pending_14bit_msb.lock().unwrap();
+                                let msb_cache = self.pending_14bit_msb.lock();
                                 msb_cache.get(&msb_cc).copied()
                             };
                             if let Some(msb_val) = msb_val_opt {

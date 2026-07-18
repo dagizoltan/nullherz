@@ -382,28 +382,24 @@ impl SidecarHandle {
 
         if let Ok(content) = std::fs::read_to_string(&events_path) {
             for line in content.lines() {
-                if line.starts_with("oom_kill ") {
-                    if let Some(count_str) = line.split_whitespace().nth(1) {
-                        if let Ok(count) = count_str.parse::<u64>() {
-                            if count > self.last_oom_events {
+                if line.starts_with("oom_kill ")
+                    && let Some(count_str) = line.split_whitespace().nth(1)
+                        && let Ok(count) = count_str.parse::<u64>()
+                            && count > self.last_oom_events {
                                 self.last_oom_events = count;
                                 eprintln!("Sidecar {} OOM event detected! (count: {})", self.name, count);
                                 return true;
                             }
-                        }
-                    }
-                }
             }
         }
 
         // Check for memory.high/max pressure
         let pressure_path = format!("{}/memory.pressure", group_path);
-        if let Ok(content) = std::fs::read_to_string(&pressure_path) {
-             if content.contains("some avg10=") {
+        if let Ok(content) = std::fs::read_to_string(&pressure_path)
+             && content.contains("some avg10=") {
                  // Check if pressure is above threshold (e.g. 50%)
                  // Implementation logic for pressure parsing
              }
-        }
 
         false
     }

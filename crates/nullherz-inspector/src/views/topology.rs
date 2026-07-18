@@ -194,8 +194,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                     if socket_resp.hovered() {
                         ui.painter().circle_stroke(socket_pos, socket_radius + 2.0, egui::Stroke::new(1.0, theme.warning));
-                        if ui.input(|i| i.pointer.any_released()) {
-                            if let Some((src_node, src_out)) = app.active_connection_source {
+                        if ui.input(|i| i.pointer.any_released())
+                            && let Some((src_node, src_out)) = app.active_connection_source {
                                 let _ = app.command_sender.send(Command::Topology(TopologyCommand::Connect {
                                     src_node_idx: src_node,
                                     src_output_idx: src_out,
@@ -204,7 +204,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 }));
                                 app.active_connection_source = None;
                             }
-                        }
                     }
 
                     if socket_resp.secondary_clicked() {
@@ -233,13 +232,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 }
 
                 // CPU/Telemetry
-                if let Some(t) = telemetry {
-                     if idx < t.node_times_ns.len() {
+                if let Some(t) = telemetry
+                     && idx < t.node_times_ns.len() {
                          let time = t.node_times_ns[idx];
                          let color = if time > 500_000 { theme.danger } else if time > 100_000 { theme.warning } else { theme.accent };
                          ui.painter().text(node_rect.left_bottom() + egui::vec2(5.0, -5.0), egui::Align2::LEFT_BOTTOM, format!("{} ns", time), egui::FontId::proportional(theme.type_caption), color);
                      }
-                }
             }
         });
 
@@ -282,9 +280,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     }
 
     // Draw active drag cable (Cubic Bezier for consistency)
-    if let Some((src_node, src_out)) = app.active_connection_source {
-        if let Some(&start) = socket_positions.get(&(src_node, true, src_out)) {
-            if let Some(mouse_pos) = ui.input(|i| i.pointer.latest_pos()) {
+    if let Some((src_node, src_out)) = app.active_connection_source
+        && let Some(&start) = socket_positions.get(&(src_node, true, src_out))
+            && let Some(mouse_pos) = ui.input(|i| i.pointer.latest_pos()) {
                 let cp1 = start + egui::vec2(50.0, 0.0);
                 let cp2 = mouse_pos - egui::vec2(50.0, 0.0);
                 painter.add(egui::Shape::CubicBezier(egui::epaint::CubicBezierShape {
@@ -294,8 +292,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     stroke: egui::Stroke::new(2.0, theme.warning),
                 }));
             }
-        }
-    }
 
     ui.add_space(theme.space_md);
 

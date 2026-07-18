@@ -1,4 +1,5 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use nullherz_traits::RenderingEngine;
 use crate::AudioBackend;
@@ -27,7 +28,7 @@ impl AudioBackend for MockBackend {
     fn start(&mut self, engine: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>, period_size: u64) -> Result<(), String> {
         self.is_running = true;
         let count = self.process_count.clone();
-        let engine_lock = engine.lock().unwrap();
+        let engine_lock = engine.lock();
         if let Some(ref engine_arc) = *engine_lock {
             let inputs = [ &[][..]; 0 ];
             let mut out_data = vec![0.0f32; period_size as usize];

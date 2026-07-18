@@ -272,16 +272,14 @@ impl AudioProcessor for PersonalityInheritanceProcessor {
 
     fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
         match command {
-            nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, .. }) => {
-                if *target_id == self.id {
+            nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, .. })
+                if *target_id == self.id => {
                     self.set_parameter(*param_id, *value, 0);
                 }
-            }
-            nullherz_traits::Command::Dna(dna_cmd) => {
-                if dna_cmd.target_id == self.id {
+            nullherz_traits::Command::Dna(dna_cmd)
+                if dna_cmd.target_id == self.id => {
                     self.handle_dna_command(dna_cmd);
                 }
-            }
             _ => {}
         }
     }

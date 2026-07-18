@@ -122,7 +122,7 @@ impl ProjectState {
         // Use try_lock for non-blocking capture in auto-save context
         let mut engine_handle_lock = conductor.engine_coordinator.backend_manager.engine_handle.try_lock();
 
-        if let Ok(ref mut engine_opt) = engine_handle_lock {
+        if let Some(ref mut engine_opt) = engine_handle_lock {
             if let Some(engine) = engine_opt.as_mut() {
                 for child in engine.list_children() {
                     let metadata = child.metadata();

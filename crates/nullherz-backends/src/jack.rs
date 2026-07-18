@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use nullherz_traits::RenderingEngine;
 use crate::AudioBackend;
 
@@ -122,7 +122,7 @@ impl AudioBackend for JackBackend {
             inner.ports = vec![out1, out2];
 
             inner.engine_handle = Some(engine_handle.clone());
-            inner.engine_arc = engine_handle.lock().unwrap().clone();
+            inner.engine_arc = engine_handle.lock().clone();
             let ptr = inner as *mut _ as *mut _;
             (inner.lib.as_ref().unwrap().jack_set_process_callback)(inner.client, jack_process_callback, ptr);
             (inner.lib.as_ref().unwrap().jack_activate)(inner.client);

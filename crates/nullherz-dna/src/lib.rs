@@ -1,7 +1,10 @@
+// Non-RT plane (gossip/discovery network threads): thread spawn/sleep are sanctioned here.
+// The disallowed-methods lint exists to protect the audio hot path only.
+#![allow(clippy::disallowed_methods)]
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicPtr, Ordering};
 use redb::{Database, TableDefinition, ReadableTable, TableError};
 
@@ -238,18 +241,14 @@ impl GeneticLibrary for LibraryDatabase {
     fn query_tracks(&self, genre: Option<&str>, min_bpm: Option<f32>, max_bpm: Option<f32>, root_key: Option<f32>) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
         let all_tracks = self.list_tracks()?;
         let results = all_tracks.into_iter().filter(|t| {
-            if let Some(g) = genre {
-                if t.genre != g { return false; }
-            }
-            if let Some(min) = min_bpm {
-                if (*t.metadata).bpm < min { return false; }
-            }
-            if let Some(max) = max_bpm {
-                if (*t.metadata).bpm > max { return false; }
-            }
-            if let Some(key) = root_key {
-                if (*t.metadata).root_key != Some(key) { return false; }
-            }
+            if let Some(g) = genre
+                && t.genre != g { return false; }
+            if let Some(min) = min_bpm
+                && t.metadata.bpm < min { return false; }
+            if let Some(max) = max_bpm
+                && t.metadata.bpm > max { return false; }
+            if let Some(key) = root_key
+                && t.metadata.root_key != Some(key) { return false; }
             true
         }).collect();
         Ok(results)
@@ -316,11 +315,11 @@ impl LibraryDatabase {
         let tracks = self.list_tracks()?;
         let mut hasher = Sha256::new();
         for track in tracks {
-            let dna_bytes = serde_json::to_vec(&(*track.metadata).dna)?;
+            let dna_bytes = serde_json::to_vec(&track.metadata.dna)?;
             hasher.update(&dna_bytes);
         }
         let hash: [u8; 32] = hasher.finalize().into();
-        let mut root = self.merkle_root.lock().unwrap();
+        let mut root = self.merkle_root.lock();
         *root = hash;
         Ok(hash)
     }
@@ -380,13 +379,13 @@ impl LibraryDatabase {
     pub fn sync_with_cloud(&self, sync_service: &dyn PeerSync) -> Result<(), Box<dyn std::error::Error>> {
         let tracks = self.list_tracks()?;
         for track in tracks {
-            sync_service.announce_dna(&(*track.metadata).dna);
+            sync_service.announce_dna(&track.metadata.dna);
         }
 
         let remote_dna = sync_service.list_peer_dna();
         for (id, name) in remote_dna {
-            if self.get_track(id)?.is_none() {
-                if let Some(dna) = sync_service.request_dna(id) {
+            if self.get_track(id)?.is_none()
+                && let Some(dna) = sync_service.request_dna(id) {
                     println!("Sync: Inherited SoundDNA '{}' from cloud peer.", name);
                     let track = LibraryTrack {
                         id,
@@ -403,7 +402,6 @@ impl LibraryDatabase {
                     };
                     self.save_track(&track)?;
                 }
-            }
         }
         Ok(())
     }
@@ -431,24 +429,61 @@ pub trait PeerSync {
 pub struct CloudPeerSync {
     pub peers: Vec<String>,
     pub trusted_peers: std::collections::HashSet<String>,
-    /// Mock for cryptographic signatures: peer_addr -> signature
-    pub peer_signatures: HashMap<String, [u8; 64]>,
+    /// Verified peer identity keys (peer_addr -> ed25519 public key), pinned
+    /// trust-on-first-use via the HANDSHAKE/IDENTITY exchange. A peer whose key
+    /// changes after pinning is rejected.
+    pub peer_keys: Mutex<HashMap<String, [u8; 32]>>,
     /// Node's own signing key
     pub signing_key: Option<[u8; 32]>,
     /// Active Gossipsub mesh links
     pub mesh_links: Mutex<std::collections::HashSet<String>>,
 }
 
+impl CloudPeerSync {
+    /// HANDSHAKE with a peer and pin its identity key (trust-on-first-use).
+    /// Returns the peer's pinned public key, or None if the peer is unreachable,
+    /// presents no identity, or presents a key that conflicts with the pin.
+    pub fn handshake(&self, peer: &str) -> Option<[u8; 32]> {
+        let addr: std::net::SocketAddr = peer.parse().ok()?;
+        let mut stream = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)).ok()?;
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(1000)));
+        let our_pk = hex::encode(self.get_public_key());
+        stream.write_all(format!("HANDSHAKE {}\n", our_pk).as_bytes()).ok()?;
+
+        let mut reader = BufReader::new(&stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).ok()?;
+        let parts: Vec<&str> = line.trim().split_whitespace().collect();
+        if parts.len() < 2 || parts[0] != "IDENTITY" || parts[1] == "none" {
+            return None;
+        }
+        let key_bytes: [u8; 32] = hex::decode(parts[1]).ok()?.try_into().ok()?;
+        // Reject keys that are not valid ed25519 points.
+        ed25519_dalek::VerifyingKey::from_bytes(&key_bytes).ok()?;
+
+        let mut keys = self.peer_keys.lock();
+        match keys.get(peer) {
+            Some(pinned) if *pinned != key_bytes => {
+                eprintln!("Cloud: peer {} presented a DIFFERENT identity key than pinned — rejecting.", peer);
+                None
+            }
+            _ => {
+                keys.insert(peer.to_string(), key_bytes);
+                Some(key_bytes)
+            }
+        }
+    }
+}
+
 impl PeerSync for CloudPeerSync {
     fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {
         // In Gossipsub, announcing is broadcasting to our grafted mesh links
-        let mesh = self.mesh_links.lock().unwrap();
+        let mesh = self.mesh_links.lock();
         for peer in mesh.iter() {
-            if let Ok(addr) = peer.parse() {
-                if let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100)) {
+            if let Ok(addr) = peer.parse()
+                && let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100)) {
                     let _ = stream.write_all(b"GOSSIP_PUB\n");
                 }
-            }
         }
     }
 
@@ -478,8 +513,8 @@ impl PeerSync for CloudPeerSync {
             if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
                 &addr,
                 std::time::Duration::from_millis(100)
-            ) {
-                if let Ok(payload) = serde_json::to_string(known_ids) {
+            )
+                && let Ok(payload) = serde_json::to_string(known_ids) {
                     use ed25519_dalek::Signer;
                     let sk = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
                     let sig = sk.sign(payload.as_bytes());
@@ -487,7 +522,6 @@ impl PeerSync for CloudPeerSync {
                     let msg = format!("GOSSIP_SIGNED {} {} {}\n", hex::encode(sig.to_bytes()), hex::encode(sk.verifying_key().to_bytes()), payload);
                     let _ = stream.write_all(msg.as_bytes());
                 }
-            }
         }
     }
 
@@ -511,10 +545,22 @@ impl PeerSync for CloudPeerSync {
 
                 if let Ok(signed_dna) = serde_json::from_slice::<SignedSoundDna>(&buffer) {
                     // Lineage and Signature verification before ingestion
-                    if GeneticLineageConsensus::verify_lineage(&signed_dna) {
-                        return Some(signed_dna.dna);
-                    } else {
+                    if !GeneticLineageConsensus::verify_lineage(&signed_dna) {
                         println!("Cloud: DNA lineage consensus validation FAILED from peer {}", peer);
+                        continue;
+                    }
+                    // Identity check: the payload must be signed by the key
+                    // pinned for this peer (pinned on first contact).
+                    let pinned = { self.peer_keys.lock().get(peer).copied() }
+                        .or_else(|| self.handshake(peer));
+                    match pinned {
+                        Some(key) if key == signed_dna.signer_public_key => return Some(signed_dna.dna),
+                        Some(_) => {
+                            println!("Cloud: DNA from peer {} signed by a key that does not match its pinned identity — rejected.", peer);
+                        }
+                        None => {
+                            println!("Cloud: peer {} has no verifiable identity — rejected.", peer);
+                        }
                     }
                 }
             }
@@ -553,6 +599,12 @@ pub struct DiscoveryService {
     mdns: Option<mdns_sd::ServiceDaemon>,
     service_type: &'static str,
     pub signing_key: Option<[u8; 32]>,
+}
+
+impl Default for DiscoveryService {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DiscoveryService {
@@ -594,8 +646,8 @@ impl DiscoveryService {
 
     /// Listens for new peers in the local genetic cloud
     pub fn listen(&mut self) {
-        if let Some(mdns) = &self.mdns {
-            if let Ok(browser) = mdns.browse(self.service_type) {
+        if let Some(mdns) = &self.mdns
+            && let Ok(browser) = mdns.browse(self.service_type) {
                 while let Ok(event) = browser.recv_timeout(std::time::Duration::from_millis(10)) {
                     if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
                         let addr = info.get_addresses().iter().next()
@@ -609,7 +661,6 @@ impl DiscoveryService {
                     }
                 }
             }
-        }
     }
 
     /// Proactively announces a new SoundDNA availability to known peers.
@@ -648,8 +699,8 @@ impl DiscoveryService {
                 if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
                     &addr,
                     std::time::Duration::from_millis(200)
-                ) {
-                    if let Ok(payload) = serde_json::to_string(&metadata) {
+                )
+                    && let Ok(payload) = serde_json::to_string(&metadata) {
                         use ed25519_dalek::Signer;
                         let sk = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
                         let sig = sk.sign(payload.as_bytes());
@@ -657,7 +708,6 @@ impl DiscoveryService {
                         let msg = format!("GOSSIP_SIGNED {} {} {}\n", hex::encode(sig.to_bytes()), hex::encode(sk.verifying_key().to_bytes()), payload);
                         let _ = stream.write_all(msg.as_bytes());
                     }
-                }
             }
         }
     }
@@ -672,7 +722,8 @@ fn handle_gossip(payload: &str, lib_clone: &Arc<Mutex<LibraryDatabase>>, stream:
 
             // 1. Identify missing IDs without holding the lock for networking
             let mut missing_ids = Vec::new();
-            if let Ok(lib) = lib_clone.lock() {
+            {
+                let lib = lib_clone.lock();
                 for (id, name) in remote_metadata {
                     if lib.get_track(id).map(|t| t.is_none()).unwrap_or(false) {
                         missing_ids.push((id, name));
@@ -688,7 +739,7 @@ fn handle_gossip(payload: &str, lib_clone: &Arc<Mutex<LibraryDatabase>>, stream:
                     let sync_client = CloudPeerSync {
                         peers: vec![addr_clone.clone()],
                         trusted_peers: std::collections::HashSet::from([addr_clone.clone()]),
-                        peer_signatures: HashMap::new(),
+                        peer_keys: Mutex::new(HashMap::new()),
                         signing_key: None,
                         mesh_links: Mutex::new(std::collections::HashSet::new()),
                     };
@@ -709,7 +760,8 @@ fn handle_gossip(payload: &str, lib_clone: &Arc<Mutex<LibraryDatabase>>, stream:
                                     ..nullherz_traits::SampleMetadata::new_empty()
                                 }),
                             };
-                            if let Ok(lib) = lib_c.lock() {
+                            {
+                                let lib = lib_c.lock();
                                 let _ = lib.save_track(&track);
                                 println!("Gossip: Successfully synchronized DNA '{}' from cloud.", id);
                             }
@@ -741,11 +793,10 @@ impl DnaServer {
                         if reader.read_line(&mut line).is_ok() {
                             let line_trimmed = line.trim();
                             if line_trimmed == "LIST" {
-                                if let Ok(lib) = lib_clone.lock() {
-                                    if let Ok(tracks) = lib.list_tracks() {
-                                        let list: Vec<(u64, String)> = tracks.into_iter().map(|t| (t.id, t.title)).collect();
-                                        let _ = serde_json::to_writer(&mut stream, &list);
-                                    }
+                                let lib = lib_clone.lock();
+                                if let Ok(tracks) = lib.list_tracks() {
+                                    let list: Vec<(u64, String)> = tracks.into_iter().map(|t| (t.id, t.title)).collect();
+                                    let _ = serde_json::to_writer(&mut stream, &list);
                                 }
                                 return;
                             }
@@ -757,27 +808,25 @@ impl DnaServer {
                                 // GOSSIPSUB CONTROL MESSAGES OVER TCP
                                 "GRAFT" => {
                                     if let Ok(peer_addr) = stream.peer_addr() {
-                                        mesh_peers_clone.lock().unwrap().insert(peer_addr.to_string());
+                                        mesh_peers_clone.lock().insert(peer_addr.to_string());
                                         let _ = stream.write_all(b"GRAFT_ACK\n");
                                     }
                                 }
                                 "PRUNE" => {
                                     if let Ok(peer_addr) = stream.peer_addr() {
-                                        mesh_peers_clone.lock().unwrap().remove(&peer_addr.to_string());
+                                        mesh_peers_clone.lock().remove(&peer_addr.to_string());
                                         let _ = stream.write_all(b"PRUNE_ACK\n");
                                     }
                                 }
-                                "IHAVE_ID" => {
-                                    if parts.len() >= 2 {
+                                "IHAVE_ID"
+                                    if parts.len() >= 2 => {
                                         let _ = stream.write_all(format!("IWANT_ID {}\n", parts[1]).as_bytes());
                                     }
-                                }
                                 "GOSSIP" => {
                                     eprintln!("DNA Server: GOSSIP payload rejected because it was unsigned.");
-                                    return;
                                 }
-                                "GOSSIP_SIGNED" => {
-                                    if parts.len() >= 4 {
+                                "GOSSIP_SIGNED"
+                                    if parts.len() >= 4 => {
                                         let sig_hex = parts[1];
                                         let pk_hex = parts[2];
                                         // Find start of payload. It's after "GOSSIP_SIGNED <sig> <pk> "
@@ -806,28 +855,30 @@ impl DnaServer {
                                             }
                                         }
                                     }
-                                }
-                                "HANDSHAKE" => {
-                                    if parts.len() >= 2 {
+                                "HANDSHAKE"
+                                    if parts.len() >= 2 => {
                                         let pk_hex = parts[1];
                                         println!("DNA Server: Peer handshake with public key {}", pk_hex);
-                                        let resp = signing_key.map(|k| hex::encode(&k[..])).unwrap_or_else(|| "none".to_string());
+                                        // Respond with the PUBLIC verifying key only — the
+                                        // signing key must never leave this node.
+                                        let resp = signing_key
+                                            .map(|k| hex::encode(ed25519_dalek::SigningKey::from_bytes(&k).verifying_key().to_bytes()))
+                                            .unwrap_or_else(|| "none".to_string());
                                         let _ = stream.write_all(format!("IDENTITY {}\n", resp).as_bytes());
                                     }
-                                }
-                                "GET" => {
-                                    if parts.len() >= 3 && parts[1] == "DNA" {
+                                "GET"
+                                    if parts.len() >= 3 && parts[1] == "DNA" => {
                                         let id_str = parts[2];
                                         if let Ok(id) = id_str.parse::<u64>() {
-                                            if let Ok(lib) = lib_clone.lock() {
-                                                if let Ok(Some(track)) = lib.get_track(id) {
+                                            let lib = lib_clone.lock();
+                                            if let Ok(Some(track)) = lib.get_track(id) {
                                                     // Production Beta: Sign DNA payload and calculate CAS-ID
                                                     use ed25519_dalek::{Signer, SigningKey};
                                                     use sha2::{Sha256, Digest};
 
                                                     let mut signature = [0u8; 64];
                                                     let mut pub_key = [0u8; 32];
-                                                    let dna_bytes = serde_json::to_vec(&(*track.metadata).dna).unwrap_or_default();
+                                                    let dna_bytes = serde_json::to_vec(&track.metadata.dna).unwrap_or_default();
 
                                                     let mut hasher = Sha256::new();
                                                     hasher.update(&dna_bytes);
@@ -841,7 +892,7 @@ impl DnaServer {
                                                     }
 
                                                     let signed = SignedSoundDna {
-                                                        dna: (*track.metadata).dna.clone(),
+                                                        dna: track.metadata.dna.clone(),
                                                         signature,
                                                         signer_public_key: pub_key,
                                                         cas_id: Some(cas_id),
@@ -850,11 +901,9 @@ impl DnaServer {
                                                         generation: 1,
                                                     };
                                                     let _ = serde_json::to_writer(&mut stream, &signed);
-                                                }
                                             }
                                         }
                                     }
-                                }
                                 _ => {}
                             }
                         }
@@ -882,7 +931,7 @@ impl SmartCrateManager {
         // 2. Filter by Spectral Tilt
         if let Some((min, max)) = def.spectral_tilt_range {
             results.retain(|t| {
-                let val = (*t.metadata).dna.spectral.tilt;
+                let val = t.metadata.dna.spectral.tilt;
                 val >= min && val <= max
             });
         }
@@ -890,7 +939,7 @@ impl SmartCrateManager {
         // 3. Filter by Rhythmic Syncopation
         if let Some((min, max)) = def.rhythmic_syncopation_range {
             results.retain(|t| {
-                let val = (*t.metadata).dna.rhythmic.syncopation_index;
+                let val = t.metadata.dna.rhythmic.syncopation_index;
                 val >= min && val <= max
             });
         }
@@ -898,7 +947,7 @@ impl SmartCrateManager {
         // 4. Filter by Glitch Density
         if let Some((min, max)) = def.glitch_density_range {
             results.retain(|t| {
-                let val = (*t.metadata).dna.artifacts.glitch_density;
+                let val = t.metadata.dna.artifacts.glitch_density;
                 val >= min && val <= max
             });
         }
@@ -910,7 +959,7 @@ impl SmartCrateManager {
 
         // 6. Filter by BPM range
         if let Some((min, max)) = def.bpm_range {
-            results.retain(|t| (*t.metadata).bpm >= min && (*t.metadata).bpm <= max);
+            results.retain(|t| t.metadata.bpm >= min && t.metadata.bpm <= max);
         }
 
         // 7. Filter by Energy level
@@ -920,7 +969,7 @@ impl SmartCrateManager {
 
         // 8. Filter by Root Key
         if let Some(key) = def.root_key {
-            results.retain(|t| (*t.metadata).root_key == Some(key));
+            results.retain(|t| t.metadata.root_key == Some(key));
         }
 
         results
@@ -930,15 +979,15 @@ impl SmartCrateManager {
     pub fn generate_energy_matched_crate(seed_track: &LibraryTrack, _all_tracks: Vec<LibraryTrack>, threshold: f32) -> SmartCrateDefinition {
         SmartCrateDefinition {
             name: format!("Energy Match: {}", seed_track.title),
-            target_dna: Some((*seed_track.metadata).dna.clone()),
+            target_dna: Some(seed_track.metadata.dna.clone()),
             threshold,
             spectral_tilt_range: None,
             rhythmic_syncopation_range: None,
             glitch_density_range: None,
             genre: Some(seed_track.genre.clone()),
-            bpm_range: Some(((*seed_track.metadata).bpm - 5.0, (*seed_track.metadata).bpm + 5.0)),
+            bpm_range: Some((seed_track.metadata.bpm - 5.0, seed_track.metadata.bpm + 5.0)),
             energy_range: Some((seed_track.energy_level - 0.2, seed_track.energy_level + 0.2)),
-            root_key: (*seed_track.metadata).root_key,
+            root_key: seed_track.metadata.root_key,
         }
     }
 }
@@ -967,7 +1016,7 @@ impl nullherz_traits::SampleRegistry for SampleRegistry {
     }
 
     fn register_with_metadata(&self, id: u64, buffer: SampleBuffer, metadata: Arc<nullherz_traits::SampleMetadata>) {
-        let _lock = self.write_lock.lock().unwrap();
+        let _lock = self.write_lock.lock();
 
         let old_ptr = self.inner.load(Ordering::Acquire);
         let mut new_map = unsafe { (*old_ptr).clone() };
@@ -975,12 +1024,12 @@ impl nullherz_traits::SampleRegistry for SampleRegistry {
 
         let new_ptr = Box::into_raw(Box::new(new_map));
         self.inner.store(new_ptr, Ordering::Release);
-        self.garbage.lock().unwrap().push(old_ptr);
+        self.garbage.lock().push(old_ptr);
     }
 
     fn drain_garbage(&self) {
         if self.readers.load(Ordering::SeqCst) > 0 { return; }
-        let mut g = self.garbage.lock().unwrap();
+        let mut g = self.garbage.lock();
         for ptr in g.drain(..) {
             unsafe { drop(Box::from_raw(ptr)); }
         }
@@ -1021,350 +1070,6 @@ impl Drop for SampleRegistry {
         let ptr = self.inner.load(Ordering::Acquire);
         unsafe { drop(Box::from_raw(ptr)); }
         self.drain_garbage();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    #[test]
-    fn test_lineage_consensus_verification() {
-        use ed25519_dalek::{SigningKey, Signer};
-        let mut csprng = rand::rngs::OsRng;
-        let signing_key = SigningKey::generate(&mut csprng);
-        let verifying_key = signing_key.verifying_key();
-
-        let dna = nullherz_traits::SoundDNA::default();
-        let dna_bytes = serde_json::to_vec(&dna).unwrap_or_default();
-        let signature = signing_key.sign(&dna_bytes);
-
-        let mut signed = SignedSoundDna {
-            dna,
-            signature: signature.to_bytes(),
-            signer_public_key: verifying_key.to_bytes(),
-            cas_id: None,
-            parent_hashes: vec![[1u8; 32]],
-            authorship_chain: vec!["alice".to_string()],
-            generation: 1,
-        };
-        // Should succeed for a properly signed lineage record
-        assert!(GeneticLineageConsensus::verify_lineage(&signed));
-
-        // Should fail if signature is invalid
-        signed.signature[0] ^= 1;
-        assert!(!GeneticLineageConsensus::verify_lineage(&signed));
-        signed.signature[0] ^= 1; // restore
-
-        // Should fail if generation is 0 but has parents
-        signed.generation = 0;
-        assert!(!GeneticLineageConsensus::verify_lineage(&signed));
-
-        // Should fail if generation is >0 but authorship_chain is empty
-        signed.generation = 1;
-        signed.authorship_chain = vec![];
-        assert!(!GeneticLineageConsensus::verify_lineage(&signed));
-    }
-
-    #[test]
-    fn test_library_database_crud() {
-        let db_path = "test_library.redb";
-        let _ = fs::remove_file(db_path);
-
-        let db = LibraryDatabase::load(db_path).unwrap();
-
-        let track = LibraryTrack {
-            id: 1,
-            path: "/test/path.wav".to_string(),
-            title: "Test Track".to_string(),
-            artist: "Test Artist".to_string(),
-            album: "Test Album".to_string(),
-            genre: "Test Genre".to_string(),
-            energy_level: 0.8,
-            metadata: Arc::new(nullherz_traits::SampleMetadata::new_empty()),
-        };
-
-        db.save_track(&track).unwrap();
-
-        let loaded = db.get_track(1).unwrap().unwrap();
-        assert_eq!(loaded, track);
-
-        let list = db.list_tracks().unwrap();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0], track);
-
-        let _ = fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn test_sync_with_cloud_persistence() {
-        let db_path = "test_sync.redb";
-        let _ = std::fs::remove_file(db_path);
-        let db = LibraryDatabase::load(db_path).unwrap();
-
-        struct MockSync;
-        impl PeerSync for MockSync {
-            fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {}
-            fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA> {
-                if id == 0xABC { Some(nullherz_traits::SoundDNA::default()) } else { None }
-            }
-            fn list_peer_dna(&self) -> Vec<(u64, String)> {
-                vec![(0xABC, "Cloud Track".to_string())]
-            }
-            fn gossip_metadata(&self, _known_ids: &[(u64, String)]) {}
-            fn get_public_key(&self) -> [u8; 32] { [0u8; 32] }
-        }
-
-        db.sync_with_cloud(&MockSync).unwrap();
-
-        let track = db.get_track(0xABC).unwrap().expect("Track should be persisted after sync");
-        assert_eq!(track.title, "Cloud Track");
-        assert_eq!(track.artist, "Cloud Peer");
-        assert!(track.path.contains("cloud://"));
-
-        let _ = std::fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn test_library_crating() {
-        let db_path = "test_crates.redb";
-        let _ = fs::remove_file(db_path);
-        let db = LibraryDatabase::load(db_path).unwrap();
-
-        let track = LibraryTrack {
-            id: 101,
-            path: "/test/track.wav".to_string(),
-            title: "Crate Track".to_string(),
-            artist: "Crate Artist".to_string(),
-            album: "Crate Album".to_string(),
-            genre: "Techno".to_string(),
-            energy_level: 0.9,
-            metadata: Arc::new(nullherz_traits::SampleMetadata::new_empty()),
-        };
-
-        db.save_track(&track).unwrap();
-        db.add_to_crate("Techno", 101).unwrap();
-
-        let in_crate = db.get_tracks_in_crate("Techno").unwrap();
-        assert_eq!(in_crate.len(), 1);
-        assert_eq!(in_crate[0].id, 101);
-
-        let empty_crate = db.get_tracks_in_crate("House").unwrap();
-        assert!(empty_crate.is_empty());
-
-        let _ = fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn test_genetic_similarity() {
-        use nullherz_traits::SoundDNA;
-        let mut dna_a = SoundDNA::default();
-        let mut dna_b = SoundDNA::default();
-
-        for i in 0..16 {
-            dna_a.spectral.latent_space[i] = 0.5;
-            dna_b.spectral.latent_space[i] = 0.55;
-        }
-
-        let sim = calculate_similarity(&dna_a, &dna_b);
-        assert!(sim > 0.9);
-
-        for i in 0..16 { dna_b.spectral.latent_space[i] = 1.0; }
-        let sim_low = calculate_similarity(&dna_a, &dna_b);
-        assert!(sim_low < sim);
-    }
-
-    #[test]
-    fn test_simd_dna_interpolation() {
-        use nullherz_traits::SoundDNA;
-        let mut dna_a = SoundDNA::default();
-        let mut dna_b = SoundDNA::default();
-
-        for i in 0..16 {
-            dna_a.spectral.latent_space[i] = 0.2;
-            dna_b.spectral.latent_space[i] = 0.8;
-        }
-
-        let child = transfuse_dna(&dna_a, &dna_b, 0.5);
-
-        for i in 0..16 {
-            // Neural shaping applies tanh() to the result: 0.5.tanh() ~= 0.4621
-            assert!((child.spectral.latent_space[i] - 0.5_f32.tanh()).abs() < 0.001);
-        }
-
-        let child_025 = transfuse_dna(&dna_a, &dna_b, 0.25);
-        for i in 0..16 {
-            // (0.2 * 0.75) + (0.8 * 0.25) = 0.15 + 0.2 = 0.35
-            // 0.35.tanh() ~= 0.3363
-            assert!((child_025.spectral.latent_space[i] - 0.35_f32.tanh()).abs() < 0.001);
-        }
-    }
-
-    #[test]
-    fn test_smart_crate_filtering() {
-    }
-
-    #[test]
-    fn test_chaotic_transfusion_determinism() {
-        use nullherz_traits::SoundDNA;
-        let dna_a = SoundDNA::default();
-        let dna_b = SoundDNA::default();
-
-        let child_1 = chaotic_transfuse_dna(&dna_a, &dna_b, 0.5, 0.5);
-        let child_2 = chaotic_transfuse_dna(&dna_a, &dna_b, 0.5, 0.5);
-
-        assert_eq!(child_1, child_2);
-    }
-
-    #[test]
-    fn test_chaotic_transfusion_mutation() {
-        use nullherz_traits::SoundDNA;
-        let dna_a = SoundDNA::default();
-        let dna_b = SoundDNA::default();
-
-        let normal = transfuse_dna(&dna_a, &dna_b, 0.5);
-        let chaotic = chaotic_transfuse_dna(&dna_a, &dna_b, 0.5, 1.0);
-
-        // Chaotic transfusion should produce different latent spaces due to mutations
-        assert_ne!(normal.spectral.latent_space, chaotic.spectral.latent_space);
-        assert!(chaotic.artifacts.glitch_density > normal.artifacts.glitch_density);
-    }
-
-    #[test]
-    fn test_gossip_signature_enforcement_server() {
-        use std::net::{TcpStream, TcpListener, SocketAddr};
-        use std::io::{Write, Read, BufRead, BufReader};
-        use ed25519_dalek::{SigningKey, Signer};
-        use socket2::{Socket, Domain, Type, Protocol};
-
-        let actual_port = {
-            let l = TcpListener::bind("127.0.0.1:0").unwrap();
-            l.local_addr().unwrap().port()
-        };
-        let client_port = {
-            let l = TcpListener::bind("127.0.0.1:0").unwrap();
-            l.local_addr().unwrap().port()
-        };
-
-        let db_path = format!("test_gossip_srv_{}.redb", actual_port);
-        let _ = fs::remove_file(&db_path);
-        let lib = Arc::new(Mutex::new(LibraryDatabase::load(&db_path).unwrap()));
-
-        let mut csprng = rand::rngs::OsRng;
-        let sk = SigningKey::generate(&mut csprng);
-        let sk_bytes = sk.to_bytes();
-
-        DnaServer::start(lib.clone(), actual_port, Some(sk_bytes)).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(100));
-
-        let server_addr: SocketAddr = format!("127.0.0.1:{}", actual_port).parse().unwrap();
-        let client_addr: SocketAddr = format!("127.0.0.1:{}", client_port).parse().unwrap();
-
-        // 1. Create client listener to accept the server's connect_timeout back on client_port
-        let client_listener_sock = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
-        client_listener_sock.set_reuse_address(true).unwrap();
-        #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
-        let _ = client_listener_sock.set_reuse_port(true);
-        client_listener_sock.bind(&client_addr.into()).unwrap();
-        client_listener_sock.listen(128).unwrap();
-        let client_listener: TcpListener = client_listener_sock.into();
-
-        // Spawn mock client DNA provider loop in background to serve GET DNA requests
-        let client_listener_clone = client_listener.try_clone().unwrap();
-        let mock_provider_thread = std::thread::spawn(move || {
-            if let Ok((mut incoming_stream, _)) = client_listener_clone.accept() {
-                let mut reader = BufReader::new(&incoming_stream);
-                let mut line = String::new();
-                if reader.read_line(&mut line).is_ok() {
-                    let line_trimmed = line.trim();
-                    if line_trimmed.starts_with("GET DNA ") {
-                        // Let's sign and return a valid SignedSoundDna for track 2
-                        use ed25519_dalek::{SigningKey, Signer};
-                        let mut csprng = rand::rngs::OsRng;
-                        let sk = SigningKey::generate(&mut csprng);
-                        let dna = nullherz_traits::SoundDNA::default();
-                        let dna_bytes = serde_json::to_vec(&dna).unwrap_or_default();
-                        let sig = sk.sign(&dna_bytes);
-
-                        let signed = SignedSoundDna {
-                            dna,
-                            signature: sig.to_bytes(),
-                            signer_public_key: sk.verifying_key().to_bytes(),
-                            cas_id: None,
-                            parent_hashes: Vec::new(),
-                            authorship_chain: vec!["origin".to_string()],
-                            generation: 1,
-                        };
-                        let _ = serde_json::to_writer(&mut incoming_stream, &signed);
-                    }
-                }
-            }
-        });
-
-        // 1. Send unsigned GOSSIP (does not need to bind to client_addr since server rejects unsigned gossip immediately)
-        {
-            let client_sock = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
-            client_sock.connect(&server_addr.into()).unwrap();
-            let mut stream: TcpStream = client_sock.into();
-
-            let metadata = vec![(1u64, "Unsigned Track".to_string())];
-            let payload = serde_json::to_string(&metadata).unwrap();
-            let msg = format!("GOSSIP {}\n", payload);
-            stream.write_all(msg.as_bytes()).unwrap();
-            stream.flush().unwrap();
-            // Connection will be closed by server
-            let mut buf = Vec::new();
-            stream.read_to_end(&mut buf).unwrap();
-        }
-
-        // Give any background task a moment
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        {
-            let db = lib.lock().unwrap();
-            let track = db.get_track(1).unwrap();
-            assert!(track.is_none(), "Unsigned Track (ID 1) should NOT be present in database");
-        }
-
-        // 2. Send GOSSIP_SIGNED
-        {
-            let client_sock = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
-            client_sock.set_reuse_address(true).unwrap();
-            #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
-            let _ = client_sock.set_reuse_port(true);
-            client_sock.bind(&client_addr.into()).unwrap();
-            client_sock.connect(&server_addr.into()).unwrap();
-            let mut stream: TcpStream = client_sock.into();
-
-            let metadata = vec![(2u64, "Signed Track".to_string())];
-            let payload = serde_json::to_string(&metadata).unwrap();
-            let sig = sk.sign(payload.as_bytes());
-            let msg = format!(
-                "GOSSIP_SIGNED {} {} {}\n",
-                hex::encode(sig.to_bytes()),
-                hex::encode(sk.verifying_key().to_bytes()),
-                payload
-            );
-            stream.write_all(msg.as_bytes()).unwrap();
-            stream.flush().unwrap();
-            // Connection will be closed by server
-            let mut buf = Vec::new();
-            stream.read_to_end(&mut buf).unwrap();
-        }
-
-        // Wait for mock DNA provider to finish and background sync thread to save to the database
-        let _ = mock_provider_thread.join();
-        std::thread::sleep(std::time::Duration::from_millis(250));
-
-        {
-            let db = lib.lock().unwrap();
-            let track = db.get_track(2).unwrap();
-            assert!(track.is_some(), "Signed Track (ID 2) should be present in database after signed GOSSIP");
-            let t = track.unwrap();
-            assert_eq!(t.title, "Signed Track");
-        }
-
-        let _ = fs::remove_file(&db_path);
     }
 }
 
@@ -1633,7 +1338,7 @@ impl Matchmaker {
         use rayon::prelude::*;
         let mut scores: Vec<(u64, f32)> = candidates.par_iter()
             .map(|track| {
-                let score = calculate_similarity(target, &(*track.metadata).dna);
+                let score = calculate_similarity(target, &track.metadata.dna);
                 (track.id, score)
             })
             .collect();
@@ -1647,7 +1352,7 @@ impl Matchmaker {
         use rayon::prelude::*;
         let mut results: Vec<(u64, f32)> = candidates.par_iter()
             .filter_map(|track| {
-                let score = calculate_similarity(target, &(*track.metadata).dna);
+                let score = calculate_similarity(target, &track.metadata.dna);
                 if score >= threshold {
                     Some((track.id, score))
                 } else {
@@ -1663,5 +1368,414 @@ impl Matchmaker {
     pub fn find_best_matches(db: &LibraryDatabase, target: &nullherz_traits::SoundDNA, limit: usize) -> Result<Vec<(u64, f32)>, Box<dyn std::error::Error>> {
         let tracks = db.list_tracks()?;
         Ok(Self::rank_compatibility(target, &tracks, limit))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_lineage_consensus_verification() {
+        use ed25519_dalek::{SigningKey, Signer};
+        let mut csprng = rand::rngs::OsRng;
+        let signing_key = SigningKey::generate(&mut csprng);
+        let verifying_key = signing_key.verifying_key();
+
+        let dna = nullherz_traits::SoundDNA::default();
+        let dna_bytes = serde_json::to_vec(&dna).unwrap_or_default();
+        let signature = signing_key.sign(&dna_bytes);
+
+        let mut signed = SignedSoundDna {
+            dna,
+            signature: signature.to_bytes(),
+            signer_public_key: verifying_key.to_bytes(),
+            cas_id: None,
+            parent_hashes: vec![[1u8; 32]],
+            authorship_chain: vec!["alice".to_string()],
+            generation: 1,
+        };
+        // Should succeed for a properly signed lineage record
+        assert!(GeneticLineageConsensus::verify_lineage(&signed));
+
+        // Should fail if signature is invalid
+        signed.signature[0] ^= 1;
+        assert!(!GeneticLineageConsensus::verify_lineage(&signed));
+        signed.signature[0] ^= 1; // restore
+
+        // Should fail if generation is 0 but has parents
+        signed.generation = 0;
+        assert!(!GeneticLineageConsensus::verify_lineage(&signed));
+
+        // Should fail if generation is >0 but authorship_chain is empty
+        signed.generation = 1;
+        signed.authorship_chain = vec![];
+        assert!(!GeneticLineageConsensus::verify_lineage(&signed));
+    }
+
+    #[test]
+    fn test_library_database_crud() {
+        let db_path = "test_library.redb";
+        let _ = fs::remove_file(db_path);
+
+        let db = LibraryDatabase::load(db_path).unwrap();
+
+        let track = LibraryTrack {
+            id: 1,
+            path: "/test/path.wav".to_string(),
+            title: "Test Track".to_string(),
+            artist: "Test Artist".to_string(),
+            album: "Test Album".to_string(),
+            genre: "Test Genre".to_string(),
+            energy_level: 0.8,
+            metadata: Arc::new(nullherz_traits::SampleMetadata::new_empty()),
+        };
+
+        db.save_track(&track).unwrap();
+
+        let loaded = db.get_track(1).unwrap().unwrap();
+        assert_eq!(loaded, track);
+
+        let list = db.list_tracks().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0], track);
+
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn test_sync_with_cloud_persistence() {
+        let db_path = "test_sync.redb";
+        let _ = std::fs::remove_file(db_path);
+        let db = LibraryDatabase::load(db_path).unwrap();
+
+        struct MockSync;
+        impl PeerSync for MockSync {
+            fn announce_dna(&self, _dna: &nullherz_traits::SoundDNA) {}
+            fn request_dna(&self, id: u64) -> Option<nullherz_traits::SoundDNA> {
+                if id == 0xABC { Some(nullherz_traits::SoundDNA::default()) } else { None }
+            }
+            fn list_peer_dna(&self) -> Vec<(u64, String)> {
+                vec![(0xABC, "Cloud Track".to_string())]
+            }
+            fn gossip_metadata(&self, _known_ids: &[(u64, String)]) {}
+            fn get_public_key(&self) -> [u8; 32] { [0u8; 32] }
+        }
+
+        db.sync_with_cloud(&MockSync).unwrap();
+
+        let track = db.get_track(0xABC).unwrap().expect("Track should be persisted after sync");
+        assert_eq!(track.title, "Cloud Track");
+        assert_eq!(track.artist, "Cloud Peer");
+        assert!(track.path.contains("cloud://"));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn test_library_crating() {
+        let db_path = "test_crates.redb";
+        let _ = fs::remove_file(db_path);
+        let db = LibraryDatabase::load(db_path).unwrap();
+
+        let track = LibraryTrack {
+            id: 101,
+            path: "/test/track.wav".to_string(),
+            title: "Crate Track".to_string(),
+            artist: "Crate Artist".to_string(),
+            album: "Crate Album".to_string(),
+            genre: "Techno".to_string(),
+            energy_level: 0.9,
+            metadata: Arc::new(nullherz_traits::SampleMetadata::new_empty()),
+        };
+
+        db.save_track(&track).unwrap();
+        db.add_to_crate("Techno", 101).unwrap();
+
+        let in_crate = db.get_tracks_in_crate("Techno").unwrap();
+        assert_eq!(in_crate.len(), 1);
+        assert_eq!(in_crate[0].id, 101);
+
+        let empty_crate = db.get_tracks_in_crate("House").unwrap();
+        assert!(empty_crate.is_empty());
+
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn test_handshake_pins_public_key_not_private() {
+        use std::net::TcpListener;
+        use ed25519_dalek::SigningKey;
+
+        let actual_port = {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let db_path = format!("test_handshake_{}.redb", actual_port);
+        let _ = fs::remove_file(&db_path);
+        let lib = Arc::new(Mutex::new(LibraryDatabase::load(&db_path).unwrap()));
+
+        let mut csprng = rand::rngs::OsRng;
+        let sk = SigningKey::generate(&mut csprng);
+        let sk_bytes = sk.to_bytes();
+        let expected_pk = sk.verifying_key().to_bytes();
+
+        DnaServer::start(lib, actual_port, Some(sk_bytes)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        let peer = format!("127.0.0.1:{}", actual_port);
+        let sync = CloudPeerSync {
+            peers: vec![peer.clone()],
+            trusted_peers: std::collections::HashSet::from([peer.clone()]),
+            peer_keys: Mutex::new(HashMap::new()),
+            signing_key: None,
+            mesh_links: Mutex::new(std::collections::HashSet::new()),
+        };
+
+        // First contact pins the server's PUBLIC key — and must never be the
+        // private signing key (regression: IDENTITY used to leak the secret).
+        let pinned = sync.handshake(&peer).expect("handshake should succeed");
+        assert_eq!(pinned, expected_pk);
+        assert_ne!(pinned, sk_bytes, "IDENTITY must not expose the private signing key");
+        assert_eq!(sync.peer_keys.lock().get(&peer).copied(), Some(expected_pk));
+
+        // A peer whose identity key changes after pinning is rejected.
+        sync.peer_keys.lock().insert(peer.clone(), [7u8; 32]);
+        assert!(sync.handshake(&peer).is_none(), "key change after pinning must be rejected");
+
+        let _ = fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn test_genetic_similarity() {
+        use nullherz_traits::SoundDNA;
+        let mut dna_a = SoundDNA::default();
+        let mut dna_b = SoundDNA::default();
+
+        for i in 0..16 {
+            dna_a.spectral.latent_space[i] = 0.5;
+            dna_b.spectral.latent_space[i] = 0.55;
+        }
+
+        let sim = calculate_similarity(&dna_a, &dna_b);
+        assert!(sim > 0.9);
+
+        for i in 0..16 { dna_b.spectral.latent_space[i] = 1.0; }
+        let sim_low = calculate_similarity(&dna_a, &dna_b);
+        assert!(sim_low < sim);
+    }
+
+    #[test]
+    fn test_simd_dna_interpolation() {
+        use nullherz_traits::SoundDNA;
+        let mut dna_a = SoundDNA::default();
+        let mut dna_b = SoundDNA::default();
+
+        for i in 0..16 {
+            dna_a.spectral.latent_space[i] = 0.2;
+            dna_b.spectral.latent_space[i] = 0.8;
+        }
+
+        let child = transfuse_dna(&dna_a, &dna_b, 0.5);
+
+        for i in 0..16 {
+            // Neural shaping applies tanh() to the result: 0.5.tanh() ~= 0.4621
+            assert!((child.spectral.latent_space[i] - 0.5_f32.tanh()).abs() < 0.001);
+        }
+
+        let child_025 = transfuse_dna(&dna_a, &dna_b, 0.25);
+        for i in 0..16 {
+            // (0.2 * 0.75) + (0.8 * 0.25) = 0.15 + 0.2 = 0.35
+            // 0.35.tanh() ~= 0.3363
+            assert!((child_025.spectral.latent_space[i] - 0.35_f32.tanh()).abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn test_smart_crate_filtering() {
+    }
+
+    #[test]
+    fn test_chaotic_transfusion_determinism() {
+        use nullherz_traits::SoundDNA;
+        let dna_a = SoundDNA::default();
+        let dna_b = SoundDNA::default();
+
+        let child_1 = chaotic_transfuse_dna(&dna_a, &dna_b, 0.5, 0.5);
+        let child_2 = chaotic_transfuse_dna(&dna_a, &dna_b, 0.5, 0.5);
+
+        assert_eq!(child_1, child_2);
+    }
+
+    #[test]
+    fn test_chaotic_transfusion_mutation() {
+        use nullherz_traits::SoundDNA;
+        let dna_a = SoundDNA::default();
+        let dna_b = SoundDNA::default();
+
+        let normal = transfuse_dna(&dna_a, &dna_b, 0.5);
+        let chaotic = chaotic_transfuse_dna(&dna_a, &dna_b, 0.5, 1.0);
+
+        // Chaotic transfusion should produce different latent spaces due to mutations
+        assert_ne!(normal.spectral.latent_space, chaotic.spectral.latent_space);
+        assert!(chaotic.artifacts.glitch_density > normal.artifacts.glitch_density);
+    }
+
+    #[test]
+    fn test_gossip_signature_enforcement_server() {
+        use std::net::{TcpStream, TcpListener, SocketAddr};
+        use std::io::{Write, Read, BufRead, BufReader};
+        use ed25519_dalek::{SigningKey, Signer};
+        use socket2::{Socket, Domain, Type, Protocol};
+
+        let actual_port = {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let client_port = {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+
+        let db_path = format!("test_gossip_srv_{}.redb", actual_port);
+        let _ = fs::remove_file(&db_path);
+        let lib = Arc::new(Mutex::new(LibraryDatabase::load(&db_path).unwrap()));
+
+        let mut csprng = rand::rngs::OsRng;
+        let sk = SigningKey::generate(&mut csprng);
+        let sk_bytes = sk.to_bytes();
+
+        DnaServer::start(lib.clone(), actual_port, Some(sk_bytes)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        let server_addr: SocketAddr = format!("127.0.0.1:{}", actual_port).parse().unwrap();
+        let client_addr: SocketAddr = format!("127.0.0.1:{}", client_port).parse().unwrap();
+
+        // 1. Create client listener to accept the server's connect_timeout back on client_port
+        let client_listener_sock = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
+        client_listener_sock.set_reuse_address(true).unwrap();
+        #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
+        let _ = client_listener_sock.set_reuse_port(true);
+        client_listener_sock.bind(&client_addr.into()).unwrap();
+        client_listener_sock.listen(128).unwrap();
+        let client_listener: TcpListener = client_listener_sock.into();
+
+        // Spawn mock client DNA provider loop in background. It serves GET DNA
+        // requests and answers HANDSHAKE with a consistent identity key — the
+        // server's pull path pins peer identities and rejects DNA whose signer
+        // does not match the pinned key.
+        let client_listener_clone = client_listener.try_clone().unwrap();
+        let mock_provider_thread = std::thread::spawn(move || {
+            use ed25519_dalek::{SigningKey, Signer};
+            let mut csprng = rand::rngs::OsRng;
+            let client_sk = SigningKey::generate(&mut csprng);
+
+            client_listener_clone.set_nonblocking(true).unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            let mut served_get = false;
+            let mut served_handshake = false;
+            while std::time::Instant::now() < deadline && !(served_get && served_handshake) {
+                let (mut incoming_stream, _) = match client_listener_clone.accept() {
+                    Ok(conn) => conn,
+                    Err(_) => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                };
+                incoming_stream.set_nonblocking(false).unwrap();
+                let mut reader = BufReader::new(&incoming_stream);
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_ok() {
+                    let line_trimmed = line.trim();
+                    if line_trimmed.starts_with("HANDSHAKE") {
+                        let pk_hex = hex::encode(client_sk.verifying_key().to_bytes());
+                        let _ = incoming_stream.write_all(format!("IDENTITY {}\n", pk_hex).as_bytes());
+                        served_handshake = true;
+                    } else if line_trimmed.starts_with("GET DNA ") {
+                        // Sign and return a valid SignedSoundDna for track 2
+                        let dna = nullherz_traits::SoundDNA::default();
+                        let dna_bytes = serde_json::to_vec(&dna).unwrap_or_default();
+                        let sig = client_sk.sign(&dna_bytes);
+
+                        let signed = SignedSoundDna {
+                            dna,
+                            signature: sig.to_bytes(),
+                            signer_public_key: client_sk.verifying_key().to_bytes(),
+                            cas_id: None,
+                            parent_hashes: Vec::new(),
+                            authorship_chain: vec!["origin".to_string()],
+                            generation: 1,
+                        };
+                        let _ = serde_json::to_writer(&mut incoming_stream, &signed);
+                        served_get = true;
+                    }
+                }
+            }
+        });
+
+        // 1. Send unsigned GOSSIP (does not need to bind to client_addr since server rejects unsigned gossip immediately)
+        {
+            let client_sock = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
+            client_sock.connect(&server_addr.into()).unwrap();
+            let mut stream: TcpStream = client_sock.into();
+
+            let metadata = vec![(1u64, "Unsigned Track".to_string())];
+            let payload = serde_json::to_string(&metadata).unwrap();
+            let msg = format!("GOSSIP {}\n", payload);
+            stream.write_all(msg.as_bytes()).unwrap();
+            stream.flush().unwrap();
+            // Connection will be closed by server
+            let mut buf = Vec::new();
+            stream.read_to_end(&mut buf).unwrap();
+        }
+
+        // Give any background task a moment
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        {
+            let db = lib.lock();
+            let track = db.get_track(1).unwrap();
+            assert!(track.is_none(), "Unsigned Track (ID 1) should NOT be present in database");
+        }
+
+        // 2. Send GOSSIP_SIGNED
+        {
+            let client_sock = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
+            client_sock.set_reuse_address(true).unwrap();
+            #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
+            let _ = client_sock.set_reuse_port(true);
+            client_sock.bind(&client_addr.into()).unwrap();
+            client_sock.connect(&server_addr.into()).unwrap();
+            let mut stream: TcpStream = client_sock.into();
+
+            let metadata = vec![(2u64, "Signed Track".to_string())];
+            let payload = serde_json::to_string(&metadata).unwrap();
+            let sig = sk.sign(payload.as_bytes());
+            let msg = format!(
+                "GOSSIP_SIGNED {} {} {}\n",
+                hex::encode(sig.to_bytes()),
+                hex::encode(sk.verifying_key().to_bytes()),
+                payload
+            );
+            stream.write_all(msg.as_bytes()).unwrap();
+            stream.flush().unwrap();
+            // Connection will be closed by server
+            let mut buf = Vec::new();
+            stream.read_to_end(&mut buf).unwrap();
+        }
+
+        // Wait for mock DNA provider to finish and background sync thread to save to the database
+        let _ = mock_provider_thread.join();
+        std::thread::sleep(std::time::Duration::from_millis(250));
+
+        {
+            let db = lib.lock();
+            let track = db.get_track(2).unwrap();
+            assert!(track.is_some(), "Signed Track (ID 2) should be present in database after signed GOSSIP");
+            let t = track.unwrap();
+            assert_eq!(t.title, "Signed Track");
+        }
+
+        let _ = fs::remove_file(&db_path);
     }
 }

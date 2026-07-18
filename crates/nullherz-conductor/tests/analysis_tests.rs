@@ -10,7 +10,7 @@ async fn test_analysis_pipeline() {
     let _ = std::fs::remove_file(db_path);
 
     let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
-    let library = Arc::new(std::sync::Mutex::new(LibraryDatabase::load(db_path).unwrap()));
+    let library = Arc::new(parking_lot::Mutex::new(LibraryDatabase::load(db_path).unwrap()));
 
     // Register a mock sample (1 second of a 4Hz pulse to simulate transients)
     let sample_rate = 44100;
@@ -24,7 +24,7 @@ async fn test_analysis_pipeline() {
 
     // Register track in library
     {
-        let lib = library.lock().unwrap();
+        let lib = library.lock();
         lib.save_track(&LibraryTrack {
             id: sample_id,
             path: "mock.wav".to_string(),
@@ -50,12 +50,11 @@ async fn test_analysis_pipeline() {
     let mut enriched = false;
     for _ in 0..20 {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if let Some(sample) = sample_registry.get(sample_id) {
-            if sample.metadata.bpm > 0.0 {
+        if let Some(sample) = sample_registry.get(sample_id)
+            && sample.metadata.bpm > 0.0 {
                 enriched = true;
                 break;
             }
-        }
     }
 
     assert!(enriched, "Sample metadata should be enriched with BPM");
@@ -68,7 +67,7 @@ async fn test_analysis_pipeline() {
 
     // Verify database sync
     {
-        let lib = library.lock().unwrap();
+        let lib = library.lock();
         let track = lib.get_track(sample_id).unwrap().unwrap();
         assert!(track.metadata.bpm > 0.0);
     }
@@ -101,12 +100,11 @@ async fn test_root_key_detection() {
     let mut detected_key = None;
     for _ in 0..20 {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if let Some(sample) = sample_registry.get(sample_id) {
-            if let Some(key) = sample.metadata.root_key {
+        if let Some(sample) = sample_registry.get(sample_id)
+            && let Some(key) = sample.metadata.root_key {
                 detected_key = Some(key);
                 break;
             }
-        }
     }
 
     assert!(detected_key.is_some(), "Root key should be detected");

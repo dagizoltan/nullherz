@@ -59,11 +59,10 @@ impl AudioProcessor for StereoUtilityProcessor {
 fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 fn apply_command(&mut self, command: &ProcessorCommand) {
-        if let Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, .. }) = command {
-            if *target_id == self.id {
+        if let Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, .. }) = command
+            && *target_id == self.id {
                 self.set_parameter(*param_id, *value, 0);
             }
-        }
     }
 fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
         match param_id {

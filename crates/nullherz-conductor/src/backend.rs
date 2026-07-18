@@ -1,4 +1,8 @@
-use std::sync::{Arc, Mutex};
+// Non-RT plane (backend lifecycle thread): thread spawn/sleep are sanctioned here.
+// The disallowed-methods lint exists to protect the audio hot path only.
+#![allow(clippy::disallowed_methods)]
+use std::sync::Arc;
+use parking_lot::Mutex;
 use nullherz_traits::{RenderingEngine, AudioBackendType};
 use nullherz_backends::AudioBackend;
 

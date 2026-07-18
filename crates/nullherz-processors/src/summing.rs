@@ -21,7 +21,7 @@ impl SummingProcessor {
 impl nullherz_traits::SignalProcessor for SummingProcessor {
 fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         if outputs.is_empty() { return; }
-        self.inner.process_16_to_1_simd(inputs, &mut outputs[0]);
+        self.inner.process_16_to_1_simd(inputs, outputs[0]);
 
         if self.soft_clip {
             let threshold = self.threshold;

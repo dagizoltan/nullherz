@@ -37,11 +37,10 @@ impl WasmSidecarHost {
                          let len = cursor.position() as usize;
                          let data = &buf[..len];
 
-                         if data.len() <= max_len as usize {
-                             if mem.write(&mut caller, ptr as usize, data).is_ok() {
+                         if data.len() <= max_len as usize
+                             && mem.write(&mut caller, ptr as usize, data).is_ok() {
                                  return data.len() as i32;
                              }
-                         }
                      }
                      -1 // Error: buffer too small or write failed
                  } else {

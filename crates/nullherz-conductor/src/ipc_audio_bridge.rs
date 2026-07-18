@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use ipc_layer::{SharedMemory, ShmRingBuffer, AudioBlock, IpcAudioProducer, IpcAudioConsumer};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 pub struct JitterBuffer {
     pub buffer: VecDeque<AudioBlock>,
@@ -134,13 +134,13 @@ impl RdmaTransport {
 
     pub fn register_memory_region(&self, node_idx: u32, addr: u64, size: usize) -> u32 {
         let rkey = node_idx.wrapping_mul(777) + 1234;
-        let mut mrs = self.memory_regions.lock().unwrap();
+        let mut mrs = self.memory_regions.lock();
         mrs.insert(node_idx, RdmaMemoryRegion { addr, size, rkey });
         rkey
     }
 
     pub fn connect_qp(&self, node_idx: u32, remote_qp: u32) {
-        let mut qps = self.active_qps.lock().unwrap();
+        let mut qps = self.active_qps.lock();
         qps.insert(node_idx, RdmaQueuePair {
             local_qp_num: node_idx * 10 + 1,
             remote_qp_num: remote_qp,
@@ -150,8 +150,8 @@ impl RdmaTransport {
 
     /// Performs zero-copy bypass-CPU direct transfer of raw audio blocks into local memory region.
     pub unsafe fn rdma_write_block(&self, node_idx: u32, block: &AudioBlock) -> Result<(), &'static str> {
-        let mrs = self.memory_regions.lock().unwrap();
-        let qps = self.active_qps.lock().unwrap();
+        let mrs = self.memory_regions.lock();
+        let qps = self.active_qps.lock();
 
         if !qps.contains_key(&node_idx) {
             return Err("RDMA Error: Queue Pair not connected");
@@ -219,35 +219,35 @@ impl IpcAudioBridge {
             rb: rb_ptr,
         };
 
-        self.return_queues.lock().unwrap().insert(node_idx, producer);
-        self.shm_segments.lock().unwrap().insert(node_idx, shm);
+        self.return_queues.lock().insert(node_idx, producer);
+        self.shm_segments.lock().insert(node_idx, shm);
 
         Ok(consumer)
     }
 
     pub fn push_block(&self, node_idx: u32, block: AudioBlock) -> Result<(), AudioBlock> {
         // Apply jitter buffering for remote blocks (identified by being pushed via discovery listener)
-        let mut jitters = self.jitter_buffers.lock().unwrap();
+        let mut jitters = self.jitter_buffers.lock();
         let buffer = jitters.entry(node_idx).or_insert_with(|| JitterBuffer::new(4));
         buffer.push(block);
         Ok(())
     }
 
     pub fn set_clock(&self, node_idx: u32, clock: Arc<dyn nullherz_traits::ClockProvider>) {
-        let mut jitters = self.jitter_buffers.lock().unwrap();
+        let mut jitters = self.jitter_buffers.lock();
         if let Some(buffer) = jitters.get_mut(&node_idx) {
             buffer.clock = Some(clock);
         }
     }
 
     pub fn pop_block(&self, node_idx: u32) -> Option<AudioBlock> {
-        let mut queues = self.send_queues.lock().unwrap();
+        let mut queues = self.send_queues.lock();
         queues.get_mut(&node_idx).and_then(|consumer| consumer.pop())
     }
 
     pub fn process_return_queues(&self) {
-        let mut jitters = self.jitter_buffers.lock().unwrap();
-        let queues = self.return_queues.lock().unwrap();
+        let mut jitters = self.jitter_buffers.lock();
+        let queues = self.return_queues.lock();
 
         for (&node_idx, buffer) in jitters.iter_mut() {
             if let Some(producer) = queues.get(&node_idx) {
@@ -275,15 +275,15 @@ impl IpcAudioBridge {
             rb: rb_ptr,
         };
 
-        self.send_queues.lock().unwrap().insert(node_idx, consumer);
-        self.shm_segments.lock().unwrap().insert(node_idx, shm);
+        self.send_queues.lock().insert(node_idx, consumer);
+        self.shm_segments.lock().insert(node_idx, shm);
 
         Ok(producer)
     }
 
     pub fn unregister_return_node(&self, node_idx: u32) {
-        self.return_queues.lock().unwrap().remove(&node_idx);
-        self.shm_segments.lock().unwrap().remove(&node_idx);
+        self.return_queues.lock().remove(&node_idx);
+        self.shm_segments.lock().remove(&node_idx);
     }
 }
 

@@ -29,22 +29,22 @@ impl DiscoveryBeacon {
 
 pub struct SidecarDiscoveryService {
     pub plugins_dir: String,
-    pub known_plugins: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, nullherz_traits::SidecarManifest>>>,
-    pub library_db: Option<std::sync::Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>>,
-    pub dna_discovery: std::sync::Arc<std::sync::Mutex<nullherz_dna::DiscoveryService>>,
+    pub known_plugins: std::sync::Arc<parking_lot::Mutex<std::collections::HashMap<String, nullherz_traits::SidecarManifest>>>,
+    pub library_db: Option<std::sync::Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>>,
+    pub dna_discovery: std::sync::Arc<parking_lot::Mutex<nullherz_dna::DiscoveryService>>,
 }
 
 impl SidecarDiscoveryService {
     pub fn new(plugins_dir: &str) -> Self {
         Self {
             plugins_dir: plugins_dir.to_string(),
-            known_plugins: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            known_plugins: std::sync::Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
             library_db: None,
-            dna_discovery: std::sync::Arc::new(std::sync::Mutex::new(nullherz_dna::DiscoveryService::new())),
+            dna_discovery: std::sync::Arc::new(parking_lot::Mutex::new(nullherz_dna::DiscoveryService::new())),
         }
     }
 
-    pub fn with_library(mut self, db: std::sync::Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>) -> Self {
+    pub fn with_library(mut self, db: std::sync::Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>) -> Self {
         self.library_db = Some(db);
         self
     }
@@ -77,7 +77,7 @@ impl SidecarDiscoveryService {
             tokio::spawn(async move {
                 loop {
                     let peers = {
-                        let mut discovery = discovery_mutex.lock().unwrap();
+                        let mut discovery = discovery_mutex.lock();
                         discovery.discover();
                         discovery.listen();
                         discovery.known_peers.clone()
@@ -87,19 +87,19 @@ impl SidecarDiscoveryService {
                     if peers.is_empty() { continue; }
                     if peers.is_empty() { continue; }
 
-                    let lib_lock = lib_db.lock().unwrap();
+                    let lib_lock = lib_db.lock();
 
                     let (trusted_peers, signing_key) = {
-                        let d = discovery_mutex.lock().unwrap();
+                        let d = discovery_mutex.lock();
                         (d.trusted_peers.clone(), d.signing_key)
                     };
 
                     let sync = nullherz_dna::CloudPeerSync {
                         peers,
                         trusted_peers,
-                        peer_signatures: std::collections::HashMap::new(),
+                        peer_keys: parking_lot::Mutex::new(std::collections::HashMap::new()),
                         signing_key,
-                        mesh_links: std::sync::Mutex::new(std::collections::HashSet::new()),
+                        mesh_links: parking_lot::Mutex::new(std::collections::HashSet::new()),
                     };
                     let _ = lib_lock.sync_with_cloud(&sync);
                 }
@@ -142,7 +142,7 @@ impl SidecarDiscoveryService {
                         }
                     }
 
-                    let mut known_lock = known.lock().unwrap();
+                    let mut known_lock = known.lock();
                     for (name, manifest) in current_manifests {
                         if !known_lock.contains_key(&name) {
                             println!("Discovery: Found new sidecar plugin: {} (v{})", name, manifest.version);

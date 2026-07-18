@@ -1,3 +1,6 @@
+// Non-RT plane (disk-streaming worker thread): thread spawn/sleep are sanctioned here.
+// The disallowed-methods lint exists to protect the audio hot path only.
+#![allow(clippy::disallowed_methods)]
 use std::sync::Arc;
 use ipc_layer::ShmRingBuffer;
 use std::thread;

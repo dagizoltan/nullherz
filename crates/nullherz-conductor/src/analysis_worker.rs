@@ -1,3 +1,6 @@
+// Non-RT plane (analysis worker thread): thread spawn/sleep are sanctioned here.
+// The disallowed-methods lint exists to protect the audio hot path only.
+#![allow(clippy::disallowed_methods)]
 use nullherz_traits::SampleRegistry;
 use std::sync::Arc;
 use nullherz_dna::GeneticLibrary;
@@ -11,7 +14,7 @@ thread_local! {
 
 pub struct AnalysisWorker {
     sample_registry: Arc<dyn SampleRegistry>,
-    library: Option<Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>>,
+    library: Option<Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>>,
     processed_ids: std::collections::HashSet<u64>,
     compatibility_matrix: std::collections::HashMap<u64, Vec<(u64, f32)>>,
     dirty_ids: std::collections::HashSet<u64>,
@@ -28,7 +31,7 @@ impl AnalysisWorker {
         }
     }
 
-    pub fn with_library(mut self, library: Arc<std::sync::Mutex<nullherz_dna::LibraryDatabase>>) -> Self {
+    pub fn with_library(mut self, library: Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>) -> Self {
         self.library = Some(library);
         self
     }
@@ -92,7 +95,7 @@ impl AnalysisWorker {
 
         if !tracks_to_save.is_empty() {
             if let Some(ref lib_mutex) = self.library {
-                let lib = lib_mutex.lock().unwrap();
+                let lib = lib_mutex.lock();
                 for (id, metadata) in tracks_to_save {
                     if let Ok(Some(mut track)) = lib.get_track(id) {
                         track.metadata = Arc::new(metadata);
@@ -109,7 +112,7 @@ impl AnalysisWorker {
         if self.dirty_ids.is_empty() { return; }
 
         let tracks = {
-            let lib = lib_mutex.lock().unwrap();
+            let lib = lib_mutex.lock();
             let Ok(t) = lib.list_tracks() else { return; };
             t
         };

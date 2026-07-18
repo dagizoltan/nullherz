@@ -59,7 +59,7 @@ mod tests {
                 resources,
                 Box::new(graph),
                 Arc::new(nullherz_dna::SampleRegistry::new()), Arc::new(crate::rt_logging::RtLogger::new(256)),
-                StandardKernel::default()
+                StandardKernel
             );
 
             let mut topo_prod_cloned = topo_prod;
@@ -103,7 +103,7 @@ mod tests {
             resources,
             Box::new(graph),
             Arc::new(nullherz_dna::SampleRegistry::new()), Arc::new(crate::rt_logging::RtLogger::new(256)),
-            StandardKernel::default()
+            StandardKernel
         );
 
         let mut out_l = [0.0f32; 128];
@@ -154,7 +154,7 @@ mod tests {
                 resources,
                 Box::new(graph),
                 Arc::new(nullherz_dna::SampleRegistry::new()), Arc::new(crate::rt_logging::RtLogger::new(256)),
-                StandardKernel::default()
+                StandardKernel
             );
 
             let mut out_l = [0.0f32; 128];
@@ -211,7 +211,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             resources,
             Box::new(MockProcessor { process_count: 0 }),
             Arc::new(nullherz_dna::SampleRegistry::new()), Arc::new(crate::rt_logging::RtLogger::new(256)),
-            StandardKernel::default()
+            StandardKernel
         );
 
         let mut out = [0.0f32; 128];
@@ -266,7 +266,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
             resources,
             Box::new(MidiMockProcessor { midi_received: false }),
             Arc::new(nullherz_dna::SampleRegistry::new()), Arc::new(crate::rt_logging::RtLogger::new(256)),
-            StandardKernel::default()
+            StandardKernel
         );
 
         let mut out = [0.0f32; 128];
@@ -296,12 +296,11 @@ impl AudioProcessor for ParamMockProcessor {
 fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 fn apply_command(&mut self, cmd: &Command) {
-                if let Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, value, .. }) = cmd {
-                    if *target_id == self.id {
+                if let Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, value, .. }) = cmd
+                    && *target_id == self.id {
                         self.param_value = *value;
                         self.apply_count += 1;
                     }
-                }
             }
 }
 
@@ -339,7 +338,7 @@ fn apply_command(&mut self, cmd: &Command) {
             resources,
             Box::new(ParamMockProcessor { param_value: 0.0, apply_count: 0, id: proc_id }),
             Arc::new(nullherz_dna::SampleRegistry::new()), Arc::new(crate::rt_logging::RtLogger::new(256)),
-            StandardKernel::default()
+            StandardKernel
         );
 
         let mut out = [0.0f32; 128];

@@ -11,7 +11,8 @@ pub use threaded::ThreadedBackend;
 pub use mock::MockBackend;
 
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 pub use nullherz_traits::{RenderingEngine, AudioBackendType};
 
 pub trait AudioBackend: Send {

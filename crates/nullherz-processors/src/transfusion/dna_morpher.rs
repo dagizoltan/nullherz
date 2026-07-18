@@ -84,21 +84,17 @@ impl AudioProcessor for DnaMorpher {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
     fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
-        if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, .. }) = command {
-            if *target_id == self.id {
+        if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, .. }) = command
+            && *target_id == self.id {
                 self.set_parameter(*param_id, *value, 0);
             }
-        }
     }
 
     fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutation) {
-        match mutation {
-            nullherz_traits::TopologyMutation::UpdateMetadata { metadata, .. } => {
-                // For DnaMorpher, we might treat updates as setting Slot B
-                self.dna_a = self.dna_b.clone();
-                self.dna_b = Arc::new(metadata.dna.clone());
-            }
-            _ => {}
+        if let nullherz_traits::TopologyMutation::UpdateMetadata { metadata, .. } = mutation {
+            // For DnaMorpher, we might treat updates as setting Slot B
+            self.dna_a = self.dna_b.clone();
+            self.dna_b = Arc::new(metadata.dna.clone());
         }
     }
 

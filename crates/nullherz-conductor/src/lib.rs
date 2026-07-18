@@ -57,7 +57,7 @@ mod tests {
 
         conductor.start_backend(nullherz_backends::AudioBackendType::Mock).unwrap();
 
-        let engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock().unwrap();
+        let engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
         let _engine = engine_lock.as_ref().unwrap();
 
         // In MockBackend::start, we already call process_block once for verification.

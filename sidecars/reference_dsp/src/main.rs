@@ -7,6 +7,12 @@ pub struct BitcrusherSidecar {
     last_sample: f32,
 }
 
+impl Default for BitcrusherSidecar {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BitcrusherSidecar {
     pub fn new() -> Self {
         Self {
@@ -27,7 +33,7 @@ impl nullherz_traits::SignalProcessor for BitcrusherSidecar {
         let step = (2.0f32.powf(self.bits)).recip();
 
         for i in 0..input.len() {
-            if self.counter % self.downsample == 0 {
+            if self.counter.is_multiple_of(self.downsample) {
                 let s = input[i];
                 self.last_sample = (s / step).round() * step;
             }

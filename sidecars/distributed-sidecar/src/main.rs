@@ -1,5 +1,5 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use nullherz_traits::{TimestampedCommand, Command, CoreCommand, SampleMetadata};
+use nullherz_traits::{TimestampedCommand, Command, CoreCommand, SampleMetadata, SampleRegistry as _};
 use nullherz_dna::SampleRegistry;
 use std::net::UdpSocket;
 use std::time::Duration;
@@ -33,7 +33,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Conductor attached from {}", addr);
         let registry_clone = sample_registry.clone();
 
-        let addr_clone = addr.to_string();
         tokio::spawn(async move {
             let mut len_buf = [0u8; 4];
             loop {
@@ -60,21 +59,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         registry_clone.register_with_metadata(
                             sample_id,
                             Arc::new(f32_data.to_vec()),
-                            SampleMetadata::new_empty()
+                            Arc::new(SampleMetadata::new_empty())
                         );
                         println!("Sidecar: Registered mirrored sample ID={}", sample_id);
                     }
                     continue;
                 }
 
-                if let Ok(cmd) = TimestampedCommand::from_binary(&payload) {
+                // Drop the non-Send Box<dyn Error> before awaiting below (tokio::spawn needs Send)
+                let parsed_cmd = TimestampedCommand::from_binary(&payload).ok();
+                if let Some(cmd) = parsed_cmd {
                     println!("Received command: {:?}", cmd);
 
                     // --- STAGE 3: AUDIO RETURN PATH ---
                     // If we receive a command that indicates we should start streaming back audio,
                     // we'd spawn a sender task. For now, we simulate by sending a dummy block on RequestSnapshots.
                     if let Command::Core(CoreCommand::RequestSnapshots) = cmd.command {
-                        let dummy_block = ipc_layer::AudioBlock { data: [0.5; 256], len: 256 };
+                        let dummy_block = ipc_layer::AudioBlock { data: [0.5; ipc_layer::MAX_BLOCK_SIZE], len: 256, _pad: [0; 15] };
                         let block_bytes = bytemuck::bytes_of(&dummy_block);
                         let mut header = Vec::with_capacity(5);
                         header.push(3u8); // Type 3: Audio Return Block
@@ -88,7 +89,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         timestamp_samples: 0,
                         command: Command::Core(CoreCommand::RequestSnapshots),
                     };
-                    if let Ok(ack) = ack_cmd.to_binary() {
+                    let ack_bytes = ack_cmd.to_binary().ok();
+                    if let Some(ack) = ack_bytes {
                         let mut resp = Vec::with_capacity(4 + ack.len());
                         resp.extend_from_slice(&(ack.len() as u32).to_be_bytes());
                         resp.extend_from_slice(&ack);

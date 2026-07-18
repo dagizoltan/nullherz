@@ -7,6 +7,12 @@ pub struct MockProcessor {
     pub last_param_value: f32,
 }
 
+impl Default for MockProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockProcessor {
     pub fn new() -> Self {
         Self {
@@ -181,10 +187,10 @@ impl ConformanceSuite {
         };
 
         // Check alignment of pointers
-        if (inputs[0].as_ptr() as usize) % crate::SIMD_ALIGNMENT != 0 {
+        if !(inputs[0].as_ptr() as usize).is_multiple_of(crate::SIMD_ALIGNMENT) {
             return Err("Input buffer not SIMD aligned".into());
         }
-        if (outputs[0].as_ptr() as usize) % crate::SIMD_ALIGNMENT != 0 {
+        if !(outputs[0].as_ptr() as usize).is_multiple_of(crate::SIMD_ALIGNMENT) {
             return Err("Output buffer not SIMD aligned".into());
         }
 
@@ -592,6 +598,12 @@ pub struct TestHost {
     pub config: AudioConfig,
 }
 
+impl Default for TestHost {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestHost {
     pub fn new() -> Self {
         Self {
@@ -607,6 +619,93 @@ impl TestHost {
             is_last_sub_block: true,
         };
         processor.process(inputs, outputs, &mut context);
+    }
+}
+
+pub struct VirtualClockHost {
+    pub config: AudioConfig,
+    pub transport: Transport,
+    pub sample_counter: u64,
+}
+
+impl Default for VirtualClockHost {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl VirtualClockHost {
+    pub fn new() -> Self {
+        Self {
+            config: AudioConfig { sample_rate: 44100.0, block_size: 256 },
+            transport: Transport {
+                bpm: 120.0,
+                beat_position: 0.0,
+                is_playing: true,
+                sample_rate: 44100.0,
+                absolute_samples: 0,
+                system_time_ns: 0,
+                device_time_ns: 0,
+            },
+            sample_counter: 0,
+        }
+    }
+
+    pub fn process_with_commands<P: AudioProcessor>(
+        &mut self,
+        processor: &mut P,
+        num_samples: usize,
+        commands: &[(u64, crate::Command)],
+    ) {
+        let mut iter = crate::SubBlockIterator::new(num_samples, crate::MAX_BLOCK_SIZE);
+        let block_start = self.sample_counter;
+        let block_end = block_start + num_samples as u64;
+
+        let mut commands_processed_indices = std::collections::HashSet::new();
+
+        while iter.current_offset < num_samples {
+            // Find next command in this block that we haven't processed yet
+            let next_cmd_idx = commands.iter().enumerate()
+                .filter(|(idx, (ts, _))| !commands_processed_indices.contains(idx) && *ts >= block_start + iter.current_offset as u64 && *ts < block_end)
+                .min_by_key(|(_, (ts, _))| *ts)
+                .map(|(idx, _)| idx);
+
+            if let Some(idx) = next_cmd_idx {
+                let (ts, cmd) = &commands[idx];
+                let cmd_offset = (*ts - block_start) as usize;
+                if iter.current_offset < cmd_offset {
+                    while let Some(sb) = iter.next_chunk_up_to(cmd_offset) {
+                        self.run_sub_block(processor, sb.offset, sb.len, sb.is_last);
+                    }
+                }
+                processor.apply_command(cmd);
+                commands_processed_indices.insert(idx);
+            } else {
+                while let Some(sb) = iter.next_chunk() {
+                    self.run_sub_block(processor, sb.offset, sb.len, sb.is_last);
+                }
+            }
+        }
+        self.sample_counter = block_end;
+    }
+
+
+    fn run_sub_block(&mut self, processor: &mut dyn AudioProcessor, offset: usize, len: usize, is_last: bool) {
+        let mut ctx = crate::ProcessContext {
+            transport: Some(&self.transport),
+            host: None,
+            sub_block_offset: offset,
+            is_last_sub_block: is_last,
+        };
+        // Dummy buffers
+        let inputs = [ &[][..]; 0 ];
+        let mut outputs = [ &mut [][..]; 0 ];
+        processor.process(&inputs, &mut outputs, &mut ctx);
+
+        if self.transport.is_playing {
+            let beats = (len as f64 / self.transport.sample_rate as f64) * (self.transport.bpm as f64 / 60.0);
+            self.transport.beat_position += beats;
+        }
     }
 }
 
@@ -704,86 +803,5 @@ mod tests {
         assert_eq!(mock.process_called_count, 2); // 0-100 and 100-128
         assert_eq!(mock.last_param_id, 1);
         assert_eq!(mock.last_param_value, 0.5);
-    }
-}
-
-pub struct VirtualClockHost {
-    pub config: AudioConfig,
-    pub transport: Transport,
-    pub sample_counter: u64,
-}
-
-impl VirtualClockHost {
-    pub fn new() -> Self {
-        Self {
-            config: AudioConfig { sample_rate: 44100.0, block_size: 256 },
-            transport: Transport {
-                bpm: 120.0,
-                beat_position: 0.0,
-                is_playing: true,
-                sample_rate: 44100.0,
-                absolute_samples: 0,
-                system_time_ns: 0,
-                device_time_ns: 0,
-            },
-            sample_counter: 0,
-        }
-    }
-
-    pub fn process_with_commands<P: AudioProcessor>(
-        &mut self,
-        processor: &mut P,
-        num_samples: usize,
-        commands: &[(u64, crate::Command)],
-    ) {
-        let mut iter = crate::SubBlockIterator::new(num_samples, crate::MAX_BLOCK_SIZE);
-        let block_start = self.sample_counter;
-        let block_end = block_start + num_samples as u64;
-
-        let mut commands_processed_indices = std::collections::HashSet::new();
-
-        while iter.current_offset < num_samples {
-            // Find next command in this block that we haven't processed yet
-            let next_cmd_idx = commands.iter().enumerate()
-                .filter(|(idx, (ts, _))| !commands_processed_indices.contains(idx) && *ts >= block_start + iter.current_offset as u64 && *ts < block_end)
-                .min_by_key(|(_, (ts, _))| *ts)
-                .map(|(idx, _)| idx);
-
-            if let Some(idx) = next_cmd_idx {
-                let (ts, cmd) = &commands[idx];
-                let cmd_offset = (*ts - block_start) as usize;
-                if iter.current_offset < cmd_offset {
-                    while let Some(sb) = iter.next_chunk_up_to(cmd_offset) {
-                        self.run_sub_block(processor, sb.offset, sb.len, sb.is_last);
-                    }
-                }
-                processor.apply_command(cmd);
-                commands_processed_indices.insert(idx);
-            } else {
-                while let Some(sb) = iter.next_chunk() {
-                    self.run_sub_block(processor, sb.offset, sb.len, sb.is_last);
-                }
-            }
-        }
-        self.sample_counter = block_end;
-    }
-
-
-    fn run_sub_block(&mut self, processor: &mut dyn AudioProcessor, offset: usize, len: usize, is_last: bool) {
-        let mut ctx = crate::ProcessContext {
-            transport: Some(&self.transport),
-            host: None,
-            sub_block_offset: offset,
-            is_last_sub_block: is_last,
-        };
-        // Dummy buffers
-        let inputs = [ &[][..]; 0 ];
-        let mut outputs = [ &mut [][..]; 0 ];
-        processor.process(&inputs, &mut outputs, &mut ctx);
-
-        if self.transport.is_playing {
-            let beats = (len as f64 / self.transport.sample_rate as f64) * (self.transport.bpm as f64 / 60.0);
-            self.transport.beat_position += beats;
-        }
     }
 }

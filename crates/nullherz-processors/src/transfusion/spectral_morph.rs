@@ -101,13 +101,12 @@ fn as_any(&self) -> &dyn std::any::Any { self }
 fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
         match *command {
-            nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, ramp_duration_samples }) => {
-                if target_id == self.id {
+            nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, ramp_duration_samples })
+                if target_id == self.id => {
                     self.set_parameter(param_id, value, ramp_duration_samples);
                 }
-            }
-            nullherz_traits::Command::Extension(nullherz_traits::OpaqueEnvelope { domain_id, target_id, opcode, data }) => {
-                if domain_id == 0x53504543 && target_id == self.id { // "SPEC"
+            nullherz_traits::Command::Extension(nullherz_traits::OpaqueEnvelope { domain_id, target_id, opcode, data })
+                if domain_id == 0x53504543 && target_id == self.id => { // "SPEC"
                     match opcode {
                         0x01 => { // Set Window Shape (alternate via opcode)
                             let shape_val = data[0];
@@ -127,7 +126,6 @@ fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
                         _ => {}
                     }
                 }
-            }
             _ => {}
         }
     }

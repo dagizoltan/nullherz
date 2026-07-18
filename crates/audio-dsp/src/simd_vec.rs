@@ -219,8 +219,8 @@ impl std::ops::Div for FloatX16 {
 /// Helper to ensure WASM SIMD128 (4-wide) optimized paths are clear and utilized.
 #[inline(always)]
 pub fn complex_mul_accumulate_wasm_simd(re: &mut f32x4, im: &mut f32x4, hr: f32x4, hi: f32x4, ir: f32x4, ii: f32x4) {
-    *re = *re + (hr * ir - hi * ii);
-    *im = *im + (hr * ii + hi * ir);
+    *re += hr * ir - hi * ii ;
+    *im += hr * ii + hi * ir ;
 }
 
 /// SIMD-optimized tanh approximation for neural activation.
