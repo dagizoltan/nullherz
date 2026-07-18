@@ -5,6 +5,8 @@
 
 ---
 
+> **Framing note (July 18, 2026):** read these tables as an *engineering yardstick*, not a market map. Per the [Strategic Assessment](./STRATEGIC_ASSESSMENT_2026_07.md), Nullherz does not intend to meet Traktor/Ableton/Rekordbox in their own categories — those markets are locked by hardware certification and ecosystem gravity. The comparisons below remain useful for calibrating technical claims (RT safety, isolation, latency).
+
 ## 1. Competitive Landscape Overview
 Nullherz occupies a unique position in the audio software market: it is a hybrid of a **Professional DJ Performance Tool** and a **Modern Studio Orchestration Engine**, built entirely on **Rust** for maximum safety and performance.
 
