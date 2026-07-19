@@ -551,7 +551,7 @@ mod tests {
                 active_midi_profile: "default".to_string(),
                 config_saved_time: None,
                 audio_devices: vec![],
-                selected_audio_device: String::new(),
+                _selected_audio_device: String::new(),
                 restore_last_session: false,
                 default_view_on_launch: crate::View::Composer,
                 autosave_enabled: false,

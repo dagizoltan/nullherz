@@ -39,18 +39,24 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
 
             ui.add_space(theme.space_md);
             ui.horizontal(|ui| {
-                ui.label("Device:");
-                egui::ComboBox::from_id_source("audio_device_select")
-                    .selected_text(&app.settings.selected_audio_device)
-                    .show_ui(ui, |ui| {
-                        for dev in &app.settings.audio_devices {
-                            ui.selectable_value(&mut app.settings.selected_audio_device, dev.clone(), dev);
-                        }
-                    });
-
-                if ui.button("Scan for Devices").clicked() {
-                     // Trigger re-enumeration in backend (noop for now as orchestrator does it every tick)
-                }
+                ui.label("Devices:");
+                // DISPLAY ONLY — there is no device-selection command in the
+                // protocol yet; the backend opens its default device. The old
+                // dropdown let you "select" a device that nothing consumed,
+                // and the "Scan" button was an admitted no-op (enumeration
+                // already refreshes every tick via telemetry).
+                ui.add_enabled_ui(false, |ui| {
+                    egui::ComboBox::from_id_source("audio_device_select")
+                        .selected_text(
+                            app.settings.audio_devices.first().map(String::as_str).unwrap_or("(default)"),
+                        )
+                        .show_ui(ui, |_ui| {});
+                });
+                ui.label(
+                    RichText::new("detected — output uses the backend default")
+                        .size(theme.type_caption)
+                        .color(theme.text_disabled),
+                );
             });
         });
 

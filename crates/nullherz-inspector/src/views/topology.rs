@@ -250,7 +250,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         let end_key = (edge.to, false, edge.input_idx);
 
         if let (Some(&start), Some(&end)) = (socket_positions.get(&start_key), socket_positions.get(&end_key)) {
-            let level = telemetry.as_ref().map(|t| t.peak_levels[edge.from as usize]).unwrap_or(0.0);
+            // .get(): edge ids come from persisted graph.json, which can carry
+                // node ids from an older layout (>= MAX_NODES) — raw indexing
+                // panicked the whole view on such files.
+                let level = telemetry.as_ref().and_then(|t| t.peak_levels.get(edge.from as usize).copied()).unwrap_or(0.0);
             let base_color = if level > 1.0 { theme.danger } else if level > 0.01 { theme.accent } else { theme.text_disabled };
 
             let cp1 = start + egui::vec2(60.0, 0.0);
@@ -321,7 +324,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         for edge in &app.graph.edges {
                             let src_name = app.graph.nodes.get(edge.from as usize).map(|n| n.name.as_str()).unwrap_or("Unknown");
                             let dst_name = app.graph.nodes.get(edge.to as usize).map(|n| n.name.as_str()).unwrap_or("Unknown");
-                            let level = telemetry.as_ref().map(|t| t.peak_levels[edge.from as usize]).unwrap_or(0.0);
+                            // .get(): edge ids come from persisted graph.json, which can carry
+                // node ids from an older layout (>= MAX_NODES) — raw indexing
+                // panicked the whole view on such files.
+                let level = telemetry.as_ref().and_then(|t| t.peak_levels.get(edge.from as usize).copied()).unwrap_or(0.0);
 
                             ui.label(src_name);
                             ui.label(format!("{} (In {})", dst_name, edge.input_idx));

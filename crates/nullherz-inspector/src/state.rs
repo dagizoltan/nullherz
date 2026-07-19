@@ -266,7 +266,8 @@ pub struct SettingsState {
     pub active_midi_profile: String,
     pub config_saved_time: Option<f64>,
     pub audio_devices: Vec<String>,
-    pub selected_audio_device: String,
+    /// Retained for the future device-selection command.
+    pub _selected_audio_device: String,
     pub restore_last_session: bool,
     pub default_view_on_launch: View,
     pub autosave_enabled: bool,
@@ -284,7 +285,7 @@ impl Default for SettingsState {
             active_midi_profile: "default".to_string(),
             config_saved_time: None,
             audio_devices: vec!["default".to_string()],
-            selected_audio_device: "default".to_string(),
+            _selected_audio_device: "default".to_string(),
             restore_last_session: false,
             default_view_on_launch: View::Console,
             autosave_enabled: false,
