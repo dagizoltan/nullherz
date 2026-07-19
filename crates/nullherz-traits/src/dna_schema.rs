@@ -119,6 +119,8 @@ pub struct MipWaveform {
     pub levels: Vec<Arc<Vec<f32>>>,
 }
 
+fn default_channels() -> u16 { 1 }
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]
 pub struct SampleMetadata {
@@ -131,7 +133,14 @@ pub struct SampleMetadata {
     pub beat_grid_offset: u64,
     #[serde(with = "crate::serde_helpers::serde_arc")]
     pub peaks: Arc<Vec<f32>>,
+    /// Frames PER CHANNEL — not the length of the sample buffer. For a stereo
+    /// source the planar buffer holds `total_samples * channels` values.
     pub total_samples: u64,
+    /// Channel count of the source. Sample buffers are PLANAR: channel `c`
+    /// occupies `buffer[c * total_samples .. (c + 1) * total_samples]`.
+    /// Defaulted so libraries written before the field existed still load.
+    #[serde(default = "default_channels")]
+    pub channels: u16,
     pub mip_waveform: MipWaveform,
     pub dna: SoundDNA,
     pub midi_map: Option<MidiMap>,
@@ -148,6 +157,7 @@ impl SampleMetadata {
             beat_grid_offset: 0,
             peaks: Arc::new(Vec::new()),
             total_samples: 0,
+            channels: 1,
             mip_waveform: MipWaveform::default(),
             dna: SoundDNA::default(),
             midi_map: None,

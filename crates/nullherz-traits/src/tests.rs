@@ -14,6 +14,7 @@ mod tests {
             beat_grid_offset: 0,
             peaks: Arc::new((0..1024).map(|i| (i as f32 / 1024.0).sin().abs()).collect()),
             total_samples: 44100,
+            channels: 1,
             mip_waveform: MipWaveform {
                 levels: vec![Arc::new(vec![0.0, 0.5, 1.0])],
             },

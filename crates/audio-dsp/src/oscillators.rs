@@ -369,6 +369,13 @@ pub struct SamplerVoice {
     pub window_lut: [f32; 1024],
     pub trigger_offset: f32,
     pub trigger_beat: f64,
+    /// Frames PER CHANNEL in `buffer`. Sample buffers are PLANAR, so channel
+    /// `c` lives at `buffer[c * buffer_frames .. (c + 1) * buffer_frames]` and
+    /// `play_head` counts FRAMES, never raw buffer elements. Interleaved data
+    /// would break interpolation outright: it reads four consecutive elements
+    /// (via a 4-wide SIMD load), which across L,R,L,R blends the channels.
+    pub buffer_frames: usize,
+    pub buffer_channels: usize,
 }
 
 impl Default for SamplerVoice {
@@ -404,6 +411,8 @@ impl SamplerVoice {
             },
             trigger_offset: 0.0,
             trigger_beat: 0.0,
+            buffer_frames: 0,
+            buffer_channels: 1,
         }
     }
 
@@ -412,6 +421,8 @@ impl SamplerVoice {
     }
 
     pub fn trigger_at(&mut self, buffer: std::sync::Arc<Vec<f32>>, playback_rate: f32, velocity: f32, offset: f32, beat: f64) {
+        self.buffer_frames = buffer.len();
+        self.buffer_channels = 1;
         self.buffer = Some(buffer);
         self.play_head = offset;
         self.trigger_offset = offset;
@@ -432,6 +443,11 @@ impl SamplerVoice {
         if needs_clone {
             self.buffer = Some(buffer.clone());
         }
+        // Callers that know the real layout call set_layout right after; this
+        // keeps single-channel callers (granular grains, MIDI note triggers)
+        // working unchanged.
+        self.buffer_frames = buffer.len();
+        self.buffer_channels = 1;
         self.play_head = offset;
         self.trigger_offset = offset;
         self.trigger_beat = beat;
@@ -479,15 +495,63 @@ impl SamplerVoice {
         sample * self.velocity
     }
 
+    /// Declare the planar layout of the buffer most recently triggered.
+    /// Call immediately after `trigger_*` when the source is not mono.
+    pub fn set_layout(&mut self, frames: usize, channels: usize) {
+        self.buffer_frames = frames;
+        self.buffer_channels = channels.max(1);
+    }
+
+    /// Render one block across up to `outputs.len()` channels, advancing the
+    /// playhead ONCE per frame rather than once per output channel.
+    ///
+    /// This is what makes a stereo source play at the right speed: the playhead
+    /// counts frames, and each output reads its own contiguous plane. Feeding
+    /// interleaved data through the old mono path consumed L and R as two
+    /// successive frames, so every stereo file played an octave up at double
+    /// tempo. Outputs beyond the source's channel count repeat channel 0, so a
+    /// mono file still fills a stereo strip.
+    pub fn process_block_planar(&mut self, outputs: &mut [&mut [f32]], num_samples: usize) {
+        if !self.is_active || outputs.is_empty() { return; }
+        let Some(buffer) = &self.buffer else { return; };
+
+        let frames = self.buffer_frames.min(buffer.len());
+        if frames == 0 { self.is_active = false; return; }
+        let channels = self.buffer_channels.max(1);
+        let num_samples = outputs.iter().map(|o| o.len()).min().unwrap_or(0).min(num_samples);
+
+        for i in 0..num_samples {
+            let idx = self.play_head.floor() as usize;
+            if idx + 4 >= frames { self.is_active = false; break; }
+
+            for (out_ch, output) in outputs.iter_mut().enumerate() {
+                let plane = if out_ch < channels { out_ch } else { 0 };
+                let start = plane * frames;
+                // Bounds-checked once; a ragged buffer must not read a
+                // neighbouring channel's samples.
+                let Some(slice) = buffer.get(start..start + frames) else { continue; };
+                output[i] += self.interpolate_sample(slice, self.play_head, idx) * self.velocity;
+            }
+
+            self.play_head += self.playback_rate;
+            self.background_playhead += self.playback_rate;
+
+            if self.loop_enabled && self.play_head >= self.loop_end as f32 {
+                self.play_head = self.loop_start as f32 + (self.play_head - self.loop_end as f32);
+            }
+        }
+    }
+
     pub fn process_block(&mut self, output: &mut [f32]) {
         if !self.is_active { return; }
         let Some(buffer) = &self.buffer else { return; };
 
         if (self.time_stretch_ratio - 1.0).abs() < 0.001 {
             // NORMAL MODE
+            let frames = if self.buffer_frames > 0 { self.buffer_frames.min(buffer.len()) } else { buffer.len() };
             for sample_out in output.iter_mut() {
                 let idx = self.play_head.floor() as usize;
-                if idx + 4 >= buffer.len() { self.is_active = false; break; }
+                if idx + 4 >= frames { self.is_active = false; break; }
 
                 let sample = self.interpolate_sample(buffer, self.play_head, idx);
                 *sample_out += sample * self.velocity;

@@ -70,11 +70,30 @@ impl AnalysisWorker {
             .filter_map(|id| {
                 let sample = registry.get(id)?;
 
+                // Sample buffers are PLANAR. Analyse channel 0 alone: handing
+                // the kernel the whole buffer makes it read L followed by R as
+                // one stream, so it detects the track twice over — doubling the
+                // apparent length and corrupting BPM, transients and peaks.
+                let channels = (sample.metadata.channels as usize).max(1);
+                let frames = if sample.metadata.total_samples > 0 {
+                    (sample.metadata.total_samples as usize).min(sample.buffer.len())
+                } else {
+                    sample.buffer.len() / channels
+                };
+                // Arc clone (refcount only) so the buffer can be borrowed for
+                // analysis and still handed on without copying the samples.
+                let buffer = sample.buffer.clone();
                 KERNEL.with(|kernel_cell| {
                     let mut kernel = kernel_cell.borrow_mut();
-                    let (metadata, dna) = kernel.analyze(&sample.buffer);
+                    let first_channel = buffer.get(..frames).unwrap_or(&buffer);
+                    let (metadata, dna) = kernel.analyze(first_channel);
                     let mut final_metadata = metadata;
                     final_metadata.dna = dna;
+                    // analyze() starts from new_empty(), which reports one
+                    // channel. Letting that land would re-register a stereo
+                    // sample as mono and undo the planar layout entirely.
+                    final_metadata.channels = channels as u16;
+                    final_metadata.total_samples = frames as u64;
                     Some((id, final_metadata, sample.buffer))
                 })
             }).collect();
