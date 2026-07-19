@@ -240,7 +240,11 @@ impl MixerManager {
         // buffer, and whichever stage runs later erases the other (the old
         // wiring was only inaudible because Kahn happened to schedule the
         // preview first).
-        let preview_id = nullherz_traits::NodeConventions::PREVIEW;
+        // A real, legal graph index — NOT NodeConventions::PREVIEW, which is a
+        // logical sentinel (111 >= MAX_NODES; as a graph index it was silently
+        // dropped and preview never made a sound). The conductor translates
+        // the sentinel to this node via node_names.
+        let preview_id = self.id_allocator.allocate_node_id();
         self.node_names.insert("preview_node".to_string(), preview_id);
         let preview_l = self.id_allocator.allocate_buffer_id(2);
         let preview_r = preview_l + 1;

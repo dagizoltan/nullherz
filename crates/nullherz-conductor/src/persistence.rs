@@ -206,14 +206,14 @@ impl ProjectState {
                 state.edges.push(EdgeState {
                     node_idx: n_idx as u32,
                     input_idx: i as u32,
-                    buffer_idx: routing.input_indices[i] as u32,
+                    buffer_idx: routing.input_indices[i].0,
                 });
             }
             for i in 0..routing.output_count {
                 state.output_edges.push(OutputEdgeState {
                     node_idx: n_idx as u32,
                     output_idx: i as u32,
-                    buffer_idx: routing.output_indices[i] as u32,
+                    buffer_idx: routing.output_indices[i].0,
                 });
             }
         }

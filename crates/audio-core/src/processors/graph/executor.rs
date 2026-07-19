@@ -66,7 +66,7 @@ impl GraphExecutor {
                 }
 
                 if state.node_idx < crate::MAX_NODES && state.input_idx < crate::MAX_CHANNELS {
-                    block_x_map[state.node_idx][state.input_idx] = (crate::MAX_BUFFERS + x_buf_idx) as u8;
+                    block_x_map[state.node_idx][state.input_idx] = nullherz_traits::BufferSlot::encode_crossfade(x_buf_idx);
                 }
 
                 if state.remaining_samples == 0 { *x_state_opt = None; }
@@ -164,22 +164,24 @@ impl GraphExecutor {
                 let mut resolved_outputs = [0usize; crate::MAX_CHANNELS];
 
                 for j in 0..routing.input_count.min(crate::MAX_CHANNELS) {
-                    let v_idx = (*routing.input_indices.get(j).unwrap_or(&0) % crate::MAX_BUFFERS as u32) as usize;
-                    let mut p_idx = topo.virtual_to_physical[v_idx] as usize;
+                    let v_idx = routing.input_indices.get(j).copied().unwrap_or_default().index();
+                    let mut p_idx = topo.virtual_to_physical[v_idx].index();
+                    // block_x_map overrides carry the crossfade sentinel
+                    // (MAX_BUFFERS + k); consumers decode via BufferSlot.
                     let p_override = block_x_map[n_idx][j];
                     if p_override != 0 { p_idx = p_override as usize; }
                     resolved_inputs[j] = p_idx;
                 }
 
                 for j in 0..routing.sidechain_count.min(crate::MAX_CHANNELS) {
-                    let v_idx = (*routing.sidechain_indices.get(j).unwrap_or(&0) % crate::MAX_BUFFERS as u32) as usize;
-                    let p_idx = topo.virtual_to_physical[v_idx] as usize;
+                    let v_idx = routing.sidechain_indices.get(j).copied().unwrap_or_default().index();
+                    let p_idx = topo.virtual_to_physical[v_idx].index();
                     resolved_sidechains[j] = p_idx;
                 }
 
                 for (j, resolved_out) in resolved_outputs.iter_mut().enumerate().take(routing.output_count.min(crate::MAX_CHANNELS)) {
-                    let v_idx = (*routing.output_indices.get(j).unwrap_or(&0) % crate::MAX_BUFFERS as u32) as usize;
-                    *resolved_out = topo.virtual_to_physical[v_idx] as usize;
+                    let v_idx = routing.output_indices.get(j).copied().unwrap_or_default().index();
+                    *resolved_out = topo.virtual_to_physical[v_idx].index();
                 }
 
                 let is_bypassed = topo.bypass_states[n_idx] || faulted_states[n_idx].load(Ordering::Relaxed);
@@ -233,8 +235,8 @@ impl GraphExecutor {
                 let mut node_outputs_reconstructed: [&mut [f32]; crate::MAX_CHANNELS] = std::array::from_fn(|_| &mut [][..]);
                 let output_count = routing.output_count.min(crate::MAX_CHANNELS);
                 for i in 0..output_count {
-                    let v_idx = *unsafe { routing.output_indices.get_unchecked(i) } as usize;
-                    let p_idx = *unsafe { topo.virtual_to_physical.get_unchecked(v_idx) } as usize;
+                    let v_idx = unsafe { routing.output_indices.get_unchecked(i) }.index();
+                    let p_idx = unsafe { topo.virtual_to_physical.get_unchecked(v_idx) }.index();
                     unsafe {
                         *node_outputs_reconstructed.get_unchecked_mut(i) = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr().add(offset), num_samples);
                     }
@@ -247,21 +249,23 @@ impl GraphExecutor {
                 // PDC: Apply input delays if required
                 for i in 0..input_count + sidechain_count {
                     let v_idx = if i < input_count {
-                        *unsafe { routing.input_indices.get_unchecked(i) } as usize
+                        unsafe { routing.input_indices.get_unchecked(i) }.index()
                     } else {
-                        *unsafe { routing.sidechain_indices.get_unchecked(i - input_count) } as usize
+                        unsafe { routing.sidechain_indices.get_unchecked(i - input_count) }.index()
                     };
-                    let mut p_idx = *unsafe { topo.virtual_to_physical.get_unchecked(v_idx) } as usize;
+                    let mut p_idx = unsafe { topo.virtual_to_physical.get_unchecked(v_idx) }.index();
                     if i < input_count {
                         let p_override = block_x_map[n_idx][i];
                         if p_override != 0 { p_idx = p_override as usize; }
                     }
 
-                    if p_idx >= crate::MAX_BUFFERS {
-                        let x_idx = p_idx - crate::MAX_BUFFERS;
-                        unsafe { node_inputs_storage[i] = &(&(*x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
-                    } else {
-                        unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[offset..offset + num_samples]; }
+                    match nullherz_traits::BufferSlot::from_raw(p_idx) {
+                        nullherz_traits::BufferSlot::Crossfade(x_idx) => {
+                            unsafe { node_inputs_storage[i] = &(&(*x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
+                        }
+                        nullherz_traits::BufferSlot::Pool(p_idx) => {
+                            unsafe { node_inputs_storage[i] = &(&(*buffers_ptr.add(p_idx)).data)[offset..offset + num_samples]; }
+                        }
                     }
                 }
 
