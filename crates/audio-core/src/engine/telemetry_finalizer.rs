@@ -97,19 +97,22 @@ impl TelemetryFinalizer {
         let mut deck_positions = [0u64; 4];
         let mut deck_playback_rates = [1.0f32; 4];
         if let Some(pg) = graph.as_any_mut().downcast_mut::<crate::processors::ProcessorGraph>() {
+            // Deck samplers are the first four samplers in node-index order:
+            // the bootstrap allocates deck strips A-D before the preview
+            // sampler and any user-added nodes, and node ids are never
+            // reused. (The old `!= 111` preview exclusion is gone — the
+            // preview node lives at a real allocated index now, safely
+            // after the decks.)
             let mut deck_idx = 0;
             for i in 0..pg.node_count {
                 let proc = unsafe { &*pg.nodes[i].processor.get() };
                 if proc.processor_type() == "sampler" {
-                    let sampler_id = i as u32;
-                    if sampler_id != 111 { // Exclude preview sampler
-                        if deck_idx < 4 {
-                            deck_positions[deck_idx] = proc.get_playback_position();
-                            deck_playback_rates[deck_idx] = proc.get_parameter(1);
-                            deck_idx += 1;
-                        } else {
-                            break;
-                        }
+                    if deck_idx < 4 {
+                        deck_positions[deck_idx] = proc.get_playback_position();
+                        deck_playback_rates[deck_idx] = proc.get_parameter(1);
+                        deck_idx += 1;
+                    } else {
+                        break;
                     }
                 }
             }

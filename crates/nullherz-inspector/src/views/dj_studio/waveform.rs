@@ -35,7 +35,9 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
             );
         }
 
-        // Render playhead using actual per-deck playback position
+        // Render playhead using actual per-deck playback position.
+        // High-contrast (dark casing + light core) — the old single line in
+        // deck_color was invisible on top of a waveform of the same color.
         let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[i]).unwrap_or(0);
         let total_samples = track.as_ref().map(|t| t.metadata.total_samples).unwrap_or(0).max(1);
         let playhead_ratio = elapsed_samples as f32 / total_samples as f32;
@@ -43,7 +45,25 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
 
         ui.painter().line_segment(
             [egui::pos2(playhead_x, rect.min.y), egui::pos2(playhead_x, rect.max.y)],
-            egui::Stroke::new(2.0, deck_color)
+            egui::Stroke::new(4.0, Color32::from_black_alpha(160))
+        );
+        ui.painter().line_segment(
+            [egui::pos2(playhead_x, rect.min.y), egui::pos2(playhead_x, rect.max.y)],
+            egui::Stroke::new(2.0, theme.text_primary)
+        );
+
+        // Elapsed / total time readout, anchored top-left of the zone.
+        let sr = 44_100.0f64;
+        let fmt = |samples: u64| -> String {
+            let s = samples as f64 / sr;
+            format!("{}:{:04.1}", (s / 60.0) as u64, s % 60.0)
+        };
+        ui.painter().text(
+            egui::pos2(rect.min.x + 6.0, rect.min.y + 4.0),
+            egui::Align2::LEFT_TOP,
+            format!("{} / {}", fmt(elapsed_samples), fmt(total_samples)),
+            egui::FontId::monospace(theme.type_caption),
+            theme.text_primary,
         );
     } else {
         // Enhanced EMPTY DECK visualization (always shown regardless of GPU/WGPU availability!)

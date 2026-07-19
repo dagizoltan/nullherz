@@ -150,11 +150,19 @@ impl WaveformRenderer {
     }
 
     pub fn update_peaks(&mut self, queue: &wgpu::Queue, peaks: &[f32]) {
-        let peak_count = peaks.len().min(self._max_peaks);
-        if peak_count == 0 { return; }
+        if peaks.is_empty() { return; }
 
+        // If the level is denser than the vertex buffer, DOWNSAMPLE across
+        // the whole track (max of each stride window). Truncating with
+        // `.take()` here used to display only the first max_peaks points
+        // stretched to full width — the waveform showed the track's opening
+        // seconds as if they were the whole file.
+        let peak_count = peaks.len().min(self._max_peaks);
         let mut vertices = Vec::with_capacity(peak_count * 2);
-        for (i, &peak) in peaks.iter().take(peak_count).enumerate() {
+        for i in 0..peak_count {
+            let start = i * peaks.len() / peak_count;
+            let end = (((i + 1) * peaks.len()) / peak_count).max(start + 1);
+            let peak = peaks[start..end].iter().fold(0.0f32, |a, &v| a.max(v));
             // Normalized X in range [0, 2] instead of [-1, 1] to allow easier zooming from start
             let x = (i as f32 / peak_count as f32) * 2.0;
             vertices.push(WaveformVertex { position: [x, peak] });

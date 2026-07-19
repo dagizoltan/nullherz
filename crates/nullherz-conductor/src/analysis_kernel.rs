@@ -33,11 +33,13 @@ impl AnalysisKernel {
         metadata.bpm = self.detect_bpm_from_transients(&transients);
 
         // 2b. Calculate Peaks — resolution PROPORTIONAL to track length
-        // (one peak per 512-sample window, ~86/sec at 44.1k). The old fixed
-        // width of 1024 compressed a 5-minute track to ~3 points per second,
-        // which is why waveforms looked like mush. Memory stays trivial
-        // (a 5-minute track is ~100 KB of peaks plus MIPs).
-        let peak_count = (buffer.len() / 512).max(1);
+        // (one peak per 128-sample window, ~345/sec at 44.1k: enough for
+        // ~2 peaks per pixel on a wide deck view even for short loops; the
+        // MIP levels handle zoomed-out display of long tracks). The old
+        // fixed width of 1024 compressed a 5-minute track to ~3 points per
+        // second, which is why waveforms looked like mush. Memory stays
+        // modest (a 5-minute track is ~400 KB of peaks plus MIPs).
+        let peak_count = (buffer.len() / 128).max(1);
         metadata.peaks = Arc::new(self.calculate_peaks(buffer, peak_count));
 
         // 3. DNA Analysis (Spectral)
