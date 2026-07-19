@@ -2,7 +2,7 @@
 
 **Author:** Senior Lead Audio & Rust Systems Architect
 **Status:** PRODUCTION BETA
-**Date:** 2026-07-17 (verified against code; see [ARCHITECTURE.md](../system/ARCHITECTURE.md) for the full reverse-engineered reference)
+**Date:** 2026-07-19 (verified against code; see [ARCHITECTURE.md](../system/ARCHITECTURE.md) for the full reverse-engineered reference)
 
 ---
 
@@ -40,6 +40,7 @@ The Nullherz engine is built upon a strict separation of concerns, ensuring that
 - **System-Wide Safe Mode**: Sidecar failures can now trigger a global "Safe Mode" via the command bus, allowing the engine to enter a known stable state.
 - **RSS Limits**: Sidecar subprocesses are now constrained by real RSS memory limits using cgroups.
 - **DSP Safety Pass**: All critical kernels (Gain, Biquad, Spectral) are hardened against non-finite float values.
+- **Stereo Integrity (July 2026)**: Sample buffers are planar end to end (channel *c* at `buffer[c*frames..]`, playhead counts frames), fixing stereo files playing an octave high at double tempo. `MAX_BUFFERS = 128` decouples the buffer/edge address space from `MAX_NODES = 64` so a full stereo console cannot silently alias graph edges.
 
 ### 2.3 Hardware & Distributed Orchestration
 - **Universal Backend Switching**: Real-time hot-swapping between ALSA, PipeWire, JACK, Threaded, and Mock backends without process restarts; automatic fallback to Threaded on boot failure. Period size is now configurable via `system_config.json` (`period_size`).
@@ -88,8 +89,8 @@ While the Nullherz engine is architecturally hardened, the transition to a "Valu
 | **Clock Sync** | Active | Typed PTP protocol with Delay_Req/Delay_Resp measured path delay (offset-free, EMA-filtered, plausibility-clamped), PI clock servo (Kani-proved clamp). Remaining: SO_TIMESTAMPING integration, BMC election. |
 | **Topology Manager** | Production Beta | Thread-safe, off-audio DAG compilation. |
 | **Genetic Cloud** | Active | TCP Gossipsub-style DNA exchange with ed25519 `GOSSIP_SIGNED` payloads and TOFU peer-identity pinning (HANDSHAKE/IDENTITY, key-change rejection). |
-| **DSP Kernels** | Production Beta | Wasm-SIMD128 optimized spectral kernels; OLA time-stretch and transient detectors added (July 2026). |
-| **Mixer Console** | Active | 4-channel DJ topology with harmonic auto-sync. |
+| **DSP Kernels** | Production Beta | Wasm-SIMD128 optimized spectral kernels with exact COLA overlap-add reconstruction; KeySync is a real phase-vocoder pitch shifter; OLA time-stretch and transient detectors (July 2026). |
+| **Mixer Console** | Active | 4-channel DJ topology with harmonic auto-sync; stereo deck strips with private L/R buffers and stereo cue bus. |
 | **Audio Editor** | Active | Waveform selection, OLA time-stretch, transient chop, non-destructive undo (July 2026). |
 | **Composer** | Active | Endless-scroll step grid with sequencer routing and live per-step telemetry. |
 | **Curation** | Active | Intelligent "Energy Match" smart crating logic. |
@@ -98,6 +99,6 @@ While the Nullherz engine is architecturally hardened, the transition to a "Valu
 
 ## 6. Conclusion
 
-The Nullherz engine has transitioned to a **Production Beta** state. It features a Kani-covered execution plane, distributed clock discipline with measured path delay, a signed genetic DNA gossip protocol with peer-identity pinning, warning-free builds (`cargo check --workspace --all-targets -D warnings`), a CI gate, and a fully green test suite (**127/127**, 2026-07-18).
+The Nullherz engine has transitioned to a **Production Beta** state. It features a Kani-covered execution plane, distributed clock discipline with measured path delay, a signed genetic DNA gossip protocol with peer-identity pinning, warning-free builds (`cargo check --workspace --all-targets -D warnings`), a CI gate, and a fully green test suite (**190/190**, 2026-07-19).
 
 **Architecture Status:** PRODUCTION BETA.

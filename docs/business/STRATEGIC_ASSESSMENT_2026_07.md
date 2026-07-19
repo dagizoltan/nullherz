@@ -2,7 +2,7 @@
 
 **Author:** Senior Audio & Rust Systems Architect
 **Date:** July 18, 2026
-**Basis:** Full reverse-engineering of the codebase (~31k lines, 20 crates + 8 sidecars), the July hardening campaign (green 127-test suite, CI gate, security fixes), and the competitive docs in this folder.
+**Basis:** Full reverse-engineering of the codebase (~41k lines incl. tests, 19 crates + 8 sidecars), the July hardening campaign (green 190-test suite, CI gate, security fixes), and the competitive docs in this folder.
 **Character:** Deliberately blunt. This document exists to correct optimism bias in the earlier strategy documents, not to replace their energy.
 
 ---

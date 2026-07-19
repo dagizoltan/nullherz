@@ -1,7 +1,7 @@
 # Nullherz System Feature Matrix (Stage 6: Evolutionary Intelligence)
 
 **Current State:** Production Beta (see [SYSTEM_STATUS.md](./SYSTEM_STATUS.md) for qualifications)
-**Last Updated:** July 17, 2026 — verified against code (reverse-engineering pass; see [ARCHITECTURE.md](../system/ARCHITECTURE.md))
+**Last Updated:** July 19, 2026 — verified against code (reverse-engineering pass; see [ARCHITECTURE.md](../system/ARCHITECTURE.md))
 
 ---
 
@@ -53,7 +53,9 @@
 | **4x Unrolled Scalar Kernels**| ✅ | Optimized fallback paths for non-SIMD processors (e.g., `DjIsolator`). |
 | **Exact Filter Math** | ✅ | Runtime Linkwitz-Riley coefficient generation for exact crossovers. |
 | **Soft Fallback** | ✅ | Heartbeat-monitored instant swap to bypass node upon DSP failure; escalation to global Safe Mode. |
-| **Spectral Processor** | ✅ | Hardened FFT overlap-add. Supports variable block sizes up to 1024 samples. |
+| **Spectral Processor** | ✅ | Hardened FFT overlap-add with exact COLA-normalized synthesis window. Supports variable block sizes up to 1024 samples. |
+| **KeySync Pitch Shift** | ✅ | Real phase-vocoder pitch shifter with per-bin phase tracking (level preserved on shift). |
+| **Planar Stereo Playback** | ✅ | Planar sample buffers end to end; frame-counted playhead; per-plane crop/stretch; stereo deck strips with private L/R buffers (`MAX_BUFFERS = 128` edge address space). |
 | **OLA Time-Stretch** | ✅ | Overlap-add `time_stretch` kernel with corrected ratio semantics (`audio-dsp/util.rs`). |
 | **Transient Detection** | ✅ | Spectral-flux + RMS onset/transient detectors powering editor chop and analysis. |
 | **Parallel Graph Execution** | ✅ | Static stage assignment `TaskPool`; safety covered by a Kani proof harness (`kani-verify` feature). |

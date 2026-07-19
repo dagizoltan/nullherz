@@ -192,7 +192,7 @@ impl TopologyCoordinator {
                 let i_idx = input_idx as usize;
                 if n_idx < crate::MAX_NODES && i_idx < crate::MAX_CHANNELS {
                     let topo = self.inactive_topology_mut();
-                    topo.routing[n_idx].input_indices[i_idx] = new_buffer_idx.min(crate::MAX_NODES as u32 - 1);
+                    topo.routing[n_idx].input_indices[i_idx] = new_buffer_idx.min(crate::MAX_BUFFERS as u32 - 1);
                     if i_idx >= topo.routing[n_idx].input_count {
                         topo.routing[n_idx].input_count = i_idx + 1;
                     }
@@ -203,7 +203,7 @@ impl TopologyCoordinator {
                 let o_idx = output_idx as usize;
                 if n_idx < crate::MAX_NODES && o_idx < crate::MAX_CHANNELS {
                     let topo = self.inactive_topology_mut();
-                    topo.routing[n_idx].output_indices[o_idx] = new_buffer_idx.min(crate::MAX_NODES as u32 - 1);
+                    topo.routing[n_idx].output_indices[o_idx] = new_buffer_idx.min(crate::MAX_BUFFERS as u32 - 1);
                     if o_idx >= topo.routing[n_idx].output_count {
                         topo.routing[n_idx].output_count = o_idx + 1;
                     }

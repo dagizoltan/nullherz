@@ -6,7 +6,7 @@ pub struct GraphTopology {
     #[serde(with = "BigArray")]
     pub routing: [NodeRouting; MAX_NODES],
     #[serde(with = "BigArray")]
-    pub virtual_to_physical: [u32; MAX_NODES],
+    pub virtual_to_physical: [u32; MAX_BUFFERS],
     pub plan: CompiledGraphPlan,
     pub crossfades: [Option<CrossfadeState>; 8],
     pub node_count: usize,

@@ -16,13 +16,13 @@ impl GraphCompiler {
         let mut adj_count = Box::new([0usize; MAX_NODES]);
 
         // 1. Build adjacency list and in-degrees efficiently
-        let mut v_to_producers = Box::new([[0usize; MAX_NODES]; MAX_NODES]);
-        let mut v_producer_counts = Box::new([0usize; MAX_NODES]);
+        let mut v_to_producers = Box::new([[0usize; MAX_NODES]; nullherz_traits::MAX_BUFFERS]);
+        let mut v_producer_counts = Box::new([0usize; nullherz_traits::MAX_BUFFERS]);
         for j in 0..n {
             let routing_j = &topo.routing[j];
             for k in 0..routing_j.output_count {
                 let v_out = routing_j.output_indices[k] as usize;
-                if v_out < MAX_NODES {
+                if v_out < nullherz_traits::MAX_BUFFERS {
                     v_to_producers[v_out][v_producer_counts[v_out]] = j;
                     v_producer_counts[v_out] += 1;
                 }
@@ -36,7 +36,7 @@ impl GraphCompiler {
             // and ensure the producer is processed in an earlier stage.
             for l in 0..routing_i.input_count {
                 let v_in = routing_i.input_indices[l] as usize;
-                if v_in < MAX_NODES {
+                if v_in < nullherz_traits::MAX_BUFFERS {
                     for &j in v_to_producers[v_in].iter().take(v_producer_counts[v_in]) {
                         if i == j { continue; }
                         let mut exists = false;
@@ -62,10 +62,10 @@ impl GraphCompiler {
         plan.num_stages = 0;
 
         while processed_count < n {
-            let mut stage_nodes = [0u32; MAX_NODES];
+            let mut stage_nodes = [0u32; nullherz_traits::MAX_BUFFERS];
             let mut stage_count = 0;
-            let mut physical_writes_in_stage = [false; MAX_NODES];
-            let mut physical_reads_in_stage = [false; MAX_NODES];
+            let mut physical_writes_in_stage = [false; nullherz_traits::MAX_BUFFERS];
+            let mut physical_reads_in_stage = [false; nullherz_traits::MAX_BUFFERS];
 
             for i in 0..n {
                 if !is_processed[i] && in_degree[i] == 0 {
@@ -87,7 +87,7 @@ impl GraphCompiler {
                     let routing = &topo.routing[i];
 
                     for k in 0..routing.output_count {
-                        let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                        let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % nullherz_traits::MAX_BUFFERS as u32) as usize;
                         let p_out = topo.virtual_to_physical[v_out] as usize;
                         if physical_writes_in_stage[p_out] || physical_reads_in_stage[p_out] {
                             collision = true;
@@ -97,7 +97,7 @@ impl GraphCompiler {
                     if collision { continue; }
 
                     for k in 0..routing.input_count {
-                        let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                        let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % nullherz_traits::MAX_BUFFERS as u32) as usize;
                         let p_in = topo.virtual_to_physical[v_in] as usize;
                         if physical_writes_in_stage[p_in] {
                             collision = true;
@@ -109,12 +109,12 @@ impl GraphCompiler {
                         stage_nodes[stage_count] = i as u32;
                         stage_count += 1;
                         for k in 0..routing.output_count {
-                            let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                            let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % nullherz_traits::MAX_BUFFERS as u32) as usize;
                             let p_out = topo.virtual_to_physical[v_out] as usize;
                             physical_writes_in_stage[p_out] = true;
                         }
                         for k in 0..routing.input_count {
-                            let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                            let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % nullherz_traits::MAX_BUFFERS as u32) as usize;
                             let p_in = topo.virtual_to_physical[v_in] as usize;
                             physical_reads_in_stage[p_in] = true;
                         }
@@ -193,7 +193,7 @@ impl GraphCompiler {
     }
 
     fn calculate_pdc(n: usize, adj: &[[usize; MAX_NODES]; MAX_NODES], adj_count: &[usize; MAX_NODES], plan: &mut CompiledGraphPlan, topo: &GraphTopology) {
-        let mut path_latencies = [0u32; MAX_NODES];
+        let mut path_latencies = [0u32; nullherz_traits::MAX_BUFFERS];
 
         // 1. Initial pass: Get intrinsic latencies from topo (populated by GraphManager)
         for i in 0..n {
@@ -224,7 +224,7 @@ impl GraphCompiler {
             let routing_j = &topo.routing[j];
             for k in 0..routing_j.output_count {
                 let v_out = routing_j.output_indices[k] as usize;
-                if v_out < MAX_NODES {
+                if v_out < nullherz_traits::MAX_BUFFERS {
                     v_to_producer[v_out] = Some(j);
                 }
             }
@@ -294,8 +294,8 @@ impl GraphCompiler {
     pub fn verify_no_hazards(topo: &GraphTopology, plan: &CompiledGraphPlan) -> Result<(), AudioError> {
         for s_idx in 0..plan.num_stages {
             let stage = &plan.stages[s_idx].0[..plan.stage_counts[s_idx] as usize];
-            let mut physical_writes = [false; MAX_NODES];
-            let mut physical_reads = [false; MAX_NODES];
+            let mut physical_writes = [false; nullherz_traits::MAX_BUFFERS];
+            let mut physical_reads = [false; nullherz_traits::MAX_BUFFERS];
 
             for &n_idx_u32 in stage {
                 let n_idx = n_idx_u32 as usize;
@@ -306,7 +306,7 @@ impl GraphCompiler {
                 // Intra-node reuse is permitted for in-place processing.
 
                 for k in 0..routing.output_count {
-                    let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                    let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % nullherz_traits::MAX_BUFFERS as u32) as usize;
                     let p_out = topo.virtual_to_physical[v_out] as usize;
 
                     if physical_writes[p_out] || physical_reads[p_out] {
@@ -315,7 +315,7 @@ impl GraphCompiler {
                 }
 
                 for k in 0..routing.input_count {
-                    let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                    let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % nullherz_traits::MAX_BUFFERS as u32) as usize;
                     let p_in = topo.virtual_to_physical[v_in] as usize;
 
                     if physical_writes[p_in] {
@@ -325,12 +325,12 @@ impl GraphCompiler {
 
                 // After checking, MARK them as used by this node for the rest of the stage
                 for k in 0..routing.output_count {
-                    let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                    let v_out = (*routing.output_indices.get(k).unwrap_or(&0) % nullherz_traits::MAX_BUFFERS as u32) as usize;
                     let p_out = topo.virtual_to_physical[v_out] as usize;
                     physical_writes[p_out] = true;
                 }
                 for k in 0..routing.input_count {
-                    let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % MAX_NODES as u32) as usize;
+                    let v_in = (*routing.input_indices.get(k).unwrap_or(&0) % nullherz_traits::MAX_BUFFERS as u32) as usize;
                     let p_in = topo.virtual_to_physical[v_in] as usize;
                     physical_reads[p_in] = true;
                 }
@@ -353,7 +353,7 @@ mod tests {
             writes in prop::collection::vec((0..MAX_NODES, 0..16usize), 1..10),
             reads in prop::collection::vec((0..MAX_NODES, 0..16usize), 1..10)
         ) {
-            let mut v2p_arr = [0u32; MAX_NODES];
+            let mut v2p_arr = [0u32; nullherz_traits::MAX_BUFFERS];
             for (i, &v) in v2p.iter().enumerate() { v2p_arr[i] = v as u32; }
 
             let mut topo = GraphTopology {
@@ -400,7 +400,7 @@ mod tests {
             num_nodes in 1..20usize,
             edges in prop::collection::vec((0..20usize, 0..20usize), 0..40)
         ) {
-            let mut v2p = [0u32; MAX_NODES];
+            let mut v2p = [0u32; nullherz_traits::MAX_BUFFERS];
             for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
 
             let mut topo = GraphTopology {
@@ -449,7 +449,7 @@ mod tests {
 
     #[test]
     fn test_hazard_detection_raw() {
-        let mut v2p = [0u32; MAX_NODES];
+        let mut v2p = [0u32; nullherz_traits::MAX_BUFFERS];
         for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
         let mut topo = GraphTopology {
             routing: [NodeRouting {
@@ -494,7 +494,7 @@ mod tests {
 
     #[test]
     fn test_hazard_detection_war() {
-        let mut v2p = [0u32; MAX_NODES];
+        let mut v2p = [0u32; nullherz_traits::MAX_BUFFERS];
         for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
         let mut topo = GraphTopology {
             routing: [NodeRouting {
@@ -538,7 +538,7 @@ mod tests {
 
     #[test]
     fn test_proxy_injection_on_boundary_cross() {
-        let mut v2p = [0u32; MAX_NODES];
+        let mut v2p = [0u32; nullherz_traits::MAX_BUFFERS];
         for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
         let mut node_assignments = [nullherz_traits::NodeAssignment([0; 32]); MAX_NODES];
         node_assignments[0] = nullherz_traits::NodeAssignment([0; 32]);
@@ -586,7 +586,7 @@ mod tests {
 
     #[test]
     fn test_static_graph_pruning() {
-        let mut v2p = [0u32; MAX_NODES];
+        let mut v2p = [0u32; nullherz_traits::MAX_BUFFERS];
         for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
         let mut topo = GraphTopology {
             routing: [NodeRouting {
@@ -633,7 +633,7 @@ mod tests {
 
     #[test]
     fn test_hazard_detection_waw() {
-        let mut v2p = [0u32; MAX_NODES];
+        let mut v2p = [0u32; nullherz_traits::MAX_BUFFERS];
         for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
         let mut topo = GraphTopology {
             routing: [NodeRouting {
