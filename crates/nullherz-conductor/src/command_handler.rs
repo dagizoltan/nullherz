@@ -76,7 +76,10 @@ impl CommandHandler {
         // thread, so ANY library entry is playable regardless of which
         // scanner or seeder created it.
         for cmd in &commands {
-            if let Command::Performance(PerformanceCommand::LoadTrackToDeck { sample_id, .. }) = cmd {
+            if let Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id, sample_id }) = cmd {
+                // Remember which sample sits on which deck — needed to map a
+                // deck's sampler NODE back to its TRACK (hot-cue persistence).
+                conductor.mixer_manager.deck_samples.insert(*deck_id, *sample_id);
                 if conductor.transfusion_manager.sample_registry.get(*sample_id).is_none() {
                     let track = { conductor.library.lock().get_track(*sample_id).ok().flatten() };
                     if let Some(track) = track {
@@ -128,6 +131,13 @@ impl CommandHandler {
                 // the old code called handle_performance_command(PlayNode) and
                 // discarded its `false`, so the trigger never left the
                 // conductor and preview was silent even with a live node.
+                Command::Performance(PerformanceCommand::SetHotCue { node_idx, cue_idx, position_samples }) => {
+                    Self::handle_set_hot_cue(conductor, node_idx, cue_idx, position_samples);
+                    // Not consumed: the engine-side sampler does not store
+                    // cues itself, but forwarding costs nothing and keeps the
+                    // command visible to sidecars/remotes.
+                    false
+                }
                 Command::Performance(PerformanceCommand::Preview { sample_id }) => {
                     if let Some(node_idx) = Self::stage_preview_source(conductor, sample_id) {
                         final_commands.push(Command::Performance(PerformanceCommand::PlayNode { node_idx }));
@@ -147,6 +157,46 @@ impl CommandHandler {
         }
         if !final_commands.is_empty() {
             conductor.mixer_bridge.apply_mixer_commands(final_commands, &mut conductor.topology_manager, &mut conductor.modulation_matrix);
+        }
+    }
+
+    /// Persist a hot cue into the deck's track metadata and push the update
+    /// to the live sampler node. `SetHotCue` had NO handler anywhere —
+    /// shift-clicking a performance pad to set a cue was a silent no-op, and
+    /// hot cues only ever resolved to their 10%-of-track fallback positions.
+    fn handle_set_hot_cue(conductor: &mut Conductor, node_idx: u32, cue_idx: u32, position_samples: u64) {
+        if cue_idx >= 8 {
+            return;
+        }
+        let Some(deck) = conductor
+            .mixer_manager
+            .deck_mappings
+            .iter()
+            .find(|(_, n)| n.sampler_id == node_idx)
+            .map(|(d, _)| *d)
+        else {
+            return;
+        };
+        let Some(&sample_id) = conductor.mixer_manager.deck_samples.get(&deck) else { return; };
+        let Some(sample) = conductor.transfusion_manager.sample_registry.get(sample_id) else { return; };
+
+        let mut metadata = (*sample.metadata).clone();
+        metadata.hot_cues[cue_idx as usize] = Some(position_samples);
+        let metadata = std::sync::Arc::new(metadata);
+
+        conductor
+            .transfusion_manager
+            .sample_registry
+            .register_with_metadata(sample_id, sample.buffer, metadata.clone());
+        {
+            let lib = conductor.library.lock();
+            if let Ok(Some(mut track)) = lib.get_track(sample_id) {
+                track.metadata = metadata.clone();
+                let _ = lib.save_track(&track);
+            }
+        }
+        if let Some(ref mut prod) = conductor.topology_manager.topo_producer {
+            let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata { node_idx, metadata });
         }
     }
 

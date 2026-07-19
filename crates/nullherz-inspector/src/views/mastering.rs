@@ -11,28 +11,37 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     let available_w = ui.available_width();
     let is_wide = available_w > 650.0;
 
-    let mut render_left_panel = |ui: &mut Ui| {
+    let render_left_panel = |ui: &mut Ui| {
         Frame::none()
             .fill(theme.bg_surface)
             .rounding(Rounding::same(theme.radius_md))
             .inner_margin(Margin::same(15.0))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut app.mixer.mastering_eq_enabled, "3-BAND EQ");
-                    });
+                    ui.label(RichText::new("3-BAND EQ").strong().size(theme.type_body).color(theme.text_secondary));
                     ui.add_space(theme.space_sm);
-                    ui.horizontal(|ui| {
-                        if widgets::render_knob(ui, &mut app.mixer.mastering_eq_low, 0.0..=2.0, "LOW", theme.accent).changed() {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id: 19, param_id: 0, value: app.mixer.mastering_eq_low, ramp_duration_samples: 128 }));
-                        }
-                        if widgets::render_knob(ui, &mut app.mixer.mastering_eq_mid, 0.0..=2.0, "MID", theme.accent).changed() {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id: 19, param_id: 1, value: app.mixer.mastering_eq_mid, ramp_duration_samples: 128 }));
-                        }
-                        if widgets::render_knob(ui, &mut app.mixer.mastering_eq_high, 0.0..=2.0, "HIGH", theme.accent).changed() {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id: 19, param_id: 2, value: app.mixer.mastering_eq_high, ramp_duration_samples: 128 }));
-                        }
+                    // NOT WIRED — deliberately disabled. The old knobs sent
+                    // SetParam to hardcoded node 19 (today: deck B's cue-send
+                    // gain), and there is no master tone stage to bind them
+                    // to: the master chain's BIQUAD takes raw coefficients
+                    // (b0/b1/b2), which LOW/MID/HIGH gains are not. Enable
+                    // this only once a real master isolator/EQ node exists.
+                    ui.add_enabled_ui(false, |ui| {
+                        ui.horizontal(|ui| {
+                            let mut zero = 1.0f32;
+                            widgets::render_knob(ui, &mut zero, 0.0..=2.0, "LOW", theme.text_disabled);
+                            let mut zero = 1.0f32;
+                            widgets::render_knob(ui, &mut zero, 0.0..=2.0, "MID", theme.text_disabled);
+                            let mut zero = 1.0f32;
+                            widgets::render_knob(ui, &mut zero, 0.0..=2.0, "HIGH", theme.text_disabled);
+                        });
                     });
+                    ui.add_space(theme.space_xs);
+                    ui.label(
+                        RichText::new("Not wired — no master EQ stage in the graph yet.")
+                            .size(theme.type_caption)
+                            .color(theme.text_disabled),
+                    );
                 });
             });
     };
