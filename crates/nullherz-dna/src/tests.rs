@@ -6,6 +6,7 @@ use crate::*;
 
 
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use super::*;
     use std::fs;

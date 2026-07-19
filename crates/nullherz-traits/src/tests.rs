@@ -1,3 +1,4 @@
+#[allow(clippy::module_inception)]
 mod tests {
     use crate::*;
     use std::sync::Arc;
