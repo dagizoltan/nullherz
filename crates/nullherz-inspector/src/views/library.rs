@@ -259,7 +259,14 @@ fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
                          app.library.library_needs_refresh = true;
                     }
                     ui.add_space(theme.space_xs);
-                    ui.label(RichText::new(format!("{:.0}", track.metadata.bpm)).monospace().size(theme.type_caption).color(theme.text_secondary));
+                    // "—" until analysis has produced a real tempo; a literal
+                    // "0" reads like a broken track rather than a pending one.
+                    let bpm_text = if track.metadata.bpm >= 20.0 {
+                        format!("{:.0}", track.metadata.bpm)
+                    } else {
+                        "—".to_string()
+                    };
+                    ui.label(RichText::new(bpm_text).monospace().size(theme.type_caption).color(theme.text_secondary));
 
                     // SoundDNA Sparkline
                     let (spark_rect, _) = ui.allocate_at_least(egui::vec2(40.0, 10.0), egui::Sense::hover());

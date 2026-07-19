@@ -29,6 +29,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         ui.label("Sequencer not available yet (topology still installing).");
         return;
     };
+    let grid_deck = app.decks.focused_deck.min(3);
     ui.horizontal(|ui| {
         ui.heading(RichText::new("SESSION VIEW (COMPOSER)").strong().color(app.theme.text_primary));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -71,7 +72,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         if ui.button("STOP ALL CLIPS").clicked() {
             for i in 0..16 {
                  let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: seq_node, track_idx: i as u32 }));
-                 app.composer.sequencer_grid[i].fill(0.0);
+                 app.composer.sequencer_grid[grid_deck][i].fill(0.0);
             }
         }
 
@@ -101,7 +102,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         .inner_margin(Margin::same(app.theme.space_sm))
         .show(ui, |ui| {
             let mut extend_grid = false;
-            let steps_count = app.composer.sequencer_grid[0].len();
+            let steps_count = app.composer.sequencer_grid[grid_deck][0].len();
 
             ui.horizontal(|ui| {
                 // 1. LEFT SIDE: Stationary Track Headers column (100.0px width)
@@ -183,7 +184,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             // Stop Clip button (compact)
                                             let stop_btn = egui::Button::new(RichText::new("■").size(app.theme.type_caption).strong()).fill(app.theme.bg_inset);
                                             if ui.add_sized([18.0, 18.0], stop_btn).on_hover_text("Stop clip").clicked() {
-                                                app.composer.sequencer_grid[track_idx].fill(0.0);
+                                                app.composer.sequencer_grid[grid_deck][track_idx].fill(0.0);
                                                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: seq_node, track_idx: track_idx as u32 }));
                                             }
                                         });
@@ -289,7 +290,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         // Playback status
                                         let (is_playing, is_starting) = check_step_telemetry(telemetry, track_idx, slot_idx);
 
-                                        let velocity = app.composer.sequencer_grid[track_idx][slot_idx];
+                                        let velocity = app.composer.sequencer_grid[grid_deck][track_idx][slot_idx];
                                         let mut color = if is_playing {
                                             app.theme.success
                                         } else if is_starting {
@@ -320,9 +321,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         }
 
                                         if response.clicked() {
-                                            let is_on = app.composer.sequencer_grid[track_idx][slot_idx] == 0.0;
+                                            let is_on = app.composer.sequencer_grid[grid_deck][track_idx][slot_idx] == 0.0;
                                             let val = if is_on { 1.0 } else { 0.0 };
-                                            app.composer.sequencer_grid[track_idx][slot_idx] = val;
+                                            app.composer.sequencer_grid[grid_deck][track_idx][slot_idx] = val;
                                             let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
                                                 node_idx: seq_node,
                                                 track: track_idx as u32,
@@ -409,7 +410,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
             if extend_grid {
                 for i in 0..16 {
-                    app.composer.sequencer_grid[i].resize(steps_count + 16, 0.0);
+                    app.composer.sequencer_grid[grid_deck][i].resize(steps_count + 16, 0.0);
                 }
             }
         });
@@ -505,7 +506,7 @@ mod tests {
                 ..Default::default()
             },
             composer: crate::state::ComposerState {
-                sequencer_grid: std::array::from_fn(|_| vec![0.0; 64]),
+                sequencer_grid: std::array::from_fn(|_| std::array::from_fn(|_| vec![0.0; 64])),
                 selected_composer_track: None,
                 sequencer_active_step: 0,
                 track_mutes: [false; 16],
@@ -564,6 +565,7 @@ mod tests {
                 damped_latent: [0.0; 16],
                 damped_peaks: [0.0; 4],
                 damped_master_peaks: [0.0; 2],
+                last_deck_positions: [0; 4],
             },
             topo: crate::state::TopologyViewState {
                 active_connection_source: None,

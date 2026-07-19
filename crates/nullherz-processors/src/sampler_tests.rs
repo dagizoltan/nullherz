@@ -200,6 +200,62 @@ mod stereo_playback_tests {
         );
     }
 
+    /// DJ transport contract: STOP pauses (position held), PLAY resumes in
+    /// place, and loading a NEW source clears every voice so neither a
+    /// playing nor a paused voice can keep sounding the previous track.
+    #[test]
+    fn test_stop_pauses_play_resumes_and_load_clears_voices() {
+        use nullherz_traits::PerformanceCommand;
+        let frames = 44100;
+        let (buffer, metadata) = planar_stereo(440.0, 880.0, frames);
+
+        let mut p = SamplerProcessor::new(0);
+        p.apply_topology_mutation(TopologyMutation::AddSource {
+            node_idx: 0, buffer, sample_id: 1, metadata: Some(metadata),
+        });
+        p.apply_command(&nullherz_traits::Command::Performance(PerformanceCommand::PlayNode { node_idx: 0 }));
+
+        // Run a while, then pause.
+        let _ = render(&mut p, 2, 20, 128);
+        let pos_at_pause = p.get_playback_position();
+        assert!(pos_at_pause >= (19 * 128) as u64, "playhead must have advanced, got {}", pos_at_pause);
+
+        p.apply_command(&nullherz_traits::Command::Performance(PerformanceCommand::StopNode { node_idx: 0 }));
+        let out = render(&mut p, 2, 4, 128);
+        assert!(out[0].iter().all(|&s| s == 0.0), "paused deck must be silent");
+        assert_eq!(
+            p.get_playback_position(), pos_at_pause,
+            "pause must HOLD the position (it used to reset to 0)"
+        );
+
+        // Resume: playback continues from the held position.
+        p.apply_command(&nullherz_traits::Command::Performance(PerformanceCommand::PlayNode { node_idx: 0 }));
+        let out = render(&mut p, 2, 4, 128);
+        assert!(out[0].iter().any(|&s| s != 0.0), "resume must produce audio");
+        assert!(
+            p.get_playback_position() > pos_at_pause,
+            "resume must continue FROM the held position, not restart"
+        );
+
+        // Load a new source while paused: the old voice must not survive.
+        p.apply_command(&nullherz_traits::Command::Performance(PerformanceCommand::StopNode { node_idx: 0 }));
+        let (buffer2, metadata2) = planar_stereo(220.0, 440.0, frames);
+        p.apply_topology_mutation(TopologyMutation::AddSource {
+            node_idx: 0, buffer: buffer2, sample_id: 2, metadata: Some(metadata2),
+        });
+        assert_eq!(p.get_playback_position(), 0, "a new source must clear held positions");
+
+        p.apply_command(&nullherz_traits::Command::Performance(PerformanceCommand::PlayNode { node_idx: 0 }));
+        let out = render(&mut p, 2, 100, 128);
+        let hz = dominant_hz(&out[0]);
+        assert!(
+            (hz - 220.0).abs() < 10.0,
+            "after a load, PLAY must start the NEW track from the top (measured {:.1} Hz; \
+             440 here means the old voice resumed)",
+            hz
+        );
+    }
+
     /// A mono source must still fill both channels of a stereo strip.
     #[test]
     fn test_mono_sample_fills_both_outputs() {

@@ -1,4 +1,4 @@
-use nullherz_traits::{AudioProcessor, SignalProcessor};
+use nullherz_traits::AudioProcessor;
 use audio_dsp::SamplerVoice;
 
 #[derive(Debug)]
@@ -223,6 +223,18 @@ fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutatio
                 // RT path: adopt the shared buffers — deep-cloning a full track
                 // here (malloc + tens-of-MB memcpy on the audio thread) caused
                 // multi-ms block spikes at deck load.
+                //
+                // A new source invalidates EVERY existing voice: each voice
+                // holds its own Arc to the audio it was triggered with, so
+                // without this a playing voice kept sounding the PREVIOUS
+                // track after a load, and a paused one would resume it.
+                // (Dropping the old Arcs here is a refcount decrement; the
+                // registry retains the buffers.)
+                for v in self.voices.iter_mut() {
+                    v.is_active = false;
+                    v.play_head = 0.0;
+                    v.buffer = None;
+                }
                 self.sample_buffer = buffer;
                 self.sample_id = Some(sample_id);
                 self.metadata = metadata;
@@ -277,8 +289,15 @@ fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
     }
 
     fn get_playback_position(&self) -> u64 {
+        // Active voice wins; otherwise report a PAUSED voice's held position
+        // so the UI playhead does not snap to zero on stop.
         for voice in &self.voices {
             if voice.is_active {
+                return voice.play_head as u64;
+            }
+        }
+        for voice in &self.voices {
+            if voice.buffer.is_some() && voice.play_head > 0.0 {
                 return voice.play_head as u64;
             }
         }
@@ -359,17 +378,38 @@ impl SamplerProcessor {
                 if self.sample_buffer.is_empty() {
                     self.pending_play = true;
                 } else {
-                    let (frames, channels) = (self.source_frames(), self.source_channels());
-                    if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
-                        let beat_pos = context.and_then(|c| c.transport).map(|t| t.beat_position).unwrap_or(0.0);
-                        voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, 0.0, beat_pos);
-                        Self::apply_layout(voice, frames, channels);
+                    let frames = self.source_frames();
+                    // RESUME takes priority over a fresh trigger: a paused
+                    // voice (deactivated by StopNode, position held) picks up
+                    // where it left off. It must still belong to the CURRENT
+                    // source and sit inside the buffer — AddSource clears
+                    // voices, so a stale resume cannot replay an old track.
+                    let resumable = self.voices.iter_mut().find(|v| {
+                        !v.is_active
+                            && v.play_head > 0.0
+                            && (v.play_head as usize) < frames
+                            && v.buffer.as_ref().is_some_and(|b| std::sync::Arc::ptr_eq(b, &self.sample_buffer))
+                    });
+                    if let Some(voice) = resumable {
+                        voice.is_active = true;
+                    } else {
+                        let channels = self.source_channels();
+                        if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
+                            let beat_pos = context.and_then(|c| c.transport).map(|t| t.beat_position).unwrap_or(0.0);
+                            voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, 0.0, beat_pos);
+                            Self::apply_layout(voice, frames, channels);
+                        }
                     }
                 }
             }
             Command::Performance(PerformanceCommand::StopNode { node_idx }) if node_idx as u64 == self.id => {
+                // PAUSE, not wipe: a DJ's stop holds the position (CUE is the
+                // way back to the start). Voices keep their play_head and
+                // buffer; a following PlayNode resumes them in place.
                 self.pending_play = false;
-                self.reset();
+                for v in self.voices.iter_mut() {
+                    v.is_active = false;
+                }
             }
             Command::Performance(PerformanceCommand::SetSlipMode { node_idx: _, enabled }) => {
                 for voice in self.voices.iter_mut() {

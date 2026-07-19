@@ -266,15 +266,21 @@ impl BreederView {
                      && let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id)
                          && let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
                              let child_rhythmic = nullherz_dna::transfuse_dna(&track_a.metadata.dna, &track_b.metadata.dna, state.transfusion_bias_y).rhythmic;
-                             let commands = crate::views::composer::DnaSequencer::mutate_pattern(
-                                 &child_rhythmic,
-                                 &app.composer.sequencer_grid,
-                                 70, // Sequencer default ID
-                                 0,  // Target track 0
-                                 0.2 // 20% mutation probability
-                             );
-                             for cmd in commands {
-                                 let _ = app.command_sender.send(cmd);
+                             // Target the FOCUSED deck's live sequencer. (This
+                             // used to aim at sentinel node 70, which no node
+                             // backs — the mutation commands were dropped.)
+                             let grid_deck = app.decks.focused_deck.min(3);
+                             if let Some(seq_node) = app.get_node_id(&format!("deck_{}_sequencer", (b'a' + grid_deck as u8) as char)) {
+                                 let commands = crate::views::composer::DnaSequencer::mutate_pattern(
+                                     &child_rhythmic,
+                                     &app.composer.sequencer_grid[grid_deck],
+                                     seq_node,
+                                     0,  // Target track 0
+                                     0.2 // 20% mutation probability
+                                 );
+                                 for cmd in commands {
+                                     let _ = app.command_sender.send(cmd);
+                                 }
                              }
                          }
             }).response.on_disabled_hover_text("Select both parents first");
