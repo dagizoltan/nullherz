@@ -51,16 +51,21 @@ mod tests {
     #[test]
     fn test_update_derives_beat_from_engine_sample_counter() {
         let mut tl = Timeline { bpm: 120.0, sample_rate: 44100.0, ..Default::default() };
-        let mut tel = audio_core::Telemetry::default();
+        let tel = audio_core::Telemetry {
+            sample_counter: 44100,
+            ..Default::default()
+        };
 
         // 120 BPM = 2 beats/sec; 44100 samples = 1 second = 2 beats.
-        tel.sample_counter = 44100;
         tl.update(&tel);
         assert!((tl.current_beat - 2.0).abs() < 1e-9);
 
         // Ground truth follows the engine, not accumulated local time.
-        tel.sample_counter = 22050;
-        tl.update(&tel);
+        let tel_backward = audio_core::Telemetry {
+            sample_counter: 22050,
+            ..Default::default()
+        };
+        tl.update(&tel_backward);
         assert!((tl.current_beat - 1.0).abs() < 1e-9, "timeline must track the engine even backwards");
     }
 

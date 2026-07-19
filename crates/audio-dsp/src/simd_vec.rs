@@ -449,7 +449,7 @@ mod tests {
                 // Padé approximant should be extremely precise (within 0.01 tolerance)
                 assert!(error < 0.01, "tanh_simd error at x={}: got {}, ref={}", x, approx_val, ref_val);
                 // Ensure outputs are correctly bounded inside [-1.0, 1.0]
-                assert!(approx_val >= -1.0 && approx_val <= 1.0);
+                assert!((-1.0..=1.0).contains(&approx_val));
             }
         }
     }
@@ -472,7 +472,7 @@ mod tests {
                 let approx_val = output[i];
                 let error = (approx_val - ref_val).abs();
                 assert!(error < 0.01, "tanh_simd_x8 error at x={}: got {}, ref={}", x, approx_val, ref_val);
-                assert!(approx_val >= -1.0 && approx_val <= 1.0);
+                assert!((-1.0..=1.0).contains(&approx_val));
             }
         }
     }
@@ -495,7 +495,7 @@ mod tests {
                 let approx_val = output[i];
                 let error = (approx_val - ref_val).abs();
                 assert!(error < 0.01, "sigmoid_simd error at x={}: got {}, ref={}", x, approx_val, ref_val);
-                assert!(approx_val >= 0.0 && approx_val <= 1.0);
+                assert!((0.0..=1.0).contains(&approx_val));
             }
         }
     }
