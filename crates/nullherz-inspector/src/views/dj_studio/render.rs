@@ -174,6 +174,16 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
         let sync_color = if is_sync { theme.accent } else { theme.text_disabled };
         if ui.selectable_label(is_sync, RichText::new("S").strong().size(theme.type_caption).color(sync_color)).clicked() {
             app.mixer.channel_sync[i] = !is_sync;
+            // Wire it: S = the deck sampler's quantize/BPM-lock (param 2).
+            // The toggle used to be a local bool that did nothing.
+            if let Some(node) = app.get_node_id(&format!("deck_{}_sampler", (b'a' + i as u8) as char)) {
+                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                    target_id: node as u64,
+                    param_id: 2,
+                    value: if app.mixer.channel_sync[i] { 1.0 } else { 0.0 },
+                    ramp_duration_samples: 0,
+                }));
+            }
         }
 
         ui.add_space(theme.space_sm);

@@ -212,9 +212,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 ui.separator();
 
                                 // Slip mode toggle
-                                let is_slip = app.mixer.channel_sync[deck_idx]; // Reuse sync array or represent slip
+                                let is_slip = app.mixer.channel_slip[deck_idx];
                                 if ui.selectable_label(is_slip, "SLIP").clicked() {
-                                    app.mixer.channel_sync[deck_idx] = !is_slip;
+                                    app.mixer.channel_slip[deck_idx] = !is_slip;
                                     let node_name = match deck_idx {
                                         0 => "deck_a_sampler",
                                         1 => "deck_b_sampler",
