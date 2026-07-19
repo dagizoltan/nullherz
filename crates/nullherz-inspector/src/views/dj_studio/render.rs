@@ -184,16 +184,21 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
         let track = track_id.and_then(|id| app.library_db.get_track(id).ok().flatten());
 
         if let Some(ref t) = track {
-            // Track Title & Artist
-            let title_text = if t.title.len() > 20 {
-                format!("{}...", &t.title[..18])
-            } else {
-                t.title.clone()
+            // Track Title & Artist — char-safe truncation: byte-slicing
+            // (&s[..18]) PANICS on a UTF-8 boundary, so any track title with
+            // an accent or emoji at the wrong offset crashed the console.
+            let truncate = |s: &str, max: usize| -> String {
+                if s.chars().count() > max {
+                    format!("{}...", s.chars().take(max.saturating_sub(2)).collect::<String>())
+                } else {
+                    s.to_string()
+                }
             };
+            let title_text = truncate(&t.title, 20);
             ui.label(RichText::new(title_text).strong().size(theme.type_caption).color(theme.text_primary));
 
-            let artist_text = if t.artist.len() > 15 {
-                format!("by {}...", &t.artist[..13])
+            let artist_text = if t.artist.chars().count() > 15 {
+                format!("by {}...", t.artist.chars().take(13).collect::<String>())
             } else {
                 format!("by {}", t.artist)
             };
@@ -372,22 +377,14 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
 
-                    // Master VU
+                    // Master VU — the only real output pair in the graph.
+                    // (The old BTH/REC meters displayed the master scaled by
+                    // 0.8: there are no booth or record sends in the
+                    // topology, and a meter that means nothing is worse than
+                    // no meter. Build the sends first, then meter them.)
                     ui.vertical(|ui| {
                         ui.label(RichText::new("MST").size(theme.type_caption).color(theme.text_secondary));
                         render_stereo_vu_meter(ui, app.viz.damped_master_peaks[0], app.viz.damped_master_peaks[1], app.mixer.master_peak_hold, theme.text_primary, 100.0);
-                    });
-
-                    // Booth VU
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new("BTH").size(theme.type_caption).color(theme.text_secondary));
-                        render_stereo_vu_meter(ui, app.viz.damped_master_peaks[0] * 0.8, app.viz.damped_master_peaks[1] * 0.8, app.mixer._booth_peak_hold, theme.accent, 100.0);
-                    });
-
-                    // Rec VU
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new("REC").size(theme.type_caption).color(theme.text_secondary));
-                        render_stereo_vu_meter(ui, app.viz.damped_master_peaks[0], app.viz.damped_master_peaks[1], app.mixer._rec_peak_hold, theme.deck_colors[2], 100.0);
                     });
 
                     // Master Gain Fader — per-side summing gain, resolved by

@@ -18,6 +18,17 @@ pub fn check_step_telemetry(
 }
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
+    // The composer edits the FOCUSED deck's sequencer node, resolved by
+    // name. (It used to target "sequencer_node", which never existed — the
+    // unwrap_or(0) fallback sent every step/mute/solo command to node 0,
+    // deck A's SAMPLER. The composer has never actually driven a sequencer.)
+    let Some(seq_node) = app.get_node_id(&format!(
+        "deck_{}_sequencer",
+        (b'a' + app.decks.focused_deck.min(3) as u8) as char
+    )) else {
+        ui.label("Sequencer not available yet (topology still installing).");
+        return;
+    };
     ui.horizontal(|ui| {
         ui.heading(RichText::new("SESSION VIEW (COMPOSER)").strong().color(app.theme.text_primary));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -59,7 +70,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         if ui.button("STOP ALL CLIPS").clicked() {
             for i in 0..16 {
-                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: app.get_node_id("sequencer_node"), track_idx: i as u32 }));
+                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: seq_node, track_idx: i as u32 }));
                  app.composer.sequencer_grid[i].fill(0.0);
             }
         }
@@ -158,7 +169,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             let activator_color = if !is_muted { app.theme.warning } else { app.theme.bg_inset };
                                             if ui.add_sized([22.0, 18.0], egui::Button::new(RichText::new("ON").size(app.theme.type_caption).strong()).fill(activator_color)).clicked() {
                                                 app.composer.track_mutes[track_idx] = !is_muted;
-                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackMute { node_idx: app.get_node_id("sequencer_node"), track_idx: track_idx as u32, muted: app.composer.track_mutes[track_idx] }));
+                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackMute { node_idx: seq_node, track_idx: track_idx as u32, muted: app.composer.track_mutes[track_idx] }));
                                             }
 
                                             // Solo Button
@@ -166,14 +177,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             let solo_color = if is_soloed { app.theme.track_colors[1] } else { app.theme.bg_inset };
                                             if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("S").size(app.theme.type_caption).strong()).fill(solo_color)).clicked() {
                                                 app.composer.track_solos[track_idx] = !is_soloed;
-                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackSolo { node_idx: app.get_node_id("sequencer_node"), track_idx: track_idx as u32, soloed: app.composer.track_solos[track_idx] }));
+                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackSolo { node_idx: seq_node, track_idx: track_idx as u32, soloed: app.composer.track_solos[track_idx] }));
                                             }
 
                                             // Stop Clip button (compact)
                                             let stop_btn = egui::Button::new(RichText::new("■").size(app.theme.type_caption).strong()).fill(app.theme.bg_inset);
                                             if ui.add_sized([18.0, 18.0], stop_btn).on_hover_text("Stop clip").clicked() {
                                                 app.composer.sequencer_grid[track_idx].fill(0.0);
-                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: app.get_node_id("sequencer_node"), track_idx: track_idx as u32 }));
+                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: seq_node, track_idx: track_idx as u32 }));
                                             }
                                         });
 
@@ -204,7 +215,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         if changed {
                                             app.composer.track_targets[track_idx] = selected_name;
                                             let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                target_id: app.get_node_id("sequencer_node") as u64,
+                                                target_id: seq_node as u64,
                                                 param_id: 10 + track_idx as u32,
                                                 value: selected_node_idx as f32,
                                                 ramp_duration_samples: 0,
@@ -313,7 +324,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             let val = if is_on { 1.0 } else { 0.0 };
                                             app.composer.sequencer_grid[track_idx][slot_idx] = val;
                                             let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
-                                                node_idx: app.get_node_id("sequencer_node"),
+                                                node_idx: seq_node,
                                                 track: track_idx as u32,
                                                 step: slot_idx as u32,
                                                 value: val,

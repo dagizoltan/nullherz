@@ -25,7 +25,7 @@ pub fn render_deck_performance(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
                     };
                     let node_idx = app.get_node_id(node_name);
 
-                    if response.clicked() {
+                    if let (true, Some(node_idx)) = (response.clicked(), node_idx) {
                         if ui.input(|i| i.modifiers.shift) {
                             let pos = telemetry.as_ref().map(|t| t.sample_counter).unwrap_or(0);
                             let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::SetHotCue {

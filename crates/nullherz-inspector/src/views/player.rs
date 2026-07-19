@@ -175,8 +175,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         3 => "deck_d_sampler",
                                         _ => "",
                                     };
-                                    let node_idx = app.get_node_id(node_name);
-                                    let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpByBeats { node_idx, beats: -4.0 }));
+                                    if let Some(node_idx) = app.get_node_id(node_name) {
+                                        let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpByBeats { node_idx, beats: -4.0 }));
+                                    }
                                 }
 
                                 let is_deck_playing = app.decks.deck_playing[deck_idx];
@@ -203,8 +204,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         3 => "deck_d_sampler",
                                         _ => "",
                                     };
-                                    let node_idx = app.get_node_id(node_name);
-                                    let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpByBeats { node_idx, beats: 4.0 }));
+                                    if let Some(node_idx) = app.get_node_id(node_name) {
+                                        let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpByBeats { node_idx, beats: 4.0 }));
+                                    }
                                 }
 
                                 ui.separator();
@@ -220,8 +222,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         3 => "deck_d_sampler",
                                         _ => "",
                                     };
-                                    let node_idx = app.get_node_id(node_name);
-                                    let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::SetSlipMode { node_idx, enabled: !is_slip }));
+                                    if let Some(node_idx) = app.get_node_id(node_name) {
+                                        let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::SetSlipMode { node_idx, enabled: !is_slip }));
+                                    }
                                 }
                             });
 
@@ -240,7 +243,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             3 => "deck_d_sampler",
                                             _ => "",
                                         };
-                                        let node_idx = app.get_node_id(node_name);
+                                        let Some(node_idx) = app.get_node_id(node_name) else { return; };
                                         // Send loop configuration command
                                         let start = elapsed_samples;
                                         let sample_rate = telemetry.as_ref().map(|t| t.sample_rate).unwrap_or(44100.0);
@@ -263,13 +266,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         3 => "deck_d_sampler",
                                         _ => "",
                                     };
-                                    let node_idx = app.get_node_id(node_name);
-                                    let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::SetLoop {
-                                        node_idx,
-                                        enabled: false,
-                                        start_samples: 0,
-                                        end_samples: 0,
-                                    }));
+                                    if let Some(node_idx) = app.get_node_id(node_name) {
+                                        let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::SetLoop {
+                                            node_idx,
+                                            enabled: false,
+                                            start_samples: 0,
+                                            end_samples: 0,
+                                        }));
+                                    }
                                 }
                             });
                         });
@@ -295,7 +299,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                 3 => "deck_d_sampler",
                                                 _ => "",
                                             };
-                                            let node_idx = app.get_node_id(node_name);
+                                            let Some(node_idx) = app.get_node_id(node_name) else { return; };
 
                                             // Quantized micro-jump calculation
                                             let current_beat = telemetry.as_ref().map(|t| t.get_interpolated_beat_position()).unwrap_or(0.0);

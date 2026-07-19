@@ -145,8 +145,14 @@ impl InspectorApp {
         });
     }
 
-    pub fn get_node_id(&self, name: &str) -> u32 {
-        *self.topo.node_map.get(name).unwrap_or(&0)
+    /// Resolve a node name from the live telemetry node map.
+    ///
+    /// Returns None when the name is not (yet) published. Callers MUST skip
+    /// their command in that case — the old `unwrap_or(0)` fallback silently
+    /// redirected every unresolved control to node 0, deck A's sampler
+    /// (the crossfader and master gain both did exactly that).
+    pub fn get_node_id(&self, name: &str) -> Option<u32> {
+        self.topo.node_map.get(name).copied()
     }
 
     pub(crate) fn node_names(&self) -> Vec<(String, u32)> {
