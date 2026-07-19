@@ -102,7 +102,10 @@ impl AnalysisWorker {
 
         for (id, mut metadata, buffer) in results {
             // --- WAVEFORM MIP-MAPPING GENERATION ---
-            let mip_data = audio_dsp::util::WaveformProcessor::generate_mip_levels(&metadata.peaks, 5);
+            // 8 levels: with the denser base resolution (128 samples/peak) a
+            // long track needs deeper /2 downsampling before the renderer's
+            // ~2-peaks-per-pixel LOD target is reachable.
+            let mip_data = audio_dsp::util::WaveformProcessor::generate_mip_levels(&metadata.peaks, 8);
             metadata.mip_waveform.levels = mip_data.into_iter().map(Arc::new).collect();
 
             self.sample_registry.register_with_metadata(id, buffer, Arc::new(metadata.clone()));

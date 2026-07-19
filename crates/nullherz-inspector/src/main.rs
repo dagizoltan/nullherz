@@ -742,7 +742,7 @@ fn main() -> eframe::Result<()> {
                 let wf_renderer = nullherz_ui_hal::render::waveform_renderer::WaveformRenderer::new(
                     &render_state.device,
                     render_state.target_format,
-                    1024
+                    8192
                 );
                 app.waveform_renderer = Some(Arc::new(Mutex::new(wf_renderer)));
 
