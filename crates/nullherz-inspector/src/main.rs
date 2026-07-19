@@ -643,6 +643,16 @@ impl eframe::App for InspectorApp {
                 let alpha_p = if target_peak > self.viz.damped_peaks[i] { 1.0 } else { decay * 0.5 };
                 self.viz.damped_peaks[i] += (target_peak - self.viz.damped_peaks[i]) * alpha_p;
             }
+            // Truthful play state: a deck is playing iff its playhead moved
+            // since the last telemetry frame. The player-view button used to
+            // keep a local bool that drifted from engine truth (track end,
+            // stop from another view, pause).
+            for i in 0..4 {
+                let pos = t.deck_positions[i];
+                self.decks.deck_playing[i] = pos != 0 && pos != self.viz.last_deck_positions[i];
+                self.viz.last_deck_positions[i] = pos;
+            }
+
             for (i, name) in ["master_sum_l", "master_sum_r"].iter().enumerate() {
                 let target_m_peak = match self.topo.node_map.get(*name).copied() {
                     Some(n) if (n as usize) < t.peak_levels.len() => t.peak_levels[n as usize],

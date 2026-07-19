@@ -141,7 +141,10 @@ impl Default for LibraryState {
 
 /// Step-sequencer / song-builder grid state.
 pub struct ComposerState {
-    pub sequencer_grid: [Vec<f32>; 16],
+    /// Step grids PER DECK: the composer edits the focused deck's
+    /// sequencer, so each deck needs its own grid — one shared grid showed
+    /// deck A's steps no matter which deck you were editing.
+    pub sequencer_grid: [[Vec<f32>; 16]; 4],
     pub selected_composer_track: Option<usize>,
     pub sequencer_active_step: usize,
     pub track_mutes: [bool; 16],
@@ -157,7 +160,7 @@ pub struct ComposerState {
 impl Default for ComposerState {
     fn default() -> Self {
         Self {
-            sequencer_grid: std::array::from_fn(|_| vec![0.0; 64]),
+            sequencer_grid: std::array::from_fn(|_| std::array::from_fn(|_| vec![0.0; 64])),
             selected_composer_track: None,
             sequencer_active_step: 0,
             track_mutes: [false; 16],
@@ -285,6 +288,10 @@ pub struct VizState {
     pub damped_latent: [f32; 16],
     pub damped_peaks: [f32; 4],
     pub damped_master_peaks: [f32; 2],
+    /// Previous telemetry deck positions — playing state is DERIVED
+    /// (position advanced => playing) instead of kept as a local bool that
+    /// drifts from engine truth.
+    pub last_deck_positions: [u64; 4],
 }
 
 impl Default for VizState {
@@ -294,6 +301,7 @@ impl Default for VizState {
             damped_spectrum: [0.0; 128],
             damped_goniometer: [0.0; 128],
             damped_latent: [0.0; 16],
+            last_deck_positions: [0; 4],
             damped_peaks: [0.0; 4],
             damped_master_peaks: [0.0; 2],
         }
