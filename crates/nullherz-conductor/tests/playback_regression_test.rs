@@ -448,6 +448,67 @@ fn register_stereo_tone(conductor: &Conductor, id: u64, left_hz: f32, right_hz: 
     .expect("in-memory library save cannot fail");
 }
 
+/// DNA groove transfusion must target the deck's LIVE sequencer node.
+///
+/// Regression: groove commands were aimed at NodeConventions sentinel ids
+/// (70-73, all >= MAX_NODES) that no processor backed — the engine dropped
+/// them silently and rhythmic transfusion did nothing. Deck sequencers are
+/// real graph nodes now; the orchestrator resolves them by name.
+#[test]
+fn test_groove_commands_target_live_sequencer_nodes() {
+    let mut conductor = Conductor::with_library_path(":memory:");
+    conductor.setup_engine();
+    conductor.bootstrap_4channel_mixer();
+
+    // A track whose DNA carries a nonzero groove.
+    let tone_id = 6_600;
+    register_tone(&conductor, tone_id, 440.0);
+    {
+        let lib = conductor.library.lock();
+        let mut track = lib.get_track(tone_id).unwrap().unwrap();
+        let mut metadata = (*track.metadata).clone();
+        metadata.dna.rhythmic.micro_timing[0] = 64;
+        track.metadata = Arc::new(metadata);
+        lib.save_track(&track).unwrap();
+    }
+
+    let seq_idx = *conductor
+        .mixer_manager
+        .node_names
+        .get("deck_a_sequencer")
+        .expect("bootstrap must name the deck sequencer");
+    assert!(
+        (seq_idx as usize) < nullherz_traits::MAX_NODES,
+        "deck sequencer must live at a legal graph index, got {}",
+        seq_idx
+    );
+
+    let cmd = Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id: 'A', sample_id: tone_id });
+    let translated = nullherz_conductor::mixer_orchestrator::MixerOrchestrator::translate_command(
+        &cmd,
+        &conductor.mixer_manager,
+        &conductor.library,
+    );
+
+    let groove_params: Vec<(u64, u32)> = translated
+        .iter()
+        .filter_map(|c| match c {
+            Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, .. })
+                if (100..356).contains(param_id) => Some((*target_id, *param_id)),
+            _ => None,
+        })
+        .collect();
+
+    assert!(!groove_params.is_empty(), "groove DNA must emit micro-timing commands");
+    for (target, param) in &groove_params {
+        assert_eq!(
+            *target, seq_idx as u64,
+            "groove param {} targets node {} instead of the live sequencer {}",
+            param, target, seq_idx
+        );
+    }
+}
+
 /// Stereo sources must drive the deck chain exactly like mono ones.
 ///
 /// Sample buffers are PLANAR (channel 0, then channel 1), and the sampler reads

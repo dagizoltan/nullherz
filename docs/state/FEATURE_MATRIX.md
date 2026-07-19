@@ -19,6 +19,7 @@
 | **Pattern Manager** | ✅ | `SongArrangement` scheduling of pattern events on the beat timeline. |
 | **Clip Orchestrator** | ✅ | 8×8 clip grid with quantized launch, row transfusion, and active/starting-clip telemetry. |
 | **Genetic Sequencer** | 🧪 | DNA-driven pattern evolution (`evolve_pattern`); heuristic kernel. |
+| **Groove Transfusion** | ✅ | DNA micro-timing lands on live per-deck sequencer nodes and shifts step fire times (was silently dropped: sentinel targets 70–73 had no backing nodes and the sequencer ignored the params). |
 | **Modulation Matrix** | ✅ | Macro → multi-target parameter broadcast with `TemporalShape` ramps. |
 | **Master-Deck Suggestion**| ✅ | DNA suggestions bound to `active_master_deck` state (A–D). |
 | **Offline Rendering** | ✅ | Safe bit-perfect WAV export with safe engine access. |

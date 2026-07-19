@@ -25,6 +25,11 @@ pub struct SequencerProcessor {
     pub swing: f32,           // 0.0 to 1.0
     bpm: f32,
     pub track_targets: [u64; 16],
+    /// Groove micro-timing per track: fraction-of-a-step offsets indexed by
+    /// step subdivision (RhythmicDNA carries 12; storage is 16 to match the
+    /// `param 100 + track*16 + subdivision` convention). Written by DNA
+    /// groove transfusion (`DnaSequencer::apply_groove`).
+    micro_timing: [[f32; 16]; 16],
 }
 
 impl SequencerProcessor {
@@ -43,6 +48,7 @@ impl SequencerProcessor {
             swing: 0.0,
             bpm,
             track_targets,
+            micro_timing: [[0.0; 16]; 16],
         }
     }
 }
@@ -93,9 +99,15 @@ fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &
                         let velocity = pattern.grid[track][step_idx];
                         if velocity > 0.0 {
                             // STAGE 8 Quantization Logic: Corrected to adjust timing offset
-                            // quantize_amount = 1.0 (hard-locked to grid), 0.0 (unquantized)
+                            // quantized_offset = 1.0 (hard-locked to grid), 0.0 (unquantized)
                             let quantized_offset = 0; // Relative to step start
-                            let final_offset = (sample_offset as f32 * (1.0 - self.quantize_amount) + quantized_offset as f32 * self.quantize_amount) as u64;
+                            // Groove transfusion: per-track micro-timing shifts
+                            // the fire point by a fraction of a step. Negative
+                            // offsets (play early) clamp to the step boundary —
+                            // we cannot schedule into the past of this block.
+                            let groove = self.micro_timing[track][step_idx % 12];
+                            let groove_offset = (groove as f64 * samples_per_step).round().max(0.0) as u64;
+                            let final_offset = (sample_offset as f32 * (1.0 - self.quantize_amount) + quantized_offset as f32 * self.quantize_amount) as u64 + groove_offset;
 
                             host.push_command(
                                 self.current_sample + final_offset.min(block_len - 1),
@@ -132,6 +144,14 @@ fn apply_command(&mut self, command: &nullherz_traits::Command) {
                 self.patterns[self.active_pattern].grid[*track as usize][*step as usize] = *value;
             }
         }
+        // Bus-delivered parameters (incl. groove micro-timing from DNA
+        // transfusion). Without this arm, SetParam addressed to a sequencer
+        // was silently dropped — the command bus matches on target_id inside
+        // each processor.
+        if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, ramp_duration_samples }) = command
+            && *target_id == self.id as u64 {
+                nullherz_traits::AudioProcessor::set_parameter(self, *param_id, *value, *ramp_duration_samples);
+            }
 
         if let nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetBpm(new_bpm)) = command {
             self.bpm = *new_bpm;
@@ -155,6 +175,15 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
             10..=25 => {
                 let track = (param_id - 10) as usize;
                 self.track_targets[track] = value.round() as u64;
+            }
+            // Groove micro-timing: param = 100 + track*16 + subdivision,
+            // value = fraction-of-a-step offset (DnaSequencer::apply_groove).
+            100..=355 => {
+                let rel = (param_id - 100) as usize;
+                let (track, sub) = (rel / 16, rel % 16);
+                if track < 16 && sub < 16 {
+                    self.micro_timing[track][sub] = value.clamp(-1.0, 1.0);
+                }
             }
             _ => {}
         }
@@ -293,5 +322,94 @@ mod tests {
 
         // Verify other tracks remained default
         assert_eq!(new_seq.track_targets[1], 71);
+    }
+
+    struct CaptureHost {
+        events: std::sync::Mutex<Vec<(u64, u64, u32, f32)>>, // (ts, target, param, value)
+    }
+    impl nullherz_traits::Host for CaptureHost {
+        fn push_command(&self, timestamp_samples: u64, command: nullherz_traits::Command) {
+            if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, .. }) = command {
+                self.events.lock().unwrap().push((timestamp_samples, target_id, param_id, value));
+            }
+        }
+        fn request_registration(&self, _capture_node_idx: u32, _sample_id: u64) {}
+    }
+
+    /// Fire step 0 of track 0 through one block and return the timestamp of
+    /// the velocity SetParam the sequencer scheduled.
+    fn fire_step_timestamp(seq: &mut SequencerProcessor) -> u64 {
+        use nullherz_traits::SignalProcessor;
+        let host = CaptureHost { events: std::sync::Mutex::new(Vec::new()) };
+        let transport = nullherz_traits::Transport {
+            bpm: 120.0,
+            beat_position: 0.0,
+            is_playing: true,
+            sample_rate: 44100.0,
+            absolute_samples: 0,
+            system_time_ns: 0,
+            device_time_ns: 0,
+        };
+        let mut ctx = nullherz_traits::ProcessContext {
+            transport: Some(&transport),
+            host: Some(&host),
+            sub_block_offset: 0,
+            is_last_sub_block: true,
+        };
+        let mut out = vec![0.0f32; 256];
+        let out_slice = &mut out[..];
+        let mut outputs: [&mut [f32]; 1] = [out_slice];
+        seq.process(&[], &mut outputs, &mut ctx);
+
+        let events = host.events.lock().unwrap();
+        let (ts, _, param, _) = *events
+            .iter()
+            .find(|(_, _, param, _)| *param == 0)
+            .expect("step must fire a velocity SetParam");
+        assert_eq!(param, 0);
+        ts
+    }
+
+    /// Groove transfusion regression: micro-timing offsets (param 100+) must
+    /// actually SHIFT the step's fire time. Both halves of this were broken:
+    /// the sequencer dropped SetParam entirely (no bus-delivery arm) and had
+    /// no micro-timing storage; groove commands additionally targeted logical
+    /// sentinel nodes (70-73) that no processor backed.
+    #[test]
+    fn test_groove_micro_timing_shifts_step_fire_time() {
+        // Baseline: no groove, step fires at the step boundary (sample 0).
+        let mut seq = SequencerProcessor::new(1, 44100.0, 120.0);
+        seq.apply_command(&nullherz_traits::Command::Performance(
+            nullherz_traits::PerformanceCommand::SetSequencerStep { node_idx: 1, track: 0, step: 0, value: 1.0 },
+        ));
+        assert_eq!(fire_step_timestamp(&mut seq), 0, "ungrooved step must fire on the grid");
+
+        // Grooved: +0.02 of a step at 120 BPM / 44.1k = ~110 samples late.
+        // Delivered over the command bus the way apply_groove sends it.
+        let mut seq = SequencerProcessor::new(1, 44100.0, 120.0);
+        seq.apply_command(&nullherz_traits::Command::Performance(
+            nullherz_traits::PerformanceCommand::SetSequencerStep { node_idx: 1, track: 0, step: 0, value: 1.0 },
+        ));
+        seq.apply_command(&nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+            target_id: 1,
+            param_id: 100, // track 0, subdivision 0
+            value: 0.02,
+            ramp_duration_samples: 0,
+        }));
+        let ts = fire_step_timestamp(&mut seq);
+        assert_eq!(ts, 110, "groove offset must shift the fire time (got {})", ts);
+
+        // A SetParam addressed to ANOTHER node must not affect this one.
+        let mut seq = SequencerProcessor::new(1, 44100.0, 120.0);
+        seq.apply_command(&nullherz_traits::Command::Performance(
+            nullherz_traits::PerformanceCommand::SetSequencerStep { node_idx: 1, track: 0, step: 0, value: 1.0 },
+        ));
+        seq.apply_command(&nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+            target_id: 999,
+            param_id: 100,
+            value: 0.5,
+            ramp_duration_samples: 0,
+        }));
+        assert_eq!(fire_step_timestamp(&mut seq), 0, "foreign SetParam must be ignored");
     }
 }
