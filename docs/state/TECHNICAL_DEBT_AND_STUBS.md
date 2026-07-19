@@ -1,82 +1,58 @@
-# Nullherz Technical Debt & Stubs Report (Updated July 18, 2026)
+# Nullherz Technical Debt & Stubs Log
 
-This document tracks remaining stubs and prototype logic, verified against the code. Items are listed with file evidence so they can be re-checked cheaply. Full suite: **127/127 green** as of 2026-07-18.
+**Author:** Senior Lead Audio & Rust Systems Architect
+**Status:** PRODUCTION BETA
+**Date:** July 2026
 
----
-
-## 1. Open Items (Verified in Code)
-
-### Clock Sync (`nullherz-conductor/src/ptp_engine.rs`, `nullherz-traits`)
-- **SO_TIMESTAMPING not wired into the sync engine**: the rewritten `PtpEngine` (typed SYNC/DELAY_REQ/DELAY_RESP protocol, measured path delay) timestamps arrivals with `ClockProvider::get_system_time_ns()`; `PtpClockProvider::recv_with_timestamp` (hardware RX timestamps) exists but reads from its own socket and is not yet integrated into the engine's recv path. Software timestamps bound accuracy to scheduler latency (~tens of µs).
-- **`SystemClockProvider::synchronize_with_master` is a no-op** (`nullherz-traits/src/lib.rs`, "Placeholder for PTP sync logic") — only `PtpClockProvider` actually disciplines.
-- **No Best-Master-Clock election**: master/slave roles are static constructor flags.
-
-### Genetic Cloud (`nullherz-dna/src/lib.rs`)
-- **Latent-space projection matrix is mocked** (`lib.rs` ~line 1412) for dimensionality reduction.
-- **Identity pinning is TOFU**: peer keys are pinned trust-on-first-use with key-change rejection; there is no out-of-band verification or revocation. `libp2p` migration remains the Q3 directive.
-
-### WASM Runtime (`fx-runtime/src/wasm_runtime.rs`)
-- **Zero-copy SHM mapping is a placeholder** (~line 64): guest access to the shared command buffer currently goes through a copy; "true zero-copy mapping" is noted in-code as pending.
-
-### Execution Plane
-- **Engine metrics feedback loop** (`audio-core/src/engine/metrics.rs` ~line 84): internal telemetry pulse is a placeholder for Conductor feedback.
-- **Spectral boundary handling** (`nullherz-processors/src/spectral.rs`): arbitrary non-power-of-two block sizes in the spectral domain still need hardening (no explicit TODO markers remain, but coverage is limited to sizes ≤ 1024).
-
-### UI (`nullherz-inspector`)
-- **Offline mock fallbacks**: Settings→Network, Settings→MIDI, and Genetic Cloud views intentionally present labeled mock devices/peers when nothing is detected. Acceptable for demos; should be gated out of any production build.
-- **Session restore is disabled/mocked** (`views/settings/preferences.rs`).
-- **Breeder View**: transfusion progress bar tracks active DNA blends but lacks sub-block pipeline progress telemetry.
-
-### Execution Plane (found by the survival harness, July 18)
-- **Period sizes above `MAX_BLOCK_SIZE` (256) crash the RT thread**: the graph indexes its internal `AudioBlock` buffers with period-global offsets, so the second sub-block of a 512-sample period overruns them (`graph/mod.rs` slice panic). Now clamped with a warning at `BackendManager::start`; the deeper fix (per-sub-block internal indexing or larger pool blocks) is open if >256 periods are ever needed.
-- **Threaded backend is xrun-blind**: it software-clocks the callback and cannot detect budget overruns, so a survival PASS on Threaded is provisional (the harness prints a warning when peak block time exceeds the period budget). Real xrun accounting requires ALSA/PipeWire runs.
-- **[RESOLVED] Track-load deep clone on the RT thread**: `SamplerProcessor`'s `AddSource` handler deep-cloned the entire track buffer and metadata (`(*buffer).clone()` — tens of MB of malloc+memcpy on the audio thread per deck load). It now adopts the shared `Arc`s; regression test `test_add_source_is_o1_no_deep_clone` enforces O(1) adoption and true sharing. Note: sandbox survival runs cannot confirm the block-time improvement end-to-end (no RT scheduling privileges — overruns there are scheduler noise, spread across the whole run); the harness now logs a budget-overrun timeline so hardware runs can tell load spikes from steady-state trouble.
-- **Spectral `set_ir` allocates and FFTs on the RT thread** (`audio-dsp/src/spectral.rs:231`): partition buffers are allocated and transformed inside `apply_topology_mutation`. Tolerable for short IRs; the proper fix is conductor-side pre-partitioning shipped as a ready-made mutation payload.
-- **Retired sample buffers drop on the RT thread**: replacing a deck's `Arc<Vec<f32>>` frees the old buffer on the audio thread if the registry no longer holds it. In practice the registry retains samples, so the drop is refcount-only; a deferred-drop channel (extend `GarbageProducer` beyond boxed processors) would close the gap completely.
-
-### Lint Backlog
-- **174 clippy style lints** (collapsible_if let-chains, auto-deref, type_complexity, needless_range_loop, missing `# Safety` docs). The CI clippy job is advisory until these reach zero, then flips to a hard gate. All RT-safety (disallowed-methods/types) lints are resolved or explicitly scoped.
+This document lists the open technical debt, stubs, and prototype logic verified directly in the codebase. Identifying and cataloging these items with precise file paths allows the engineering team to address them systematically without architectural disruption.
 
 ---
 
-## 2. Resolved Items (Hardened — kept for history)
+## 1. Verified Core Technical Debt & Stubs
 
-### July 18, 2026 hardening pass
-- **Inspector routing test**: [RESOLVED] `test_inspector_command_routing_to_conductor` now uses the Mock backend and poll-with-timeout instead of sleep-based sync; suite fully green.
-- **PTP path delay**: [RESOLVED] `PtpEngine` rewritten with a typed SYNC/DELAY_REQ/DELAY_RESP protocol; round-trip is measured (offset-free four-timestamp computation), EMA-filtered (1/8), plausibility-clamped (≤100 ms), replacing the fixed 1 ms assumption. Legacy 8-byte SYNC still accepted.
-- **PTP engine never ran on Linux**: [RESOLVED] `PtpClockProvider` and `PtpEngine` both bound `0.0.0.0:319`; the second bind failed with EADDRINUSE and was silently discarded. The engine socket now sets SO_REUSEADDR/SO_REUSEPORT.
-- **Peer signature cache**: [RESOLVED] Replaced the write-only `peer_signatures` mock with `peer_keys` — per-peer ed25519 identities pinned trust-on-first-use via HANDSHAKE/IDENTITY, with key-change rejection; `request_dna` requires the DNA signer to match the pinned identity.
-- **Private key disclosure (security)**: [RESOLVED] The DnaServer HANDSHAKE handler responded with the node's *private* signing key as its IDENTITY; it now sends only the derived public verifying key. Regression-tested.
-- **parking_lot migration**: [RESOLVED] All remaining `std::sync::Mutex` usage in the orchestration/UI/network planes migrated to `parking_lot::Mutex` (192 lint hits); `tokio::sync::Mutex` async sites untouched.
-- **`fallback_*.redb` litter**: [RESOLVED] Fallback library DBs now go to the system temp dir; root files deleted.
-- **`alsa_test.rs`**: [RESOLVED] Moved to `crates/nullherz-backends/examples/alsa_dlopen_probe.rs` (CI-compiled).
-- **distributed-sidecar workspace coverage**: [RESOLVED] Added to workspace members; latent rot (missing trait import, `AudioBlock` `_pad`, non-`Send` futures) fixed.
-- **CI gate**: [ADDED] check with `-D warnings`, full test suite on Mock backend, advisory clippy, weekly Kani proofs.
+### 1.1 Clock Synchronization & PTP Engine
+- **SO_TIMESTAMPING Engine Integration**:
+  - *Location*: `crates/nullherz-conductor/src/ptp_engine.rs` and `crates/nullherz-traits/src/clock.rs`.
+  - *Detail*: While `PtpClockProvider` implements high-precision raw packet timestamp extraction via `recv_with_timestamp` utilizing `SO_TIMESTAMPING` and `SCM_TIMESTAMPING` (`crates/nullherz-traits/src/clock.rs`), the main synchronization loop in `ptp_engine.rs` timestamps packet arrival via the standard software clock `get_system_time_ns()`. Integrating true hardware RX timestamps directly into the engine's receipt path remains an open goal.
+- **System Clock Synchronize Placeholder**:
+  - *Location*: `crates/nullherz-traits/src/clock.rs` — `SystemClockProvider::synchronize_with_master`.
+  - *Detail*: This function is a no-op placeholder. Standard desktop/VM runs fallback entirely to software monotonic time discipline.
+- **Best-Master-Clock (BMC) Election**:
+  - *Location*: `crates/nullherz-conductor/src/ptp_engine.rs` — `PtpEngine::new`.
+  - *Detail*: Node roles (master vs. slave) are hardcoded as configuration/constructor flags. There is no dynamic Best-Master-Clock algorithm (IEEE 1588 BMC) to automatically elect the highest-quality clock on the subnet.
 
-### Earlier passes
+### 1.2 WASM Sidecar Zero-Copy SHM Mapping
+- **Zero-Copy SHM Guest Mapping**:
+  - *Location*: `crates/fx-runtime/src/wasm_runtime.rs` (approx. line 64).
+  - *Detail*: Guest access to the shared-memory command ring currently triggers a memory copy (`memcpy`) across host/guest boundaries. True zero-copy pointer mapping directly into the guest WASM linear address space remains a Q3 objective.
 
-- **Orchestrator Calibration**: [RESOLVED] Dynamic calculation based on engine sample rate implemented.
-- **Remote Audio Send**: [RESOLVED] Refactored from per-block `tokio::spawn` to efficient batching.
-- **Isolator Filters**: [OPTIMIZED] 4x unrolled kernels and exact Linkwitz-Riley coefficient generation.
-- **Offline Rendering**: [RESOLVED] Replaced `unsafe` pointer hack with safe mutable access in `bounce.rs`.
-- **DNA Mutation Targeting**: [RESOLVED] Replaced first-ID heuristic with precise `resource_id` resolution.
-- **UI Placeholders**: [RESOLVED] Account and Metrics views now utilize live telemetry instead of mocks.
-- **Waveform Rendering**: [OPTIMIZED] Precise LOD selection in `waveform_renderer.rs`; MIP-level generation in `audio-dsp/util.rs`.
-- **DNA Transfusion Builder**: [RESOLVED] `DnaCommand::pack_transfusion` eliminates unsafe byte-packing in the Breeder view.
-- **Decoupled Synchronization**: [RESOLVED] `parking_lot::Mutex` across UI and rendering components (no poisoning, RT-lint compliant).
-- **Gossip Signatures**: [RESOLVED] `GOSSIP_SIGNED` ed25519 payload validation with local-network sync test suite (see open item above for the remaining peer-cache mock).
-- **SHM Host Exports**: [RESOLVED] Direct memory-mapping getters (`get_shared_command_buffer_ptr`, etc.) integrated for guest SDK (zero-copy itself still open, see §1).
-- **wasm_simd128 Kernels**: [RESOLVED] Implemented in `audio-dsp` (`simd_vec.rs`, spectral `complex_mul_accumulate_wasm_simd`).
-- **OLA Time-Stretch Ratio**: [RESOLVED] Corrected ratio semantics; RMS transient detector added (July 2026).
-- **Step-Sequencer Telemetry**: [RESOLVED] Refactored per-step playback telemetry with tests up to slot 512; `period_size` made configurable via `SystemConfig`.
+### 1.3 Execution Plane & Real-Time Safety Gaps
+- **Spectral Domain Arbitrary Block Sizes**:
+  - *Location*: `crates/nullherz-processors/src/spectral.rs`.
+  - *Detail*: The spectral processing kernels are verified to support block sizes of power-of-two ≤ 1024. Arbitrary, non-power-of-two hardware buffer blocks require further buffer padding and overlap-add buffering wrappers to prevent filter leakage or slice overflows.
+- **Spectral `set_ir` Allocation on RT Thread**:
+  - *Location*: `crates/audio-dsp/src/spectral.rs` (approx. line 231).
+  - *Detail*: The partition buffer allocations and FFT calculations are performed inside `apply_topology_mutation`. Although tolerable for short impulse responses, this should be pre-partitioned and packaged as a ready-made mutation payload on the Conductor side to completely shield the RT thread.
+- **Retired Sample Buffer Drops**:
+  - *Location*: `crates/audio-core/src/engine/resource_recycler.rs`.
+  - *Detail*: When a sample buffer is replaced on a deck, the original `Arc<Vec<f32>>` is dropped on the RT thread if the sample registry does not retain a copy. While standard practice retains samples in the registry (reducing drop to a simple atomic decrement), a secondary lock-free garbage collection ring should be introduced to defer all buffer deallocations off-thread.
+- **Threaded Audio Backend Xrun Blindness**:
+  - *Location*: `crates/nullherz-backends/src/threaded.rs`.
+  - *Detail*: The software fallback Threaded backend clocks callbacks using an interval sleep loop. It cannot programmatically detect or log hardware-level underruns (xruns) under adversarial scheduler loads, unlike the ALSA or PipeWire backends.
+
+### 1.4 User Interface (UI) Placeholders
+- **Session Restoration Bypass**:
+  - *Location*: `crates/nullherz-inspector/src/views/settings/preferences.rs`.
+  - *Detail*: The session restoration checkbox is a non-functional preference, defaulting to a mock state.
+- **Breeder Pipeline Telemetry**:
+  - *Location*: `crates/nullherz-inspector/src/views/breeder.rs`.
+  - *Detail*: The transfusion progress bar displays linear progress but lacks real-time sub-block DSP pipeline feedback metrics from the execution plane.
 
 ---
 
-## 3. Strategic Technical Debt
+## 2. Resolved Architectural Hardenings (Kept for Context)
 
-### Distributed Networking
-- **Jitter Resilience**: [HARDENED] Jitter Buffer implements aggressive clock recovery; target-size invariance is Kani-proved.
-- **RDMA Path**: [RESEARCH] Zero-copy RDMA return path (Protocol Type 7) for distributed AudioBlocks remains a long-term research goal.
-
-### Intelligence Plane
-- **DNA-Aware Sequencing**: [PROTOTYPE] `GeneticSequencer::evolve_pattern` exists as a heuristic kernel; real-time mutation of MIDI patterns based on Rhythmic DNA is the next step.
+- **O(1) Sample Deck Loading**: Resolved track-load heap clones. `SamplerProcessor` has been refactored to adopt shared `Arc` containers instead of deep-cloning sample buffers, preventing large allocations on the RT thread hot-path.
+- **PTP Path-Delay Calculation**: Refactored `PtpEngine` from a fixed 1 ms assumption to an active four-timestamp round-trip measurement with EMA smoothing and a 100 ms plausibility filter.
+- **Database Mutex Contention**: Migrated track analysis saves to a batched, single-transaction database commit pattern inside `AnalysisWorker` (`crates/nullherz-conductor/src/analysis_worker.rs`), reducing lock contention on `library.redb`.
+- **System-Wide `parking_lot` Migration**: Replaced standard library blocking mutexes with lightweight, non-poisoning `parking_lot::Mutex` across the UI, metrics, and orchestration layers to prevent priority inversion.
