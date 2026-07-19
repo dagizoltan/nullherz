@@ -18,6 +18,14 @@ pub struct SpectralPipeline {
     pub(crate) scratch_re: AlignedBuffer,
     pub(crate) scratch_im: AlignedBuffer,
     pub window: AlignedBuffer,
+    /// Synthesis window: the analysis window divided by the overlap-add (COLA)
+    /// sum at each frame-local position. Windowing on BOTH analysis and
+    /// synthesis means the signal is multiplied by `window[i]^2`, whose
+    /// overlapping sum is not unity for any of the shapes here — for Hann at
+    /// 50% overlap it oscillates between 0.5 and 1.0, and for Rectangular it
+    /// is a flat 2.0. Pre-dividing by that sum makes reconstruction exact for
+    /// any window shape and any hop size, at no hot-path cost.
+    pub synth_window: AlignedBuffer,
     pub hop_size: usize,
     pub(crate) in_ptr: usize,
     pub(crate) out_ptr: usize,
@@ -35,6 +43,7 @@ impl SpectralPipeline {
             scratch_re: AlignedBuffer::new(fft_size),
             scratch_im: AlignedBuffer::new(fft_size),
             window: AlignedBuffer::new(fft_size),
+            synth_window: AlignedBuffer::new(fft_size),
             hop_size: fft_size / 2,
             in_ptr: 0,
             out_ptr: 0,
@@ -68,6 +77,38 @@ impl SpectralPipeline {
             SpectralWindowShape::Rectangular => {
                 self.window.fill(1.0);
             }
+        }
+        self.rebuild_synthesis_window();
+    }
+
+    /// Derive the synthesis window from the analysis window so that
+    /// analysis * synthesis sums to exactly 1.0 across overlapping frames.
+    ///
+    /// The overlap-add sum at absolute output position `p` gathers every frame
+    /// whose local index is congruent to `p` modulo the hop size, so the sum
+    /// `S[j] = sum_m window[j + m*hop]^2` depends only on `j = p % hop`.
+    /// Dividing the synthesis window by `S[i % hop]` therefore makes the total
+    /// contribution at every position exactly 1, for any shape or hop size.
+    fn rebuild_synthesis_window(&mut self) {
+        let n = self.fft.size;
+        let hop = self.hop_size.max(1);
+
+        let mut cola = vec![0.0f32; hop];
+        for (j, slot) in cola.iter_mut().enumerate() {
+            let mut sum = 0.0f32;
+            let mut k = j;
+            while k < n {
+                sum += self.window[k] * self.window[k];
+                k += hop;
+            }
+            *slot = sum;
+        }
+
+        for i in 0..n {
+            // A window with a true zero in its COLA sum cannot be normalized;
+            // leaving those positions unscaled is better than emitting NaN.
+            let denom = cola[i % hop];
+            self.synth_window[i] = if denom > 1e-6 { self.window[i] / denom } else { self.window[i] };
         }
     }
 
@@ -148,7 +189,7 @@ impl SpectralPipeline {
             let mut i = 0;
             while i + 16 <= n {
                 let v_re = load_f32x16(&self.scratch_re, i);
-                let v_win = load_f32x16(&self.window, i);
+                let v_win = load_f32x16(&self.synth_window, i);
                 let v_val = (v_re * v_norm_16) * v_win;
 
                 #[cfg(target_feature = "avx512f")]
@@ -177,7 +218,7 @@ impl SpectralPipeline {
             let v_norm = f32x8::from(norm);
             while i + 8 <= n {
                 let v_re = load_f32x8(&self.scratch_re, i);
-                let v_win = load_f32x8(&self.window, i);
+                let v_win = load_f32x8(&self.synth_window, i);
                 let v_val = (v_re * v_norm) * v_win;
                 let res: [f32; 8] = v_val.into();
                 for (j, val) in res.iter().enumerate() {
@@ -187,7 +228,7 @@ impl SpectralPipeline {
                 i += 8;
             }
             while i < n {
-                let val = (self.scratch_re[i] * norm) * self.window[i];
+                let val = (self.scratch_re[i] * norm) * self.synth_window[i];
                 let target_ptr = (self.out_ptr + i) & mask;
                 self.out_buffer[target_ptr] += val;
                 i += 1;
@@ -339,5 +380,112 @@ impl SpectralProcessor {
                 *partition_idx = (*partition_idx + 1) % num_p;
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod pipeline_reconstruction_tests {
+    use super::*;
+
+    const SHAPES: [SpectralWindowShape; 4] = [
+        SpectralWindowShape::Hann,
+        SpectralWindowShape::Hamming,
+        SpectralWindowShape::Blackman,
+        SpectralWindowShape::Rectangular,
+    ];
+
+    /// Run a steady sine through the pipeline with an identity spectral op and
+    /// report (peak ratio, rms ratio) measured in the steady-state region.
+    fn identity_gain(shape: SpectralWindowShape, n: usize) -> (f32, f32) {
+        let mut p = SpectralPipeline::new(n);
+        p.update_window(shape);
+
+        let len = n * 24;
+        // Integer cycles per frame keeps the test free of spectral leakage.
+        let cycles_per_frame = 8.0;
+        let input: Vec<f32> = (0..len)
+            .map(|i| (2.0 * std::f32::consts::PI * cycles_per_frame * i as f32 / n as f32).sin() * 0.5)
+            .collect();
+        let mut output = vec![0.0; len];
+        p.process(&input, &mut output, |_re, _im, _n, _w, _f| {});
+
+        // Skip pipeline priming; measure only steady state.
+        let start = n * 4;
+        let peak = |s: &[f32]| s.iter().fold(0.0f32, |a, b| a.max(b.abs()));
+        let rms = |s: &[f32]| (s.iter().map(|v| (v * v) as f64).sum::<f64>() / s.len() as f64).sqrt() as f32;
+
+        (
+            peak(&output[start..]) / peak(&input[start..]),
+            rms(&output[start..]) / rms(&input[start..]),
+        )
+    }
+
+    /// Windowing on both analysis and synthesis squares the window, and the
+    /// overlapping sum of a squared window is not unity: Hann at 50% overlap
+    /// oscillates between 0.5 and 1.0 (an audible ~344 Hz buzz at fft_size
+    /// 256), and Rectangular doubles the signal outright. The COLA-normalized
+    /// synthesis window must reconstruct the input exactly instead.
+    #[test]
+    fn test_identity_reconstruction_is_unity_for_every_window() {
+        for &shape in &SHAPES {
+            let (peak_ratio, rms_ratio) = identity_gain(shape, 256);
+            assert!(
+                (peak_ratio - 1.0).abs() < 0.02,
+                "{:?}: identity peak gain {:.4} is not unity",
+                shape,
+                peak_ratio
+            );
+            assert!(
+                (rms_ratio - 1.0).abs() < 0.02,
+                "{:?}: identity RMS gain {:.4} is not unity — the overlap-add sum \
+                 ripples, which amplitude-modulates the signal even though the peak looks correct",
+                shape,
+                rms_ratio
+            );
+        }
+    }
+
+    /// The normalization must hold across FFT sizes, not just the one measured.
+    #[test]
+    fn test_identity_reconstruction_holds_across_fft_sizes() {
+        for &n in &[128usize, 256, 512, 1024] {
+            let (peak_ratio, rms_ratio) = identity_gain(SpectralWindowShape::Hann, n);
+            assert!(
+                (peak_ratio - 1.0).abs() < 0.02 && (rms_ratio - 1.0).abs() < 0.02,
+                "fft_size {}: peak {:.4} rms {:.4} — expected unity",
+                n,
+                peak_ratio,
+                rms_ratio
+            );
+        }
+    }
+
+    /// The synthesis window is only correct if analysis*synthesis sums to 1
+    /// at every position modulo the hop; check the invariant directly.
+    #[test]
+    fn test_cola_sum_is_unity_at_every_hop_position() {
+        for &shape in &SHAPES {
+            let n = 256;
+            let p = {
+                let mut p = SpectralPipeline::new(n);
+                p.update_window(shape);
+                p
+            };
+            for j in 0..p.hop_size {
+                let mut sum = 0.0f32;
+                let mut k = j;
+                while k < n {
+                    sum += p.window[k] * p.synth_window[k];
+                    k += p.hop_size;
+                }
+                assert!(
+                    (sum - 1.0).abs() < 1e-4,
+                    "{:?}: overlap-add sum at hop position {} is {:.6}, not 1.0",
+                    shape,
+                    j,
+                    sum
+                );
+            }
+        }
     }
 }
