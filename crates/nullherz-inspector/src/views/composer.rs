@@ -485,6 +485,7 @@ mod tests {
             decks: crate::state::DeckState {
                 master_deck: None,
                 now_playing: [None; 4],
+                cached_tracks: std::array::from_fn(|_| None),
                 global_bpm: 120.0,
                 focused_deck: 0,
                 deck_playing: [false; 4],

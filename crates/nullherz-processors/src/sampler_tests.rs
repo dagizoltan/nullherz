@@ -256,6 +256,44 @@ mod stereo_playback_tests {
         );
     }
 
+    /// Performance commands are broadcast to every node by the engine, so a
+    /// sampler must act only on commands ADDRESSED to it. Cueing deck A used
+    /// to yank every deck's playhead (JumpToHotCue matched `node_idx: _`,
+    /// as did TriggerSlice, JumpByBeats, SetLoop and SetSlipMode).
+    #[test]
+    fn test_performance_commands_are_targeted_per_deck() {
+        use nullherz_traits::PerformanceCommand;
+        let frames = 44100;
+
+        let mut deck_a = SamplerProcessor::new(0);
+        let mut deck_b = SamplerProcessor::new(10);
+        for (p, id) in [(&mut deck_a, 1u64), (&mut deck_b, 2u64)] {
+            let (buffer, metadata) = planar_stereo(440.0, 880.0, frames);
+            p.apply_topology_mutation(TopologyMutation::AddSource {
+                node_idx: 0, buffer, sample_id: id, metadata: Some(metadata),
+            });
+        }
+        deck_a.apply_command(&nullherz_traits::Command::Performance(PerformanceCommand::PlayNode { node_idx: 0 }));
+        deck_b.apply_command(&nullherz_traits::Command::Performance(PerformanceCommand::PlayNode { node_idx: 10 }));
+
+        let _ = render(&mut deck_a, 2, 20, 128);
+        let _ = render(&mut deck_b, 2, 20, 128);
+        let pos_b_before = deck_b.get_playback_position();
+        assert!(pos_b_before > 0, "deck B must be rolling");
+
+        // Cue deck A back to the start — broadcast reaches BOTH processors,
+        // only deck A may react.
+        let cue = nullherz_traits::Command::Performance(PerformanceCommand::JumpToHotCue { node_idx: 0, cue_idx: 0 });
+        deck_a.apply_command(&cue);
+        deck_b.apply_command(&cue);
+
+        assert_eq!(deck_a.get_playback_position(), 0, "deck A must jump to its cue");
+        assert_eq!(
+            deck_b.get_playback_position(), pos_b_before,
+            "deck B must IGNORE deck A's cue (untargeted match yanked every deck)"
+        );
+    }
+
     /// A mono source must still fill both channels of a stereo strip.
     #[test]
     fn test_mono_sample_fills_both_outputs() {

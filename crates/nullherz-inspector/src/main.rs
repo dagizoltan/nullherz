@@ -569,6 +569,7 @@ impl eframe::App for InspectorApp {
                 self.library.library_needs_refresh = false;
                 self.library.bg_library_loader = None;
                 self.library.last_refresh_time = current_time;
+                self.decks.cached_tracks = std::array::from_fn(|_| None);
             }
         } else if self.library.library_needs_refresh {
             self.trigger_library_refresh();
@@ -582,6 +583,16 @@ impl eframe::App for InspectorApp {
         // Initialize last_saved_time on first loop run if it's 0.0
         if self.settings.last_saved_time == 0.0 {
             self.settings.last_saved_time = current_time;
+        }
+
+        // Refresh the per-deck track cache only when the loaded id changes;
+        // views read the cache instead of hitting redb every frame.
+        for i in 0..4 {
+            let want = self.decks.now_playing[i];
+            let have = self.decks.cached_tracks[i].as_ref().map(|t| t.id);
+            if want != have {
+                self.decks.cached_tracks[i] = want.and_then(|id| self.library_db.get_track(id).ok().flatten());
+            }
         }
 
         // --- Keyboard Shortcuts ---
