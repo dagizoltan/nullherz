@@ -140,7 +140,11 @@ async fn main() {
         {
             let lib = conductor.library.lock();
             if let Ok(tracks) = lib.list_tracks() {
-                track_ids = tracks.iter().map(|t| t.id).collect();
+                // Only tracks whose file actually exists: stale library entries
+                // (e.g. old auto-breeder children) must not be selected.
+                track_ids = tracks.iter()
+                    .filter(|t| std::path::Path::new(&t.path).exists())
+                    .map(|t| t.id).collect();
             }
         }
         conductor.tick();
@@ -201,6 +205,13 @@ async fn main() {
                 next_probe += 1;
                 let handle = conductor.engine_coordinator.backend_manager.engine_handle.lock();
                 let children = handle.as_ref().map(|e| e.list_children().len()).unwrap_or(usize::MAX);
+                if next_probe == 3 {
+                    if let Some(e) = handle.as_ref() {
+                        let types: Vec<(usize, &str, Option<u64>)> = e.list_children().iter().enumerate()
+                            .map(|(i, c)| (i, c.processor_type(), c.resource_id())).take(12).collect();
+                        eprintln!("PROBE types: {:?}", types);
+                    }
+                }
                 let hot: Vec<usize> = last_tel.as_ref().map(|t| t.peak_levels.iter().enumerate().filter(|(_, p)| **p > 1e-6).map(|(i, _)| i).collect()).unwrap_or_default();
                 eprintln!("PROBE t={}s children={} hot={:?}", t0.elapsed().as_secs(), children, hot);
             }

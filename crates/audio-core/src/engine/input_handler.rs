@@ -10,11 +10,29 @@ pub struct EngineInputHandler {}
 
 impl EngineInputHandler {
     #[allow(clippy::too_many_arguments)]
+    /// Phase 1: structural mutations only (topology ring -> pending buffer).
+    pub fn handle_topology_inputs(
+        graph: &mut dyn AudioProcessor,
+        topology_consumer: &mut Option<Box<dyn TopologyMutationConsumer>>,
+    ) {
+        if let Some(cons) = topology_consumer {
+            let mut topo_processed = 0;
+            while let Some(topo_mut) = cons.pop() {
+                graph.apply_topology_mutation(topo_mut);
+                topo_processed += 1;
+                if topo_processed >= 16 { break; }
+            }
+            if let Some(g) = graph.as_any_mut().downcast_mut::<crate::processors::graph::ProcessorGraph>() {
+                g.set_topology_stream_pending(topo_processed >= 16);
+            }
+        }
+    }
+
     pub fn handle_async_inputs(
         graph: &mut dyn AudioProcessor,
         transport: &mut nullherz_traits::Transport,
         bundle_consumer: &mut Option<Box<dyn CommandBundleConsumer>>,
-        topology_consumer: &mut Option<Box<dyn TopologyMutationConsumer>>,
+        _topology_consumer: &mut Option<Box<dyn TopologyMutationConsumer>>,
         midi_consumer: &mut Option<Box<dyn MidiConsumer>>,
         resource_recycler: &mut ResourceRecycler,
         sample_registry: &dyn SampleRegistry,
@@ -30,20 +48,6 @@ impl EngineInputHandler {
             }
         }
 
-        if let Some(cons) = topology_consumer {
-            // Chunked drain (16/block) bounds RT work; commit-until-
-            // SetTopology gating in the coordinator makes the streamed batch
-            // atomic regardless of chunking.
-            let mut topo_processed = 0;
-            while let Some(topo_mut) = cons.pop() {
-                graph.apply_topology_mutation(topo_mut);
-                topo_processed += 1;
-                if topo_processed >= 16 { break; }
-            }
-            if let Some(g) = graph.as_any_mut().downcast_mut::<crate::processors::graph::ProcessorGraph>() {
-                g.set_topology_stream_pending(topo_processed >= 16);
-            }
-        }
 
         if let Some(cons) = midi_consumer {
             let context = nullherz_traits::ProcessContext {

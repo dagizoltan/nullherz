@@ -223,6 +223,14 @@ impl<K: ProcessingKernel> AudioEngine<K> {
         // SAFETY: We are on the real-time thread.
         let graph = unsafe { self.graph_manager.swap_if_pending(&self.metrics, &self.health_signal) };
 
+        // Phase order matters: structural mutations must be INSTALLED into the
+        // node array (commit_graph) before command bundles run — a PlayNode
+        // broadcast in the same block as bootstrap otherwise fires into
+        // DummyProcessors and is lost forever (fire-once semantics).
+        EngineInputHandler::handle_topology_inputs(graph, &mut self.topology_consumer);
+        if let Some(graph_concrete) = graph.as_any_mut().downcast_mut::<crate::processors::graph::ProcessorGraph>() {
+            graph_concrete.commit_graph();
+        }
         EngineInputHandler::handle_async_inputs(
             graph,
             &mut self.transport,
@@ -234,11 +242,6 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             &self.metrics,
             &self.health_signal,
         );
-
-        // Audit Fix §0: Drain and commit buffered topology mutations to the live graph.
-        if let Some(graph_concrete) = graph.as_any_mut().downcast_mut::<crate::processors::graph::ProcessorGraph>() {
-            graph_concrete.commit_graph();
-        }
 
         let block_start_samples = self.transport.absolute_samples;
 

@@ -1,5 +1,5 @@
 {
-  "audio_backend": "ALSA",
+  "audio_backend": "Alsa",
   "midi_ports": [
     "Pioneer DDJ-400",
     "Generic MIDI Keyboard"

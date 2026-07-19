@@ -44,6 +44,7 @@ pub struct Conductor {
     pub ptp_clock: Option<Arc<nullherz_traits::PtpClockProvider>>,
     last_autosave_secs: u64,
     pub last_genetic_evolve_secs: u64,
+    last_metadata_sync_secs: u64,
     pub focused_node_idx: Option<u32>,
     pub active_transitions: Vec<DnaTransition>,
     pub undo_stack: Vec<(
@@ -118,6 +119,7 @@ impl Conductor {
             ptp_clock: None,
             last_autosave_secs: 0,
             last_genetic_evolve_secs: 0,
+            last_metadata_sync_secs: 0,
             focused_node_idx: None,
             active_transitions: Vec::new(),
             undo_stack: Vec::new(),
@@ -185,6 +187,7 @@ impl Conductor {
             ptp_clock: None,
             last_autosave_secs: 0,
             last_genetic_evolve_secs: 0,
+            last_metadata_sync_secs: 0,
             focused_node_idx: None,
             active_transitions: Vec::new(),
             undo_stack: Vec::new(),
@@ -589,15 +592,10 @@ impl Conductor {
         self.process_evolutionary_breeding(now);
         self.tick_dna_transitions();
 
-        // Genetic Pattern Evolution (Every 8 seconds)
-        if now % 8 == 0 && self.last_genetic_evolve_secs != now {
-            self.last_genetic_evolve_secs = now;
-            // Example: trigger evolution on node 0, track 0 if sampler is active
-            let node_idx = 0;
-            let track_idx = 0;
-            let cmd = nullherz_traits::PerformanceCommand::EvolvePattern { node_idx, track_idx, mutation_strength: 0.2 };
-            self.apply_mixer_commands(vec![nullherz_traits::Command::Performance(cmd)]);
-        }
+        // NOTE: the former auto-EvolvePattern demo block fired every 8 seconds
+        // at hardcoded node 0 — silently mutating deck A's live sample and
+        // breeding evolution children into the library. Evolution now runs
+        // only on explicit EvolvePattern commands from the UI.
 
         self.handle_transfusion_registrations();
 
@@ -619,6 +617,11 @@ impl Conductor {
     }
 
     fn sync_sampler_metadata(&mut self) {
+        // Once per second is plenty for BPM/metadata reconciliation; every
+        // 16ms tick flooded the topology ring alongside user commands.
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+        if self.last_metadata_sync_secs == now { return; }
+        self.last_metadata_sync_secs = now;
         { let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock();
             if let Some(ref engine) = *engine_lock {
                 for child in engine.list_children() {

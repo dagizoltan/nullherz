@@ -186,6 +186,10 @@ impl MixerOrchestrator {
             }
             Command::Performance(PerformanceCommand::PlayDeck { deck_id }) => {
                 if let Some(nodes) = mixer_manager.deck_mappings.get(deck_id) {
+                    // Pressing play starts the clock: with the transport
+                    // stopped, beat_position freezes at 0 and the quantize
+                    // phase-lock drags every voice back to the track start.
+                    translated.push(Command::Core(nullherz_traits::CoreCommand::Play));
                     translated.push(Command::Performance(PerformanceCommand::PlayNode { node_idx: nodes.sampler_id }));
                 }
             }

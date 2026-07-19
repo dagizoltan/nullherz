@@ -19,6 +19,10 @@ impl CommandHandler {
                 if conductor.transfusion_manager.sample_registry.get(*sample_id).is_none() {
                     let track = { conductor.library.lock().get_track(*sample_id).ok().flatten() };
                     if let Some(track) = track {
+                        if !std::path::Path::new(&track.path).exists() {
+                            eprintln!("CommandHandler: track {} path missing ({}); refusing to register silence.", sample_id, track.path);
+                            continue;
+                        }
                         println!("CommandHandler: Hydrating sample {} from {}", sample_id, track.path);
                         let buffer = crate::folder_monitor::decode_audio_file(&track.path);
                         conductor.transfusion_manager.sample_registry.register_with_metadata(
