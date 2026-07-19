@@ -226,18 +226,30 @@ pub fn complex_mul_accumulate_wasm_simd(re: &mut f32x4, im: &mut f32x4, hr: f32x
 /// SIMD-optimized tanh approximation for neural activation.
 /// Uses a Padé approximant for high performance in real-time paths.
 pub fn tanh_simd(x: f32x4) -> f32x4 {
+    let large_pos_mask = x.cmp_gt(f32x4::from(4.0));
+    let large_neg_mask = x.cmp_lt(f32x4::from(-4.0));
+
     let x2 = x * x;
     let a = x * (f32x4::from(1.0) + f32x4::from(0.12317192) * x2);
     let b = f32x4::from(1.0) + f32x4::from(0.4565311) * x2 + f32x4::from(0.01524316) * x2 * x2;
-    a / b
+    let approx = a / b;
+
+    let approx_clamped = large_neg_mask.blend(f32x4::from(-1.0), approx);
+    large_pos_mask.blend(f32x4::from(1.0), approx_clamped)
 }
 
 /// 8-wide SIMD tanh approximation.
 pub fn tanh_simd_x8(x: f32x8) -> f32x8 {
+    let large_pos_mask = x.cmp_gt(f32x8::from(4.0));
+    let large_neg_mask = x.cmp_lt(f32x8::from(-4.0));
+
     let x2 = x * x;
     let a = x * (f32x8::from(1.0) + f32x8::from(0.12317192) * x2);
     let b = f32x8::from(1.0) + f32x8::from(0.4565311) * x2 + f32x8::from(0.01524316) * x2 * x2;
-    a / b
+    let approx = a / b;
+
+    let approx_clamped = large_neg_mask.blend(f32x8::from(-1.0), approx);
+    large_pos_mask.blend(f32x8::from(1.0), approx_clamped)
 }
 
 /// SIMD-optimized sigmoid approximation.
@@ -411,4 +423,132 @@ pub unsafe fn load_f32x16_ptr(ptr: *const f32) -> FloatX16 {
 pub unsafe fn store_f32x16_ptr(ptr: *mut f32, val: FloatX16) {
     let arr: [f32; 16] = val.into();
     unsafe { std::ptr::copy_nonoverlapping(arr.as_ptr(), ptr, 16); }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tanh_simd_precision_and_bounds() {
+        let test_vals = [
+            -10.0, -5.0, -2.0, -1.0, -0.5, -0.1, 0.0, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0
+        ];
+
+        for chunk in test_vals.chunks(4) {
+            let mut arr = [0.0f32; 4];
+            arr[..chunk.len()].copy_from_slice(chunk);
+            let input = f32x4::new(arr);
+            let output: [f32; 4] = tanh_simd(input).into();
+
+            for i in 0..chunk.len() {
+                let x = chunk[i];
+                let ref_val = x.tanh();
+                let approx_val = output[i];
+                let error = (approx_val - ref_val).abs();
+                // Padé approximant should be extremely precise (within 0.01 tolerance)
+                assert!(error < 0.01, "tanh_simd error at x={}: got {}, ref={}", x, approx_val, ref_val);
+                // Ensure outputs are correctly bounded inside [-1.0, 1.0]
+                assert!(approx_val >= -1.0 && approx_val <= 1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_tanh_simd_x8_precision_and_bounds() {
+        let test_vals = [
+            -20.0, -8.0, -3.0, -1.5, -0.8, -0.05, 0.0, 0.05, 0.8, 1.5, 3.0, 8.0, 20.0
+        ];
+
+        for chunk in test_vals.chunks(8) {
+            let mut arr = [0.0f32; 8];
+            arr[..chunk.len()].copy_from_slice(chunk);
+            let input = f32x8::new(arr);
+            let output: [f32; 8] = tanh_simd_x8(input).into();
+
+            for i in 0..chunk.len() {
+                let x = chunk[i];
+                let ref_val = x.tanh();
+                let approx_val = output[i];
+                let error = (approx_val - ref_val).abs();
+                assert!(error < 0.01, "tanh_simd_x8 error at x={}: got {}, ref={}", x, approx_val, ref_val);
+                assert!(approx_val >= -1.0 && approx_val <= 1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_sigmoid_simd_precision_and_bounds() {
+        let test_vals = [
+            -10.0, -4.0, -1.0, -0.2, 0.0, 0.2, 1.0, 4.0, 10.0
+        ];
+
+        for chunk in test_vals.chunks(4) {
+            let mut arr = [0.0f32; 4];
+            arr[..chunk.len()].copy_from_slice(chunk);
+            let input = f32x4::new(arr);
+            let output: [f32; 4] = sigmoid_simd(input).into();
+
+            for i in 0..chunk.len() {
+                let x = chunk[i];
+                let ref_val = 1.0 / (1.0 + (-x).exp());
+                let approx_val = output[i];
+                let error = (approx_val - ref_val).abs();
+                assert!(error < 0.01, "sigmoid_simd error at x={}: got {}, ref={}", x, approx_val, ref_val);
+                assert!(approx_val >= 0.0 && approx_val <= 1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_soft_clip_simd_identity() {
+        let test_vals = [-3.0, -1.0, 0.0, 1.0, 3.0];
+        let mut arr = [0.0f32; 4];
+        arr[..4].copy_from_slice(&test_vals[..4]);
+        let input = f32x4::new(arr);
+
+        let out_soft: [f32; 4] = soft_clip_simd(input).into();
+        let out_tanh: [f32; 4] = tanh_simd(input).into();
+        assert_eq!(out_soft, out_tanh, "soft_clip_simd must be identical to tanh_simd");
+    }
+
+    #[test]
+    fn test_soft_clip_simd_x8_identity() {
+        let test_vals = [-5.0, -2.0, -0.5, 0.0, 0.5, 2.0, 5.0, 10.0];
+        let input = f32x8::new(test_vals);
+
+        let out_soft: [f32; 8] = soft_clip_simd_x8(input).into();
+        let out_tanh: [f32; 8] = tanh_simd_x8(input).into();
+        assert_eq!(out_soft, out_tanh, "soft_clip_simd_x8 must be identical to tanh_simd_x8");
+    }
+
+    #[test]
+    fn test_simd_extreme_limits_and_no_nan() {
+        let extreme_vals = [
+            f32::MIN, -1e6, -1000.0, 1000.0, 1e6, f32::MAX
+        ];
+
+        for chunk in extreme_vals.chunks(4) {
+            let mut arr = [0.0f32; 4];
+            arr[..chunk.len()].copy_from_slice(chunk);
+            let input = f32x4::new(arr);
+
+            let out_tanh: [f32; 4] = tanh_simd(input).into();
+            let out_sig: [f32; 4] = sigmoid_simd(input).into();
+
+            for i in 0..chunk.len() {
+                let x = chunk[i];
+                assert!(out_tanh[i].is_finite(), "tanh_simd produced non-finite value at x={}", x);
+                assert!(out_sig[i].is_finite(), "sigmoid_simd produced non-finite value at x={}", x);
+
+                if x > 100.0 {
+                    assert!((out_tanh[i] - 1.0).abs() < 1e-4);
+                    assert!((out_sig[i] - 1.0).abs() < 1e-4);
+                } else if x < -100.0 {
+                    assert!((out_tanh[i] + 1.0).abs() < 1e-4);
+                    assert!(out_sig[i].abs() < 1e-4);
+                }
+            }
+        }
+    }
 }
