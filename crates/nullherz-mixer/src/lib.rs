@@ -27,6 +27,10 @@ pub struct MixerManager {
     pub config: MixerConfig,
     pub deck_mappings: HashMap<char, DeckNodes>,
     pub node_names: HashMap<String, u32>,
+    /// Which sample id is loaded on each deck (recorded at LoadTrackToDeck).
+    /// Needed to resolve a deck's sampler NODE back to its TRACK, e.g. when
+    /// persisting hot cues.
+    pub deck_samples: HashMap<char, u64>,
 }
 
 impl MixerManager {
@@ -36,6 +40,7 @@ impl MixerManager {
             config: MixerConfig::default(),
             deck_mappings: HashMap::new(),
             node_names: HashMap::new(),
+            deck_samples: HashMap::new(),
         }
     }
 

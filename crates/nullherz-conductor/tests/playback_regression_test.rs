@@ -509,6 +509,65 @@ fn test_groove_commands_target_live_sequencer_nodes() {
     }
 }
 
+/// Setting a hot cue must PERSIST: into the registry metadata (so the deck
+/// picks it up) and into the library row (so it survives restart).
+///
+/// Regression: SetHotCue had no handler anywhere in the system — the UI sent
+/// it, nothing consumed it, and cues silently resolved to their
+/// 10%-of-track fallback positions forever.
+#[test]
+fn test_set_hot_cue_persists_to_registry_and_library() {
+    let mut conductor = Conductor::with_library_path(":memory:");
+    conductor.setup_engine();
+    conductor.bootstrap_4channel_mixer();
+
+    let tone_id = 4_400;
+    register_tone(&conductor, tone_id, 440.0);
+
+    conductor.apply_mixer_commands(vec![
+        Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id: 'A', sample_id: tone_id }),
+    ]);
+
+    let sampler_idx = *conductor
+        .mixer_manager
+        .node_names
+        .get("deck_a_sampler")
+        .expect("bootstrap must name the deck sampler");
+
+    conductor.apply_mixer_commands(vec![
+        Command::Performance(PerformanceCommand::SetHotCue {
+            node_idx: sampler_idx,
+            cue_idx: 3,
+            position_samples: 12_345,
+        }),
+    ]);
+
+    let registry_meta = conductor
+        .transfusion_manager
+        .sample_registry
+        .get(tone_id)
+        .expect("sample must stay registered")
+        .metadata;
+    assert_eq!(
+        registry_meta.hot_cues[3],
+        Some(12_345),
+        "hot cue must land in the registry metadata"
+    );
+
+    let lib_meta = conductor
+        .library
+        .lock()
+        .get_track(tone_id)
+        .unwrap()
+        .expect("track must exist in the library")
+        .metadata;
+    assert_eq!(
+        lib_meta.hot_cues[3],
+        Some(12_345),
+        "hot cue must persist to the library row"
+    );
+}
+
 /// Stereo sources must drive the deck chain exactly like mono ones.
 ///
 /// Sample buffers are PLANAR (channel 0, then channel 1), and the sampler reads

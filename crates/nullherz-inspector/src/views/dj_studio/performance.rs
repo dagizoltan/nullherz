@@ -27,7 +27,10 @@ pub fn render_deck_performance(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
 
                     if let (true, Some(node_idx)) = (response.clicked(), node_idx) {
                         if ui.input(|i| i.modifiers.shift) {
-                            let pos = telemetry.as_ref().map(|t| t.sample_counter).unwrap_or(0);
+                            // The DECK's playhead, not the global engine
+                            // sample counter — a cue is a position in the
+                            // TRACK.
+                            let pos = telemetry.as_ref().map(|t| t.deck_positions[i]).unwrap_or(0);
                             let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::SetHotCue {
                                 node_idx,
                                 cue_idx: j as u32,
