@@ -350,7 +350,12 @@ impl SamplerProcessor {
                     voice.loop_end = end_samples;
                 }
             }
-            Command::Performance(PerformanceCommand::PlayNode { .. }) => {
+            // TARGETED: PlayNode/StopNode are broadcast to every node by the
+            // engine, so each sampler must check the address. Matching `..`
+            // here meant playing ONE deck armed/triggered every sampler in
+            // the graph — decks, preview, the sampler view — and any of them
+            // auto-fired the moment a source later landed (pending_play).
+            Command::Performance(PerformanceCommand::PlayNode { node_idx }) if node_idx as u64 == self.id => {
                 if self.sample_buffer.is_empty() {
                     self.pending_play = true;
                 } else {
@@ -362,7 +367,7 @@ impl SamplerProcessor {
                     }
                 }
             }
-            Command::Performance(PerformanceCommand::StopNode { .. }) => {
+            Command::Performance(PerformanceCommand::StopNode { node_idx }) if node_idx as u64 == self.id => {
                 self.pending_play = false;
                 self.reset();
             }
