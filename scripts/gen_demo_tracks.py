@@ -220,6 +220,59 @@ def make_house(path: str):
     song.write(path)
 
 
+def make_halftime(path: str):
+    """140 BPM halftime: sparse heavy kicks, snare on the 3, reese swells."""
+    rng = random.Random(0x140)
+    bpm = 140.0
+    beat = 60.0 / bpm
+    bars = 8
+    song = Song(bars * 4 * beat + 0.6)
+
+    roots = [41.2, 41.2, 49.0, 36.7]  # E1 / G1 / D1 movement
+    for bar in range(bars):
+        t0 = bar * 4 * beat
+        song.add(t0, kick(punch=140, tail=42, dur=0.3), gain=1.0)
+        if bar % 2 == 1:
+            song.add(t0 + 3.5 * beat, kick(punch=140, tail=42, dur=0.22), gain=0.8)
+        song.add(t0 + 2 * beat, snare(rng, dur=0.22), gain=0.85)
+        for h in range(8):
+            if h % 2 == 0 or rng.random() < 0.35:
+                song.add(t0 + h * 0.5 * beat, hat(rng), pan=(-0.3 if h % 4 else 0.3), gain=0.28)
+        root = roots[bar % 4]
+        song.add(t0 + 0.02, reese(root, 1.6 * beat, 0.7), gain=0.5)
+        song.add(t0 + 2.5 * beat, reese(root * 1.5, 1.2 * beat, 1.3), pan=0.25, gain=0.35)
+    song.write(path)
+
+
+def make_boombap(path: str):
+    """92 BPM boom bap: swung kicks, cracking snare on 2 & 4, dusty stabs."""
+    rng = random.Random(0x92)
+    bpm = 92.0
+    beat = 60.0 / bpm
+    bars = 8
+    swing = 0.09 * beat
+    song = Song(bars * 4 * beat + 0.6)
+
+    for bar in range(bars):
+        t0 = bar * 4 * beat
+        song.add(t0, kick(punch=110, tail=55, dur=0.26), gain=0.95)
+        song.add(t0 + 1.75 * beat + swing, kick(punch=110, tail=55, dur=0.2), gain=0.7)
+        if bar % 2 == 1:
+            song.add(t0 + 3.25 * beat + swing, kick(punch=110, tail=55, dur=0.2), gain=0.6)
+        song.add(t0 + 1 * beat, snare(rng, dur=0.19), gain=0.9)
+        song.add(t0 + 3 * beat, snare(rng, dur=0.19), gain=0.9)
+        for h in range(8):
+            off = swing if h % 2 else 0.0
+            song.add(t0 + h * 0.5 * beat + off, hat(rng, dur=0.04), pan=0.25, gain=0.3)
+        song.add(t0 + 0.5 * beat, sub(55.0, 0.4 * beat), gain=0.6)
+        song.add(t0 + 2.5 * beat + swing, sub(61.7, 0.4 * beat), gain=0.55)
+        if bar % 4 == 2:
+            song.add(t0 + 2 * beat, stab(196.0, dur=0.3), pan=-0.35, gain=0.4)
+    song.write(path)
+
+
 if __name__ == "__main__":
     make_neuro("tracks/track_a.wav")
     make_house("tracks/track_b.wav")
+    make_halftime("tracks/track_c.wav")
+    make_boombap("tracks/track_d.wav")
