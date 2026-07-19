@@ -138,8 +138,10 @@ impl BreederView {
                     ui.painter().hline(rect.x_range(), y, Stroke::new(0.5, theme.border.linear_multiply(0.5)));
                 }
 
-                if response.dragged() {
-                    let pos = response.interact_pointer_pos().unwrap();
+                // interact_pointer_pos is None on some drag-release frames;
+                // unwrap() here could panic mid-gesture.
+                if response.dragged()
+                    && let Some(pos) = response.interact_pointer_pos() {
                     state.transfusion_bias_x = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                     state.transfusion_bias_y = ((rect.bottom() - pos.y) / rect.height()).clamp(0.0, 1.0);
 
