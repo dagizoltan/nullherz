@@ -43,9 +43,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         ui.horizontal_top(|ui| {
             for i in 0..4 {
                 render_channel_strip(app, ui, i, telemetry);
-                // Vertical divider between channels/master
-                let (line_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 320.0), egui::Sense::hover());
-                ui.painter().rect_filled(line_rect, Rounding::ZERO, theme.border);
+                // Card borders + spacing separate the strips; the old painted
+                // 320px divider never matched the real strip height.
                 ui.add_space(theme.space_sm);
             }
 
@@ -316,6 +315,10 @@ fn render_stereo_vu_meter(ui: &mut Ui, peak_l: f32, peak_r: f32, peak_hold: f32,
 
 fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
     let theme = app.theme;
+    // Fixed-width container FIRST: vertical_centered inside the row expands
+    // to the full remaining width otherwise (the ballooning master card).
+    ui.allocate_ui_with_layout(Vec2::new(226.0, ui.available_height()), egui::Layout::top_down(egui::Align::Center), |ui| {
+    ui.set_width(226.0);
     Frame::none()
         .fill(theme.bg_surface)
         .stroke(theme.border_stroke)
@@ -325,17 +328,24 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
             ui.vertical_centered(|ui| {
                 ui.set_width(210.0);
 
-                // Crossfader
+                // Crossfader — drives BOTH sides of the stereo crossfader
+                // pair, resolved by name. (The old "master_crossfader" name
+                // is only registered by the standalone builder; the lookup
+                // fell back to node 0 = deck A's sampler.)
                 ui.label(RichText::new("CROSSFADER").size(theme.type_caption).color(theme.text_secondary));
                 ui.add_space(theme.space_xs);
                 let r_cross = widgets::render_horizontal_fader(ui, &mut app.mixer.crossfader_pos, 0.0..=1.0, theme.text_primary, 160.0, 32.0);
                 if r_cross.changed() {
-                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                        target_id: app.get_node_id("master_crossfader") as u64,
-                        param_id: 0,
-                        value: app.mixer.crossfader_pos,
-                        ramp_duration_samples: 0,
-                    }));
+                    for name in ["master_xf_l", "master_xf_r"] {
+                        if let Some(&node) = app.topo.node_map.get(name) {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                target_id: node as u64,
+                                param_id: 0,
+                                value: app.mixer.crossfader_pos,
+                                ramp_duration_samples: 0,
+                            }));
+                        }
+                    }
                 }
                 if r_cross.drag_stopped() || r_cross.lost_focus() {
                     let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CheckpointParameterEdit));
@@ -380,17 +390,23 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
                         render_stereo_vu_meter(ui, app.viz.damped_master_peaks[0], app.viz.damped_master_peaks[1], app.mixer._rec_peak_hold, theme.deck_colors[2], 100.0);
                     });
 
-                    // Master Gain Fader
+                    // Master Gain Fader — per-side summing gain, resolved by
+                    // name. ("master_sum" never existed: get_node_id fell
+                    // back to 0 and this fader set a deck A sampler param.)
                     ui.vertical(|ui| {
                         ui.label(RichText::new("GAIN").size(theme.type_caption).color(theme.text_secondary));
                         let r_master = widgets::render_fader(ui, &mut app.mixer.master_gain, 0.0..=1.5, theme.text_primary, 100.0, 18.0);
                         if r_master.changed() {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                target_id: app.get_node_id("master_sum") as u64,
-                                param_id: 0,
-                                value: app.mixer.master_gain,
-                                ramp_duration_samples: 0,
-                            }));
+                            for name in ["master_sum_l", "master_sum_r"] {
+                                if let Some(&node) = app.topo.node_map.get(name) {
+                                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                        target_id: node as u64,
+                                        param_id: 0,
+                                        value: app.mixer.master_gain,
+                                        ramp_duration_samples: 0,
+                                    }));
+                                }
+                            }
                         }
                         if r_master.drag_stopped() || r_master.lost_focus() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CheckpointParameterEdit));
@@ -399,4 +415,5 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
                 });
             });
         });
+    });
 }
