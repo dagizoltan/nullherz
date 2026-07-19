@@ -410,3 +410,111 @@ fn test_decks_at_different_tempos_both_stay_audible() {
         limiter_peak
     );
 }
+
+/// Register a PLANAR STEREO tone: channel 0 then channel 1, `channels` set.
+fn register_stereo_tone(conductor: &Conductor, id: u64, left_hz: f32, right_hz: f32) {
+    let sample_rate = 44_100.0f32;
+    let frames = (sample_rate * 2.0) as usize;
+    let mut samples = Vec::with_capacity(frames * 2);
+    for hz in [left_hz, right_hz] {
+        for i in 0..frames {
+            samples.push((i as f32 * hz * 2.0 * std::f32::consts::PI / sample_rate).sin() * 0.5);
+        }
+    }
+
+    let mut metadata = nullherz_traits::SampleMetadata::new_empty();
+    metadata.bpm = 120.0;
+    metadata.total_samples = frames as u64;
+    metadata.channels = 2;
+    let metadata = std::sync::Arc::new(metadata);
+
+    conductor
+        .transfusion_manager
+        .sample_registry
+        .register_with_metadata(id, std::sync::Arc::new(samples), metadata.clone());
+
+    let lib = conductor.library.lock();
+    lib.save_track(&nullherz_dna::LibraryTrack {
+        id,
+        path: format!("tone://{}", id),
+        title: "stereo tone".to_string(),
+        artist: "regression".to_string(),
+        album: "regression".to_string(),
+        genre: "test tone".to_string(),
+        energy_level: 0.5,
+        metadata,
+    })
+    .expect("in-memory library save cannot fail");
+}
+
+/// Stereo sources must drive the deck chain exactly like mono ones.
+///
+/// Sample buffers are PLANAR (channel 0, then channel 1), and the sampler reads
+/// frames-per-channel from metadata. A deck fed a stereo source must still
+/// reach the master — if the layout were misread the playhead would run off the
+/// end of what it thinks is the buffer and the voice would deactivate.
+#[test]
+fn test_stereo_source_plays_on_both_decks() {
+    let mut conductor = Conductor::with_library_path(":memory:");
+    let mut context = conductor.setup_engine();
+    conductor.bootstrap_4channel_mixer();
+
+    for (i, deck) in ['A', 'B'].iter().enumerate() {
+        register_stereo_tone(&conductor, 7_000 + *deck as u64, 220.0 * (i as f32 + 1.0), 330.0 * (i as f32 + 1.0));
+    }
+
+    conductor
+        .start_backend(AudioBackendType::Threaded)
+        .expect("threaded backend must start without hardware");
+
+    let expected_nodes = conductor
+        .topology_manager
+        .active_node_types
+        .keys()
+        .filter(|&&idx| (idx as usize) < nullherz_traits::MAX_NODES)
+        .count();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let installed = {
+            let handle = conductor.engine_coordinator.backend_manager.engine_handle.lock();
+            handle.as_ref().map(|e| e.list_children().len()).unwrap_or(0)
+        };
+        if installed >= expected_nodes { break; }
+        assert!(Instant::now() < deadline, "topology never installed ({}/{})", installed, expected_nodes);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let mut commands = Vec::new();
+    for deck in ['A', 'B'] {
+        commands.push(Command::Performance(PerformanceCommand::LoadTrackToDeck {
+            deck_id: deck,
+            sample_id: 7_000 + deck as u64,
+        }));
+    }
+    for deck in ['A', 'B'] {
+        commands.push(Command::Performance(PerformanceCommand::PlayDeck { deck_id: deck }));
+    }
+    conductor.apply_mixer_commands(commands);
+
+    let idx = |name: String| *conductor.mixer_manager.node_names.get(&name).expect("named node") as usize;
+    let a = idx("deck_a_sampler".to_string());
+    let b = idx("deck_b_sampler".to_string());
+    let master = idx("master_limiter".to_string());
+
+    let (mut a_peak, mut b_peak, mut master_peak) = (0.0f32, 0.0f32, 0.0f32);
+    let deadline = Instant::now() + WALL_DEADLINE;
+    while Instant::now() < deadline {
+        while let Some(tel) = context.telemetry_consumer.pop() {
+            a_peak = a_peak.max(tel.peak_levels[a]);
+            b_peak = b_peak.max(tel.peak_levels[b]);
+            master_peak = master_peak.max(tel.peak_levels[master]);
+        }
+        if a_peak > AUDIBLE && b_peak > AUDIBLE && master_peak > AUDIBLE { break; }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    conductor.stop_backend();
+
+    assert!(a_peak > AUDIBLE, "deck A silent on a stereo source (peak {:.6})", a_peak);
+    assert!(b_peak > AUDIBLE, "deck B silent on a stereo source (peak {:.6})", b_peak);
+    assert!(master_peak > AUDIBLE, "stereo decks hot but master silent (peak {:.6})", master_peak);
+}

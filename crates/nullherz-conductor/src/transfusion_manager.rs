@@ -296,7 +296,9 @@ impl TransfusionManager {
                 loop_points: None,
                 beat_grid_offset: 0,
                 peaks: Arc::new(Vec::new()),
+                // Capture snapshots are a single mono stream.
                 total_samples: snapshot.len() as u64,
+                channels: 1,
                 mip_waveform: nullherz_traits::MipWaveform::default(),
                 dna: nullherz_traits::SoundDNA::default(),
                 midi_map: None,

@@ -5,6 +5,42 @@ use nullherz_dna::GeneticLibrary;
 
 pub struct CommandHandler;
 
+/// Frames per channel and channel count for a registry sample, tolerating
+/// entries registered before the planar layout carried a channel count.
+fn planar_layout(sample: &nullherz_dna::RegisteredSample) -> (usize, usize) {
+    let channels = (sample.metadata.channels as usize).max(1);
+    let frames = match sample.metadata.total_samples as usize {
+        n if n > 0 && n * channels <= sample.buffer.len() => n,
+        _ => sample.buffer.len() / channels,
+    };
+    (frames, channels)
+}
+
+/// Apply a per-channel transform and reassemble a planar buffer.
+///
+/// Editing a planar buffer as one flat stream splices the channels together:
+/// a crop lands inside channel 0 and discards channel 1, and a time-stretch
+/// smears across the seam between them. Every edit has to run per plane.
+fn map_planes(
+    buffer: &[f32],
+    frames: usize,
+    channels: usize,
+    mut f: impl FnMut(&[f32]) -> Vec<f32>,
+) -> (Vec<f32>, usize) {
+    let mut planes: Vec<Vec<f32>> = Vec::with_capacity(channels);
+    for c in 0..channels {
+        let start = c * frames;
+        let plane = buffer.get(start..start + frames).unwrap_or(&[]);
+        planes.push(f(plane));
+    }
+    let new_frames = planes.iter().map(|p| p.len()).min().unwrap_or(0);
+    let mut out = Vec::with_capacity(new_frames * channels);
+    for plane in &planes {
+        out.extend_from_slice(&plane[..new_frames]);
+    }
+    (out, new_frames)
+}
+
 impl CommandHandler {
     pub fn apply_mixer_commands(conductor: &mut Conductor, commands: Vec<Command>) {
         let mut final_commands = Vec::new();
@@ -24,9 +60,14 @@ impl CommandHandler {
                             continue;
                         }
                         println!("CommandHandler: Hydrating sample {} from {}", sample_id, track.path);
-                        let buffer = crate::folder_monitor::decode_audio_file(&track.path);
+                        let decoded = crate::folder_monitor::decode_audio_file(&track.path);
+                        // The library row may predate the planar layout (or the
+                        // file may have changed); trust what we just decoded.
+                        let mut metadata = (*track.metadata).clone();
+                        metadata.total_samples = decoded.frames as u64;
+                        metadata.channels = decoded.channels as u16;
                         conductor.transfusion_manager.sample_registry.register_with_metadata(
-                            *sample_id, buffer, track.metadata.clone());
+                            *sample_id, decoded.samples, std::sync::Arc::new(metadata));
                     } else {
                         eprintln!("CommandHandler: LoadTrackToDeck {} has no library entry; the deck will stay silent.", sample_id);
                     }
@@ -339,11 +380,17 @@ impl CommandHandler {
             ResourceCommand::Crop { sample_id, start_samples, end_samples } => {
                  conductor.checkpoint();
                  if let Some(sample) = conductor.transfusion_manager.sample_registry.get(sample_id) {
-                     let start = start_samples as usize;
-                     let end = (end_samples as usize).min(sample.buffer.len());
+                     let (frames, channels) = planar_layout(&sample);
+                     let start = (start_samples as usize).min(frames);
+                     let end = (end_samples as usize).min(frames);
                      if start < end {
-                         let cropped = sample.buffer[start..end].to_vec();
-                         conductor.transfusion_manager.sample_registry.register_with_metadata(sample_id, Arc::new(cropped), sample.metadata);
+                         let (cropped, new_frames) = map_planes(&sample.buffer, frames, channels, |plane| {
+                             plane[start..end].to_vec()
+                         });
+                         let mut metadata = (*sample.metadata).clone();
+                         metadata.total_samples = new_frames as u64;
+                         conductor.transfusion_manager.sample_registry.register_with_metadata(
+                             sample_id, Arc::new(cropped), Arc::new(metadata));
                      }
                  }
                  true
@@ -351,9 +398,12 @@ impl CommandHandler {
             ResourceCommand::TimeStretch { sample_id, ratio } => {
                  conductor.checkpoint();
                  if let Some(sample) = conductor.transfusion_manager.sample_registry.get(sample_id) {
-                     let stretched = audio_dsp::util::time_stretch(&sample.buffer, ratio);
+                     let (frames, channels) = planar_layout(&sample);
+                     let (stretched, new_frames) = map_planes(&sample.buffer, frames, channels, |plane| {
+                         audio_dsp::util::time_stretch(plane, ratio)
+                     });
                      let mut new_metadata = (*sample.metadata).clone();
-                     new_metadata.total_samples = stretched.len() as u64;
+                     new_metadata.total_samples = new_frames as u64;
 
                      let mut new_transients = Vec::new();
                      for &t in (*sample.metadata.transients).iter() {

@@ -6,7 +6,6 @@ pub struct SamplerProcessor {
     pub id: u64,
     pub voices: Vec<SamplerVoice>,
     sample_buffer: std::sync::Arc<Vec<f32>>,
-    render_buffer: [f32; ipc_layer::MAX_BLOCK_SIZE],
     sample_id: Option<u64>,
     metadata: Option<std::sync::Arc<nullherz_traits::SampleMetadata>>,
     quantize_enabled: bool,
@@ -27,7 +26,6 @@ impl SamplerProcessor {
             id,
             voices,
             sample_buffer: std::sync::Arc::new(Vec::new()),
-            render_buffer: [0.0; ipc_layer::MAX_BLOCK_SIZE],
             sample_id: None,
             metadata: None,
             quantize_enabled: true,
@@ -71,7 +69,29 @@ impl SamplerProcessor {
         self.sample_id
     }
 
+    /// Channel count of the loaded sample (1 when unknown).
+    fn source_channels(&self) -> usize {
+        self.metadata.as_ref().map(|m| m.channels as usize).unwrap_or(1).max(1)
+    }
+
+    /// Frames PER CHANNEL of the loaded sample. Metadata is authoritative;
+    /// dividing the buffer length by the channel count is the fallback for
+    /// sources registered without it.
+    fn source_frames(&self) -> usize {
+        let channels = self.source_channels();
+        match self.metadata.as_ref().map(|m| m.total_samples as usize) {
+            Some(frames) if frames > 0 && frames * channels <= self.sample_buffer.len() => frames,
+            _ => self.sample_buffer.len() / channels,
+        }
+    }
+
+    /// Tell a freshly triggered voice how to read the planar buffer.
+    fn apply_layout(voice: &mut SamplerVoice, frames: usize, channels: usize) {
+        voice.set_layout(frames, channels);
+    }
+
     fn trigger_slice(&mut self, slice_idx: u32, context: Option<&nullherz_traits::ProcessContext>) {
+        let (frames, channels) = (self.source_frames(), self.source_channels());
         if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
             let bpm = self.metadata.as_ref().map(|m| m.bpm).unwrap_or(120.0);
             let sample_rate = context.and_then(|c| c.transport).map(|t| t.sample_rate).unwrap_or(44100.0);
@@ -82,6 +102,7 @@ impl SamplerProcessor {
 
             // RT-HARDENING: Use buffer_ref instead of clone to avoid atomic overhead in the hot path
             voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, offset, beat_pos);
+            Self::apply_layout(voice, frames, channels);
         }
     }
 }
@@ -99,6 +120,7 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &m
 
 fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext, _executor: Option<&mut (dyn nullherz_traits::ParallelExecutor + '_)>) {
         // SYNC LOGIC
+        let source_frames = self.source_frames();
         if self.quantize_enabled
             && let (Some(transport), Some(meta)) = (context.transport, &self.metadata)
                 && meta.bpm > 10.0 {
@@ -116,7 +138,7 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
                                 voice.trigger_offset + (beat_diff as f32 * samples_per_beat as f32)
                             } else {
                                 let expected_pos_beats = transport.beat_position;
-                                (expected_pos_beats * samples_per_beat) as f32 % self.sample_buffer.len().max(1) as f32
+                                (expected_pos_beats * samples_per_beat) as f32 % source_frames.max(1) as f32
                             };
 
                             // Gently nudge playhead towards locked phase
@@ -136,28 +158,18 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
         // The engine should enforce this, but we protect the processor here.
         let num_samples = num_samples.min(ipc_layer::MAX_BLOCK_SIZE);
 
-        // Render all active voices into the temporary render_buffer once per cycle.
-        // Performance Optimization: Skip inactive voices to reduce branching and cache misses.
-        self.render_buffer[..num_samples].fill(0.0);
-        let render_slice = &mut self.render_buffer[..num_samples];
-        for voice in self.voices.iter_mut().filter(|v| v.is_active) {
-            voice.process_block(render_slice);
+        // Voices accumulate, so the outputs must start clean.
+        for output in outputs.iter_mut() {
+            output[..num_samples].fill(0.0);
         }
 
-        // Production Hardening: Use SIMD for multi-channel output distribution if possible
-        // (Ensuring 64-byte alignment safety via audio-dsp primitives)
-        use audio_dsp::simd_vec::{load_f32x8, store_f32x8};
-        for output in outputs.iter_mut() {
-            let mut i = 0;
-            while i + 8 <= num_samples {
-                let v = load_f32x8(render_slice, i);
-                store_f32x8(output, i, v);
-                i += 8;
-            }
-            while i < num_samples {
-                output[i] = render_slice[i];
-                i += 1;
-            }
+        // Render every active voice straight into the real outputs, one plane
+        // per channel. The previous code rendered a single MONO buffer and
+        // copied it to every output, which threw away the right channel of any
+        // stereo source before the strip ever saw it. Writing into `outputs`
+        // directly also keeps this allocation-free on the audio thread.
+        for voice in self.voices.iter_mut().filter(|v| v.is_active) {
+            voice.process_block_planar(outputs, num_samples);
         }
     }
 }
@@ -170,11 +182,15 @@ impl nullherz_traits::MidiResponder for SamplerProcessor {
                 if (36..=51).contains(&event.data1) {
                     self.trigger_slice((event.data1 - 36) as u32, context);
                 }
-            } else if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
-                let freq = 440.0 * 2.0f32.powf((event.data1 as f32 - 69.0) / 12.0);
-                let playback_rate = (freq / 440.0) * self.playback_rate;
-                let velocity = event.data2 as f32 / 127.0;
-                voice.trigger(self.sample_buffer.clone(), playback_rate, velocity);
+            } else {
+                let (frames, channels) = (self.source_frames(), self.source_channels());
+                if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
+                    let freq = 440.0 * 2.0f32.powf((event.data1 as f32 - 69.0) / 12.0);
+                    let playback_rate = (freq / 440.0) * self.playback_rate;
+                    let velocity = event.data2 as f32 / 127.0;
+                    voice.trigger(self.sample_buffer.clone(), playback_rate, velocity);
+                    Self::apply_layout(voice, frames, channels);
+                }
             }
         }
     }
@@ -212,8 +228,10 @@ fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutatio
                 self.metadata = metadata;
                 if self.pending_play && !self.sample_buffer.is_empty() {
                     self.pending_play = false;
+                    let (frames, channels) = (self.source_frames(), self.source_channels());
                     if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
                         voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, 0.0, 0.0);
+                        Self::apply_layout(voice, frames, channels);
                     }
                 }
             }
@@ -275,9 +293,9 @@ impl SamplerProcessor {
             Command::Performance(PerformanceCommand::JumpToHotCue { node_idx: _, cue_idx }) => {
                 let offset = if let Some(ref metadata) = self.metadata {
                     metadata.hot_cues.get(cue_idx as usize).and_then(|&c| c)
-                        .unwrap_or((cue_idx as f32 * 0.1 * self.sample_buffer.len() as f32) as u64)
+                        .unwrap_or((cue_idx as f32 * 0.1 * self.source_frames() as f32) as u64)
                 } else {
-                    (cue_idx as f32 * 0.1 * self.sample_buffer.len() as f32) as u64
+                    (cue_idx as f32 * 0.1 * self.source_frames() as f32) as u64
                 };
 
                 let mut offset = offset;
@@ -303,6 +321,7 @@ impl SamplerProcessor {
                 self.trigger_slice(slice_idx, context);
             }
             Command::Performance(PerformanceCommand::JumpByBeats { node_idx: _, beats }) => {
+                let source_frames = self.source_frames();
                 if let (Some(ctx), Some(meta)) = (context, &self.metadata)
                     && let Some(transport) = ctx.transport
                         && meta.bpm > 0.0 {
@@ -317,8 +336,8 @@ impl SamplerProcessor {
 
                                     // Clamp to buffer range
                                     if voice.play_head < 0.0 { voice.play_head = 0.0; }
-                                    if voice.play_head >= self.sample_buffer.len() as f32 {
-                                        voice.play_head = (self.sample_buffer.len() as f32 - 1.0).max(0.0);
+                                    if voice.play_head >= source_frames as f32 {
+                                        voice.play_head = (source_frames as f32 - 1.0).max(0.0);
                                     }
                                 }
                             }
@@ -334,9 +353,13 @@ impl SamplerProcessor {
             Command::Performance(PerformanceCommand::PlayNode { .. }) => {
                 if self.sample_buffer.is_empty() {
                     self.pending_play = true;
-                } else if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
-                    let beat_pos = context.and_then(|c| c.transport).map(|t| t.beat_position).unwrap_or(0.0);
-                    voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, 0.0, beat_pos);
+                } else {
+                    let (frames, channels) = (self.source_frames(), self.source_channels());
+                    if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
+                        let beat_pos = context.and_then(|c| c.transport).map(|t| t.beat_position).unwrap_or(0.0);
+                        voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, 0.0, beat_pos);
+                        Self::apply_layout(voice, frames, channels);
+                    }
                 }
             }
             Command::Performance(PerformanceCommand::StopNode { .. }) => {

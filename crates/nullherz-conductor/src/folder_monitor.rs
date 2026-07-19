@@ -68,7 +68,7 @@ impl FolderMonitor {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
-        let buffer = decode_audio_file(path);
+        let decoded = decode_audio_file(path);
 
         let mut hasher = DefaultHasher::new();
         path.hash(&mut hasher);
@@ -82,8 +82,10 @@ impl FolderMonitor {
         // or stale metadata/waveforms live forever.
         let existing = { let lib = self.library.lock(); lib.get_track(id).ok().flatten() };
         if let Some(track) = existing {
-            if track.metadata.total_samples == buffer.len() as u64 {
-                self.sample_registry.register_with_metadata(id, buffer, track.metadata.clone());
+            if track.metadata.total_samples == decoded.frames as u64
+                && track.metadata.channels as usize == decoded.channels
+            {
+                self.sample_registry.register_with_metadata(id, decoded.samples, track.metadata.clone());
                 println!("FolderMonitor: Hydrated registry for {}", path);
                 return;
             }
@@ -92,7 +94,8 @@ impl FolderMonitor {
         let lib = self.library.lock();
 
         let mut metadata = SampleMetadata::new_empty();
-        metadata.total_samples = buffer.len() as u64;
+        metadata.total_samples = decoded.frames as u64;
+        metadata.channels = decoded.channels as u16;
 
         let track = LibraryTrack {
             id,
@@ -106,7 +109,7 @@ impl FolderMonitor {
         };
 
         let _ = lib.save_track(&track);
-        self.sample_registry.register(id, buffer);
+        self.sample_registry.register_with_metadata(id, decoded.samples, track.metadata.clone());
         println!("FolderMonitor: Registered {}", path);
     }
 
@@ -121,9 +124,42 @@ impl FolderMonitor {
 }
 
 
-/// Decode any supported audio file to an interleaved f32 buffer.
+/// A decoded audio file in PLANAR layout: channel 0 occupies `samples[0..frames]`,
+/// channel 1 `samples[frames..2*frames]`, and so on.
+///
+/// Planar rather than interleaved is load-bearing, not a style choice. The
+/// sampler voice interpolates across four CONSECUTIVE buffer elements (via a
+/// SIMD 4-wide load), so interleaved data would have it interpolating across
+/// L,R,L,R — mixing channels together — and there is no stride-aware form of
+/// that load. Keeping each channel contiguous leaves the interpolator and its
+/// SIMD path correct, with a channel selected by offset alone.
+#[derive(Debug, Clone)]
+pub struct DecodedAudio {
+    pub samples: Arc<Vec<f32>>,
+    /// Frames PER CHANNEL (not total samples).
+    pub frames: usize,
+    pub channels: usize,
+}
+
+impl DecodedAudio {
+    /// Samples for one channel, clamped to what actually exists so a caller
+    /// asking for a channel the file does not have gets channel 0 rather than
+    /// a panic or silence.
+    pub fn channel(&self, channel: usize) -> &[f32] {
+        let c = if channel < self.channels { channel } else { 0 };
+        let start = c * self.frames;
+        &self.samples[start..start + self.frames]
+    }
+
+    fn silent_fallback() -> Self {
+        let frames = 44100 * 5;
+        Self { samples: Arc::new(vec![0.0f32; frames]), frames, channels: 1 }
+    }
+}
+
+/// Decode any supported audio file to a planar f32 buffer.
 /// Non-RT; used by the scanner and by on-demand deck-load hydration.
-pub fn decode_audio_file(path: &str) -> Arc<Vec<f32>> {
+pub fn decode_audio_file(path: &str) -> DecodedAudio {
     use symphonia::core::audio::Signal;
     if let Ok(file) = std::fs::File::open(path) {
         let mss = symphonia::core::io::MediaSourceStream::new(Box::new(file), Default::default());
@@ -131,7 +167,10 @@ pub fn decode_audio_file(path: &str) -> Arc<Vec<f32>> {
         if let Ok(mut probed) = symphonia::default::get_probe().format(&hint, mss, &Default::default(), &Default::default()) {
             if let Some(track) = probed.format.default_track() {
                 if let Ok(mut decoder) = symphonia::default::get_codecs().make(&track.codec_params, &Default::default()) {
-                    let mut samples = Vec::new();
+                    // Accumulate per channel, then concatenate: packets arrive
+                    // in chunks, so channels can only be laid out contiguously
+                    // once the whole file is known.
+                    let mut planes: Vec<Vec<f32>> = Vec::new();
                     let mut sample_buf = None;
                     while let Ok(packet) = probed.format.next_packet() {
                         if let Ok(decoded) = decoder.decode(&packet) {
@@ -139,14 +178,29 @@ pub fn decode_audio_file(path: &str) -> Arc<Vec<f32>> {
                             decoded.convert(buf);
                             let chan_len = buf.frames();
                             let num_chans = buf.spec().channels.count();
-                            for i in 0..chan_len {
-                                for c in 0..num_chans {
-                                    samples.push(buf.chan(c)[i]);
-                                }
+                            if planes.len() < num_chans {
+                                planes.resize(num_chans, Vec::new());
+                            }
+                            for (c, plane) in planes.iter_mut().enumerate().take(num_chans) {
+                                plane.extend_from_slice(&buf.chan(c)[..chan_len]);
                             }
                         }
                     }
-                    return Arc::new(samples);
+
+                    if planes.is_empty() || planes[0].is_empty() {
+                        eprintln!("decode_audio_file: decoded no audio from: {}", path);
+                        return DecodedAudio::silent_fallback();
+                    }
+
+                    // A truncated final packet can leave channels ragged; trim
+                    // to the shortest so `frames` is valid for every channel.
+                    let frames = planes.iter().map(|p| p.len()).min().unwrap_or(0);
+                    let channels = planes.len();
+                    let mut samples = Vec::with_capacity(frames * channels);
+                    for plane in &planes {
+                        samples.extend_from_slice(&plane[..frames]);
+                    }
+                    return DecodedAudio { samples: Arc::new(samples), frames, channels };
                 }
                 eprintln!("decode_audio_file: Unsupported codec for: {}", path);
             } else {
@@ -158,7 +212,7 @@ pub fn decode_audio_file(path: &str) -> Arc<Vec<f32>> {
     } else {
         eprintln!("decode_audio_file: Failed to open file: {}", path);
     }
-    Arc::new(vec![0.0f32; 44100 * 5]) // silent fallback
+    DecodedAudio::silent_fallback()
 }
 
 #[cfg(test)]
@@ -183,5 +237,113 @@ mod tests {
         monitor.load_and_register("/non_existent_audio_file.wav");
 
         let _ = std::fs::remove_file(db_path);
+    }
+}
+
+#[cfg(test)]
+mod stereo_decode_tests {
+    use super::*;
+
+    /// Write a stereo WAV whose two channels carry DIFFERENT tones, so any
+    /// channel confusion is visible rather than averaged away.
+    fn write_stereo_wav(path: &str, left_hz: f32, right_hz: f32, seconds: f32) -> usize {
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 44100,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let frames = (44100.0 * seconds) as usize;
+        let mut w = hound::WavWriter::create(path, spec).unwrap();
+        for i in 0..frames {
+            let t = i as f32 / 44100.0;
+            let l = (2.0 * std::f32::consts::PI * left_hz * t).sin() * 0.5;
+            let r = (2.0 * std::f32::consts::PI * right_hz * t).sin() * 0.5;
+            w.write_sample((l * 32767.0) as i16).unwrap();
+            w.write_sample((r * 32767.0) as i16).unwrap();
+        }
+        w.finalize().unwrap();
+        frames
+    }
+
+    fn dominant_hz(samples: &[f32]) -> f32 {
+        let crossings = samples.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
+        crossings as f32 * 44100.0 / samples.len() as f32
+    }
+
+    /// A decoded stereo file must expose its frame count and channel layout
+    /// truthfully. Interleaving channels into one flat buffer and calling it a
+    /// mono stream is what made every stereo track play at 2x speed: the voice
+    /// advances one ELEMENT per output frame, so L,R,L,R is consumed as four
+    /// consecutive mono frames.
+    #[test]
+    fn test_stereo_decode_is_planar_with_channel_count() {
+        let path = std::env::temp_dir().join("nullherz_stereo_decode.wav");
+        let path = path.to_string_lossy().to_string();
+        let frames = write_stereo_wav(&path, 440.0, 880.0, 1.0);
+
+        let decoded = decode_audio_file(&path);
+
+        assert_eq!(
+            decoded.channels, 2,
+            "a 2-channel file must report 2 channels"
+        );
+        assert_eq!(
+            decoded.frames, frames,
+            "frame count must be per-channel frames, not total samples"
+        );
+        assert_eq!(decoded.samples.len(), frames * 2, "planar buffer holds every sample");
+
+        // Planar layout: channel 0 occupies the first `frames` slots, channel 1
+        // the next. Each must carry its OWN tone.
+        let left = &decoded.samples[..frames];
+        let right = &decoded.samples[frames..];
+        let left_hz = dominant_hz(left);
+        let right_hz = dominant_hz(right);
+
+        assert!(
+            (left_hz - 440.0).abs() < 5.0,
+            "left channel should be 440 Hz, measured {:.1} Hz",
+            left_hz
+        );
+        assert!(
+            (right_hz - 880.0).abs() < 10.0,
+            "right channel should be 880 Hz, measured {:.1} Hz",
+            right_hz
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A mono file must still decode to exactly one channel, unchanged.
+    #[test]
+    fn test_mono_decode_is_unchanged() {
+        let path = std::env::temp_dir().join("nullherz_mono_decode.wav");
+        let path = path.to_string_lossy().to_string();
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 44100,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let frames = 44100usize;
+        {
+            let mut w = hound::WavWriter::create(&path, spec).unwrap();
+            for i in 0..frames {
+                let v = (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 44100.0).sin() * 0.5;
+                w.write_sample((v * 32767.0) as i16).unwrap();
+            }
+            w.finalize().unwrap();
+        }
+
+        let decoded = decode_audio_file(&path);
+
+        assert_eq!(decoded.channels, 1);
+        assert_eq!(decoded.frames, frames);
+        assert_eq!(decoded.samples.len(), frames);
+        let hz = dominant_hz(&decoded.samples);
+        assert!((hz - 440.0).abs() < 5.0, "mono 440 Hz, measured {:.1}", hz);
+
+        let _ = std::fs::remove_file(&path);
     }
 }
