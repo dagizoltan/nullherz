@@ -190,9 +190,14 @@ impl TopologyCoordinator {
             TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
                 let n_idx = node_idx as usize;
                 let i_idx = input_idx as usize;
-                if n_idx < crate::MAX_NODES && i_idx < crate::MAX_CHANNELS {
+                // The conductor rejects out-of-range buffers before they get
+                // here; a survivor is a bug. Drop the mutation rather than
+                // clamp — clamping aliases a buffer some other edge owns.
+                debug_assert!(new_buffer_idx < crate::MAX_BUFFERS as u32,
+                    "UpdateEdge buffer {} escaped conductor validation", new_buffer_idx);
+                if n_idx < crate::MAX_NODES && i_idx < crate::MAX_CHANNELS && new_buffer_idx < crate::MAX_BUFFERS as u32 {
                     let topo = self.inactive_topology_mut();
-                    topo.routing[n_idx].input_indices[i_idx] = new_buffer_idx.min(crate::MAX_BUFFERS as u32 - 1);
+                    topo.routing[n_idx].input_indices[i_idx] = new_buffer_idx;
                     if i_idx >= topo.routing[n_idx].input_count {
                         topo.routing[n_idx].input_count = i_idx + 1;
                     }
@@ -201,9 +206,11 @@ impl TopologyCoordinator {
             TopologyMutation::UpdateOutputEdge { node_idx, output_idx, new_buffer_idx } => {
                 let n_idx = node_idx as usize;
                 let o_idx = output_idx as usize;
-                if n_idx < crate::MAX_NODES && o_idx < crate::MAX_CHANNELS {
+                debug_assert!(new_buffer_idx < crate::MAX_BUFFERS as u32,
+                    "UpdateOutputEdge buffer {} escaped conductor validation", new_buffer_idx);
+                if n_idx < crate::MAX_NODES && o_idx < crate::MAX_CHANNELS && new_buffer_idx < crate::MAX_BUFFERS as u32 {
                     let topo = self.inactive_topology_mut();
-                    topo.routing[n_idx].output_indices[o_idx] = new_buffer_idx.min(crate::MAX_BUFFERS as u32 - 1);
+                    topo.routing[n_idx].output_indices[o_idx] = new_buffer_idx;
                     if o_idx >= topo.routing[n_idx].output_count {
                         topo.routing[n_idx].output_count = o_idx + 1;
                     }

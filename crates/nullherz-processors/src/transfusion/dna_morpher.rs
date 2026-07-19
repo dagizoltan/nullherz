@@ -5,9 +5,13 @@ use std::sync::Arc;
 /// DnaMorpher Processor
 /// Performs high-dimensional interpolation (Slerp) between two DNA profiles
 /// to morph the spectral and rhythmic characteristics of a signal.
+/// Channels a deck strip carries; each needs its own overlap-add pipeline
+/// (the pipeline's input/output rings hold one signal's history).
+const STEREO_LANES: usize = 2;
+
 pub struct DnaMorpher {
     pub id: u64,
-    pipeline: SpectralPipeline,
+    pipelines: Vec<SpectralPipeline>,
 
     // Genetic Profiles
     pub(crate) dna_a: Arc<SoundDNA>,
@@ -28,7 +32,7 @@ impl DnaMorpher {
     pub fn new(id: u64, fft_size: usize) -> Self {
         Self {
             id,
-            pipeline: SpectralPipeline::new(fft_size),
+            pipelines: (0..STEREO_LANES).map(|_| SpectralPipeline::new(fft_size)).collect(),
             dna_a: Arc::new(SoundDNA::default()),
             dna_b: Arc::new(SoundDNA::default()),
             current_latent: [0.0; 16],
@@ -62,31 +66,41 @@ impl nullherz_traits::SignalProcessor for DnaMorpher {
 
         self.update_morph();
 
-        let input = inputs[0];
-        let output = &mut outputs[0];
         let latent = self.current_latent;
+        let n_ch = inputs.len().min(outputs.len());
+        for ch in 0..n_ch {
+            match self.pipelines.get_mut(ch) {
+                Some(pipeline) => pipeline.process(inputs[ch], outputs[ch], |re, im, n, _window, _fft| {
+                    let bins_per_map_entry = n / 2 / 16;
+                    if bins_per_map_entry == 0 { return; }
 
-        self.pipeline.process(input, output, |re, im, n, _window, _fft| {
-            let bins_per_map_entry = n / 2 / 16;
-            if bins_per_map_entry == 0 { return; }
+                    for i in 0..16 {
+                        let target_mag = latent[i].max(0.0).min(1.0);
+                        let start_bin = i * bins_per_map_entry;
+                        let end_bin = (i + 1) * bins_per_map_entry;
 
-            for i in 0..16 {
-                let target_mag = latent[i].max(0.0).min(1.0);
-                let start_bin = i * bins_per_map_entry;
-                let end_bin = (i + 1) * bins_per_map_entry;
-
-                for bin in start_bin..end_bin {
-                    let current_mag = (re[bin] * re[bin] + im[bin] * im[bin]).sqrt().max(1e-9);
-                    let scale = target_mag / current_mag;
-                    re[bin] *= scale;
-                    im[bin] *= scale;
+                        for bin in start_bin..end_bin {
+                            let current_mag = (re[bin] * re[bin] + im[bin] * im[bin]).sqrt().max(1e-9);
+                            let scale = target_mag / current_mag;
+                            re[bin] *= scale;
+                            im[bin] *= scale;
+                        }
+                    }
+                }),
+                // Wired wider than we have pipelines: dry passthrough rather
+                // than starving the channel.
+                None => {
+                    let n = inputs[ch].len().min(outputs[ch].len());
+                    outputs[ch][..n].copy_from_slice(&inputs[ch][..n]);
                 }
             }
-        });
+        }
     }
 
     fn reset(&mut self) {
-        self.pipeline.reset();
+        for pipeline in self.pipelines.iter_mut() {
+            pipeline.reset();
+        }
     }
 }
 

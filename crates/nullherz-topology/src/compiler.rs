@@ -10,6 +10,23 @@ impl GraphCompiler {
         let n = topo.node_count;
         if n == 0 { return Ok(plan); }
 
+        // Refuse out-of-range buffer indices instead of %-wrapping them below:
+        // a wrapped index aliases another edge's buffer and corrupts audio
+        // with no error. This runs off-thread, so failing the compile is free.
+        for i in 0..n.min(MAX_NODES) {
+            let r = &topo.routing[i];
+            let max_buf = nullherz_traits::MAX_BUFFERS as u32;
+            let bad = r.input_indices.iter().take(r.input_count.min(nullherz_traits::MAX_CHANNELS))
+                .chain(r.output_indices.iter().take(r.output_count.min(nullherz_traits::MAX_CHANNELS)))
+                .chain(r.sidechain_indices.iter().take(r.sidechain_count.min(nullherz_traits::MAX_CHANNELS)))
+                .find(|&&v| v >= max_buf);
+            if let Some(&v) = bad {
+                return Err(AudioError::ConfigurationError(format!(
+                    "node {} routes buffer {} out of range (MAX_BUFFERS = {})", i, v, max_buf
+                )));
+            }
+        }
+
         // PERF-08: Use Boxed arrays to avoid massive stack pressure (~96KB previously)
         let mut in_degree = Box::new([0usize; MAX_NODES]);
         let mut adj = Box::new([[0usize; MAX_NODES]; MAX_NODES]);
@@ -219,7 +236,7 @@ impl GraphCompiler {
         // Since topo.routing[v].input_indices[i] tells us the virtual buffer,
         // and we can find which node writes to that virtual buffer.
 
-        let mut v_to_producer = [None; MAX_NODES];
+        let mut v_to_producer = [None; nullherz_traits::MAX_BUFFERS];
         for j in 0..n {
             let routing_j = &topo.routing[j];
             for k in 0..routing_j.output_count {

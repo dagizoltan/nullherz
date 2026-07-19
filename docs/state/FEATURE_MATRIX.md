@@ -55,7 +55,7 @@
 | **Soft Fallback** | ✅ | Heartbeat-monitored instant swap to bypass node upon DSP failure; escalation to global Safe Mode. |
 | **Spectral Processor** | ✅ | Hardened FFT overlap-add with exact COLA-normalized synthesis window. Supports variable block sizes up to 1024 samples. |
 | **KeySync Pitch Shift** | ✅ | Real phase-vocoder pitch shifter with per-bin phase tracking (level preserved on shift). |
-| **Planar Stereo Playback** | ✅ | Planar sample buffers end to end; frame-counted playhead; per-plane crop/stretch; stereo deck strips with private L/R buffers (`MAX_BUFFERS = 128` edge address space). |
+| **Planar Stereo Playback** | ✅ | Planar sample buffers end to end; frame-counted playhead; per-plane crop/stretch; deck strips stereo at every hop with per-channel DSP state (vocoder lanes, kernel banks) and private L/R buffers (`MAX_BUFFERS = 128` edge address space). Channel identity covered by full-chain regression tests. |
 | **OLA Time-Stretch** | ✅ | Overlap-add `time_stretch` kernel with corrected ratio semantics (`audio-dsp/util.rs`). |
 | **Transient Detection** | ✅ | Spectral-flux + RMS onset/transient detectors powering editor chop and analysis. |
 | **Parallel Graph Execution** | ✅ | Static stage assignment `TaskPool`; safety covered by a Kani proof harness (`kani-verify` feature). |

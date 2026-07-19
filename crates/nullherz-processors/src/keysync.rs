@@ -3,35 +3,19 @@ use audio_dsp::spectral::SpectralPipeline;
 
 const TWO_PI: f32 = 2.0 * std::f32::consts::PI;
 
-/// Phase-vocoder pitch shifter.
+/// Channels a deck strip carries. Lanes beyond the wired channel count are
+/// idle (the pipeline only runs when process() hands them a buffer).
+const STEREO_LANES: usize = 2;
+
+/// One channel's worth of phase-vocoder state.
 ///
-/// Shifting a spectrum by moving bin MAGNITUDES alone does not work: each bin's
-/// phase must also advance at the rate its new frequency implies, or successive
-/// overlapping frames sum incoherently and cancel. That cancellation is not
-/// subtle — it cost 51-85% of the signal level, varying erratically with the
-/// interval (see the regression test) — and it also smears transients.
-///
-/// So this tracks per-bin phase across frames: the deviation from each bin's
-/// expected advance gives the partial's true frequency, that frequency is
-/// scaled by the pitch ratio, and the synthesis phase is accumulated from it.
-///
-/// Frequencies are carried in BIN units rather than Hz, which makes the whole
-/// thing sample-rate independent and collapses the synthesis phase increment to
-/// `2*pi * true_bin / oversampling`.
-///
-/// KNOWN LIMITATION: bins are remapped by rounding to the nearest target, so a
-/// partial's bins can still drift in relative phase and the level sags on large
-/// upward shifts — measured RMS runs 0.64 at +5 and +12 semitones against
-/// 0.84-0.96 elsewhere (worst case about -3.9 dB). Classic identity phase
-/// locking does NOT fix this: it assumes bin frequencies stay put, so applied
-/// after a remap it detunes the result (measured +5 st landing at 606 Hz
-/// instead of 587). Closing the gap properly means shifting by time-stretch
-/// plus resampling rather than by bin remapping.
-pub struct KeySyncProcessor {
-    pub id: u64,
+/// Per-channel state is not an optimization but a correctness requirement:
+/// `prev_phase`/`sum_phase` track a single signal's phase trajectory across
+/// frames. Feeding two channels through one lane interleaves their phases and
+/// the frequency estimate (the delta between successive frames) becomes
+/// garbage for both.
+struct VocoderLane {
     pipeline: SpectralPipeline,
-    semitones: f32,
-    ratio: f32,
     scratch_re: Vec<f32>,
     scratch_im: Vec<f32>,
     /// Per-bin analysis phase from the previous frame.
@@ -46,14 +30,11 @@ pub struct KeySyncProcessor {
     syn_freq: Vec<f32>,
 }
 
-impl KeySyncProcessor {
-    pub fn new(id: u64, fft_size: usize) -> Self {
+impl VocoderLane {
+    fn new(fft_size: usize) -> Self {
         let bins = fft_size / 2 + 1;
         Self {
-            id,
             pipeline: SpectralPipeline::new(fft_size),
-            semitones: 0.0,
-            ratio: 1.0,
             scratch_re: vec![0.0; fft_size],
             scratch_im: vec![0.0; fft_size],
             prev_phase: vec![0.0; bins],
@@ -65,37 +46,17 @@ impl KeySyncProcessor {
         }
     }
 
-    pub fn set_semitones(&mut self, semitones: f32) {
-        if semitones == self.semitones {
-            return;
-        }
-        self.semitones = semitones;
-        self.ratio = 2.0f32.powf(semitones / 12.0);
-        // The accumulated phase describes the OLD ratio; carrying it across a
-        // change makes the first frames after the change beat against
-        // themselves. Start the new interval from a clean slate.
-        self.clear_phase_state();
-    }
-
     fn clear_phase_state(&mut self) {
         self.prev_phase.fill(0.0);
         self.sum_phase.fill(0.0);
     }
-}
 
-/// Wrap a phase deviation into (-pi, pi].
-#[inline]
-fn wrap_phase(x: f32) -> f32 {
-    x - TWO_PI * (x / TWO_PI).round()
-}
+    fn reset(&mut self) {
+        self.pipeline.reset();
+        self.clear_phase_state();
+    }
 
-impl nullherz_traits::SignalProcessor for KeySyncProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
-        if inputs.is_empty() || outputs.is_empty() { return; }
-        let input = inputs[0];
-        let output = &mut *outputs[0];
-
-        let ratio = self.ratio;
+    fn process(&mut self, input: &[f32], output: &mut [f32], ratio: f32) {
         // Frames per window: the phase advance a stationary bin accrues between
         // hops is 2*pi*k/oversampling.
         let oversampling = (self.pipeline.fft.size / self.pipeline.hop_size.max(1)) as f32;
@@ -189,15 +150,99 @@ impl nullherz_traits::SignalProcessor for KeySyncProcessor {
             im.copy_from_slice(&scratch_im[..n]);
         });
     }
+}
+
+/// Phase-vocoder pitch shifter.
+///
+/// Shifting a spectrum by moving bin MAGNITUDES alone does not work: each bin's
+/// phase must also advance at the rate its new frequency implies, or successive
+/// overlapping frames sum incoherently and cancel. That cancellation is not
+/// subtle — it cost 51-85% of the signal level, varying erratically with the
+/// interval (see the regression test) — and it also smears transients.
+///
+/// So this tracks per-bin phase across frames: the deviation from each bin's
+/// expected advance gives the partial's true frequency, that frequency is
+/// scaled by the pitch ratio, and the synthesis phase is accumulated from it.
+///
+/// Frequencies are carried in BIN units rather than Hz, which makes the whole
+/// thing sample-rate independent and collapses the synthesis phase increment to
+/// `2*pi * true_bin / oversampling`.
+///
+/// Stereo: one `VocoderLane` per channel — phase state is per-signal, so
+/// channels must never share a lane.
+///
+/// KNOWN LIMITATION: bins are remapped by rounding to the nearest target, so a
+/// partial's bins can still drift in relative phase and the level sags on large
+/// upward shifts — measured RMS runs 0.64 at +5 and +12 semitones against
+/// 0.84-0.96 elsewhere (worst case about -3.9 dB). Classic identity phase
+/// locking does NOT fix this: it assumes bin frequencies stay put, so applied
+/// after a remap it detunes the result (measured +5 st landing at 606 Hz
+/// instead of 587). Closing the gap properly means shifting by time-stretch
+/// plus resampling rather than by bin remapping.
+pub struct KeySyncProcessor {
+    pub id: u64,
+    semitones: f32,
+    ratio: f32,
+    lanes: Vec<VocoderLane>,
+}
+
+impl KeySyncProcessor {
+    pub fn new(id: u64, fft_size: usize) -> Self {
+        Self {
+            id,
+            semitones: 0.0,
+            ratio: 1.0,
+            lanes: (0..STEREO_LANES).map(|_| VocoderLane::new(fft_size)).collect(),
+        }
+    }
+
+    pub fn set_semitones(&mut self, semitones: f32) {
+        if semitones == self.semitones {
+            return;
+        }
+        self.semitones = semitones;
+        self.ratio = 2.0f32.powf(semitones / 12.0);
+        // The accumulated phase describes the OLD ratio; carrying it across a
+        // change makes the first frames after the change beat against
+        // themselves. Start the new interval from a clean slate.
+        for lane in self.lanes.iter_mut() {
+            lane.clear_phase_state();
+        }
+    }
+}
+
+/// Wrap a phase deviation into (-pi, pi].
+#[inline]
+fn wrap_phase(x: f32) -> f32 {
+    x - TWO_PI * (x / TWO_PI).round()
+}
+
+impl nullherz_traits::SignalProcessor for KeySyncProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
+        let n_ch = inputs.len().min(outputs.len());
+        for ch in 0..n_ch {
+            match self.lanes.get_mut(ch) {
+                Some(lane) => lane.process(inputs[ch], outputs[ch], self.ratio),
+                // Wired wider than we have lanes: pass through unshifted
+                // rather than starve the channel with silence.
+                None => {
+                    let n = inputs[ch].len().min(outputs[ch].len());
+                    outputs[ch][..n].copy_from_slice(&inputs[ch][..n]);
+                }
+            }
+        }
+    }
 
     fn setup(&mut self, _config: AudioConfig) {
-        self.pipeline.reset();
-        self.clear_phase_state();
+        for lane in self.lanes.iter_mut() {
+            lane.reset();
+        }
     }
 
     fn reset(&mut self) {
-        self.pipeline.reset();
-        self.clear_phase_state();
+        for lane in self.lanes.iter_mut() {
+            lane.reset();
+        }
     }
 }
 
@@ -343,5 +388,54 @@ mod keysync_tests {
                 cents
             );
         }
+    }
+
+    /// Stereo independence: a hot left channel must not bleed into a silent
+    /// right channel, and the right channel's silence must not corrupt the
+    /// left channel's phase tracking (they were one shared lane before).
+    #[test]
+    fn test_stereo_channels_are_independent() {
+        const SR: f32 = 44100.0;
+        const BLOCK: usize = 128;
+        const BLOCKS: usize = 260;
+        const WARMUP_BLOCKS: usize = 60;
+
+        let mut p = KeySyncProcessor::new(0, 1024);
+        AudioProcessor::set_parameter(&mut p, 0, 7.0, 0);
+
+        let mut left_out = Vec::new();
+        let mut right_out = Vec::new();
+
+        for b in 0..BLOCKS {
+            let base = (b * BLOCK) as f32;
+            let l_in: Vec<f32> = (0..BLOCK)
+                .map(|i| (TWO_PI * 440.0 * (base + i as f32) / SR).sin() * 0.5)
+                .collect();
+            let r_in = vec![0.0f32; BLOCK];
+            let mut l_buf = vec![0.0f32; BLOCK];
+            let mut r_buf = vec![0.0f32; BLOCK];
+            {
+                let ins: [&[f32]; 2] = [&l_in, &r_in];
+                let (l_slot, r_slot) = (&mut l_buf[..], &mut r_buf[..]);
+                let mut outs: [&mut [f32]; 2] = [l_slot, r_slot];
+                let mut ctx = ProcessContext {
+                    transport: None,
+                    host: None,
+                    sub_block_offset: 0,
+                    is_last_sub_block: true,
+                };
+                p.process(&ins, &mut outs, &mut ctx);
+            }
+            if b >= WARMUP_BLOCKS {
+                left_out.extend_from_slice(&l_buf);
+                right_out.extend_from_slice(&r_buf);
+            }
+        }
+
+        let rms = |s: &[f32]| (s.iter().map(|v| (v * v) as f64).sum::<f64>() / s.len() as f64).sqrt() as f32;
+        let l_rms = rms(&left_out);
+        let r_rms = rms(&right_out);
+        assert!(l_rms > 0.2, "left channel must survive the shift, rms {:.4}", l_rms);
+        assert!(r_rms < 1e-4, "silent right channel must stay silent, rms {:.6}", r_rms);
     }
 }

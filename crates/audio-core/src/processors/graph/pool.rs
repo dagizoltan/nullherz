@@ -138,14 +138,18 @@ impl TaskPool {
                                 *job.sidechain_indices.get(i - input_count).unwrap_or(&0)
                             };
 
-                            if p_idx >= crate::MAX_NODES {
-                                let x_idx = p_idx - crate::MAX_NODES;
+                            // The crossfade-override sentinel space starts at
+                            // MAX_BUFFERS, not MAX_NODES: real buffer ids run
+                            // 0..MAX_BUFFERS. Splitting at MAX_NODES misread
+                            // every buffer id >= 64 as a crossfade slot.
+                            if p_idx >= crate::MAX_BUFFERS {
+                                let x_idx = p_idx - crate::MAX_BUFFERS;
                                 if x_idx < crate::MAX_CROSSFADE_BUFFERS {
                                     // SAFETY: x_buffers_ptr is valid for MAX_CROSSFADE_BUFFERS AudioBlocks as pre-allocated by ProcessorGraph.
                                     unsafe { node_inputs_storage[i] = &(&(*job.x_buffers_ptr.add(x_idx)).data)[..num_samples]; }
                                 }
-                            } else if p_idx < crate::MAX_NODES {
-                                // SAFETY: buffers_ptr is valid for MAX_NODES AudioBlocks as pre-allocated by ProcessorGraph.
+                            } else {
+                                // SAFETY: buffers_ptr is valid for MAX_BUFFERS AudioBlocks as pre-allocated by ProcessorGraph.
                                 unsafe { node_inputs_storage[i] = &(&(*job.buffers_ptr.add(p_idx)).data)[offset..offset + num_samples]; }
                             }
                         }
@@ -154,7 +158,7 @@ impl TaskPool {
                         let output_count = job.output_count.min(crate::MAX_CHANNELS);
                         for (i, output_storage) in node_outputs_reconstructed.iter_mut().enumerate().take(output_count) {
                             let p_idx = *job.output_indices.get(i).unwrap_or(&0);
-                            if p_idx < crate::MAX_NODES {
+                            if p_idx < crate::MAX_BUFFERS {
                                 // SAFETY: buffers_ptr is valid and unique for each index in the current stage.
                                 unsafe {
                                     *output_storage = std::slice::from_raw_parts_mut((*buffers_ptr.add(p_idx)).data.as_mut_ptr().add(offset), num_samples);

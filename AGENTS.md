@@ -40,7 +40,8 @@ Any code that runs within the `process()` or `process_block()` path of a `Signal
 *   **Denormal Protection**: Ensure FTZ (Flush-to-Zero) and DAZ (Denormals-Are-Zero) flags are respected.
 *   **SIMD Alignment**: All audio buffers must be 64-byte aligned (use `AudioBlock` or `AlignedBuffer`).
 *   **Sample Accuracy**: Commands must be timestamped relative to `Transport.absolute_samples`.
-*   **Separate Address Spaces**: Node indices (`< MAX_NODES = 64`) and audio-buffer/edge indices (`< MAX_BUFFERS = 128`) are distinct address spaces. Allocate both through the `IdAllocator`; never derive a buffer index from a node index — out-of-range buffer indices are clamped/wrapped *silently*, aliasing two edges onto one buffer with no error.
+*   **Separate Address Spaces**: Node indices (`< MAX_NODES = 64`) and audio-buffer/edge indices (`< MAX_BUFFERS = 128`) are distinct address spaces. Allocate both through the `IdAllocator`; never derive a buffer index from a node index, and never bounds-check a buffer index against `MAX_NODES` (the worker pool did — every buffer ≥ 64 was silently dropped or misread as a crossfade slot). Out-of-range buffer indices are rejected at the conductor and compiler; do not reintroduce clamping.
+*   **Per-Channel DSP State**: Stereo strips run both channels through one processor node. Any processor with per-signal state (filter history, FFT overlap rings, vocoder phase) must keep one state instance per channel (`MultiChannelDspProcessor`, vocoder lanes) — sharing state across channels corrupts both.
 *   **Planar Sample Layout**: Decoded sample buffers are planar (channel `c` occupies `buffer[c*frames .. (c+1)*frames]`); `SampleMetadata.total_samples` counts frames *per channel*. Any code slicing sample buffers must map per plane.
 
 ---

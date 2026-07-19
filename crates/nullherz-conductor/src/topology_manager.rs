@@ -161,6 +161,14 @@ impl TopologyManager {
                 }
             }
             Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge {   node_idx, input_idx, new_buffer_idx }) => {
+                // Out-of-range buffer ids used to be clamped/wrapped downstream,
+                // silently aliasing two edges onto one buffer. Reject them here,
+                // loudly, where returning an error is free.
+                if new_buffer_idx >= nullherz_traits::MAX_BUFFERS as u32 {
+                    eprintln!("TopologyManager: REJECTED UpdateEdge node {} input {}: buffer {} out of range (MAX_BUFFERS = {})",
+                        node_idx, input_idx, new_buffer_idx, nullherz_traits::MAX_BUFFERS);
+                    return false;
+                }
                 let n_idx = node_idx as usize;
                 let i_idx = input_idx as usize;
                 if n_idx < nullherz_traits::MAX_NODES && i_idx < nullherz_traits::MAX_CHANNELS {
@@ -173,6 +181,11 @@ impl TopologyManager {
                 return true;
             }
             Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge {   node_idx, output_idx, new_buffer_idx }) => {
+                if new_buffer_idx >= nullherz_traits::MAX_BUFFERS as u32 {
+                    eprintln!("TopologyManager: REJECTED UpdateOutputEdge node {} output {}: buffer {} out of range (MAX_BUFFERS = {})",
+                        node_idx, output_idx, new_buffer_idx, nullherz_traits::MAX_BUFFERS);
+                    return false;
+                }
                 let n_idx = node_idx as usize;
                 let o_idx = output_idx as usize;
                 if n_idx < nullherz_traits::MAX_NODES && o_idx < nullherz_traits::MAX_CHANNELS {
