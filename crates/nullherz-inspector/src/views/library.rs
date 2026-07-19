@@ -87,8 +87,16 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             });
             ui.add_space(theme.space_sm);
 
+            // Height budget: the TRACK LIST owns every pixel the inspector
+            // doesn't need. Without an explicit budget the scroll area
+            // auto-shrinks and the inspector floats directly under the last
+            // row — the panel showed a handful of tracks over dead space.
+            let inspector_open = app.library.selected_library_track.is_some();
+            let inspector_budget = if inspector_open { 264.0 } else { 0.0 };
+            let list_height = (ui.available_height() - inspector_budget).max(96.0);
+
             // Track List
-            render_track_list(app, ui);
+            render_track_list(app, ui, list_height);
 
             if let Some(track_id) = app.library.selected_library_track {
                 ui.add_space(theme.space_sm);
@@ -184,7 +192,10 @@ fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
     }
 }
 
-fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
+/// Compact row height: ~27 rows visible in a 700px sidebar.
+const TRACK_ROW_H: f32 = 26.0;
+
+fn render_track_list(app: &mut InspectorApp, ui: &mut Ui, list_height: f32) {
     let theme = app.theme;
     if app.library.library_needs_refresh
         && app.library.bg_library_loader.is_none() {
@@ -198,9 +209,24 @@ fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
         displayed_tracks.retain(|t| t.title.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q));
     }
 
-    ScrollArea::vertical().id_source("lib_scroll").show(ui, |ui| {
-        for track in &displayed_tracks {
-            let (rect, res) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), egui::Sense::click());
+    ui.label(
+        RichText::new(format!("{} TRACKS", displayed_tracks.len()))
+            .size(theme.type_caption)
+            .color(theme.text_secondary),
+    );
+    ui.add_space(theme.space_xs);
+
+    // Virtualized (show_rows): only visible rows are laid out, so a large
+    // library scrolls at full frame rate. auto_shrink off: the list OWNS its
+    // full budget even when short — that is what fills the sidebar.
+    ScrollArea::vertical()
+        .id_source("lib_scroll")
+        .max_height(list_height)
+        .min_scrolled_height(list_height)
+        .auto_shrink([false, false])
+        .show_rows(ui, TRACK_ROW_H, displayed_tracks.len(), |ui, row_range| {
+        for track in &displayed_tracks[row_range] {
+            let (rect, res) = ui.allocate_exact_size(egui::vec2(ui.available_width(), TRACK_ROW_H), egui::Sense::click());
 
             // Hover effect
             let hover_alpha = ui.ctx().animate_bool(res.id, res.hovered());
