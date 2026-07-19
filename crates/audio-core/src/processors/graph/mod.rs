@@ -43,7 +43,7 @@ pub struct ProcessorGraph {
 
 impl ProcessorGraph {
     pub fn new() -> Self {
-        let mut v2p = [0u32; crate::MAX_NODES];
+        let mut v2p = [0u32; crate::MAX_BUFFERS];
         for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
         let topo = GraphTopology {
             routing: [NodeRouting {
@@ -574,7 +574,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         // Check progression
         let state = graph.topology_coordinator.topologies[topo_idx].crossfades[0].unwrap();
         assert_eq!(state.remaining_samples, 50);
-        assert_eq!(block_x_map[1][0], 64); // 64 + x_idx
+        assert_eq!(block_x_map[1][0], crate::MAX_BUFFERS as u8); // MAX_BUFFERS + x_idx
 
         // Check buffer content (halfway should be ~1.5)
         assert_eq!(graph.buffer_pool.crossfade_buffers[0].data[0], 1.0);

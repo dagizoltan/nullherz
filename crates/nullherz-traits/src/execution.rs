@@ -43,6 +43,14 @@ pub trait ExecutionProvider: Send + Sync {
 pub const SIMD_ALIGNMENT: usize = 64;
 pub const MAX_BLOCK_SIZE: usize = 256;
 pub const MAX_NODES: usize = 64;
+/// Audio-buffer (edge) address space, decoupled from MAX_NODES. A stereo
+/// console needs roughly two buffers per strip stage: 4 decks x 8 stages x 2
+/// channels plus buses and master already exceeds 64, and the graph clamps or
+/// wraps out-of-range buffer indices SILENTLY (aliasing two edges onto one
+/// buffer — instant corruption, no error). Kept within u8 sentinel range:
+/// `block_x_map` encodes crossfade overrides as `MAX_BUFFERS + k` in a u8, so
+/// MAX_BUFFERS + MAX_CROSSFADE_BUFFERS must stay <= 255.
+pub const MAX_BUFFERS: usize = 128;
 pub const MAX_CHANNELS: usize = 16;
 pub const MAX_CROSSFADE_BUFFERS: usize = 8;
 pub const MAX_MUTATIONS: usize = 64;

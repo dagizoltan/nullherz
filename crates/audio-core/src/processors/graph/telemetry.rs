@@ -23,7 +23,7 @@ impl GraphTelemetry {
     pub fn update_peak_levels(
         &self,
         topo: &GraphTopology,
-        buffers: &[AudioBlock; crate::MAX_NODES],
+        buffers: &[AudioBlock; crate::MAX_BUFFERS],
         offset: usize,
         num_samples: usize
     ) {
@@ -32,8 +32,8 @@ impl GraphTelemetry {
             let mut node_peak = if offset == 0 { 0.0f32 } else { f32::from_bits(self.peak_levels[n_idx].load(Ordering::Relaxed)) };
 
             for o_idx in 0..routing.output_count {
-                let v_out = routing.output_indices.get(o_idx).copied().unwrap_or(0).min(crate::MAX_NODES as u32 - 1) as usize;
-                let p_idx = topo.virtual_to_physical.get(v_out).copied().unwrap_or(0).min(crate::MAX_NODES as u32 - 1) as usize;
+                let v_out = routing.output_indices.get(o_idx).copied().unwrap_or(0).min(crate::MAX_BUFFERS as u32 - 1) as usize;
+                let p_idx = topo.virtual_to_physical.get(v_out).copied().unwrap_or(0).min(crate::MAX_BUFFERS as u32 - 1) as usize;
                 let data = &buffers[p_idx].data[offset..offset + num_samples];
 
                 use wide::*;

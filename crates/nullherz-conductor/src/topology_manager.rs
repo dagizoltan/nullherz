@@ -42,7 +42,7 @@ impl Default for TopologyManager {
 
 impl TopologyManager {
     pub fn new() -> Self {
-        let mut v2p = [0u32; nullherz_traits::MAX_NODES];
+        let mut v2p = [0u32; nullherz_traits::MAX_BUFFERS];
         for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
 
         Self {

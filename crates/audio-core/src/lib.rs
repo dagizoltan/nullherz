@@ -18,7 +18,7 @@ pub use nullherz_traits::telemetry::Telemetry;
 pub use nullherz_traits::error::AudioError;
 
 pub use nullherz_traits::{
-    AudioConfig, Transport, MAX_CHANNELS, MAX_NODES,
+    AudioConfig, Transport, MAX_BUFFERS, MAX_CHANNELS, MAX_NODES,
     MAX_CROSSFADE_BUFFERS, MAX_MUTATIONS, DEFAULT_WORKER_COUNT, MAX_COMMANDS_PER_BLOCK
 };
 
