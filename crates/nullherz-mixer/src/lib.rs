@@ -18,6 +18,7 @@ pub struct DeckNodes {
     pub keysync_id: u32,
     pub stereo_util_id: u32,
     pub dna_morph_id: Option<u32>,
+    pub sequencer_id: u32,
 }
 
 #[derive(Default)]
@@ -167,6 +168,7 @@ impl MixerManager {
         self.node_names.insert(format!("deck_{}_sampler", id_lower), nodes.sampler_id);
         self.node_names.insert(format!("deck_{}_gain", id_lower), nodes.gain_id);
         self.node_names.insert(format!("deck_{}_filter", id_lower), nodes.filter_id);
+        self.node_names.insert(format!("deck_{}_sequencer", id_lower), nodes.sequencer_id);
         commands
     }
 

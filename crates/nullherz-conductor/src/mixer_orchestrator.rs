@@ -58,9 +58,16 @@ impl MixerOrchestrator {
                                 println!("MixerOrchestrator: DNA-Aware Gain: Compensing by factor {}", energy_compensation);
                             }
 
-                            // Groove Transfusion: Apply rhythmic micro-timing to associated sequencer
-                            let seq_node_idx = nullherz_traits::NodeConventions::sequencer_for_deck(*deck_id);
-                            translated.extend(crate::pattern_manager::DnaSequencer::apply_groove(&track.metadata.dna.rhythmic, seq_node_idx, 0));
+                            // Groove Transfusion: Apply rhythmic micro-timing to the
+                            // deck's sequencer node. Resolve the REAL node index by
+                            // name — NodeConventions sequencer ids (70-73) are logical
+                            // sentinels >= MAX_NODES, and commands aimed at them are
+                            // silently dropped by the engine.
+                            if let Some(&seq_node_idx) = mixer_manager.node_names.get(&format!("deck_{}_sequencer", deck_id.to_lowercase())) {
+                                translated.extend(crate::pattern_manager::DnaSequencer::apply_groove(&track.metadata.dna.rhythmic, seq_node_idx, 0));
+                            } else {
+                                eprintln!("MixerOrchestrator: deck {} has no sequencer node; groove transfusion skipped.", deck_id);
+                            }
 
                             // Formant-Driven EQ: Automatically "de-ess" or "enhance" based on formant peaks
                             // Formant peaks are (Freq, Q, Gain)

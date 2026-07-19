@@ -90,6 +90,17 @@ pub fn create_dj_deck(
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: cue_gain_r_id, input_idx: 0, new_buffer_idx: target_r as u32 }));
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: cue_gain_r_id, output_idx: 0, new_buffer_idx: config.cue_r as u32 }));
 
+    // DECK SEQUENCER — trigger generator for DNA groove transfusion and
+    // patterns. Not part of the audio path, but it MUST have an output edge:
+    // a node with no output buffers gets zero-length outputs and its
+    // process() early-returns, so it would never tick. Nothing reads the
+    // buffer. (The old design pointed groove commands at the LOGICAL
+    // sentinel ids 70-73, which no node backed — dropped silently.)
+    let sequencer_id = id_allocator.allocate_node_id();
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: sequencer_id, processor_type_id: ProcessorTypeId::SEQUENCER }));
+    let seq_tick_buf = id_allocator.allocate_buffer_id(1);
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: sequencer_id, output_idx: 0, new_buffer_idx: seq_tick_buf }));
+
     let nodes = crate::DeckNodes {
         sampler_id: resample_id,
         out_l: target_l as u32,
@@ -100,6 +111,7 @@ pub fn create_dj_deck(
         keysync_id,
         stereo_util_id,
         dna_morph_id: Some(dna_morph_id),
+        sequencer_id,
     };
 
     (commands, nodes)
