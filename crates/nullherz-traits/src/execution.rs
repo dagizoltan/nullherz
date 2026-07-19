@@ -45,7 +45,7 @@ pub const MAX_BLOCK_SIZE: usize = 256;
 pub const MAX_NODES: usize = 64;
 pub const MAX_CHANNELS: usize = 16;
 pub const MAX_CROSSFADE_BUFFERS: usize = 8;
-pub const MAX_MUTATIONS: usize = 16;
+pub const MAX_MUTATIONS: usize = 64;
 pub const DEFAULT_WORKER_COUNT: usize = 4;
 pub const MAX_COMMANDS_PER_BLOCK: usize = 256;
 
