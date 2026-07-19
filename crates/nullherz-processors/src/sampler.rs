@@ -309,6 +309,12 @@ impl SamplerProcessor {
     pub fn apply_command_with_context(&mut self, command: &nullherz_traits::ProcessorCommand, context: Option<&nullherz_traits::ProcessContext>) {
         use nullherz_traits::{Command, PerformanceCommand};
         match *command {
+            // Bus-delivered parameters (playback rate, quantize, slicer,
+            // grid). The sampler had NO SetParam arm, so every parameter
+            // sent over the command bus to a sampler was silently dropped.
+            Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, .. }) if target_id == self.id => {
+                self.set_parameter(param_id, value);
+            }
             Command::Performance(PerformanceCommand::JumpToHotCue { node_idx, cue_idx }) if node_idx as u64 == self.id => {
                 let offset = if let Some(ref metadata) = self.metadata {
                     metadata.hot_cues.get(cue_idx as usize).and_then(|&c| c)

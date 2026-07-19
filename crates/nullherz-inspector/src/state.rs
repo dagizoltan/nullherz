@@ -16,7 +16,12 @@ pub struct MixerState {
     pub channel_personality_organic: [f32; 4],
     pub channel_personality_warm: [f32; 4],
     pub channel_personality_aggressive: [f32; 4],
+    /// Deck tempo-sync (the sampler's quantize/BPM-lock). Engine default is
+    /// ON, so the UI must boot showing ON.
     pub channel_sync: [bool; 4],
+    /// Slip mode per deck — its own state. (The player view used to reuse
+    /// channel_sync for slip, so toggling slip flipped the console's S badge.)
+    pub channel_slip: [bool; 4],
     pub quantize_enabled: bool,
     pub master_gain: f32,
     pub crossfader_pos: f32,
@@ -48,7 +53,8 @@ impl Default for MixerState {
             channel_personality_organic: [0.0; 4],
             channel_personality_warm: [0.0; 4],
             channel_personality_aggressive: [0.0; 4],
-            channel_sync: [false; 4],
+            channel_sync: [true; 4],
+            channel_slip: [false; 4],
             quantize_enabled: true,
             master_gain: 1.0,
             crossfader_pos: 0.5,
