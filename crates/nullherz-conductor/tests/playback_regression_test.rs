@@ -101,8 +101,9 @@ fn run_deck_playback(deck: char) -> (f32, f32, Option<u64>, u64) {
     // (Firing PlayNode into a half-built graph loses the fire-once broadcast
     // to DummyProcessors — see docs/system/ transport ordering note.)
     //
-    // Nodes at indices >= MAX_NODES are excluded: the graph silently drops
-    // them (known defect — the preview node sits at 111 with MAX_NODES = 64).
+    // The >= MAX_NODES filter is pure defense now: every bootstrap node,
+    // including the preview sampler, has a legal index. (The preview node
+    // used to sit at the LOGICAL id 111 and was silently dropped.)
     let expected_nodes = conductor
         .topology_manager
         .active_node_types
@@ -601,6 +602,88 @@ fn test_left_only_source_stays_left() {
         l_peak, r_peak
     );
     assert!(limiter_peak > AUDIBLE, "left sum hot but master limiter silent (peak {:.6})", limiter_peak);
+}
+
+/// Library pre-listen must be audible: the Preview command routes a sample to
+/// the preview node, which mixes into the master sums.
+///
+/// Regression: the preview node was created at NodeConventions::PREVIEW (111,
+/// a LOGICAL id >= MAX_NODES), so the graph silently dropped it and preview
+/// never made a sound. It now gets a real allocated index; the conductor
+/// translates the sentinel.
+#[test]
+fn test_preview_command_is_audible() {
+    let mut conductor = Conductor::with_library_path(":memory:");
+    let mut context = conductor.setup_engine();
+    conductor.bootstrap_4channel_mixer();
+
+    let tone_id = 8_800;
+    register_tone(&conductor, tone_id, 440.0);
+
+    conductor
+        .start_backend(AudioBackendType::Threaded)
+        .expect("threaded backend must start without hardware");
+
+    let expected_nodes = conductor
+        .topology_manager
+        .active_node_types
+        .keys()
+        .filter(|&&idx| (idx as usize) < nullherz_traits::MAX_NODES)
+        .count();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let installed = {
+            let handle = conductor.engine_coordinator.backend_manager.engine_handle.lock();
+            handle.as_ref().map(|e| e.list_children().len()).unwrap_or(0)
+        };
+        if installed >= expected_nodes { break; }
+        assert!(Instant::now() < deadline, "topology never installed ({}/{})", installed, expected_nodes);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    conductor.apply_mixer_commands(vec![
+        Command::Performance(PerformanceCommand::Preview { sample_id: tone_id }),
+    ]);
+
+    let preview_idx = *conductor
+        .mixer_manager
+        .node_names
+        .get("preview_node")
+        .expect("bootstrap must name the preview node") as usize;
+    assert!(
+        preview_idx < nullherz_traits::MAX_NODES,
+        "preview node must live at a legal graph index, got {}",
+        preview_idx
+    );
+    let limiter_idx = *conductor
+        .mixer_manager
+        .node_names
+        .get("master_limiter")
+        .expect("bootstrap must name the master limiter") as usize;
+
+    let (mut preview_peak, mut limiter_peak) = (0.0f32, 0.0f32);
+    let deadline = Instant::now() + WALL_DEADLINE;
+    while Instant::now() < deadline {
+        while let Some(tel) = context.telemetry_consumer.pop() {
+            preview_peak = preview_peak.max(tel.peak_levels[preview_idx]);
+            limiter_peak = limiter_peak.max(tel.peak_levels[limiter_idx]);
+        }
+        if preview_peak > AUDIBLE && limiter_peak > AUDIBLE { break; }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    conductor.stop_backend();
+
+    assert!(
+        preview_peak > AUDIBLE,
+        "preview node stayed silent (peak {:.6}) — Preview command chain broken",
+        preview_peak
+    );
+    assert!(
+        limiter_peak > AUDIBLE,
+        "preview was hot (peak {:.6}) but never reached the master (peak {:.6})",
+        preview_peak,
+        limiter_peak
+    );
 }
 
 /// A right-only source must come out right-only. This is the direction the

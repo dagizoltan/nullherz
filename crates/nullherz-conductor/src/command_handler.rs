@@ -45,6 +45,31 @@ impl CommandHandler {
     pub fn apply_mixer_commands(conductor: &mut Conductor, commands: Vec<Command>) {
         let mut final_commands = Vec::new();
 
+        // 0a. Resolve the PREVIEW sentinel. NodeConventions::PREVIEW is a
+        // LOGICAL id the UI may target without knowing the graph; the real
+        // preview node index is allocated by the mixer at bootstrap (it used
+        // to BE the sentinel, 111 — which is >= MAX_NODES, so the graph
+        // silently dropped the node and preview never played).
+        let commands: Vec<Command> = commands
+            .into_iter()
+            .map(|cmd| {
+                let resolve = |node_idx: u32| -> u32 {
+                    if node_idx == nullherz_traits::NodeConventions::PREVIEW {
+                        conductor.mixer_manager.node_names.get("preview_node").cloned().unwrap_or(node_idx)
+                    } else {
+                        node_idx
+                    }
+                };
+                match cmd {
+                    Command::Performance(PerformanceCommand::PlayNode { node_idx }) =>
+                        Command::Performance(PerformanceCommand::PlayNode { node_idx: resolve(node_idx) }),
+                    Command::Performance(PerformanceCommand::StopNode { node_idx }) =>
+                        Command::Performance(PerformanceCommand::StopNode { node_idx: resolve(node_idx) }),
+                    other => other,
+                }
+            })
+            .collect();
+
         // 0. On-demand registry hydration: a deck load referencing a library
         // track whose buffer is not in the (boot-empty, in-memory) registry
         // would silently no-op in the engine. Decode it here, off the RT
@@ -98,6 +123,17 @@ impl CommandHandler {
 
         for cmd in translated_commands {
             let handled = match cmd {
+                // Preview stages the source here (registry + topology ring),
+                // but the PLAY trigger must ride the normal engine pipeline:
+                // the old code called handle_performance_command(PlayNode) and
+                // discarded its `false`, so the trigger never left the
+                // conductor and preview was silent even with a live node.
+                Command::Performance(PerformanceCommand::Preview { sample_id }) => {
+                    if let Some(node_idx) = Self::stage_preview_source(conductor, sample_id) {
+                        final_commands.push(Command::Performance(PerformanceCommand::PlayNode { node_idx }));
+                    }
+                    true
+                }
                 Command::Core(core_cmd) => Self::handle_core_command(conductor, core_cmd),
                 Command::Performance(perf_cmd) => Self::handle_performance_command(conductor, perf_cmd),
                 Command::Resource(res_cmd) => Self::handle_resource_command(conductor, res_cmd),
@@ -112,6 +148,50 @@ impl CommandHandler {
         if !final_commands.is_empty() {
             conductor.mixer_bridge.apply_mixer_commands(final_commands, &mut conductor.topology_manager, &mut conductor.modulation_matrix);
         }
+    }
+
+    /// Stage `sample_id` onto the preview node (AddSource on the topology
+    /// ring) and return the preview node's real graph index, or None if
+    /// nothing could be staged. The caller is responsible for issuing the
+    /// PlayNode through the engine pipeline.
+    fn stage_preview_source(conductor: &mut Conductor, mut sample_id: u64) -> Option<u32> {
+        let preview_node_idx = conductor
+            .mixer_manager
+            .node_names
+            .get("preview_node")
+            .cloned()
+            .unwrap_or(nullherz_traits::NodeConventions::PREVIEW);
+
+        // Quality-of-life fallback: if hardcoded sample_id 1 or 2 is not found
+        // in the registry, fall back to the first or second available sample.
+        let mut sample_opt = conductor.transfusion_manager.sample_registry.get(sample_id);
+        if sample_opt.is_none() && (sample_id == 1 || sample_id == 2) {
+            let ids = conductor.transfusion_manager.sample_registry.list_ids();
+            if !ids.is_empty() {
+                let fallback_idx = if sample_id == 2 { 1.min(ids.len() - 1) } else { 0 };
+                sample_id = ids[fallback_idx];
+                sample_opt = conductor.transfusion_manager.sample_registry.get(sample_id);
+            }
+        }
+
+        let Some(sample) = sample_opt else {
+            eprintln!("Preview failed: sample_id {} not found in registry, and no fallback available.", sample_id);
+            return None;
+        };
+        let Some(ref mut prod) = conductor.topology_manager.topo_producer else { return None; };
+        if prod
+            .push(nullherz_traits::TopologyMutation::AddSource {
+                node_idx: preview_node_idx,
+                buffer: sample.buffer,
+                sample_id,
+                metadata: Some(sample.metadata.clone()),
+            })
+            .is_err()
+        {
+            eprintln!("Preview failed: topology ring full, AddSource dropped.");
+            return None;
+        }
+        Some(preview_node_idx)
     }
 
     fn handle_core_command(conductor: &mut Conductor, cmd: CoreCommand) -> bool {
@@ -285,36 +365,6 @@ impl CommandHandler {
             }
             PerformanceCommand::ClearTrackPattern { track_idx, .. } => {
                 println!("Conductor: Clearing Pattern for Track {}", track_idx);
-                true
-            }
-            PerformanceCommand::Preview { mut sample_id } => {
-                if let Some(ref mut prod) = conductor.topology_manager.topo_producer {
-                    let preview_node_idx = conductor.mixer_manager.node_names.get("preview_node").cloned().unwrap_or(111);
-
-                    // Quality-of-life fallback: if hardcoded sample_id 1 or 2 is not found in the registry,
-                    // fall back to the first or second available sample in the registry.
-                    let mut sample_opt = conductor.transfusion_manager.sample_registry.get(sample_id);
-                    if sample_opt.is_none() && (sample_id == 1 || sample_id == 2) {
-                        let ids = conductor.transfusion_manager.sample_registry.list_ids();
-                        if !ids.is_empty() {
-                            let fallback_idx = if sample_id == 2 { 1.min(ids.len() - 1) } else { 0 };
-                            sample_id = ids[fallback_idx];
-                            sample_opt = conductor.transfusion_manager.sample_registry.get(sample_id);
-                        }
-                    }
-
-                    if let Some(sample) = sample_opt {
-                         let _ = prod.push(nullherz_traits::TopologyMutation::AddSource {
-                            node_idx: preview_node_idx,
-                            buffer: sample.buffer,
-                            sample_id,
-                            metadata: Some(sample.metadata.clone()),
-                        });
-                        let _ = Self::handle_performance_command(conductor, PerformanceCommand::PlayNode { node_idx: preview_node_idx });
-                    } else {
-                        eprintln!("Preview failed: sample_id {} not found in registry, and no fallback available.", sample_id);
-                    }
-                }
                 true
             }
             PerformanceCommand::SyncDecks { source_deck, target_deck } => {

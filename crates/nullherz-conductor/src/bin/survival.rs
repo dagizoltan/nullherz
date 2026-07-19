@@ -236,8 +236,8 @@ async fn main() {
             let topo = &conductor.topology_manager.current_topology;
             for idx in 0..topo.node_count.min(64) {
                 let r = &topo.routing[idx];
-                let ins: Vec<u32> = r.input_indices[..r.input_count].to_vec();
-                let outs: Vec<u32> = r.output_indices[..r.output_count].to_vec();
+                let ins: Vec<u32> = r.input_indices[..r.input_count].iter().map(|b| b.0).collect();
+                let outs: Vec<u32> = r.output_indices[..r.output_count].iter().map(|b| b.0).collect();
                 println!("DIAG: node {:2} in={:?} out={:?}", idx, ins, outs);
             }
         }

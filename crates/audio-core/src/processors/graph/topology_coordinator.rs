@@ -113,20 +113,20 @@ impl TopologyCoordinator {
                         let topo = &mut self.topologies[inactive];
                         let r = &topo.routing[idx];
                         for &buf_idx in r.output_indices.iter().take(r.output_count) {
-                            if buf_idx != 0 {
+                            if buf_idx != nullherz_traits::BufferId(0) {
                                 buffers_to_clear.insert(buf_idx);
                             }
                         }
                         for &buf_idx in r.input_indices.iter().take(r.input_count) {
-                            if buf_idx != 0 {
+                            if buf_idx != nullherz_traits::BufferId(0) {
                                 buffers_to_clear.insert(buf_idx);
                             }
                         }
 
                         // Clear node's own routing
-                        topo.routing[idx].input_indices.fill(0);
-                        topo.routing[idx].output_indices.fill(0);
-                        topo.routing[idx].sidechain_indices.fill(0);
+                        topo.routing[idx].input_indices.fill(nullherz_traits::BufferId(0));
+                        topo.routing[idx].output_indices.fill(nullherz_traits::BufferId(0));
+                        topo.routing[idx].sidechain_indices.fill(nullherz_traits::BufferId(0));
                         topo.routing[idx].input_count = 0;
                         topo.routing[idx].output_count = 0;
                         topo.routing[idx].sidechain_count = 0;
@@ -138,12 +138,12 @@ impl TopologyCoordinator {
                             let other_routing = &mut topo.routing[other_idx];
                             for i in 0..other_routing.input_count {
                                 if buffers_to_clear.contains(&other_routing.input_indices[i]) {
-                                    other_routing.input_indices[i] = 0;
+                                    other_routing.input_indices[i] = nullherz_traits::BufferId(0);
                                 }
                             }
                             for i in 0..other_routing.output_count {
                                 if buffers_to_clear.contains(&other_routing.output_indices[i]) {
-                                    other_routing.output_indices[i] = 0;
+                                    other_routing.output_indices[i] = nullherz_traits::BufferId(0);
                                 }
                             }
                         }
@@ -197,7 +197,7 @@ impl TopologyCoordinator {
                     "UpdateEdge buffer {} escaped conductor validation", new_buffer_idx);
                 if n_idx < crate::MAX_NODES && i_idx < crate::MAX_CHANNELS && new_buffer_idx < crate::MAX_BUFFERS as u32 {
                     let topo = self.inactive_topology_mut();
-                    topo.routing[n_idx].input_indices[i_idx] = new_buffer_idx;
+                    topo.routing[n_idx].input_indices[i_idx] = nullherz_traits::BufferId(new_buffer_idx);
                     if i_idx >= topo.routing[n_idx].input_count {
                         topo.routing[n_idx].input_count = i_idx + 1;
                     }
@@ -210,7 +210,7 @@ impl TopologyCoordinator {
                     "UpdateOutputEdge buffer {} escaped conductor validation", new_buffer_idx);
                 if n_idx < crate::MAX_NODES && o_idx < crate::MAX_CHANNELS && new_buffer_idx < crate::MAX_BUFFERS as u32 {
                     let topo = self.inactive_topology_mut();
-                    topo.routing[n_idx].output_indices[o_idx] = new_buffer_idx;
+                    topo.routing[n_idx].output_indices[o_idx] = nullherz_traits::BufferId(new_buffer_idx);
                     if o_idx >= topo.routing[n_idx].output_count {
                         topo.routing[n_idx].output_count = o_idx + 1;
                     }

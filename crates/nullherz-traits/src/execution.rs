@@ -53,11 +53,67 @@ pub const MAX_NODES: usize = 64;
 pub const MAX_BUFFERS: usize = 128;
 pub const MAX_CHANNELS: usize = 16;
 pub const MAX_CROSSFADE_BUFFERS: usize = 8;
+
+/// Typed index into the audio-buffer (edge) address space.
+///
+/// Buffer ids and node ids are DIFFERENT address spaces (`MAX_BUFFERS` vs
+/// `MAX_NODES`); comparing a buffer id against `MAX_NODES` silently corrupted
+/// audio twice (compiler PDC pass, worker pool). Carrying buffer ids as a
+/// distinct type makes that mistake a compile error. serde-transparent: the
+/// wire/persisted format is still a bare u32.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct BufferId(pub u32);
+
+impl BufferId {
+    #[inline]
+    pub const fn index(self) -> usize { self.0 as usize }
+    #[inline]
+    pub const fn is_valid(self) -> bool { (self.0 as usize) < MAX_BUFFERS }
+}
+
+/// A RESOLVED physical buffer slot: either a pool buffer or a crossfade
+/// scratch buffer. This is the only place the `MAX_BUFFERS + k` sentinel
+/// encoding (used by `block_x_map` overrides) may be interpreted — executor
+/// and worker pool must both go through it, so the split point cannot drift
+/// between them again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BufferSlot {
+    Pool(usize),
+    Crossfade(usize),
+}
+
+impl BufferSlot {
+    #[inline]
+    pub const fn from_raw(p_idx: usize) -> Self {
+        if p_idx >= MAX_BUFFERS { BufferSlot::Crossfade(p_idx - MAX_BUFFERS) } else { BufferSlot::Pool(p_idx) }
+    }
+
+    /// Encode a crossfade slot for a `block_x_map` u8 cell (the encode
+    /// counterpart of `from_raw`). Requires
+    /// `MAX_BUFFERS + MAX_CROSSFADE_BUFFERS <= 255` — 0 stays reserved for
+    /// "no override".
+    #[inline]
+    pub const fn encode_crossfade(x_idx: usize) -> u8 {
+        (MAX_BUFFERS + x_idx) as u8
+    }
+}
+
+// The block_x_map u8 sentinel space must fit: 0 = no override, then pool ids,
+// then crossfade slots.
+const _: () = assert!(MAX_BUFFERS + MAX_CROSSFADE_BUFFERS <= 255);
 pub const MAX_MUTATIONS: usize = 64;
 pub const DEFAULT_WORKER_COUNT: usize = 4;
 pub const MAX_COMMANDS_PER_BLOCK: usize = 256;
 
-/// Centralized node index conventions for standard signal graph layouts.
+/// Centralized LOGICAL node id conventions.
+///
+/// These are sentinels for UI/protocol use, deliberately >= MAX_NODES so they
+/// can never collide with (or be mistaken for) a real graph index. The
+/// conductor translates them to actual allocated node indices (e.g. PREVIEW
+/// -> `node_names["preview_node"]` in `apply_mixer_commands`). Never pass one
+/// to the engine as a graph index — the graph drops indices >= MAX_NODES.
 pub struct NodeConventions;
 impl NodeConventions {
     pub const PREVIEW: u32 = 111;

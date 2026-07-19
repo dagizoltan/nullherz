@@ -14,17 +14,17 @@ mod verification {
         topo.plan.stages[0][0] = 0;
         topo.plan.stages[0][1] = 1;
 
-        let p_out_0 = kani::any_where(|&idx: &usize| idx < crate::MAX_NODES);
-        let p_out_1 = kani::any_where(|&idx: &usize| idx < crate::MAX_NODES);
+        let p_out_0 = nullherz_traits::BufferId(kani::any_where(|&v: &u32| (v as usize) < crate::MAX_BUFFERS));
+        let p_out_1 = nullherz_traits::BufferId(kani::any_where(|&v: &u32| (v as usize) < crate::MAX_BUFFERS));
         kani::assume(p_out_0 != p_out_1);
 
         topo.virtual_to_physical[0] = p_out_0;
         topo.routing[0].output_count = 1;
-        topo.routing[0].output_indices[0] = 0;
+        topo.routing[0].output_indices[0] = nullherz_traits::BufferId(0);
 
         topo.virtual_to_physical[1] = p_out_1;
         topo.routing[1].output_count = 1;
-        topo.routing[1].output_indices[0] = 1;
+        topo.routing[1].output_indices[0] = nullherz_traits::BufferId(1);
 
         let nodes: [ProcessorNode; crate::MAX_NODES] = std::array::from_fn(|_| ProcessorNode::new_empty());
         let mut buffers: [AudioBlock; crate::MAX_BUFFERS] = [AudioBlock { data: [0.0; crate::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; crate::MAX_BUFFERS];
@@ -42,8 +42,8 @@ mod verification {
 
                 for k in 0..u_routing.output_count {
                     for l in 0..v_routing.output_count {
-                        let u_phys = topo.virtual_to_physical[u_routing.output_indices[k] as usize];
-                        let v_phys = topo.virtual_to_physical[v_routing.output_indices[l] as usize];
+                        let u_phys = topo.virtual_to_physical[u_routing.output_indices[k].index()];
+                        let v_phys = topo.virtual_to_physical[v_routing.output_indices[l].index()];
                         kani::assert(u_phys != v_phys, "Write hazard detected: parallel nodes write to same physical buffer");
                     }
                 }

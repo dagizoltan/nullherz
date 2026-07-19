@@ -5,8 +5,10 @@ use crate::*;
 pub struct GraphTopology {
     #[serde(with = "BigArray")]
     pub routing: [NodeRouting; MAX_NODES],
+    /// Virtual buffer id -> physical buffer id indirection (both in the
+    /// BufferId address space).
     #[serde(with = "BigArray")]
-    pub virtual_to_physical: [u32; MAX_BUFFERS],
+    pub virtual_to_physical: [BufferId; MAX_BUFFERS],
     pub plan: CompiledGraphPlan,
     pub crossfades: [Option<CrossfadeState>; 8],
     pub node_count: usize,

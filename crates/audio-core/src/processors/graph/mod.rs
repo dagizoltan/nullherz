@@ -43,13 +43,13 @@ pub struct ProcessorGraph {
 
 impl ProcessorGraph {
     pub fn new() -> Self {
-        let mut v2p = [0u32; crate::MAX_BUFFERS];
-        for (i, val) in v2p.iter_mut().enumerate() { *val = i as u32; }
+        let mut v2p = [nullherz_traits::BufferId(0); crate::MAX_BUFFERS];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = nullherz_traits::BufferId(i as u32); }
         let topo = GraphTopology {
             routing: [NodeRouting {
-                input_indices: [0; crate::MAX_CHANNELS],
-                output_indices: [0; crate::MAX_CHANNELS],
-                sidechain_indices: [0; crate::MAX_CHANNELS],
+                input_indices: [nullherz_traits::BufferId(0); crate::MAX_CHANNELS],
+                output_indices: [nullherz_traits::BufferId(0); crate::MAX_CHANNELS],
+                sidechain_indices: [nullherz_traits::BufferId(0); crate::MAX_CHANNELS],
                 input_count: 0,
                 output_count: 0,
                 sidechain_count: 0,
@@ -195,13 +195,13 @@ impl ProcessorGraph {
         let input_count = inputs.len().min(crate::MAX_CHANNELS);
         topo.routing[idx].input_count = input_count;
         for (i, &v_idx) in inputs.iter().take(input_count).enumerate() {
-            topo.routing[idx].input_indices[i] = v_idx as u32;
+            topo.routing[idx].input_indices[i] = nullherz_traits::BufferId(v_idx as u32);
         }
 
         let output_count = outputs.len().min(crate::MAX_CHANNELS);
         topo.routing[idx].output_count = output_count;
         for (i, &v_idx) in outputs.iter().take(output_count).enumerate() {
-            topo.routing[idx].output_indices[i] = v_idx as u32;
+            topo.routing[idx].output_indices[i] = nullherz_traits::BufferId(v_idx as u32);
         }
         topo.node_count += 1;
 
@@ -315,8 +315,8 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                 // Stage 7: Frequency-Domain Spectral Morphing
                 // We utilize the pre-allocated FFT resources to blend paths in the magnitude spectrum.
                 for i in 0..external_outputs.len().min(4) {
-                    let p_idx = topo.virtual_to_physical[i] as usize;
-                    let old_p_idx = old_topo.virtual_to_physical[i] as usize;
+                    let p_idx = topo.virtual_to_physical[i].index();
+                    let old_p_idx = old_topo.virtual_to_physical[i].index();
 
                     let new_data = &self.buffer_pool.buffers[p_idx].data[offset..offset + num_samples];
                     let old_data = &self.buffer_pool.old_path_buffers[old_p_idx].data[offset..offset + num_samples];
@@ -340,8 +340,8 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                     let gain_new = progress.sqrt();
 
                     for i in 0..external_outputs.len().min(4) {
-                        let p_idx = topo.virtual_to_physical[i] as usize;
-                        let old_p_idx = old_topo.virtual_to_physical[i] as usize;
+                        let p_idx = topo.virtual_to_physical[i].index();
+                        let old_p_idx = old_topo.virtual_to_physical[i].index();
                         let new_val = self.buffer_pool.buffers[p_idx].data[offset + j];
                         let old_val = self.buffer_pool.old_path_buffers[old_p_idx].data[offset + j];
                         external_outputs[i][j] = old_val * gain_old + new_val * gain_new;
@@ -352,7 +352,7 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
             self.morph_samples_remaining = self.morph_samples_remaining.saturating_sub(num_samples as u32);
         } else {
             for i in 0..external_outputs.len().min(4) {
-                let p_idx = topo.virtual_to_physical[i] as usize;
+                let p_idx = topo.virtual_to_physical[i].index();
                 external_outputs[i].copy_from_slice(&self.buffer_pool.buffers[p_idx].data[offset..offset + num_samples]);
             }
         }
@@ -741,7 +741,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         // 1. Run first block execution
         // Populate input buffer 2 with ones
         let active_idx_0 = graph.topology_coordinator.active_idx();
-        let p_idx_2 = graph.topology_coordinator.topologies[active_idx_0].virtual_to_physical[2] as usize;
+        let p_idx_2 = graph.topology_coordinator.topologies[active_idx_0].virtual_to_physical[2].index();
         graph.buffer_pool.buffers[p_idx_2].data.fill(1.0);
 
         let mut out_data = [0.0f32; 100];
@@ -758,7 +758,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         assert_eq!(count.load(Ordering::Relaxed), 1);
 
         // Assert Node 1's outputs (virtual buffer 3) were zero-filled/silenced
-        let p_idx_3 = graph.topology_coordinator.topologies[active_idx_0].virtual_to_physical[3] as usize;
+        let p_idx_3 = graph.topology_coordinator.topologies[active_idx_0].virtual_to_physical[3].index();
         assert!(graph.buffer_pool.buffers[p_idx_3].data.iter().all(|&x| x == 0.0));
 
         // Assert Node 1 is permanently bypassed in active topology via faulted_states AtomicBool
@@ -822,7 +822,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         assert!(is_dummy, "Node 1's processor must be replaced with DummyProcessor");
 
         // Verify Node 0's output (which pointed to buffer 11) is gone, and Node 2's input (which pointed to buffer 12) is gone!
-        assert_eq!(topo.routing[0].output_indices[0], 0);
-        assert_eq!(topo.routing[2].input_indices[0], 0);
+        assert_eq!(topo.routing[0].output_indices[0], nullherz_traits::BufferId(0));
+        assert_eq!(topo.routing[2].input_indices[0], nullherz_traits::BufferId(0));
     }
 }
