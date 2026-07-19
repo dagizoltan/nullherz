@@ -125,6 +125,7 @@ mod tests {
         fn list_children(&self) -> Vec<&dyn nullherz_traits::AudioProcessor> { Vec::new() }
     }
 
+    #[allow(clippy::type_complexity)]
     fn handle_with(engine: Option<FakeEngine>) -> (Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>, Arc<AtomicU32>) {
         let calls = engine.as_ref().map(|e| e.calls.clone()).unwrap_or_default();
         let inner: Option<Arc<dyn RenderingEngine>> = engine.map(|e| Arc::new(e) as Arc<dyn RenderingEngine>);

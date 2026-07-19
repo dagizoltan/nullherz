@@ -479,8 +479,10 @@ mod tests {
         topo.routing[1].input_count = 1;
 
         // Force them into the same stage in a manually constructed plan
-        let mut plan = CompiledGraphPlan::default();
-        plan.num_stages = 1;
+        let mut plan = CompiledGraphPlan {
+            num_stages: 1,
+            ..Default::default()
+        };
         plan.stage_counts[0] = 2;
         plan.stages[0].0[0] = 0;
         plan.stages[0].0[1] = 1;
@@ -521,8 +523,10 @@ mod tests {
         topo.routing[1].output_indices[0] = 10;
         topo.routing[1].output_count = 1;
 
-        let mut plan = CompiledGraphPlan::default();
-        plan.num_stages = 1;
+        let mut plan = CompiledGraphPlan {
+            num_stages: 1,
+            ..Default::default()
+        };
         plan.stage_counts[0] = 2;
         plan.stages[0].0[0] = 0;
         plan.stages[0].0[1] = 1;
@@ -656,8 +660,10 @@ mod tests {
         topo.routing[1].output_indices[0] = 10;
         topo.routing[1].output_count = 1;
 
-        let mut plan = CompiledGraphPlan::default();
-        plan.num_stages = 1;
+        let mut plan = CompiledGraphPlan {
+            num_stages: 1,
+            ..Default::default()
+        };
         plan.stage_counts[0] = 2;
         plan.stages[0].0[0] = 0;
         plan.stages[0].0[1] = 1;

@@ -24,7 +24,7 @@ impl OfflineRenderer {
             sample_format: hound::SampleFormat::Float,
         };
 
-        let mut writer = hound::WavWriter::create(path, spec).map_err(|e| std::io::Error::other(e))?;
+        let mut writer = hound::WavWriter::create(path, spec).map_err(std::io::Error::other)?;
 
         let mut processed = 0;
         let mut left_out = vec![0.0f32; block_size];
@@ -61,8 +61,8 @@ impl OfflineRenderer {
             }
 
             for i in 0..chunk {
-                writer.write_sample(left_out[i]).map_err(|e| std::io::Error::other(e))?;
-                writer.write_sample(right_out[i]).map_err(|e| std::io::Error::other(e))?;
+                writer.write_sample(left_out[i]).map_err(std::io::Error::other)?;
+                writer.write_sample(right_out[i]).map_err(std::io::Error::other)?;
             }
 
             processed += chunk;
@@ -71,7 +71,7 @@ impl OfflineRenderer {
             }
         }
 
-        writer.finalize().map_err(|e| std::io::Error::other(e))?;
+        writer.finalize().map_err(std::io::Error::other)?;
         println!("Bounce: Export complete.");
         Ok(())
     }

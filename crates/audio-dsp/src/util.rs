@@ -144,8 +144,8 @@ mod tests {
     fn test_time_stretch() {
         let mut input = vec![0.0f32; 44100];
         // Populate input with a simple sine wave to verify signal integrity
-        for i in 0..input.len() {
-            input[i] = (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 44100.0).sin();
+        for (i, val) in input.iter_mut().enumerate() {
+            *val = (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 44100.0).sin();
         }
 
         // Test stretching slower (ratio = 2.0 -> half speed, twice as long)

@@ -469,7 +469,6 @@ mod tests {
                 mastering_eq_high: 1.0,
                 spectral_window_shape: 0,
                 personality_macro_mode: false,
-                ..Default::default()
             },
             decks: crate::state::DeckState {
                 master_deck: None,
@@ -478,7 +477,6 @@ mod tests {
                 focused_deck: 0,
                 deck_playing: [false; 4],
                 global_playing: false,
-                ..Default::default()
             },
             library: crate::state::LibraryState {
                 active_crate: None,
@@ -507,7 +505,6 @@ mod tests {
                 _automation_data: std::collections::HashMap::new(),
                 evolution_strengths: [0.0; 16],
                 auto_pollinate_enabled: false,
-                ..Default::default()
             },
             sampler: crate::state::SamplerState {
                 sampler_slicer_mode: false,
@@ -518,12 +515,10 @@ mod tests {
                 sampler_is_stereo: false,
                 sampler_input_source: 0,
                 next_sample_id: 1,
-                ..Default::default()
             },
             editor: crate::state::EditorState {
                 editor_time_stretch_ratio: 1.0,
                 editor_selection: None,
-                ..Default::default()
             },
             broadcast: crate::state::BroadcastState {
                 is_streaming: false,
@@ -535,7 +530,6 @@ mod tests {
                 broadcast_state: 0,
                 broadcast_error_msg: String::new(),
                 broadcast_start_time: None,
-                ..Default::default()
             },
             settings: crate::state::SettingsState {
                 active_settings_tab: crate::SettingsTab::General,
@@ -551,7 +545,6 @@ mod tests {
                 last_saved_time: 0.0,
                 autosave_triggered: None,
                 shortcuts_enabled: false,
-                ..Default::default()
             },
             viz: crate::state::VizState {
                 visualizer_damping: 0.1,
@@ -560,7 +553,6 @@ mod tests {
                 damped_latent: [0.0; 16],
                 damped_peaks: [0.0; 4],
                 damped_master_peaks: [0.0; 2],
-                ..Default::default()
             },
             topo: crate::state::TopologyViewState {
                 active_connection_source: None,
@@ -569,7 +561,6 @@ mod tests {
                 bypassed_nodes: std::collections::HashSet::new(),
                 node_map: [("sequencer_node".to_string(), 70), ("sampler_node".to_string(), 100)]
                     .into_iter().collect(),
-                ..Default::default()
             },
             library_db: library_db_wrapper,
             active_right_tab: None,

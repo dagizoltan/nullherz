@@ -22,8 +22,7 @@ pub fn render_spectrum_analyzer(ui: &mut Ui, spectrum: &[f32; 128], accent_color
     let mut mesh = egui::Mesh::default();
     let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
 
-    for i in 0..128 {
-        let val = spectrum[i];
+    for (i, &val) in spectrum.iter().enumerate() {
         let h = (val * height * 5.0).min(height - 4.0);
         if h < 0.5 { continue; }
 

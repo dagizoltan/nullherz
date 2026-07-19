@@ -216,7 +216,7 @@ mod tests {
         assert_eq!(commands2.len(), 1);
         if let Command::Mixer(MixerCommand::SetMacro { macro_id, value }) = commands2[0] {
             assert_eq!(macro_id, 2);
-            assert!(value >= 15.0 && value <= 15.1); // approx mid-point of [10.0, 20.0]
+            assert!((15.0..=15.1).contains(&value)); // approx mid-point of [10.0, 20.0]
         } else {
             panic!("Expected SetMacro command");
         }

@@ -303,18 +303,18 @@ impl BreederView {
 
                 // 2. Rhythmic Transfusion (Micro-timing)
                 let mut micro_timing = [0i16; 12];
-                for i in 0..12 {
+                for (i, item) in micro_timing.iter_mut().enumerate() {
                     let val_a = track_a.metadata.dna.rhythmic.micro_timing[i] as f32;
                     let val_b = track_b.metadata.dna.rhythmic.micro_timing[i] as f32;
-                    micro_timing[i] = (val_a * (1.0 - self.transfusion_bias_y) + val_b * self.transfusion_bias_y) as i16;
+                    *item = (val_a * (1.0 - self.transfusion_bias_y) + val_b * self.transfusion_bias_y) as i16;
                 }
 
                 // 3. Rhythmic Transfusion (Onset Mask)
                 let mut onset_mask = [0u64; 4];
-                for i in 0..4 {
+                for (i, item) in onset_mask.iter_mut().enumerate() {
                     let mask_a = track_a.metadata.dna.rhythmic.onset_mask[i];
                     let mask_b = track_b.metadata.dna.rhythmic.onset_mask[i];
-                    onset_mask[i] = if self.transfusion_bias_y > 0.5 { mask_b } else { mask_a };
+                    *item = if self.transfusion_bias_y > 0.5 { mask_b } else { mask_a };
                 }
 
                 // Hardened: Utilizing type-safe builder to eliminate unsafe byte-packing
