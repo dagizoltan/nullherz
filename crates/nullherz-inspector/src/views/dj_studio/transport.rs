@@ -29,11 +29,12 @@ pub fn render_deck_transport(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
                 3 => "deck_d_sampler",
                 _ => "",
             };
-            let node_idx = app.get_node_id(node_name);
-            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpToHotCue {
-                node_idx,
-                cue_idx: 0,
-            }));
+            if let Some(node_idx) = app.get_node_id(node_name) {
+                let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpToHotCue {
+                    node_idx,
+                    cue_idx: 0,
+                }));
+            }
         }
 
         // SYNC

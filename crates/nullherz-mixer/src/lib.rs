@@ -225,6 +225,13 @@ impl MixerManager {
         let xf_out_l = self.id_allocator.allocate_buffer_id(1);
         let xf_out_r = self.id_allocator.allocate_buffer_id(1);
 
+        // Named: the console crossfader control resolves these. (It used to
+        // target "master_crossfader", a name only the STANDALONE crossfader
+        // builder registers — the lookup fell back to node 0 and the UI
+        // crossfader silently set a parameter on deck A's sampler.)
+        self.node_names.insert("master_xf_l".to_string(), xf_l_id);
+        self.node_names.insert("master_xf_r".to_string(), xf_r_id);
+
         // Left Path
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: xf_l_id, processor_type_id: ProcessorTypeId::CROSSFADER }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: xf_l_id, input_idx: 0, new_buffer_idx: self.config.dj_a_l as u32 }));
