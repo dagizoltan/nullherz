@@ -1,4 +1,3 @@
-use nullherz_dna::GeneticLibrary;
 use egui::{Ui, Color32, RichText, Frame, Margin, Rounding, Stroke, ScrollArea, Vec2};
 use crate::InspectorApp;
 use nullherz_ui_hal::widgets;
@@ -180,8 +179,7 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
         ui.add_space(theme.space_sm);
 
         // Track metadata block
-        let track_id = app.decks.now_playing[i];
-        let track = track_id.and_then(|id| app.library_db.get_track(id).ok().flatten());
+        let track = app.decks.cached_tracks[i].clone();
 
         if let Some(ref t) = track {
             // Track Title & Artist — char-safe truncation: byte-slicing

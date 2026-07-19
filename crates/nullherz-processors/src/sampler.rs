@@ -309,7 +309,7 @@ impl SamplerProcessor {
     pub fn apply_command_with_context(&mut self, command: &nullherz_traits::ProcessorCommand, context: Option<&nullherz_traits::ProcessContext>) {
         use nullherz_traits::{Command, PerformanceCommand};
         match *command {
-            Command::Performance(PerformanceCommand::JumpToHotCue { node_idx: _, cue_idx }) => {
+            Command::Performance(PerformanceCommand::JumpToHotCue { node_idx, cue_idx }) if node_idx as u64 == self.id => {
                 let offset = if let Some(ref metadata) = self.metadata {
                     metadata.hot_cues.get(cue_idx as usize).and_then(|&c| c)
                         .unwrap_or((cue_idx as f32 * 0.1 * self.source_frames() as f32) as u64)
@@ -330,16 +330,19 @@ impl SamplerProcessor {
                                 offset = grid_pos as u64;
                             }
 
+                // Applies to paused voices as well: pause deactivates a
+                // voice but keeps it armed, and CUE on a paused deck must
+                // re-seat the held position.
                 for voice in self.voices.iter_mut() {
-                    if voice.is_active {
+                    if voice.is_active || voice.buffer.is_some() {
                         voice.play_head = offset as f32;
                     }
                 }
             }
-            Command::Performance(PerformanceCommand::TriggerSlice { node_idx: _, slice_idx }) => {
+            Command::Performance(PerformanceCommand::TriggerSlice { node_idx, slice_idx }) if node_idx as u64 == self.id => {
                 self.trigger_slice(slice_idx, context);
             }
-            Command::Performance(PerformanceCommand::JumpByBeats { node_idx: _, beats }) => {
+            Command::Performance(PerformanceCommand::JumpByBeats { node_idx, beats }) if node_idx as u64 == self.id => {
                 let source_frames = self.source_frames();
                 if let (Some(ctx), Some(meta)) = (context, &self.metadata)
                     && let Some(transport) = ctx.transport
@@ -347,8 +350,11 @@ impl SamplerProcessor {
                             let samples_per_beat = (transport.sample_rate * 60.0 / meta.bpm) as f64;
                             let jump_samples = (beats as f64 * samples_per_beat) as f32;
 
+                            // Paused voices jump too — pause holds a voice
+                            // inactive with its position, and beat-jumping a
+                            // paused deck must move the held position.
                             for voice in self.voices.iter_mut() {
-                                if voice.is_active {
+                                if voice.is_active || voice.buffer.is_some() {
                                     // Law of Bit-Exact Reset: Jumps should be precise and not introduce DC offsets
                                     // Linear interpolation in voice handles the fractional position
                                     voice.play_head += jump_samples;
@@ -362,7 +368,7 @@ impl SamplerProcessor {
                             }
                         }
             }
-            Command::Performance(PerformanceCommand::SetLoop { node_idx: _, enabled, start_samples, end_samples }) => {
+            Command::Performance(PerformanceCommand::SetLoop { node_idx, enabled, start_samples, end_samples }) if node_idx as u64 == self.id => {
                 for voice in self.voices.iter_mut() {
                     voice.loop_enabled = enabled;
                     voice.loop_start = start_samples;
@@ -411,7 +417,7 @@ impl SamplerProcessor {
                     v.is_active = false;
                 }
             }
-            Command::Performance(PerformanceCommand::SetSlipMode { node_idx: _, enabled }) => {
+            Command::Performance(PerformanceCommand::SetSlipMode { node_idx, enabled }) if node_idx as u64 == self.id => {
                 for voice in self.voices.iter_mut() {
                     voice.slip_enabled = enabled;
                     if !enabled {

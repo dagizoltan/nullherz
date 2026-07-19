@@ -1,4 +1,3 @@
-use nullherz_dna::GeneticLibrary;
 use egui::{Ui, Vec2, Color32, Stroke};
 use crate::InspectorApp;
 use audio_core::Telemetry;
@@ -8,8 +7,7 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), egui::Sense::hover());
     ui.painter().rect_filled(rect, theme.radius_sm, theme.bg_inset);
 
-    let track_id = app.decks.now_playing[i];
-    let track = track_id.and_then(|id| app.library_db.get_track(id).ok().flatten());
+    let track = app.decks.cached_tracks[i].clone();
 
     if let Some(ref t) = track {
         if let Some(wf_lock) = &app.deck_waveform_renderers[i] {

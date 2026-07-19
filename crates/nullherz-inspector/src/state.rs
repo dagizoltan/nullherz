@@ -70,6 +70,10 @@ impl Default for MixerState {
 pub struct DeckState {
     pub master_deck: Option<usize>,
     pub now_playing: [Option<u64>; 4],
+    /// Per-deck track cache: the console header and waveform used to hit
+    /// redb PER FRAME per deck (hundreds of reads/sec at repaint cadence).
+    /// Refreshed when the loaded id changes or the library reloads.
+    pub cached_tracks: [Option<nullherz_dna::LibraryTrack>; 4],
     pub global_bpm: f32,
     pub focused_deck: usize,
     pub deck_playing: [bool; 4],
@@ -80,7 +84,11 @@ impl Default for DeckState {
     fn default() -> Self {
         Self {
             master_deck: Some(0),
-            now_playing: [Some(1), Some(2), None, None],
+            // No tracks are loaded at boot. (The old [Some(1), Some(2), ..]
+            // pointed at the retired fixed demo ids — library ids are path
+            // hashes now, so the console claimed tracks that don't exist.)
+            now_playing: [None; 4],
+            cached_tracks: std::array::from_fn(|_| None),
             global_bpm: 128.0,
             focused_deck: 0,
             deck_playing: [false; 4],
