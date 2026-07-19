@@ -518,3 +518,102 @@ fn test_stereo_source_plays_on_both_decks() {
     assert!(b_peak > AUDIBLE, "deck B silent on a stereo source (peak {:.6})", b_peak);
     assert!(master_peak > AUDIBLE, "stereo decks hot but master silent (peak {:.6})", master_peak);
 }
+
+/// Peaks below this count as silence for the channel-identity tests. Stricter
+/// than AUDIBLE: the silent side of a one-sided source is structurally zero
+/// (separate buffers end to end), not merely quiet.
+const SILENT: f32 = 1e-5;
+
+/// Play a one-sided stereo tone on deck A and return the peaks observed at the
+/// per-side master summing nodes (the last per-channel observation points)
+/// plus the master limiter.
+///
+/// This is the test the strip wiring earns its keep by: a mono fold anywhere
+/// in the chain leaks the hot side into the silent one, and a dropped right
+/// channel leaves the right sum dead no matter what plays.
+fn run_channel_identity(left_hz: f32, right_hz: f32) -> (f32, f32, f32) {
+    let mut conductor = Conductor::with_library_path(":memory:");
+    let mut context = conductor.setup_engine();
+    conductor.bootstrap_4channel_mixer();
+
+    // A frequency of 0.0 renders sin(0) == 0.0 exactly: a structurally silent
+    // plane, not just a quiet one.
+    let tone_id = 7_700;
+    register_stereo_tone(&conductor, tone_id, left_hz, right_hz);
+
+    conductor
+        .start_backend(AudioBackendType::Threaded)
+        .expect("threaded backend must start without hardware");
+
+    let expected_nodes = conductor
+        .topology_manager
+        .active_node_types
+        .keys()
+        .filter(|&&idx| (idx as usize) < nullherz_traits::MAX_NODES)
+        .count();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let installed = {
+            let handle = conductor.engine_coordinator.backend_manager.engine_handle.lock();
+            handle.as_ref().map(|e| e.list_children().len()).unwrap_or(0)
+        };
+        if installed >= expected_nodes { break; }
+        assert!(Instant::now() < deadline, "topology never installed ({}/{})", installed, expected_nodes);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    conductor.apply_mixer_commands(vec![
+        Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id: 'A', sample_id: tone_id }),
+        Command::Performance(PerformanceCommand::PlayDeck { deck_id: 'A' }),
+    ]);
+
+    let idx = |name: &str| *conductor.mixer_manager.node_names.get(name).expect("named node") as usize;
+    let sum_l = idx("master_sum_l");
+    let sum_r = idx("master_sum_r");
+    let limiter = idx("master_limiter");
+
+    let (mut l_peak, mut r_peak, mut limiter_peak) = (0.0f32, 0.0f32, 0.0f32);
+    let deadline = Instant::now() + WALL_DEADLINE;
+    while Instant::now() < deadline {
+        while let Some(tel) = context.telemetry_consumer.pop() {
+            l_peak = l_peak.max(tel.peak_levels[sum_l]);
+            r_peak = r_peak.max(tel.peak_levels[sum_r]);
+            limiter_peak = limiter_peak.max(tel.peak_levels[limiter]);
+        }
+        // Wait for the HOT side; the silent side is asserted after the run so
+        // any late bleed still fails the test.
+        if l_peak.max(r_peak) > AUDIBLE && limiter_peak > AUDIBLE { break; }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    conductor.stop_backend();
+    (l_peak, r_peak, limiter_peak)
+}
+
+/// A left-only source must come out left-only: hot L sum, silent R sum.
+/// Catches a dropped right wire (R never written) AND any L->R mono fold.
+#[test]
+fn test_left_only_source_stays_left() {
+    let (l_peak, r_peak, limiter_peak) = run_channel_identity(440.0, 0.0);
+    assert!(l_peak > AUDIBLE, "left-only source never reached the left master sum (peak {:.6})", l_peak);
+    assert!(
+        r_peak < SILENT,
+        "left-only source leaked into the right channel (L {:.6}, R {:.6}) — a mono fold survives in the chain",
+        l_peak, r_peak
+    );
+    assert!(limiter_peak > AUDIBLE, "left sum hot but master limiter silent (peak {:.6})", limiter_peak);
+}
+
+/// A right-only source must come out right-only. This is the direction the
+/// mono-era strip actually broke: every stage carried one buffer, so the
+/// right plane died at the first hop.
+#[test]
+fn test_right_only_source_stays_right() {
+    let (l_peak, r_peak, limiter_peak) = run_channel_identity(0.0, 440.0);
+    assert!(r_peak > AUDIBLE, "right-only source never reached the right master sum (peak {:.6})", r_peak);
+    assert!(
+        l_peak < SILENT,
+        "right-only source leaked into the left channel (L {:.6}, R {:.6}) — a mono fold survives in the chain",
+        l_peak, r_peak
+    );
+    assert!(limiter_peak > AUDIBLE, "right sum hot but master limiter silent (peak {:.6})", limiter_peak);
+}

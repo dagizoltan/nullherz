@@ -27,7 +27,7 @@ mod verification {
         topo.routing[1].output_indices[0] = 1;
 
         let nodes: [ProcessorNode; crate::MAX_NODES] = std::array::from_fn(|_| ProcessorNode::new_empty());
-        let mut buffers: [AudioBlock; crate::MAX_NODES] = [AudioBlock { data: [0.0; crate::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; crate::MAX_NODES];
+        let mut buffers: [AudioBlock; crate::MAX_BUFFERS] = [AudioBlock { data: [0.0; crate::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; crate::MAX_BUFFERS];
         let mut crossfade_buffers: [AudioBlock; crate::MAX_CROSSFADE_BUFFERS] = [AudioBlock { data: [0.0; crate::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; crate::MAX_CROSSFADE_BUFFERS];
         let block_x_map = [[0u8; crate::MAX_CHANNELS]; crate::MAX_NODES];
         let telemetry = std::array::from_fn(|_| AtomicU64::new(0));
@@ -56,7 +56,7 @@ mod verification {
     pub fn prove_execute_stage_bounds_safety() {
         let topo = GraphTopology::default();
         let nodes: [ProcessorNode; crate::MAX_NODES] = std::array::from_fn(|_| ProcessorNode::new_empty());
-        let mut buffers: [AudioBlock; crate::MAX_NODES] = [AudioBlock { data: [0.0; crate::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; crate::MAX_NODES];
+        let mut buffers: [AudioBlock; crate::MAX_BUFFERS] = [AudioBlock { data: [0.0; crate::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; crate::MAX_BUFFERS];
         let mut crossfade_buffers: [AudioBlock; crate::MAX_CROSSFADE_BUFFERS] = [AudioBlock { data: [0.0; crate::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; crate::MAX_CROSSFADE_BUFFERS];
         let block_x_map = [[0u8; crate::MAX_CHANNELS]; crate::MAX_NODES];
         let telemetry = std::array::from_fn(|_| AtomicU64::new(0));

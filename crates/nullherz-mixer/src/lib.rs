@@ -42,6 +42,9 @@ impl MixerManager {
         if self.id_allocator.current_node_id() >= nullherz_traits::MAX_NODES as u32 {
             return Err(format!("Mixer topology exceeds MAX_NODES ({})", nullherz_traits::MAX_NODES));
         }
+        if self.id_allocator.current_buffer_id() > nullherz_traits::MAX_BUFFERS as u32 {
+            return Err(format!("Mixer topology exceeds MAX_BUFFERS ({})", nullherz_traits::MAX_BUFFERS));
+        }
 
         // Kahn's Algorithm for Cycle Detection
         let mut in_degree = std::collections::HashMap::new();
@@ -230,23 +233,43 @@ impl MixerManager {
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: xf_r_id, input_idx: 1, new_buffer_idx: self.config.dj_b_r as u32 }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: xf_r_id, output_idx: 0, new_buffer_idx: xf_out_r }));
 
-        // Summing to FX Chain
-        let sum_id = self.id_allocator.allocate_node_id();
-        let sum_out_l = self.id_allocator.allocate_buffer_id(1);
-        let sum_out_r = self.id_allocator.allocate_buffer_id(1);
-
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: sum_id, processor_type_id: ProcessorTypeId::SUMMING }));
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: sum_id, input_idx: 0, new_buffer_idx: xf_out_l }));
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: sum_id, input_idx: 1, new_buffer_idx: xf_out_r }));
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: sum_id, output_idx: 0, new_buffer_idx: sum_out_l }));
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: sum_id, output_idx: 1, new_buffer_idx: sum_out_r }));
-
         // --- PREVIEW NODE ---
+        // Renders planar stereo into its own buffer pair, mixed in by the
+        // master sums below. It must NOT write the sum output buffers
+        // directly: that makes it a second producer on the same physical
+        // buffer, and whichever stage runs later erases the other (the old
+        // wiring was only inaudible because Kahn happened to schedule the
+        // preview first).
         let preview_id = nullherz_traits::NodeConventions::PREVIEW;
         self.node_names.insert("preview_node".to_string(), preview_id);
+        let preview_l = self.id_allocator.allocate_buffer_id(2);
+        let preview_r = preview_l + 1;
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: preview_id, processor_type_id: ProcessorTypeId::SAMPLER }));
-        // Route preview node to master sum
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: preview_id, output_idx: 0, new_buffer_idx: sum_out_l }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: preview_id, output_idx: 0, new_buffer_idx: preview_l }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: preview_id, output_idx: 1, new_buffer_idx: preview_r }));
+
+        // Summing to FX Chain: one summing node PER SIDE. SummingProcessor
+        // mixes all its inputs into outputs[0] only — a single node wired
+        // L,R -> 0,1 mono-folds the crossfader mix onto the left buffer and
+        // never writes the right one.
+        let sum_l_id = self.id_allocator.allocate_node_id();
+        let sum_r_id = self.id_allocator.allocate_node_id();
+        let sum_out_l = self.id_allocator.allocate_buffer_id(2);
+        let sum_out_r = sum_out_l + 1;
+        // Named: these are the only per-side nodes at the master, so they are
+        // the observation points for channel-identity tests and metering.
+        self.node_names.insert("master_sum_l".to_string(), sum_l_id);
+        self.node_names.insert("master_sum_r".to_string(), sum_r_id);
+
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: sum_l_id, processor_type_id: ProcessorTypeId::SUMMING }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: sum_l_id, input_idx: 0, new_buffer_idx: xf_out_l }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: sum_l_id, input_idx: 1, new_buffer_idx: preview_l }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: sum_l_id, output_idx: 0, new_buffer_idx: sum_out_l }));
+
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: sum_r_id, processor_type_id: ProcessorTypeId::SUMMING }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: sum_r_id, input_idx: 0, new_buffer_idx: xf_out_r }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: sum_r_id, input_idx: 1, new_buffer_idx: preview_r }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: sum_r_id, output_idx: 0, new_buffer_idx: sum_out_r }));
 
         // --- MASTER FX CHAIN ---
 
