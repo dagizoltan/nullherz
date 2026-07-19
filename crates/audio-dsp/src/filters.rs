@@ -927,8 +927,10 @@ mod tests {
         let mut outputs_simd = vec![vec![0.0f32; len]; 8];
         let mut outputs_scalar = vec![vec![0.0f32; len]; 8];
 
-        for ch in 0..8 {
-            for i in 0..len { inputs[ch][i] = (ch + i) as f32 * 0.01; }
+        for (ch, input_ch) in inputs.iter_mut().enumerate().take(8) {
+            for (i, val) in input_ch.iter_mut().enumerate().take(len) {
+                *val = (ch + i) as f32 * 0.01;
+            }
         }
 
         let in_ptrs: [*const f32; 8] = [

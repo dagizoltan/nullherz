@@ -38,7 +38,7 @@ impl ModulationMatrix {
     }
 
     pub fn add_temporal_mapping(&mut self, macro_id: u32, target_id: u64, param_id: u32, scaling: f32, ramp_duration_samples: u32, shape: Option<TemporalShape>) {
-        let entry = self.mappings.entry(macro_id).or_insert_with(Vec::new);
+        let entry = self.mappings.entry(macro_id).or_default();
         entry.push(ModMapping {
             target_id,
             param_id,

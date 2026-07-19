@@ -331,11 +331,11 @@ mod tests {
 
         osc_simd.process_8_channels(fm_ptrs, pm_ptrs, out_ptrs, len);
 
-        for ch in 0..8 {
+        for (ch, output_ch) in outputs_simd.iter().enumerate().take(8) {
             let mut out_scalar = vec![0.0f32; len];
             osc_scalar.process_scalar(ch, &fm_data, &pm_data, &mut out_scalar);
-            for i in 0..len {
-                assert!((outputs_simd[ch][i] - out_scalar[i]).abs() < 1e-5);
+            for (i, &val) in output_ch.iter().enumerate().take(len) {
+                assert!((val - out_scalar[i]).abs() < 1e-5);
             }
         }
     }
