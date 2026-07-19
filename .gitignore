@@ -1,2 +1,8 @@
 target/
 *.redb
+
+# Runtime state — written by the app on every run; never commit
+autosave.json
+autosave.rkyv
+library.redb
+library.redb.bak
