@@ -79,16 +79,23 @@ pub fn create_dj_deck(
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: eq_id, output_idx: 1, new_buffer_idx: target_r as u32 }));
 
     // CUE BUS ROUTING
-    // Parallel send from EQ output to Global CUE bus (Stereo)
+    // Parallel send from EQ output into PRIVATE per-deck cue buffers; the
+    // global CUE bus is mixed by SUMMING nodes in create_4channel_mixer.
+    // (All four decks used to write config.cue_l/r DIRECTLY — four
+    // producers on one buffer, last writer wins, so the cue bus only ever
+    // carried deck D. Same multi-producer disease the preview node had.)
+    let _ = config;
     let cue_gain_l_id = id_allocator.allocate_node_id();
     let cue_gain_r_id = id_allocator.allocate_node_id();
+    let cue_out_l = id_allocator.allocate_buffer_id(2);
+    let cue_out_r = cue_out_l + 1;
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: cue_gain_l_id, processor_type_id: ProcessorTypeId::GAIN }));
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: cue_gain_l_id, input_idx: 0, new_buffer_idx: target_l as u32 }));
-    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: cue_gain_l_id, output_idx: 0, new_buffer_idx: config.cue_l as u32 }));
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: cue_gain_l_id, output_idx: 0, new_buffer_idx: cue_out_l }));
 
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: cue_gain_r_id, processor_type_id: ProcessorTypeId::GAIN }));
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: cue_gain_r_id, input_idx: 0, new_buffer_idx: target_r as u32 }));
-    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: cue_gain_r_id, output_idx: 0, new_buffer_idx: config.cue_r as u32 }));
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: cue_gain_r_id, output_idx: 0, new_buffer_idx: cue_out_r }));
 
     // DECK SEQUENCER — trigger generator for DNA groove transfusion and
     // patterns. Not part of the audio path, but it MUST have an output edge:
@@ -112,6 +119,8 @@ pub fn create_dj_deck(
         stereo_util_id,
         dna_morph_id: Some(dna_morph_id),
         sequencer_id,
+        cue_out_l,
+        cue_out_r,
     };
 
     (commands, nodes)
