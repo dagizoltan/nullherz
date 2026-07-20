@@ -184,3 +184,83 @@ fn test_golden_stereo_master_render() {
         hash_r
     );
 }
+
+/// Live capture end to end: arm the master resample tap while decks play,
+/// disarm, and the recording must land in the SampleRegistry as a playable
+/// PLANAR STEREO source.
+///
+/// This also proves the capture node cannot alter the master path — it runs
+/// inside the same deterministic console as the golden render above.
+#[test]
+fn test_capture_records_master_as_planar_stereo() {
+    let mut conductor = Conductor::with_library_path(":memory:");
+    conductor.setup_engine();
+    conductor.bootstrap_4channel_mixer();
+
+    register_stereo_tone(&conductor, 5_601, 220.0, 330.0);
+
+    let mut left = vec![0.0f32; BLOCK];
+    let mut right = vec![0.0f32; BLOCK];
+    for _ in 0..INSTALL_BLOCKS {
+        pump_block(&mut conductor, &mut left, &mut right);
+    }
+
+    let cap_node = *conductor
+        .mixer_manager
+        .node_names
+        .get("capture_node")
+        .expect("bootstrap must name the capture node");
+    assert!(
+        (cap_node as usize) < nullherz_traits::MAX_NODES,
+        "capture node must live at a legal graph index, got {}",
+        cap_node
+    );
+
+    let ids_before = conductor.transfusion_manager.sample_registry.list_ids();
+
+    conductor.apply_mixer_commands(vec![
+        Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id: 'A', sample_id: 5_601 }),
+        Command::Performance(PerformanceCommand::PlayDeck { deck_id: 'A' }),
+        // Arm the recorder (param 3) via the command bus.
+        Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+            target_id: cap_node as u64,
+            param_id: 3,
+            value: 1.0,
+            ramp_duration_samples: 0,
+        }),
+    ]);
+    for _ in 0..64 {
+        pump_block(&mut conductor, &mut left, &mut right);
+    }
+    conductor.apply_mixer_commands(vec![Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+        target_id: cap_node as u64,
+        param_id: 3,
+        value: 0.0,
+        ramp_duration_samples: 0,
+    })]);
+    for _ in 0..4 {
+        pump_block(&mut conductor, &mut left, &mut right);
+    }
+
+    // The orchestrator tick polls snapshots off the engine and registers them.
+    conductor.tick();
+
+    let ids_after = conductor.transfusion_manager.sample_registry.list_ids();
+    let new_id = ids_after
+        .iter()
+        .find(|id| !ids_before.contains(id))
+        .copied()
+        .expect("an armed capture over live audio must register a snapshot");
+
+    let sample = conductor.transfusion_manager.sample_registry.get(new_id).unwrap();
+    assert_eq!(sample.metadata.channels, 2, "captures are planar stereo");
+    assert_eq!(
+        sample.buffer.len() as u64,
+        sample.metadata.total_samples * 2,
+        "buffer must be exactly two planes of total_samples frames"
+    );
+    assert!(
+        sample.buffer.iter().any(|&s| s != 0.0),
+        "captured audio must not be silence while a deck is playing"
+    );
+}

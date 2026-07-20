@@ -86,8 +86,9 @@ impl nullherz_traits::SnapshotProvider for CaptureProcessor {
             return None;
         }
 
-        // For simple pull, we only support mono for now or interleaved.
-        // Let's do interleaved stereo if stereo mode.
+        // PLANAR, always two planes (channel 0 then channel 1, mono
+        // duplicated) — the whole sample pipeline is planar and interleaved
+        // data replays an octave high at double tempo.
         let ptr = self.write_ptr.load(std::sync::atomic::Ordering::Acquire);
         let len = self.buffer_l.len();
 
@@ -95,11 +96,10 @@ impl nullherz_traits::SnapshotProvider for CaptureProcessor {
         for i in 0..len {
             let idx = (ptr + i) % len;
             snapshot.push(self.buffer_l[idx]);
-            if self.is_stereo {
-                snapshot.push(self.buffer_r[idx]);
-            } else {
-                snapshot.push(self.buffer_l[idx]);
-            }
+        }
+        for i in 0..len {
+            let idx = (ptr + i) % len;
+            snapshot.push(if self.is_stereo { self.buffer_r[idx] } else { self.buffer_l[idx] });
         }
         self.has_data.store(false, Ordering::Release);
         Some(std::sync::Arc::new(snapshot))
@@ -111,15 +111,16 @@ impl AudioProcessor for CaptureProcessor {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
     fn apply_command(&mut self, command: &Command) {
-        match command {
-            nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop) => {
-                self.is_recording.store(false, Ordering::Release);
+        // Recording is armed EXPLICITLY via param 3 — the old Play/Stop
+        // coupling meant every deck play (and every sequencer step, which
+        // pushes CoreCommand::Play) silently started the recorder.
+        //
+        // Bus-delivered parameters (the missing-SetParam-arm class): without
+        // this arm the sampler view's capture controls were dropped.
+        if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, ramp_duration_samples }) = command
+            && *target_id == self.capture_id {
+                nullherz_traits::AudioProcessor::set_parameter(self, *param_id, *value, *ramp_duration_samples);
             }
-            nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Play) => {
-                self.is_recording.store(true, Ordering::Release);
-            }
-            _ => {}
-        }
     }
 
     fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {

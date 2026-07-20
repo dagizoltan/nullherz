@@ -296,9 +296,11 @@ impl TransfusionManager {
                 loop_points: None,
                 beat_grid_offset: 0,
                 peaks: Arc::new(Vec::new()),
-                // Capture snapshots are a single mono stream.
-                total_samples: snapshot.len() as u64,
-                channels: 1,
+                // Capture snapshots are PLANAR two-plane buffers (see
+                // CaptureProcessor::pull_snapshot): frames per channel is
+                // half the buffer.
+                total_samples: (snapshot.len() / 2) as u64,
+                channels: 2,
                 mip_waveform: nullherz_traits::MipWaveform::default(),
                 band_waveform: nullherz_traits::BandWaveform::default(),
                 dna: nullherz_traits::SoundDNA::default(),

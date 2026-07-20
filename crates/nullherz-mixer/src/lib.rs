@@ -324,6 +324,19 @@ impl MixerManager {
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: lim_id, output_idx: 0, new_buffer_idx: self.config.master_l as u32 }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: lim_id, output_idx: 1, new_buffer_idx: self.config.master_r as u32 }));
 
+        // --- CAPTURE NODE (master resample tap) ---
+        // Reads the finished master (post-limiter) as a parallel consumer;
+        // NO outputs, so it cannot alter the audio path (golden hashes
+        // untouched). Recording is armed via param 3; snapshots register
+        // into the SampleRegistry as playable planar-stereo sources. Named
+        // so the sampler view's capture controls (which already resolve
+        // "capture_node" and skip while it is missing) come alive.
+        let cap_id = self.id_allocator.allocate_node_id();
+        self.node_names.insert("capture_node".to_string(), cap_id);
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: cap_id, processor_type_id: ProcessorTypeId::CAPTURE }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: cap_id, input_idx: 0, new_buffer_idx: self.config.master_l as u32 }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: cap_id, input_idx: 1, new_buffer_idx: self.config.master_r as u32 }));
+
         commands
     }
 }
@@ -444,10 +457,15 @@ mod tests {
             }
         }
 
-        // Summing node must have inputs and outputs
-        // In 4-channel mixer, summing node should be the last added node index
-        let sum_node_idx = mixer.id_allocator.allocate_node_id() - 1;
-        assert!(nodes_with_inputs.contains(&sum_node_idx));
-        assert!(nodes_with_outputs.contains(&sum_node_idx));
+        // The master limiter must have inputs and outputs.
+        let lim_idx = *mixer.node_names.get("master_limiter").expect("limiter named");
+        assert!(nodes_with_inputs.contains(&lim_idx));
+        assert!(nodes_with_outputs.contains(&lim_idx));
+
+        // The capture tap is BY DESIGN a pure consumer: inputs from the
+        // master buffers, NO outputs (so it cannot alter the audio path).
+        let cap_idx = *mixer.node_names.get("capture_node").expect("capture named");
+        assert!(nodes_with_inputs.contains(&cap_idx));
+        assert!(!nodes_with_outputs.contains(&cap_idx));
     }
 }
