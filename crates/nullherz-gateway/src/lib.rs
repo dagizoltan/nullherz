@@ -91,7 +91,16 @@ async fn handle_connection(
     tel_provider: Arc<dyn TelemetryProvider>,
     library_db: Option<Arc<Mutex<nullherz_dna::LibraryDatabase>>>
 ) {
-    let ws_stream = accept_async(stream).await.expect("Error during the websocket handshake occurred");
+    // Panic-freedom: any TCP client that fails the WebSocket handshake (a
+    // port scanner, a health check, a curl) used to PANIC this connection
+    // task with a full backtrace. Drop the connection quietly instead.
+    let ws_stream = match accept_async(stream).await {
+        Ok(ws) => ws,
+        Err(e) => {
+            eprintln!("Gateway: rejected non-WebSocket connection: {}", e);
+            return;
+        }
+    };
     println!("New WebSocket connection");
 
     let (mut write, mut read) = ws_stream.split();
