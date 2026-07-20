@@ -271,8 +271,213 @@ def make_boombap(path: str):
     song.write(path)
 
 
+def pad(freqs, dur: float, attack=0.8, release=1.2, detune=1.004) -> list:
+    """Slow-attack detuned-saw chord pad."""
+    n = int(dur * SR)
+    a = int(attack * SR)
+    r = int(release * SR)
+    phases = [0.0] * (len(freqs) * 2)
+    out = []
+    for i in range(n):
+        s = 0.0
+        for k, f in enumerate(freqs):
+            for d, ph_idx in ((1.0, k * 2), (detune, k * 2 + 1)):
+                phases[ph_idx] = (phases[ph_idx] + f * d / SR) % 1.0
+                s += (phases[ph_idx] * 2 - 1) / (len(freqs) * 2)
+        e = min(1.0, i / max(1, a), (n - i) / max(1, r))
+        out.append(s * e * 0.6)
+    return out
+
+
+def acid(root: float, dur: float, res_sweep_hz: float, rng) -> list:
+    """Single resonant-ish saw line: crude 303 flavour via a swept one-pole
+    plus an octave-jumping pattern baked into the phase."""
+    n = int(dur * SR)
+    out = []
+    p = lp = 0.0
+    for i in range(n):
+        t = i / SR
+        f = root * (2.0 if (int(t * 8) % 4 == 3) else 1.0)
+        p = (p + f / SR) % 1.0
+        raw = p * 2 - 1
+        cutoff = 180 + 1400 * (0.5 + 0.5 * math.sin(2 * math.pi * res_sweep_hz * t + rng.random() * 0.1))
+        a = min(0.99, 2 * math.pi * cutoff / SR)
+        lp += a * (raw - lp)
+        edge = min(1.0, i / 100, (n - i) / 300)
+        out.append((lp * 1.4 + raw * 0.1) * edge)
+    return out
+
+
+def sub808(freq: float, dur: float, glide_to: float = 0.0) -> list:
+    """808-style sub with a click and optional pitch glide."""
+    n = int(dur * SR)
+    out = []
+    ph = 0.0
+    for i in range(n):
+        t = i / n
+        f = freq if glide_to <= 0.0 else freq * (1 - t) + glide_to * t
+        ph += 2 * math.pi * f / SR
+        e = math.exp(-i / (0.45 * SR))
+        click = 0.4 * math.exp(-i / (0.003 * SR))
+        out.append((math.sin(ph) + click) * e)
+    return out
+
+
+def make_techno(path: str):
+    """132 BPM techno: rumbling four-on-the-floor, offbeat metallic hats,
+    acid line rising over 8 bars."""
+    rng = random.Random(0x132)
+    bpm = 132.0
+    beat = 60.0 / bpm
+    bars = 8
+    song = Song(bars * 4 * beat + 0.5)
+    for bar in range(bars):
+        t0 = bar * 4 * beat
+        for b in range(4):
+            song.add(t0 + b * beat, kick(punch=100, tail=45, dur=0.32), gain=1.0)
+            song.add(t0 + (b + 0.5) * beat, hat(rng, open_=(b == 3 and bar % 2)), pan=0.25, gain=0.35)
+            song.add(t0 + b * beat + 0.02, sub(41.2, 0.5 * beat), gain=0.5)  # rumble tail
+        if bar % 2 == 1:
+            song.add(t0 + 1 * beat, snare(rng, dur=0.1), pan=-0.2, gain=0.35)  # rim-ish
+        song.add(t0, acid(55.0, 4 * beat, 0.25 + bar * 0.08, rng), pan=-0.1, gain=0.34)
+    song.write(path)
+
+
+def make_trance(path: str):
+    """138 BPM trance: rolling offbeat bass, 1/16 arp stabs, snare lift each 4."""
+    rng = random.Random(0x138)
+    bpm = 138.0
+    beat = 60.0 / bpm
+    bars = 8
+    song = Song(bars * 4 * beat + 0.6)
+    arp = [220.0, 277.2, 329.6, 440.0]  # A minor-ish
+    for bar in range(bars):
+        t0 = bar * 4 * beat
+        for b in range(4):
+            song.add(t0 + b * beat, kick(punch=115, tail=50, dur=0.26), gain=0.95)
+            song.add(t0 + (b + 0.5) * beat, sub(55.0, 0.3 * beat), gain=0.7)  # offbeat bass
+        for s16 in range(16):
+            song.add(t0 + s16 * beat / 4, stab(arp[s16 % 4] * (2 if s16 % 8 >= 4 else 1), dur=0.1),
+                     pan=(-0.4 + 0.8 * ((s16 % 3) / 2.0)), gain=0.22)
+        if bar % 4 == 3:  # lift
+            for r in range(8):
+                song.add(t0 + (2 + r * 0.25) * beat, snare(rng, dur=0.09), gain=0.25 + r * 0.06)
+    song.write(path)
+
+
+def make_jungle(path: str):
+    """160 BPM jungle: chopped-break feel from kicks/snares/hats, deep sub."""
+    rng = random.Random(0x160)
+    bpm = 160.0
+    beat = 60.0 / bpm
+    bars = 8
+    song = Song(bars * 4 * beat + 0.5)
+    # 1/16 step masks for a chopped two-bar break (k=kick, s=snare, h=hat)
+    kicks_a = [0, 10]
+    snares_a = [4, 7, 12, 15]
+    kicks_b = [0, 6, 11]
+    snares_b = [4, 9, 12, 14]
+    for bar in range(bars):
+        t0 = bar * 4 * beat
+        kicks, snares = (kicks_a, snares_a) if bar % 2 == 0 else (kicks_b, snares_b)
+        for s16 in kicks:
+            song.add(t0 + s16 * beat / 4, kick(punch=120, tail=48, dur=0.2), gain=0.9)
+        for s16 in snares:
+            song.add(t0 + s16 * beat / 4, snare(rng, dur=0.11), pan=0.15 if s16 % 2 else -0.15, gain=0.7)
+        for s16 in range(16):
+            if rng.random() < 0.7:
+                song.add(t0 + s16 * beat / 4, hat(rng, dur=0.03), pan=0.3, gain=0.2)
+        root = (36.7, 41.2, 32.7, 41.2)[bar % 4]
+        song.add(t0 + 0.02, sub(root, 1.5 * beat), gain=0.8)
+        song.add(t0 + 2 * beat, sub(root, 1.2 * beat), gain=0.7)
+    song.write(path)
+
+
+def make_trap(path: str):
+    """140 BPM trap (half-time feel): 808 glides, hat rolls, clap on 3."""
+    rng = random.Random(0x140 + 1)
+    bpm = 140.0
+    beat = 60.0 / bpm
+    bars = 8
+    song = Song(bars * 4 * beat + 0.7)
+    roots = [55.0, 55.0, 65.4, 49.0]
+    for bar in range(bars):
+        t0 = bar * 4 * beat
+        song.add(t0, kick(punch=95, tail=48, dur=0.3), gain=0.95)
+        if bar % 2 == 1:
+            song.add(t0 + 3.5 * beat, kick(punch=95, tail=48, dur=0.2), gain=0.7)
+        song.add(t0 + 2 * beat, snare(rng, dur=0.16), gain=0.85)  # clap-ish on 3
+        root = roots[bar % 4]
+        song.add(t0 + 0.01, sub808(root, 1.8 * beat, glide_to=root * (0.75 if bar % 4 == 2 else 1.0)), gain=0.85)
+        # hats: 1/8 base with occasional 1/32 rolls
+        s = 0.0
+        while s < 4.0:
+            if rng.random() < 0.15:
+                for r in range(4):  # roll
+                    song.add(t0 + (s + r * 0.125 / 2) * beat, hat(rng, dur=0.02), pan=0.2, gain=0.22)
+                s += 0.5
+            else:
+                song.add(t0 + s * beat, hat(rng, dur=0.03), pan=0.2, gain=0.3)
+                s += 0.5
+    song.write(path)
+
+
+def make_ambient(path: str):
+    """80 BPM ambient: slow pads and a soft pulse — exercises the analyzers'
+    low-transient path (sparse onsets, sustained spectrum)."""
+    rng = random.Random(0x80)
+    bpm = 80.0
+    beat = 60.0 / bpm
+    bars = 8
+    song = Song(bars * 4 * beat + 1.5)
+    chords = [
+        (110.0, 164.8, 220.0),   # A min-ish
+        (98.0, 146.8, 196.0),    # G
+        (87.3, 130.8, 174.6),    # F
+        (98.0, 155.6, 196.0),    # G sus-ish
+    ]
+    for bar in range(bars):
+        t0 = bar * 4 * beat
+        song.add(t0, pad(chords[bar % 4], 4.2 * beat), pan=-0.15 if bar % 2 else 0.15, gain=0.5)
+        song.add(t0, kick(punch=70, tail=40, dur=0.4), gain=0.35)  # soft pulse
+        if bar % 2 == 1:
+            song.add(t0 + 2 * beat, hat(rng, open_=True), pan=0.4, gain=0.12)
+        song.add(t0 + rng.random() * 3 * beat, stab(440.0 * (1.5 if bar % 4 == 2 else 1.0), dur=0.5),
+                 pan=rng.uniform(-0.5, 0.5), gain=0.1)
+    song.write(path)
+
+
+def make_dub(path: str):
+    """75 BPM dub: one-drop kick, offbeat skank stabs with echoes, deep sub."""
+    rng = random.Random(0x75)
+    bpm = 75.0
+    beat = 60.0 / bpm
+    bars = 8
+    song = Song(bars * 4 * beat + 1.0)
+    for bar in range(bars):
+        t0 = bar * 4 * beat
+        song.add(t0 + 2 * beat, kick(punch=90, tail=50, dur=0.3), gain=0.9)  # one drop
+        song.add(t0 + 2 * beat, snare(rng, dur=0.14), gain=0.5)
+        for b in (1, 3):  # skank + echo tail
+            for echo in range(3):
+                song.add(t0 + (b + echo * 0.75) * beat, stab(261.6, dur=0.12),
+                         pan=(-0.3, 0.2, 0.5)[echo], gain=0.3 * (0.55 ** echo))
+        root = (55.0, 49.0)[bar % 2]
+        song.add(t0 + 0.5 * beat, sub(root, 1.2 * beat), gain=0.8)
+        song.add(t0 + 2.5 * beat, sub(root, 0.9 * beat), gain=0.7)
+        if rng.random() < 0.5:
+            song.add(t0 + 3.5 * beat, hat(rng, open_=True), pan=0.35, gain=0.15)
+    song.write(path)
+
+
 if __name__ == "__main__":
     make_neuro("tracks/track_a.wav")
     make_house("tracks/track_b.wav")
     make_halftime("tracks/track_c.wav")
     make_boombap("tracks/track_d.wav")
+    make_techno("tracks/track_e.wav")
+    make_trance("tracks/track_f.wav")
+    make_jungle("tracks/track_g.wav")
+    make_trap("tracks/track_h.wav")
+    make_ambient("tracks/track_i.wav")
+    make_dub("tracks/track_j.wav")
