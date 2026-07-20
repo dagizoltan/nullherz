@@ -1,7 +1,7 @@
 # Nullherz System Feature Matrix (Stage 6: Evolutionary Intelligence)
 
 **Current State:** Production Beta (see [SYSTEM_STATUS.md](./SYSTEM_STATUS.md) for qualifications)
-**Last Updated:** July 19, 2026 — verified against code (reverse-engineering pass; see [ARCHITECTURE.md](../system/ARCHITECTURE.md))
+**Last Updated:** July 20, 2026 — verified against code (reverse-engineering pass; see [ARCHITECTURE.md](../system/ARCHITECTURE.md))
 
 ---
 
@@ -19,6 +19,7 @@
 | **Pattern Manager** | ✅ | `SongArrangement` scheduling of pattern events on the beat timeline. |
 | **Clip Orchestrator** | ✅ | 8×8 clip grid with quantized launch, row transfusion, and active/starting-clip telemetry. |
 | **Genetic Sequencer** | 🧪 | DNA-driven pattern evolution (`evolve_pattern`); heuristic kernel. |
+| **Hot Cue Persistence** | ✅ | SetHotCue persists to registry + library + live node; cue set at the deck playhead; numbered markers on the waveform. |
 | **Groove Transfusion** | ✅ | DNA micro-timing lands on live per-deck sequencer nodes and shifts step fire times (was silently dropped: sentinel targets 70–73 had no backing nodes and the sequencer ignored the params). |
 | **Modulation Matrix** | ✅ | Macro → multi-target parameter broadcast with `TemporalShape` ramps. |
 | **Master-Deck Suggestion**| ✅ | DNA suggestions bound to `active_master_deck` state (A–D). |
@@ -56,6 +57,8 @@
 | **Soft Fallback** | ✅ | Heartbeat-monitored instant swap to bypass node upon DSP failure; escalation to global Safe Mode. |
 | **Spectral Processor** | ✅ | Hardened FFT overlap-add with exact COLA-normalized synthesis window. Supports variable block sizes up to 1024 samples. |
 | **KeySync Pitch Shift** | ✅ | Real phase-vocoder pitch shifter with per-bin phase tracking (level preserved on shift). |
+| **Colored Waveforms** | ✅ | Per-window 3-band peaks + signed envelope (BandWaveform, serde-defaulted); filled per-vertex-colored GPU rendering; beat grid + cue markers on deck lanes. |
+| **DJ Transport Semantics** | ✅ | Stop pauses (position held), play resumes in place, load clears voices; playhead reports held position. |
 | **Planar Stereo Playback** | ✅ | Planar sample buffers end to end; frame-counted playhead; per-plane crop/stretch; deck strips stereo at every hop with per-channel DSP state (vocoder lanes, kernel banks) and private L/R buffers (`MAX_BUFFERS = 128` edge address space). Channel identity covered by full-chain regression tests. |
 | **OLA Time-Stretch** | ✅ | Overlap-add `time_stretch` kernel with corrected ratio semantics (`audio-dsp/util.rs`). |
 | **Transient Detection** | ✅ | Spectral-flux + RMS onset/transient detectors powering editor chop and analysis. |
