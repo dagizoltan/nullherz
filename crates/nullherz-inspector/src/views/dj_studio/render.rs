@@ -38,6 +38,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     // Mixer section (bottom half of the window)
     // Wrapped in a nested vertical ScrollArea so the mixer strips and master section scroll independently
     // within the remaining available height of the central panel.
+    // NEEDLE VIEW: zoomed, auto-scrolling strip of the focused deck.
+    waveform::render_needle_strip(app, ui, telemetry, 64.0);
+    ui.add_space(theme.space_xs);
+
     // horizontal_wrapped: on a narrow window (library sidebar open) the
     // strips FLOW onto a second row instead of clipping off the right edge;
     // ScrollArea::both is the backstop for extreme sizes.

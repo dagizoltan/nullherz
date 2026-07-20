@@ -182,6 +182,114 @@ impl WaveformRenderer {
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
     }
 
+    /// Upload only a WINDOW of the band waveform — `[start_ratio, end_ratio)`
+    /// of the track — remapped to the full x range. This is the needle-view
+    /// path: slicing beats shader zoom because the vertex budget then serves
+    /// the visible window alone (a whole-track upload capped at max_peaks
+    /// starves a deeply zoomed view no matter the LOD).
+    ///
+    /// Callers should set globals scroll=0, zoom=1.
+    pub fn update_from_band_window(
+        &mut self,
+        queue: &wgpu::Queue,
+        band: &nullherz_traits::BandWaveform,
+        start_ratio: f32,
+        end_ratio: f32,
+        display_pixel_width: u32,
+    ) {
+        if band.is_empty() || end_ratio <= start_ratio { return; }
+
+        // Pick the finest level whose SLICE still fits the density target.
+        let target = (display_pixel_width.max(1) as f32 * 2.0) as usize;
+        let span = (end_ratio - start_ratio).clamp(1e-6, 1.0);
+        let mut level_idx = 0;
+        for (i, level) in band.env_max.levels.iter().enumerate() {
+            level_idx = i;
+            if (level.len() as f32 * span) as usize <= target * 2 {
+                break;
+            }
+        }
+        let level_idx = level_idx.min(band.env_max.levels.len().saturating_sub(1));
+
+        let get = |m: &nullherz_traits::MipWaveform| m.levels.get(level_idx).cloned();
+        let (Some(low), Some(mid), Some(high), Some(env_min), Some(env_max)) = (
+            get(&band.low), get(&band.mid), get(&band.high), get(&band.env_min), get(&band.env_max),
+        ) else { return; };
+        let n = low.len().min(mid.len()).min(high.len()).min(env_min.len()).min(env_max.len());
+        if n == 0 { return; }
+
+        // Window bounds in series indices; ratios may run past the track on
+        // either side (playhead near an edge) — out-of-range points render
+        // as silence so the window keeps its geometry.
+        let f_start = start_ratio * n as f32;
+        let f_span = span * n as f32;
+        let count = ((f_span as usize).max(2)).min(self._max_peaks);
+
+        let mut vertices = Vec::with_capacity(count * 2);
+        for i in 0..count {
+            let idx_f = f_start + (i as f32 / count as f32) * f_span;
+            let x = (i as f32 / count as f32) * 2.0;
+            if idx_f < 0.0 || idx_f >= n as f32 {
+                vertices.push(WaveformVertex { position: [x, 0.0], color: [0.0, 0.0, 0.0, 0.0] });
+                vertices.push(WaveformVertex { position: [x, 0.0], color: [0.0, 0.0, 0.0, 0.0] });
+                continue;
+            }
+            let idx = idx_f as usize;
+            let (l, m, h) = (low[idx], mid[idx], high[idx]);
+            let top = env_max[idx].clamp(-1.0, 1.0);
+            let bot = env_min[idx].clamp(-1.0, 1.0);
+            let sum = (l + m + h).max(1e-6);
+            let amp = top.max(-bot).clamp(0.0, 1.0);
+            let bright = 0.55 + 0.45 * amp.sqrt();
+            let mix = |k: usize| {
+                (l * Self::LOW_COLOR[k] + m * Self::MID_COLOR[k] + h * Self::HIGH_COLOR[k]) / sum * bright
+            };
+            let color = [mix(0), mix(1), mix(2), 1.0];
+            vertices.push(WaveformVertex { position: [x, top], color });
+            vertices.push(WaveformVertex { position: [x, bot], color });
+        }
+        self.num_vertices = vertices.len() as u32;
+        queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
+    }
+
+    /// Mono fallback of `update_from_band_window` for pre-band library rows.
+    pub fn update_from_mip_window(
+        &mut self,
+        queue: &wgpu::Queue,
+        mip: &nullherz_traits::MipWaveform,
+        start_ratio: f32,
+        end_ratio: f32,
+        display_pixel_width: u32,
+        color: [f32; 4],
+    ) {
+        if mip.levels.is_empty() || end_ratio <= start_ratio { return; }
+        let target = (display_pixel_width.max(1) as f32 * 2.0) as usize;
+        let span = (end_ratio - start_ratio).clamp(1e-6, 1.0);
+        let mut level_idx = 0;
+        for (i, level) in mip.levels.iter().enumerate() {
+            level_idx = i;
+            if (level.len() as f32 * span) as usize <= target * 2 {
+                break;
+            }
+        }
+        let Some(peaks) = mip.levels.get(level_idx.min(mip.levels.len() - 1)) else { return; };
+        let n = peaks.len();
+        if n == 0 { return; }
+        let f_start = start_ratio * n as f32;
+        let f_span = span * n as f32;
+        let count = ((f_span as usize).max(2)).min(self._max_peaks);
+        let mut vertices = Vec::with_capacity(count * 2);
+        for i in 0..count {
+            let idx_f = f_start + (i as f32 / count as f32) * f_span;
+            let x = (i as f32 / count as f32) * 2.0;
+            let peak = if idx_f < 0.0 || idx_f >= n as f32 { 0.0 } else { peaks[idx_f as usize] };
+            vertices.push(WaveformVertex { position: [x, peak], color });
+            vertices.push(WaveformVertex { position: [x, -peak], color });
+        }
+        self.num_vertices = vertices.len() as u32;
+        queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
+    }
+
     /// Frequency-band colors: low = warm amber, mid = green-teal,
     /// high = icy white-blue. Tuned for dark backgrounds.
     const LOW_COLOR: [f32; 3] = [0.98, 0.45, 0.16];
@@ -204,7 +312,10 @@ impl WaveformRenderer {
         // LOD selection identical to the mono path, driven by the envelope.
         let mut level_idx = 0;
         if display_pixel_width > 0 {
-            let target_peaks = (display_pixel_width as f32 * 2.0) / zoom.max(0.001);
+            // Zoom MULTIPLIES the density target: at zoom N only 1/N of the
+            // track is on screen, so the full-track series needs N times the
+            // per-pixel density for the visible window to hit ~2 peaks/px.
+            let target_peaks = display_pixel_width as f32 * 2.0 * zoom.max(1.0);
             for (i, level) in band.env_max.levels.iter().enumerate() {
                 level_idx = i;
                 if level.len() as f32 <= target_peaks * 1.2 {
@@ -259,7 +370,8 @@ impl WaveformRenderer {
 
         let mut level_idx = 0;
         if display_pixel_width > 0 && !mip_waveform.levels.is_empty() {
-            let target_peaks = (display_pixel_width as f32 * 2.0) / zoom;
+            // See update_from_band_waveform: zoom multiplies the target.
+            let target_peaks = display_pixel_width as f32 * 2.0 * zoom.max(1.0);
 
             for (i, level) in mip_waveform.levels.iter().enumerate() {
                 level_idx = i;
