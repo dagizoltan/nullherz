@@ -38,16 +38,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     // Mixer section (bottom half of the window)
     // Wrapped in a nested vertical ScrollArea so the mixer strips and master section scroll independently
     // within the remaining available height of the central panel.
-    ScrollArea::vertical().id_source("mixer_scroll").show(ui, |ui| {
-        ui.horizontal_top(|ui| {
+    // horizontal_wrapped: on a narrow window (library sidebar open) the
+    // strips FLOW onto a second row instead of clipping off the right edge;
+    // ScrollArea::both is the backstop for extreme sizes.
+    ScrollArea::both().id_source("mixer_scroll").show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(theme.space_sm, theme.space_sm);
             for i in 0..4 {
                 render_channel_strip(app, ui, i, telemetry);
-                // Card borders + spacing separate the strips; the old painted
-                // 320px divider never matched the real strip height.
-                ui.add_space(theme.space_sm);
             }
-
-            // Move crossfader/master section to the same row as the decks, aligned right!
             render_master_section(app, ui, telemetry);
         });
     });
@@ -260,15 +259,14 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
     let border_thickness = if is_focused { 1.5 } else { 1.0 };
 
-    ui.allocate_ui_with_layout(Vec2::new(140.0, ui.available_height()), egui::Layout::top_down(egui::Align::Center), |ui| {
-        ui.set_width(140.0);
-        Frame::none()
-            .fill(bg_color)
-            .stroke(Stroke::new(border_thickness, stroke_color))
-            .rounding(theme.radius_md)
-            .inner_margin(Margin::symmetric(theme.space_sm, theme.space_md))
-            .show(ui, |ui| {
-                ui.vertical_centered(|ui| {
+    Frame::none()
+        .fill(bg_color)
+        .stroke(Stroke::new(border_thickness, stroke_color))
+        .rounding(theme.radius_md)
+        .inner_margin(Margin::symmetric(theme.space_sm, theme.space_md))
+        .show(ui, |ui| {
+            ui.set_width(132.0);
+            ui.vertical_centered(|ui| {
                     // Header (Selectable title/indicator for focus)
                     let deck_id_label = (b'A' + i as u8) as char;
                     let label_text = RichText::new(format!("CH {}", deck_id_label)).strong().size(theme.type_body).color(if is_focused { deck_color } else { theme.text_secondary });
@@ -305,7 +303,6 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                         });
                 });
             });
-    });
 }
 
 fn render_stereo_vu_meter(ui: &mut Ui, peak_l: f32, peak_r: f32, peak_hold: f32, accent_color: Color32, height: f32) {
@@ -318,18 +315,17 @@ fn render_stereo_vu_meter(ui: &mut Ui, peak_l: f32, peak_r: f32, peak_hold: f32,
 
 fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
     let theme = app.theme;
-    // Fixed-width container FIRST: vertical_centered inside the row expands
-    // to the full remaining width otherwise (the ballooning master card).
-    ui.allocate_ui_with_layout(Vec2::new(226.0, ui.available_height()), egui::Layout::top_down(egui::Align::Center), |ui| {
-    ui.set_width(226.0);
+    // Width bounded INSIDE the frame: vertical_centered expands to the full
+    // remaining width otherwise (the ballooning master card), and a
+    // full-height container would stretch every wrapped row to panel height.
     Frame::none()
         .fill(theme.bg_surface)
         .stroke(theme.border_stroke)
         .rounding(theme.radius_md)
         .inner_margin(Margin::symmetric(theme.space_sm, theme.space_md))
         .show(ui, |ui| {
+            ui.set_width(210.0);
             ui.vertical_centered(|ui| {
-                ui.set_width(210.0);
 
                 // Crossfader — drives BOTH sides of the stereo crossfader
                 // pair, resolved by name. (The old "master_crossfader" name
@@ -410,5 +406,4 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
                 });
             });
         });
-    });
 }

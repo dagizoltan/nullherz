@@ -8,11 +8,13 @@ pub fn render_deck_performance(app: &mut InspectorApp, ui: &mut Ui, i: usize, te
     ui.vertical(|ui| {
         ui.label(RichText::new("HOT-CUES").size(theme.type_caption).color(theme.text_secondary));
         egui::Grid::new(format!("perf_grid_{}", i)).spacing([theme.space_xs, theme.space_xs]).show(ui, |ui| {
-            for row in 0..4 {
-                for col in 0..2 {
-                    let j = row * 2 + col;
+            // 4 wide x 2 tall: the old 2x4 layout burned vertical space the
+            // strip doesn't have.
+            for row in 0..2 {
+                for col in 0..4 {
+                    let j = row * 4 + col;
                     let btn = egui::Button::new(RichText::new(format!("{}", j + 1)).strong().size(theme.type_caption))
-                        .min_size(Vec2::new(32.0, 24.0))
+                        .min_size(Vec2::new(28.0, 24.0))
                         .fill(theme.bg_surface);
 
                     let response = ui.add(btn);
