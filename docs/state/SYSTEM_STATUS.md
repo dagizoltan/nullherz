@@ -2,7 +2,7 @@
 
 **Author:** Senior Lead Audio & Rust Systems Architect
 **Status:** PRODUCTION BETA
-**Date:** 2026-07-19 (verified against code; see [ARCHITECTURE.md](../system/ARCHITECTURE.md) for the full reverse-engineered reference)
+**Date:** 2026-07-20 (verified against code; see [ARCHITECTURE.md](../system/ARCHITECTURE.md) for the full reverse-engineered reference)
 
 ---
 
@@ -91,6 +91,7 @@ While the Nullherz engine is architecturally hardened, the transition to a "Valu
 | **Genetic Cloud** | Active | TCP Gossipsub-style DNA exchange with ed25519 `GOSSIP_SIGNED` payloads and TOFU peer-identity pinning (HANDSHAKE/IDENTITY, key-change rejection). |
 | **DSP Kernels** | Production Beta | Wasm-SIMD128 optimized spectral kernels with exact COLA overlap-add reconstruction; KeySync is a real phase-vocoder pitch shifter; OLA time-stretch and transient detectors (July 2026). |
 | **Mixer Console** | Active | 4-channel DJ topology with harmonic auto-sync; stereo deck strips with private L/R buffers and stereo cue bus. |
+| **DJ Console UX** | Active | Frequency-colored asymmetric waveforms with beat grid + numbered hot cues; visible playhead + time readouts; pause/resume transport; persistent hot cues; per-deck command isolation; wrap-flow mixer strips (July 2026 UI campaign). |
 | **Audio Editor** | Active | Waveform selection, OLA time-stretch, transient chop, non-destructive undo (July 2026). |
 | **Composer** | Active | Endless-scroll step grid with sequencer routing and live per-step telemetry. |
 | **Curation** | Active | Intelligent "Energy Match" smart crating logic. |
@@ -99,6 +100,6 @@ While the Nullherz engine is architecturally hardened, the transition to a "Valu
 
 ## 6. Conclusion
 
-The Nullherz engine has transitioned to a **Production Beta** state. It features a Kani-covered execution plane, distributed clock discipline with measured path delay, a signed genetic DNA gossip protocol with peer-identity pinning, warning-free builds (`cargo check --workspace --all-targets -D warnings`), a CI gate, and a fully green test suite (**190/190**, 2026-07-19).
+The Nullherz engine has transitioned to a **Production Beta** state. It features a Kani-covered execution plane, distributed clock discipline with measured path delay, a signed genetic DNA gossip protocol with peer-identity pinning, warning-free builds (`cargo check --workspace --all-targets -D warnings`), a CI gate, and a fully green test suite (**200/200**, 2026-07-20).
 
 **Architecture Status:** PRODUCTION BETA.
