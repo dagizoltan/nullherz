@@ -42,6 +42,11 @@ impl AnalysisKernel {
         let peak_count = (buffer.len() / 128).max(1);
         metadata.peaks = Arc::new(self.calculate_peaks(buffer, peak_count));
 
+        // 2c. Frequency-colored waveform: band peaks + signed envelope at the
+        // same window resolution. The worker turns these into MIP pyramids.
+        let bands = self.calculate_band_waveform(buffer, 128);
+        metadata.band_waveform = bands;
+
         // 3. DNA Analysis (Spectral)
         self.analyze_spectral(buffer, &mut dna);
 
@@ -129,6 +134,71 @@ impl AnalysisKernel {
             peaks.push(max_val);
         }
         peaks
+    }
+
+    /// Frequency-colored waveform source data: per `window`-sample window,
+    /// the peak of three bands (low <200 Hz, mid, high >2 kHz via two
+    /// cascaded one-pole splits) plus the SIGNED min/max envelope. Series
+    /// share window boundaries, so a renderer can index them together.
+    fn calculate_band_waveform(&self, buffer: &[f32], window: usize) -> nullherz_traits::BandWaveform {
+        use nullherz_traits::{BandWaveform, MipWaveform};
+        if buffer.is_empty() {
+            return BandWaveform::default();
+        }
+        let windows = buffer.len().div_ceil(window);
+        let (mut low_v, mut mid_v, mut high_v) = (
+            Vec::with_capacity(windows),
+            Vec::with_capacity(windows),
+            Vec::with_capacity(windows),
+        );
+        let mut min_v = Vec::with_capacity(windows);
+        let mut max_v = Vec::with_capacity(windows);
+
+        let two_pi = 2.0 * std::f32::consts::PI;
+        let a_low = (two_pi * 200.0 / self.sample_rate).min(0.99);
+        let a_high = (two_pi * 2_000.0 / self.sample_rate).min(0.99);
+        let (mut lp200, mut lp2k) = (0.0f32, 0.0f32);
+
+        let mut idx = 0;
+        while idx < buffer.len() {
+            let end = (idx + window).min(buffer.len());
+            let (mut l, mut m, mut h) = (0.0f32, 0.0f32, 0.0f32);
+            let (mut mn, mut mx) = (f32::MAX, f32::MIN);
+            for &x in &buffer[idx..end] {
+                lp200 += a_low * (x - lp200);
+                lp2k += a_high * (x - lp2k);
+                let low = lp200;
+                let mid = lp2k - lp200;
+                let high = x - lp2k;
+                if low.abs() > l { l = low.abs(); }
+                if mid.abs() > m { m = mid.abs(); }
+                if high.abs() > h { h = high.abs(); }
+                if x < mn { mn = x; }
+                if x > mx { mx = x; }
+            }
+            low_v.push(l);
+            mid_v.push(m);
+            high_v.push(h);
+            min_v.push(mn.min(0.0));
+            max_v.push(mx.max(0.0));
+            idx = end;
+        }
+
+        let to_mips = |series: Vec<f32>| -> MipWaveform {
+            MipWaveform {
+                levels: audio_dsp::util::WaveformProcessor::generate_mip_levels(&series, 8)
+                    .into_iter()
+                    .map(Arc::new)
+                    .collect(),
+            }
+        };
+        BandWaveform {
+            low: to_mips(low_v),
+            mid: to_mips(mid_v),
+            high: to_mips(high_v),
+            env_min: to_mips(min_v),
+            env_max: to_mips(max_v),
+        }
     }
 
     fn analyze_spectral(&mut self, buffer: &[f32], dna: &mut nullherz_traits::SoundDNA) {

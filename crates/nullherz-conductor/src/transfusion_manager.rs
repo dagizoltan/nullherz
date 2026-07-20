@@ -300,6 +300,7 @@ impl TransfusionManager {
                 total_samples: snapshot.len() as u64,
                 channels: 1,
                 mip_waveform: nullherz_traits::MipWaveform::default(),
+                band_waveform: nullherz_traits::BandWaveform::default(),
                 dna: nullherz_traits::SoundDNA::default(),
                 midi_map: None,
             });

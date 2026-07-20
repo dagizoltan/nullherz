@@ -379,7 +379,12 @@ mod rtt_properties {
         /// exactly the sum of the two legs — the offset must cancel.
         #[test]
         fn rtt_recovers_delay_regardless_of_offset(
-            t1 in 1_000_000_000u64..2_000_000_000,
+            // Epoch must exceed the largest negative offset: with t1 as low
+            // as 1s and offset down to -10s, the model's own t1+offset went
+            // NEGATIVE, wrapped through `as u64`, and overflowed on
+            // `t2 + think_time` — a physically impossible timeline, not a
+            // property of the code under test.
+            t1 in 20_000_000_000u64..21_000_000_000,
             delay_ab in 0i64..50_000_000,
             delay_ba in 0i64..50_000_000,
             offset in -10_000_000_000i64..10_000_000_000,

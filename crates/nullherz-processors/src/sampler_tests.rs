@@ -21,6 +21,7 @@ fn test_sampler_sync_logic() {
         channels: 1,
             total_samples: buffer.len() as u64,
         mip_waveform: nullherz_traits::MipWaveform::default(),
+        band_waveform: nullherz_traits::BandWaveform::default(),
         dna: SoundDNA::default(),
         midi_map: None,
     };
@@ -87,6 +88,7 @@ fn test_add_source_is_o1_no_deep_clone() {
         channels: 1,
             total_samples: big.len() as u64,
         mip_waveform: nullherz_traits::MipWaveform::default(),
+        band_waveform: nullherz_traits::BandWaveform::default(),
         dna: SoundDNA::default(),
         midi_map: None,
     });

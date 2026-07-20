@@ -20,6 +20,7 @@ fn test_sampler_slicer_offsets() {
         channels: 1,
             total_samples: buffer.len() as u64,
         mip_waveform: nullherz_traits::MipWaveform::default(),
+        band_waveform: nullherz_traits::BandWaveform::default(),
         dna: SoundDNA::default(),
         midi_map: None,
     };
@@ -87,6 +88,7 @@ fn test_sampler_slicer_phase_lock() {
         channels: 1,
             total_samples: buffer.len() as u64,
         mip_waveform: nullherz_traits::MipWaveform::default(),
+        band_waveform: nullherz_traits::BandWaveform::default(),
         dna: SoundDNA::default(),
         midi_map: None,
     };

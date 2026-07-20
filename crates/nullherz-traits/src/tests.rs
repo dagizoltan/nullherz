@@ -18,6 +18,13 @@ mod tests {
             mip_waveform: MipWaveform {
                 levels: vec![Arc::new(vec![0.0, 0.5, 1.0])],
             },
+            band_waveform: BandWaveform {
+                low: MipWaveform { levels: vec![Arc::new(vec![0.1, 0.2])] },
+                mid: MipWaveform { levels: vec![Arc::new(vec![0.3, 0.4])] },
+                high: MipWaveform { levels: vec![Arc::new(vec![0.5, 0.6])] },
+                env_min: MipWaveform { levels: vec![Arc::new(vec![-0.8, -0.6])] },
+                env_max: MipWaveform { levels: vec![Arc::new(vec![0.9, 0.7])] },
+            },
             dna: SoundDNA::default(),
             midi_map: None,
         };
@@ -28,6 +35,16 @@ mod tests {
         assert_eq!(deserialized.bpm, 120.0);
         assert_eq!(deserialized.peaks.len(), 1024);
         assert_eq!(deserialized.mip_waveform.levels.len(), 1);
+        // Band waveform must round-trip (and its serde default must let
+        // pre-band payloads deserialize — checked separately below).
+        assert_eq!(deserialized.band_waveform.low.levels[0].as_slice(), &[0.1, 0.2]);
+        assert_eq!(deserialized.band_waveform.env_min.levels[0].as_slice(), &[-0.8, -0.6]);
+
+        // Pre-band payload (field absent) must still deserialize.
+        let mut v: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        v.as_object_mut().unwrap().remove("band_waveform");
+        let legacy: SampleMetadata = serde_json::from_value(v).expect("legacy payload without band_waveform must load");
+        assert!(legacy.band_waveform.is_empty());
         assert_eq!(deserialized.mip_waveform.levels[0].as_slice(), &[0.0, 0.5, 1.0]);
     }
 
