@@ -19,6 +19,9 @@ const _: () = assert!(std::mem::size_of::<WaveformGlobals>() == 32);
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct WaveformVertex {
     position: [f32; 2],
+    /// Per-vertex color: frequency-band tint for colored waveforms, the
+    /// accent color for the mono fallback.
+    color: [f32; 4],
 }
 
 pub struct WaveformRenderer {
@@ -102,11 +105,18 @@ impl WaveformRenderer {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<WaveformVertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[wgpu::VertexAttribute {
-                        offset: 0,
-                        shader_location: 0,
-                        format: wgpu::VertexFormat::Float32x2,
-                    }],
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: 8,
+                            shader_location: 1,
+                            format: wgpu::VertexFormat::Float32x4,
+                        },
+                    ],
                 }],
             },
             fragment: Some(wgpu::FragmentState {
@@ -119,7 +129,7 @@ impl WaveformRenderer {
                 })],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineStrip,
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: None,
@@ -149,7 +159,7 @@ impl WaveformRenderer {
         }
     }
 
-    pub fn update_peaks(&mut self, queue: &wgpu::Queue, peaks: &[f32]) {
+    pub fn update_peaks(&mut self, queue: &wgpu::Queue, peaks: &[f32], color: [f32; 4]) {
         if peaks.is_empty() { return; }
 
         // If the level is denser than the vertex buffer, DOWNSAMPLE across
@@ -165,14 +175,84 @@ impl WaveformRenderer {
             let peak = peaks[start..end].iter().fold(0.0f32, |a, &v| a.max(v));
             // Normalized X in range [0, 2] instead of [-1, 1] to allow easier zooming from start
             let x = (i as f32 / peak_count as f32) * 2.0;
-            vertices.push(WaveformVertex { position: [x, peak] });
-            vertices.push(WaveformVertex { position: [x, -peak] });
+            vertices.push(WaveformVertex { position: [x, peak], color });
+            vertices.push(WaveformVertex { position: [x, -peak], color });
         }
         self.num_vertices = vertices.len() as u32;
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
     }
 
-    pub fn update_from_mip_waveform(&mut self, queue: &wgpu::Queue, mip_waveform: &nullherz_traits::MipWaveform, zoom: f32, display_pixel_width: u32) {
+    /// Frequency-band colors: low = warm amber, mid = green-teal,
+    /// high = icy white-blue. Tuned for dark backgrounds.
+    const LOW_COLOR: [f32; 3] = [0.98, 0.45, 0.16];
+    const MID_COLOR: [f32; 3] = [0.18, 0.85, 0.55];
+    const HIGH_COLOR: [f32; 3] = [0.75, 0.87, 1.0];
+
+    /// Upload a frequency-colored waveform: asymmetric min/max envelope for
+    /// the SHAPE, per-point color mixed from the three band peaks. Falls
+    /// back to nothing (caller should use `update_from_mip_waveform`) when
+    /// the band data is empty.
+    pub fn update_from_band_waveform(
+        &mut self,
+        queue: &wgpu::Queue,
+        band: &nullherz_traits::BandWaveform,
+        zoom: f32,
+        display_pixel_width: u32,
+    ) {
+        if band.is_empty() { return; }
+
+        // LOD selection identical to the mono path, driven by the envelope.
+        let mut level_idx = 0;
+        if display_pixel_width > 0 {
+            let target_peaks = (display_pixel_width as f32 * 2.0) / zoom.max(0.001);
+            for (i, level) in band.env_max.levels.iter().enumerate() {
+                level_idx = i;
+                if level.len() as f32 <= target_peaks * 1.2 {
+                    break;
+                }
+            }
+        }
+        let level_idx = level_idx.min(band.env_max.levels.len().saturating_sub(1));
+
+        let get = |m: &nullherz_traits::MipWaveform| m.levels.get(level_idx).cloned();
+        let (Some(low), Some(mid), Some(high), Some(env_min), Some(env_max)) = (
+            get(&band.low), get(&band.mid), get(&band.high), get(&band.env_min), get(&band.env_max),
+        ) else { return; };
+
+        // All series share lengths per level; min() guards a malformed row.
+        let n = low.len().min(mid.len()).min(high.len()).min(env_min.len()).min(env_max.len());
+        if n == 0 { return; }
+        let peak_count = n.min(self._max_peaks);
+
+        let mut vertices = Vec::with_capacity(peak_count * 2);
+        for i in 0..peak_count {
+            let start = i * n / peak_count;
+            let end = (((i + 1) * n) / peak_count).max(start + 1);
+            let seg_max = |s: &[f32]| s[start..end].iter().fold(0.0f32, |a, &v| a.max(v));
+            let l = seg_max(&low);
+            let m = seg_max(&mid);
+            let h = seg_max(&high);
+            let top = env_max[start..end].iter().fold(f32::MIN, |a, &v| a.max(v)).clamp(-1.0, 1.0);
+            let bot = env_min[start..end].iter().fold(f32::MAX, |a, &v| a.min(v)).clamp(-1.0, 1.0);
+
+            let sum = (l + m + h).max(1e-6);
+            let amp = top.max(-bot).clamp(0.0, 1.0);
+            // Quiet sections dim slightly so loud hits pop.
+            let bright = 0.55 + 0.45 * amp.sqrt();
+            let mix = |k: usize| {
+                (l * Self::LOW_COLOR[k] + m * Self::MID_COLOR[k] + h * Self::HIGH_COLOR[k]) / sum * bright
+            };
+            let color = [mix(0), mix(1), mix(2), 1.0];
+
+            let x = (i as f32 / peak_count as f32) * 2.0;
+            vertices.push(WaveformVertex { position: [x, top], color });
+            vertices.push(WaveformVertex { position: [x, bot], color });
+        }
+        self.num_vertices = vertices.len() as u32;
+        queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
+    }
+
+    pub fn update_from_mip_waveform(&mut self, queue: &wgpu::Queue, mip_waveform: &nullherz_traits::MipWaveform, zoom: f32, display_pixel_width: u32, color: [f32; 4]) {
         // Advanced LOD selection logic:
         // We aim for approximately 2 peaks per display pixel for optimal visual density
         // without overloading the GPU with redundant geometry.
@@ -193,7 +273,7 @@ impl WaveformRenderer {
 
         let level_idx = level_idx.min(mip_waveform.levels.len().saturating_sub(1));
         if let Some(peaks) = mip_waveform.levels.get(level_idx) {
-            self.update_peaks(queue, peaks);
+            self.update_peaks(queue, peaks, color);
         }
     }
 

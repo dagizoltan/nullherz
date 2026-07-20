@@ -19,7 +19,12 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
             if let Some(wgpu) = &app.wgpu_renderer {
                 let wgpu = wgpu.lock();
                 wf.update_globals(&wgpu.queue, scroll, zoom, color);
-                wf.update_from_mip_waveform(&wgpu.queue, &t.metadata.mip_waveform, zoom, rect.width() as u32);
+                if t.metadata.band_waveform.is_empty() {
+                    // Pre-band library rows: mono silhouette in the deck color.
+                    wf.update_from_mip_waveform(&wgpu.queue, &t.metadata.mip_waveform, zoom, rect.width() as u32, color);
+                } else {
+                    wf.update_from_band_waveform(&wgpu.queue, &t.metadata.band_waveform, zoom, rect.width() as u32);
+                }
             }
 
             nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_lock.clone());
@@ -31,6 +36,53 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
                 [egui::pos2(rect.min.x, rect.center().y), egui::pos2(rect.max.x, rect.center().y)],
                 egui::Stroke::new(1.0, theme.border)
             );
+        }
+
+        // Beat grid from the analyzed BPM: a tick per beat, full-height and
+        // brighter on the downbeat (every 4th). Drawn before the playhead so
+        // the needle stays on top.
+        let total_frames = t.metadata.total_samples.max(1);
+        if t.metadata.bpm > 20.0 {
+            let spb = 44_100.0f64 * 60.0 / t.metadata.bpm as f64;
+            let total = total_frames as f64;
+            let offset = t.metadata.beat_grid_offset as f64;
+            let mut b: u64 = 0;
+            loop {
+                let pos = offset + b as f64 * spb;
+                if pos >= total || b > 100_000 {
+                    break;
+                }
+                let x = rect.min.x + (pos / total) as f32 * rect.width();
+                let (h, alpha) = if b % 4 == 0 {
+                    (rect.height(), 42)
+                } else {
+                    (rect.height() * 0.35, 22)
+                };
+                ui.painter().line_segment(
+                    [egui::pos2(x, rect.max.y - h), egui::pos2(x, rect.max.y)],
+                    egui::Stroke::new(1.0, Color32::from_white_alpha(alpha)),
+                );
+                b += 1;
+            }
+        }
+
+        // Hot cue markers: accent notch + slot number at the top edge.
+        for (ci, cue) in t.metadata.hot_cues.iter().enumerate() {
+            if let Some(pos) = cue {
+                let ratio = (*pos as f32 / total_frames as f32).clamp(0.0, 1.0);
+                let x = rect.min.x + ratio * rect.width();
+                ui.painter().line_segment(
+                    [egui::pos2(x, rect.min.y), egui::pos2(x, rect.min.y + 10.0)],
+                    egui::Stroke::new(2.0, theme.accent),
+                );
+                ui.painter().text(
+                    egui::pos2(x + 3.0, rect.min.y + 1.0),
+                    egui::Align2::LEFT_TOP,
+                    format!("{}", ci + 1),
+                    egui::FontId::monospace(9.0),
+                    theme.accent,
+                );
+            }
         }
 
         // Render playhead using actual per-deck playback position.

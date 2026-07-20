@@ -136,7 +136,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             let color = deck_color.to_array().map(|v| v as f32 / 255.0);
 
                             wf.update_globals(&_wgpu.queue, scroll, zoom, color);
-                            wf.update_from_mip_waveform(&_wgpu.queue, &t.metadata.mip_waveform, zoom, wf_rect.width() as u32);
+                            wf.update_from_mip_waveform(&_wgpu.queue, &t.metadata.mip_waveform, zoom, wf_rect.width() as u32, app.theme.accent.to_array().map(|v| v as f32 / 255.0));
                             nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, wf_rect, wf_mtx.clone());
                         } else {
                             // Fallback rendering

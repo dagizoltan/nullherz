@@ -1,5 +1,6 @@
 struct VertexInput {
     @location(0) position: vec2<f32>,
+    @location(1) color: vec4<f32>,
 };
 
 struct VertexOutput {
@@ -27,8 +28,8 @@ fn vs_main(
     let x = (model.position.x - globals.scroll_offset) * globals.zoom - 1.0;
     out.clip_position = vec4<f32>(x, model.position.y, 0.0, 1.0);
 
-    // Simple color based on height for now
-    out.color = globals.accent_color;
+    // Per-vertex color: band tint for colored waveforms, accent for mono.
+    out.color = model.color;
 
     return out;
 }

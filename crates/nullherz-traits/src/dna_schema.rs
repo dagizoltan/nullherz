@@ -119,6 +119,32 @@ pub struct MipWaveform {
     pub levels: Vec<Arc<Vec<f32>>>,
 }
 
+/// Frequency-colored waveform data: per-window band peaks (low <200 Hz,
+/// mid, high >2 kHz) plus the SIGNED min/max envelope, each as a MIP
+/// pyramid. All series share window boundaries and per-level lengths, so a
+/// renderer can pick one LOD index across the set.
+///
+/// serde-defaulted everywhere it is embedded: libraries written before this
+/// existed load fine, and views fall back to the mono silhouette while
+/// `is_empty()`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Default)]
+#[archive(check_bytes)]
+pub struct BandWaveform {
+    pub low: MipWaveform,
+    pub mid: MipWaveform,
+    pub high: MipWaveform,
+    /// Signed envelope minimum per window (asymmetric waveform bottom).
+    pub env_min: MipWaveform,
+    /// Signed envelope maximum per window (asymmetric waveform top).
+    pub env_max: MipWaveform,
+}
+
+impl BandWaveform {
+    pub fn is_empty(&self) -> bool {
+        self.low.levels.is_empty()
+    }
+}
+
 fn default_channels() -> u16 { 1 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -142,6 +168,10 @@ pub struct SampleMetadata {
     #[serde(default = "default_channels")]
     pub channels: u16,
     pub mip_waveform: MipWaveform,
+    /// Frequency-colored waveform (band peaks + signed envelope). Defaulted
+    /// so pre-band libraries load; empty means "render the mono silhouette".
+    #[serde(default)]
+    pub band_waveform: BandWaveform,
     pub dna: SoundDNA,
     pub midi_map: Option<MidiMap>,
 }
@@ -159,6 +189,7 @@ impl SampleMetadata {
             total_samples: 0,
             channels: 1,
             mip_waveform: MipWaveform::default(),
+            band_waveform: BandWaveform::default(),
             dna: SoundDNA::default(),
             midi_map: None,
         }

@@ -54,7 +54,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 if let Some(wgpu) = &app.wgpu_renderer {
                     let wgpu = wgpu.lock();
                     wf.update_globals(&wgpu.queue, scroll, zoom, color);
-                    wf.update_from_mip_waveform(&wgpu.queue, &track.metadata.mip_waveform, zoom, rect.width() as u32);
+                    wf.update_from_mip_waveform(&wgpu.queue, &track.metadata.mip_waveform, zoom, rect.width() as u32, app.theme.accent.to_array().map(|v| v as f32 / 255.0));
                 }
 
                 nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_lock.clone());
