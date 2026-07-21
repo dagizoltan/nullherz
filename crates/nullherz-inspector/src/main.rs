@@ -655,13 +655,19 @@ impl eframe::App for InspectorApp {
                 self.viz.damped_peaks[i] += (target_peak - self.viz.damped_peaks[i]) * alpha_p;
             }
             // Truthful play state: a deck is playing iff its playhead moved
-            // since the last telemetry frame. The player-view button used to
-            // keep a local bool that drifted from engine truth (track end,
-            // stop from another view, pause).
-            for i in 0..4 {
-                let pos = t.deck_positions[i];
-                self.decks.deck_playing[i] = pos != 0 && pos != self.viz.last_deck_positions[i];
-                self.viz.last_deck_positions[i] = pos;
+            // ACROSS TELEMETRY SNAPSHOTS. Gated on sample_counter: the UI
+            // repaints faster than telemetry refreshes, and re-deriving from
+            // the SAME cached snapshot compared a position against itself —
+            // deck_playing flapped false mid-playback and the player view's
+            // play/stop toggle sent PlayDeck when the user meant StopDeck.
+            if t.sample_counter != self.viz.last_playstate_counter {
+                self.viz.last_playstate_counter = t.sample_counter;
+                crate::state::update_deck_playing(
+                    &t.deck_positions,
+                    &mut self.viz.last_deck_positions,
+                    &mut self.viz.deck_still_snapshots,
+                    &mut self.decks.deck_playing,
+                );
             }
 
             for (i, name) in ["master_sum_l", "master_sum_r"].iter().enumerate() {

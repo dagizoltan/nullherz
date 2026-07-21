@@ -567,6 +567,8 @@ mod tests {
                 damped_peaks: [0.0; 4],
                 damped_master_peaks: [0.0; 2],
                 last_deck_positions: [0; 4],
+                deck_still_snapshots: [0; 4],
+                last_playstate_counter: 0,
             },
             topo: crate::state::TopologyViewState {
                 active_connection_source: None,
