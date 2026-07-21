@@ -60,6 +60,9 @@ mod verification {
         let mut crossfade_buffers: [AudioBlock; crate::MAX_CROSSFADE_BUFFERS] = [AudioBlock { data: [0.0; crate::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; crate::MAX_CROSSFADE_BUFFERS];
         let block_x_map = [[0u8; crate::MAX_CHANNELS]; crate::MAX_NODES];
         let telemetry = std::array::from_fn(|_| AtomicU64::new(0));
+        let mut pdc_lines = crate::processors::graph::buffer_pool::PdcLines::new();
+        let faulted_states: [std::sync::atomic::AtomicBool; crate::MAX_NODES] =
+            std::array::from_fn(|_| std::sync::atomic::AtomicBool::new(false));
 
         // Symbolic sub-block params
         let num_samples = kani::any_where(|&n: &usize| n <= crate::MAX_BLOCK_SIZE);
@@ -79,6 +82,9 @@ mod verification {
             None,
             true,
             &telemetry,
+            &mut pdc_lines,
+            0,
+            &faulted_states,
         );
     }
 }

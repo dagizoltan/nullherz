@@ -20,6 +20,17 @@ use self::resource_recycler::ResourceRecycler;
 use self::telemetry_finalizer::TelemetryFinalizer;
 use nullherz_traits::SampleRegistry;
 
+/// Default worker-pool size when neither the resource config nor
+/// `NULLHERZ_WORKERS` specifies one. Leaves the RT thread its own core
+/// (`available_parallelism - 1`); the per-stage cost gate means these are an
+/// upper bound, not a guarantee of use. Falls back to the historical default
+/// if the core count can't be read. Never call on the RT path.
+fn default_worker_count() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().saturating_sub(1))
+        .unwrap_or(nullherz_traits::DEFAULT_WORKER_COUNT)
+}
+
 pub struct EngineHost {
     command_producer: Box<dyn nullherz_traits::CommandProducer>,
 }
@@ -97,6 +108,7 @@ pub struct AudioEngine<K: ProcessingKernel = StandardKernel> {
     fft_plan: audio_dsp::SimdFft,
     fft_re: audio_dsp::AlignedBuffer,
     fft_im: audio_dsp::AlignedBuffer,
+    spectral_cache: telemetry_finalizer::SpectralTelemetryCache,
 }
 
 impl<K: ProcessingKernel> nullherz_traits::RenderingEngine for AudioEngine<K> {
@@ -143,7 +155,17 @@ impl<K: ProcessingKernel> AudioEngine<K> {
         kernel: K,
     ) -> Self {
         let command_producer = dyn_clone::clone_box(&*resources.command_producer);
-        let worker_count = resources.worker_count.unwrap_or(nullherz_traits::DEFAULT_WORKER_COUNT);
+        // Worker-count resolution: explicit resource config, then the
+        // NULLHERZ_WORKERS env override (0 = no pool, pure serial execution
+        // on the RT thread), then a core-count-aware default. This is an
+        // UPPER BOUND on parallelism, not a mandate: the executor's per-stage
+        // cost gate decides whether any given stage actually dispatches, so
+        // spare workers just park (see the 2026-07-21 worker experiment).
+        // Read here, at construction, on the setup thread — never on the RT path.
+        let worker_count = resources.worker_count
+            .or_else(|| std::env::var("NULLHERZ_WORKERS").ok().and_then(|v| v.parse::<usize>().ok()))
+            .unwrap_or_else(default_worker_count)
+            .min(64);
         Self {
             command_producer: dyn_clone::clone_box(&*command_producer),
             command_consumer: resources.command_consumer,
@@ -169,7 +191,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             metrics: EngineMetrics::new(),
             health_signal: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             host: Some(EngineHost { command_producer }),
-            pool: Some(Box::new(TaskPool::new(worker_count))),
+            pool: if worker_count == 0 { None } else { Some(Box::new(TaskPool::new(worker_count))) },
             transport: nullherz_traits::Transport {
                 bpm: 120.0,
                 beat_position: 0.0,
@@ -184,6 +206,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             fft_plan: audio_dsp::SimdFft::new(1024),
             fft_re: audio_dsp::AlignedBuffer::new(1024),
             fft_im: audio_dsp::AlignedBuffer::new(1024),
+            spectral_cache: telemetry_finalizer::SpectralTelemetryCache::default(),
         }
     }
 
@@ -271,6 +294,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             &mut self.fft_re,
             &mut self.fft_im,
             &self.transport,
+            &mut self.spectral_cache,
         );
 
         // Black-Box Flight Recorder (RT-Safe SPSC push)

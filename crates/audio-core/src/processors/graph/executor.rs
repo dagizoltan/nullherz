@@ -100,12 +100,34 @@ impl GraphExecutor {
         let buffers_ptr = buffers.as_mut_ptr();
         let x_buffers_ptr = crossfade_buffers.as_mut_ptr();
 
-        if let Some(pool) = pool.as_mut() {
-            let start_count = pool.current_completion_count();
+        // Per-stage cost gate: dispatch to the pool only when the stage's own
+        // work out-costs dispatch overhead. Cost is the telemetry-measured
+        // sum of the stage's node times; cold start reads 0 → serial (safe
+        // default), and a stage escalates to the pool only once measured cost
+        // proves it worthwhile. Single-node stages can never parallelize. The
+        // generic (test-double) executor keeps the old always-pool behavior.
+        let use_pool = match pool.as_mut() {
+            None => false,
+            Some(_) if stage.len() < 2 => false,
+            Some(pool_dyn) => {
+                if let Some(tp) = pool_dyn.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
+                    let stage_cost: u64 = stage
+                        .iter()
+                        .map(|&n| telemetry_node_times_cycles[n as usize].load(Ordering::Relaxed))
+                        .sum();
+                    stage_cost >= tp.parallel_threshold_cycles
+                } else {
+                    true
+                }
+            }
+        };
+
+        if use_pool {
+            let pool_dyn = pool.as_mut().unwrap();
+            let start_count = pool_dyn.current_completion_count();
             let num_nodes = stage.len();
 
             let mut worker_costs = [0u64; 64];
-            let num_workers = pool.num_workers().min(64);
 
             // STAGE 7: Latency-Aware Critical-Path Scheduler
             // Identify critical path (highest latency chain) and pin it to worker 0
@@ -120,44 +142,9 @@ impl GraphExecutor {
                 }
             }
 
-            for &n_idx_u32 in stage {
-                let n_idx = n_idx_u32 as usize;
-                let mut worker_idx = 0;
-
-                // Priority: Pin critical node to a dedicated high-performance worker (idx 0)
-                if Some(n_idx_u32) == critical_node {
-                    worker_idx = 0;
-                } else {
-                    // Try to use cached assignment if available
-                    let mut cached = false;
-                    if let Some(p_mut) = pool.as_any().downcast_mut::<crate::processors::graph::TaskPool>()
-                        && let Some(assignment) = p_mut.assignment_cache[n_idx] {
-                            worker_idx = assignment.worker_idx as usize;
-                            cached = true;
-                        }
-
-                    if !cached {
-                        let mut min_cost = u64::MAX;
-                        for w in 0..num_workers {
-                            if worker_costs[w] < min_cost {
-                                min_cost = worker_costs[w];
-                                worker_idx = w;
-                            }
-                        }
-
-                        // Cache the new assignment
-                        if let Some(p_mut) = pool.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
-                            p_mut.assignment_cache[n_idx] = Some(crate::processors::graph::pool::StaticAssignment {
-                                node_idx: n_idx as u32,
-                                worker_idx: worker_idx as u8,
-                            });
-                        }
-                    }
-                }
-
-                let cost = telemetry_node_times_cycles[n_idx].load(Ordering::Relaxed);
-                worker_costs[worker_idx] += cost.max(100); // Minimum weight to prevent lopsidedness on zero-telemetry
-
+            // Job assembly shared by both pool flavours below.
+            let pdc_lines_ptr: *mut crate::processors::graph::buffer_pool::PdcLines = pdc_lines;
+            let build_job = |n_idx: usize, telemetry_ptr: *mut [std::sync::atomic::AtomicU64; crate::MAX_NODES]| -> Job {
                 let routing = &topo.routing[n_idx];
                 let mut resolved_inputs = [0usize; crate::MAX_CHANNELS];
                 let mut resolved_sidechains = [0usize; crate::MAX_CHANNELS];
@@ -175,8 +162,7 @@ impl GraphExecutor {
 
                 for j in 0..routing.sidechain_count.min(crate::MAX_CHANNELS) {
                     let v_idx = routing.sidechain_indices.get(j).copied().unwrap_or_default().index();
-                    let p_idx = topo.virtual_to_physical[v_idx].index();
-                    resolved_sidechains[j] = p_idx;
+                    resolved_sidechains[j] = topo.virtual_to_physical[v_idx].index();
                 }
 
                 for (j, resolved_out) in resolved_outputs.iter_mut().enumerate().take(routing.output_count.min(crate::MAX_CHANNELS)) {
@@ -186,14 +172,7 @@ impl GraphExecutor {
 
                 let is_bypassed = topo.bypass_states[n_idx] || faulted_states[n_idx].load(Ordering::Relaxed);
 
-
-                let telemetry_ptr = if let Some(p_mut) = pool.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
-                    &p_mut.worker_telemetry[worker_idx] as *const _ as *mut _
-                } else {
-                    telemetry_node_times_cycles as *const _ as *mut _
-                };
-
-                let job = Job {
+                Job {
                     node_ptr: &nodes[n_idx] as *const _,
                     num_samples,
                     sub_block_offset: offset,
@@ -213,21 +192,82 @@ impl GraphExecutor {
                     is_last_sub_block,
                     is_bypassed,
                     bypass_state_ptr: &faulted_states[n_idx] as *const std::sync::atomic::AtomicBool,
-                    pdc_lines_ptr: pdc_lines,
+                    pdc_lines_ptr,
                     pdc_write_pos,
-                };
-                unsafe { pool.push_job_raw(worker_idx, &job as *const _ as *const u8, std::mem::size_of::<Job>(), |_| {}); }
-            }
+                }
+            };
 
-            pool.notify_workers();
-            pool.wait_for_completion(start_count + num_nodes);
+            // Hoisted TaskPool downcast: this dynamic cast used to run up to
+            // three times per node, per stage, per sub-block.
+            if let Some(tp) = pool_dyn.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
+                let num_workers = tp.worker_producers.len().min(64);
+                let mut wake_mask: u64 = 0;
+
+                for &n_idx_u32 in stage {
+                    let n_idx = n_idx_u32 as usize;
+                    let mut worker_idx = 0usize;
+
+                    // Priority: Pin critical node to a dedicated high-performance worker (idx 0)
+                    if Some(n_idx_u32) == critical_node {
+                        worker_idx = 0;
+                    } else if let Some(assignment) = tp.assignment_cache[n_idx] {
+                        worker_idx = assignment.worker_idx as usize;
+                    } else {
+                        let mut min_cost = u64::MAX;
+                        for w in 0..num_workers {
+                            if worker_costs[w] < min_cost {
+                                min_cost = worker_costs[w];
+                                worker_idx = w;
+                            }
+                        }
+                        // Cache the new assignment
+                        tp.assignment_cache[n_idx] = Some(crate::processors::graph::pool::StaticAssignment {
+                            node_idx: n_idx as u32,
+                            worker_idx: worker_idx as u8,
+                        });
+                    }
+
+                    let cost = telemetry_node_times_cycles[n_idx].load(Ordering::Relaxed);
+                    worker_costs[worker_idx] += cost.max(100); // Minimum weight to prevent lopsidedness on zero-telemetry
+
+                    let telemetry_ptr = &tp.worker_telemetry[worker_idx] as *const _ as *mut _;
+                    let _ = tp.worker_producers[worker_idx].push(build_job(n_idx, telemetry_ptr));
+                    wake_mask |= 1u64 << (worker_idx as u32 & 63);
+                }
+
+                tp.notify_workers_masked(wake_mask);
+                nullherz_traits::ParallelExecutor::wait_for_completion(tp, start_count + num_nodes);
+            } else {
+                // Generic ParallelExecutor: no assignment cache or per-worker
+                // telemetry storage; least-loaded placement, broadcast wake.
+                let num_workers = pool_dyn.num_workers().min(64);
+                for &n_idx_u32 in stage {
+                    let n_idx = n_idx_u32 as usize;
+                    let mut worker_idx = 0usize;
+                    if Some(n_idx_u32) != critical_node {
+                        let mut min_cost = u64::MAX;
+                        for w in 0..num_workers {
+                            if worker_costs[w] < min_cost {
+                                min_cost = worker_costs[w];
+                                worker_idx = w;
+                            }
+                        }
+                    }
+                    let cost = telemetry_node_times_cycles[n_idx].load(Ordering::Relaxed);
+                    worker_costs[worker_idx] += cost.max(100);
+
+                    let job = build_job(n_idx, telemetry_node_times_cycles as *const _ as *mut _);
+                    unsafe { pool_dyn.push_job_raw(worker_idx, &job as *const _ as *const u8, std::mem::size_of::<Job>(), |_| {}); }
+                }
+                pool_dyn.notify_workers();
+                pool_dyn.wait_for_completion(start_count + num_nodes);
+            }
         } else {
             for &n_idx_u32 in stage {
                 let n_idx = n_idx_u32 as usize;
                 let node = &nodes[n_idx];
                 let routing = &topo.routing[n_idx];
                 let mut node_inputs_storage = [ &[][..]; crate::MAX_CHANNELS * 2 ];
-                let mut pdc_storage = [[0.0f32; ipc_layer::MAX_BLOCK_SIZE]; crate::MAX_CHANNELS * 2];
                 let input_count = routing.input_count.min(crate::MAX_CHANNELS);
                 let sidechain_count = routing.sidechain_count.min(crate::MAX_CHANNELS);
 
@@ -286,10 +326,12 @@ impl GraphExecutor {
                         let delay_int = delay_f.floor() as usize;
                         let delay_frac = delay_f - delay_f.floor();
 
-                        // Read from delay line with offset
+                        // Read from delay line with offset (into the
+                        // pool-owned scratch; rows are fully overwritten
+                        // before they are read below)
                         let mut r_pos = (pdc_write_pos.wrapping_sub(num_samples).wrapping_sub(delay_int)) % max_len;
                         for j in 0..num_samples {
-                            pdc_storage[i][j] = pdc_lines.get_sample_interpolated(n_idx, i, r_pos, delay_frac);
+                            pdc_lines.scratch[i][j] = pdc_lines.get_sample_interpolated(n_idx, i, r_pos, delay_frac);
                             r_pos = (r_pos + 1) % max_len;
                         }
                     }
@@ -298,7 +340,7 @@ impl GraphExecutor {
                 for i in 0..input_count {
                     let delay_f = topo.plan.input_delays[n_idx].0[i];
                     if delay_f > 0.0 && delay_f < (crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES as f32 - 4.0) {
-                        node_inputs_storage[i] = &pdc_storage[i][..num_samples];
+                        node_inputs_storage[i] = &pdc_lines.scratch[i][..num_samples];
                     }
                 }
 
