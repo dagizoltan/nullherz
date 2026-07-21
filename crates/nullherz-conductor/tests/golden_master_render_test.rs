@@ -1,21 +1,43 @@
-//! Golden-hash STEREO master render: the full 4-deck console, driven
-//! deterministically, must produce bit-identical L and R at the master
-//! forever. Any change to the chain — a pan law, a gain stage, a COLA
-//! window, a wiring edit — flips a hash and must be acknowledged by
-//! updating the constant in the same commit that changes the sound.
+//! Golden STEREO master render: the full 4-deck console, driven
+//! deterministically, is compared sample-for-sample against a committed
+//! reference render and must stay within an AUDIBLE tolerance. Any real
+//! change to the chain — a pan law, a gain stage, a COLA window, a wiring
+//! edit — moves the master far past that floor and fails loudly, and must be
+//! acknowledged by regenerating the reference in the same commit.
 //!
-//! The channel-identity tests catch STRUCTURAL breaks (folds, dropped
-//! wires); this catches GRADUAL ones. Hashing L and R separately means a
-//! change that only warps one side cannot hide.
+//! Why a tolerance, not an exact hash: adding nodes to the graph reorders the
+//! float adds in the master's own SIMD summing, shifting the render by an
+//! INAUDIBLE amount (~-104 dBFS, measured at ~6e-6 peak — below the 16-bit
+//! floor). An exact bit-hash flips on that reassociation even though nothing
+//! audible changed, so it cried wolf on every node-adding feature (see the
+//! cue-bus fix, PR #337). The tolerance ignores reassociation and still
+//! catches anything a listener could hear. Structural breaks (folds, dropped
+//! wires, multi-producer buffers) are covered exactly by the mixer's
+//! `test_bootstrap_has_single_producer_per_buffer` / connectivity tests;
+//! comparing L and R planes SEPARATELY here keeps swap/fold detection too.
+//!
+//! Program material: each deck plays a MULTITONE stack (220 Hz – 13.2 kHz,
+//! distinct frequency sets per channel), not a single sine. The reference can
+//! only defend spectrum it contains — with four low sines, a master-EQ change
+//! at 5 kHz would have been invisible. The window is ~3 beats at 120 BPM so
+//! beat-aligned behavior (sequencer triggers, groove) is pinned, not just
+//! steady-state tone.
+//!
+//! Deliberate property: sample-wise comparison means a LATENCY change in the
+//! master path (even one sample) fails loudly — shifted audio diffs at
+//! near-signal level. On a DJ console beat alignment is behavior, not noise;
+//! an intended latency change goes through the same listen-then-regen ritual.
 //!
 //! Determinism: no backend thread, no conductor tick — the test drives
 //! `process_block` directly like the offline bounce path, so every block
 //! boundary, command arrival and transport step is identical on every run.
-//! (Worker-pool scheduling does not affect the result: stages are barriers
-//! and nodes write disjoint buffers.)
+//! The render is bit-identical run to run on the same binary; the tolerance
+//! only forgives drift ACROSS code changes (and across compilers/CPUs).
 //!
-//! Hashes are exact IEEE-754 bit patterns on x86_64 (the shared dev/CI
-//! target); a new target gets its own constants.
+//! Regenerate the reference after an INTENDED, listened-to sonic change:
+//!   GOLDEN_REGEN=1 cargo test -p nullherz-conductor --test golden_master_render_test test_golden
+//! It prints the old-vs-new delta in dBFS — quote it in the commit that
+//! ships the new fixture, so the accepted change has a recorded magnitude.
 
 use std::sync::Arc;
 
@@ -23,11 +45,11 @@ use nullherz_conductor::Conductor;
 use nullherz_dna::GeneticLibrary;
 use nullherz_traits::{Command, PerformanceCommand};
 
-/// Expected FNV-1a hashes of the master L/R streams. If a change flips
-/// these INTENTIONALLY, listen first, then update the constants in the same
-/// commit. If you did not intend to change the sound, you broke it.
-const GOLDEN_MASTER_L: u64 = 0xf50e8b111fdae040;
-const GOLDEN_MASTER_R: u64 = 0xc238337563fc6552;
+/// Peak per-sample |difference| we treat as AUDIBLE, in full-scale units
+/// (1.0 == 0 dBFS). 1e-3 is -60 dBFS. Inaudible float reassociation from
+/// adding graph nodes sits ~44 dB below this (~6e-6, -104 dBFS), so it passes;
+/// any real DSP change (pan law, gain, EQ) is tens of dB above, so it fails.
+const AUDIBLE_PEAK_DIFF: f32 = 1e-3;
 
 const SR: f32 = 44_100.0;
 const BLOCK: usize = 256;
@@ -35,37 +57,71 @@ const BLOCK: usize = 256;
 /// topology (bounded mutations per block) with headroom. Fixed, not
 /// condition-based, so the timeline is identical on every run.
 const INSTALL_BLOCKS: usize = 256;
-/// Blocks between issuing Load/Play and the start of hashing (command
-/// delivery + trigger, fixed for determinism).
+/// Blocks between issuing Load/Play and the start of the compared render
+/// (command delivery + trigger, fixed for determinism).
 const ARM_BLOCKS: usize = 8;
-/// Hashed render length.
+/// Compared render length: ~1.49 s ≈ 3 beats at 120 BPM, so beat-aligned
+/// behavior (sequencer triggers, groove) is inside the pinned window.
 const RENDER_BLOCKS: usize = 256;
 
-fn fnv1a(acc: u64, bytes: &[u8]) -> u64 {
-    let mut h = acc;
-    for &b in bytes {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    h
+/// Committed reference master render: RENDER_BLOCKS*BLOCK f32 of the L plane
+/// followed by the same count for the R plane, little-endian. Read at test
+/// time; (re)written by GOLDEN_REGEN=1.
+const FIXTURE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/golden_master.f32");
+
+/// Largest |difference| and where it happened, plus the RMS of the
+/// difference — peak gates the assertion, RMS contextualizes the failure.
+struct PlaneDelta {
+    peak: f32,
+    peak_idx: usize,
+    rms: f32,
 }
 
-fn hash_block(acc: u64, block: &[f32]) -> u64 {
-    let mut h = acc;
-    for &s in block {
-        h = fnv1a(h, &s.to_bits().to_le_bytes());
+fn plane_delta(live: &[f32], reference: &[f32]) -> PlaneDelta {
+    let mut peak = 0.0f32;
+    let mut peak_idx = 0usize;
+    let mut sum_sq = 0.0f64;
+    for (i, (&a, &b)) in live.iter().zip(reference).enumerate() {
+        let d = (a - b).abs();
+        if d > peak {
+            peak = d;
+            peak_idx = i;
+        }
+        sum_sq += (d as f64) * (d as f64);
     }
-    h
+    let rms = (sum_sq / live.len().max(1) as f64).sqrt() as f32;
+    PlaneDelta { peak, peak_idx, rms }
 }
 
-/// Register a deterministic planar stereo tone: distinct L/R frequencies so
-/// a channel swap or fold changes both hashes.
-fn register_stereo_tone(conductor: &Conductor, id: u64, left_hz: f32, right_hz: f32) {
+fn dbfs(x: f32) -> f32 {
+    if x > 0.0 { 20.0 * x.log10() } else { f32::NEG_INFINITY }
+}
+
+fn decode_reference(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect()
+}
+
+/// Per-partial amplitudes for the multitone stacks. Sum is 0.5, matching the
+/// old single-sine peak so bus/limiter headroom is unchanged.
+const PARTIAL_AMPS: [f32; 3] = [0.275, 0.15, 0.075];
+
+/// Register a deterministic planar stereo MULTITONE: three partials per
+/// channel spanning low/mid/high so the reference has energy across the band
+/// (a single sine cannot defend spectrum it doesn't contain). Distinct L/R
+/// frequency sets so a channel swap or fold changes both planes.
+fn register_stereo_tone(conductor: &Conductor, id: u64, left_hz: [f32; 3], right_hz: [f32; 3]) {
     let frames = (SR * 2.0) as usize;
     let mut samples = Vec::with_capacity(frames * 2);
-    for hz in [left_hz, right_hz] {
+    for set in [left_hz, right_hz] {
         for i in 0..frames {
-            samples.push((i as f32 * hz * 2.0 * std::f32::consts::PI / SR).sin() * 0.5);
+            let mut s = 0.0f32;
+            for (hz, amp) in set.iter().zip(PARTIAL_AMPS) {
+                s += (i as f32 * hz * 2.0 * std::f32::consts::PI / SR).sin() * amp;
+            }
+            samples.push(s);
         }
     }
 
@@ -117,8 +173,10 @@ fn test_golden_stereo_master_render() {
     conductor.setup_engine();
     conductor.bootstrap_4channel_mixer();
 
-    register_stereo_tone(&conductor, 5_501, 220.0, 330.0);
-    register_stereo_tone(&conductor, 5_502, 440.0, 550.0);
+    // Low / mid / high partials per channel, all sets disjoint: full-band
+    // coverage AND per-channel identity.
+    register_stereo_tone(&conductor, 5_501, [220.0, 1_470.0, 6_300.0], [330.0, 2_210.0, 9_500.0]);
+    register_stereo_tone(&conductor, 5_502, [440.0, 3_150.0, 11_000.0], [550.0, 4_400.0, 13_200.0]);
 
     let mut left = vec![0.0f32; BLOCK];
     let mut right = vec![0.0f32; BLOCK];
@@ -158,30 +216,90 @@ fn test_golden_stereo_master_render() {
         pump_block(&mut conductor, &mut left, &mut right);
     }
 
-    // 3. Render and hash L and R independently.
-    let (mut hash_l, mut hash_r) = (0xcbf29ce484222325u64, 0xcbf29ce484222325u64);
-    let (mut peak_l, mut peak_r) = (0.0f32, 0.0f32);
+    // 3. Render, capturing L and R planes.
+    let mut render_l = Vec::with_capacity(RENDER_BLOCKS * BLOCK);
+    let mut render_r = Vec::with_capacity(RENDER_BLOCKS * BLOCK);
     for _ in 0..RENDER_BLOCKS {
         pump_block(&mut conductor, &mut left, &mut right);
-        hash_l = hash_block(hash_l, &left);
-        hash_r = hash_block(hash_r, &right);
-        peak_l = left.iter().fold(peak_l, |a, &v| a.max(v.abs()));
-        peak_r = right.iter().fold(peak_r, |a, &v| a.max(v.abs()));
+        render_l.extend_from_slice(&left);
+        render_r.extend_from_slice(&right);
     }
 
-    // A golden hash of silence pins nothing: both sides must be hot.
+    // A reference of silence pins nothing: both sides must be hot.
+    let peak_l = render_l.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
+    let peak_r = render_r.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
     assert!(peak_l > 1e-4, "master L silent during golden render (peak {:.6})", peak_l);
     assert!(peak_r > 1e-4, "master R silent during golden render (peak {:.6})", peak_r);
 
+    let n = RENDER_BLOCKS * BLOCK;
+
+    // REGEN: report the magnitude of the change being accepted (old vs new),
+    // then write the freshly rendered planes as the new reference and stop.
+    if std::env::var("GOLDEN_REGEN").is_ok() {
+        match std::fs::read(FIXTURE_PATH) {
+            Ok(old) if old.len() == n * 2 * 4 => {
+                let old_f32 = decode_reference(&old);
+                let (old_l, old_r) = old_f32.split_at(n);
+                let dl = plane_delta(&render_l, old_l);
+                let dr = plane_delta(&render_r, old_r);
+                eprintln!(
+                    "GOLDEN_REGEN: change vs outgoing reference — \
+                     L peak {:.2e} ({:.1} dBFS) rms {:.2e} ({:.1} dBFS); \
+                     R peak {:.2e} ({:.1} dBFS) rms {:.2e} ({:.1} dBFS). \
+                     Quote this in the commit.",
+                    dl.peak, dbfs(dl.peak), dl.rms, dbfs(dl.rms),
+                    dr.peak, dbfs(dr.peak), dr.rms, dbfs(dr.rms),
+                );
+            }
+            Ok(old) if !old.is_empty() => {
+                eprintln!("GOLDEN_REGEN: outgoing reference has unexpected size {}; replacing.", old.len());
+            }
+            _ => eprintln!("GOLDEN_REGEN: no usable outgoing reference; writing the first one."),
+        }
+        let mut bytes = Vec::with_capacity((render_l.len() + render_r.len()) * 4);
+        for &s in render_l.iter().chain(render_r.iter()) {
+            bytes.extend_from_slice(&s.to_le_bytes());
+        }
+        std::fs::write(FIXTURE_PATH, &bytes).expect("write golden reference fixture");
+        eprintln!("GOLDEN_REGEN: wrote {} bytes to {}", bytes.len(), FIXTURE_PATH);
+        return;
+    }
+
+    // 4. Compare each plane against the committed reference within tolerance.
+    let reference = std::fs::read(FIXTURE_PATH).unwrap_or_else(|e| {
+        panic!(
+            "missing golden reference fixture {}: {}. Generate it with \
+             GOLDEN_REGEN=1 and commit it.",
+            FIXTURE_PATH, e
+        )
+    });
     assert_eq!(
-        hash_l, GOLDEN_MASTER_L,
-        "master L changed: got {:#018x}. If intentional, listen, then update GOLDEN_MASTER_L in this commit.",
-        hash_l
+        reference.len(),
+        n * 2 * 4,
+        "reference fixture is {} bytes, expected {} ({} f32 x 2 planes). \
+         Regenerate with GOLDEN_REGEN=1.",
+        reference.len(), n * 2 * 4, n
     );
-    assert_eq!(
-        hash_r, GOLDEN_MASTER_R,
-        "master R changed: got {:#018x}. If intentional, listen, then update GOLDEN_MASTER_R in this commit.",
-        hash_r
+    let ref_f32 = decode_reference(&reference);
+    let (ref_l, ref_r) = ref_f32.split_at(n);
+
+    let dl = plane_delta(&render_l, ref_l);
+    let dr = plane_delta(&render_r, ref_r);
+    assert!(
+        dl.peak < AUDIBLE_PEAK_DIFF,
+        "master L diverged from reference: peak {:.2e} ({:.1} dBFS) at sample {}, \
+         rms {:.2e} ({:.1} dBFS); audible floor {:.1} dBFS. If this is an \
+         INTENDED sonic change, listen, then regenerate the fixture with \
+         GOLDEN_REGEN=1 in this commit.",
+        dl.peak, dbfs(dl.peak), dl.peak_idx, dl.rms, dbfs(dl.rms), dbfs(AUDIBLE_PEAK_DIFF)
+    );
+    assert!(
+        dr.peak < AUDIBLE_PEAK_DIFF,
+        "master R diverged from reference: peak {:.2e} ({:.1} dBFS) at sample {}, \
+         rms {:.2e} ({:.1} dBFS); audible floor {:.1} dBFS. If this is an \
+         INTENDED sonic change, listen, then regenerate the fixture with \
+         GOLDEN_REGEN=1 in this commit.",
+        dr.peak, dbfs(dr.peak), dr.peak_idx, dr.rms, dbfs(dr.rms), dbfs(AUDIBLE_PEAK_DIFF)
     );
 }
 
@@ -197,7 +315,7 @@ fn test_capture_records_master_as_planar_stereo() {
     conductor.setup_engine();
     conductor.bootstrap_4channel_mixer();
 
-    register_stereo_tone(&conductor, 5_601, 220.0, 330.0);
+    register_stereo_tone(&conductor, 5_601, [220.0, 1_470.0, 6_300.0], [330.0, 2_210.0, 9_500.0]);
 
     let mut left = vec![0.0f32; BLOCK];
     let mut right = vec![0.0f32; BLOCK];
