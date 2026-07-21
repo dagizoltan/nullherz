@@ -382,3 +382,69 @@ fn test_capture_records_master_as_planar_stereo() {
         "captured audio must not be silence while a deck is playing"
     );
 }
+
+/// The mastering EQ is LIVE end to end: a SetParam to the named "master_eq"
+/// node through the real command bus must audibly reshape the master render
+/// (the golden test above proves the untouched stage changes nothing).
+#[test]
+fn test_master_eq_setparam_audibly_shapes_master() {
+    let render = |low_gain: Option<f32>| -> Vec<f32> {
+        let mut conductor = Conductor::with_library_path(":memory:");
+        conductor.setup_engine();
+        conductor.bootstrap_4channel_mixer();
+        register_stereo_tone(&conductor, 5_701, [220.0, 1_470.0, 6_300.0], [330.0, 2_210.0, 9_500.0]);
+
+        let mut left = vec![0.0f32; BLOCK];
+        let mut right = vec![0.0f32; BLOCK];
+        for _ in 0..INSTALL_BLOCKS {
+            pump_block(&mut conductor, &mut left, &mut right);
+        }
+
+        let mut commands = vec![
+            Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id: 'A', sample_id: 5_701 }),
+            Command::Performance(PerformanceCommand::PlayDeck { deck_id: 'A' }),
+        ];
+        if let Some(gain) = low_gain {
+            let eq_node = *conductor
+                .mixer_manager
+                .node_names
+                .get("master_eq")
+                .expect("bootstrap must name the master EQ");
+            commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                target_id: eq_node as u64,
+                param_id: 0, // LOW shelf
+                value: gain,
+                ramp_duration_samples: 0,
+            }));
+        }
+        conductor.apply_mixer_commands(commands);
+        for _ in 0..ARM_BLOCKS {
+            pump_block(&mut conductor, &mut left, &mut right);
+        }
+
+        let mut out = Vec::with_capacity(64 * BLOCK);
+        for _ in 0..64 {
+            pump_block(&mut conductor, &mut left, &mut right);
+            out.extend_from_slice(&left);
+        }
+        out
+    };
+
+    let flat = render(None);
+    let cut = render(Some(0.25)); // low shelf -12 dB
+
+    let peak_flat = flat.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
+    assert!(peak_flat > 1e-4, "flat render silent (peak {:.6})", peak_flat);
+
+    let max_diff = flat
+        .iter()
+        .zip(&cut)
+        .fold(0.0f32, |m, (&a, &b)| m.max((a - b).abs()));
+    assert!(
+        max_diff > AUDIBLE_PEAK_DIFF,
+        "a -12 dB low-shelf SetParam to master_eq changed the master by only \
+         {:.2e} ({:.1} dBFS) — the EQ is not live in the chain",
+        max_diff,
+        dbfs(max_diff)
+    );
+}

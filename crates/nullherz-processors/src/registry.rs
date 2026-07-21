@@ -41,6 +41,7 @@ impl ProcessorRegistry {
         self.register_factory(Box::new(SpectralMorphFactory));
         self.register_factory(Box::new(CaptureFactory));
         self.register_factory(Box::new(DjIsolatorFactory));
+        self.register_factory(Box::new(MasteringEqFactory));
         self.register_factory(Box::new(SimdBiquadFactory));
         self.register_factory(Box::new(KeySyncFactory));
         self.register_factory(Box::new(PersonalityInheritanceFactory));

@@ -301,11 +301,18 @@ impl MixerManager {
         // wiring here was the "right channel silent" bug — the limiter wrote
         // out ch1 from an input that never existed.
 
-        // 1. Master EQ (Biquad)
+        // 1. Master EQ — a MASTERING_EQ tone stage (RBJ low shelf / mid peak /
+        // high shelf), NOT the deck isolator: LR crossovers phase-rotate even
+        // at unity, while every shelf band at gain 1.0 is the bit-exact
+        // identity, so the untouched stage does not move the golden render.
+        // NAMED so the mastering view's LOW/MID/HIGH knobs can bind to it
+        // (params 0/1/2, linear gain, 1.0 = flat). This replaced an unnamed
+        // raw-coefficient BIQUAD nothing could drive.
         let eq_id = self.id_allocator.allocate_node_id();
+        self.node_names.insert("master_eq".to_string(), eq_id);
         let eq_out_l = self.id_allocator.allocate_buffer_id(1);
         let eq_out_r = self.id_allocator.allocate_buffer_id(1);
-        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: eq_id, processor_type_id: ProcessorTypeId::BIQUAD }));
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: eq_id, processor_type_id: ProcessorTypeId::MASTERING_EQ }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: eq_id, input_idx: 0, new_buffer_idx: sum_out_l }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: eq_id, input_idx: 1, new_buffer_idx: sum_out_r }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: eq_id, output_idx: 0, new_buffer_idx: eq_out_l }));
