@@ -19,6 +19,9 @@ pub struct DeckNodes {
     pub stereo_util_id: u32,
     pub dna_morph_id: Option<u32>,
     pub sequencer_id: u32,
+    /// Private per-deck cue-send buffers (summed onto the global cue bus).
+    pub cue_out_l: u32,
+    pub cue_out_r: u32,
 }
 
 #[derive(Default)]
@@ -324,6 +327,32 @@ impl MixerManager {
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: lim_id, output_idx: 0, new_buffer_idx: self.config.master_l as u32 }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: lim_id, output_idx: 1, new_buffer_idx: self.config.master_r as u32 }));
 
+        // --- CUE BUS SUMMING ---
+        // One summing node per side mixes the four private per-deck cue
+        // sends onto the global cue buffers. Decks writing cue_l/r directly
+        // was a four-producer overwrite (only deck D survived).
+        {
+            let outs: Vec<(u32, u32)> = ['A', 'B', 'C', 'D']
+                .iter()
+                .map(|d| {
+                    let n = &self.deck_mappings[d];
+                    (n.cue_out_l, n.cue_out_r)
+                })
+                .collect();
+            let cue_sum_l = self.id_allocator.allocate_node_id();
+            let cue_sum_r = self.id_allocator.allocate_node_id();
+            self.node_names.insert("cue_sum_l".to_string(), cue_sum_l);
+            self.node_names.insert("cue_sum_r".to_string(), cue_sum_r);
+            commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: cue_sum_l, processor_type_id: ProcessorTypeId::SUMMING }));
+            commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: cue_sum_r, processor_type_id: ProcessorTypeId::SUMMING }));
+            for (i, (l, r)) in outs.iter().enumerate() {
+                commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: cue_sum_l, input_idx: i as u32, new_buffer_idx: *l }));
+                commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: cue_sum_r, input_idx: i as u32, new_buffer_idx: *r }));
+            }
+            commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: cue_sum_l, output_idx: 0, new_buffer_idx: self.config.cue_l as u32 }));
+            commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: cue_sum_r, output_idx: 0, new_buffer_idx: self.config.cue_r as u32 }));
+        }
+
         // --- CAPTURE NODE (master resample tap) ---
         // Reads the finished master (post-limiter) as a parallel consumer;
         // NO outputs, so it cannot alter the audio path (golden hashes
@@ -402,6 +431,34 @@ mod tests {
                     last_node_idx = Some(node_idx);
                 }
             }
+        }
+    }
+
+    /// CLASS KILLER: no buffer in the generated console may have two
+    /// producers. The executor gives each stage exclusive write slices, so
+    /// a second producer does not mix — it OVERWRITES, and whichever stage
+    /// runs last wins silently. This shipped three times: the preview node
+    /// erased the master sum, and both cue buffers only ever carried
+    /// deck D. Mixing is what SUMMING nodes are for.
+    #[test]
+    fn test_bootstrap_has_single_producer_per_buffer() {
+        let mut mixer = MixerManager::new();
+        let commands = mixer.create_4channel_mixer();
+
+        let mut producers: HashMap<u32, Vec<u32>> = HashMap::new();
+        for cmd in &commands {
+            if let Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx, new_buffer_idx, .. }) = cmd {
+                producers.entry(*new_buffer_idx).or_default().push(*node_idx);
+            }
+        }
+        for (buf, nodes) in &producers {
+            assert!(
+                nodes.len() == 1,
+                "buffer {} has {} producers ({:?}) — a second producer silently overwrites the first; mix through a SUMMING node instead",
+                buf,
+                nodes.len(),
+                nodes
+            );
         }
     }
 

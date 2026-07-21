@@ -26,8 +26,8 @@ use nullherz_traits::{Command, PerformanceCommand};
 /// Expected FNV-1a hashes of the master L/R streams. If a change flips
 /// these INTENTIONALLY, listen first, then update the constants in the same
 /// commit. If you did not intend to change the sound, you broke it.
-const GOLDEN_MASTER_L: u64 = 0x5a17ef877a06a366;
-const GOLDEN_MASTER_R: u64 = 0xa68a9d59da589089;
+const GOLDEN_MASTER_L: u64 = 0xf50e8b111fdae040;
+const GOLDEN_MASTER_R: u64 = 0xc238337563fc6552;
 
 const SR: f32 = 44_100.0;
 const BLOCK: usize = 256;
