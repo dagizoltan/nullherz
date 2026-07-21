@@ -307,6 +307,16 @@ pub struct VizState {
     /// (position advanced => playing) instead of kept as a local bool that
     /// drifts from engine truth.
     pub last_deck_positions: [u64; 4],
+    /// Consecutive NEW telemetry snapshots in which a deck's position did
+    /// not advance. The playing flag only drops after a few still snapshots.
+    pub deck_still_snapshots: [u8; 4],
+    /// sample_counter of the last telemetry snapshot processed for deck
+    /// play-state. The UI repaints faster than telemetry refreshes; deriving
+    /// per UI FRAME re-compared the SAME snapshot against itself, flapping
+    /// deck_playing to false mid-playback — which turned the player view's
+    /// play/stop TOGGLE into a coin flip (a click in a false frame sent
+    /// PlayDeck instead of StopDeck: "stop doesn't stop").
+    pub last_playstate_counter: u64,
 }
 
 impl Default for VizState {
@@ -317,6 +327,8 @@ impl Default for VizState {
             damped_goniometer: [0.0; 128],
             damped_latent: [0.0; 16],
             last_deck_positions: [0; 4],
+            deck_still_snapshots: [0; 4],
+            last_playstate_counter: 0,
             damped_peaks: [0.0; 4],
             damped_master_peaks: [0.0; 2],
         }
@@ -348,5 +360,83 @@ impl Default for TopologyViewState {
                 ("capture_node".to_string(), 110), ("sequencer_node".to_string(), 70), ("sampler_node".to_string(), 100),
             ].into_iter().collect(),
         }
+    }
+}
+
+/// Derive per-deck playing state from a telemetry snapshot. Must be called
+/// once per NEW snapshot (caller gates on `sample_counter` advancing): a deck
+/// is playing iff its playhead advanced, and only counts as stopped after
+/// `STILL_SNAPSHOTS_TO_STOP` consecutive still snapshots (a slow playback
+/// rate can hold a u64 position across a block without being stopped).
+pub const STILL_SNAPSHOTS_TO_STOP: u8 = 3;
+
+pub fn update_deck_playing(
+    positions: &[u64; 4],
+    last_positions: &mut [u64; 4],
+    still_snapshots: &mut [u8; 4],
+    deck_playing: &mut [bool; 4],
+) {
+    for i in 0..4 {
+        let pos = positions[i];
+        if pos != 0 && pos != last_positions[i] {
+            still_snapshots[i] = 0;
+            deck_playing[i] = true;
+        } else {
+            still_snapshots[i] = still_snapshots[i].saturating_add(1);
+            if still_snapshots[i] >= STILL_SNAPSHOTS_TO_STOP {
+                deck_playing[i] = false;
+            }
+        }
+        last_positions[i] = pos;
+    }
+}
+
+#[cfg(test)]
+mod playstate_tests {
+    use super::*;
+
+    /// The bug this kills: the same snapshot processed twice (UI frames
+    /// outpacing telemetry) must NOT mark a moving deck as stopped. The
+    /// caller gates on sample_counter, so this function simply never runs
+    /// for a repeat — asserted here by contract: consecutive DIFFERENT
+    /// positions always yield playing=true.
+    #[test]
+    fn advancing_position_is_always_playing() {
+        let mut last = [0u64; 4];
+        let mut still = [0u8; 4];
+        let mut playing = [false; 4];
+        for step in 1..=10u64 {
+            update_deck_playing(&[step * 256, 0, 0, 0], &mut last, &mut still, &mut playing);
+            assert!(playing[0], "moving deck must read as playing at step {}", step);
+        }
+    }
+
+    #[test]
+    fn stopped_deck_needs_consecutive_still_snapshots() {
+        let mut last = [0u64; 4];
+        let mut still = [0u8; 4];
+        let mut playing = [false; 4];
+        update_deck_playing(&[1_000, 0, 0, 0], &mut last, &mut still, &mut playing);
+        assert!(playing[0]);
+        // One or two still snapshots: still playing (slow-rate tolerance).
+        update_deck_playing(&[1_000, 0, 0, 0], &mut last, &mut still, &mut playing);
+        assert!(playing[0]);
+        update_deck_playing(&[1_000, 0, 0, 0], &mut last, &mut still, &mut playing);
+        assert!(playing[0]);
+        // Third still snapshot: stopped.
+        update_deck_playing(&[1_000, 0, 0, 0], &mut last, &mut still, &mut playing);
+        assert!(!playing[0], "deck still after {} snapshots must read stopped", STILL_SNAPSHOTS_TO_STOP);
+    }
+
+    #[test]
+    fn brief_stall_recovers_immediately() {
+        let mut last = [0u64; 4];
+        let mut still = [0u8; 4];
+        let mut playing = [false; 4];
+        update_deck_playing(&[500, 0, 0, 0], &mut last, &mut still, &mut playing);
+        update_deck_playing(&[500, 0, 0, 0], &mut last, &mut still, &mut playing);
+        update_deck_playing(&[756, 0, 0, 0], &mut last, &mut still, &mut playing);
+        assert!(playing[0], "movement after a brief stall must read playing again");
+        assert_eq!(still[0], 0, "stall counter must reset on movement");
     }
 }
