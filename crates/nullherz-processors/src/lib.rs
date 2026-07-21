@@ -13,6 +13,7 @@ pub mod registry;
 pub mod gain;
 pub mod biquad;
 pub mod crossfader;
+pub mod dj_isolator;
 pub mod summing;
 pub mod wavetable;
 pub mod spectral;

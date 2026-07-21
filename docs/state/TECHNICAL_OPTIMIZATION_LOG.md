@@ -53,8 +53,32 @@ equivalence tests added):
 
 Total per-block node time **537 µs → 202 µs (2.65×)**. The console now sits at
 ~3.3% of the 256-sample budget; a 128-sample period (2.9 ms) is comfortable on
-mean/p99. New hot nodes for a future pass: DjIsolator (36.6% of the smaller
-total) and Sampler (22.4%).
+mean/p99.
+
+### DjIsolator: stereo-SIMD (the next hot node) — 2026-07-21 (session 5)
+
+With KeySync and the limiter handled, DjIsolator became the top node (36.6% of
+the smaller total). **First attempt — a dud:** band-blocking the crossover
+(run each biquad over the whole block via `process_block_unrolled` + scratch
+buffers) was bit-identical but ~14% SLOWER (node ~18 µs → ~27 µs) — it traded
+the original's single-pass, register-resident flow for ~10 passes through
+intermediate buffers (~10× memory traffic). Reverted. Same lesson as the
+sampler: reshaping memory access can't beat an already-optimal single pass.
+
+**What worked — stereo-SIMD.** The isolator ran as TWO independent scalar
+kernels (one per channel via `MultiChannelDspProcessor`), each 8 scalar
+biquads. New `StereoBiquad` runs L and R together in SIMD lanes 0/1 (shared
+coefficients, per-channel z-state in the lanes); `DjIsolatorStereo` chains 8 of
+them in one register-resident pass, and a direct `DjIsolatorProcessor` replaces
+the per-channel wrapper. This cuts the actual per-sample ARITHMETIC ~2× (not
+memory layout — which is why it wins where band-blocking didn't). Bit-identical
+to two scalar isolators on finite input (`test_dj_isolator_stereo_matches_two_scalar_bitexact`);
+conformance gauntlet (NaN/reset/multichannel) and golden render pass.
+
+Node **~18 µs → ~8.4 µs (~2.1×)**. Interleaved A/B: default-config mean **~159 µs
+→ ~129 µs (~19%)**, p99 ~325 µs → ~260 µs (every rep faster, no overlap). The
+console now sits at ~2.2% of the 256-sample budget. Remaining top nodes are now
+Sampler (~24%) and Biquad (~19%) — both largely inherent recursive/serial work.
 
 ---
 
