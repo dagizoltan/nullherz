@@ -155,10 +155,11 @@ impl ProcessorFactory for CaptureFactory {
 
 pub struct DjIsolatorFactory;
 impl ProcessorFactory for DjIsolatorFactory {
-    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        // One kernel per channel: the isolator's crossover biquads hold filter
-        // state, and a stereo strip must not run L and R through one state.
-        Some(Box::new(crate::dsp_kernel_processor::MultiChannelDspProcessor::new(node_idx as u64, audio_dsp::DjIsolator::new(), 2)))
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        // Stereo-SIMD isolator: L and R run together through one crossover pass
+        // (per-channel state in SIMD lanes) rather than two independent scalar
+        // kernels — bit-identical on finite input, ~2x fewer per-sample ops.
+        Some(Box::new(crate::dj_isolator::DjIsolatorProcessor::new(node_idx as u64, sample_rate)))
     }
     fn name(&self) -> &'static str { "DjIsolator" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::DJ_ISOLATOR }

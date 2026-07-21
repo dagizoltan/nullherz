@@ -841,6 +841,160 @@ impl BiquadFilter {
     }
 }
 
+/// A biquad that runs TWO channels (stereo L/R) at once in SIMD lanes 0 and 1.
+/// Coefficients are shared; per-channel z-state lives in the lanes of z1/z2.
+/// Each lane is arithmetically identical to a scalar `BiquadFilter` (Direct
+/// Form II Transposed) — the point is to do both channels per instruction.
+/// Lanes 2/3 are unused (carry zero). No coefficient ramp path: the isolator
+/// sets crossover coefficients once at construction.
+#[derive(Clone, Copy)]
+pub struct StereoBiquad {
+    pub coeffs: BiquadCoefficients,
+    z1: wide::f32x4,
+    z2: wide::f32x4,
+}
+
+impl StereoBiquad {
+    pub fn new(coeffs: BiquadCoefficients) -> Self {
+        Self { coeffs, z1: wide::f32x4::ZERO, z2: wide::f32x4::ZERO }
+    }
+
+    /// One stereo sample. Per lane: `y = x*b0 + z1; z1 = x*b1 - y*a1 + z2;
+    /// z2 = x*b2 - y*a2`, with a branchless per-lane guard that zeroes a lane's
+    /// output and state on a non-finite result — matching scalar
+    /// `process_sample` lane-for-lane, so finite input is bit-identical.
+    #[inline(always)]
+    pub fn process(&mut self, x: wide::f32x4) -> wide::f32x4 {
+        use wide::*;
+        let b0 = f32x4::from(self.coeffs.b0);
+        let b1 = f32x4::from(self.coeffs.b1);
+        let b2 = f32x4::from(self.coeffs.b2);
+        let a1 = f32x4::from(self.coeffs.a1);
+        let a2 = f32x4::from(self.coeffs.a2);
+
+        let y = (x * b0) + self.z1;
+        // finite lanes: (y - y) == 0 (Inf/NaN both fail); == f32::is_finite.
+        let finite = (y - y).cmp_eq(f32x4::ZERO);
+        let z1n = ((x * b1) - (y * a1)) + self.z2;
+        let z2n = (x * b2) - (y * a2);
+        self.z1 = finite.blend(z1n, f32x4::ZERO);
+        self.z2 = finite.blend(z2n, f32x4::ZERO);
+        finite.blend(y, f32x4::ZERO)
+    }
+
+    pub fn reset(&mut self) {
+        self.z1 = wide::f32x4::ZERO;
+        self.z2 = wide::f32x4::ZERO;
+    }
+}
+
+/// Stereo (2-channel SIMD) `DjIsolator`: the identical 3-band LR crossover, but
+/// L and R flow together through 8 `StereoBiquad`s in ONE register-resident
+/// pass — bit-identical to two independent scalar `DjIsolator`s on finite
+/// input, at roughly half the per-sample arithmetic.
+#[derive(Clone)]
+pub struct DjIsolatorStereo {
+    low_pass_1: StereoBiquad,
+    low_pass_2: StereoBiquad,
+    high_pass_1: StereoBiquad,
+    high_pass_2: StereoBiquad,
+    mid_low_hp_1: StereoBiquad,
+    mid_low_hp_2: StereoBiquad,
+    mid_high_lp_1: StereoBiquad,
+    mid_high_lp_2: StereoBiquad,
+    pub gains: [f32; 3],
+}
+
+impl Default for DjIsolatorStereo {
+    fn default() -> Self { Self::new() }
+}
+
+impl DjIsolatorStereo {
+    pub fn new() -> Self { Self::with_sample_rate(44100.0) }
+
+    pub fn with_sample_rate(sample_rate: f32) -> Self {
+        let lp = BiquadCoefficients::linkwitz_riley_lp(300.0, sample_rate);
+        let hp = BiquadCoefficients::linkwitz_riley_hp(3000.0, sample_rate);
+        let mid_hp = BiquadCoefficients::linkwitz_riley_hp(300.0, sample_rate);
+        let mid_lp = BiquadCoefficients::linkwitz_riley_lp(3000.0, sample_rate);
+        Self {
+            low_pass_1: StereoBiquad::new(lp),
+            low_pass_2: StereoBiquad::new(lp),
+            high_pass_1: StereoBiquad::new(hp),
+            high_pass_2: StereoBiquad::new(hp),
+            mid_low_hp_1: StereoBiquad::new(mid_hp),
+            mid_low_hp_2: StereoBiquad::new(mid_hp),
+            mid_high_lp_1: StereoBiquad::new(mid_lp),
+            mid_high_lp_2: StereoBiquad::new(mid_lp),
+            gains: [1.0, 1.0, 1.0],
+        }
+    }
+
+    pub fn set_gain(&mut self, band: usize, value: f32) {
+        if band < 3 && value.is_finite() {
+            self.gains[band] = value.clamp(0.0, 10.0);
+        }
+    }
+
+    /// Run one packed sample through the crossover. Gains are pre-splatted by
+    /// the caller (loop-invariant). Sanitizes the input and clamps a non-finite
+    /// SUM to zero, exactly as the scalar `process_block` did per sample.
+    #[inline(always)]
+    fn run_sample(&mut self, raw: wide::f32x4, g_l: wide::f32x4, g_m: wide::f32x4, g_h: wide::f32x4) -> wide::f32x4 {
+        use wide::*;
+        let in_finite = (raw - raw).cmp_eq(f32x4::ZERO);
+        let x = in_finite.blend(raw, f32x4::ZERO);
+
+        let l = self.low_pass_2.process(self.low_pass_1.process(x));
+        let h = self.high_pass_2.process(self.high_pass_1.process(x));
+        let m_low = self.mid_low_hp_2.process(self.mid_low_hp_1.process(x));
+        let m = self.mid_high_lp_2.process(self.mid_high_lp_1.process(m_low));
+
+        let out = (l * g_l) + (m * g_m) + (h * g_h);
+        let out_finite = (out - out).cmp_eq(f32x4::ZERO);
+        out_finite.blend(out, f32x4::ZERO)
+    }
+
+    pub fn process_stereo(&mut self, in_l: &[f32], in_r: &[f32], out_l: &mut [f32], out_r: &mut [f32]) {
+        use wide::*;
+        let g_l = f32x4::from(self.gains[0]);
+        let g_m = f32x4::from(self.gains[1]);
+        let g_h = f32x4::from(self.gains[2]);
+        let n = in_l.len().min(in_r.len()).min(out_l.len()).min(out_r.len());
+        for i in 0..n {
+            let out = self.run_sample(f32x4::new([in_l[i], in_r[i], 0.0, 0.0]), g_l, g_m, g_h);
+            let arr: [f32; 4] = out.into();
+            out_l[i] = arr[0];
+            out_r[i] = arr[1];
+        }
+    }
+
+    /// Single-channel path (lane 0 only) for mono wiring / conformance.
+    pub fn process_mono(&mut self, input: &[f32], output: &mut [f32]) {
+        use wide::*;
+        let g_l = f32x4::from(self.gains[0]);
+        let g_m = f32x4::from(self.gains[1]);
+        let g_h = f32x4::from(self.gains[2]);
+        let n = input.len().min(output.len());
+        for i in 0..n {
+            let out = self.run_sample(f32x4::new([input[i], 0.0, 0.0, 0.0]), g_l, g_m, g_h);
+            let arr: [f32; 4] = out.into();
+            output[i] = arr[0];
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.low_pass_1.reset();
+        self.low_pass_2.reset();
+        self.high_pass_1.reset();
+        self.high_pass_2.reset();
+        self.mid_low_hp_1.reset();
+        self.mid_low_hp_2.reset();
+        self.mid_high_lp_1.reset();
+        self.mid_high_lp_2.reset();
+    }
+}
+
 /// A simple Envelope Follower using rectification and a one-pole low-pass filter.
 #[derive(Debug, Clone, Copy)]
 pub struct EnvelopeFollower {
@@ -1202,6 +1356,55 @@ mod tests {
             for &sample in &output {
                 prop_assert!(sample.is_finite());
             }
+        }
+    }
+
+    /// The stereo-SIMD `DjIsolatorStereo` must produce BIT-identical output to
+    /// TWO independent scalar `DjIsolator`s (one per channel) — the SIMD lanes
+    /// run the same DFII-T recursion as the scalar path. Distinct L/R signals
+    /// with non-unity band gains, in varying chunk sizes.
+    #[test]
+    fn test_dj_isolator_stereo_matches_two_scalar_bitexact() {
+        let sr = 44_100.0;
+        let gains = [0.8f32, 0.5f32, 1.2f32];
+
+        let mut stereo = DjIsolatorStereo::with_sample_rate(sr);
+        stereo.gains = gains;
+        let mut scalar_l = DjIsolator::with_sample_rate(sr);
+        scalar_l.gains = gains;
+        let mut scalar_r = DjIsolator::with_sample_rate(sr);
+        scalar_r.gains = gains;
+
+        // Distinct deterministic L/R signals.
+        let mut seed = 0x1357_9bdfu32;
+        let mut rng = || {
+            seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+            (seed as f32 / u32::MAX as f32) * 2.0 - 1.0
+        };
+        let total = 3000usize;
+        let sig_l: Vec<f32> = (0..total).map(|_| rng()).collect();
+        let sig_r: Vec<f32> = (0..total).map(|_| rng()).collect();
+
+        let mut out_l = vec![0.0f32; total];
+        let mut out_r = vec![0.0f32; total];
+        let mut ref_l = vec![0.0f32; total];
+        let mut ref_r = vec![0.0f32; total];
+
+        let sizes = [64usize, 37, 200, 129, 256, 91];
+        let (mut pos, mut bi) = (0usize, 0usize);
+        while pos < total {
+            let b = sizes[bi % sizes.len()].min(total - pos);
+            bi += 1;
+            stereo.process_stereo(&sig_l[pos..pos + b], &sig_r[pos..pos + b],
+                                  &mut out_l[pos..pos + b], &mut out_r[pos..pos + b]);
+            scalar_l.process_block(&sig_l[pos..pos + b], &mut ref_l[pos..pos + b]);
+            scalar_r.process_block(&sig_r[pos..pos + b], &mut ref_r[pos..pos + b]);
+            pos += b;
+        }
+
+        for i in 0..total {
+            assert_eq!(out_l[i].to_bits(), ref_l[i].to_bits(), "L mismatch at {}", i);
+            assert_eq!(out_r[i].to_bits(), ref_r[i].to_bits(), "R mismatch at {}", i);
         }
     }
 }
