@@ -11,6 +11,7 @@ Nullherz is strictly divided into three planes. Never allow logic or resources t
 1.  **The Orchestration Plane (`nullherz-conductor`)**:
     *   Handles high-level logic, lifecycle, and declarative state.
     *   Performs expensive operations (e.g., Kahn's algorithm for topology compilation) off the audio thread.
+    *   The conductor **tick/command path is latency-critical too** (it feeds the RT command ring): no blocking work — file decode, disk I/O — inline in a command handler. Decode on background threads and re-drive on completion (see async track hydration; an inline decode once froze every queued command, including Play, for seconds).
     *   Communicates with the execution plane via the **Protocol Plane**.
 
 2.  **The Protocol Plane (`ipc-layer`, `nullherz-traits`)**:

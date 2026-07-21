@@ -39,7 +39,19 @@ pub struct ProcessorGraph {
     pub(crate) pending_mutations: [Option<TopologyMutation>; crate::MAX_MUTATIONS],
     pub(crate) pending_mutation_count: usize,
     pub(crate) faulted_states: Arc<[std::sync::atomic::AtomicBool; crate::MAX_NODES]>,
+    /// Peak-metering decimation phase, advanced once per PHYSICAL block (at
+    /// offset 0). Metering scans every node's output buffers (~128 KB of
+    /// reads) for a UI that samples at <= 30 Hz; doing it every 172 Hz block
+    /// was cache traffic for nothing. `meter_this_block` is latched at block
+    /// start so all sub-blocks of one physical block meter consistently (the
+    /// offset==0 reset + accumulate keeps peak-hold within the block).
+    pub(crate) meter_phase: u32,
+    pub(crate) meter_this_block: bool,
 }
+
+/// Meter every Nth physical block (~43 Hz at 256/44.1k), comfortably above
+/// the 30 Hz focused UI cadence.
+pub(crate) const METER_DECIM: u32 = 4;
 
 impl ProcessorGraph {
     pub fn new() -> Self {
@@ -86,6 +98,8 @@ impl ProcessorGraph {
             pending_mutations: std::array::from_fn(|_| None),
             pending_mutation_count: 0,
             faulted_states,
+            meter_phase: 0,
+            meter_this_block: true,
         }
     }
 
@@ -377,7 +391,15 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                  }
              }
 
-        self.telemetry.update_peak_levels(topo, &self.buffer_pool.buffers, offset, num_samples);
+        // Latch the metering decision once per physical block (offset 0) so
+        // every sub-block of the block agrees; decimate to METER_DECIM.
+        if offset == 0 {
+            self.meter_this_block = self.meter_phase == 0;
+            self.meter_phase = (self.meter_phase + 1) % METER_DECIM;
+        }
+        if self.meter_this_block {
+            self.telemetry.update_peak_levels(topo, &self.buffer_pool.buffers, offset, num_samples);
+        }
     }
 fn setup(&mut self, config: nullherz_traits::AudioConfig) {
         for node in self.nodes.iter() {
@@ -623,6 +645,44 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         for i in 0..128 {
             assert_eq!(out_data[i], i as f32);
         }
+    }
+
+    /// The per-stage cost gate routes cheap stages to serial execution, so a
+    /// trivial graph no longer exercises the pool's multi-node dispatch path.
+    /// Force the gate open (threshold 0) on a stage with TWO INDEPENDENT
+    /// nodes and assert both are dispatched to workers and write correct,
+    /// disjoint output.
+    #[test]
+    fn test_pool_multinode_stage_dispatch() {
+        let mut graph = ProcessorGraph::new();
+        // Two independent nodes (no shared buffers, no edge) → one stage.
+        graph.add_node(Box::new(IdentityProcessor), vec![10], vec![11]); // node 0
+        graph.add_node(Box::new(IdentityProcessor), vec![12], vec![0]);  // node 1 → external out
+
+        // Confirm the compiler co-scheduled them: a single stage of 2 nodes
+        // is the precondition for the pool path we mean to test.
+        let active = graph.topology_coordinator.active_idx();
+        let plan = &graph.topology_coordinator.topologies[active].plan;
+        assert_eq!(plan.stage_counts[0], 2, "the two independent nodes must share stage 0");
+
+        let mut pool = TaskPool::new(2);
+        pool.parallel_threshold_cycles = 0; // force dispatch regardless of cost
+
+        let mut in0 = [0.0f32; 128];
+        let mut in1 = [0.0f32; 128];
+        for i in 0..128 { in0[i] = i as f32; in1[i] = (i * 2) as f32; }
+        graph.buffer_pool.buffers[10].data[..128].copy_from_slice(&in0);
+        graph.buffer_pool.buffers[12].data[..128].copy_from_slice(&in1);
+
+        let mut out_data = [0.0f32; 128];
+        let mut outputs = [&mut out_data[..]];
+        let mut context = ProcessContext { transport: None, host: None, sub_block_offset: 0, is_last_sub_block: true };
+        graph.process_parallel(&[], &mut outputs, &mut context, Some(&mut pool));
+
+        // node 1 wrote external out (buffer 0): in1 = 2*i
+        for i in 0..128 { assert_eq!(out_data[i], (i * 2) as f32); }
+        // node 0 wrote internal buffer 11: in0 = i (proves it also ran)
+        for i in 0..128 { assert_eq!(graph.buffer_pool.buffers[11].data[i], i as f32); }
     }
 
     #[test]

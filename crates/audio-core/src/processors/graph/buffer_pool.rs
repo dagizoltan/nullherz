@@ -5,6 +5,13 @@ pub const MAX_PDC_SAMPLES: usize = 4096;
 /// Circular delay lines for PDC alignment.
 pub struct PdcLines {
     pub data: Box<[f32]>,
+    /// Interpolation scratch for the SERIAL executor path (the worker pool
+    /// carries a per-thread scratch instead). Rows are fully overwritten for
+    /// the `[..num_samples]` range before they are read, so reuse across
+    /// nodes is safe. Owning it here (allocated once, off the RT thread)
+    /// replaces a 32 KB stack zero-init that ran per node, per sub-block,
+    /// whether or not any input delay was active.
+    pub scratch: Box<[[f32; ipc_layer::MAX_BLOCK_SIZE]; crate::MAX_CHANNELS]>,
 }
 
 impl PdcLines {
@@ -12,6 +19,7 @@ impl PdcLines {
         let total_samples = crate::MAX_NODES * crate::MAX_CHANNELS * MAX_PDC_SAMPLES;
         Self {
             data: vec![0.0f32; total_samples].into_boxed_slice(),
+            scratch: Box::new([[0.0f32; ipc_layer::MAX_BLOCK_SIZE]; crate::MAX_CHANNELS]),
         }
     }
 

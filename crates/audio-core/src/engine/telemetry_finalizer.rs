@@ -3,9 +3,38 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use nullherz_traits::{AudioProcessor, TelemetryProducer, telemetry::Telemetry};
 use crate::engine::metrics::EngineMetrics;
 
+/// Decimation for the spectral analysis block (1024-pt FFT + magnitude
+/// fold-down, goniometer, DNA latent space): blocks arrive at ~172 Hz while
+/// the UI consumes telemetry at <= 30 Hz, so computing the spectrum every
+/// block was pure RT-thread waste. Every 4th block (~43 Hz at 256/44.1k)
+/// keeps every consumer fully fed.
+const SPECTRAL_DECIM: u32 = 4;
+
+/// Carry-over spectral telemetry between decimated computations. Owned by
+/// the engine (pre-allocated at construction, RT-safe); intermediate blocks
+/// republish the cached analysis.
+pub struct SpectralTelemetryCache {
+    phase: u32,
+    spectrum: [f32; 128],
+    goniometer_pts: [f32; 128],
+    dna_latent_space: [f32; 16],
+}
+
+impl Default for SpectralTelemetryCache {
+    fn default() -> Self {
+        Self {
+            phase: 0,
+            spectrum: [0.0; 128],
+            goniometer_pts: [0.0; 128],
+            dna_latent_space: [0.0; 16],
+        }
+    }
+}
+
 pub struct TelemetryFinalizer {}
 
 impl TelemetryFinalizer {
+    #[allow(clippy::too_many_arguments)]
     pub fn finalize_block_telemetry(
         graph: &mut dyn AudioProcessor,
         metrics: &EngineMetrics,
@@ -19,6 +48,7 @@ impl TelemetryFinalizer {
         fft_re: &mut audio_dsp::AlignedBuffer,
         fft_im: &mut audio_dsp::AlignedBuffer,
         transport: &nullherz_traits::Transport,
+        spectral_cache: &mut SpectralTelemetryCache,
     ) -> Telemetry {
         let mut node_times = [0u64; 64];
         let mut node_peak_times = [0u64; 64];
@@ -44,55 +74,70 @@ impl TelemetryFinalizer {
         let current_ns = (elapsed_cycles as f64 * ns_per_cycle) as u64;
         let peak = metrics.update_peak(current_ns, transport.sample_rate, sample_counter, num_samples);
 
-        // 1024-point Spectrum Analysis (AnaWaves Stage 2)
-        // Optimized for RT-safety: No allocations, zero-padded input
-        let mut spectrum = [0.0f32; 128];
-        if !outputs.is_empty() {
-            let fft_size = 1024;
+        // Spectral analysis runs DECIMATED (see SPECTRAL_DECIM); off-phase
+        // blocks republish the cached result.
+        let compute_spectral = spectral_cache.phase == 0;
+        spectral_cache.phase = (spectral_cache.phase + 1) % SPECTRAL_DECIM;
 
-            // Clear buffers (re & im) before use
-            fft_re.fill(0.0);
-            fft_im.fill(0.0);
+        if compute_spectral {
+            // 1024-point Spectrum Analysis (AnaWaves Stage 2)
+            // Optimized for RT-safety: No allocations, zero-padded input
+            let mut spectrum = [0.0f32; 128];
+            if !outputs.is_empty() {
+                let fft_size = 1024;
 
-            let out_l = &outputs[0];
-            let len = out_l.len().min(fft_size);
-            fft_re[..len].copy_from_slice(&out_l[..len]);
+                // Clear buffers (re & im) before use
+                fft_re.fill(0.0);
+                fft_im.fill(0.0);
 
-            fft.process(fft_re, fft_im);
+                let out_l = &outputs[0];
+                let len = out_l.len().min(fft_size);
+                fft_re[..len].copy_from_slice(&out_l[..len]);
 
-            for i in 0..128 {
+                fft.process(fft_re, fft_im);
+
+                for i in 0..128 {
+                    let mut sum = 0.0;
+                    for k in 0..4 {
+                        let bin = i * 4 + k;
+                        sum += (fft_re[bin] * fft_re[bin] + fft_im[bin] * fft_im[bin]).sqrt();
+                    }
+                    spectrum[i] = sum / 4.0;
+                }
+            }
+
+            // Stage 6: decimate spectrum to latent space representation
+            let mut dna_latent_space = [0.0f32; 16];
+            for i in 0..16 {
                 let mut sum = 0.0;
-                for k in 0..4 {
-                    let bin = i * 4 + k;
-                    sum += (fft_re[bin] * fft_re[bin] + fft_im[bin] * fft_im[bin]).sqrt();
+                for k in 0..8 {
+                    sum += spectrum[i * 8 + k];
                 }
-                spectrum[i] = sum / 4.0;
+                dna_latent_space[i] = (sum / 8.0).min(1.0);
             }
-        }
 
-        // Stage 6: decimate spectrum to latent space representation
-        let mut dna_latent_space = [0.0f32; 16];
-        for i in 0..16 {
-            let mut sum = 0.0;
-            for k in 0..8 {
-                sum += spectrum[i * 8 + k];
-            }
-            dna_latent_space[i] = (sum / 8.0).min(1.0);
-        }
-
-        let mut goniometer_pts = [0.0f32; 128];
-        if outputs.len() >= 2 {
-            let left = &outputs[0];
-            let right = &outputs[1];
-            let step = left.len() / 64;
-            if step > 0 {
-                for i in 0..64 {
-                    let idx = i * step;
-                    goniometer_pts[i * 2] = left[idx];
-                    goniometer_pts[i * 2 + 1] = right[idx];
+            let mut goniometer_pts = [0.0f32; 128];
+            if outputs.len() >= 2 {
+                let left = &outputs[0];
+                let right = &outputs[1];
+                let step = left.len() / 64;
+                if step > 0 {
+                    for i in 0..64 {
+                        let idx = i * step;
+                        goniometer_pts[i * 2] = left[idx];
+                        goniometer_pts[i * 2 + 1] = right[idx];
+                    }
                 }
             }
+
+            spectral_cache.spectrum = spectrum;
+            spectral_cache.dna_latent_space = dna_latent_space;
+            spectral_cache.goniometer_pts = goniometer_pts;
         }
+
+        let spectrum = spectral_cache.spectrum;
+        let dna_latent_space = spectral_cache.dna_latent_space;
+        let goniometer_pts = spectral_cache.goniometer_pts;
 
         let mut deck_positions = [0u64; 4];
         let mut deck_playback_rates = [1.0f32; 4];
@@ -151,7 +196,16 @@ impl TelemetryFinalizer {
             node_map_keys: [[0u8; 32]; 32],
             node_map_values: [0u32; 32],
             audio_devices: [nullherz_traits::telemetry::DeviceName::default(); 16],
-            ..Telemetry::default()
+            // Remaining fields written out explicitly: `..Telemetry::default()`
+            // here constructed and dropped an ENTIRE second multi-KB Telemetry
+            // every block just to fill these seven.
+            is_streaming: false,
+            stream_bitrate: 0.0,
+            stream_uptime_sec: 0,
+            stream_dropped_frames: 0,
+            stream_viewers: 0,
+            mesh_peer_count: 0,
+            mesh_peer_names: [nullherz_traits::telemetry::PeerName::default(); 8],
         };
         let _ = telemetry_producer.push_telemetry(telemetry);
         telemetry

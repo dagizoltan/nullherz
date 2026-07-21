@@ -52,6 +52,12 @@ pub fn get_cycles() -> u64 {
 #[macro_export]
 macro_rules! assert_finite_block {
     ($block:expr, $node_idx:expr) => {
+        // Release builds compile the check away; consume the bindings so
+        // call sites stay warning-free in both profiles.
+        #[cfg(not(debug_assertions))]
+        {
+            let _ = (&$block, &$node_idx);
+        }
         #[cfg(debug_assertions)]
         {
             for (i, sample) in $block.iter().enumerate() {
