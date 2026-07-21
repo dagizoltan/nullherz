@@ -72,30 +72,63 @@ impl CommandHandler {
 
         // 0. On-demand registry hydration: a deck load referencing a library
         // track whose buffer is not in the (boot-empty, in-memory) registry
-        // would silently no-op in the engine. Decode it here, off the RT
-        // thread, so ANY library entry is playable regardless of which
-        // scanner or seeder created it.
+        // would silently no-op in the engine. The decode runs on a BACKGROUND
+        // thread — a full-track decode inline here blocked the tick thread
+        // (and every queued command, including the user's Play) for seconds:
+        // ~4 s for a 5-minute WAV in a debug build. While the decode runs,
+        // the engine no-ops the AddSource and the sampler's pending_play
+        // holds any early Play trigger; tick() re-drives the load when the
+        // worker reports completion, so the deck starts the moment audio is
+        // ready instead of the world stopping until it is.
         for cmd in &commands {
             if let Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id, sample_id }) = cmd {
                 // Remember which sample sits on which deck — needed to map a
-                // deck's sampler NODE back to its TRACK (hot-cue persistence).
+                // deck's sampler NODE back to its TRACK (hot-cue persistence),
+                // and by tick() to know which decks to re-drive on completion.
                 conductor.mixer_manager.deck_samples.insert(*deck_id, *sample_id);
-                if conductor.transfusion_manager.sample_registry.get(*sample_id).is_none() {
+                if conductor.transfusion_manager.sample_registry.get(*sample_id).is_none()
+                    && !conductor.hydration_pending.contains(sample_id)
+                {
                     let track = { conductor.library.lock().get_track(*sample_id).ok().flatten() };
                     if let Some(track) = track {
                         if !std::path::Path::new(&track.path).exists() {
                             eprintln!("CommandHandler: track {} path missing ({}); refusing to register silence.", sample_id, track.path);
                             continue;
                         }
-                        println!("CommandHandler: Hydrating sample {} from {}", sample_id, track.path);
-                        let decoded = crate::folder_monitor::decode_audio_file(&track.path);
-                        // The library row may predate the planar layout (or the
-                        // file may have changed); trust what we just decoded.
-                        let mut metadata = (*track.metadata).clone();
-                        metadata.total_samples = decoded.frames as u64;
-                        metadata.channels = decoded.channels as u16;
-                        conductor.transfusion_manager.sample_registry.register_with_metadata(
-                            *sample_id, decoded.samples, std::sync::Arc::new(metadata));
+                        let id = *sample_id;
+                        let path = track.path.clone();
+                        let meta_template = track.metadata.clone();
+                        let registry = conductor.transfusion_manager.sample_registry.clone();
+                        let done_tx = conductor.hydration_done_tx.clone();
+                        conductor.hydration_pending.insert(id);
+                        let spawned = std::thread::Builder::new()
+                            .name(format!("hydrate-{}", id))
+                            .spawn(move || {
+                                println!("CommandHandler: Hydrating sample {} from {} (background)", id, path);
+                                let decoded = crate::folder_monitor::decode_audio_file(&path);
+                                // The library row may predate the planar layout
+                                // (or the file may have changed); trust what we
+                                // just decoded.
+                                let mut metadata = (*meta_template).clone();
+                                metadata.total_samples = decoded.frames as u64;
+                                metadata.channels = decoded.channels as u16;
+                                registry.register_with_metadata(id, decoded.samples, std::sync::Arc::new(metadata));
+                                // Receiver gone means the conductor is shutting
+                                // down; the registry entry still landed.
+                                let _ = done_tx.send(id);
+                            });
+                        if let Err(e) = spawned {
+                            // No thread — fall back to the old inline decode
+                            // rather than leaving the deck silent forever.
+                            eprintln!("CommandHandler: hydration thread failed ({}); decoding inline.", e);
+                            conductor.hydration_pending.remove(sample_id);
+                            let decoded = crate::folder_monitor::decode_audio_file(&track.path);
+                            let mut metadata = (*track.metadata).clone();
+                            metadata.total_samples = decoded.frames as u64;
+                            metadata.channels = decoded.channels as u16;
+                            conductor.transfusion_manager.sample_registry.register_with_metadata(
+                                *sample_id, decoded.samples, std::sync::Arc::new(metadata));
+                        }
                     } else {
                         eprintln!("CommandHandler: LoadTrackToDeck {} has no library entry; the deck will stay silent.", sample_id);
                     }

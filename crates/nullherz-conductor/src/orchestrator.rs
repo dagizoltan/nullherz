@@ -56,6 +56,11 @@ pub struct Conductor {
         std::collections::HashMap<u64, (std::sync::Arc<Vec<f32>>, std::sync::Arc<nullherz_traits::SampleMetadata>)>,
     )>,
     // --- Live RTMP/Opus Broadcast Streaming ---
+    /// Samples currently being decoded on background hydration threads
+    /// (see command_handler): dedupes concurrent loads of the same track.
+    pub hydration_pending: std::collections::HashSet<u64>,
+    pub(crate) hydration_done_tx: std::sync::mpsc::Sender<u64>,
+    hydration_done_rx: std::sync::mpsc::Receiver<u64>,
     pub is_streaming: bool,
     pub stream_start_time: Option<std::time::Instant>,
     pub stream_bitrate: f32,
@@ -91,6 +96,7 @@ impl Conductor {
         transfusion_manager.discovery_service = Some(dna_discovery);
         transfusion_manager = transfusion_manager.with_library(library.clone());
 
+        let (hydration_done_tx, hydration_done_rx) = std::sync::mpsc::channel();
         Self {
             engine_coordinator: EngineCoordinator::new(),
             topology_manager: TopologyManager::new(),
@@ -124,6 +130,9 @@ impl Conductor {
             active_transitions: Vec::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            hydration_pending: std::collections::HashSet::new(),
+            hydration_done_tx,
+            hydration_done_rx,
             is_streaming: false,
             stream_start_time: None,
             stream_bitrate: 256.0,
@@ -159,6 +168,7 @@ impl Conductor {
         transfusion_manager.discovery_service = Some(dna_discovery);
         transfusion_manager = transfusion_manager.with_library(library.clone());
 
+        let (hydration_done_tx, hydration_done_rx) = std::sync::mpsc::channel();
         Self {
             engine_coordinator: EngineCoordinator::new(),
             topology_manager: TopologyManager::new(),
@@ -192,6 +202,9 @@ impl Conductor {
             active_transitions: Vec::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            hydration_pending: std::collections::HashSet::new(),
+            hydration_done_tx,
+            hydration_done_rx,
             is_streaming: false,
             stream_start_time: None,
             stream_bitrate: 256.0,
@@ -507,6 +520,28 @@ impl Conductor {
     pub fn tick(&mut self) {
         use std::time::{SystemTime, UNIX_EPOCH};
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+
+        // Complete background hydrations: the decode thread has registered
+        // the sample; re-drive the load for every deck still mapped to it so
+        // the engine's AddSourceFromRegistry (a no-op while the registry
+        // missed) finally lands. A deck the user re-loaded meanwhile is
+        // mapped to a different sample and is left alone.
+        let hydrated: Vec<u64> = self.hydration_done_rx.try_iter().collect();
+        for sample_id in hydrated {
+            self.hydration_pending.remove(&sample_id);
+            let decks: Vec<char> = self
+                .mixer_manager
+                .deck_samples
+                .iter()
+                .filter(|&(_, &s)| s == sample_id)
+                .map(|(&d, _)| d)
+                .collect();
+            for deck_id in decks {
+                self.apply_mixer_commands(vec![nullherz_traits::Command::Performance(
+                    nullherz_traits::PerformanceCommand::LoadTrackToDeck { deck_id, sample_id },
+                )]);
+            }
+        }
 
         // 0. Handle Background Auto-Save (Every 60 seconds)
         if now % 60 == 0 && self.last_autosave_secs != now {
