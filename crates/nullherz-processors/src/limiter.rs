@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use nullherz_traits::{AudioProcessor, SignalProcessor, ProcessContext, AudioConfig, ProcessorCommand, Command, MidiEvent, MidiResponder, SnapshotProvider};
 use crate::MAX_CHANNELS;
 
@@ -19,6 +20,15 @@ pub struct LimiterProcessor {
     lookahead_samples: usize,
     envelope: f32,
     capacity: usize,
+
+    // Sliding-window-maximum state (monotonic deque). Replaces an O(window)
+    // rescan per sample with O(1) amortized: `max_deque` holds (sample_index,
+    // peak) pairs in strictly-decreasing peak order, so the front is always
+    // the max over the current look-ahead window. Pre-reserved to `capacity`
+    // (> lookahead), so push/pop never allocate on the audio thread. Produces
+    // the identical window max the rescan did — output is bit-for-bit the same.
+    sample_counter: u64,
+    max_deque: VecDeque<(u64, f32)>,
 }
 
 impl LimiterProcessor {
@@ -41,6 +51,8 @@ impl LimiterProcessor {
             lookahead_samples: 0,
             envelope: 0.0,
             capacity,
+            sample_counter: 0,
+            max_deque: VecDeque::with_capacity(capacity),
         };
         processor.update_derived_params();
         processor
@@ -77,12 +89,25 @@ impl SignalProcessor for LimiterProcessor {
             }
             self.peak_buffer[self.write_pos] = current_peak;
 
-            // Look-ahead peak detection: find the maximum peak over the look-ahead window
-            let mut window_max = 0.0_f32;
-            for offset in 0..self.lookahead_samples {
-                let idx = (self.write_pos + self.capacity - offset) % self.capacity;
-                window_max = window_max.max(self.peak_buffer[idx]);
+            // Look-ahead peak detection via monotonic deque (sliding-window
+            // max over the last `lookahead_samples` samples, current included).
+            // Drop candidates the new peak dominates, append it, then drop the
+            // front once it falls out of the window. Front = window max — the
+            // same value the old O(window) rescan produced.
+            let t = self.sample_counter;
+            while let Some(&(_, v)) = self.max_deque.back() {
+                if v <= current_peak { self.max_deque.pop_back(); } else { break; }
             }
+            self.max_deque.push_back((t, current_peak));
+            // saturating: at startup t+1 < lookahead, so the window simply
+            // starts at sample 0 (matches the old scan, whose extra slots read
+            // zero-initialized peaks that never beat a real |sample| >= 1e-6).
+            let window_start = (t + 1).saturating_sub(self.lookahead_samples as u64);
+            while let Some(&(idx, _)) = self.max_deque.front() {
+                if idx < window_start { self.max_deque.pop_front(); } else { break; }
+            }
+            let window_max = self.max_deque.front().map(|&(_, v)| v).unwrap_or(0.0);
+            self.sample_counter += 1;
 
             // Smooth the peak envelope using release ballistics
             self.envelope = window_max.max(self.envelope * self.release_coef);
@@ -117,6 +142,8 @@ impl SignalProcessor for LimiterProcessor {
         self.peak_buffer.fill(0.0);
         self.write_pos = 0;
         self.envelope = 0.0;
+        self.sample_counter = 0;
+        self.max_deque.clear();
         self.update_derived_params();
     }
 }
@@ -228,6 +255,88 @@ mod tests {
         }
         for val in out_right {
             assert!(val.abs() <= 0.5001, "Right channel exceeded ceiling: {}", val);
+        }
+    }
+
+    /// The monotonic-deque look-ahead must produce BIT-identical output to the
+    /// original O(window) rescan. Drive a long pseudo-random stereo signal in
+    /// odd-sized blocks (so block boundaries fall mid-window) and compare, per
+    /// sample, against a brute-force reference that scans the whole window.
+    #[test]
+    fn test_deque_lookahead_matches_bruteforce_bitexact() {
+        let sr = 44_100.0;
+        let mut limiter = LimiterProcessor::new(1, sr);
+        // Non-default params exercise a different lookahead/release than the
+        // constructor's, and a threshold low enough to force real limiting.
+        limiter.set_parameter(0, 0.3, 0);   // threshold
+        limiter.set_parameter(1, 50.0, 0);  // release ms
+        limiter.set_parameter(2, 3.5, 0);   // lookahead ms
+        limiter.set_parameter(3, 0.9, 0);   // ceiling
+
+        // Reference state mirroring the ORIGINAL algorithm exactly.
+        let lookahead = (3.5 * 0.001 * sr).round() as usize;
+        let cap = 2048usize;
+        let mut ref_buf_l = vec![0.0f32; cap];
+        let mut ref_buf_r = vec![0.0f32; cap];
+        let mut ref_peak = vec![0.0f32; cap];
+        let mut ref_wpos = 0usize;
+        let mut ref_env = 0.0f32;
+        let release_coef = (-1.0f32 / (50.0 * 0.001 * sr).max(1.0)).exp();
+        let (threshold, ceiling) = (0.3f32, 0.9f32);
+
+        // Deterministic pseudo-random signal (xorshift), a few thousand samples.
+        let mut seed = 0x1234_5678u32;
+        let mut rng = || {
+            seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+            (seed as f32 / u32::MAX as f32) * 2.4 - 1.2 // spans past +/-1 to trigger limiting
+        };
+        let total = 5000usize;
+        let sig_l: Vec<f32> = (0..total).map(|_| rng()).collect();
+        let sig_r: Vec<f32> = (0..total).map(|_| rng()).collect();
+
+        let mut ctx = ProcessContext { transport: None, host: None, sub_block_offset: 0, is_last_sub_block: false };
+
+        // Cycle through varying block sizes so block boundaries land at many
+        // different offsets relative to the look-ahead window.
+        let block_sizes = [64usize, 37, 200, 129, 256, 91];
+        let mut pos = 0usize;
+        let mut bs = 0usize;
+        while pos < total {
+            let b = block_sizes[bs % block_sizes.len()].min(total - pos);
+            bs += 1;
+            let in_l = &sig_l[pos..pos + b];
+            let in_r = &sig_r[pos..pos + b];
+            let mut ol = vec![0.0f32; b];
+            let mut or = vec![0.0f32; b];
+            {
+                let inputs: &[&[f32]] = &[in_l, in_r];
+                let mut olr = &mut ol[..];
+                let mut orr = &mut or[..];
+                let outputs: &mut [&mut [f32]] = &mut [&mut olr, &mut orr];
+                limiter.process(inputs, outputs, &mut ctx);
+            }
+            // Brute-force reference (the ORIGINAL algorithm) for the same block.
+            for k in 0..b {
+                let cur = (in_l[k].abs()).max(in_r[k].abs()).max(1e-6);
+                ref_buf_l[ref_wpos] = in_l[k];
+                ref_buf_r[ref_wpos] = in_r[k];
+                ref_peak[ref_wpos] = cur;
+                let mut wmax = 0.0f32;
+                for off in 0..lookahead {
+                    let idx = (ref_wpos + cap - off) % cap;
+                    wmax = wmax.max(ref_peak[idx]);
+                }
+                ref_env = wmax.max(ref_env * release_coef);
+                let gain = if ref_env > threshold { threshold / ref_env } else { 1.0 };
+                let scale = gain * (ceiling / threshold);
+                let rpos = (ref_wpos + cap - lookahead) % cap;
+                let exp_l = ref_buf_l[rpos] * scale;
+                let exp_r = ref_buf_r[rpos] * scale;
+                assert_eq!(ol[k].to_bits(), exp_l.to_bits(), "L mismatch at sample {}", pos + k);
+                assert_eq!(or[k].to_bits(), exp_r.to_bits(), "R mismatch at sample {}", pos + k);
+                ref_wpos = (ref_wpos + 1) % cap;
+            }
+            pos += b;
         }
     }
 }
