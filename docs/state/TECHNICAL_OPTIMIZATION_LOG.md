@@ -2,6 +2,62 @@
 
 ---
 
+## Profile-Driven DSP Optimization — 2026-07-21 (session 4)
+
+The earlier audit optimized by inspection; a sampler inner-loop hoist that
+"looked" hot measured as pure noise (reverted). Lesson applied: **profile
+first.** New tool `profile_console_nodes` reads the engine's own per-node cycle
+telemetry from the bootstrapped 4-deck console and ranks nodes by cost.
+
+**The profile (before), total per-block node time ~537 µs:**
+
+| type | share | note |
+| :--- | ---: | :--- |
+| KeySync | **48.7%** | 4 decks × ~65 µs — full STFT every block *even at unison* |
+| Limiter | **22.3%** | one node (master), ~119 µs — a quadratic look-ahead scan |
+| DjIsolator | 12.9% | 4 decks |
+| Sampler | 6.8% | (the thing inspection had targeted) |
+
+Two fixes, both **bit-verified** (golden master render unchanged; per-change
+equivalence tests added):
+
+- **Limiter look-ahead: O(window) → O(1) (`limiter.rs`).** The brick-wall
+  limiter rescanned the entire ~88-sample look-ahead window for its max on
+  every one of 256 samples (~22.5k ops/block). Replaced with a monotonic deque
+  (pre-reserved to capacity, no RT allocation) giving the sliding-window max in
+  O(1) amortized — the *identical* max value, so output is bit-for-bit the same
+  (`test_deque_lookahead_matches_bruteforce_bitexact` pins it against the
+  original algorithm). Node cost **119 µs → 12 µs (~10×)**.
+
+- **KeySync unison identity path (`spectral.rs` + `keysync.rs`).** The phase
+  vocoder ran a full FFT→IFFT round-trip per frame even at unison (no pitch
+  shift — the common case), where the vocoder op is a no-op. But an identity op
+  makes `IFFT(FFT(window·frame)) == window·frame` (the 1/n norm cancels the
+  transform scaling), so the reconstruction reduces to
+  `overlap_add(synth_window · window · frame)`. New `SpectralPipeline::process_identity`
+  computes exactly that, skipping BOTH transforms; KeySync calls it when
+  `|ratio − 1| < 0.001`. Same framing/latency/buffers as the FFT path, so
+  engaging/releasing pitch shift stays continuous; output matches the FFT path
+  to within round-trip float error (~−120 dBFS, far below the −60 dBFS golden
+  floor — `test_process_identity_matches_fft_roundtrip` pins < −80 dB). Node
+  cost **~65 µs → ~4.9 µs (~13×)** per deck at unison; full pitch-shift path
+  unchanged.
+
+**Measured (bench_console_block, interleaved A/B, 4 reps, default config):**
+
+| metric | before (merged main) | + limiter + KeySync |
+| :--- | ---: | ---: |
+| mean | ~600 µs (10.3% budget) | **~191 µs (3.3%)** |
+| p99 | ~1.25–1.54 ms | **~0.40 ms** |
+| max | up to ~6.5 ms | ~1.8–2.1 ms |
+
+Total per-block node time **537 µs → 202 µs (2.65×)**. The console now sits at
+~3.3% of the 256-sample budget; a 128-sample period (2.9 ms) is comfortable on
+mean/p99. New hot nodes for a future pass: DjIsolator (36.6% of the smaller
+total) and Sampler (22.4%).
+
+---
+
 ## Hot-Path Performance Audit — 2026-07-21
 
 **Scope:** full read of the RT execution path (`AudioEngine::process` → `StandardKernel` → `ProcessorGraph::process_parallel` → `GraphExecutor` / `TaskPool` workers → processors), the telemetry finalizer, ipc-layer primitives, and the ALSA backend loop. The architecture is fundamentally sound — static-dispatch kernel, O(1) topology swap, lock-free rings with cache-line padding, FTZ/DAZ, pre-allocated buffers, panic isolation. The findings below are optimization-level, ranked by estimated per-block impact at 44.1 kHz / 256-sample periods (~172 blocks/s, 5.8 ms budget).

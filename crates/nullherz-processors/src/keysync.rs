@@ -57,6 +57,16 @@ impl VocoderLane {
     }
 
     fn process(&mut self, input: &[f32], output: &mut [f32], ratio: f32) {
+        // Unison: the vocoder is a no-op and the pipeline's reconstruction is
+        // pure overlap-add, so skip BOTH the phase-vocoder math AND the FFT
+        // round-trip via the identity path. Same framing/latency/buffers as the
+        // full path, so engaging or releasing pitch shift stays continuous, and
+        // the output matches the FFT path to within round-trip float error.
+        if (ratio - 1.0).abs() < 0.001 {
+            self.pipeline.process_identity(input, output);
+            return;
+        }
+
         // Frames per window: the phase advance a stationary bin accrues between
         // hops is 2*pi*k/oversampling.
         let oversampling = (self.pipeline.fft.size / self.pipeline.hop_size.max(1)) as f32;
@@ -71,10 +81,6 @@ impl VocoderLane {
         let syn_freq = &mut self.syn_freq;
 
         self.pipeline.process(input, output, |re, im, n, _window, _fft| {
-            // Unison is a genuine bypass: the pipeline reconstructs exactly, so
-            // the (transcendental-heavy) vocoder is pure cost at ratio 1.
-            if (ratio - 1.0).abs() < 0.001 { return; }
-
             let n_half = n / 2;
             let bins = n_half + 1;
 

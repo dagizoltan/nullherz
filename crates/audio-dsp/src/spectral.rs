@@ -236,6 +236,62 @@ impl SpectralPipeline {
         }
     }
 
+    /// Streaming reconstruction WITHOUT the FFT round-trip — for callers whose
+    /// spectral op is the identity (e.g. a pitch shifter at unison). The full
+    /// path computes `overlap_add(synth_window * norm * IFFT(FFT(window *
+    /// frame)))`; with an identity op, `IFFT(FFT(x)) == n*x` and `norm == 1/n`,
+    /// so it reduces to `overlap_add(synth_window * window * frame)` — computed
+    /// directly here, skipping both transforms (the dominant cost). Framing,
+    /// latency and the in/out buffers are IDENTICAL to `process`, so a caller
+    /// may switch between the two block-to-block with no discontinuity; the
+    /// output matches the FFT path to within its round-trip float error.
+    pub fn process_identity(&mut self, input: &[f32], output: &mut [f32]) {
+        let len = input.len();
+        let mask = self.out_mask;
+        for i in 0..len {
+            self.in_buffer[self.in_ptr] = input[i];
+            output[i] = self.out_buffer[self.out_ptr];
+            self.out_buffer[self.out_ptr] = 0.0;
+
+            self.in_ptr += 1;
+            self.out_ptr = (self.out_ptr + 1) & mask;
+
+            if self.in_ptr >= self.fft.size {
+                self.execute_block_identity();
+                self.in_buffer.copy_within(self.hop_size..self.fft.size, 0);
+                self.in_ptr = self.fft.size - self.hop_size;
+            }
+        }
+    }
+
+    /// Windowed overlap-add of the current frame with NO transform — the
+    /// identity-op reduction of `execute_block` (see `process_identity`).
+    fn execute_block_identity(&mut self) {
+        let n = self.fft.size;
+        let mask = self.out_mask;
+        let mut i = 0;
+        {
+            use crate::simd_vec::*;
+            while i + 8 <= n {
+                let v_in = load_f32x8(&self.in_buffer, i);
+                let v_aw = load_f32x8(&self.window, i);
+                let v_sw = load_f32x8(&self.synth_window, i);
+                let res: [f32; 8] = (v_in * v_aw * v_sw).into();
+                for (j, val) in res.iter().enumerate() {
+                    let target = (self.out_ptr + i + j) & mask;
+                    self.out_buffer[target] += *val;
+                }
+                i += 8;
+            }
+        }
+        while i < n {
+            let val = self.in_buffer[i] * self.window[i] * self.synth_window[i];
+            let target = (self.out_ptr + i) & mask;
+            self.out_buffer[target] += val;
+            i += 1;
+        }
+    }
+
     pub fn reset(&mut self) {
         self.in_buffer.fill(0.0);
         self.out_buffer.fill(0.0);
@@ -486,6 +542,50 @@ mod pipeline_reconstruction_tests {
                     sum
                 );
             }
+        }
+    }
+
+    /// `process_identity` must produce the SAME output as the full `process`
+    /// with a no-op spectral op — the two differ only by the FFT round-trip's
+    /// float error, which must sit far below any audible floor. This is what
+    /// lets a pitch shifter drop to the identity path at unison without the
+    /// golden render moving.
+    #[test]
+    fn test_process_identity_matches_fft_roundtrip() {
+        for &n in &[256usize, 512, 1024] {
+            let mut p_fft = SpectralPipeline::new(n);
+            let mut p_id = SpectralPipeline::new(n);
+
+            let len = n * 20;
+            // Mixed-frequency content so the match isn't a single-tone fluke.
+            let input: Vec<f32> = (0..len)
+                .map(|i| {
+                    let t = i as f32;
+                    0.4 * (2.0 * std::f32::consts::PI * 7.3 * t / n as f32).sin()
+                        + 0.25 * (2.0 * std::f32::consts::PI * 19.0 * t / n as f32).sin()
+                        + 0.15 * (2.0 * std::f32::consts::PI * 53.5 * t / n as f32).sin()
+                })
+                .collect();
+
+            let mut out_fft = vec![0.0f32; len];
+            let mut out_id = vec![0.0f32; len];
+            p_fft.process(&input, &mut out_fft, |_re, _im, _n, _w, _f| {});
+            p_id.process_identity(&input, &mut out_id);
+
+            // Compare steady state (skip priming). Peak difference must be far
+            // below the -60 dBFS golden floor; the FFT round-trip is ~-120 dB.
+            let start = n * 4;
+            let peak_in = input[start..].iter().fold(0.0f32, |a, b| a.max(b.abs()));
+            let peak_diff = out_fft[start..]
+                .iter()
+                .zip(&out_id[start..])
+                .fold(0.0f32, |a, (&x, &y)| a.max((x - y).abs()));
+            let db = 20.0 * (peak_diff / peak_in).max(1e-30).log10();
+            assert!(
+                db < -80.0,
+                "fft_size {}: identity vs FFT round-trip peak diff {:.1} dBFS (expected << -60)",
+                n, db
+            );
         }
     }
 }
