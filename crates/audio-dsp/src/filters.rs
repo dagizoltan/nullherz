@@ -292,6 +292,63 @@ impl BiquadCoefficients {
             a2: (k - 2.0_f32.sqrt() * theta + 1.0) / delta,
         }
     }
+
+    /// RBJ low shelf (Audio EQ Cookbook, S = 1). `gain` is LINEAR (1.0 =
+    /// flat). At exactly 1.0 the coefficients are the bit-exact identity, so
+    /// an untouched shelf is a true passthrough, not a numeric near-identity.
+    pub fn low_shelf(freq: f32, gain: f32, sample_rate: f32) -> Self {
+        if gain == 1.0 { return Self::default(); }
+        let a = gain.sqrt();
+        let omega = 2.0 * std::f32::consts::PI * freq / sample_rate;
+        let (sn, cs) = omega.sin_cos();
+        let alpha = sn / 2.0 * 2.0_f32.sqrt();
+        let two_ra = 2.0 * a.sqrt() * alpha;
+        let a0 = (a + 1.0) + (a - 1.0) * cs + two_ra;
+        Self {
+            b0: a * ((a + 1.0) - (a - 1.0) * cs + two_ra) / a0,
+            b1: 2.0 * a * ((a - 1.0) - (a + 1.0) * cs) / a0,
+            b2: a * ((a + 1.0) - (a - 1.0) * cs - two_ra) / a0,
+            a1: -2.0 * ((a - 1.0) + (a + 1.0) * cs) / a0,
+            a2: ((a + 1.0) + (a - 1.0) * cs - two_ra) / a0,
+        }
+    }
+
+    /// RBJ high shelf (Audio EQ Cookbook, S = 1). `gain` is LINEAR; 1.0 is
+    /// the bit-exact identity, as with `low_shelf`.
+    pub fn high_shelf(freq: f32, gain: f32, sample_rate: f32) -> Self {
+        if gain == 1.0 { return Self::default(); }
+        let a = gain.sqrt();
+        let omega = 2.0 * std::f32::consts::PI * freq / sample_rate;
+        let (sn, cs) = omega.sin_cos();
+        let alpha = sn / 2.0 * 2.0_f32.sqrt();
+        let two_ra = 2.0 * a.sqrt() * alpha;
+        let a0 = (a + 1.0) - (a - 1.0) * cs + two_ra;
+        Self {
+            b0: a * ((a + 1.0) + (a - 1.0) * cs + two_ra) / a0,
+            b1: -2.0 * a * ((a - 1.0) + (a + 1.0) * cs) / a0,
+            b2: a * ((a + 1.0) + (a - 1.0) * cs - two_ra) / a0,
+            a1: 2.0 * ((a - 1.0) - (a + 1.0) * cs) / a0,
+            a2: ((a + 1.0) - (a - 1.0) * cs - two_ra) / a0,
+        }
+    }
+
+    /// RBJ peaking EQ (Audio EQ Cookbook). `gain` is LINEAR; 1.0 is the
+    /// bit-exact identity, as with the shelves.
+    pub fn peaking(freq: f32, q: f32, gain: f32, sample_rate: f32) -> Self {
+        if gain == 1.0 { return Self::default(); }
+        let a = gain.sqrt();
+        let omega = 2.0 * std::f32::consts::PI * freq / sample_rate;
+        let (sn, cs) = omega.sin_cos();
+        let alpha = sn / (2.0 * q);
+        let a0 = 1.0 + alpha / a;
+        Self {
+            b0: (1.0 + alpha * a) / a0,
+            b1: -2.0 * cs / a0,
+            b2: (1.0 - alpha * a) / a0,
+            a1: -2.0 * cs / a0,
+            a2: (1.0 - alpha / a) / a0,
+        }
+    }
 }
 
 impl BiquadFilter {
@@ -851,10 +908,186 @@ impl crate::DspKernel for EnvelopeFollower {
     }
 }
 
+/// A 3-band mastering tone stage: RBJ low shelf, mid peak and high shelf in
+/// SERIES. Unlike the DjIsolator (crossover split + re-sum, allpass phase
+/// rotation even at unity), every band at gain 1.0 is the bit-exact identity
+/// biquad — an untouched MasteringEq passes audio through unchanged, which is
+/// what lets it sit in the master chain without shifting the golden render.
+///
+/// Params (linear gain, 1.0 = flat): 0 = LOW shelf, 1 = MID peak, 2 = HIGH
+/// shelf. Coefficient changes are RAMPED (caller-provided duration) so knob
+/// moves cannot click on the master bus.
+#[derive(Clone)]
+pub struct MasteringEq {
+    pub low: BiquadFilter,
+    pub mid: BiquadFilter,
+    pub high: BiquadFilter,
+    pub gains: [f32; 3],
+    sample_rate: f32,
+}
+
+/// Corner frequencies chosen for master-bus tone shaping (broad strokes),
+/// not surgical EQ: shelves at the spectrum edges, gentle mid bell.
+const MASTERING_EQ_LOW_HZ: f32 = 120.0;
+const MASTERING_EQ_MID_HZ: f32 = 1_000.0;
+const MASTERING_EQ_MID_Q: f32 = 0.707;
+const MASTERING_EQ_HIGH_HZ: f32 = 8_000.0;
+
+/// Gain floor for coefficient math: the RBJ formulas divide by the gain, so
+/// a full kill (0.0) is clamped to -30 dB — a master tone control is not a
+/// kill switch, and -30 dB reads as "off" on program material.
+const MASTERING_EQ_MIN_GAIN: f32 = 0.0316;
+const MASTERING_EQ_MAX_GAIN: f32 = 4.0;
+
+impl Default for MasteringEq {
+    fn default() -> Self {
+        Self::with_sample_rate(44_100.0)
+    }
+}
+
+impl MasteringEq {
+    pub fn with_sample_rate(sample_rate: f32) -> Self {
+        let identity = BiquadCoefficients::default();
+        Self {
+            low: BiquadFilter::new(identity),
+            mid: BiquadFilter::new(identity),
+            high: BiquadFilter::new(identity),
+            gains: [1.0, 1.0, 1.0],
+            sample_rate,
+        }
+    }
+
+    fn band_coeffs(&self, band: usize) -> BiquadCoefficients {
+        let g = if self.gains[band] == 1.0 {
+            1.0
+        } else {
+            self.gains[band].clamp(MASTERING_EQ_MIN_GAIN, MASTERING_EQ_MAX_GAIN)
+        };
+        match band {
+            0 => BiquadCoefficients::low_shelf(MASTERING_EQ_LOW_HZ, g, self.sample_rate),
+            1 => BiquadCoefficients::peaking(MASTERING_EQ_MID_HZ, MASTERING_EQ_MID_Q, g, self.sample_rate),
+            _ => BiquadCoefficients::high_shelf(MASTERING_EQ_HIGH_HZ, g, self.sample_rate),
+        }
+    }
+}
+
+impl crate::DspKernel for MasteringEq {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
+        if inputs.is_empty() || outputs.is_empty() { return; }
+        let input = inputs[0];
+        let output = &mut outputs[0];
+        let len = input.len().min(output.len());
+        for i in 0..len {
+            let mut s = input[i];
+            if !s.is_finite() { s = 0.0; }
+            s = self.low.process_sample(s);
+            s = self.mid.process_sample(s);
+            s = self.high.process_sample(s);
+            if s.is_finite() {
+                output[i] = s;
+            } else {
+                output[i] = 0.0;
+                self.reset();
+            }
+        }
+    }
+
+    fn reset(&mut self) {
+        self.low.reset();
+        self.mid.reset();
+        self.high.reset();
+    }
+
+    fn set_parameter(&mut self, id: u32, value: f32, ramp_samples: u32) {
+        if !value.is_finite() || id >= 3 { return; }
+        self.gains[id as usize] = value.clamp(0.0, MASTERING_EQ_MAX_GAIN);
+        let coeffs = self.band_coeffs(id as usize);
+        let filter = match id {
+            0 => &mut self.low,
+            1 => &mut self.mid,
+            _ => &mut self.high,
+        };
+        filter.set_coeffs_ramped(coeffs, ramp_samples);
+    }
+
+    fn get_parameter(&self, id: u32) -> f32 {
+        if id < 3 { self.gains[id as usize] } else { 0.0 }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    /// An untouched MasteringEq must be a BIT-EXACT passthrough — that is the
+    /// property that lets it live in the master chain without shifting the
+    /// golden render.
+    #[test]
+    fn test_mastering_eq_unity_is_bit_exact_identity() {
+        let mut eq = MasteringEq::with_sample_rate(44_100.0);
+        let input: Vec<f32> = (0..4096)
+            .map(|i| ((i as f32 * 0.01).sin() * 0.9 + (i as f32 * 0.37).sin() * 0.05) as f32)
+            .collect();
+        let mut output = vec![0.0f32; input.len()];
+        crate::DspKernel::process(&mut eq, &[&input], &mut [&mut output]);
+        for (i, (&a, &b)) in input.iter().zip(&output).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "sample {} not bit-identical at unity", i);
+        }
+    }
+
+    /// A low-shelf cut must attenuate lows and leave highs alone — and vice
+    /// versa nothing should explode at the clamp extremes.
+    #[test]
+    fn test_mastering_eq_low_cut_is_band_selective() {
+        let sr = 44_100.0;
+        let rms_after = |eq: &mut MasteringEq, hz: f32| -> f32 {
+            let n = 44_100;
+            let input: Vec<f32> = (0..n)
+                .map(|i| (i as f32 * hz * 2.0 * std::f32::consts::PI / sr).sin() * 0.5)
+                .collect();
+            let mut output = vec![0.0f32; n];
+            crate::DspKernel::process(eq, &[&input], &mut [&mut output]);
+            // Skip the first half: filter settle + coefficient ramp.
+            let tail = &output[n / 2..];
+            (tail.iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>() / tail.len() as f64).sqrt() as f32
+        };
+        let unity_rms = 0.5f32 / 2.0f32.sqrt();
+
+        let mut eq = MasteringEq::with_sample_rate(sr);
+        crate::DspKernel::set_parameter(&mut eq, 0, 0.25, 64); // low shelf -12 dB
+        let low = rms_after(&mut eq, 60.0);
+        assert!(
+            low < unity_rms * 0.5,
+            "60 Hz should be clearly attenuated by a -12 dB low shelf (rms {} vs unity {})",
+            low, unity_rms
+        );
+
+        let mut eq = MasteringEq::with_sample_rate(sr);
+        crate::DspKernel::set_parameter(&mut eq, 0, 0.25, 64);
+        let high = rms_after(&mut eq, 10_000.0);
+        assert!(
+            (high - unity_rms).abs() < unity_rms * 0.1,
+            "10 kHz should pass a low-shelf cut nearly untouched (rms {} vs unity {})",
+            high, unity_rms
+        );
+    }
+
+    /// Full kill and full boost requests stay finite: the coefficient math
+    /// clamps to the documented gain floor instead of dividing by zero.
+    #[test]
+    fn test_mastering_eq_extremes_stay_finite() {
+        let mut eq = MasteringEq::with_sample_rate(44_100.0);
+        crate::DspKernel::set_parameter(&mut eq, 0, 0.0, 0);
+        crate::DspKernel::set_parameter(&mut eq, 1, 0.0, 0);
+        crate::DspKernel::set_parameter(&mut eq, 2, 4.0, 0);
+        let input: Vec<f32> = (0..8192)
+            .map(|i| (i as f32 * 0.05).sin() * 0.9)
+            .collect();
+        let mut output = vec![0.0f32; input.len()];
+        crate::DspKernel::process(&mut eq, &[&input], &mut [&mut output]);
+        assert!(output.iter().all(|v| v.is_finite()), "extreme settings produced non-finite output");
+    }
 
     #[test]
     fn test_biquad_unrolled_vs_sample() {

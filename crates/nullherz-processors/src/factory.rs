@@ -164,6 +164,21 @@ impl ProcessorFactory for DjIsolatorFactory {
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::DJ_ISOLATOR }
 }
 
+pub struct MasteringEqFactory;
+impl ProcessorFactory for MasteringEqFactory {
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        // One kernel per channel: the shelf/peak biquads hold filter state,
+        // and the stereo master must not run L and R through one state.
+        Some(Box::new(crate::dsp_kernel_processor::MultiChannelDspProcessor::new(
+            node_idx as u64,
+            audio_dsp::MasteringEq::with_sample_rate(sample_rate),
+            2,
+        )))
+    }
+    fn name(&self) -> &'static str { "MasteringEq" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::MASTERING_EQ }
+}
+
 pub struct SimdBiquadFactory;
 impl ProcessorFactory for SimdBiquadFactory {
     fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {

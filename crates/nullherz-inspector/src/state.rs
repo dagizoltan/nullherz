@@ -29,12 +29,11 @@ pub struct MixerState {
     pub master_peak_hold: f32,
     pub _booth_peak_hold: f32,
     pub _rec_peak_hold: f32,
-    /// Retained for the future master EQ stage; the mastering view's knobs
-    /// are disabled until a real master tone node exists.
-    pub _mastering_eq_enabled: bool,
-    pub _mastering_eq_low: f32,
-    pub _mastering_eq_mid: f32,
-    pub _mastering_eq_high: f32,
+    /// Master tone stage (node "master_eq", params 0/1/2): linear band
+    /// gains, 1.0 = flat. Live — the mastering view binds knobs to these.
+    pub mastering_eq_low: f32,
+    pub mastering_eq_mid: f32,
+    pub mastering_eq_high: f32,
     pub macros: [f32; 8],
     pub _macro_names: [String; 8],
     pub personality_macro_mode: bool,
@@ -62,10 +61,9 @@ impl Default for MixerState {
             master_peak_hold: 0.0,
             _booth_peak_hold: 0.0,
             _rec_peak_hold: 0.0,
-            _mastering_eq_enabled: true,
-            _mastering_eq_low: 1.0,
-            _mastering_eq_mid: 1.0,
-            _mastering_eq_high: 1.0,
+            mastering_eq_low: 1.0,
+            mastering_eq_mid: 1.0,
+            mastering_eq_high: 1.0,
             macros: [0.0; 8],
             _macro_names: std::array::from_fn(|i| format!("MACRO {}", i + 1)),
             personality_macro_mode: false,
