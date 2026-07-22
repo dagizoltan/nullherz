@@ -58,7 +58,11 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &
                 0.0
             };
 
-            let gain = (gain_reduction_db / 20.0).powf(10.0) * self.makeup_gain;
+            // dB -> linear is 10^(dB/20). This previously read
+            // `(gain_reduction_db / 20.0).powf(10.0)` — base and exponent
+            // swapped ((dB/20)^10), which drove the gain to ~1e-7 and
+            // effectively muted the signal the instant it compressed.
+            let gain = 10.0f32.powf(gain_reduction_db / 20.0) * self.makeup_gain;
             output[i] = input[i] * gain;
         }
     }
@@ -135,5 +139,52 @@ fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
             num_parameters: 5,
             parameters,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nullherz_traits::SignalProcessor;
+
+    /// A signal above threshold must be gently ATTENUATED, not muted. The dB→
+    /// linear conversion bug drove the gain to ~1e-7, so a compressing signal
+    /// vanished. Feed a steady tone above threshold, settle the envelope, and
+    /// assert the steady-state output matches the expected compressor gain.
+    #[test]
+    fn test_compressor_attenuates_not_mutes() {
+        let sr = 44_100.0;
+        let mut comp = CompressorProcessor::new(1, sr);
+        // Defaults: threshold 0.5, ratio 4.0, makeup 1.0.
+        let amp = 1.0f32; // above threshold
+
+        let block = nullherz_traits::MAX_BLOCK_SIZE;
+        let input = vec![amp; block];
+        let mut out = vec![0.0f32; block];
+        let mut ctx = ProcessContext { transport: None, host: None, sub_block_offset: 0, is_last_sub_block: false };
+
+        // Settle the envelope (~0.5 s of steady input).
+        for _ in 0..100 {
+            let inputs: &[&[f32]] = &[&input];
+            let mut o = &mut out[..];
+            let outputs: &mut [&mut [f32]] = &mut [&mut o];
+            comp.process(inputs, outputs, &mut ctx);
+        }
+
+        // Expected: env ~= amp (1.0). env_db = 0; threshold_db = 20*log10(0.5).
+        // reduction = (threshold_db - env_db)*(1 - 1/ratio); gain = 10^(red/20).
+        let threshold_db = 20.0 * 0.5f32.log10();
+        let reduction_db = (threshold_db - 0.0) * (1.0 - 1.0 / 4.0);
+        let expected_gain = 10.0f32.powf(reduction_db / 20.0);
+        let expected = amp * expected_gain; // ~0.594
+
+        let steady = out[block - 1];
+        assert!(
+            (steady - expected).abs() < 0.02,
+            "compressor output {:.5} != expected {:.5} (gain {:.4}) — dB->linear likely wrong",
+            steady, expected, expected_gain
+        );
+        // And it is genuinely attenuating, not passing through or muting.
+        assert!(steady > 0.4 && steady < amp, "output {:.5} not in the compressing range", steady);
     }
 }
