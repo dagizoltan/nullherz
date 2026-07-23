@@ -26,6 +26,9 @@ pub struct LibraryTrack {
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct TrackFacets {
     pub id: u64,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
     pub genre: String,
     pub energy_level: f32,
     pub bpm: f32,
@@ -34,17 +37,71 @@ pub struct TrackFacets {
 }
 
 impl LibraryTrack {
-    /// Extract the cacheable query facets. Cheap: clones a genre string and a
-    /// fixed-size DNA struct — no waveform data is copied.
+    /// Extract the cacheable query facets. Cheap: clones the short text fields
+    /// and a fixed-size DNA struct — no waveform data is copied.
     pub fn facets(&self) -> TrackFacets {
         TrackFacets {
             id: self.id,
+            title: self.title.clone(),
+            artist: self.artist.clone(),
+            album: self.album.clone(),
             genre: self.genre.clone(),
             energy_level: self.energy_level,
             bpm: self.metadata.bpm,
             root_key: self.metadata.root_key,
             dna: self.metadata.dna.clone(),
         }
+    }
+}
+
+/// Sort order for library queries / search results.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum TrackSort {
+    /// Alphabetical by title (default).
+    #[default]
+    Title,
+    Artist,
+    Album,
+    Genre,
+    BpmAsc,
+    BpmDesc,
+    EnergyAsc,
+    EnergyDesc,
+}
+
+impl TrackSort {
+    /// Order two facets under this sort. Text is compared case-insensitively;
+    /// numeric ties fall back to title so results are deterministic.
+    fn cmp(self, a: &TrackFacets, b: &TrackFacets) -> std::cmp::Ordering {
+        use std::cmp::Ordering::Equal;
+        let by_title = || a.title.to_lowercase().cmp(&b.title.to_lowercase());
+        match self {
+            TrackSort::Title => by_title(),
+            TrackSort::Artist => a.artist.to_lowercase().cmp(&b.artist.to_lowercase()).then_with(by_title),
+            TrackSort::Album => a.album.to_lowercase().cmp(&b.album.to_lowercase()).then_with(by_title),
+            TrackSort::Genre => a.genre.to_lowercase().cmp(&b.genre.to_lowercase()).then_with(by_title),
+            TrackSort::BpmAsc => a.bpm.partial_cmp(&b.bpm).unwrap_or(Equal).then_with(by_title),
+            TrackSort::BpmDesc => b.bpm.partial_cmp(&a.bpm).unwrap_or(Equal).then_with(by_title),
+            TrackSort::EnergyAsc => a.energy_level.partial_cmp(&b.energy_level).unwrap_or(Equal).then_with(by_title),
+            TrackSort::EnergyDesc => b.energy_level.partial_cmp(&a.energy_level).unwrap_or(Equal).then_with(by_title),
+        }
+    }
+
+    /// Sort a slice of full tracks by this order — for callers that already hold
+    /// `LibraryTrack`s in memory (e.g. the Library view). Same ordering as `cmp`.
+    pub fn order_tracks(self, tracks: &mut [LibraryTrack]) {
+        use std::cmp::Ordering::Equal;
+        let by_title = |a: &LibraryTrack, b: &LibraryTrack| a.title.to_lowercase().cmp(&b.title.to_lowercase());
+        tracks.sort_by(|a, b| match self {
+            TrackSort::Title => by_title(a, b),
+            TrackSort::Artist => a.artist.to_lowercase().cmp(&b.artist.to_lowercase()).then_with(|| by_title(a, b)),
+            TrackSort::Album => a.album.to_lowercase().cmp(&b.album.to_lowercase()).then_with(|| by_title(a, b)),
+            TrackSort::Genre => a.genre.to_lowercase().cmp(&b.genre.to_lowercase()).then_with(|| by_title(a, b)),
+            TrackSort::BpmAsc => a.metadata.bpm.partial_cmp(&b.metadata.bpm).unwrap_or(Equal).then_with(|| by_title(a, b)),
+            TrackSort::BpmDesc => b.metadata.bpm.partial_cmp(&a.metadata.bpm).unwrap_or(Equal).then_with(|| by_title(a, b)),
+            TrackSort::EnergyAsc => a.energy_level.partial_cmp(&b.energy_level).unwrap_or(Equal).then_with(|| by_title(a, b)),
+            TrackSort::EnergyDesc => b.energy_level.partial_cmp(&a.energy_level).unwrap_or(Equal).then_with(|| by_title(a, b)),
+        });
     }
 }
 
@@ -55,7 +112,10 @@ const SMART_CRATES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("s
 /// written in the same transaction as the full track. Lets the in-memory index
 /// be (re)built by reading these tiny rows instead of every full track blob —
 /// so the first query after boot is fast, and it survives restarts.
-const FACETS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("facets");
+/// `_v2`: the facet schema gained title/artist/album for text search; the old
+/// `facets` rows lack them, so a fresh table name forces a one-time backfill
+/// from the full tracks (which carry the text) rather than a lossy serde default.
+const FACETS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("facets_v2");
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct SmartCrateDefinition {
@@ -486,6 +546,35 @@ impl LibraryDatabase {
         } else {
             Ok(Vec::new())
         }
+    }
+
+    /// Case-insensitive substring search over title / artist / album / genre,
+    /// filtered on the in-memory facet index (no full-track deserialization for
+    /// non-matches), sorted by `sort`, then full tracks fetched for the matches
+    /// only. An empty/whitespace query returns the whole library in sorted order.
+    pub fn search_tracks(&self, query: &str, sort: TrackSort) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
+        self.ensure_index()?;
+        let q = query.trim().to_lowercase();
+        let ids: Vec<u64> = {
+            let guard = self.facets.read();
+            let facets = guard.as_ref().expect("ensure_index just built it");
+            let mut matched: Vec<&TrackFacets> = facets.values().filter(|f| {
+                q.is_empty()
+                    || f.title.to_lowercase().contains(&q)
+                    || f.artist.to_lowercase().contains(&q)
+                    || f.album.to_lowercase().contains(&q)
+                    || f.genre.to_lowercase().contains(&q)
+            }).collect();
+            matched.sort_by(|a, b| sort.cmp(a, b));
+            matched.into_iter().map(|f| f.id).collect()
+        };
+        let mut results = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(t) = self.get_track(id)? {
+                results.push(t);
+            }
+        }
+        Ok(results)
     }
 
     pub fn sync_with_cloud(&self, sync_service: &dyn PeerSync) -> Result<(), Box<dyn std::error::Error>> {

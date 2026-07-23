@@ -165,6 +165,56 @@ mod tests {
         let _ = fs::remove_file(&db_path);
     }
 
+    /// Text search (title/artist/album/genre, case-insensitive substring) and
+    /// sort ordering, over the facet index.
+    #[test]
+    fn test_search_and_sort() {
+        let db_path = format!("test_search_{}.redb", std::process::id());
+        let _ = fs::remove_file(&db_path);
+        let db = LibraryDatabase::load(&db_path).unwrap();
+
+        let mk = |id: u64, title: &str, artist: &str, album: &str, genre: &str, bpm: f32| {
+            let mut m = nullherz_traits::SampleMetadata::new_empty();
+            m.bpm = bpm;
+            LibraryTrack {
+                id, path: format!("/p/{id}.wav"),
+                title: title.into(), artist: artist.into(), album: album.into(),
+                genre: genre.into(), energy_level: 0.5, metadata: Arc::new(m),
+            }
+        };
+        db.save_track(&mk(1, "Midnight Drive", "Aria", "Neon", "techno", 128.0)).unwrap();
+        db.save_track(&mk(2, "Sunrise", "Bassline Bob", "Dawn", "house", 124.0)).unwrap();
+        db.save_track(&mk(3, "Drive Home", "Cody", "Neon", "dnb", 174.0)).unwrap();
+
+        // Title substring, case-insensitive: "drive" → 1 and 3, title-sorted.
+        let r = db.search_tracks("DRIVE", TrackSort::Title).unwrap();
+        assert_eq!(r.iter().map(|t| t.id).collect::<Vec<_>>(), vec![3, 1]);
+
+        // Artist substring.
+        let r = db.search_tracks("bob", TrackSort::Title).unwrap();
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].id, 2);
+
+        // Album substring "neon" → 1 and 3, artist-sorted (Aria < Cody).
+        let r = db.search_tracks("neon", TrackSort::Artist).unwrap();
+        assert_eq!(r.iter().map(|t| t.id).collect::<Vec<_>>(), vec![1, 3]);
+
+        // Genre substring.
+        assert_eq!(db.search_tracks("techno", TrackSort::Title).unwrap().len(), 1);
+
+        // Empty query → whole library, BPM ascending / descending.
+        assert_eq!(
+            db.search_tracks("", TrackSort::BpmAsc).unwrap().iter().map(|t| t.id).collect::<Vec<_>>(),
+            vec![2, 1, 3]
+        );
+        assert_eq!(
+            db.search_tracks("", TrackSort::BpmDesc).unwrap().iter().map(|t| t.id).collect::<Vec<_>>(),
+            vec![3, 1, 2]
+        );
+
+        let _ = fs::remove_file(&db_path);
+    }
+
     #[test]
     fn test_sync_with_cloud_persistence() {
         let db_path = "test_sync.redb";
