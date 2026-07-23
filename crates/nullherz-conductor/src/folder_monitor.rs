@@ -39,7 +39,6 @@ impl FolderMonitor {
     }
 
     pub fn scan_folder_sync(&self, path: &str) {
-        use rayon::prelude::*;
         let path_obj = Path::new(path);
         if !path_obj.is_dir() { return; }
 
@@ -57,22 +56,46 @@ impl FolderMonitor {
             })
             .collect();
 
-        entries.into_par_iter().for_each(|entry| {
+        // Decode SEQUENTIALLY, not with `into_par_iter()`. Each decode holds a
+        // whole file (plus a decode-time intermediate) in memory; decoding
+        // every file at once fanned the peak out to (file size x core count)
+        // and pinned every core, starving the in-process UI thread — a
+        // memory/CPU spike that froze the app on a library of large files. One
+        // at a time bounds the transient to a single decode; this is a
+        // background scan (its own thread), so throughput is not critical, and
+        // the registry skip in `load_and_register` means it only does real work
+        // for genuinely new files.
+        for entry in entries {
             if let Some(path_str) = entry.path().to_str() {
                 self.load_and_register(path_str);
             }
-        });
+        }
     }
 
     fn load_and_register(&self, path: &str) {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
-        let decoded = decode_audio_file(path);
-
         let mut hasher = DefaultHasher::new();
         path.hash(&mut hasher);
         let id = hasher.finish();
+
+        // Already decoded and in the (in-memory) registry this session — there
+        // is nothing to do, so skip the decode ENTIRELY. `start_auto_scan`
+        // reruns this scan every 10 s to pick up NEW files; the decode used to
+        // run BEFORE any existence check, so every cycle re-read and
+        // re-allocated the whole library in parallel while the previous copies
+        // were still live in the registry — memory periodically doubled, and
+        // with large files that exhausted RAM and froze the app soon after
+        // startup. The `get` here is the registry's lock-free reader (cheap).
+        // (A content change to an already-loaded file is now only picked up on
+        // the next app start; detecting it live without re-decoding would need
+        // an mtime/size check — a follow-up, not worth re-freezing for.)
+        if self.sample_registry.get(id).is_some() {
+            return;
+        }
+
+        let decoded = decode_audio_file(path);
 
         // The SampleRegistry is in-memory and empty on EVERY boot; the library
         // is persistent. A library hit must still hydrate the registry, or every
@@ -237,6 +260,59 @@ mod tests {
         monitor.load_and_register("/non_existent_audio_file.wav");
 
         let _ = std::fs::remove_file(db_path);
+    }
+
+    /// The periodic rescan must NOT re-decode a file already in the registry.
+    /// Re-decoding every file every cycle (the old order: decode before the
+    /// existence check) doubled memory on a loop and froze the app on large
+    /// libraries. A second scan of the same file must reuse the existing
+    /// buffer Arc rather than decoding and registering a fresh one.
+    #[test]
+    fn test_rescan_skips_already_registered_file() {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let dir = std::env::temp_dir().join(format!("nh_rescan_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let wav = dir.join("tone.wav");
+        let wav_str = wav.to_str().unwrap().to_string();
+        {
+            let spec = hound::WavSpec {
+                channels: 1, sample_rate: 44100, bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            };
+            let mut w = hound::WavWriter::create(&wav, spec).unwrap();
+            for i in 0..4410 {
+                w.write_sample(((i as f32 * 0.1).sin() * 10000.0) as i16).unwrap();
+            }
+            w.finalize().unwrap();
+        }
+
+        let registry = Arc::new(nullherz_dna::SampleRegistry::new());
+        let db_path = dir.join("lib.redb");
+        let library = Arc::new(parking_lot::Mutex::new(
+            LibraryDatabase::load(db_path.to_str().unwrap()).unwrap(),
+        ));
+        let monitor = FolderMonitor::new(registry.clone(), library);
+
+        let mut hasher = DefaultHasher::new();
+        wav_str.hash(&mut hasher);
+        let id = hasher.finish();
+
+        // First scan decodes and registers.
+        monitor.load_and_register(&wav_str);
+        let first = registry.get(id).expect("registered on first scan").buffer;
+
+        // Second scan must SKIP — same buffer Arc, proving no re-decode.
+        monitor.load_and_register(&wav_str);
+        let second = registry.get(id).expect("still registered").buffer;
+
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "rescan re-decoded an already-registered file — the freeze regression is back"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
