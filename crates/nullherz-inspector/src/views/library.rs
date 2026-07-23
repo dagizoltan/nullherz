@@ -95,6 +95,15 @@ fn render_toolbar(app: &mut InspectorApp, ui: &mut Ui) {
             if ui.button(egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE).on_hover_text("Refresh").clicked() {
                 app.library.library_needs_refresh = true;
             }
+            egui::ComboBox::from_id_source("lib_sort")
+                .selected_text(track_sort_label(app.library.sort))
+                .show_ui(ui, |ui| {
+                    use nullherz_dna::TrackSort::*;
+                    for s in [Title, Artist, Album, Genre, BpmAsc, BpmDesc, EnergyAsc, EnergyDesc] {
+                        ui.selectable_value(&mut app.library.sort, s, track_sort_label(s));
+                    }
+                })
+                .response.on_hover_text("Sort");
         });
     });
     ui.add_space(theme.space_xs);
@@ -197,6 +206,20 @@ fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
     }
 }
 
+fn track_sort_label(s: nullherz_dna::TrackSort) -> &'static str {
+    use nullherz_dna::TrackSort::*;
+    match s {
+        Title => "Title",
+        Artist => "Artist",
+        Album => "Album",
+        Genre => "Genre",
+        BpmAsc => "BPM \u{2191}",
+        BpmDesc => "BPM \u{2193}",
+        EnergyAsc => "Energy \u{2191}",
+        EnergyDesc => "Energy \u{2193}",
+    }
+}
+
 /// Compact row height: ~27 rows visible in a 700px sidebar.
 const TRACK_ROW_H: f32 = 26.0;
 
@@ -207,12 +230,20 @@ fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
             app.trigger_library_refresh();
         }
 
-    // Apply client-side search query filtering on top of cached_library
+    // Apply client-side search + sort on top of cached_library. Search now spans
+    // title / artist / album / genre (was title/artist only); sort by the
+    // selected TrackSort.
     let mut displayed_tracks = app.library.cached_library.clone();
-    if !app.library.search_query.is_empty() {
+    if !app.library.search_query.trim().is_empty() {
         let q = app.library.search_query.to_lowercase();
-        displayed_tracks.retain(|t| t.title.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q));
+        displayed_tracks.retain(|t| {
+            t.title.to_lowercase().contains(&q)
+                || t.artist.to_lowercase().contains(&q)
+                || t.album.to_lowercase().contains(&q)
+                || t.genre.to_lowercase().contains(&q)
+        });
     }
+    app.library.sort.order_tracks(&mut displayed_tracks);
 
     ui.label(
         RichText::new(format!("{} TRACKS", displayed_tracks.len()))

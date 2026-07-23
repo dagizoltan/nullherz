@@ -107,6 +107,7 @@ impl Default for DeckState {
 pub struct LibraryState {
     pub active_crate: Option<String>,
     pub search_query: String,
+    pub sort: nullherz_dna::TrackSort,
     pub cached_library: Vec<nullherz_dna::LibraryTrack>,
     pub cached_library_raw: Vec<nullherz_dna::LibraryTrack>,
     pub bg_library_loader: Option<std::sync::mpsc::Receiver<Vec<nullherz_dna::LibraryTrack>>>,
@@ -127,6 +128,7 @@ impl Default for LibraryState {
         Self {
             active_crate: None,
             search_query: String::new(),
+            sort: nullherz_dna::TrackSort::default(),
             cached_library: vec![],
             cached_library_raw: vec![],
             bg_library_loader: None,
