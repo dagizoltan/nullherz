@@ -131,6 +131,40 @@ mod tests {
         let _ = fs::remove_file(&db_path);
     }
 
+    /// The persisted facets table self-heals: wiping it (simulating a
+    /// pre-facets-table library, or drift) must trigger a one-time backfill on
+    /// the next query — correct results, and the table repopulated so a fresh
+    /// load takes the fast read path.
+    #[test]
+    fn test_facets_table_backfill() {
+        let db_path = format!("test_facets_backfill_{}.redb", std::process::id());
+        let _ = fs::remove_file(&db_path);
+        let db = LibraryDatabase::load(&db_path).unwrap();
+
+        let mk = |id: u64, genre: &str| LibraryTrack {
+            id, path: format!("/p/{id}.wav"), title: format!("t{id}"),
+            artist: "a".into(), album: "al".into(), genre: genre.into(),
+            energy_level: 0.5, metadata: Arc::new(nullherz_traits::SampleMetadata::new_empty()),
+        };
+        db.save_track(&mk(1, "techno")).unwrap();
+        db.save_track(&mk(2, "house")).unwrap();
+        db.save_track(&mk(3, "techno")).unwrap();
+
+        // Simulate a library with no facets table + drop the in-memory index.
+        db.wipe_facets_table_for_test().unwrap();
+
+        // Next query must backfill and still be correct.
+        assert_eq!(db.query_tracks(Some("techno"), None, None, None).unwrap().len(), 2);
+
+        // Table now repopulated → a fresh load takes the fast path and agrees.
+        drop(db);
+        let db2 = LibraryDatabase::load(&db_path).unwrap();
+        assert_eq!(db2.query_tracks(Some("house"), None, None, None).unwrap().len(), 1);
+        assert_eq!(db2.list_tracks().unwrap().len(), 3);
+
+        let _ = fs::remove_file(&db_path);
+    }
+
     #[test]
     fn test_sync_with_cloud_persistence() {
         let db_path = "test_sync.redb";

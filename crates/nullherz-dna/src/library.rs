@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::collections::HashMap;
 use parking_lot::{Mutex, RwLock};
-use redb::{Database, TableDefinition, ReadableTable, TableError};
+use redb::{Database, TableDefinition, ReadableTable, ReadableTableMetadata, TableError};
 use crate::*;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -23,7 +23,7 @@ pub struct LibraryTrack {
 /// (see `LibraryDatabase::facets`) so those queries filter over ~hundreds of
 /// bytes per track instead of re-reading and deserializing the entire library's
 /// waveforms from redb on every call.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct TrackFacets {
     pub id: u64,
     pub genre: String,
@@ -51,6 +51,11 @@ impl LibraryTrack {
 const TRACKS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("tracks");
 const CRATES_TABLE: TableDefinition<(&str, u64), ()> = TableDefinition::new("crates_v2");
 const SMART_CRATES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("smart_crates");
+/// Persisted small query facets (id → serialized `TrackFacets`, no waveform),
+/// written in the same transaction as the full track. Lets the in-memory index
+/// be (re)built by reading these tiny rows instead of every full track blob —
+/// so the first query after boot is fast, and it survives restarts.
+const FACETS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("facets");
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct SmartCrateDefinition {
@@ -128,17 +133,22 @@ impl GeneticLibrary for LibraryDatabase {
     }
 
     fn save_track(&self, track: &LibraryTrack) -> Result<(), Box<dyn std::error::Error>> {
+        let facets = track.facets();
         let write_txn = self.db.begin_write()?;
         {
             let mut table = write_txn.open_table(TRACKS_TABLE)?;
             let serialized = serde_json::to_vec(track)?;
             table.insert(track.id, serialized.as_slice())?;
+            // Persist the small query facets alongside the full track IN THE SAME
+            // transaction, so the two tables can never drift.
+            let mut facets_table = write_txn.open_table(FACETS_TABLE)?;
+            facets_table.insert(track.id, serde_json::to_vec(&facets)?.as_slice())?;
         }
         write_txn.commit()?;
-        // Keep the facet index coherent (insert-or-replace) — only if it has been
-        // built; otherwise the lazy build picks this write up from redb later.
+        // Keep the in-memory facet index coherent (insert-or-replace) — only if it
+        // has been built; otherwise the lazy build picks this up from redb later.
         if let Some(map) = self.facets.write().as_mut() {
-            map.insert(track.id, track.facets());
+            map.insert(track.id, facets);
         }
         Ok(())
     }
@@ -252,6 +262,7 @@ impl GeneticLibrary for LibraryDatabase {
         {
             let mut track_table = write_txn.open_table(TRACKS_TABLE)?;
             track_table.remove(id)?;
+            write_txn.open_table(FACETS_TABLE)?.remove(id)?;
 
             let mut crate_table = write_txn.open_table(CRATES_TABLE)?;
             let mut keys_to_remove = Vec::new();
@@ -293,6 +304,7 @@ impl LibraryDatabase {
             let _ = write_txn.open_table(TRACKS_TABLE)?;
             let _ = write_txn.open_table(CRATES_TABLE)?;
             let _ = write_txn.open_table(SMART_CRATES_TABLE)?;
+            let _ = write_txn.open_table(FACETS_TABLE)?;
         }
         write_txn.commit()?;
         Ok(Self {
@@ -308,29 +320,92 @@ impl LibraryDatabase {
     /// (waveforms and all) is dropped as soon as its small facets are extracted,
     /// so peak memory is one track, not the whole library. This is the same
     /// deserialization cost the old per-query full scans paid, now paid a single
-    /// time off the hot path; thereafter the index stays current incrementally.
+    /// Ensure the in-memory facet index is built (lazily, on first query). Fast
+    /// path: read the persisted `FACETS_TABLE` (tiny rows, no waveform blobs).
+    /// If it is incomplete versus the track count — a library written before the
+    /// facets table existed, or any drift — backfill it once from the full
+    /// tracks (streamed one at a time). After a backfill, every future load takes
+    /// the fast path.
     fn ensure_index(&self) -> Result<(), Box<dyn std::error::Error>> {
         if self.facets.read().is_some() {
             return Ok(());
         }
-        let mut map = HashMap::new();
         let read_txn = self.db.begin_read()?;
-        match read_txn.open_table(TRACKS_TABLE) {
-            Ok(table) => {
-                for res in table.iter()? {
-                    let (_id, val) = res?;
-                    let track: LibraryTrack = serde_json::from_slice(val.value())?;
-                    map.insert(track.id, track.facets());
-                    // `track` (with its waveform metadata) drops here.
+        let tracks_len = match read_txn.open_table(TRACKS_TABLE) {
+            Ok(t) => t.len()?,
+            Err(TableError::TableDoesNotExist(_)) => 0,
+            Err(e) => return Err(e.into()),
+        };
+        let mut map = HashMap::new();
+        match read_txn.open_table(FACETS_TABLE) {
+            Ok(t) => {
+                for res in t.iter()? {
+                    let (id, val) = res?;
+                    let facet: TrackFacets = serde_json::from_slice(val.value())?;
+                    map.insert(id.value(), facet);
                 }
             }
             Err(TableError::TableDoesNotExist(_)) => {}
             Err(e) => return Err(e.into()),
         }
+        drop(read_txn);
+
+        if map.len() as u64 != tracks_len {
+            // Migration / self-heal: (re)populate the facets table once.
+            map = self.backfill_facets()?;
+        }
+
         let mut w = self.facets.write();
         if w.is_none() {
             *w = Some(map);
         }
+        Ok(())
+    }
+
+    /// One-time backfill: scan the full tracks (streaming one at a time, so peak
+    /// memory is a single track), extract facets, persist them to `FACETS_TABLE`,
+    /// and return the in-memory map. Runs only when the facets table is missing
+    /// or out of sync with the tracks table.
+    fn backfill_facets(&self) -> Result<HashMap<u64, TrackFacets>, Box<dyn std::error::Error>> {
+        let mut map = HashMap::new();
+        {
+            let read_txn = self.db.begin_read()?;
+            match read_txn.open_table(TRACKS_TABLE) {
+                Ok(table) => {
+                    for res in table.iter()? {
+                        let (_id, val) = res?;
+                        let track: LibraryTrack = serde_json::from_slice(val.value())?;
+                        map.insert(track.id, track.facets());
+                        // `track` (with its waveform metadata) drops here.
+                    }
+                }
+                Err(TableError::TableDoesNotExist(_)) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut facets_table = write_txn.open_table(FACETS_TABLE)?;
+            for (id, facet) in &map {
+                facets_table.insert(*id, serde_json::to_vec(facet)?.as_slice())?;
+            }
+        }
+        write_txn.commit()?;
+        Ok(map)
+    }
+
+    /// Test hook: wipe the persisted facets table to simulate a pre-facets-table
+    /// library, so the backfill/self-heal path can be exercised.
+    #[cfg(test)]
+    pub(crate) fn wipe_facets_table_for_test(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut t = write_txn.open_table(FACETS_TABLE)?;
+            let ids: Vec<u64> = t.iter()?.filter_map(|r| r.ok().map(|(k, _)| k.value())).collect();
+            for id in ids { t.remove(id)?; }
+        }
+        write_txn.commit()?;
+        *self.facets.write() = None; // force a rebuild on next query
         Ok(())
     }
 
