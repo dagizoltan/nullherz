@@ -367,6 +367,12 @@ impl GraphExecutor {
                     }));
 
                     if result.is_err() {
+                        // Debug-only: `eprintln!` is a blocking write(2) under the
+                        // stderr lock — never on the release RT thread. The fault
+                        // is recorded lock-free in `faulted_states` below (the
+                        // state the engine actually acts on); this line is just a
+                        // dev diagnostic, gated like `assert_finite_block!`.
+                        #[cfg(debug_assertions)]
                         eprintln!(
                             "Audio Engine: caught panic in process() of node_idx {} (processor type: '{}')",
                             n_idx,

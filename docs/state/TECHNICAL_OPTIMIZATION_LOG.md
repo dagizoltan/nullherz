@@ -2,6 +2,36 @@
 
 ---
 
+## RT-safety hardening pass — 2026-07-23 (session 7)
+
+Three RT-thread hazards from the #349 (ALSA) survey — the ones deferred out of that
+PR. None sit in the steady DSP arithmetic; all are on exceptional or startup paths,
+but each is a real RT-safety violation:
+
+- **Granular `unwrap()` + hidden `% 0` in `process()`** (`transfusion/granular.rs`).
+  Grain scheduling did `source_pool[idx].as_ref().unwrap().clone()` with
+  `idx = .. % source_count` — a `None` slot OR `source_count == 0` panicked on the
+  RT thread, and the executor's `catch_unwind` then **permanently bypassed the
+  node**, silencing that deck for the session. Now guards both and skips the grain;
+  normal populated playback is byte-identical (clones the same `Arc`).
+- **Panic-path `eprintln!` gated to debug** (`processors/graph/executor.rs`,
+  `pool.rs`). The node-panic handler issued a blocking `write(2)` under the stderr
+  lock on the RT thread. Gated behind `#[cfg(debug_assertions)]` like
+  `assert_finite_block!` — full diagnostic in dev, zero blocking stdio in release;
+  the fault is already recorded lock-free (`faulted_states` / `bypass_state_ptr`).
+  (Rust's default panic hook still writes on panic — a separate, process-wide
+  concern; this removes our *added* write and its format allocation.)
+- **`std::Mutex` on the RT thread → `try_lock`** (`engine/metrics.rs`). Per-block
+  `update_peak` took a blocking `Mutex::lock` during the startup calibration window
+  (`ns_per_cycle == 1.0`, cleared once calibrated). Now `try_lock`, skipping a
+  contended sample — calibration is sampled repeatedly, so the next block retries.
+
+Verified: full suite green (the conformance gauntlet exercises granular;
+`test_graph_panic_isolation` still passes), golden render unchanged, debug + release
+both `-D warnings` clean. Shipped in #349's follow-up branch `fix/rt-safety-hardening`.
+
+---
+
 ## Strip Biquad → stereo-SIMD — 2026-07-23 (session 6)
 
 The lever named in the re-audit below. The deck-strip EQ `BiquadProcessor` ran L
