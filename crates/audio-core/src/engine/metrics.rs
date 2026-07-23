@@ -52,18 +52,24 @@ impl EngineMetrics {
 
         let ns_bits = self.ns_per_cycle.load(Ordering::Acquire);
         if f64::from_bits(ns_bits) == 1.0 {
-            let mut start_lock = self.calibration_start_instant.lock().unwrap();
-            if start_lock.is_none() {
-                *start_lock = Some(Instant::now());
-                self.calibration_start_cycles.store(crate::get_cycles(), Ordering::Relaxed);
-            } else if sample_counter > 0 && sample_counter.is_multiple_of(num_samples as u64 * 1024) {
-                let start_inst = start_lock.unwrap();
-                let elapsed = start_inst.elapsed().as_nanos() as f64;
-                let start_c = self.calibration_start_cycles.load(Ordering::Relaxed);
-                let elapsed_c = crate::get_cycles().wrapping_sub(start_c) as f64;
-                if elapsed_c > 0.0 {
-                    let ratio = elapsed / elapsed_c;
-                    self.ns_per_cycle.store(ratio.to_bits(), Ordering::Release);
+            // Startup calibration only (the ns_per_cycle==1.0 sentinel is
+            // cleared once calibrated). try_lock and never block: a blocking
+            // std::Mutex::lock on the audio thread is an RT-safety violation.
+            // Calibration is sampled repeatedly, so skipping a contended sample
+            // is harmless — the next block retries.
+            if let Ok(mut start_lock) = self.calibration_start_instant.try_lock() {
+                if start_lock.is_none() {
+                    *start_lock = Some(Instant::now());
+                    self.calibration_start_cycles.store(crate::get_cycles(), Ordering::Relaxed);
+                } else if sample_counter > 0 && sample_counter.is_multiple_of(num_samples as u64 * 1024) {
+                    let start_inst = start_lock.unwrap();
+                    let elapsed = start_inst.elapsed().as_nanos() as f64;
+                    let start_c = self.calibration_start_cycles.load(Ordering::Relaxed);
+                    let elapsed_c = crate::get_cycles().wrapping_sub(start_c) as f64;
+                    if elapsed_c > 0.0 {
+                        let ratio = elapsed / elapsed_c;
+                        self.ns_per_cycle.store(ratio.to_bits(), Ordering::Release);
+                    }
                 }
             }
         }

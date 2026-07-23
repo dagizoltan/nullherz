@@ -188,6 +188,11 @@ fn run_job(job: &Job, pdc_scratch: &mut [[f32; ipc_layer::MAX_BLOCK_SIZE]; crate
         }));
 
         if result.is_err() {
+            // Debug-only: `eprintln!` is a blocking write(2) under the stderr
+            // lock — never on a release worker thread. The fault is recorded
+            // lock-free via `bypass_state_ptr` below; this is a dev diagnostic,
+            // gated like `assert_finite_block!`.
+            #[cfg(debug_assertions)]
             eprintln!(
                 "Audio Engine: caught panic in process() of node_idx {} (processor type: '{}')",
                 job.node_idx,

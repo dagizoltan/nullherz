@@ -131,23 +131,34 @@ fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: 
                     let r_pos = self.next_rand();
                     let r_pitch = self.next_rand();
 
-                    let source_idx = (r_src * self.source_count as f32) as usize % self.source_count;
-                    let source = self.source_pool[source_idx].as_ref().unwrap().clone();
+                    // Guard the modulo (source_count == 0 → divide-by-zero) and
+                    // a None pool slot (the old `.unwrap()`): either would panic
+                    // right here on the RT thread, and the executor's
+                    // catch_unwind would then PERMANENTLY bypass this node —
+                    // silencing the deck for the rest of the session. Skip the
+                    // grain instead. Normal populated playback is unchanged: the
+                    // Some branch clones the very same Arc as before.
+                    let source_idx = if self.source_count > 0 {
+                        (r_src * self.source_count as f32) as usize % self.source_count
+                    } else { 0 };
+                    if let Some(source) = self.source_pool.get(source_idx).and_then(|s| s.as_ref()) {
+                        let source = source.clone();
 
-                    let base_pos = r_pos * (source.len() as f32);
-                    let pos_jitter_offset = (self.next_rand() * 2.0 - 1.0) * self.pos_jitter * self.sample_rate;
-                    let start_pos = (base_pos + pos_jitter_offset).clamp(0.0, (source.len() as f32 - 10.0).max(0.0));
+                        let base_pos = r_pos * (source.len() as f32);
+                        let pos_jitter_offset = (self.next_rand() * 2.0 - 1.0) * self.pos_jitter * self.sample_rate;
+                        let start_pos = (base_pos + pos_jitter_offset).clamp(0.0, (source.len() as f32 - 10.0).max(0.0));
 
-                    let pitch_jitter_val = (r_pitch * 2.0 - 1.0) * self.pitch_jitter;
-                    let playback_rate = (1.0 + pitch_jitter_val).max(0.01);
+                        let pitch_jitter_val = (r_pitch * 2.0 - 1.0) * self.pitch_jitter;
+                        let playback_rate = (1.0 + pitch_jitter_val).max(0.01);
 
-                    let duration_samples = (self.grain_duration_ms * 0.001 * self.sample_rate) as u32;
+                        let duration_samples = (self.grain_duration_ms * 0.001 * self.sample_rate) as u32;
 
-                    self.voices[idx].trigger(source, playback_rate, 1.0);
-                    self.voices[idx].play_head = start_pos;
-                    self.voices[idx].interpolation = self.interpolation;
-                    self.voice_ages[idx] = 0;
-                    self.voice_durations[idx] = duration_samples;
+                        self.voices[idx].trigger(source, playback_rate, 1.0);
+                        self.voices[idx].play_head = start_pos;
+                        self.voices[idx].interpolation = self.interpolation;
+                        self.voice_ages[idx] = 0;
+                        self.voice_durations[idx] = duration_samples;
+                    }
                 }
 
                 self.next_grain_samples = (1.0 / self.density.max(0.1)) * self.sample_rate;
