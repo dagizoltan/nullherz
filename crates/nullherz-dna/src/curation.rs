@@ -4,61 +4,46 @@ use crate::*;
 pub struct SmartCrateManager;
 
 impl SmartCrateManager {
-    pub fn filter_tracks(def: &SmartCrateDefinition, tracks: Vec<LibraryTrack>) -> Vec<LibraryTrack> {
-        let mut results = tracks;
-
-        // 1. Filter by DNA Similarity if target_dna is present
-        if let Some(ref target) = def.target_dna {
-            let matched = Matchmaker::find_matches_above_threshold(target, &results, def.threshold);
-            let matched_ids: std::collections::HashSet<u64> = matched.into_iter().map(|(id, _)| id).collect();
-            results.retain(|t| matched_ids.contains(&t.id));
-        }
-
-        // 2. Filter by Spectral Tilt
+    /// The single smart-crate predicate, evaluated over a track's cached
+    /// `TrackFacets`. Both `filter_tracks` (full tracks) and `filter_facet_ids`
+    /// (the in-memory index) go through this, so the two paths can never diverge.
+    /// All eight clauses are ANDed; DNA similarity is `calculate_similarity >=
+    /// threshold`, matching the previous `find_matches_above_threshold` step.
+    fn facet_matches(def: &SmartCrateDefinition, f: &TrackFacets) -> bool {
+        if let Some(ref target) = def.target_dna
+            && calculate_similarity(target, &f.dna) < def.threshold { return false; }
         if let Some((min, max)) = def.spectral_tilt_range {
-            results.retain(|t| {
-                let val = t.metadata.dna.spectral.tilt;
-                val >= min && val <= max
-            });
+            let v = f.dna.spectral.tilt;
+            if v < min || v > max { return false; }
         }
-
-        // 3. Filter by Rhythmic Syncopation
         if let Some((min, max)) = def.rhythmic_syncopation_range {
-            results.retain(|t| {
-                let val = t.metadata.dna.rhythmic.syncopation_index;
-                val >= min && val <= max
-            });
+            let v = f.dna.rhythmic.syncopation_index;
+            if v < min || v > max { return false; }
         }
-
-        // 4. Filter by Glitch Density
         if let Some((min, max)) = def.glitch_density_range {
-            results.retain(|t| {
-                let val = t.metadata.dna.artifacts.glitch_density;
-                val >= min && val <= max
-            });
+            let v = f.dna.artifacts.glitch_density;
+            if v < min || v > max { return false; }
         }
+        if let Some(ref genre) = def.genre
+            && f.genre != *genre { return false; }
+        if let Some((min, max)) = def.bpm_range
+            && (f.bpm < min || f.bpm > max) { return false; }
+        if let Some((min, max)) = def.energy_range
+            && (f.energy_level < min || f.energy_level > max) { return false; }
+        if let Some(key) = def.root_key
+            && f.root_key != Some(key) { return false; }
+        true
+    }
 
-        // 5. Filter by Genre
-        if let Some(ref genre) = def.genre {
-            results.retain(|t| t.genre == *genre);
-        }
+    /// Filter full tracks by a smart-crate definition (public API unchanged).
+    pub fn filter_tracks(def: &SmartCrateDefinition, tracks: Vec<LibraryTrack>) -> Vec<LibraryTrack> {
+        tracks.into_iter().filter(|t| Self::facet_matches(def, &t.facets())).collect()
+    }
 
-        // 6. Filter by BPM range
-        if let Some((min, max)) = def.bpm_range {
-            results.retain(|t| t.metadata.bpm >= min && t.metadata.bpm <= max);
-        }
-
-        // 7. Filter by Energy level
-        if let Some((min, max)) = def.energy_range {
-            results.retain(|t| t.energy_level >= min && t.energy_level <= max);
-        }
-
-        // 8. Filter by Root Key
-        if let Some(key) = def.root_key {
-            results.retain(|t| t.metadata.root_key == Some(key));
-        }
-
-        results
+    /// Filter the in-memory facet index, returning the matching track ids (the
+    /// caller fetches the full tracks for just these).
+    pub fn filter_facet_ids<'a>(def: &SmartCrateDefinition, facets: impl Iterator<Item = &'a TrackFacets>) -> Vec<u64> {
+        facets.filter(|f| Self::facet_matches(def, f)).map(|f| f.id).collect()
     }
 
     /// Automatically generates a smart crate based on "energy-level-matching" to a seed track.

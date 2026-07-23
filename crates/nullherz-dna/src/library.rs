@@ -1,5 +1,6 @@
 use std::sync::Arc;
-use parking_lot::Mutex;
+use std::collections::HashMap;
+use parking_lot::{Mutex, RwLock};
 use redb::{Database, TableDefinition, ReadableTable, TableError};
 use crate::*;
 
@@ -14,6 +15,37 @@ pub struct LibraryTrack {
     pub energy_level: f32,
     #[serde(with = "crate::consensus::serde_arc")]
     pub metadata: Arc<nullherz_traits::SampleMetadata>,
+}
+
+/// The small, queryable subset of a track — exactly the fields the query /
+/// smart-crate / matchmaking predicates read (genre, energy, bpm, key, and the
+/// fixed-size `SoundDNA`), WITHOUT the heavy waveform metadata. Cached in memory
+/// (see `LibraryDatabase::facets`) so those queries filter over ~hundreds of
+/// bytes per track instead of re-reading and deserializing the entire library's
+/// waveforms from redb on every call.
+#[derive(Clone)]
+pub struct TrackFacets {
+    pub id: u64,
+    pub genre: String,
+    pub energy_level: f32,
+    pub bpm: f32,
+    pub root_key: Option<f32>,
+    pub dna: nullherz_traits::SoundDNA,
+}
+
+impl LibraryTrack {
+    /// Extract the cacheable query facets. Cheap: clones a genre string and a
+    /// fixed-size DNA struct — no waveform data is copied.
+    pub fn facets(&self) -> TrackFacets {
+        TrackFacets {
+            id: self.id,
+            genre: self.genre.clone(),
+            energy_level: self.energy_level,
+            bpm: self.metadata.bpm,
+            root_key: self.metadata.root_key,
+            dna: self.metadata.dna.clone(),
+        }
+    }
 }
 
 const TRACKS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("tracks");
@@ -53,6 +85,14 @@ pub struct LibraryDatabase {
     /// Merkle-DAG Root Hash representing the entire library state.
     pub merkle_root: Mutex<[u8; 32]>,
     transient_path: Option<String>,
+    /// In-memory facet index (id → queryable fields), lazily built on the first
+    /// query (`None` until then, so `load` stays cheap and boot never regresses),
+    /// then updated incrementally in `save_track`/`remove_track` — coherent
+    /// because every track write in the workspace goes through those two methods.
+    /// `query_tracks`, `get_smart_crate_tracks`, and `suggest_matches` filter
+    /// over this instead of deserializing the whole library from redb per call.
+    /// `RwLock` gives interior mutability under the `&self` trait methods.
+    facets: RwLock<Option<HashMap<u64, TrackFacets>>>,
 }
 
 impl GeneticLibrary for LibraryDatabase {
@@ -95,6 +135,11 @@ impl GeneticLibrary for LibraryDatabase {
             table.insert(track.id, serialized.as_slice())?;
         }
         write_txn.commit()?;
+        // Keep the facet index coherent (insert-or-replace) — only if it has been
+        // built; otherwise the lazy build picks this write up from redb later.
+        if let Some(map) = self.facets.write().as_mut() {
+            map.insert(track.id, track.facets());
+        }
         Ok(())
     }
 
@@ -159,23 +204,47 @@ impl GeneticLibrary for LibraryDatabase {
     }
 
     fn query_tracks(&self, genre: Option<&str>, min_bpm: Option<f32>, max_bpm: Option<f32>, root_key: Option<f32>) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
-        let all_tracks = self.list_tracks()?;
-        let results = all_tracks.into_iter().filter(|t| {
-            if let Some(g) = genre
-                && t.genre != g { return false; }
-            if let Some(min) = min_bpm
-                && t.metadata.bpm < min { return false; }
-            if let Some(max) = max_bpm
-                && t.metadata.bpm > max { return false; }
-            if let Some(key) = root_key
-                && t.metadata.root_key != Some(key) { return false; }
-            true
-        }).collect();
+        // Filter the in-memory facet index (no waveform deserialization), then
+        // fetch full tracks only for the matches.
+        self.ensure_index()?;
+        let ids: Vec<u64> = {
+            let guard = self.facets.read();
+            let facets = guard.as_ref().expect("ensure_index just built it");
+            facets.values().filter(|f| {
+                if let Some(g) = genre
+                    && f.genre != g { return false; }
+                if let Some(min) = min_bpm
+                    && f.bpm < min { return false; }
+                if let Some(max) = max_bpm
+                    && f.bpm > max { return false; }
+                if let Some(key) = root_key
+                    && f.root_key != Some(key) { return false; }
+                true
+            }).map(|f| f.id).collect()
+        };
+        let mut results = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(t) = self.get_track(id)? {
+                results.push(t);
+            }
+        }
         Ok(results)
     }
 
     fn suggest_matches(&self, target_dna: &nullherz_traits::SoundDNA, limit: usize) -> Result<Vec<(u64, f32)>, Box<dyn std::error::Error>> {
-        Matchmaker::find_best_matches(self, target_dna, limit)
+        // Rank over the facet index (DNA is cached there) — matchmaking returns
+        // only (id, score), so no full-track fetch is needed at all.
+        self.ensure_index()?;
+        let mut scores: Vec<(u64, f32)> = {
+            let guard = self.facets.read();
+            let facets = guard.as_ref().expect("ensure_index just built it");
+            facets.values()
+                .map(|f| (f.id, crate::transfusion::calculate_similarity(target_dna, &f.dna)))
+                .collect()
+        };
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores.truncate(limit);
+        Ok(scores)
     }
 
     fn remove_track(&self, id: u64) -> Result<(), Box<dyn std::error::Error>> {
@@ -198,6 +267,9 @@ impl GeneticLibrary for LibraryDatabase {
             }
         }
         write_txn.commit()?;
+        if let Some(map) = self.facets.write().as_mut() {
+            map.remove(&id);
+        }
         Ok(())
     }
 }
@@ -227,7 +299,39 @@ impl LibraryDatabase {
             db,
             merkle_root: Mutex::new([0u8; 32]),
             transient_path: if is_transient { Some(db_path) } else { None },
+            facets: RwLock::new(None),
         })
+    }
+
+    /// Ensure the facet index is built (lazily, on first query). Deserializes
+    /// each track ONE AT A TIME straight from redb — the full `LibraryTrack`
+    /// (waveforms and all) is dropped as soon as its small facets are extracted,
+    /// so peak memory is one track, not the whole library. This is the same
+    /// deserialization cost the old per-query full scans paid, now paid a single
+    /// time off the hot path; thereafter the index stays current incrementally.
+    fn ensure_index(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.facets.read().is_some() {
+            return Ok(());
+        }
+        let mut map = HashMap::new();
+        let read_txn = self.db.begin_read()?;
+        match read_txn.open_table(TRACKS_TABLE) {
+            Ok(table) => {
+                for res in table.iter()? {
+                    let (_id, val) = res?;
+                    let track: LibraryTrack = serde_json::from_slice(val.value())?;
+                    map.insert(track.id, track.facets());
+                    // `track` (with its waveform metadata) drops here.
+                }
+            }
+            Err(TableError::TableDoesNotExist(_)) => {}
+            Err(e) => return Err(e.into()),
+        }
+        let mut w = self.facets.write();
+        if w.is_none() {
+            *w = Some(map);
+        }
+        Ok(())
     }
 
     pub fn update_merkle_root(&self) -> Result<[u8; 32], Box<dyn std::error::Error>> {
@@ -289,8 +393,21 @@ impl LibraryDatabase {
     pub fn get_smart_crate_tracks(&self, name: &str) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {
         let definition = self.get_smart_crate(name)?;
         if let Some(def) = definition {
-            let all_tracks = self.list_tracks()?;
-            Ok(SmartCrateManager::filter_tracks(&def, all_tracks))
+            // Filter the facet index for matching ids, then fetch only those
+            // full tracks from redb.
+            self.ensure_index()?;
+            let ids = {
+                let guard = self.facets.read();
+                let facets = guard.as_ref().expect("ensure_index just built it");
+                SmartCrateManager::filter_facet_ids(&def, facets.values())
+            };
+            let mut results = Vec::with_capacity(ids.len());
+            for id in ids {
+                if let Some(t) = self.get_track(id)? {
+                    results.push(t);
+                }
+            }
+            Ok(results)
         } else {
             Ok(Vec::new())
         }

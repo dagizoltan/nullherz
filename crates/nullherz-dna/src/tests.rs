@@ -79,6 +79,58 @@ mod tests {
         let _ = fs::remove_file(db_path);
     }
 
+    /// The in-memory facet index must track save / update / remove / reload so
+    /// index-backed queries (query_tracks, smart crates) stay correct without a
+    /// full-library redb scan.
+    #[test]
+    fn test_facet_index_coherence() {
+        let db_path = format!("test_facet_coherence_{}.redb", std::process::id());
+        let _ = fs::remove_file(&db_path);
+        let db = LibraryDatabase::load(&db_path).unwrap();
+
+        let mk = |id: u64, genre: &str, bpm: f32| {
+            let mut m = nullherz_traits::SampleMetadata::new_empty();
+            m.bpm = bpm;
+            LibraryTrack {
+                id, path: format!("/p/{id}.wav"), title: format!("t{id}"),
+                artist: "a".into(), album: "al".into(), genre: genre.into(),
+                energy_level: 0.5, metadata: Arc::new(m),
+            }
+        };
+
+        db.save_track(&mk(1, "techno", 130.0)).unwrap();
+        db.save_track(&mk(2, "house", 124.0)).unwrap();
+        db.save_track(&mk(3, "techno", 128.0)).unwrap();
+
+        // Genre query hits the index and fetches full tracks for matches only.
+        let techno = db.query_tracks(Some("techno"), None, None, None).unwrap();
+        assert_eq!(techno.len(), 2);
+        assert!(techno.iter().all(|t| t.genre == "techno"));
+
+        // BPM range.
+        let fast = db.query_tracks(None, Some(129.0), None, None).unwrap();
+        assert_eq!(fast.len(), 1);
+        assert_eq!(fast[0].id, 1);
+
+        // UPDATE: re-saving id 3 as house must move it in the index.
+        db.save_track(&mk(3, "house", 128.0)).unwrap();
+        assert_eq!(db.query_tracks(Some("techno"), None, None, None).unwrap().len(), 1);
+        assert_eq!(db.query_tracks(Some("house"), None, None, None).unwrap().len(), 2);
+
+        // REMOVE: id 1 must vanish from index queries.
+        db.remove_track(1).unwrap();
+        assert_eq!(db.query_tracks(Some("techno"), None, None, None).unwrap().len(), 0);
+        assert_eq!(db.query_tracks(None, None, None, None).unwrap().len(), 2);
+
+        // RELOAD: index rebuilt from disk agrees with redb.
+        drop(db);
+        let db2 = LibraryDatabase::load(&db_path).unwrap();
+        assert_eq!(db2.query_tracks(Some("house"), None, None, None).unwrap().len(), 2);
+        assert_eq!(db2.list_tracks().unwrap().len(), 2);
+
+        let _ = fs::remove_file(&db_path);
+    }
+
     #[test]
     fn test_sync_with_cloud_persistence() {
         let db_path = "test_sync.redb";
