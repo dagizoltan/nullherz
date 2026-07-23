@@ -1,6 +1,6 @@
 # Nullherz System Architecture Reference
 
-**Source of truth:** reverse-engineered from the workspace code on 2026-07-20; refreshed 2026-07-21 (master EQ stage, async track hydration, cue-bus summing, live capture, needle-view lanes, tolerance-gated golden render).
+**Source of truth:** reverse-engineered from the workspace code on 2026-07-20; refreshed 2026-07-21 (master EQ stage, async track hydration, cue-bus summing, live capture, needle-view lanes, tolerance-gated golden render); re-verified 2026-07-22 on branch `fix/dsp-correctness` (compressor dB→linear un-inversion, fractional-delay direction fix, boot library auto-scan disabled + folder monitor made sequential/idempotent).
 **Scope:** every crate and sidecar in the workspace, the runtime data flow, wire protocols, and on-disk state.
 
 This document describes *what is actually in the tree*, as opposed to the strategy and status documents which describe intent and maturity. When this document and the code disagree, the code wins — please update this file in the same PR.
@@ -17,7 +17,7 @@ This document describes *what is actually in the tree*, as opposed to the strate
 | :--- | ---: | :--- |
 | `audio-core` | ~4.4k | `AudioEngine<K: ProcessingKernel>` (statically dispatched), `ProcessorGraph` VM, sample-accurate command scheduling (`engine/processing_kernel.rs`), parallel stage execution (`processors/graph/pool.rs`), buffer pool with PDC lines (`MAX_BUFFERS` audio blocks + crossfade blocks), RT logging, resource recycler, telemetry finalizer. Contains Kani proof harnesses in `processors/graph/verification.rs`. |
 | `audio-dsp` | ~3.7k | SIMD math foundation: `FloatX16` vector abstraction with AVX-512 / wasm-simd128 / scalar fallback paths (`simd_vec.rs`), biquad & Linkwitz-Riley filters plus RBJ shelf/peaking constructors and the 3-band `MasteringEq` master tone stage (low shelf 120 Hz / mid peak 1 kHz / high shelf 8 kHz in series; every band at unity gain is the bit-exact identity biquad, coefficient changes ramp), oscillators (incl. the planar `SamplerVoice` — see §2.1), spectral kernels (FFT overlap-add with exact COLA-normalized synthesis window, `complex_mul_accumulate_wasm_simd`), and the editor DSP toolbox in `util.rs`: OLA `time_stretch`, spectral-flux transient/onset detection, spectral envelope extraction, waveform MIP-level generation, polyphase up/downsamplers, Newton solver, n-dimensional slerp. |
-| `nullherz-processors` | ~5.7k | The processor library: 23 registered factories (Gain, Biquad, SimdBiquad, Sampler, StreamingSampler, Crossfader, Summing, Spectral, SpectralMorph, Wavetable, Modulation, Sequencer, EnvelopeFollower, Granular, Capture, DjIsolator, KeySync — a real phase-vocoder pitch shifter with per-bin phase tracking, PersonalityInheritance, DnaMorph, Limiter, Compressor, StereoUtility, Analysis) plus the `FallbackProcessor` (bypass) and the sidecar proxy processor. Conformance `test_kit` and golden-hash render regression tests included. |
+| `nullherz-processors` | ~5.7k | The processor library: **24 registered factories** (Gain, Biquad, SimdBiquad, Sampler, StreamingSampler, Crossfader, Summing, Spectral, SpectralMorph, Wavetable, Modulation, Sequencer, EnvelopeFollower, Granular, Capture, DjIsolator, MasteringEq, KeySync — a real phase-vocoder pitch shifter with per-bin phase tracking, PersonalityInheritance, DnaMorph, Limiter, Compressor, StereoUtility, Analysis) plus the `FallbackProcessor` (bypass) and the sidecar proxy processor. **`DelayProcessor` (fractional Hermite-interpolated delay line, backing chorus/flanger/modulated-delay) is present and unit-tested but its `DelayFactory` is NOT registered** in `ProcessorRegistry` — it is unreachable through the default engine registry (see [TECHNICAL_DEBT_AND_STUBS.md](../state/TECHNICAL_DEBT_AND_STUBS.md)). Conformance `test_kit` and golden-hash render regression tests included. |
 
 ### 1.2 Protocol Plane (shared schemas & lock-free transport)
 
@@ -140,7 +140,7 @@ Key invariants observed in code:
 | `graph.json` | inspector/conductor | Serialized topology snapshot. |
 | `mappings/default.json` | `midi_mapper` | MIDI CC → command mappings. |
 | `plugins/` | discovery service | Drop-in sidecar manifests (e.g. `bitcrusher.json` + binary dir). |
-| `tracks/` | demo assets | Ten deterministic genre loops `track_a.wav`..`track_j.wav` (75-174 BPM; regenerate with `scripts/gen_demo_tracks.py`). |
+| `tracks/` | demo assets | Ten deterministic genre loops `track_a.wav`..`track_j.wav` (75-174 BPM; regenerate with `scripts/gen_demo_tracks.py`). **Not auto-scanned at boot** as of 2026-07-22: both the conductor daemon and the inspector no longer call `folder_monitor.start_auto_scan("tracks")` on startup (it decoded every file into the in-memory `SampleRegistry` at boot and froze on large libraries). The folder monitor stays owned so the Library view's scan button (`ResourceCommand::ScanFolder`) can populate on demand; `scan_folder_sync` now decodes sequentially and skips files already in the registry. |
 | `$TMPDIR/nullherz_fallback_*.redb` | test/fallback runs | Transient fallback library DBs, written to the system temp dir (never the repo root). |
 
 ---

@@ -40,7 +40,12 @@ This document lists the open technical debt, stubs, and prototype logic verified
   - *Location*: `crates/nullherz-backends/src/threaded.rs`.
   - *Detail*: The software fallback Threaded backend clocks callbacks using an interval sleep loop. It cannot programmatically detect or log hardware-level underruns (xruns) under adversarial scheduler loads, unlike the ALSA or PipeWire backends.
 
-### 1.4 User Interface (UI) Placeholders
+### 1.4 Unwired Processor: Delay
+- **`DelayFactory` never registered**:
+  - *Location*: `crates/nullherz-processors/src/factory.rs` (`DelayFactory`), `crates/nullherz-processors/src/registry.rs` (`ProcessorRegistry::new` / `register_defaults`).
+  - *Detail*: `DelayProcessor` is a complete, unit-tested fractional Hermite-interpolated delay line (its direction bug was fixed in commit `4404aaf`, 2026-07-21), but `DelayFactory` is not among the 24 factories registered in `ProcessorRegistry`. The processor is therefore unreachable through the engine's `create_by_id`/`create_by_name` path — it is exercised only by its own `#[test]`s. Either register it (one line in `register_defaults`) so chorus/flanger/modulated-delay inserts can instantiate it, or move it behind an explicit feature so the dead-factory state is intentional. Until then, the recent DSP fix guards a code path no live graph reaches.
+
+### 1.5 User Interface (UI) Placeholders
 - **Session Restoration Bypass**:
   - *Location*: `crates/nullherz-inspector/src/views/settings/preferences.rs`.
   - *Detail*: The session restoration checkbox is a non-functional preference, defaulting to a mock state.
