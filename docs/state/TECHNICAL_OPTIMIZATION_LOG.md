@@ -2,6 +2,47 @@
 
 ---
 
+## Library query performance: cached facet index — 2026-07-23 (session 8)
+
+`LibraryDatabase` query paths — `query_tracks`, `get_smart_crate_tracks`,
+`suggest_matches` — each called `list_tracks()`, which deserializes **every**
+track's full `serde_json` blob (waveform peaks / MIP / band pyramids included)
+from redb, then filtered in memory. That is an O(N) full scan + full
+deserialization *per query*; on a multi-GB library it dominates library browsing.
+
+Added an in-memory **facet index** (`TrackFacets` = id/genre/energy/bpm/root_key
++ the fixed-size `SoundDNA` — no waveform), `LibraryDatabase.facets:
+RwLock<Option<HashMap<u64, TrackFacets>>>`:
+- **Lazy build** (on first query, streaming one track at a time straight from
+  redb so peak memory is one track, not the whole library) — `load` stays cheap,
+  **zero boot regression**.
+- **Coherent** via incremental `save_track`/`remove_track` updates — safe because
+  every track write in the workspace goes through those two methods (verified: no
+  direct `TRACKS_TABLE` writes exist elsewhere).
+- Queries filter the facets (no waveform deserialization) → fetch full tracks
+  only for matches; `suggest_matches` ranks over the cached DNA and fetches
+  **nothing**. `curation.rs` refactored so the full-track and index filters share
+  ONE predicate (can't diverge).
+
+**Measured** (`cargo run --release -p nullherz-dna --example bench_library_query`,
+1000 tracks × ~50k-peak metadata, warmed; identical result sets — `sink` equal):
+
+| op | before (full scan) | after (index) | speedup |
+| :--- | ---: | ---: | ---: |
+| `suggest_matches` | 1 815 614 µs | **34.9 µs** | **~52 000×** |
+| `get_smart_crate_tracks` | 1 443 094 µs | **94 823 µs** | ~15× |
+| `query_tracks` | 1 741 124 µs | **470 037 µs** | ~3.7× |
+| `load` (boot) | 1.3 ms | 2.3 ms | no regression |
+
+`suggest_matches` is the standout (it fetched the whole library's waveforms just
+to read DNA). Filtered queries still fetch full tracks *for matches*, so their win
+scales with selectivity. One-time index build ≈ 1.5 s / 1000 tracks, on the first
+query (not boot). Coherence pinned by `test_facet_index_coherence`; all DNA tests
+green. Follow-up if the first-query build ever bites: a persisted facets side-table
+(build reads small rows instead of full blobs) or a background build thread.
+
+---
+
 ## RT-safety hardening pass — 2026-07-23 (session 7)
 
 Three RT-thread hazards from the #349 (ALSA) survey — the ones deferred out of that
