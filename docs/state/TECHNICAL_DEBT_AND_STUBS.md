@@ -45,7 +45,13 @@ This document lists the open technical debt, stubs, and prototype logic verified
   - *Location*: `crates/nullherz-processors/src/factory.rs` (`DelayFactory`), `crates/nullherz-processors/src/registry.rs` (`ProcessorRegistry::new` / `register_defaults`).
   - *Detail*: `DelayProcessor` is a complete, unit-tested fractional Hermite-interpolated delay line (its direction bug was fixed in commit `4404aaf`, 2026-07-21), but `DelayFactory` is not among the 24 factories registered in `ProcessorRegistry`. The processor is therefore unreachable through the engine's `create_by_id`/`create_by_name` path — it is exercised only by its own `#[test]`s. Either register it (one line in `register_defaults`) so chorus/flanger/modulated-delay inserts can instantiate it, or move it behind an explicit feature so the dead-factory state is intentional. Until then, the recent DSP fix guards a code path no live graph reaches.
 
-### 1.5 User Interface (UI) Placeholders
+### 1.5 Unwired Subsystem: Disk Streaming (half-wired + latent liveness bug)
+- **`StreamingManager` never constructed; consumer registered without a producer**:
+  - *Location*: `crates/nullherz-conductor/src/streaming_manager.rs` (`StreamingManager`, `start_stream`/`stop_stream`); `crates/nullherz-processors/src/streaming_sampler.rs` (`StreamingSamplerProcessor`); `crates/nullherz-processors/src/registry.rs` (`StreamingSamplerFactory` registered).
+  - *Detail*: The RT consumer `StreamingSamplerProcessor` is registered (reachable via `StreamingSamplerFactory`) and correctly outputs silence on ring-buffer underrun (no block/panic). But `StreamingManager` — the disk decoder + feeder that fills that ring — is **never constructed or held as a field anywhere**; `start_stream`/`stop_stream` have zero callers. So a `StreamingSampler` node has a ring nothing ever fills → it produces silence. The subsystem is half-wired dead code (cf. the Delay processor above).
+  - *Latent bug (only if wired)*: both feeder/decoder threads stop via `Arc::strong_count(&ring) <= 1`, but `StreamingManager::start_stream` also inserts an `Arc` clone into `self.streams` (line 31). While that entry lives, the count can never reach 1, so the per-stream threads would **not terminate when the consumer releases its ring** — they'd run (feeder sleep-spinning on a full ring) until `stop_stream()` clears the entire map. Fix when wiring it: track streams so the liveness check excludes the registry's own `Arc` (e.g. compare against a known baseline count, or add explicit per-stream teardown), and set the feeder thread's priority to match its "high-priority" comment (today it is a plain `thread::spawn` at default priority).
+
+### 1.6 User Interface (UI) Placeholders
 - **Session Restoration Bypass**:
   - *Location*: `crates/nullherz-inspector/src/views/settings/preferences.rs`.
   - *Detail*: The session restoration checkbox is a non-functional preference, defaulting to a mock state.
