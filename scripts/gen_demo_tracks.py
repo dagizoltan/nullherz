@@ -3,8 +3,8 @@
 
     python3 scripts/gen_demo_tracks.py
 
-Writes tracks/track_a.wav (174 BPM neurofunk loop: kick/snare/hats + reese
-bass with filter movement) and tracks/track_b.wav (128 BPM house loop:
+Writes tracks/examples/track_a.wav (174 BPM neurofunk loop: kick/snare/hats + reese
+bass with filter movement) and tracks/examples/track_b.wav (128 BPM house loop:
 four-on-the-floor, offbeat hats, clap, sub bassline, stab). Real transients
 and dynamics so waveform rendering, BPM detection, and transient analysis
 have something to work with. After regenerating, delete library.redb so the
@@ -471,13 +471,13 @@ def make_dub(path: str):
 
 
 if __name__ == "__main__":
-    make_neuro("tracks/track_a.wav")
-    make_house("tracks/track_b.wav")
-    make_halftime("tracks/track_c.wav")
-    make_boombap("tracks/track_d.wav")
-    make_techno("tracks/track_e.wav")
-    make_trance("tracks/track_f.wav")
-    make_jungle("tracks/track_g.wav")
-    make_trap("tracks/track_h.wav")
-    make_ambient("tracks/track_i.wav")
-    make_dub("tracks/track_j.wav")
+    make_neuro("tracks/examples/track_a.wav")
+    make_house("tracks/examples/track_b.wav")
+    make_halftime("tracks/examples/track_c.wav")
+    make_boombap("tracks/examples/track_d.wav")
+    make_techno("tracks/examples/track_e.wav")
+    make_trance("tracks/examples/track_f.wav")
+    make_jungle("tracks/examples/track_g.wav")
+    make_trap("tracks/examples/track_h.wav")
+    make_ambient("tracks/examples/track_i.wav")
+    make_dub("tracks/examples/track_j.wav")

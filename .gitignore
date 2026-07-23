@@ -6,3 +6,8 @@ autosave.json
 autosave.rkyv
 library.redb
 library.redb.bak
+
+# Track library: keep the committed demo fixtures under tracks/examples/,
+# ignore the local working library dropped into tracks/ (imports, mixes, etc.)
+/tracks/*
+!/tracks/examples/
