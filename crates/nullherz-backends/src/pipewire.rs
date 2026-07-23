@@ -258,6 +258,11 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
     }
 
     if let Some(ref engine_arc) = backend.engine_arc {
+        // Denormal protection (FTZ/DAZ) for our DSP on PipeWire's process
+        // thread — decaying tails otherwise drop into microcoded FP (10-100x
+        // slower) and can underrun. RAII guard: sets FTZ/DAZ on entry, restores
+        // the thread's prior FP state on return.
+        let _fp = ipc_layer::FpControlGuard::new();
         // SAFETY: We need a &mut reference for process_block.
         // In a real system, the backend would be the sole owner of the engine's
         // processing context, or we'd use internal mutability.

@@ -192,6 +192,15 @@ impl AudioBackend for AlsaBackend {
                 Err(_) => eprintln!("[ALSA] RT scheduling: DENIED — running at normal priority. Underruns likely under load. Fix: add '@audio - rtprio 95' to /etc/security/limits.d/audio.conf and re-login."),
             }
 
+            // Denormal protection (FTZ/DAZ) for this audio thread. Without it,
+            // signals decaying into the denormal range (filter/reverb tails,
+            // releases, near-silence) fall into microcoded FP that runs 10-100x
+            // slower — a CPU spike that underruns. This is our own thread, so
+            // set it permanently. (setup_rt_thread applies this for the Threaded
+            // backend and the worker pool; the ALSA thread takes only
+            // set_rt_priority above, so it needs this explicitly.)
+            ipc_layer::FpControlGuard::apply_ftz_daz();
+
             let mut engine_arc_opt = None;
             {
                 let lock = engine_handle.lock();

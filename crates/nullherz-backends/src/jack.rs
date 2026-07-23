@@ -92,6 +92,12 @@ unsafe extern "C" fn jack_process_callback(nframes: u32, data: *mut std::ffi::c_
     }
 
     if let Some(ref engine_arc) = backend.engine_arc {
+        // Denormal protection (FTZ/DAZ) for our DSP on JACK's shared process
+        // thread — without it, decaying tails drop into microcoded FP (10-100x
+        // slower) and can underrun. RAII guard: sets FTZ/DAZ on entry, RESTORES
+        // the thread's prior FP state on return, so we don't alter it for other
+        // JACK clients that share this callback thread.
+        let _fp = ipc_layer::FpControlGuard::new();
         let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|i| {
             if i < num_ports {
                 unsafe { std::slice::from_raw_parts_mut(out_ptrs[i], nframes as usize) }
