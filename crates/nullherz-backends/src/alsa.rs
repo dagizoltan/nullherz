@@ -4,7 +4,7 @@
 use std::thread;
 use std::sync::Arc;
 use parking_lot::Mutex;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{Ordering, AtomicU64};
 use nullherz_traits::RenderingEngine;
 use crate::AudioBackend;
 
@@ -65,6 +65,10 @@ impl Drop for AlsaLib { fn drop(&mut self) { unsafe { libc::dlclose(self.handle)
 pub struct AlsaBackend {
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
+    /// Lock-free xrun (buffer-underrun) counter. Incremented on the audio
+    /// thread in place of a blocking `eprintln!` — RT-safe observability that
+    /// never issues a `write(2)` on the SCHED_FIFO callback.
+    xruns: std::sync::Arc<AtomicU64>,
 }
 
 impl Default for AlsaBackend {
@@ -74,13 +78,19 @@ impl Default for AlsaBackend {
 }
 
 impl AlsaBackend {
-    pub fn new() -> Self { Self { running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), handle: None } }
+    pub fn new() -> Self { Self { running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), handle: None, xruns: std::sync::Arc::new(AtomicU64::new(0)) } }
+
+    /// Total ALSA xruns (buffer underruns) recovered since `start`, updated
+    /// lock-free from the audio thread. Read it from any thread for metering
+    /// or health checks — no blocking I/O on the RT path.
+    pub fn xruns(&self) -> u64 { self.xruns.load(Ordering::Relaxed) }
 }
 impl AudioBackend for AlsaBackend {
     fn start(&mut self, engine_handle: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>, requested_period_size: u64) -> Result<(), String> {
         let alsa = AlsaLib::load()?;
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
+        let xruns = self.xruns.clone();
 
         // =====================================================================
         // CRITICAL: Open and configure PCM on the MAIN thread.
@@ -206,7 +216,6 @@ impl AudioBackend for AlsaBackend {
                 let mut interleaved_f32 = vec![0.0f32; actual_period * 2];
                 let mut interleaved_s16 = vec![0i16; actual_period * 2];
 
-                let mut block_count: u64 = 0;
                 // Pre-fill the device buffer with silence: starting (or
                 // recovering) with a full buffer of slack instead of one
                 // period is what breaks the endless underrun-recover loop.
@@ -245,17 +254,11 @@ impl AudioBackend for AlsaBackend {
                         offset += chunk_size;
                     }
 
-                    // Diagnostic: Log peak level every 500 blocks (~1.5s at 128/44100)
-                    if block_count.is_multiple_of(500) {
-                        let mut peak_l: f32 = 0.0;
-                        let mut peak_r: f32 = 0.0;
-                        for i in 0..actual_period {
-                            peak_l = peak_l.max(outputs_raw[0][i].abs());
-                            peak_r = peak_r.max(outputs_raw[1][i].abs());
-                        }
-                        eprintln!("[ALSA] block={} peak_L={:.6} peak_R={:.6}", block_count, peak_l, peak_r);
-                    }
-                    block_count += 1;
+                    // (No per-block diagnostics on the audio thread: the old
+                    // periodic peak-log did a full peak scan + a blocking
+                    // eprintln here every 500 blocks. Engine telemetry already
+                    // carries per-node peaks for the UI; xruns are counted
+                    // lock-free below.)
 
                     let written = if is_float {
                         for i in 0..actual_period {
@@ -272,7 +275,12 @@ impl AudioBackend for AlsaBackend {
                     };
 
                     if written < 0 {
-                        eprintln!("[ALSA] snd_pcm_writei error: {}, recovering...", written);
+                        // RT-safe: bump a lock-free counter instead of a
+                        // blocking eprintln on the SCHED_FIFO thread. Logging
+                        // here would issue a write(2) at the exact moment the
+                        // device is already underrunning — compounding the xrun
+                        // it reports. Read the total via AlsaBackend::xruns().
+                        xruns.fetch_add(1, Ordering::Relaxed);
                         (alsa.snd_pcm_recover)(pcm, written as i32, 1);
                         (alsa.snd_pcm_prepare)(pcm);
                         prefill(&alsa, pcm, &silence_f32, &silence_s16, n_periods);
