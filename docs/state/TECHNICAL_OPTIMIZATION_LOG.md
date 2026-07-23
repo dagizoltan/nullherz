@@ -2,6 +2,34 @@
 
 ---
 
+## Library query performance II: persisted facet table — 2026-07-23 (session 9)
+
+Follow-up to session 8. The in-memory facet index removed the per-query full
+scan, but the **first query after boot** still rebuilt the index by deserializing
+every full track blob (~1.5 s / 1000 tracks — tens of seconds on a multi-GB
+library, once). Added a persisted `FACETS_TABLE` (id → serialized `TrackFacets`),
+written in the **same redb transaction** as each full track by `save_track` /
+`remove_track` (atomic — the two tables can't drift). `ensure_index` now reads
+those tiny rows instead of full blobs; if the facets table is missing or out of
+sync (a pre-facets-table library, or drift), it **backfills once** from the full
+tracks and persists them, so that cost is paid a single time ever, then survives
+restarts.
+
+**Measured** (`examples/bench_library_query`, 1000 tracks × ~50k-peak metadata;
+identical result sets — `sink` equal):
+
+| | session 8 (in-memory only) | session 9 (persisted) |
+| :--- | ---: | ---: |
+| first-query index build | ~1 523.9 ms | **4.4 ms** (~346×) |
+| `load` / warmed queries | (unchanged) | unchanged |
+
+Coherence + backfill/self-heal pinned by `test_facet_index_coherence` and
+`test_facets_table_backfill`; all 13 DNA tests green, `-D warnings` clean. With
+this, both the per-query scan (session 8) and the one-time build (session 9) are
+gone — library queries are fast from the first click, every session.
+
+---
+
 ## Library query performance: cached facet index — 2026-07-23 (session 8)
 
 `LibraryDatabase` query paths — `query_tracks`, `get_smart_crate_tracks`,
