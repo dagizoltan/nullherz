@@ -2,6 +2,34 @@
 
 ---
 
+## Hot-Path Re-Audit — 2026-07-23 (post-#344, reconciled against the profiler)
+
+**Scope:** re-verify the earlier *inspection-based* backlog against the profiled reality established by the session-4/5 work below (PR #344, `perf/dsp-hot-nodes`). That work introduced `cargo run --release -p nullherz-conductor --example profile_console_nodes` (ranks live nodes by the engine's own per-node cycle telemetry) and drove the console from **537 µs → ~129 µs** node time — **~2.2 % of the 256-sample budget.** The RT DSP path is now in excellent shape; what remains is marginal. **Profile before touching anything** — two items I had ranked as wins did not survive measurement.
+
+### Corrections to the inspection-era findings
+
+| Item | Earlier claim | Verified reality (2026-07-23) |
+| :--- | :--- | :--- |
+| **#5 SamplerVoice planar-loop hoist** | "OPEN — main real-audio workload, do first" | **Not a lever.** The hoist was implemented, profiled, and **reverted as pure noise** (session 4). Sampler was only 6.8 % of the original total; it is now ~24 % of a 5× smaller total (~31 µs) and is *inherent* single-channel recursive interpolation — no memory-layout reshuffle beats the existing single pass. |
+| **#13 ZdfSvf coeff-per-sample divide** | "OPEN — trivial pure win, do second" | **Irrelevant.** `ZdfSvf` is referenced only by a fuzz target (`processors/fuzz/.../filter_fuzz.rs`); **no registered processor uses it** in the live graph. Caching its coeffs optimizes dead-to-the-engine code. Leave it. |
+| **#14 stereo strip biquad, L/R scalar** | "OPEN" | **Half done + one clear lever left.** The *DjIsolator* (the other biquad-heavy strip node) is now stereo-SIMD via the new `StereoBiquad` (session 5, ~2.1×). The strip's own **`BiquadProcessor` is still `MultiChannelDspProcessor<BiquadFilter>` — two sequential scalar recursions** (`biquad.rs:6`, `dsp_kernel_processor.rs:67`), and Biquad is now the **#2 remaining node (~19 %)**. L and R are independent recursions, so this is genuinely vectorizable. |
+
+### The one remaining live serial-path lever
+
+**#14-strip — port `BiquadProcessor` to `StereoBiquad`.** The exact primitive was built for the isolator in #344; a 2-channel fast path (scalar fallback for other channel counts, coefficient ramping preserved) applies it to the strip EQ biquad. Expect roughly the isolator's ~2× on a ~19 % node. **Must** carry a bit-exact-vs-two-scalar test and pass the golden render, exactly as #344 did. This is the only inspection lever that both survives profiling and isn't already done.
+
+### Everything else — status
+
+- **Done in #344:** Limiter O(1) look-ahead (~10×), KeySync unison identity path (~13×), DjIsolator stereo-SIMD (~2.1×). Prior #1/#2/#3/#4/#7 (earlier sessions) remain done.
+- **Feature-gated / rarely live (verify with the profiler before investing):** #6 PDC per-sample indexing (only with nonzero `input_delays`, i.e. spectral paths), #9 crossfade whole-pool capture + #12 crossfade progress-vector (only during an active crossfade), N1 per-sub-block `block_x_map` memset (~1–2 KB, unconditional but tiny).
+- **Pool-path only (dormant under the cost gate on ≤ 2-core hardware):** #10 `Job` size, #11 SPSC `% capacity`. Worth it only once genuinely heavy stages dispatch to workers on many-core / RT-privileged hardware.
+- **N2 peak-metering width** (scans all nodes incl. UI-invisible buses) and **#8 ALSA `eprintln!`** / **#15 `push_command` Arc clone** — carried, low value.
+- **N3 `DelayProcessor` unregistered** (not perf) — still true on this main; tracked in `TECHNICAL_DEBT_AND_STUBS.md` §1.4.
+
+**Bottom line:** the profile-driven pass did the heavy lifting; the console is at ~2.2 % budget with headroom for a 128-sample period. Do not re-open the inspection backlog wholesale — profile, and the only serial-path item that pays is the strip-Biquad stereo-SIMD port.
+
+---
+
 ## Profile-Driven DSP Optimization — 2026-07-21 (session 4)
 
 The earlier audit optimized by inspection; a sampler inner-loop hoist that

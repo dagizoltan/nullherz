@@ -60,9 +60,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         worker.start();
     }
 
-    if let Some(monitor) = conductor.folder_monitor.take() {
-        monitor.start_auto_scan("tracks".to_string());
-    }
+    // Library auto-discovery on startup is DISABLED (see the inspector for the
+    // rationale): auto-scanning the tracks folder decoded every file into the
+    // in-memory registry at boot and froze on large libraries. The folder
+    // monitor stays owned by the conductor so ResourceCommand::ScanFolder can
+    // drive an on-demand scan.
 
     conductor.sidecar_discovery.start_watcher();
 
