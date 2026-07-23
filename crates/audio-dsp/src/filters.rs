@@ -886,6 +886,154 @@ impl StereoBiquad {
         self.z1 = wide::f32x4::ZERO;
         self.z2 = wide::f32x4::ZERO;
     }
+
+    /// Steady-state block form of `process`: coefficients are splatted once and
+    /// z-state stays in registers across the block. Arithmetically identical to
+    /// calling `process` per frame — same DF2T expressions, same per-lane finite
+    /// guard — just without re-splatting the (constant) coefficients every
+    /// sample. Callers that ramp coefficients must use `process` per sample.
+    #[inline]
+    pub fn process_block(&mut self, in_l: &[f32], in_r: &[f32], out_l: &mut [f32], out_r: &mut [f32]) {
+        use wide::*;
+        let b0 = f32x4::from(self.coeffs.b0);
+        let b1 = f32x4::from(self.coeffs.b1);
+        let b2 = f32x4::from(self.coeffs.b2);
+        let a1 = f32x4::from(self.coeffs.a1);
+        let a2 = f32x4::from(self.coeffs.a2);
+        let mut z1 = self.z1;
+        let mut z2 = self.z2;
+        let n = in_l.len().min(in_r.len()).min(out_l.len()).min(out_r.len());
+        for i in 0..n {
+            let x = f32x4::new([in_l[i], in_r[i], 0.0, 0.0]);
+            let y = (x * b0) + z1;
+            let finite = (y - y).cmp_eq(f32x4::ZERO);
+            let z1n = ((x * b1) - (y * a1)) + z2;
+            let z2n = (x * b2) - (y * a2);
+            z1 = finite.blend(z1n, f32x4::ZERO);
+            z2 = finite.blend(z2n, f32x4::ZERO);
+            let arr: [f32; 4] = finite.blend(y, f32x4::ZERO).into();
+            out_l[i] = arr[0];
+            out_r[i] = arr[1];
+        }
+        self.z1 = z1;
+        self.z2 = z2;
+    }
+}
+
+/// Stereo (2-channel SIMD) biquad WITH the per-sample coefficient ramp of scalar
+/// `BiquadFilter` — the strip EQ node changes coefficients live and needs the
+/// zipper-free ramp that the fixed-coeff isolator `StereoBiquad` deliberately
+/// omits. L and R are always set to identical coefficients, so a single ramp
+/// accumulator drives both lanes; per-lane z-state and the non-finite guard live
+/// in the wrapped `StereoBiquad`. Each lane is arithmetically identical to a
+/// scalar `BiquadFilter` (ramp step, DF2T recursion, finite handling), so finite
+/// input is bit-identical to two scalar filters — steady or mid-ramp (proven in
+/// `test_stereo_biquad_eq_matches_two_scalar`).
+#[derive(Clone, Copy)]
+pub struct StereoBiquadEq {
+    inner: StereoBiquad,
+    target_coeffs: BiquadCoefficients,
+    ramp_duration: u32,
+    ramp_counter: u32,
+    b0_step: f32,
+    b1_step: f32,
+    b2_step: f32,
+    a1_step: f32,
+    a2_step: f32,
+}
+
+impl StereoBiquadEq {
+    pub fn new(coeffs: BiquadCoefficients) -> Self {
+        Self {
+            inner: StereoBiquad::new(coeffs),
+            target_coeffs: coeffs,
+            ramp_duration: 0,
+            ramp_counter: 0,
+            b0_step: 0.0,
+            b1_step: 0.0,
+            b2_step: 0.0,
+            a1_step: 0.0,
+            a2_step: 0.0,
+        }
+    }
+
+    pub fn coeffs(&self) -> BiquadCoefficients { self.inner.coeffs }
+    pub fn target_coeffs(&self) -> BiquadCoefficients { self.target_coeffs }
+
+    /// Instant coefficient change — mirrors `BiquadFilter::update_coeffs`.
+    pub fn update_coeffs(&mut self, coeffs: BiquadCoefficients) {
+        self.inner.coeffs = coeffs;
+        self.target_coeffs = coeffs;
+        self.ramp_duration = 0;
+        self.ramp_counter = 0;
+        self.b0_step = 0.0;
+        self.b1_step = 0.0;
+        self.b2_step = 0.0;
+        self.a1_step = 0.0;
+        self.a2_step = 0.0;
+    }
+
+    /// Ramp to `coeffs` over `duration` samples — mirrors
+    /// `BiquadFilter::set_coeffs_ramped` step-for-step (steps computed from the
+    /// current, possibly mid-ramp, coefficients).
+    pub fn set_coeffs_ramped(&mut self, coeffs: BiquadCoefficients, duration: u32) {
+        if duration == 0 {
+            self.update_coeffs(coeffs);
+        } else {
+            self.target_coeffs = coeffs;
+            self.ramp_duration = duration;
+            self.ramp_counter = duration;
+            let inv = 1.0 / duration as f32;
+            let c = self.inner.coeffs;
+            self.b0_step = (coeffs.b0 - c.b0) * inv;
+            self.b1_step = (coeffs.b1 - c.b1) * inv;
+            self.b2_step = (coeffs.b2 - c.b2) * inv;
+            self.a1_step = (coeffs.a1 - c.a1) * inv;
+            self.a2_step = (coeffs.a2 - c.a2) * inv;
+        }
+    }
+
+    #[inline(always)]
+    fn step_ramp(&mut self) {
+        if self.ramp_counter > 0 {
+            self.inner.coeffs.b0 += self.b0_step;
+            self.inner.coeffs.b1 += self.b1_step;
+            self.inner.coeffs.b2 += self.b2_step;
+            self.inner.coeffs.a1 += self.a1_step;
+            self.inner.coeffs.a2 += self.a2_step;
+            self.ramp_counter -= 1;
+            if self.ramp_counter == 0 {
+                self.inner.coeffs = self.target_coeffs;
+                self.ramp_duration = 0;
+            }
+        }
+    }
+
+    /// Filter L and R together. Each output sample equals scalar
+    /// `BiquadFilter::process_sample` on that channel, lane-for-lane. A block
+    /// that starts mid-ramp runs per-sample (coeffs step each frame, matching
+    /// the scalar block path's `ramp_duration > 0` branch); a steady block takes
+    /// the hoisted `StereoBiquad::process_block`.
+    pub fn process_stereo(&mut self, in_l: &[f32], in_r: &[f32], out_l: &mut [f32], out_r: &mut [f32]) {
+        if self.ramp_duration > 0 {
+            let n = in_l.len().min(in_r.len()).min(out_l.len()).min(out_r.len());
+            for i in 0..n {
+                self.step_ramp();
+                let arr: [f32; 4] = self
+                    .inner
+                    .process(wide::f32x4::new([in_l[i], in_r[i], 0.0, 0.0]))
+                    .into();
+                out_l[i] = arr[0];
+                out_r[i] = arr[1];
+            }
+        } else {
+            self.inner.process_block(in_l, in_r, out_l, out_r);
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
 }
 
 /// Stereo (2-channel SIMD) `DjIsolator`: the identical 3-band LR crossover, but
@@ -1399,6 +1547,72 @@ mod tests {
                                   &mut out_l[pos..pos + b], &mut out_r[pos..pos + b]);
             scalar_l.process_block(&sig_l[pos..pos + b], &mut ref_l[pos..pos + b]);
             scalar_r.process_block(&sig_r[pos..pos + b], &mut ref_r[pos..pos + b]);
+            pos += b;
+        }
+
+        for i in 0..total {
+            assert_eq!(out_l[i].to_bits(), ref_l[i].to_bits(), "L mismatch at {}", i);
+            assert_eq!(out_r[i].to_bits(), ref_r[i].to_bits(), "R mismatch at {}", i);
+        }
+    }
+
+    /// `StereoBiquadEq` must be BIT-identical to TWO scalar `BiquadFilter`s
+    /// driven exactly as `BiquadProcessor`'s fallback drives them (per-channel
+    /// `process_block_unrolled`) — across steady blocks, a mid-stream coefficient
+    /// RAMP, and an instant coefficient change, in varying chunk sizes. The ramp
+    /// path is precisely what the isolator's `StereoBiquad` does NOT cover, so
+    /// this is the pin for the strip-EQ stereo-SIMD port.
+    #[test]
+    fn test_stereo_biquad_eq_matches_two_scalar() {
+        let c0 = BiquadCoefficients { b0: 0.5, b1: 0.3, b2: 0.1, a1: -0.4, a2: 0.2 };
+        let c1 = BiquadCoefficients { b0: 0.8, b1: -0.2, b2: 0.15, a1: 0.3, a2: -0.1 };
+
+        let mut stereo = StereoBiquadEq::new(c0);
+        let mut sl = BiquadFilter::new(c0);
+        let mut sr = BiquadFilter::new(c0);
+
+        let mut seed = 0x0bad_c0deu32;
+        let mut rng = || {
+            seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+            (seed as f32 / u32::MAX as f32) * 2.0 - 1.0
+        };
+        let total = 4000usize;
+        let sig_l: Vec<f32> = (0..total).map(|_| rng()).collect();
+        let sig_r: Vec<f32> = (0..total).map(|_| rng()).collect();
+
+        let mut out_l = vec![0.0f32; total];
+        let mut out_r = vec![0.0f32; total];
+        let mut ref_l = vec![0.0f32; total];
+        let mut ref_r = vec![0.0f32; total];
+
+        // Ramp to c1 over 500 samples at offset 1000; snap to identity at 2500.
+        let ramp_at = 1000usize;
+        let instant_at = 2500usize;
+
+        let sizes = [64usize, 37, 200, 129, 256, 91];
+        let (mut pos, mut bi) = (0usize, 0usize);
+        while pos < total {
+            if pos == ramp_at {
+                stereo.set_coeffs_ramped(c1, 500);
+                sl.set_coeffs_ramped(c1, 500);
+                sr.set_coeffs_ramped(c1, 500);
+            }
+            if pos == instant_at {
+                stereo.set_coeffs_ramped(BiquadCoefficients::default(), 0);
+                sl.set_coeffs_ramped(BiquadCoefficients::default(), 0);
+                sr.set_coeffs_ramped(BiquadCoefficients::default(), 0);
+            }
+            // Clamp chunk boundaries to land exactly on the coefficient events,
+            // so both engines apply each change at the same sample.
+            let next_event = [ramp_at, instant_at].iter().copied()
+                .filter(|&e| e > pos).min().unwrap_or(total);
+            let b = sizes[bi % sizes.len()].min(total - pos).min(next_event - pos);
+            bi += 1;
+
+            stereo.process_stereo(&sig_l[pos..pos + b], &sig_r[pos..pos + b],
+                                  &mut out_l[pos..pos + b], &mut out_r[pos..pos + b]);
+            sl.process_block_unrolled(&sig_l[pos..pos + b], &mut ref_l[pos..pos + b]);
+            sr.process_block_unrolled(&sig_r[pos..pos + b], &mut ref_r[pos..pos + b]);
             pos += b;
         }
 

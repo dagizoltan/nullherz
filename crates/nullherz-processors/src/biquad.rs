@@ -3,6 +3,15 @@ use audio_dsp::BiquadCoefficients;
 use crate::dsp_kernel_processor::MultiChannelDspProcessor;
 
 pub struct BiquadProcessor {
+    /// Stereo (2-channel) fast path: L/R run together in SIMD lanes with the
+    /// same per-sample coefficient ramp as the scalar filters. Used when the
+    /// node is wired stereo (every deck strip). Bit-identical to two scalar
+    /// `BiquadFilter`s on finite input.
+    stereo: audio_dsp::StereoBiquadEq,
+    /// Scalar per-channel fallback for mono or >2-channel wiring — byte-for-byte
+    /// the previous behavior. Kept coefficient/ramp-synced with `stereo` so
+    /// either engine can drive a node; only the one matching the node's channel
+    /// count actually runs.
     inner: MultiChannelDspProcessor<audio_dsp::BiquadFilter>,
 }
 
@@ -10,6 +19,7 @@ impl BiquadProcessor {
     pub fn new(id: u64, coeffs: BiquadCoefficients) -> Self {
         let filter = audio_dsp::BiquadFilter::new(coeffs);
         Self {
+            stereo: audio_dsp::StereoBiquadEq::new(coeffs),
             inner: MultiChannelDspProcessor::new(id, filter, nullherz_traits::MAX_CHANNELS),
         }
     }
@@ -25,9 +35,18 @@ fn set_safe_mode(&mut self, enabled: bool) {
         }
     }
 fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext) {
-        self.inner.process(inputs, outputs, context);
+        if inputs.len() >= 2 && outputs.len() >= 2 {
+            // Stereo strip: L/R in SIMD lanes (isolator pattern). split_at_mut
+            // hands process_stereo two disjoint output channels.
+            let (l, r) = outputs.split_at_mut(1);
+            self.stereo.process_stereo(inputs[0], inputs[1], l[0], r[0]);
+        } else {
+            // Mono / >2-channel wiring: the unchanged scalar path.
+            self.inner.process(inputs, outputs, context);
+        }
     }
 fn reset(&mut self) {
+        self.stereo.reset();
         self.inner.reset();
     }
 }
@@ -53,9 +72,18 @@ fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u3
         for f in self.inner.kernels.iter_mut() {
             f.set_coeffs_ramped(coeffs, ramp_duration_samples);
         }
+        // Keep the stereo fast-path engine in lock-step with the scalar kernels.
+        self.stereo.set_coeffs_ramped(coeffs, ramp_duration_samples);
     }
 fn apply_command(&mut self, command: &ProcessorCommand) {
-        self.inner.apply_command(command);
+        // Route through set_parameter so BOTH engines ramp — delegating to
+        // self.inner.apply_command would update only the scalar kernels and
+        // leave the stereo fast path (which actually runs on stereo nodes)
+        // stuck at its old coefficients.
+        if let Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, ramp_duration_samples }) = *command
+            && target_id == self.inner.id {
+                self.set_parameter(param_id, value, ramp_duration_samples);
+            }
     }
 fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
         let mut parameters = [nullherz_traits::ParameterMetadata {

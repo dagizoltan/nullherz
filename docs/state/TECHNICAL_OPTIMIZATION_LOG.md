@@ -2,6 +2,47 @@
 
 ---
 
+## Strip Biquad → stereo-SIMD — 2026-07-23 (session 6)
+
+The lever named in the re-audit below. The deck-strip EQ `BiquadProcessor` ran L
+then R as two sequential scalar `BiquadFilter` recursions
+(`MultiChannelDspProcessor<BiquadFilter>`). Ported the stereo (2-channel) case to
+a new `audio_dsp::StereoBiquadEq` — the isolator's `StereoBiquad` (L/R in SIMD
+lanes 0/1, per-lane finite guard) PLUS the exact per-sample coefficient ramp of
+scalar `BiquadFilter`, which the fixed-coeff isolator primitive deliberately
+omits. Steady blocks take a hoisted `StereoBiquad::process_block` (coeffs
+splatted once); ramping blocks step per-sample, matching the scalar
+`ramp_duration > 0` branch step-for-step. Mono / >2-channel wiring keeps the
+untouched scalar `MultiChannelDspProcessor` fallback; both engines are
+ramp-synced so `set_parameter` / macro-modulation drive whichever the node's
+channel count selects.
+
+**Bit-exact** to two scalar `BiquadFilter`s on finite input — steady, mid-ramp,
+and across an instant coefficient change
+(`audio-dsp: test_stereo_biquad_eq_matches_two_scalar`); the isolator's own
+`StereoBiquad` is untouched (its bit-exact test still passes); conformance
+gauntlet and the stereo master golden render pass unchanged.
+
+**Measured** (`profile_console_nodes` for the node, `bench_console_block`
+interleaved A/B with cooldowns for the console; this 2C/4T laptop):
+
+- **Biquad node type: 23 210 → 12 827 ns/block (~1.9–2.0×).** Cross-run absolute
+  node times drift with thermal state, so normalized *within-run* against
+  unchanged nodes: Biquad/Sampler 0.856 → 0.423, Biquad/Gain 10.9 → 5.7 — both
+  ~2×, matching the isolator's stereo-SIMD result and the halved per-sample
+  arithmetic (L+R in one SIMD pass vs two scalar recursions).
+- **Console mean −7 %**, interleaved (OLD vs NEW, 3 reps, NEW faster every rep,
+  no overlap): OLD ~128.4 µs → NEW ~119.1 µs. A non-interleaved first pass showed
+  NEW "slower" purely because every node — including ones this change cannot
+  touch — was inflated by thermal drift between the two builds; the classic trap
+  #344 flagged. The interleaved run is the real signal.
+
+Biquad drops from the #2 node (~19 %) to ~10–11 %. Remaining top nodes are
+DjIsolator and Sampler — already stereo-SIMD'd or inherent serial work — so this
+closes the last inspection lever from the re-audit.
+
+---
+
 ## Hot-Path Re-Audit — 2026-07-23 (post-#344, reconciled against the profiler)
 
 **Scope:** re-verify the earlier *inspection-based* backlog against the profiled reality established by the session-4/5 work below (PR #344, `perf/dsp-hot-nodes`). That work introduced `cargo run --release -p nullherz-conductor --example profile_console_nodes` (ranks live nodes by the engine's own per-node cycle telemetry) and drove the console from **537 µs → ~129 µs** node time — **~2.2 % of the 256-sample budget.** The RT DSP path is now in excellent shape; what remains is marginal. **Profile before touching anything** — two items I had ranked as wins did not survive measurement.
@@ -14,9 +55,9 @@
 | **#13 ZdfSvf coeff-per-sample divide** | "OPEN — trivial pure win, do second" | **Irrelevant.** `ZdfSvf` is referenced only by a fuzz target (`processors/fuzz/.../filter_fuzz.rs`); **no registered processor uses it** in the live graph. Caching its coeffs optimizes dead-to-the-engine code. Leave it. |
 | **#14 stereo strip biquad, L/R scalar** | "OPEN" | **Half done + one clear lever left.** The *DjIsolator* (the other biquad-heavy strip node) is now stereo-SIMD via the new `StereoBiquad` (session 5, ~2.1×). The strip's own **`BiquadProcessor` is still `MultiChannelDspProcessor<BiquadFilter>` — two sequential scalar recursions** (`biquad.rs:6`, `dsp_kernel_processor.rs:67`), and Biquad is now the **#2 remaining node (~19 %)**. L and R are independent recursions, so this is genuinely vectorizable. |
 
-### The one remaining live serial-path lever
+### The one remaining live serial-path lever — ✅ DONE (session 6, above)
 
-**#14-strip — port `BiquadProcessor` to `StereoBiquad`.** The exact primitive was built for the isolator in #344; a 2-channel fast path (scalar fallback for other channel counts, coefficient ramping preserved) applies it to the strip EQ biquad. Expect roughly the isolator's ~2× on a ~19 % node. **Must** carry a bit-exact-vs-two-scalar test and pass the golden render, exactly as #344 did. This is the only inspection lever that both survives profiling and isn't already done.
+**#14-strip — port `BiquadProcessor` to `StereoBiquad`.** Implemented 2026-07-23 (see the session-6 entry at the top): new `StereoBiquadEq` = the isolator's `StereoBiquad` plus scalar `BiquadFilter`'s per-sample coefficient ramp; stereo fast path with the scalar `MultiChannelDspProcessor` retained as the mono/multichannel fallback. Bit-exact (dedicated test + golden render), Biquad node ~2×, console mean −7 % interleaved. With this, every inspection lever that survived profiling is closed.
 
 ### Everything else — status
 
