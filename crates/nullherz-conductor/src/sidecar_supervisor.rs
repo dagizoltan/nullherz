@@ -7,7 +7,6 @@ use tokio::sync::Mutex;
 use ipc_layer::tcp::{TcpIpcConsumer, TcpIpcProducer};
 use tokio::io::AsyncReadExt;
 use std::time::{Instant, Duration};
-use std::net::UdpSocket;
 
 pub struct RemoteSidecar {
     pub addr: String,
@@ -169,14 +168,17 @@ impl SidecarSupervisor {
     }
 
     pub async fn start_discovery_listener(remote_manager: Arc<Mutex<RemoteSidecarManager>>, audio_bridge: Arc<IpcAudioBridge>, port: u16) -> std::io::Result<()> {
-        let socket = UdpSocket::bind(format!("0.0.0.0:{}", port))?;
-        socket.set_nonblocking(true)?;
+        // tokio async socket + awaited recv, so the listener task yields to the
+        // runtime and is cancelled cleanly on shutdown. The old std socket with
+        // set_nonblocking + a no-await loop busy-spun a worker thread and could
+        // never be cancelled (cf. the return listener's blocking-recv hang below).
+        let socket = tokio::net::UdpSocket::bind(format!("0.0.0.0:{}", port)).await?;
         println!("Conductor: UDP Discovery listening on port {}", port);
 
         tokio::spawn(async move {
             let mut buf = [0u8; 1024];
             loop {
-                if let Ok((len, addr)) = socket.recv_from(&mut buf) {
+                if let Ok((len, addr)) = socket.recv_from(&mut buf).await {
                     let msg = String::from_utf8_lossy(&buf[..len]);
                     if msg.starts_with("nullherz_sidecar:") {
                         let sidecar_port = msg.split(':').nth(1).and_then(|p| p.parse::<u16>().ok()).unwrap_or(9001);
@@ -251,13 +253,18 @@ impl SidecarSupervisor {
     }
 
     pub async fn start_udp_return_listener(audio_bridge: Arc<IpcAudioBridge>, port: u16) -> std::io::Result<()> {
-        let socket = UdpSocket::bind(format!("0.0.0.0:{}", port))?;
+        // tokio async socket + awaited recv. A blocking `std::net::UdpSocket`
+        // here parked a tokio worker thread in the kernel forever (no await
+        // point, no timeout), so the runtime could never cancel it and the
+        // process (or a test harness) could not exit — a permanently-blocked
+        // leaked thread. `recv_from().await` yields, so shutdown cancels it.
+        let socket = tokio::net::UdpSocket::bind(format!("0.0.0.0:{}", port)).await?;
         println!("Conductor: UDP Return listening on port {}", port);
 
         tokio::spawn(async move {
             let mut buf = [0u8; 2048];
             loop {
-                if let Ok((len, _addr)) = socket.recv_from(&mut buf) {
+                if let Ok((len, _addr)) = socket.recv_from(&mut buf).await {
                     if len >= 5 && buf[0] == 6 {
                         let node_idx = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]);
                         let block_data = &buf[5..len];
