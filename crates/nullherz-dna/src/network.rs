@@ -383,11 +383,13 @@ impl DnaServer {
                         if reader.read_line(&mut line).is_ok() {
                             let line_trimmed = line.trim();
                             if line_trimmed == "LIST" {
-                                let lib = lib_clone.lock();
-                                if let Ok(tracks) = lib.list_tracks() {
-                                    let list: Vec<(u64, String)> = tracks.into_iter().map(|t| (t.id, t.title)).collect();
-                                    let _ = serde_json::to_writer(&mut stream, &list);
-                                }
+                                let list = {
+                                    let lib = lib_clone.lock();
+                                    lib.list_tracks().ok().map(|tracks| {
+                                        tracks.into_iter().map(|t| (t.id, t.title)).collect::<Vec<(u64, String)>>()
+                                    }).unwrap_or_default()
+                                };
+                                let _ = serde_json::to_writer(&mut stream, &list);
                                 return;
                             }
 
@@ -460,8 +462,11 @@ impl DnaServer {
                                     if parts.len() >= 3 && parts[1] == "DNA" => {
                                         let id_str = parts[2];
                                         if let Ok(id) = id_str.parse::<u64>() {
-                                            let lib = lib_clone.lock();
-                                            if let Ok(Some(track)) = lib.get_track(id) {
+                                            let track_opt = {
+                                                let lib = lib_clone.lock();
+                                                lib.get_track(id).ok().flatten()
+                                            };
+                                            if let Some(track) = track_opt {
                                                     // Production Beta: Sign DNA payload and calculate CAS-ID
                                                     use ed25519_dalek::{Signer, SigningKey};
                                                     use sha2::{Sha256, Digest};
