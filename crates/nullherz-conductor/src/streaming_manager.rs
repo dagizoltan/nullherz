@@ -1,14 +1,14 @@
 // Non-RT plane (disk-streaming worker thread): thread spawn/sleep are sanctioned here.
 // The disallowed-methods lint exists to protect the audio hot path only.
 #![allow(clippy::disallowed_methods)]
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use ipc_layer::ShmRingBuffer;
 use std::thread;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct StreamingManager {
-    streams: HashMap<u64, Arc<ShmRingBuffer<f32>>>,
+    streams: HashMap<u64, Weak<ipc_layer::SharedMemory>>,
     shutdown_signals: HashMap<u64, Arc<AtomicBool>>,
     pub is_streaming: bool,
     pub start_time: Option<std::time::Instant>,
@@ -30,9 +30,9 @@ impl StreamingManager {
         }
     }
 
-    pub fn start_stream(&mut self, id: u64, path: String, ring_buffer: Arc<ShmRingBuffer<f32>>) {
+    pub fn start_stream(&mut self, id: u64, path: String, shm: Arc<ipc_layer::SharedMemory>) {
         let shutdown = Arc::new(AtomicBool::new(false));
-        self.streams.insert(id, ring_buffer.clone());
+        self.streams.insert(id, Arc::downgrade(&shm));
         self.shutdown_signals.insert(id, shutdown.clone());
         self.is_streaming = true;
         self.start_time = Some(std::time::Instant::now());
@@ -41,11 +41,12 @@ impl StreamingManager {
         let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(64);
 
         // 1. Spawn high-priority feeder thread to drain intermediate channel and fill shared-memory ring buffer
-        // Uses Weak reference to ShmRingBuffer to avoid circular strong count leaks when the consumer is dropped,
-        // and drops upgraded strong reference `rb` during buffer-full sleep to prevent strong count locks.
-        let ring_buffer_weak = Arc::downgrade(&ring_buffer);
+        // Uses Weak reference to SharedMemory to avoid circular strong count leaks when the consumer is dropped,
+        // and drops upgraded strong reference during buffer-full sleep to prevent strong count locks.
+        let shm_weak = Arc::downgrade(&shm);
         let shutdown_feeder = shutdown.clone();
         thread::spawn(move || {
+            ipc_layer::setup_rt_thread(80, None);
             while let Ok(block) = rx.recv() {
                 if shutdown_feeder.load(Ordering::Relaxed) {
                     break;
@@ -55,15 +56,16 @@ impl StreamingManager {
                         if shutdown_feeder.load(Ordering::Relaxed) {
                             return;
                         }
-                        if ring_buffer_weak.strong_count() <= 1 {
+                        if shm_weak.strong_count() <= 1 {
                             return;
                         }
-                        if let Some(rb) = ring_buffer_weak.upgrade() {
-                            match rb.push(sample) {
+                        if let Some(shm_up) = shm_weak.upgrade() {
+                            let rb = shm_up.ptr() as *const ShmRingBuffer<f32>;
+                            match unsafe { (*rb).push(sample) } {
                                 Ok(_) => break, // Successfully pushed
                                 Err(_) => {
-                                    // Ring buffer is full. Drop `rb` so the strong count doesn't include us while sleeping
-                                    drop(rb);
+                                    // Ring buffer is full. Drop `shm_up` so the strong count doesn't include us while sleeping
+                                    drop(shm_up);
                                 }
                             }
                         } else {
@@ -76,8 +78,8 @@ impl StreamingManager {
         });
 
         // 2. Spawn disk decoder thread to run file reading and symphonia decoding
-        // Decoder thread holds a Weak reference to ShmRingBuffer to accurately detect when the consumer releases its Arc
-        let ring_buffer_weak = Arc::downgrade(&ring_buffer);
+        // Decoder thread holds a Weak reference to SharedMemory to accurately detect when the consumer releases its Arc
+        let shm_weak = Arc::downgrade(&shm);
         let shutdown_decoder = shutdown.clone();
         thread::spawn(move || {
             use symphonia::core::audio::Signal;
@@ -96,7 +98,7 @@ impl StreamingManager {
                             let mut current_block = Vec::with_capacity(1024);
 
                             while let Ok(packet) = probed.format.next_packet() {
-                                if shutdown_decoder.load(Ordering::Relaxed) || ring_buffer_weak.strong_count() <= 1 {
+                                if shutdown_decoder.load(Ordering::Relaxed) || shm_weak.strong_count() <= 1 {
                                     break;
                                 }
 
@@ -107,7 +109,7 @@ impl StreamingManager {
                                     let chan_len = buf.frames();
                                     let num_chans = buf.spec().channels.count();
                                     for i in 0..chan_len {
-                                        if shutdown_decoder.load(Ordering::Relaxed) || ring_buffer_weak.strong_count() <= 1 {
+                                        if shutdown_decoder.load(Ordering::Relaxed) || shm_weak.strong_count() <= 1 {
                                             break;
                                         }
 

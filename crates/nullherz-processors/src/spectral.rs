@@ -12,6 +12,10 @@ impl SpectralProcessor {
             inner: audio_dsp::SpectralProcessor::new(fft_size),
         }
     }
+
+    pub fn set_ir(&mut self, ir_data: &[f32]) {
+        self.inner.set_ir(ir_data);
+    }
 }
 
 impl nullherz_traits::SignalProcessor for SpectralProcessor {
@@ -55,9 +59,10 @@ impl AudioProcessor for SpectralProcessor {
     }
 
     fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutation) {
-        if let nullherz_traits::TopologyMutation::AddSource { buffer, .. } = mutation {
-            // Use AddSource to set the Impulse Response for spectral convolution
-            self.inner.set_ir(&buffer);
+        if let nullherz_traits::TopologyMutation::AddSource { .. } = mutation {
+            // Hardened: Bypassed on the RT thread to avoid inline heap allocation and FFT underrun storms.
+            // Impulse responses are computed on the Conductor off-thread and swapped in via SwapProcessor.
+            eprintln!("Warning: RT thread AddSource on SpectralProcessor bypassed to avoid xruns.");
         }
     }
 }

@@ -1,6 +1,28 @@
 use nullherz_traits::{AudioProcessor, SignalProcessor, ProcessContext, ProcessorCommand, MidiResponder, SnapshotProvider};
 use ipc_layer::ShmRingBuffer;
 use crate::MAX_CHANNELS;
+use std::sync::{Arc, Weak, Mutex, OnceLock};
+use std::collections::HashMap;
+
+static STREAMING_REGISTRY: OnceLock<Mutex<HashMap<u64, Weak<ipc_layer::SharedMemory>>>> = OnceLock::new();
+
+fn get_registry() -> &'static Mutex<HashMap<u64, Weak<ipc_layer::SharedMemory>>> {
+    STREAMING_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn register_streaming_buffer(node_idx: u64, shm: Arc<ipc_layer::SharedMemory>) {
+    if let Ok(mut map) = get_registry().lock() {
+        map.insert(node_idx, Arc::downgrade(&shm));
+    }
+}
+
+pub fn get_streaming_buffer(node_idx: u64) -> Option<Arc<ipc_layer::SharedMemory>> {
+    if let Ok(map) = get_registry().lock() {
+        map.get(&node_idx).and_then(|weak| weak.upgrade())
+    } else {
+        None
+    }
+}
 
 pub struct StreamingSamplerProcessor {
     pub id: u64,
@@ -10,6 +32,7 @@ pub struct StreamingSamplerProcessor {
     is_playing: bool,
     volume: f32,
     pub _shm_holder: Option<Vec<u8>>,
+    pub _shm_holder_arc: Option<Arc<ipc_layer::SharedMemory>>,
 }
 
 impl StreamingSamplerProcessor {
@@ -22,6 +45,7 @@ impl StreamingSamplerProcessor {
             is_playing: false,
             volume: 1.0,
             _shm_holder: None,
+            _shm_holder_arc: None,
         }
     }
 }
