@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub struct ThreadedBackend {
     running: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
+    pub xrun_counter: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl Default for ThreadedBackend {
@@ -24,6 +25,7 @@ impl ThreadedBackend {
         Self {
             running: Arc::new(AtomicBool::new(false)),
             handle: None,
+            xrun_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 }
@@ -67,6 +69,7 @@ impl AudioBackend for ThreadedBackend {
     fn start(&mut self, engine_handle: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>, period_size: u64) -> Result<(), String> {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
+        let xrun_counter = self.xrun_counter.clone();
         let handle = thread::spawn(move || {
             ipc_layer::setup_rt_thread(90, Some(0));
             {
@@ -82,10 +85,33 @@ impl AudioBackend for ThreadedBackend {
             }
 
             let mut outputs_raw = vec![vec![0.0f32; period_size as usize]; 4];
+            let mut last_cycle_start = std::time::Instant::now();
+            let mut is_first = true;
+
             while running.load(Ordering::SeqCst) {
+                let cycle_start = std::time::Instant::now();
+                let actual_elapsed_ns = cycle_start.duration_since(last_cycle_start).as_nanos() as u64;
+                last_cycle_start = cycle_start;
+
                 let sample_rate = run_cycle(&engine_handle, &mut outputs_raw, period_size);
-                // Simulate audio hardware clock
-                thread::sleep(std::time::Duration::from_nanos(period_ns(period_size, sample_rate)));
+                let expected_ns = period_ns(period_size, sample_rate);
+
+                if !is_first && actual_elapsed_ns > expected_ns + (expected_ns * 20 / 100) {
+                    let total_xruns = xrun_counter.fetch_add(1, Ordering::SeqCst) + 1;
+                    eprintln!(
+                        "Warning: Software XRUN detected! Elapsed: {} ns, Expected: {} ns. Total Xruns: {}",
+                        actual_elapsed_ns, expected_ns, total_xruns
+                    );
+                }
+                is_first = false;
+
+                // Simulate audio hardware clock by sleeping the remaining duration
+                let rendering_duration = cycle_start.elapsed();
+                let sleep_duration = std::time::Duration::from_nanos(expected_ns)
+                    .checked_sub(rendering_duration)
+                    .unwrap_or(std::time::Duration::ZERO);
+
+                thread::sleep(sleep_duration);
             }
         });
         self.handle = Some(handle);

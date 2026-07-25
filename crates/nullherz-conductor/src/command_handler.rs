@@ -86,6 +86,29 @@ impl CommandHandler {
                 // deck's sampler NODE back to its TRACK (hot-cue persistence),
                 // and by tick() to know which decks to re-drive on completion.
                 conductor.mixer_manager.deck_samples.insert(*deck_id, *sample_id);
+
+                let sampler_node_idx = conductor.mixer_manager.deck_mappings.get(deck_id).map(|d| d.sampler_id);
+                let mut is_streaming_sampler = false;
+                if let Some(node_idx) = sampler_node_idx {
+                    if let Some(&node_type) = conductor.topology_manager.active_node_types.get(&node_idx) {
+                        if node_type == nullherz_traits::ProcessorTypeId::STREAMING_SAMPLER.0 {
+                            is_streaming_sampler = true;
+                        }
+                    }
+                }
+
+                if is_streaming_sampler {
+                    let track = { conductor.library.lock().get_track(*sample_id).ok().flatten() };
+                    if let Some(track) = track {
+                        if std::path::Path::new(&track.path).exists() {
+                            if let Some(shm) = nullherz_processors::streaming_sampler::get_streaming_buffer(sampler_node_idx.unwrap() as u64) {
+                                conductor.streaming_manager.start_stream(*sample_id, track.path.clone(), shm);
+                            }
+                        }
+                    }
+                    continue;
+                }
+
                 if conductor.transfusion_manager.sample_registry.get(*sample_id).is_none()
                     && !conductor.hydration_pending.contains(sample_id)
                 {
@@ -159,6 +182,25 @@ impl CommandHandler {
 
         for cmd in translated_commands {
             let handled = match cmd {
+                Command::Resource(ResourceCommand::AddSourceFromRegistry { granular_node_idx, sample_id }) => {
+                    let mut handled = false;
+                    if let Some(&node_type) = conductor.topology_manager.active_node_types.get(&granular_node_idx) {
+                        if node_type == nullherz_traits::ProcessorTypeId::SPECTRAL.0 {
+                            if let Some(sample) = conductor.transfusion_manager.sample_registry.get(sample_id) {
+                                let mut new_proc = nullherz_processors::SpectralProcessor::new(granular_node_idx as u64, 1024);
+                                new_proc.set_ir(&sample.buffer);
+                                if let Some(ref mut prod) = conductor.topology_manager.topo_producer {
+                                    let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor {
+                                        node_idx: granular_node_idx,
+                                        processor: Box::new(new_proc),
+                                    });
+                                }
+                                handled = true;
+                            }
+                        }
+                    }
+                    handled
+                }
                 // Preview stages the source here (registry + topology ring),
                 // but the PLAY trigger must ride the normal engine pipeline:
                 // the old code called handle_performance_command(PlayNode) and
