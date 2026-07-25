@@ -1,6 +1,5 @@
 use egui::{Ui, Vec2, Stroke, Sense, RichText, Frame, Margin};
 use nullherz_traits::{Command, DnaCommand};
-use nullherz_dna::GeneticLibrary;
 
 pub struct BreederView {
     pub parent_a_id: Option<u64>,
@@ -47,9 +46,9 @@ impl BreederView {
 
                     // Matchmaking Sort (Genetic Matchmaker UI)
                     let other_dna = if parent_idx == 0 {
-                        state.parent_b_id.and_then(|id| app.library_db.get_track(id).ok().flatten()).map(|t| t.metadata.dna.clone())
+                        state.parent_b_id.and_then(|id| app.get_cached_track(id)).map(|t| t.metadata.dna.clone())
                     } else {
-                        state.parent_a_id.and_then(|id| app.library_db.get_track(id).ok().flatten()).map(|t| t.metadata.dna.clone())
+                        state.parent_a_id.and_then(|id| app.get_cached_track(id)).map(|t| t.metadata.dna.clone())
                     };
 
                     if let Some(ref target) = other_dna {
@@ -95,7 +94,7 @@ impl BreederView {
             // Parent A Selection
             ui.vertical(|ui| {
                 ui.label(RichText::new("Parent A").size(theme.type_caption).color(theme.text_secondary));
-                let label = state.parent_a_id.and_then(|id| app.library_db.get_track(id).ok().flatten())
+                let label = state.parent_a_id.and_then(|id| app.get_cached_track(id))
                     .map(|t| t.title).unwrap_or_else(|| "Select Sample".to_string());
 
                 if ui.button(RichText::new(label).size(theme.type_body)).clicked() {
@@ -110,7 +109,7 @@ impl BreederView {
             // Parent B Selection
             ui.vertical(|ui| {
                 ui.label(RichText::new("Parent B").size(theme.type_caption).color(theme.text_secondary));
-                let label = state.parent_b_id.and_then(|id| app.library_db.get_track(id).ok().flatten())
+                let label = state.parent_b_id.and_then(|id| app.get_cached_track(id))
                     .map(|t| t.title).unwrap_or_else(|| "Select Sample".to_string());
 
                 if ui.button(RichText::new(label).size(theme.type_body)).clicked() {
@@ -163,7 +162,7 @@ impl BreederView {
                 ui.painter().rect_stroke(preview_rect, theme.radius_md, theme.border_stroke);
 
                 if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
-                    if let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
+                    if let (Some(track_a), Some(track_b)) = (app.get_cached_track(id_a), app.get_cached_track(id_b)) {
                         nullherz_dna::NeuralTransfuser::interpolate_latent(&mut state.preview_dna, &track_a.metadata.dna.spectral.latent_space, &track_b.metadata.dna.spectral.latent_space, state.transfusion_bias_x);
 
                         let bin_width = preview_rect.width() / 16.0;
@@ -266,7 +265,7 @@ impl BreederView {
                 let btn = ui.button(RichText::new(format!("{} MUTATE PATTERN", egui_phosphor::regular::PIANO_KEYS)).strong().size(theme.type_label));
                 if btn.clicked()
                      && let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id)
-                         && let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
+                         && let (Some(track_a), Some(track_b)) = (app.get_cached_track(id_a), app.get_cached_track(id_b)) {
                              let child_rhythmic = nullherz_dna::transfuse_dna(&track_a.metadata.dna, &track_b.metadata.dna, state.transfusion_bias_y).rhythmic;
                              // Target the FOCUSED deck's live sequencer. (This
                              // used to aim at sentinel node 70, which no node
@@ -303,7 +302,7 @@ impl BreederView {
 
     fn emit_dna_command(&self, app: &crate::InspectorApp) {
         if let (Some(id_a), Some(id_b)) = (self.parent_a_id, self.parent_b_id)
-            && let (Ok(Some(track_a)), Ok(Some(track_b))) = (app.library_db.get_track(id_a), app.library_db.get_track(id_b)) {
+            && let (Some(track_a), Some(track_b)) = (app.get_cached_track(id_a), app.get_cached_track(id_b)) {
 
                 // 1. Spectral Transfusion
                 let mut latent = [0.0f32; 16];

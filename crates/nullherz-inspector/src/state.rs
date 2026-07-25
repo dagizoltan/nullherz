@@ -103,6 +103,13 @@ impl Default for DeckState {
     }
 }
 
+pub struct LibraryRefreshPayload {
+    pub crate_tracks: Vec<nullherz_dna::LibraryTrack>,
+    pub all_tracks: Vec<nullherz_dna::LibraryTrack>,
+    pub crates: Vec<String>,
+    pub smart_crates: Vec<nullherz_dna::SmartCrateDefinition>,
+}
+
 /// Library browsing, smart crates, and background loading.
 pub struct LibraryState {
     pub active_crate: Option<String>,
@@ -110,7 +117,10 @@ pub struct LibraryState {
     pub sort: nullherz_dna::TrackSort,
     pub cached_library: Vec<nullherz_dna::LibraryTrack>,
     pub cached_library_raw: Vec<nullherz_dna::LibraryTrack>,
-    pub bg_library_loader: Option<std::sync::mpsc::Receiver<Vec<nullherz_dna::LibraryTrack>>>,
+    pub cached_crates: Vec<String>,
+    pub cached_smart_crates: Vec<nullherz_dna::SmartCrateDefinition>,
+    pub cached_inspected_track: Option<nullherz_dna::LibraryTrack>,
+    pub bg_library_loader: Option<std::sync::mpsc::Receiver<LibraryRefreshPayload>>,
     pub library_needs_refresh: bool,
     pub smart_crate_builder_open: bool,
     pub smart_crate_def: nullherz_dna::SmartCrateDefinition,
@@ -131,6 +141,9 @@ impl Default for LibraryState {
             sort: nullherz_dna::TrackSort::default(),
             cached_library: vec![],
             cached_library_raw: vec![],
+            cached_crates: vec![],
+            cached_smart_crates: vec![],
+            cached_inspected_track: None,
             bg_library_loader: None,
             library_needs_refresh: true,
             smart_crate_builder_open: false,

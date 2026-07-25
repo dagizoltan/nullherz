@@ -128,6 +128,10 @@ pub struct InspectorApp {
 }
 
 impl InspectorApp {
+    pub fn get_cached_track(&self, id: u64) -> Option<nullherz_dna::LibraryTrack> {
+        self.library.cached_library_raw.iter().find(|t| t.id == id).cloned()
+    }
+
     pub fn trigger_library_refresh(&mut self) {
         self.library.library_needs_refresh = true;
         let db = self.library_db.clone();
@@ -136,12 +140,21 @@ impl InspectorApp {
         self.library.bg_library_loader = Some(rx);
 
         std::thread::spawn(move || {
-            let tracks = if let Some(ref name) = crate_name {
+            let crate_tracks = if let Some(ref name) = crate_name {
                 db.get_tracks_in_crate(name).unwrap_or_default()
             } else {
                 db.list_tracks().unwrap_or_default()
             };
-            let _ = tx.send(tracks);
+            let all_tracks = db.list_tracks().unwrap_or_default();
+            let crates = db.list_crates().unwrap_or_default();
+            let smart_crates = db.list_smart_crates().unwrap_or_default();
+
+            let _ = tx.send(crate::state::LibraryRefreshPayload {
+                crate_tracks,
+                all_tracks,
+                crates,
+                smart_crates,
+            });
         });
     }
 
@@ -604,9 +617,11 @@ impl eframe::App for InspectorApp {
 
         // --- Background Library Loader Polling ---
         if let Some(ref rx) = self.library.bg_library_loader {
-            if let Ok(tracks) = rx.try_recv() {
-                self.library.cached_library_raw = tracks.clone();
-                self.library.cached_library = tracks;
+            if let Ok(payload) = rx.try_recv() {
+                self.library.cached_library_raw = payload.all_tracks;
+                self.library.cached_library = payload.crate_tracks;
+                self.library.cached_crates = payload.crates;
+                self.library.cached_smart_crates = payload.smart_crates;
                 self.library.library_needs_refresh = false;
                 self.library.bg_library_loader = None;
                 self.library.last_refresh_time = current_time;
@@ -632,8 +647,15 @@ impl eframe::App for InspectorApp {
             let want = self.decks.now_playing[i];
             let have = self.decks.cached_tracks[i].as_ref().map(|t| t.id);
             if want != have {
-                self.decks.cached_tracks[i] = want.and_then(|id| self.library_db.get_track(id).ok().flatten());
+                self.decks.cached_tracks[i] = want.and_then(|id| self.get_cached_track(id));
             }
+        }
+
+        // Sync cached inspected track when selected_library_track changes
+        let selected_id = self.library.selected_library_track;
+        let current_inspected_id = self.library.cached_inspected_track.as_ref().map(|t| t.id);
+        if selected_id != current_inspected_id {
+            self.library.cached_inspected_track = selected_id.and_then(|id| self.get_cached_track(id));
         }
 
         // --- Keyboard Shortcuts ---

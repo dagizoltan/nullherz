@@ -53,7 +53,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         ui.label(RichText::new("DISCOVERED DNA").size(theme.type_caption).color(theme.text_secondary));
         ui.add_space(theme.space_xs);
 
-        let tracks = app.library_db.list_tracks().unwrap_or_default();
+        let tracks = &app.library.cached_library_raw;
         let cloud_tracks: Vec<_> = tracks.iter().filter(|t| t.artist == "Cloud Peer").collect();
 
         if cloud_tracks.is_empty() {

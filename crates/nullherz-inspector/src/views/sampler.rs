@@ -1,4 +1,3 @@
-use nullherz_dna::GeneticLibrary;
 use egui::{Ui, Frame, Vec2, Sense, Stroke, RichText};
 use crate::InspectorApp;
 use nullherz_ui_hal::widgets;
@@ -32,7 +31,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                  let deck_idx = app.decks.focused_deck;
                  if let Some(track_id) = app.decks.now_playing[deck_idx]
-                     && let Ok(Some(track)) = app.library_db.get_track(track_id) {
+                     && let Some(track) = app.get_cached_track(track_id) {
                          wf.update_from_mip_waveform(&_wgpu.queue, &track.metadata.mip_waveform, app.sampler.sampler_waveform_zoom, rect.width() as u32, app.theme.accent.to_array().map(|v| v as f32 / 255.0));
                      }
 

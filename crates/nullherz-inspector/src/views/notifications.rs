@@ -1,4 +1,3 @@
-use nullherz_dna::GeneticLibrary;
 use egui::{Ui, ScrollArea, RichText, Frame, Rounding, Margin};
 use crate::InspectorApp;
 
@@ -18,7 +17,7 @@ pub fn render(app: &InspectorApp, ui: &mut Ui) {
                     if id == 0 || score < 0.7 { continue; }
                     has_suggestions = true;
 
-                    let track = app.library_db.get_track(id).ok().flatten();
+                    let track = app.get_cached_track(id);
                     let title = track.as_ref().map(|tr| tr.title.as_str()).unwrap_or("Unknown");
 
                     render_card_group(ui, "SUGGESTION MATCH", &theme, |ui| {
