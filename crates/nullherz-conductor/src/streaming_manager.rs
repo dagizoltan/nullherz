@@ -5,9 +5,11 @@ use std::sync::Arc;
 use ipc_layer::ShmRingBuffer;
 use std::thread;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct StreamingManager {
     streams: HashMap<u64, Arc<ShmRingBuffer<f32>>>,
+    shutdown_signals: HashMap<u64, Arc<AtomicBool>>,
     pub is_streaming: bool,
     pub start_time: Option<std::time::Instant>,
     pub bitrate: f32,
@@ -19,6 +21,7 @@ impl StreamingManager {
     pub fn new() -> Self {
         Self {
             streams: HashMap::new(),
+            shutdown_signals: HashMap::new(),
             is_streaming: false,
             start_time: None,
             bitrate: 256.0,
@@ -28,7 +31,9 @@ impl StreamingManager {
     }
 
     pub fn start_stream(&mut self, id: u64, path: String, ring_buffer: Arc<ShmRingBuffer<f32>>) {
+        let shutdown = Arc::new(AtomicBool::new(false));
         self.streams.insert(id, ring_buffer.clone());
+        self.shutdown_signals.insert(id, shutdown.clone());
         self.is_streaming = true;
         self.start_time = Some(std::time::Instant::now());
 
@@ -36,17 +41,33 @@ impl StreamingManager {
         let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(64);
 
         // 1. Spawn high-priority feeder thread to drain intermediate channel and fill shared-memory ring buffer
-        let ring_buffer_clone = ring_buffer.clone();
+        // Uses Weak reference to ShmRingBuffer to avoid circular strong count leaks when the consumer is dropped,
+        // and drops upgraded strong reference `rb` during buffer-full sleep to prevent strong count locks.
+        let ring_buffer_weak = Arc::downgrade(&ring_buffer);
+        let shutdown_feeder = shutdown.clone();
         thread::spawn(move || {
             while let Ok(block) = rx.recv() {
-                if Arc::strong_count(&ring_buffer_clone) == 1 {
+                if shutdown_feeder.load(Ordering::Relaxed) {
                     break;
                 }
                 for &sample in &block {
-                    // Poll ring-buffer capacity and write next chunk
-                    while let Err(_failed_sample) = ring_buffer_clone.push(sample) {
-                        if Arc::strong_count(&ring_buffer_clone) == 1 {
-                            break;
+                    loop {
+                        if shutdown_feeder.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        if ring_buffer_weak.strong_count() <= 1 {
+                            return;
+                        }
+                        if let Some(rb) = ring_buffer_weak.upgrade() {
+                            match rb.push(sample) {
+                                Ok(_) => break, // Successfully pushed
+                                Err(_) => {
+                                    // Ring buffer is full. Drop `rb` so the strong count doesn't include us while sleeping
+                                    drop(rb);
+                                }
+                            }
+                        } else {
+                            return; // Consumer dropped
                         }
                         thread::sleep(std::time::Duration::from_millis(2));
                     }
@@ -57,6 +78,7 @@ impl StreamingManager {
         // 2. Spawn disk decoder thread to run file reading and symphonia decoding
         // Decoder thread holds a Weak reference to ShmRingBuffer to accurately detect when the consumer releases its Arc
         let ring_buffer_weak = Arc::downgrade(&ring_buffer);
+        let shutdown_decoder = shutdown.clone();
         thread::spawn(move || {
             use symphonia::core::audio::Signal;
 
@@ -74,7 +96,7 @@ impl StreamingManager {
                             let mut current_block = Vec::with_capacity(1024);
 
                             while let Ok(packet) = probed.format.next_packet() {
-                                if ring_buffer_weak.strong_count() <= 1 {
+                                if shutdown_decoder.load(Ordering::Relaxed) || ring_buffer_weak.strong_count() <= 1 {
                                     break;
                                 }
 
@@ -85,7 +107,7 @@ impl StreamingManager {
                                     let chan_len = buf.frames();
                                     let num_chans = buf.spec().channels.count();
                                     for i in 0..chan_len {
-                                        if ring_buffer_weak.strong_count() <= 1 {
+                                        if shutdown_decoder.load(Ordering::Relaxed) || ring_buffer_weak.strong_count() <= 1 {
                                             break;
                                         }
 
@@ -119,6 +141,16 @@ impl StreamingManager {
     pub fn stop_stream(&mut self) {
         self.is_streaming = false;
         self.start_time = None;
+        for sig in self.shutdown_signals.values() {
+            sig.store(true, Ordering::Relaxed);
+        }
         self.streams.clear();
+        self.shutdown_signals.clear();
+    }
+}
+
+impl Drop for StreamingManager {
+    fn drop(&mut self) {
+        self.stop_stream();
     }
 }
