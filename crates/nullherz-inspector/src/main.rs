@@ -749,51 +749,69 @@ impl eframe::App for InspectorApp {
     }
 }
 
+fn create_app(cc: &eframe::CreationContext<'_>) -> Box<dyn eframe::App> {
+    let graph = GraphJson { nodes: vec![], edges: vec![], node_assignments: nullherz_traits::NodeAssignmentArray::default() };
+    let mut app = InspectorApp::new(graph, cc);
+
+    if let Some(render_state) = &cc.wgpu_render_state {
+        // eframe already manages WGPU.
+        // We'll mark the renderer as active to enable the GPU-accelerated UI paths.
+        app.wgpu_renderer = Some(Arc::new(Mutex::new(nullherz_ui_hal::render::wgpu_backend::WgpuRenderer {
+            device: render_state.device.clone(),
+            queue: render_state.queue.clone(),
+            surface: None,
+            config: None,
+        })));
+
+        let wf_renderer = nullherz_ui_hal::render::waveform_renderer::WaveformRenderer::new(
+            &render_state.device,
+            render_state.target_format,
+            8192
+        );
+        app.waveform_renderer = Some(Arc::new(Mutex::new(wf_renderer)));
+
+        let mut deck_wfs = [None, None, None, None];
+        for wf_slot in &mut deck_wfs {
+            let wf = nullherz_ui_hal::render::waveform_renderer::WaveformRenderer::new(
+                &render_state.device,
+                render_state.target_format,
+                1024
+            );
+            *wf_slot = Some(Arc::new(Mutex::new(wf)));
+        }
+        app.deck_waveform_renderers = deck_wfs;
+    }
+
+    Box::new(app)
+}
+
 fn main() -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
 
-    eframe::run_native(
+    let result = eframe::run_native(
         "nullherz Studio",
         native_options,
-        Box::new(|cc| {
-            let graph = GraphJson { nodes: vec![], edges: vec![], node_assignments: nullherz_traits::NodeAssignmentArray::default() };
-            let mut app = InspectorApp::new(graph, cc);
+        Box::new(|cc| create_app(cc)),
+    );
 
-            if let Some(render_state) = &cc.wgpu_render_state {
-                // eframe already manages WGPU.
-                // We'll mark the renderer as active to enable the GPU-accelerated UI paths.
-                app.wgpu_renderer = Some(Arc::new(Mutex::new(nullherz_ui_hal::render::wgpu_backend::WgpuRenderer {
-                    device: render_state.device.clone(),
-                    queue: render_state.queue.clone(),
-                    surface: None,
-                    config: None,
-                })));
-
-                let wf_renderer = nullherz_ui_hal::render::waveform_renderer::WaveformRenderer::new(
-                    &render_state.device,
-                    render_state.target_format,
-                    8192
-                );
-                app.waveform_renderer = Some(Arc::new(Mutex::new(wf_renderer)));
-
-                let mut deck_wfs = [None, None, None, None];
-                for wf_slot in &mut deck_wfs {
-                    let wf = nullherz_ui_hal::render::waveform_renderer::WaveformRenderer::new(
-                        &render_state.device,
-                        render_state.target_format,
-                        1024
-                    );
-                    *wf_slot = Some(Arc::new(Mutex::new(wf)));
-                }
-                app.deck_waveform_renderers = deck_wfs;
-            }
-
-            Box::new(app)
-        }),
-    )
+    match result {
+        Err(e) => {
+            eprintln!("Warning: Failed to start eframe with Wgpu backend ({}). Retrying with Glow (OpenGL) backend...", e);
+            let glow_options = eframe::NativeOptions {
+                renderer: eframe::Renderer::Glow,
+                ..Default::default()
+            };
+            eframe::run_native(
+                "nullherz Studio",
+                glow_options,
+                Box::new(|cc| create_app(cc)),
+            )
+        }
+        Ok(()) => Ok(()),
+    }
 }
 
 #[derive(Clone)]
