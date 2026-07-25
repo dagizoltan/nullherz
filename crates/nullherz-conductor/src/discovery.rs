@@ -94,9 +94,6 @@ impl SidecarDiscoveryService {
                     tokio::time::sleep(Duration::from_secs(5)).await;
 
                     if peers.is_empty() { continue; }
-                    if peers.is_empty() { continue; }
-
-                    let lib_lock = lib_db.lock();
 
                     let (trusted_peers, signing_key) = {
                         let d = discovery_mutex.lock();
@@ -110,7 +107,47 @@ impl SidecarDiscoveryService {
                         signing_key,
                         mesh_links: parking_lot::Mutex::new(std::collections::HashSet::new()),
                     };
-                    let _ = lib_lock.sync_with_cloud(&sync);
+
+                    // Lock-free sync: get tracks briefly under lock
+                    let local_tracks = {
+                        let lib_lock = lib_db.lock();
+                        lib_lock.list_tracks().unwrap_or_default()
+                    };
+
+                    // Perform DNA announcements outside the database lock
+                    use nullherz_dna::{PeerSync, GeneticLibrary};
+                    for track in local_tracks {
+                        sync.announce_dna(&track.metadata.dna);
+                    }
+
+                    // Query remote DNA outside the database lock
+                    let remote_dna = sync.list_peer_dna();
+                    for (id, name) in remote_dna {
+                        let exists = {
+                            let lib_lock = lib_db.lock();
+                            lib_lock.get_track(id).map(|t| t.is_some()).unwrap_or(false)
+                        };
+                        if !exists {
+                            if let Some(dna) = sync.request_dna(id) {
+                                println!("Sync: Inherited SoundDNA '{}' from cloud peer.", name);
+                                let track = nullherz_dna::LibraryTrack {
+                                    id,
+                                    path: format!("cloud://{}", id),
+                                    title: name,
+                                    artist: "Cloud Peer".to_string(),
+                                    album: "Unknown".to_string(),
+                                    genre: "Unknown".to_string(),
+                                    energy_level: 0.5,
+                                    metadata: std::sync::Arc::new(nullherz_traits::SampleMetadata {
+                                        dna,
+                                        ..nullherz_traits::SampleMetadata::new_empty()
+                                    }),
+                                };
+                                let lib_lock = lib_db.lock();
+                                let _ = lib_lock.save_track(&track);
+                            }
+                        }
+                    }
                 }
             });
         }
