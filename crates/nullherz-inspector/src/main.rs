@@ -786,32 +786,36 @@ fn create_app(cc: &eframe::CreationContext<'_>) -> Box<dyn eframe::App> {
 }
 
 fn main() -> eframe::Result<()> {
+    // 1. Detect if Wgpu is supported on this system before spawning anything.
+    let has_wgpu = {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        pollster::block_on(async {
+            instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::default(),
+                force_fallback_adapter: false,
+                compatible_surface: None,
+            }).await.is_some()
+        })
+    };
+
+    let renderer = if has_wgpu {
+        println!("Wgpu adapter detected. Launching with Wgpu renderer...");
+        eframe::Renderer::Wgpu
+    } else {
+        println!("No compatible Wgpu adapter found. Launching with Glow (OpenGL) renderer...");
+        eframe::Renderer::Glow
+    };
+
     let native_options = eframe::NativeOptions {
-        renderer: eframe::Renderer::Wgpu,
+        renderer,
         ..Default::default()
     };
 
-    let result = eframe::run_native(
+    eframe::run_native(
         "nullherz Studio",
         native_options,
         Box::new(|cc| create_app(cc)),
-    );
-
-    match result {
-        Err(e) => {
-            eprintln!("Warning: Failed to start eframe with Wgpu backend ({}). Retrying with Glow (OpenGL) backend...", e);
-            let glow_options = eframe::NativeOptions {
-                renderer: eframe::Renderer::Glow,
-                ..Default::default()
-            };
-            eframe::run_native(
-                "nullherz Studio",
-                glow_options,
-                Box::new(|cc| create_app(cc)),
-            )
-        }
-        Ok(()) => Ok(()),
-    }
+    )
 }
 
 #[derive(Clone)]
