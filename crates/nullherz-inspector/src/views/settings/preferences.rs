@@ -15,11 +15,9 @@ pub fn render_preferences(app: &mut InspectorApp, ui: &mut Ui) {
         .stroke(theme.border_stroke)
         .inner_margin(theme.space_md)
         .show(ui, |ui| {
-            // Restore session (disabled/mocked)
-            ui.add_enabled_ui(false, |ui| {
-                ui.checkbox(&mut app.settings.restore_last_session, "Restore last session on launch")
-                    .on_hover_text("Planned / Not yet functional: actual session persistence is under development");
-            });
+            // Restore session
+            ui.checkbox(&mut app.settings.restore_last_session, "Restore last session on launch")
+                .on_hover_text("Restore the last active session automatically on launch");
             ui.add_space(theme.space_sm);
 
             // Default view on launch

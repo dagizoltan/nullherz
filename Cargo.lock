@@ -3340,11 +3340,13 @@ dependencies = [
  "nullherz-traits",
  "nullherz-ui-hal",
  "parking_lot",
+ "pollster",
  "serde",
  "serde_json",
  "sha2",
  "tokio",
  "tokio-tungstenite",
+ "wgpu",
 ]
 
 [[package]]
