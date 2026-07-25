@@ -24,9 +24,10 @@ impl DelayProcessor {
     }
 
     pub fn set_delay(&mut self, samples: f32) {
+        let val = if samples.is_finite() { samples } else { 0.0 };
         // Clamp to ensure we have at least 1 sample of look-behind and 2 samples of look-ahead
         // within the ring buffer capacity limits.
-        self.delay_samples = samples.clamp(0.0, self.capacity as f32 - 3.0);
+        self.delay_samples = val.clamp(0.0, self.capacity as f32 - 3.0);
     }
 }
 

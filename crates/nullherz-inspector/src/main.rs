@@ -255,7 +255,46 @@ impl InspectorApp {
             last_update_time: 0.0,
         };
         app.trigger_library_refresh();
+
+        // Load persisted preferences if they exist
+        if let Ok(pref_content) = std::fs::read_to_string("preferences.json") {
+            if let Ok(prefs) = serde_json::from_str::<PersistedPreferences>(&pref_content) {
+                app.settings.restore_last_session = prefs.restore_last_session;
+                app.settings.default_view_on_launch = string_to_view(&prefs.default_view_on_launch);
+                app.settings.autosave_enabled = prefs.autosave_enabled;
+                app.settings.autosave_interval_mins = prefs.autosave_interval_mins;
+                app.settings.shortcuts_enabled = prefs.shortcuts_enabled;
+                app.active_view = app.settings.default_view_on_launch;
+
+                if let Some(accent) = prefs.theme_accent {
+                    app.theme.accent = egui::Color32::from_rgba_unmultiplied(accent[0], accent[1], accent[2], accent[3]);
+                }
+                if let Some(success) = prefs.theme_success {
+                    app.theme.success = egui::Color32::from_rgba_unmultiplied(success[0], success[1], success[2], success[3]);
+                }
+                if let Some(danger) = prefs.theme_danger {
+                    app.theme.danger = egui::Color32::from_rgba_unmultiplied(danger[0], danger[1], danger[2], danger[3]);
+                }
+            }
+        }
+
         app
+    }
+
+    pub fn save_preferences(&self) {
+        let prefs = PersistedPreferences {
+            restore_last_session: self.settings.restore_last_session,
+            default_view_on_launch: view_to_string(self.settings.default_view_on_launch),
+            autosave_enabled: self.settings.autosave_enabled,
+            autosave_interval_mins: self.settings.autosave_interval_mins,
+            shortcuts_enabled: self.settings.shortcuts_enabled,
+            theme_accent: Some(self.theme.accent.to_array()),
+            theme_success: Some(self.theme.success.to_array()),
+            theme_danger: Some(self.theme.danger.to_array()),
+        };
+        if let Ok(serialized) = serde_json::to_string_pretty(&prefs) {
+            let _ = std::fs::write("preferences.json", serialized);
+        }
     }
 
     pub fn deck_color(theme: &nullherz_ui_hal::Theme, i: usize) -> egui::Color32 {
@@ -523,6 +562,7 @@ impl InspectorApp {
                     })));
                     self.settings.config_saved_time = Some(current_time);
                     self.settings.autosave_triggered = None;
+                    self.save_preferences();
                 }
                 if i.key_pressed(egui::Key::Num1) { self.active_view = View::Player; }
                 if i.key_pressed(egui::Key::Num2) { self.active_view = View::Console; }
@@ -552,6 +592,7 @@ impl InspectorApp {
                 self.settings.last_saved_time = current_time;
                 self.settings.config_saved_time = Some(current_time);
                 self.settings.autosave_triggered = Some(current_time);
+                self.save_preferences();
             }
         }
     }
@@ -818,6 +859,56 @@ fn main() -> eframe::Result<()> {
     )
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct PersistedPreferences {
+    pub restore_last_session: bool,
+    pub default_view_on_launch: String,
+    pub autosave_enabled: bool,
+    pub autosave_interval_mins: u32,
+    pub shortcuts_enabled: bool,
+    pub theme_accent: Option<[u8; 4]>,
+    pub theme_success: Option<[u8; 4]>,
+    pub theme_danger: Option<[u8; 4]>,
+}
+
+fn view_to_string(view: View) -> String {
+    match view {
+        View::Player => "Player".to_string(),
+        View::Console => "Console".to_string(),
+        View::Composer => "Composer".to_string(),
+        View::Editor => "Editor".to_string(),
+        View::Sampler => "Sampler".to_string(),
+        View::Breeder => "Breeder".to_string(),
+        View::Broadcast => "Broadcast".to_string(),
+        View::Topology => "Topology".to_string(),
+        View::Account => "Account".to_string(),
+        View::Settings => "Settings".to_string(),
+        _ => "Console".to_string(),
+    }
+}
+
+fn string_to_view(s: &str) -> View {
+    match s {
+        "Player" => View::Player,
+        "Console" => View::Console,
+        "Composer" => View::Composer,
+        "Editor" => View::Editor,
+        "Sampler" => View::Sampler,
+        "Breeder" => View::Breeder,
+        "Broadcast" => View::Broadcast,
+        "Topology" => View::Topology,
+        "Account" => View::Account,
+        "Settings" => View::Settings,
+        _ => View::Console,
+    }
+}
+
+impl Drop for InspectorApp {
+    fn drop(&mut self) {
+        self.save_preferences();
+    }
+}
+
 #[derive(Clone)]
 pub struct SharedLibraryDb(pub Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>);
 
@@ -886,9 +977,25 @@ pub fn start_in_process_conductor(
             let _ = cond.load_system_config();
             let context = cond.setup_engine();
 
-            // Bootstrapping 4-Channel DJ Mixer (on the conductor's own
-            // MixerManager so deck_mappings resolve at runtime)...
-            cond.bootstrap_4channel_mixer();
+            let mut session_restored = false;
+            if let Ok(pref_content) = std::fs::read_to_string("preferences.json") {
+                if let Ok(prefs) = serde_json::from_str::<serde_json::Value>(&pref_content) {
+                    if prefs.get("restore_last_session").and_then(|v| v.as_bool()) == Some(true) {
+                        if std::path::Path::new("autosave.json").exists() {
+                            if cond.load_project("autosave.json").is_ok() {
+                                session_restored = true;
+                                println!("Conductor: Last session restored successfully from autosave.json.");
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !session_restored {
+                // Bootstrapping 4-Channel DJ Mixer (on the conductor's own
+                // MixerManager so deck_mappings resolve at runtime)...
+                cond.bootstrap_4channel_mixer();
+            }
 
             if let Some(worker) = cond.analysis_worker.take() {
                 worker.start();
