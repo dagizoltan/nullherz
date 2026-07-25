@@ -367,7 +367,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                                                     if let Some(track_id) = app.decks.now_playing[track_idx % 4] {
                                                         use nullherz_dna::GeneticLibrary;
-                                                        if let Ok(Some(mut track)) = app.library_db.get_track(track_id) {
+                                                        if let Some(mut track) = app.get_cached_track(track_id) {
                                                             let mut updated_metadata = (*track.metadata).clone();
                                                             for mask_idx in 0..4 {
                                                                 let original_mask = updated_metadata.dna.rhythmic.onset_mask[mask_idx];

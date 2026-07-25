@@ -189,6 +189,8 @@ pub struct DiscoveryService {
     mdns: Option<mdns_sd::ServiceDaemon>,
     service_type: &'static str,
     pub signing_key: Option<[u8; 32]>,
+    pub has_registered: bool,
+    pub browser: Option<mdns_sd::Receiver<mdns_sd::ServiceEvent>>,
 }
 
 impl Default for DiscoveryService {
@@ -213,31 +215,43 @@ impl DiscoveryService {
             mdns: mdns_sd::ServiceDaemon::new().ok(),
             service_type: "_nullherz-dna._udp.local.",
             signing_key: Some(sk.to_bytes()),
+            has_registered: false,
+            browser: None,
         }
     }
 
     /// Announces presence to the genetic cloud via mDNS
     pub fn discover(&mut self) {
+        if self.has_registered {
+            return;
+        }
         if let Some(mdns) = &self.mdns {
             let hostname = gethostname::gethostname().to_string_lossy().to_string();
-            let service_info = mdns_sd::ServiceInfo::new(
+            if let Ok(service_info) = mdns_sd::ServiceInfo::new(
                 self.service_type,
                 &hostname,
                 &format!("{}.local.", hostname),
                 "0.0.0.0",
                 9001,
                 None,
-            ).expect("Failed to create mDNS service info");
-
-            mdns.register(service_info).expect("Failed to register mDNS service");
-            println!("P2P Discovery: Announced '{}' to the genetic cloud via mDNS.", hostname);
+            ) {
+                if mdns.register(service_info).is_ok() {
+                    self.has_registered = true;
+                    println!("P2P Discovery: Announced '{}' to the genetic cloud via mDNS.", hostname);
+                }
+            }
         }
     }
 
     /// Listens for new peers in the local genetic cloud
     pub fn listen(&mut self) {
-        if let Some(mdns) = &self.mdns
-            && let Ok(browser) = mdns.browse(self.service_type) {
+        if let Some(mdns) = &self.mdns {
+            if self.browser.is_none() {
+                if let Ok(browser) = mdns.browse(self.service_type) {
+                    self.browser = Some(browser);
+                }
+            }
+            if let Some(browser) = &self.browser {
                 while let Ok(event) = browser.recv_timeout(std::time::Duration::from_millis(10)) {
                     if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
                         let addr = info.get_addresses().iter().next()
@@ -251,6 +265,7 @@ impl DiscoveryService {
                     }
                 }
             }
+        }
     }
 
     /// Proactively announces a new SoundDNA availability to known peers.

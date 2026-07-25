@@ -1,6 +1,5 @@
 use egui::{Ui, Vec2, Sense, RichText, Frame, Margin};
 use crate::InspectorApp;
-use nullherz_dna::GeneticLibrary;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
@@ -8,7 +7,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     ui.add_space(theme.space_sm);
 
     if let Some(track_id) = app.library.selected_library_track {
-        if let Ok(Some(track)) = app.library_db.get_track(track_id) {
+        if let Some(track) = app.get_cached_track(track_id) {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&track.title).strong().size(theme.type_heading));
                 ui.label(RichText::new(format!("by {}", track.artist)).size(theme.type_body));

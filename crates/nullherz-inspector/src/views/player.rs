@@ -1,7 +1,6 @@
 use egui::{Ui, ScrollArea, Color32, Frame, Vec2, Sense, Stroke, RichText, Margin};
 use crate::InspectorApp;
 use audio_core::Telemetry;
-use nullherz_dna::GeneticLibrary;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     if app.decks.focused_deck >= 4 {
@@ -95,7 +94,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                     // OLED Status Display
                     let track_id = app.decks.now_playing[deck_idx];
-                    let track = track_id.and_then(|id| app.library_db.get_track(id).ok().flatten());
+                    let track = track_id.and_then(|id| app.get_cached_track(id));
                     let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[deck_idx]).unwrap_or(0);
 
                     Frame::none()
@@ -386,7 +385,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         ui.heading(RichText::new("Playlist Queue").size(theme.type_heading));
         let mut to_remove = None;
         for (idx, &track_id) in app.library.playlist_queue.iter().enumerate() {
-            if let Ok(Some(track)) = app.library_db.get_track(track_id) {
+            if let Some(track) = app.get_cached_track(track_id) {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(format!("{}. {} - {}", idx + 1, track.artist, track.title)).size(theme.type_body));
                     if ui.button(egui_phosphor::regular::X).clicked() { to_remove = Some(idx); }

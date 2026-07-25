@@ -51,22 +51,22 @@ fn render_crates_pane(app: &mut InspectorApp, ui: &mut Ui) {
     if ui.selectable_label(is_all, format!("{} ALL", egui_phosphor::regular::PACKAGE)).clicked() { app.library.active_crate = None; }
 
     ui.add_space(theme.space_xs);
-    let crates = app.library_db.list_crates().unwrap_or_default();
+    let crates = &app.library.cached_crates;
     for crate_name in crates {
         let is_selected = app.library.active_crate.as_deref() == Some(crate_name.as_str());
         if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::TAG, crate_name)).clicked() {
-            app.library.active_crate = Some(crate_name);
+            app.library.active_crate = Some(crate_name.clone());
             app.library.library_needs_refresh = true;
         }
     }
 
     ui.add_space(theme.space_sm);
     ui.label(RichText::new(format!("{} SMART", egui_phosphor::regular::STAR)).size(theme.type_caption).strong().color(theme.text_secondary));
-    let smart_crates = app.library_db.list_smart_crates().unwrap_or_default();
+    let smart_crates = &app.library.cached_smart_crates;
     for smart in smart_crates {
         let is_selected = app.library.active_crate.as_deref() == Some(smart.name.as_str());
         if ui.selectable_label(is_selected, &smart.name).clicked() {
-            app.library.active_crate = Some(smart.name);
+            app.library.active_crate = Some(smart.name.clone());
             app.library.library_needs_refresh = true;
         }
     }
@@ -146,15 +146,22 @@ fn render_smart_crate_builder(app: &mut InspectorApp, ui: &mut Ui) {
     });
 }
 
-fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
+fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, _track_id: u64) {
     let theme = app.theme;
-    if let Ok(Some(mut track)) = app.library_db.get_track(track_id) {
+    if let Some(mut track) = app.library.cached_inspected_track.take() {
+        let mut save_clicked = false;
+        let mut preview_clicked = false;
+        let mut energy_clicked = false;
+        let mut clear_clicked = false;
+
         render_card_group(ui, "TRACK INSPECTOR", &theme, |ui| {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     ui.text_edit_singleline(&mut track.title);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button(egui_phosphor::regular::X).clicked() { app.library.selected_library_track = None; }
+                        if ui.button(egui_phosphor::regular::X).clicked() {
+                            clear_clicked = true;
+                        }
                     });
                 });
                 ui.horizontal(|ui| {
@@ -167,8 +174,7 @@ fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
                 });
 
                 if ui.button("SAVE CHANGES").clicked() {
-                    let _ = app.library_db.save_track(&track);
-                    app.library.library_needs_refresh = true;
+                    save_clicked = true;
                 }
 
                 ui.add_space(theme.space_sm);
@@ -177,13 +183,10 @@ fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
                     ui.label(RichText::new("GENETIC PROFILE").size(theme.type_caption).strong().color(theme.accent));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.button("▶ PREVIEW").clicked() {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::Preview { sample_id: track.id }));
+                            preview_clicked = true;
                         }
                         if ui.button("⚡ ENERGY MATCH").on_hover_text("Generate smart crate with similar energy").clicked() {
-                            let tracks = app.library.cached_library_raw.clone();
-                            let new_crate = nullherz_dna::SmartCrateManager::generate_energy_matched_crate(&track, tracks, 0.7);
-                            let _ = app.library_db.save_smart_crate(&new_crate);
-                            app.trigger_library_refresh();
+                            energy_clicked = true;
                         }
                     });
                 });
@@ -203,6 +206,25 @@ fn render_track_inspector(app: &mut InspectorApp, ui: &mut Ui, track_id: u64) {
                 });
             });
         });
+
+        if save_clicked {
+            let _ = app.library_db.save_track(&track);
+            app.library.library_needs_refresh = true;
+        }
+        if preview_clicked {
+            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::Preview { sample_id: track.id }));
+        }
+        if energy_clicked {
+            let tracks = app.library.cached_library_raw.clone();
+            let new_crate = nullherz_dna::SmartCrateManager::generate_energy_matched_crate(&track, tracks, 0.7);
+            let _ = app.library_db.save_smart_crate(&new_crate);
+            app.trigger_library_refresh();
+        }
+        if clear_clicked {
+            app.library.selected_library_track = None;
+        } else {
+            app.library.cached_inspected_track = Some(track);
+        }
     }
 }
 
