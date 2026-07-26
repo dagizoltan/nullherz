@@ -18,9 +18,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     ui.add_space(theme.space_xs);
 
     // Waveform stack (top half of the window)
-    // Consumes exactly 50% of the available central-panel height.
+    // Consumes exactly 30% of the available central-panel height.
     // It sits OUTSIDE any ScrollArea so it remains persistent and visible at all times.
-    let waveform_section_h = total_h * 0.5;
+    let waveform_section_h = total_h * 0.30;
     let spacing_h = 2.0;
     let lane_h = (waveform_section_h - spacing_h * 3.0) / 4.0;
 
@@ -36,18 +36,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     ui.add_space(theme.space_xs);
 
     // Mixer section (bottom half of the window)
-    // Wrapped in a nested vertical ScrollArea so the mixer strips and master section scroll independently
-    // within the remaining available height of the central panel.
-    // horizontal_wrapped: on a narrow window (library sidebar open) the
-    // strips FLOW onto a second row instead of clipping off the right edge;
-    // ScrollArea::both is the backstop for extreme sizes.
+    // Redesigned to a 5-column single-screen layout with 2 decks on each side and the master section in the center.
     ScrollArea::both().id_source("mixer_scroll").show(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(theme.space_sm, theme.space_sm);
-            for i in 0..4 {
-                render_channel_strip(app, ui, i, telemetry);
-            }
-            render_master_section(app, ui, telemetry);
+        ui.columns(5, |cols| {
+            render_channel_strip(app, &mut cols[0], 0, telemetry);
+            render_channel_strip(app, &mut cols[1], 1, telemetry);
+            render_master_section(app, &mut cols[2], telemetry);
+            render_channel_strip(app, &mut cols[3], 2, telemetry);
+            render_channel_strip(app, &mut cols[4], 3, telemetry);
         });
     });
 }
@@ -290,7 +286,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
         .rounding(theme.radius_md)
         .inner_margin(Margin::symmetric(theme.space_sm, theme.space_md))
         .show(ui, |ui| {
-            ui.set_width(132.0);
+            ui.set_width(ui.available_width());
             ui.vertical_centered(|ui| {
                     // Header (Selectable title/indicator for focus)
                     let deck_id_label = (b'A' + i as u8) as char;
@@ -349,7 +345,7 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
         .rounding(theme.radius_md)
         .inner_margin(Margin::symmetric(theme.space_sm, theme.space_md))
         .show(ui, |ui| {
-            ui.set_width(210.0);
+            ui.set_width(ui.available_width());
             ui.vertical_centered(|ui| {
 
                 // Crossfader — drives BOTH sides of the stereo crossfader
@@ -358,7 +354,8 @@ fn render_master_section(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Optio
                 // fell back to node 0 = deck A's sampler.)
                 ui.label(RichText::new("CROSSFADER").size(theme.type_caption).color(theme.text_secondary));
                 ui.add_space(theme.space_xs);
-                let r_cross = widgets::render_horizontal_fader(ui, &mut app.mixer.crossfader_pos, 0.0..=1.0, theme.text_primary, 160.0, 32.0);
+                let xf_width = (ui.available_width() - 16.0).clamp(80.0, 160.0);
+                let r_cross = widgets::render_horizontal_fader(ui, &mut app.mixer.crossfader_pos, 0.0..=1.0, theme.text_primary, xf_width, 32.0);
                 if r_cross.changed() {
                     for name in ["master_xf_l", "master_xf_r"] {
                         if let Some(&node) = app.topo.node_map.get(name) {
