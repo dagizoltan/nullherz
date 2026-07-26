@@ -12,15 +12,22 @@ pub trait ClockProvider: Send + Sync {
 }
 
 /// A standard implementation of ClockProvider using std::time::Instant.
-/// Note: For Production Beta, this should be extended with so_timestamping
-/// on Linux to support true PTP/IEEE 1588 hardware clock discipline.
+/// Note: For Production Beta, this is extended with software-disciplined
+/// offset tracking using ClockServo and AtomicI64 to support smooth PTP
+/// synchronization on non-Linux / non-hardware environments.
 pub struct SystemClockProvider {
     start_time: std::time::Instant,
+    offset_ns: std::sync::atomic::AtomicI64,
+    servo: ClockServo,
 }
 
 impl SystemClockProvider {
     pub fn new() -> Self {
-        Self { start_time: std::time::Instant::now() }
+        Self {
+            start_time: std::time::Instant::now(),
+            offset_ns: std::sync::atomic::AtomicI64::new(0),
+            servo: ClockServo::default(),
+        }
     }
 }
 
@@ -37,16 +44,29 @@ impl ClockProvider for SystemClockProvider {
     }
 
     fn get_device_time_ns(&self) -> u64 {
-        // Fallback to system time until so_timestamping is integrated
-        self.get_system_time_ns()
+        let sys = self.get_system_time_ns();
+        let offset = self.offset_ns.load(std::sync::atomic::Ordering::Acquire);
+        if offset < 0 {
+            sys.saturating_sub(offset.unsigned_abs())
+        } else {
+            sys.saturating_add(offset as u64)
+        }
     }
 
     fn get_estimated_jitter_ns(&self) -> u64 {
-        0 // Baseline jitter
+        // Since we are smoothing the discipline, use the last offset as a jitter proxy
+        let last_offset = self.offset_ns.load(std::sync::atomic::Ordering::Acquire).abs();
+        (last_offset as u64).min(500) // Caps estimated baseline jitter
     }
 
-    fn synchronize_with_master(&self, _master_time_ns: u64, _round_trip_delay_ns: u64) {
-        // Placeholder for PTP sync logic
+    fn synchronize_with_master(&self, master_time_ns: u64, round_trip_delay_ns: u64) {
+        let local_time = self.get_system_time_ns();
+        // Basic PTP offset calculation: master_time + delay - local_arrival
+        let raw_offset = (master_time_ns as i64 + (round_trip_delay_ns / 2) as i64) - local_time as i64;
+
+        // Pass through servo for smoothing
+        let disciplined_offset = self.servo.sample(raw_offset) as i64;
+        self.offset_ns.store(disciplined_offset, std::sync::atomic::Ordering::Release);
     }
 }
 
@@ -254,5 +274,45 @@ mod clock_verification {
         let integral = f64::from_bits(servo.integral.load(std::sync::atomic::Ordering::Relaxed));
         kani::assert(integral <= 1_000_000.0, "Integral must be clamped to prevent windup");
         kani::assert(integral >= -1_000_000.0, "Integral must be clamped to prevent windup");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_system_clock_provider_discipline() {
+        let clock = SystemClockProvider::new();
+
+        // Initially offset is 0
+        let initial_diff = (clock.get_device_time_ns() as i64 - clock.get_system_time_ns() as i64).abs();
+        assert!(initial_diff < 500_000, "Initial offset should be extremely close to 0");
+
+        // Let's simulate synchronizing with a master clock that is 100,000,000 ns (100 ms) ahead of us
+        // t_master_send = current_local_time + 100,000,000. RTT delay is 2,000,000 ns.
+        let local_time = clock.get_system_time_ns();
+        let master_time = local_time + 100_000_000;
+        let rtt = 2_000_000;
+
+        clock.synchronize_with_master(master_time, rtt);
+
+        // Device time should now move towards master time smoothly
+        let actual_offset = clock.offset_ns.load(std::sync::atomic::Ordering::Acquire);
+        let diff1 = (actual_offset - 11_100_000).abs();
+        assert!(diff1 < 50_000, "Offset should be around 11,100,000, got {}, diff {}", actual_offset, diff1);
+
+        // Let's do another synchronization step to see smooth integration/tracking
+        let local_time2 = clock.get_system_time_ns();
+        let master_time2 = local_time2 + 100_000_000;
+        clock.synchronize_with_master(master_time2, rtt);
+
+        let actual_offset2 = clock.offset_ns.load(std::sync::atomic::Ordering::Acquire);
+        let diff2 = (actual_offset2 - 11_100_000).abs();
+        assert!(diff2 < 50_000, "Offset after 2nd sync should be around 11,100,000, got {}, diff {}", actual_offset2, diff2);
+
+        // Check estimated jitter
+        let jitter = clock.get_estimated_jitter_ns();
+        assert_eq!(jitter, 500, "Estimated jitter should be capped to 500");
     }
 }
