@@ -140,7 +140,8 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
                 && meta.bpm > 10.0 {
                     let sync_rate = (transport.bpm / meta.bpm) * self.playback_rate;
                     for voice in self.voices.iter_mut() {
-                        voice.playback_rate = sync_rate;
+                        let prev_rate = if voice.playback_rate == 0.0 { sync_rate } else { voice.playback_rate };
+                        let mut target_rate = sync_rate;
 
                         // PHASE LOCK
                         if transport.is_playing && voice.is_active {
@@ -166,12 +167,22 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
                                 let beat_threshold_samples = samples_per_beat as f32;
                                 if diff.abs() > beat_threshold_samples {
                                     voice.play_head = expected_pos_samples;
-                                } else if diff.abs() > 0.1 {
-                                    let k_p = 0.005; // Proportional gain
+                                    target_rate = sync_rate;
+                                } else if diff.abs() > 1.0 {
+                                    // Deadband of 1.0 sample avoids continuous micro-oscillations at steady state.
+                                    let k_p = 0.001; // Gentler proportional gain (down from 0.005) to reduce correction speed jitter.
                                     let rate_correction = (diff * k_p).clamp(-0.02, 0.02);
-                                    voice.playback_rate *= 1.0 + rate_correction;
+                                    target_rate = sync_rate * (1.0 + rate_correction);
                                 }
                             }
+                        }
+
+                        // Smoothly interpolate the playback rate using EMA to eliminate high-frequency pitch-modulation buzz.
+                        if self.slicer_mode {
+                            voice.playback_rate = target_rate;
+                        } else {
+                            let alpha = 0.1; // Smooth transition factor over blocks (approx. ~30ms response)
+                            voice.playback_rate = prev_rate + (target_rate - prev_rate) * alpha;
                         }
                     }
                 }
