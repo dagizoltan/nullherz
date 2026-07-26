@@ -56,9 +56,6 @@ impl StreamingManager {
                         if shutdown_feeder.load(Ordering::Relaxed) {
                             return;
                         }
-                        if shm_weak.strong_count() <= 1 {
-                            return;
-                        }
                         if let Some(shm_up) = shm_weak.upgrade() {
                             let rb = shm_up.ptr() as *const ShmRingBuffer<f32>;
                             match unsafe { (*rb).push(sample) } {
@@ -98,7 +95,7 @@ impl StreamingManager {
                             let mut current_block = Vec::with_capacity(1024);
 
                             while let Ok(packet) = probed.format.next_packet() {
-                                if shutdown_decoder.load(Ordering::Relaxed) || shm_weak.strong_count() <= 1 {
+                                if shutdown_decoder.load(Ordering::Relaxed) || shm_weak.upgrade().is_none() {
                                     break;
                                 }
 
@@ -108,8 +105,12 @@ impl StreamingManager {
 
                                     let chan_len = buf.frames();
                                     let num_chans = buf.spec().channels.count();
+                                    if shutdown_decoder.load(Ordering::Relaxed) || shm_weak.upgrade().is_none() {
+                                        break;
+                                    }
+
                                     for i in 0..chan_len {
-                                        if shutdown_decoder.load(Ordering::Relaxed) || shm_weak.strong_count() <= 1 {
+                                        if shutdown_decoder.load(Ordering::Relaxed) {
                                             break;
                                         }
 

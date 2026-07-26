@@ -88,6 +88,16 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
                     [egui::pos2(x, rect.max.y - h), egui::pos2(x, rect.max.y)],
                     egui::Stroke::new(1.0, Color32::from_white_alpha(alpha)),
                 );
+
+                // Elegant beat counters (1, 2, 3, 4) indicating bar/beat context to the DJ
+                let beat_num = (b % 4) + 1;
+                ui.painter().text(
+                    egui::pos2(x + 3.0, rect.max.y - h + 2.0),
+                    egui::Align2::LEFT_TOP,
+                    format!("{}", beat_num),
+                    egui::FontId::monospace(8.0),
+                    if b % 4 == 0 { theme.accent } else { theme.text_disabled },
+                );
             }
             b += 1;
         }
@@ -116,6 +126,19 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
 
     // The fixed center needle (cased for contrast on any band color).
     let cx = rect.center().x;
+
+    // Glowing visual pulse on the active playhead needle matching the current beat/tempo
+    let is_playing = app.decks.deck_playing[i];
+    if is_playing {
+        let beat_pos = telemetry.as_ref().map(|tel| tel.beat_position).unwrap_or(0.0);
+        let pulse = (1.0 - (beat_pos % 1.0) as f32).powf(3.0);
+        let glow_color = deck_color.linear_multiply(pulse * 0.8);
+        ui.painter().line_segment(
+            [egui::pos2(cx, rect.min.y), egui::pos2(cx, rect.max.y)],
+            egui::Stroke::new(6.0 + pulse * 8.0, glow_color),
+        );
+    }
+
     ui.painter().line_segment(
         [egui::pos2(cx, rect.min.y), egui::pos2(cx, rect.max.y)],
         egui::Stroke::new(4.0, Color32::from_black_alpha(160)),
