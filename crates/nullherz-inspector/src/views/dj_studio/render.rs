@@ -191,6 +191,21 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
         let track = app.decks.cached_tracks[i].clone();
 
         if let Some(ref t) = track {
+            let is_loading = if let Some(ref cond) = app.conductor {
+                cond.lock().hydration_pending.contains(&t.id)
+            } else {
+                false
+            };
+            let progress = if is_loading {
+                if let Some(ref cond) = app.conductor {
+                    cond.lock().hydration_progress.lock().get(&t.id).copied().unwrap_or(0.0)
+                } else {
+                    0.0
+                }
+            } else {
+                1.0
+            };
+
             // Track Title & Artist — char-safe truncation: byte-slicing
             // (&s[..18]) PANICS on a UTF-8 boundary, so any track title with
             // an accent or emoji at the wrong offset crashed the console.
@@ -202,7 +217,11 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
                 }
             };
             let title_text = truncate(&t.title, 20);
-            ui.label(RichText::new(title_text).strong().size(theme.type_caption).color(theme.text_primary));
+            if is_loading {
+                ui.label(RichText::new(format!("⏳ {}", title_text)).strong().size(theme.type_caption).color(theme.warning));
+            } else {
+                ui.label(RichText::new(title_text).strong().size(theme.type_caption).color(theme.text_primary));
+            }
 
             let artist_text = if t.artist.chars().count() > 15 {
                 format!("by {}...", t.artist.chars().take(13).collect::<String>())
@@ -234,15 +253,19 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
             // Time Display on the far right
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(theme.space_xs); // right padding
-                let sample_rate = telemetry.as_ref().map(|t| t.sample_rate).unwrap_or(44100.0);
-                let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[i]).unwrap_or(0);
-                let total_samples = t.metadata.total_samples;
+                if is_loading {
+                    ui.add(egui::ProgressBar::new(progress).desired_width(120.0).text(format!("LOADING {:.0}%", progress * 100.0)).fill(theme.accent));
+                } else {
+                    let sample_rate = telemetry.as_ref().map(|t| t.sample_rate).unwrap_or(44100.0);
+                    let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[i]).unwrap_or(0);
+                    let total_samples = t.metadata.total_samples;
 
-                let elapsed_str = format_duration(elapsed_samples, sample_rate);
-                let remaining_samples = total_samples.saturating_sub(elapsed_samples);
-                let remaining_str = format_duration(remaining_samples, sample_rate);
+                    let elapsed_str = format_duration(elapsed_samples, sample_rate);
+                    let remaining_samples = total_samples.saturating_sub(elapsed_samples);
+                    let remaining_str = format_duration(remaining_samples, sample_rate);
 
-                render_time_display(ui, &elapsed_str, &remaining_str, deck_color, &theme);
+                    render_time_display(ui, &elapsed_str, &remaining_str, deck_color, &theme);
+                }
             });
         } else {
             ui.label(RichText::new("NO TRACK LOADED").monospace().color(theme.text_disabled).size(theme.type_caption));

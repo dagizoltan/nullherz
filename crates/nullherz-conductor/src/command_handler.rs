@@ -125,12 +125,16 @@ impl CommandHandler {
                         let meta_template = track.metadata.clone();
                         let registry = conductor.transfusion_manager.sample_registry.clone();
                         let done_tx = conductor.hydration_done_tx.clone();
+                        let progress_map = conductor.hydration_progress.clone();
                         conductor.hydration_pending.insert(id);
                         let spawned = std::thread::Builder::new()
                             .name(format!("hydrate-{}", id))
                             .spawn(move || {
                                 println!("CommandHandler: Hydrating sample {} from {} (background)", id, path);
-                                let decoded = crate::folder_monitor::decode_audio_file(&path);
+                                let progress_map_clone = progress_map.clone();
+                                let decoded = crate::folder_monitor::decode_audio_file_with_progress(&path, move |pct| {
+                                    progress_map_clone.lock().insert(id, pct);
+                                });
                                 // The library row may predate the planar layout
                                 // (or the file may have changed); trust what we
                                 // just decoded.
