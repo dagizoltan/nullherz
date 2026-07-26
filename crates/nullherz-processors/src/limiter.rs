@@ -72,6 +72,7 @@ impl LimiterProcessor {
 impl nullherz_traits::RtSafe for LimiterProcessor {}
 
 impl SignalProcessor for LimiterProcessor {
+    #[allow(clippy::needless_range_loop)]
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         let num_channels = inputs.len().min(outputs.len()).min(MAX_CHANNELS);
         if num_channels == 0 { return; }

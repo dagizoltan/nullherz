@@ -1,6 +1,7 @@
 // Non-RT plane (library scan worker thread): thread spawn/sleep are sanctioned here.
 // The disallowed-methods lint exists to protect the audio hot path only.
 #![allow(clippy::disallowed_methods)]
+#![allow(clippy::collapsible_if)]
 use nullherz_traits::SampleRegistry;
 use std::sync::Arc;
 use nullherz_dna::{ LibraryDatabase, LibraryTrack, GeneticLibrary};

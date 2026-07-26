@@ -1,7 +1,8 @@
 use nullherz_traits::{AudioProcessor, SignalProcessor, ProcessContext, ProcessorCommand, MidiResponder, SnapshotProvider};
 use ipc_layer::ShmRingBuffer;
 use crate::MAX_CHANNELS;
-use std::sync::{Arc, Weak, Mutex, OnceLock};
+use std::sync::{Arc, Weak, OnceLock};
+use parking_lot::Mutex;
 use std::collections::HashMap;
 
 static STREAMING_REGISTRY: OnceLock<Mutex<HashMap<u64, Weak<ipc_layer::SharedMemory>>>> = OnceLock::new();
@@ -11,17 +12,13 @@ fn get_registry() -> &'static Mutex<HashMap<u64, Weak<ipc_layer::SharedMemory>>>
 }
 
 pub fn register_streaming_buffer(node_idx: u64, shm: Arc<ipc_layer::SharedMemory>) {
-    if let Ok(mut map) = get_registry().lock() {
-        map.insert(node_idx, Arc::downgrade(&shm));
-    }
+    let mut map = get_registry().lock();
+    map.insert(node_idx, Arc::downgrade(&shm));
 }
 
 pub fn get_streaming_buffer(node_idx: u64) -> Option<Arc<ipc_layer::SharedMemory>> {
-    if let Ok(map) = get_registry().lock() {
-        map.get(&node_idx).and_then(|weak| weak.upgrade())
-    } else {
-        None
-    }
+    let map = get_registry().lock();
+    map.get(&node_idx).and_then(|weak| weak.upgrade())
 }
 
 pub struct StreamingSamplerProcessor {
@@ -56,6 +53,7 @@ unsafe impl Send for StreamingSamplerProcessor {}
 unsafe impl Sync for StreamingSamplerProcessor {}
 
 impl SignalProcessor for StreamingSamplerProcessor {
+    #[allow(clippy::needless_range_loop)]
     fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         if outputs.is_empty() { return; }
         let num_samples = outputs[0].len();

@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::needless_range_loop)]
 use serde::{Serialize, Deserialize};
 use serde_with::serde_as;
 

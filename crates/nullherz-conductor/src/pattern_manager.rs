@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use serde::{Serialize, Deserialize};
 use nullherz_traits::Command;
 

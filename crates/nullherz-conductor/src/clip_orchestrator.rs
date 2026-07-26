@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use std::sync::Arc;
 use nullherz_traits::{Command, PerformanceCommand, SoundDNA, TopologyMutation};
 use serde::{Serialize, Deserialize};
@@ -31,6 +32,12 @@ pub struct ClipOrchestrator {
     pub grid: ClipGrid,
     pub pending_launches: Vec<(usize, usize)>, // (Row, Column)
     pub last_quantize_beat: i64,
+}
+
+impl Default for ClipOrchestrator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ClipOrchestrator {

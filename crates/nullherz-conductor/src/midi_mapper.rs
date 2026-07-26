@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use nullherz_traits::{MidiEvent, Command, MidiMap, MidiTarget};
 use parking_lot::Mutex;
 
