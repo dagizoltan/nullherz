@@ -16,11 +16,17 @@ pub trait ClockProvider: Send + Sync {
 /// on Linux to support true PTP/IEEE 1588 hardware clock discipline.
 pub struct SystemClockProvider {
     start_time: std::time::Instant,
+    offset_ns: std::sync::atomic::AtomicI64,
+    servo: ClockServo,
 }
 
 impl SystemClockProvider {
     pub fn new() -> Self {
-        Self { start_time: std::time::Instant::now() }
+        Self {
+            start_time: std::time::Instant::now(),
+            offset_ns: std::sync::atomic::AtomicI64::new(0),
+            servo: ClockServo::default(),
+        }
     }
 }
 
@@ -37,16 +43,29 @@ impl ClockProvider for SystemClockProvider {
     }
 
     fn get_device_time_ns(&self) -> u64 {
-        // Fallback to system time until so_timestamping is integrated
-        self.get_system_time_ns()
+        let sys = self.get_system_time_ns();
+        let offset = self.offset_ns.load(std::sync::atomic::Ordering::Acquire);
+        if offset >= 0 {
+            sys.saturating_add(offset as u64)
+        } else {
+            sys.saturating_sub(offset.unsigned_abs())
+        }
     }
 
     fn get_estimated_jitter_ns(&self) -> u64 {
         0 // Baseline jitter
     }
 
-    fn synchronize_with_master(&self, _master_time_ns: u64, _round_trip_delay_ns: u64) {
-        // Placeholder for PTP sync logic
+    fn synchronize_with_master(&self, master_time_ns: u64, round_trip_delay_ns: u64) {
+        let local_time = self.get_system_time_ns();
+        // Basic PTP offset calculation: master_time + delay - local_arrival
+        let raw_offset = (master_time_ns as i64)
+            .saturating_add((round_trip_delay_ns / 2) as i64)
+            .saturating_sub(local_time as i64);
+
+        // Pass through servo for smoothing
+        let disciplined_offset = self.servo.sample(raw_offset) as i64;
+        self.offset_ns.store(disciplined_offset, std::sync::atomic::Ordering::Release);
     }
 }
 
