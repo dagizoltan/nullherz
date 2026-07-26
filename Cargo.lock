@@ -3378,6 +3378,7 @@ dependencies = [
  "ipc-layer",
  "nullherz-dna",
  "nullherz-traits",
+ "parking_lot",
  "rand 0.8.6",
  "serde",
  "wide",

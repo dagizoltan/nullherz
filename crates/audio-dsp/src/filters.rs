@@ -49,6 +49,7 @@ impl MoogLadder {
 }
 
 impl Filter for MoogLadder {
+    #[allow(clippy::needless_range_loop)]
     fn process_sample(&mut self, mut input: f32) -> f32 {
         if !input.is_finite() {
             input = 0.0;

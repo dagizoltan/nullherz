@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::needless_range_loop)]
 use crate::orchestrator::Conductor;
 use nullherz_traits::{Command, CoreCommand, PerformanceCommand, ResourceCommand, DnaCommand};
 use std::sync::Arc;

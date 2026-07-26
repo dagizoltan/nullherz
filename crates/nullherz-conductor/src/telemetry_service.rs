@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use crate::orchestrator::Conductor;
 use nullherz_traits::telemetry::Telemetry;
 use nullherz_dna::GeneticLibrary;

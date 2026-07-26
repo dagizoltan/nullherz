@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use nullherz_traits::{Command, PerformanceCommand, MixerCommand, DeckParamType};
 use nullherz_mixer::MixerManager;
 
