@@ -104,8 +104,28 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         .show(ui, |ui| {
                             ui.vertical(|ui| {
                                 if let Some(ref t) = track {
+                                    let is_loading = if let Some(ref cond) = app.conductor {
+                                        cond.lock().hydration_pending.contains(&t.id)
+                                    } else {
+                                        false
+                                    };
+                                    let progress = if is_loading {
+                                        if let Some(ref cond) = app.conductor {
+                                            cond.lock().hydration_progress.lock().get(&t.id).copied().unwrap_or(0.0)
+                                        } else {
+                                            0.0
+                                        }
+                                    } else {
+                                        1.0
+                                    };
+
                                     ui.horizontal(|ui| {
-                                        ui.label(RichText::new(&t.title).strong().size(theme.type_body).color(theme.text_primary));
+                                        if is_loading {
+                                            ui.add(egui::Spinner::new().size(12.0));
+                                            ui.label(RichText::new(format!("LOADING ({:.0}%): {}", progress * 100.0, &t.title)).strong().size(theme.type_body).color(theme.warning));
+                                        } else {
+                                            ui.label(RichText::new(&t.title).strong().size(theme.type_body).color(theme.text_primary));
+                                        }
                                         ui.add_space(theme.space_sm);
                                         ui.label(RichText::new(format!("by {}", t.artist)).size(theme.type_caption).color(theme.text_secondary));
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

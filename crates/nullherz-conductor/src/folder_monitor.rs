@@ -183,6 +183,14 @@ impl DecodedAudio {
 /// Decode any supported audio file to a planar f32 buffer.
 /// Non-RT; used by the scanner and by on-demand deck-load hydration.
 pub fn decode_audio_file(path: &str) -> DecodedAudio {
+    decode_audio_file_with_progress(path, |_| {})
+}
+
+/// Decode any supported audio file to a planar f32 buffer, with progress updates.
+pub fn decode_audio_file_with_progress<F>(path: &str, mut progress_cb: F) -> DecodedAudio
+where
+    F: FnMut(f32) + Send + 'static,
+{
     use symphonia::core::audio::Signal;
     if let Ok(file) = std::fs::File::open(path) {
         let mss = symphonia::core::io::MediaSourceStream::new(Box::new(file), Default::default());
@@ -193,6 +201,8 @@ pub fn decode_audio_file(path: &str) -> DecodedAudio {
                     // Accumulate per channel, then concatenate: packets arrive
                     // in chunks, so channels can only be laid out contiguously
                     // once the whole file is known.
+                    let total_frames = track.codec_params.n_frames;
+                    let mut decoded_frames = 0u64;
                     let mut planes: Vec<Vec<f32>> = Vec::new();
                     let mut sample_buf = None;
                     while let Ok(packet) = probed.format.next_packet() {
@@ -206,6 +216,14 @@ pub fn decode_audio_file(path: &str) -> DecodedAudio {
                             }
                             for (c, plane) in planes.iter_mut().enumerate().take(num_chans) {
                                 plane.extend_from_slice(&buf.chan(c)[..chan_len]);
+                            }
+
+                            decoded_frames += chan_len as u64;
+                            if let Some(total) = total_frames {
+                                if total > 0 {
+                                    let progress = (decoded_frames as f32 / total as f32).clamp(0.0, 1.0);
+                                    progress_cb(progress);
+                                }
                             }
                         }
                     }

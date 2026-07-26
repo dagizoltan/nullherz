@@ -60,6 +60,7 @@ pub struct Conductor {
     /// Samples currently being decoded on background hydration threads
     /// (see command_handler): dedupes concurrent loads of the same track.
     pub hydration_pending: std::collections::HashSet<u64>,
+    pub hydration_progress: std::sync::Arc<parking_lot::Mutex<std::collections::HashMap<u64, f32>>>,
     pub(crate) hydration_done_tx: std::sync::mpsc::Sender<u64>,
     hydration_done_rx: std::sync::mpsc::Receiver<u64>,
     pub is_streaming: bool,
@@ -133,6 +134,7 @@ impl Conductor {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             hydration_pending: std::collections::HashSet::new(),
+            hydration_progress: std::sync::Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
             hydration_done_tx,
             hydration_done_rx,
             is_streaming: false,
@@ -206,6 +208,7 @@ impl Conductor {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             hydration_pending: std::collections::HashSet::new(),
+            hydration_progress: std::sync::Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
             hydration_done_tx,
             hydration_done_rx,
             is_streaming: false,
@@ -532,6 +535,7 @@ impl Conductor {
         let hydrated: Vec<u64> = self.hydration_done_rx.try_iter().collect();
         for sample_id in hydrated {
             self.hydration_pending.remove(&sample_id);
+            self.hydration_progress.lock().remove(&sample_id);
             let decks: Vec<char> = self
                 .mixer_manager
                 .deck_samples

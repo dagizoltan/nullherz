@@ -125,6 +125,7 @@ pub struct InspectorApp {
     pub(crate) theme: nullherz_ui_hal::Theme,
     pub(crate) last_update_time: f64,
     pub(crate) _conductor_thread: Option<std::thread::JoinHandle<()>>,
+    pub(crate) conductor: Option<Arc<Mutex<nullherz_conductor::Conductor>>>,
 }
 
 impl InspectorApp {
@@ -235,7 +236,7 @@ impl InspectorApp {
         let db_arc = Arc::new(parking_lot::Mutex::new(raw_db));
         let library_db_wrapper = SharedLibraryDb(db_arc.clone());
 
-        let (conductor_thread, _conductor) = start_in_process_conductor(cmd_rx, last_telemetry.clone(), db_arc, None);
+        let (conductor_thread, conductor) = start_in_process_conductor(cmd_rx, last_telemetry.clone(), db_arc, None);
 
         let default_view = View::Console;
         let mut app = Self {
@@ -243,6 +244,7 @@ impl InspectorApp {
             command_sender: cmd_tx,
             last_telemetry,
             _conductor_thread: Some(conductor_thread),
+            conductor: Some(conductor),
             active_view: default_view,
             mixer: Default::default(),
             decks: Default::default(),
