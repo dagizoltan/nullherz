@@ -872,6 +872,7 @@ fn main() -> eframe::Result<()> {
 
     let native_options = eframe::NativeOptions {
         renderer,
+        viewport: egui::ViewportBuilder::default().with_fullscreen(true),
         ..Default::default()
     };
 

@@ -107,9 +107,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             ui.horizontal(|ui| {
                 // 1. LEFT SIDE: Stationary Track Headers column (100.0px width)
                 ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
                     // Step number header space on the left to align with grid step numbers
-                    ui.add_space(20.0);
-                    ui.add_space(app.theme.space_sm);
+                    ui.add_space(32.0);
 
                     for track_idx in 0..16 {
                         let track_color = app.theme.track_colors[track_idx];
@@ -227,26 +227,27 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         }
 
                         if track_idx < 15 {
-                            ui.add_space(app.theme.space_xs);
+                            ui.add_space(6.0);
                         }
                     }
                 });
 
-                ui.add_space(app.theme.space_sm);
+                ui.add_space(6.0);
 
                 // 2. RIGHT SIDE: Scrollable Endless Step Grid
                 ScrollArea::horizontal()
                     .id_source("composer_endless_grid_scroll_h")
                     .show(ui, |ui| {
                         ui.vertical(|ui| {
-                            // Step Numbers header row
-                            ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            // Step Numbers header row (allocated exact height 22.0)
+                            ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                 ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
                                 for slot_idx in 0..steps_count {
                                     if slot_idx > 0 && slot_idx % 4 == 0 {
                                         ui.add_space(4.0);
                                     }
-                                    let (rect, _) = ui.allocate_exact_size(Vec2::new(24.0, 20.0), Sense::hover());
+                                    let (rect, _) = ui.allocate_exact_size(Vec2::new(24.0, 22.0), Sense::hover());
                                     if slot_idx % 4 == 0 {
                                         let beat_num = (slot_idx / 4) + 1;
                                         ui.painter().text(
@@ -263,7 +264,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 }
                             });
 
-                            ui.add_space(app.theme.space_sm);
+                            ui.add_space(10.0);
 
                             // Render 16 horizontal step rows
                             for track_idx in 0..16 {
@@ -343,7 +344,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         .stroke(app.theme.border_stroke)
                                         .inner_margin(Margin::same(4.0))
                                         .show(ui, |ui| {
-                                            ui.set_height(50.0);
+                                            ui.set_height(80.0);
                                             ui.horizontal(|ui| {
                                                 ui.label(RichText::new("VOLUME").size(app.theme.type_caption).color(app.theme.text_secondary));
                                                 let volume_color = if is_muted { app.theme.bg_inset } else { track_color };
@@ -401,7 +402,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 }
 
                                 if track_idx < 15 {
-                                    ui.add_space(app.theme.space_xs);
+                                    ui.add_space(6.0);
                                 }
                             }
                         });
