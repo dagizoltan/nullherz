@@ -70,35 +70,20 @@ impl MixerOrchestrator {
                                 eprintln!("MixerOrchestrator: deck {} has no sequencer node; groove transfusion skipped.", deck_id);
                             }
 
-                            // Formant-Driven EQ: Automatically "de-ess" or "enhance" based on formant peaks
-                            // Formant peaks are (Freq, Q, Gain)
-                            for (i, peak) in track.metadata.dna.spectral.formant_peaks.iter().enumerate() {
-                                if peak.0 > 0.0 {
-                                    // Map top 3 peaks to BiquadEQ bands 0, 1, 2 if available
-                                    if i < 3 {
-                                        translated.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                            target_id: nodes.filter_id as u64, // Assume filter_id points to a BiquadEQ for this logic
-                                            param_id: (i * 3) as u32,      // Freq
-                                            value: peak.0,
-                                            ramp_duration_samples: 1024,
-                                        }));
-                                        translated.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                            target_id: nodes.filter_id as u64,
-                                            param_id: (i * 3 + 1) as u32,  // Q
-                                            value: (peak.1 as f32 / 100.0).max(0.1),
-                                            ramp_duration_samples: 1024,
-                                        }));
-                                        // Reduce gain of sharp peaks to "tame" the sample
-                                        let reduction = -3.0f32;
-                                        translated.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                            target_id: nodes.filter_id as u64,
-                                            param_id: (i * 3 + 2) as u32,  // Gain
-                                            value: reduction,
-                                            ramp_duration_samples: 1024,
-                                        }));
-                                    }
-                                }
-                            }
+                            // Formant-Driven EQ removed: it addressed nodes.filter_id
+                            // as if it were a (freq, Q, gain) BiquadEQ, but that node
+                            // is a RAW BiquadProcessor whose params 0..4 are the
+                            // coefficients b0,b1,b2,a1,a2. The mapping wrote the DNA
+                            // Q (hardcoded to 100 by analysis -> 100/100 = 1.0)
+                            // straight into the pole coefficient a2, and the formant
+                            // frequency (always > 10, so rejected) never landed at all.
+                            // Result: poles at z = +/-j, exactly on the unit circle -
+                            // an undamped ~fs/4 (11 kHz) oscillator that rang forever
+                            // and did not stop when the deck stopped (the filter's IIR
+                            // feedback sustains with no input). The feature never
+                            // produced a real formant EQ; a correct version needs a
+                            // dedicated peaking-EQ node with RBJ coefficients, not raw
+                            // coefficients written onto the deck's DJ filter.
                         }
                     }
                 }

@@ -2,6 +2,20 @@ use nullherz_traits::{AudioProcessor, ProcessContext, Command, ProcessorCommand}
 use audio_dsp::BiquadCoefficients;
 use crate::dsp_kernel_processor::MultiChannelDspProcessor;
 
+/// Force both poles of a direct-form biquad strictly inside the unit circle so
+/// a raw-coefficient set can never make the filter self-oscillate. A stable
+/// biquad denominator `1 + a1 z^-1 + a2 z^-2` must satisfy the stability
+/// triangle: `|a2| < 1` and `|a1| < 1 + a2`. `R < 1` keeps a margin off the
+/// boundary (poles exactly ON the circle are undamped oscillators — that was
+/// the DNA formant-EQ bug, which wrote a2 = 1.0 and rang an ~fs/4 tone forever).
+#[inline]
+fn stabilize_denominator(coeffs: &mut BiquadCoefficients) {
+    const R: f32 = 0.9995;
+    coeffs.a2 = coeffs.a2.clamp(-R, R);
+    let a1_max = (1.0 + coeffs.a2) * R;
+    coeffs.a1 = coeffs.a1.clamp(-a1_max, a1_max);
+}
+
 pub struct BiquadProcessor {
     /// Stereo (2-channel) fast path: L/R run together in SIMD lanes with the
     /// same per-sample coefficient ramp as the scalar filters. Used when the
@@ -69,6 +83,7 @@ fn set_parameter(&mut self, param_id: u32, value: f32, ramp_duration_samples: u3
             4 => coeffs.a2 = value,
             _ => return,
         }
+        stabilize_denominator(&mut coeffs);
         for f in self.inner.kernels.iter_mut() {
             f.set_coeffs_ramped(coeffs, ramp_duration_samples);
         }
@@ -183,6 +198,7 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
             4 => coeffs.a2 = value,
             _ => return,
         }
+        stabilize_denominator(&mut coeffs);
         self.inner.coeffs = coeffs;
     }
 fn apply_command(&mut self, command: &ProcessorCommand) {

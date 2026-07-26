@@ -6,6 +6,10 @@ pub struct Timeline {
     pub current_beat: f64,
     pub last_breeding_secs: u64,
     pub last_matchmaking_secs: u64,
+    /// Background evolutionary auto-breeding. OFF by default: it silently filled
+    /// the library with generated children every 10 s. Manual breeding from the
+    /// DNA Breeder screen is unaffected by this flag.
+    pub auto_breed_enabled: bool,
 }
 
 impl Default for Timeline {
@@ -18,6 +22,7 @@ impl Default for Timeline {
             current_beat: 0.0,
             last_breeding_secs: 0,
             last_matchmaking_secs: 0,
+            auto_breed_enabled: false,
         }
     }
 }

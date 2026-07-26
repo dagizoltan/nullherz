@@ -1,0 +1,25 @@
+{
+  "restore_last_session": false,
+  "default_view_on_launch": "Console",
+  "autosave_enabled": false,
+  "autosave_interval_mins": 5,
+  "shortcuts_enabled": true,
+  "theme_accent": [
+    0,
+    255,
+    200,
+    255
+  ],
+  "theme_success": [
+    80,
+    220,
+    100,
+    255
+  ],
+  "theme_danger": [
+    255,
+    50,
+    50,
+    255
+  ]
+}

@@ -34,6 +34,12 @@ pub struct MixerManager {
     /// Needed to resolve a deck's sampler NODE back to its TRACK, e.g. when
     /// persisting hot cues.
     pub deck_samples: HashMap<char, u64>,
+    /// Decks currently playing. PlayDeck starts the master transport clock
+    /// (Core::Play) but StopDeck only stops the deck's sampler node — so the
+    /// transport, and every readout driven by it (the "POS" beat counter),
+    /// would run forever after the first play. Tracking this lets the command
+    /// handler freeze the transport once the LAST deck stops.
+    pub playing_decks: std::collections::HashSet<char>,
 }
 
 impl MixerManager {
@@ -44,6 +50,7 @@ impl MixerManager {
             deck_mappings: HashMap::new(),
             node_names: HashMap::new(),
             deck_samples: HashMap::new(),
+            playing_decks: std::collections::HashSet::new(),
         }
     }
 

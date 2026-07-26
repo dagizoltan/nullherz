@@ -173,6 +173,29 @@ impl CommandHandler {
             translated_commands.extend(crate::mixer_orchestrator::MixerOrchestrator::translate_command(cmd, &conductor.mixer_manager, &conductor.library));
         }
 
+        // 1b. Freeze the master transport when the last deck stops. PlayDeck
+        // emits Core::Play (starting the global beat clock) but StopDeck only
+        // stops the deck's sampler node — so the transport, and the "POS"
+        // beat-position readout it drives, ran forever after the first play.
+        // Track which decks are live and append Core::Stop once none remain
+        // (Stop freezes beat_position; it is not reset).
+        let mut freeze_transport = false;
+        for cmd in &commands {
+            match cmd {
+                Command::Performance(PerformanceCommand::PlayDeck { deck_id }) => {
+                    conductor.mixer_manager.playing_decks.insert(*deck_id);
+                }
+                Command::Performance(PerformanceCommand::StopDeck { deck_id }) => {
+                    conductor.mixer_manager.playing_decks.remove(deck_id);
+                    freeze_transport = conductor.mixer_manager.playing_decks.is_empty();
+                }
+                _ => {}
+            }
+        }
+        if freeze_transport {
+            translated_commands.push(Command::Core(nullherz_traits::CoreCommand::Stop));
+        }
+
         // Broadcast to remote nodes (Distributed Control Plane)
         for cmd in &commands {
             let ts_cmd = nullherz_traits::TimestampedCommand {
@@ -537,6 +560,36 @@ impl CommandHandler {
         }
     }
 
+    /// Ensure a library track's audio is present in the sample registry,
+    /// decoding it from disk if needed. Used by breeding, which operates on
+    /// registry buffers — a parent chosen from the library list may never have
+    /// been loaded on a deck. Decodes synchronously (this runs on the conductor
+    /// thread, never the audio thread); breeding is a deliberate one-off action.
+    fn ensure_sample_hydrated(conductor: &mut Conductor, sample_id: u64) {
+        if conductor.transfusion_manager.sample_registry.get(sample_id).is_some() {
+            return;
+        }
+        let track = { conductor.library.lock().get_track(sample_id).ok().flatten() };
+        let Some(track) = track else {
+            eprintln!("Breeding: parent {} has no library entry.", sample_id);
+            return;
+        };
+        if !std::path::Path::new(&track.path).exists() {
+            eprintln!("Breeding: parent {} file missing ({}); cannot hydrate.", sample_id, track.path);
+            return;
+        }
+        let decoded = crate::folder_monitor::decode_audio_file(&track.path);
+        if decoded.frames <= 1 {
+            eprintln!("Breeding: parent {} decoded empty ({}).", sample_id, track.path);
+            return;
+        }
+        let mut metadata = (*track.metadata).clone();
+        metadata.total_samples = decoded.frames as u64;
+        metadata.channels = decoded.channels as u16;
+        conductor.transfusion_manager.sample_registry.register_with_metadata(
+            sample_id, decoded.samples, std::sync::Arc::new(metadata));
+    }
+
     fn handle_resource_command(conductor: &mut Conductor, cmd: ResourceCommand) -> bool {
         match cmd {
             ResourceCommand::ScanFolder { path } => {
@@ -722,11 +775,18 @@ impl CommandHandler {
                  true
             }
             ResourceCommand::CommitBreeding { parent_a_id, parent_b_id, bias } => {
+                // The breeder needs both parents' AUDIO in the registry. A track
+                // picked from the library list is not necessarily loaded on a
+                // deck, so breeding silently did nothing. Decode-on-demand first.
+                Self::ensure_sample_hydrated(conductor, parent_a_id);
+                Self::ensure_sample_hydrated(conductor, parent_b_id);
                 let lib = conductor.library.lock();
                 conductor.transfusion_manager.commit_breeding(parent_a_id, parent_b_id, bias, &lib);
                 true
             }
             ResourceCommand::CommitChaoticBreeding { parent_a_id, parent_b_id, bias, chaotic_strength } => {
+                Self::ensure_sample_hydrated(conductor, parent_a_id);
+                Self::ensure_sample_hydrated(conductor, parent_b_id);
                 let lib = conductor.library.lock();
                 conductor.transfusion_manager.commit_chaotic_breeding(parent_a_id, parent_b_id, bias, chaotic_strength, &lib);
                 true

@@ -3,6 +3,49 @@ use nullherz_dna::{ LibraryDatabase, GeneticLibrary};
 use nullherz_traits::{SampleRegistry, RenderingEngine, SampleMetadata};
 use audio_dsp::TransientDetector;
 
+/// A track produced by the app (breeding, chaotic breeding, or live capture)
+/// rather than imported from disk. These are excluded from the auto-breeding
+/// PARENT pool: if a generated child can be a parent, every new child becomes a
+/// parent for the next cycle and the library grows without bound — the "endless
+/// auto-breeding loop". Detected by the output-path prefixes the breeder writes.
+pub(crate) fn is_generated_track(path: &str) -> bool {
+    path.starts_with("evolution/")
+        || path.starts_with("breeding/")
+        || path.starts_with("captures/")
+}
+
+/// Persist a bred child's audio to disk so it survives a restart and is
+/// playable: the breeder registers the child in the (in-memory) sample registry
+/// AND writes a library row pointing at `path`, but nothing ever created the
+/// file, so on the next boot the deck-load hydrator hit a missing path and the
+/// child was silent. `buffer` is PLANAR (channel c at `[c*frames..]`); a WAV is
+/// interleaved, so de-planarize on the way out. On reload `decode_audio_file`
+/// re-planarizes it, round-tripping cleanly.
+pub(crate) fn write_planar_child_wav(path: &str, buffer: &[f32], channels: usize) -> std::io::Result<()> {
+    let channels = channels.max(1);
+    let frames = buffer.len() / channels;
+    if frames == 0 {
+        return Err(std::io::Error::other("empty child buffer"));
+    }
+    if let Some(dir) = std::path::Path::new(path).parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let spec = hound::WavSpec {
+        channels: channels as u16,
+        sample_rate: 44_100,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create(path, spec).map_err(std::io::Error::other)?;
+    for f in 0..frames {
+        for c in 0..channels {
+            writer.write_sample(buffer[c * frames + f]).map_err(std::io::Error::other)?;
+        }
+    }
+    writer.finalize().map_err(std::io::Error::other)?;
+    Ok(())
+}
+
 /// Manages the registration and lifecycle of audio DNA (samples) captured by the engine.
 /// This component acts as the non-RT side of the 'Transfusion' synthesis layer.
 pub struct EvolutionaryBreeder {
@@ -18,8 +61,21 @@ impl EvolutionaryBreeder {
 
     pub fn run_breeding_cycle(&self) {
         let lib = self.library.lock();
-        if let Ok(tracks) = lib.list_tracks() {
+        if let Ok(all_tracks) = lib.list_tracks() {
+            // Only IMPORTED tracks are eligible parents; auto-bred children are
+            // excluded so a generation cannot breed with itself and grow the
+            // library forever. `perform_breeding` also derives a DETERMINISTIC
+            // child id per parent pair, so re-breeding the same pair overwrites
+            // rather than accumulates — together these make the cycle converge.
+            let tracks: Vec<_> = all_tracks.iter().filter(|t| !is_generated_track(&t.path)).cloned().collect();
             if tracks.len() < 2 { return; }
+
+            // Termination ceiling: stop once we hold roughly one child per
+            // eligible parent. Without it the run still converges (bounded by
+            // C(n,2) distinct pair-children) but churns for many cycles; this
+            // ends the background work early and predictably.
+            let generated = all_tracks.len() - tracks.len();
+            if generated >= tracks.len() { return; }
 
             // Intelligent Matchmaking: Select parents with a 'genetic sweet-spot'
             // We want parents that are similar enough to be compatible, but different enough to mutate.
@@ -79,9 +135,20 @@ impl EvolutionaryBreeder {
             }
 
             let child_id = id_a ^ id_b ^ 0xECA;
+            let channels = ((*parent_a.metadata).channels as usize).max(1);
             let mut child_metadata_struct = (*parent_a.metadata).clone();
             child_metadata_struct.dna = child_dna;
+            // The blended buffer is min(len_a, len_b); keep total_samples honest
+            // so the reloaded child's planar layout and playhead range are right.
+            child_metadata_struct.total_samples = (child_buffer.len() / channels) as u64;
             let child_metadata = Arc::new(child_metadata_struct);
+
+            let path = format!("evolution/child_{}.wav", child_id);
+            // Persist the audio to disk, or the library row points at a file that
+            // never existed and the child is silent after the next restart.
+            if let Err(e) = write_planar_child_wav(&path, &child_buffer, channels) {
+                eprintln!("Evolutionary Breeder: failed to write {}: {}", path, e);
+            }
 
             self.sample_registry.register_with_metadata(child_id, Arc::new(child_buffer), child_metadata.clone());
 
@@ -93,7 +160,7 @@ impl EvolutionaryBreeder {
 
             let track = nullherz_dna::LibraryTrack {
                 id: child_id,
-                path: format!("evolution/child_{}.wav", child_id),
+                path,
                 title: if use_chaotic {
                     format!("Chaotic Child ({} x {})", (*parent_a.metadata).dna.schema_version, (*parent_b.metadata).dna.schema_version)
                 } else {
@@ -193,17 +260,23 @@ impl TransfusionManager {
             use std::time::{SystemTime, UNIX_EPOCH};
             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
             let child_id = (parent_a_id ^ parent_b_id).wrapping_add(now);
+            let channels = ((*parent_a.metadata).channels as usize).max(1);
             let mut child_metadata_struct = (*parent_a.metadata).clone();
             child_metadata_struct.dna = child_dna;
+            child_metadata_struct.total_samples = (child_buffer.len() / channels) as u64;
             let child_metadata = Arc::new(child_metadata_struct);
 
+            let path = format!("breeding/child_{}.wav", child_id);
+            if let Err(e) = write_planar_child_wav(&path, &child_buffer, channels) {
+                eprintln!("Breeding: failed to write {}: {}", path, e);
+            }
             let buffer_arc = Arc::new(child_buffer);
             self.sample_registry.register_with_metadata(child_id, buffer_arc, child_metadata.clone());
 
             // 4. Save to Database
             let track = nullherz_dna::LibraryTrack {
                 id: child_id,
-                path: format!("breeding/child_{}.wav", child_id),
+                path,
                 title: format!("Child of {} x {}", parent_a_id, parent_b_id),
                 artist: "AnaWaves Breeder".to_string(),
                 album: "Breeding Lab".to_string(),
@@ -232,17 +305,23 @@ impl TransfusionManager {
             use std::time::{SystemTime, UNIX_EPOCH};
             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
             let child_id = (parent_a_id ^ parent_b_id).wrapping_add(now);
+            let channels = ((*parent_a.metadata).channels as usize).max(1);
             let mut child_metadata_struct = (*parent_a.metadata).clone();
             child_metadata_struct.dna = child_dna;
+            child_metadata_struct.total_samples = (child_buffer.len() / channels) as u64;
             let child_metadata = Arc::new(child_metadata_struct);
 
+            let path = format!("breeding/chaotic_child_{}.wav", child_id);
+            if let Err(e) = write_planar_child_wav(&path, &child_buffer, channels) {
+                eprintln!("Chaotic Breeding: failed to write {}: {}", path, e);
+            }
             let buffer_arc = Arc::new(child_buffer);
             self.sample_registry.register_with_metadata(child_id, buffer_arc, child_metadata.clone());
 
             // 4. Save to Database
             let track = nullherz_dna::LibraryTrack {
                 id: child_id,
-                path: format!("breeding/chaotic_child_{}.wav", child_id),
+                path,
                 title: format!("Chaotic Child of {} x {}", parent_a_id, parent_b_id),
                 artist: "AnaWaves Breeder".to_string(),
                 album: "Breeding Lab".to_string(),

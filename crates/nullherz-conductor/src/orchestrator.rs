@@ -409,6 +409,10 @@ impl Conductor {
     }
 
     fn process_evolutionary_breeding(&mut self, now: u64) {
+        // Auto-breeding is opt-in (default OFF): it used to generate a new child
+        // into the library every 10 s, unbounded. Manual breeding from the DNA
+        // Breeder screen (CommitBreeding) runs regardless of this flag.
+        if !self.mixer_bridge.timeline.auto_breed_enabled { return; }
         if now % 10 == 0 && self.mixer_bridge.timeline.last_breeding_secs != now {
              self.mixer_bridge.timeline.last_breeding_secs = now;
              if let Some(ref breeder) = self.transfusion_manager.evolutionary_breeder {

@@ -6,6 +6,11 @@ use audio_core::Telemetry;
 /// center needle: half the lane is history, half is what's coming.
 const NEEDLE_WINDOW_SECS: f32 = 8.0;
 
+/// Beats the playhead moves per unit of wheel scroll. A typical mouse notch is
+/// ~50 raw units, so this is roughly one beat per notch — coarse enough to
+/// nudge for beat-matching, fine enough on a trackpad to scrub smoothly.
+const SCRUB_BEATS_PER_SCROLL_UNIT: f32 = 0.02;
+
 /// Deck lane waveform — NEEDLE STYLE for every deck: a zoomed window that
 /// scrolls under a fixed center line, the beat-matching view. (The lanes
 /// used to show static whole-track overviews with a moving playhead; the
@@ -13,7 +18,7 @@ const NEEDLE_WINDOW_SECS: f32 = 8.0;
 /// plus the elapsed/total readout.)
 pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>, deck_color: Color32, height: f32) {
     let theme = app.theme;
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), egui::Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), egui::Sense::hover());
     ui.painter().rect_filled(rect, theme.radius_sm, theme.bg_inset);
 
     let track = app.decks.cached_tracks[i].clone();
@@ -25,6 +30,34 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
         ui.painter().rect_stroke(rect.shrink(2.0), theme.radius_sm, Stroke::new(1.0, theme.border));
         return;
     };
+
+    // Scroll-to-scrub: hovering a loaded deck lane and rolling the wheel seeks
+    // the deck's playhead. JumpByBeats moves the sampler voice whether it is
+    // playing or paused, so the needle follows the wheel. Consume the scroll
+    // delta so the surrounding mixer ScrollArea does not pan at the same time.
+    if response.hovered() {
+        let scroll_y = ui.input(|inp| inp.raw_scroll_delta.y);
+        if scroll_y.abs() > f32::EPSILON {
+            let node_name = match i {
+                0 => "deck_a_sampler",
+                1 => "deck_b_sampler",
+                2 => "deck_c_sampler",
+                3 => "deck_d_sampler",
+                _ => "",
+            };
+            if let Some(node_idx) = app.get_node_id(node_name) {
+                // Wheel-up (positive delta) seeks forward in the track.
+                let beats = scroll_y * SCRUB_BEATS_PER_SCROLL_UNIT;
+                let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                    nullherz_traits::PerformanceCommand::JumpByBeats { node_idx, beats },
+                ));
+                ui.input_mut(|inp| {
+                    inp.raw_scroll_delta = Vec2::ZERO;
+                    inp.smooth_scroll_delta = Vec2::ZERO;
+                });
+            }
+        }
+    }
 
     let sr = 44_100.0f32;
     let total_frames = t.metadata.total_samples.max(1);
