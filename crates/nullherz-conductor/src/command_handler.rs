@@ -98,11 +98,13 @@ impl CommandHandler {
                 }
 
                 if is_streaming_sampler {
-                    let track = { conductor.library.lock().get_track(*sample_id).ok().flatten() };
-                    if let Some(track) = track {
-                        if std::path::Path::new(&track.path).exists() {
-                            if let Some(shm) = nullherz_processors::streaming_sampler::get_streaming_buffer(sampler_node_idx.unwrap() as u64) {
-                                conductor.streaming_manager.start_stream(*sample_id, track.path.clone(), shm);
+                    if let Some(node_idx) = sampler_node_idx {
+                        let track = { conductor.library.lock().get_track(*sample_id).ok().flatten() };
+                        if let Some(track) = track {
+                            if std::path::Path::new(&track.path).exists() {
+                                if let Some(shm) = nullherz_processors::streaming_sampler::get_streaming_buffer(node_idx as u64) {
+                                    conductor.streaming_manager.start_stream(*sample_id, track.path.clone(), shm);
+                                }
                             }
                         }
                     }

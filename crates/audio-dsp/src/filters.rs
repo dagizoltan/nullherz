@@ -864,6 +864,7 @@ impl StereoBiquad {
     /// output and state on a non-finite result — matching scalar
     /// `process_sample` lane-for-lane, so finite input is bit-identical.
     #[inline(always)]
+    #[allow(clippy::eq_op)]
     pub fn process(&mut self, x: wide::f32x4) -> wide::f32x4 {
         use wide::*;
         let b0 = f32x4::from(self.coeffs.b0);
@@ -893,6 +894,7 @@ impl StereoBiquad {
     /// guard — just without re-splatting the (constant) coefficients every
     /// sample. Callers that ramp coefficients must use `process` per sample.
     #[inline]
+    #[allow(clippy::eq_op)]
     pub fn process_block(&mut self, in_l: &[f32], in_r: &[f32], out_l: &mut [f32], out_r: &mut [f32]) {
         use wide::*;
         let b0 = f32x4::from(self.coeffs.b0);
@@ -1088,6 +1090,7 @@ impl DjIsolatorStereo {
     /// the caller (loop-invariant). Sanitizes the input and clamps a non-finite
     /// SUM to zero, exactly as the scalar `process_block` did per sample.
     #[inline(always)]
+    #[allow(clippy::eq_op)]
     fn run_sample(&mut self, raw: wide::f32x4, g_l: wide::f32x4, g_m: wide::f32x4, g_h: wide::f32x4) -> wide::f32x4 {
         use wide::*;
         let in_finite = (raw - raw).cmp_eq(f32x4::ZERO);
