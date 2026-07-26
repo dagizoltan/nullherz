@@ -591,7 +591,6 @@ mod tests {
             theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
             _conductor_thread: None,
-            conductor: None,
         };
 
         // Assert initial states

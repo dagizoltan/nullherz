@@ -125,7 +125,6 @@ pub struct InspectorApp {
     pub(crate) theme: nullherz_ui_hal::Theme,
     pub(crate) last_update_time: f64,
     pub(crate) _conductor_thread: Option<std::thread::JoinHandle<()>>,
-    pub(crate) conductor: Option<Arc<Mutex<nullherz_conductor::Conductor>>>,
 }
 
 impl InspectorApp {
@@ -236,7 +235,7 @@ impl InspectorApp {
         let db_arc = Arc::new(parking_lot::Mutex::new(raw_db));
         let library_db_wrapper = SharedLibraryDb(db_arc.clone());
 
-        let (conductor_thread, conductor) = start_in_process_conductor(cmd_rx, last_telemetry.clone(), db_arc, None);
+        let (conductor_thread, _conductor) = start_in_process_conductor(cmd_rx, last_telemetry.clone(), db_arc, None);
 
         let default_view = View::Console;
         let mut app = Self {
@@ -244,7 +243,6 @@ impl InspectorApp {
             command_sender: cmd_tx,
             last_telemetry,
             _conductor_thread: Some(conductor_thread),
-            conductor: Some(conductor),
             active_view: default_view,
             mixer: Default::default(),
             decks: Default::default(),
@@ -1099,6 +1097,17 @@ pub fn start_in_process_conductor(
                     // 3. Process telemetry
                     while let Some(mut tel) = context.telemetry_consumer.pop() {
                         cond.update_timeline(&mut tel);
+                        for i in 0..4 {
+                            let deck_char = (b'A' + i as u8) as char;
+                            let sample_id = cond.mixer_manager.deck_samples.get(&deck_char).copied().unwrap_or(0);
+                            if cond.hydration_pending.contains(&sample_id) {
+                                tel.hydration_pending[i] = sample_id;
+                                tel.hydration_progress[i] = cond.hydration_progress.lock().get(&sample_id).copied().unwrap_or(0.0);
+                            } else {
+                                tel.hydration_pending[i] = 0;
+                                tel.hydration_progress[i] = 1.0;
+                            }
+                        }
                         *last_telemetry.lock() = Some(tel);
                     }
                 }

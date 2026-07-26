@@ -191,17 +191,9 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
         let track = app.decks.cached_tracks[i].clone();
 
         if let Some(ref t) = track {
-            let is_loading = if let Some(ref cond) = app.conductor {
-                cond.lock().hydration_pending.contains(&t.id)
-            } else {
-                false
-            };
+            let is_loading = telemetry.as_ref().map(|tel| tel.hydration_pending[i] == t.id).unwrap_or(false);
             let progress = if is_loading {
-                if let Some(ref cond) = app.conductor {
-                    cond.lock().hydration_progress.lock().get(&t.id).copied().unwrap_or(0.0)
-                } else {
-                    0.0
-                }
+                telemetry.as_ref().map(|tel| tel.hydration_progress[i]).unwrap_or(0.0)
             } else {
                 1.0
             };

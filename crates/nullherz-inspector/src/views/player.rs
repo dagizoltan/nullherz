@@ -104,17 +104,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         .show(ui, |ui| {
                             ui.vertical(|ui| {
                                 if let Some(ref t) = track {
-                                    let is_loading = if let Some(ref cond) = app.conductor {
-                                        cond.lock().hydration_pending.contains(&t.id)
-                                    } else {
-                                        false
-                                    };
+                                    let is_loading = telemetry.as_ref().map(|tel| tel.hydration_pending[deck_idx] == t.id).unwrap_or(false);
                                     let progress = if is_loading {
-                                        if let Some(ref cond) = app.conductor {
-                                            cond.lock().hydration_progress.lock().get(&t.id).copied().unwrap_or(0.0)
-                                        } else {
-                                            0.0
-                                        }
+                                        telemetry.as_ref().map(|tel| tel.hydration_progress[deck_idx]).unwrap_or(0.0)
                                     } else {
                                         1.0
                                     };
