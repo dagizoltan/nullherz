@@ -119,6 +119,20 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &m
     }
 
 fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut nullherz_traits::ProcessContext, _executor: Option<&mut (dyn nullherz_traits::ParallelExecutor + '_)>) {
+        if outputs.is_empty() { return; }
+        let num_samples = outputs[0].len();
+
+        if self.quantize_enabled {
+            if let Some(transport) = context.transport {
+                if !transport.is_playing {
+                    for output in outputs.iter_mut() {
+                        output[..num_samples].fill(0.0);
+                    }
+                    return;
+                }
+            }
+        }
+
         // SYNC LOGIC
         let source_frames = self.source_frames();
         if self.quantize_enabled
