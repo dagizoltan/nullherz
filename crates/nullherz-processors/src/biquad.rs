@@ -147,6 +147,12 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &
             }
             #[cfg(target_arch = "x86_64")]
             self.inner.process_16_channels(in_ptrs, out_ptrs, len);
+            #[cfg(not(target_arch = "x86_64"))]
+            {
+                for ch in 0..num_channels {
+                    self.inner.process_scalar(ch, inputs[ch], outputs[ch]);
+                }
+            }
         } else {
             for ch in 0..num_channels {
                 self.inner.process_scalar(ch, inputs[ch], outputs[ch]);

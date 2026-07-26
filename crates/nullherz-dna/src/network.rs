@@ -128,6 +128,7 @@ impl PeerSync for CloudPeerSync {
                 &addr,
                 std::time::Duration::from_millis(500)
             ) {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(1000)));
                 let req = format!("GET DNA {}\n", id);
                 let _ = stream.write_all(req.as_bytes());
                 let mut buffer = Vec::new();
@@ -393,6 +394,8 @@ impl DnaServer {
                     let lib_clone = lib.clone();
                     let mesh_peers_clone = mesh_peers.clone();
                     std::thread::spawn(move || {
+                        let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(1000)));
+                        let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(1000)));
                         let mut reader = BufReader::new(&stream);
                         let mut line = String::new();
                         if reader.read_line(&mut line).is_ok() {
