@@ -5,76 +5,91 @@ use nullherz_dna::GeneticLibrary;
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
 
-    // Inner-panel layout: egui divides the height for us — crates left,
-    // toolbar top, inspector pinned bottom, and the TRACK LIST takes every
-    // remaining pixel via the central panel. (Manual available_height()
-    // budgeting inside nested horizontal/vertical layouts systematically
-    // under-measured, which is why the list showed a handful of rows over
-    // dead space.)
-    egui::SidePanel::left("lib_crates_pane")
-        .resizable(false)
-        .exact_width(98.0)
-        .frame(Frame::none().inner_margin(Margin::symmetric(theme.space_xs, 0.0)))
-        .show_inside(ui, |ui| {
-            render_crates_pane(app, ui);
-        });
+    ui.vertical(|ui| {
+        // Crates Grid and Smart Crates Grid under each other
+        render_crates_and_smart_crates_section(app, ui);
 
-    egui::TopBottomPanel::top("lib_toolbar_pane")
-        .frame(Frame::none().inner_margin(Margin::symmetric(theme.space_xs, theme.space_xs)))
-        .show_inside(ui, |ui| {
-            render_toolbar(app, ui);
-        });
+        ui.add_space(theme.space_sm);
+        ui.separator();
+        ui.add_space(theme.space_sm);
 
-    if let Some(track_id) = app.library.selected_library_track {
-        egui::TopBottomPanel::bottom("lib_inspector_pane")
-            .resizable(false)
-            .frame(Frame::none().inner_margin(Margin::symmetric(theme.space_xs, theme.space_sm)))
-            .show_inside(ui, |ui| {
-                render_track_inspector(app, ui, track_id);
-            });
-    }
+        // Track Browser (Toolbar + Tracks) under
+        render_toolbar(app, ui);
 
-    egui::CentralPanel::default()
-        .frame(Frame::none().inner_margin(Margin::symmetric(theme.space_xs, 0.0)))
-        .show_inside(ui, |ui| {
-            render_track_list(app, ui);
-        });
+        ui.add_space(theme.space_sm);
+
+        if let Some(track_id) = app.library.selected_library_track {
+            render_track_inspector(app, ui, track_id);
+            ui.add_space(theme.space_sm);
+        }
+
+        render_track_list(app, ui);
+    });
 }
 
-fn render_crates_pane(app: &mut InspectorApp, ui: &mut Ui) {
+fn render_crates_and_smart_crates_section(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
-    ui.add_space(theme.space_xs);
-    ui.label(RichText::new(format!("{} CRATES", egui_phosphor::regular::FOLDER)).size(theme.type_caption).strong().color(theme.text_secondary));
-    ui.add_space(theme.space_sm);
 
-    let is_all = app.library.active_crate.is_none();
-    if ui.selectable_label(is_all, format!("{} ALL", egui_phosphor::regular::PACKAGE)).clicked() { app.library.active_crate = None; }
-
+    // 1. Crates Header
+    ui.label(
+        RichText::new(format!("{} CRATES", egui_phosphor::regular::FOLDER))
+            .size(theme.type_caption)
+            .strong()
+            .color(theme.text_secondary),
+    );
     ui.add_space(theme.space_xs);
-    let crates = &app.library.cached_crates;
-    for crate_name in crates {
-        let is_selected = app.library.active_crate.as_deref() == Some(crate_name.as_str());
-        if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::TAG, crate_name)).clicked() {
-            app.library.active_crate = Some(crate_name.clone());
+
+    // Crates Wrapping Grid
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(theme.space_xs, theme.space_xs);
+
+        let is_all = app.library.active_crate.is_none();
+        if ui.selectable_label(is_all, format!("{} ALL", egui_phosphor::regular::PACKAGE)).clicked() {
+            app.library.active_crate = None;
             app.library.library_needs_refresh = true;
         }
-    }
+
+        let crates = &app.library.cached_crates;
+        for crate_name in crates {
+            let is_selected = app.library.active_crate.as_deref() == Some(crate_name.as_str());
+            if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::TAG, crate_name)).clicked() {
+                app.library.active_crate = Some(crate_name.clone());
+                app.library.library_needs_refresh = true;
+            }
+        }
+    });
 
     ui.add_space(theme.space_sm);
-    ui.label(RichText::new(format!("{} SMART", egui_phosphor::regular::STAR)).size(theme.type_caption).strong().color(theme.text_secondary));
-    let smart_crates = &app.library.cached_smart_crates;
-    for smart in smart_crates {
-        let is_selected = app.library.active_crate.as_deref() == Some(smart.name.as_str());
-        if ui.selectable_label(is_selected, &smart.name).clicked() {
-            app.library.active_crate = Some(smart.name.clone());
-            app.library.library_needs_refresh = true;
-        }
-    }
 
-    ui.add_space(theme.space_md);
-    if ui.button(RichText::new("+ NEW").size(theme.type_caption)).clicked() {
-        app.library.smart_crate_builder_open = !app.library.smart_crate_builder_open;
-    }
+    // 2. Smart Crates Header + NEW button
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format!("{} SMART CRATES", egui_phosphor::regular::STAR))
+                .size(theme.type_caption)
+                .strong()
+                .color(theme.text_secondary),
+        );
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if ui.button(RichText::new("+ NEW").size(theme.type_caption)).clicked() {
+                app.library.smart_crate_builder_open = !app.library.smart_crate_builder_open;
+            }
+        });
+    });
+    ui.add_space(theme.space_xs);
+
+    // Smart Crates Wrapping Grid
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(theme.space_xs, theme.space_xs);
+
+        let smart_crates = &app.library.cached_smart_crates;
+        for smart in smart_crates {
+            let is_selected = app.library.active_crate.as_deref() == Some(smart.name.as_str());
+            if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::STAR, smart.name)).clicked() {
+                app.library.active_crate = Some(smart.name.clone());
+                app.library.library_needs_refresh = true;
+            }
+        }
+    });
 }
 
 fn render_toolbar(app: &mut InspectorApp, ui: &mut Ui) {

@@ -143,7 +143,7 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
                         voice.playback_rate = sync_rate;
 
                         // PHASE LOCK
-                        if voice.is_active {
+                        if transport.is_playing && voice.is_active {
                             let samples_per_beat = (transport.sample_rate * 60.0 / meta.bpm) as f64;
 
                             let expected_pos_samples = if self.slicer_mode {
@@ -155,10 +155,22 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
                                 (expected_pos_beats * samples_per_beat) as f32 % source_frames.max(1) as f32
                             };
 
-                            // Gently nudge playhead towards locked phase
                             let diff = expected_pos_samples - voice.play_head;
-                            if diff.abs() > 0.001 {
-                                voice.play_head += diff * 0.01; // Smooth convergence
+                            if self.slicer_mode {
+                                if diff.abs() > 0.001 {
+                                    voice.play_head += diff * 0.01; // Smooth convergence for slicer
+                                }
+                            } else {
+                                // Smooth Phase Correction (PLL) for normal track playback:
+                                // Adjust playback_rate smoothly by up to ±2% to align phase, completely avoiding step discontinuities.
+                                let beat_threshold_samples = samples_per_beat as f32;
+                                if diff.abs() > beat_threshold_samples {
+                                    voice.play_head = expected_pos_samples;
+                                } else if diff.abs() > 0.1 {
+                                    let k_p = 0.005; // Proportional gain
+                                    let rate_correction = (diff * k_p).clamp(-0.02, 0.02);
+                                    voice.playback_rate *= 1.0 + rate_correction;
+                                }
                             }
                         }
                     }
