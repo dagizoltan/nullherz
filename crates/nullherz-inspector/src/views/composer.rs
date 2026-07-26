@@ -127,7 +127,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         let inner_resp = Frame::none()
                             .fill(header_bg)
                             .rounding(Rounding::same(app.theme.radius_sm))
-                            .inner_margin(Margin::symmetric(app.theme.space_xs, app.theme.space_xs))
+                            .inner_margin(Margin::symmetric(app.theme.space_xs, 0.0))
                             .show(ui, |ui| {
                                 ui.set_width(90.0);
                                 ui.set_height(22.0);
