@@ -62,6 +62,8 @@ pub struct Telemetry {
     pub stream_viewers: u32,
     pub mesh_peer_count: u32,
     pub mesh_peer_names: [PeerName; 8],
+    pub hydration_pending: [u64; 4],
+    pub hydration_progress: [f32; 4],
 }
 
 #[repr(C)]
@@ -135,6 +137,8 @@ impl Default for Telemetry {
             stream_viewers: 0,
             mesh_peer_count: 0,
             mesh_peer_names: [PeerName::default(); 8],
+            hydration_pending: [0; 4],
+            hydration_progress: [0.0; 4],
         }
     }
 }

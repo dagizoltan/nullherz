@@ -206,6 +206,8 @@ impl TelemetryFinalizer {
             stream_viewers: 0,
             mesh_peer_count: 0,
             mesh_peer_names: [nullherz_traits::telemetry::PeerName::default(); 8],
+            hydration_pending: [0; 4],
+            hydration_progress: [0.0; 4],
         };
         let _ = telemetry_producer.push_telemetry(telemetry);
         telemetry
