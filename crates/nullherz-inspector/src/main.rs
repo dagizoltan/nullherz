@@ -272,24 +272,25 @@ impl InspectorApp {
         app.trigger_library_refresh();
 
         // Load persisted preferences if they exist
-        if let Ok(pref_content) = std::fs::read_to_string("preferences.json") {
-            if let Ok(prefs) = serde_json::from_str::<PersistedPreferences>(&pref_content) {
-                app.settings.restore_last_session = prefs.restore_last_session;
-                app.settings.default_view_on_launch = string_to_view(&prefs.default_view_on_launch);
-                app.settings.autosave_enabled = prefs.autosave_enabled;
-                app.settings.autosave_interval_mins = prefs.autosave_interval_mins;
-                app.settings.shortcuts_enabled = prefs.shortcuts_enabled;
-                app.active_view = app.settings.default_view_on_launch;
+        if let Some(prefs) = std::fs::read_to_string("preferences.json")
+            .ok()
+            .and_then(|c| serde_json::from_str::<PersistedPreferences>(&c).ok())
+        {
+            app.settings.restore_last_session = prefs.restore_last_session;
+            app.settings.default_view_on_launch = string_to_view(&prefs.default_view_on_launch);
+            app.settings.autosave_enabled = prefs.autosave_enabled;
+            app.settings.autosave_interval_mins = prefs.autosave_interval_mins;
+            app.settings.shortcuts_enabled = prefs.shortcuts_enabled;
+            app.active_view = app.settings.default_view_on_launch;
 
-                if let Some(accent) = prefs.theme_accent {
-                    app.theme.accent = egui::Color32::from_rgba_unmultiplied(accent[0], accent[1], accent[2], accent[3]);
-                }
-                if let Some(success) = prefs.theme_success {
-                    app.theme.success = egui::Color32::from_rgba_unmultiplied(success[0], success[1], success[2], success[3]);
-                }
-                if let Some(danger) = prefs.theme_danger {
-                    app.theme.danger = egui::Color32::from_rgba_unmultiplied(danger[0], danger[1], danger[2], danger[3]);
-                }
+            if let Some(accent) = prefs.theme_accent {
+                app.theme.accent = egui::Color32::from_rgba_unmultiplied(accent[0], accent[1], accent[2], accent[3]);
+            }
+            if let Some(success) = prefs.theme_success {
+                app.theme.success = egui::Color32::from_rgba_unmultiplied(success[0], success[1], success[2], success[3]);
+            }
+            if let Some(danger) = prefs.theme_danger {
+                app.theme.danger = egui::Color32::from_rgba_unmultiplied(danger[0], danger[1], danger[2], danger[3]);
             }
         }
 
@@ -1002,17 +1003,15 @@ pub fn start_in_process_conductor(
             let context = cond.setup_engine();
 
             let mut session_restored = false;
-            if let Ok(pref_content) = std::fs::read_to_string("preferences.json") {
-                if let Ok(prefs) = serde_json::from_str::<serde_json::Value>(&pref_content) {
-                    if prefs.get("restore_last_session").and_then(|v| v.as_bool()) == Some(true) {
-                        if std::path::Path::new("autosave.json").exists() {
-                            if cond.load_project("autosave.json").is_ok() {
-                                session_restored = true;
-                                println!("Conductor: Last session restored successfully from autosave.json.");
-                            }
-                        }
-                    }
-                }
+            let restore_enabled = std::fs::read_to_string("preferences.json")
+                .ok()
+                .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+                .and_then(|prefs| prefs.get("restore_last_session").and_then(|v| v.as_bool()))
+                == Some(true);
+
+            if restore_enabled && std::path::Path::new("autosave.json").exists() && cond.load_project("autosave.json").is_ok() {
+                session_restored = true;
+                println!("Conductor: Last session restored successfully from autosave.json.");
             }
 
             if !session_restored {
