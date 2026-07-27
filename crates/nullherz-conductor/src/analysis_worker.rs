@@ -10,7 +10,11 @@ use rayon::prelude::*;
 use std::cell::RefCell;
 
 thread_local! {
-    static KERNEL: RefCell<crate::analysis_kernel::AnalysisKernel> = RefCell::new(crate::analysis_kernel::AnalysisKernel::new(44100.0));
+    // Placeholder only: `set_sample_rate` below stamps the analysed sample's
+    // own source rate before every `analyze()` call, so this value is never the
+    // one any result is computed against.
+    static KERNEL: RefCell<crate::analysis_kernel::AnalysisKernel> =
+        RefCell::new(crate::analysis_kernel::AnalysisKernel::new(nullherz_traits::DEFAULT_SAMPLE_RATE));
 }
 
 pub struct AnalysisWorker {

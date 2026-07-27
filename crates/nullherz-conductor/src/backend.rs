@@ -21,6 +21,13 @@ impl Default for BackendManager {
 }
 
 impl BackendManager {
+    /// Underruns reported by the running backend, or `None` when no backend is
+    /// running or the running one does not measure them. Callers must not read
+    /// `None` as "clean".
+    pub fn xruns(&self) -> Option<u64> {
+        self.backend.as_ref().and_then(|b| b.xruns())
+    }
+
     pub fn start(&mut self, backend_type: AudioBackendType, period_size: u64) -> Result<(), String> {
         // The graph indexes its internal AudioBlock buffers with period-global
         // offsets, so a period longer than MAX_BLOCK_SIZE overruns them on the

@@ -678,6 +678,119 @@ impl<T> MpscRingBuffer<T> {
     }
 }
 
+/// Apply the audio-thread CPU pin, if the operator asked for one.
+///
+/// Returns a human-readable note describing what happened, for the startup log.
+///
+/// **Off by default, deliberately.** Pinning the audio thread is folklore that
+/// is true only under conditions most machines do not meet:
+///
+///  - Without `isolcpus`/`nohz_full`, affinity restricts only OUR thread. The
+///    scheduler still places everything else on that CPU, so the audio thread
+///    gets cache locality and no exclusivity.
+///  - On an SMT machine, a chosen CPU shares execution units with its sibling.
+///    Pinning audio to one while the DSP worker pool floats onto the other is
+///    strictly worse than letting the scheduler balance them.
+///  - The measurement that originally motivated pinning here turned out to be
+///    an artifact: the benchmark ran on a plain thread with no RT priority, so
+///    its tail was ordinary desktop preemption, not anything affinity fixes.
+///
+/// So this is opt-in via `NULLHERZ_AUDIO_CPU=<n>`, and it reports the caveats
+/// rather than implying a guarantee it cannot make.
+pub fn apply_audio_thread_affinity() -> Option<String> {
+    let raw = std::env::var("NULLHERZ_AUDIO_CPU").ok()?;
+    let cpu: usize = match raw.trim().parse() {
+        Ok(c) => c,
+        Err(_) => return Some(format!("NULLHERZ_AUDIO_CPU={raw:?} is not a CPU number; not pinning")),
+    };
+    let total = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    if cpu >= total {
+        return Some(format!(
+            "NULLHERZ_AUDIO_CPU={cpu} but this machine has {total} logical CPUs (0..{}); not pinning",
+            total - 1
+        ));
+    }
+    match pin_thread_to_core(cpu) {
+        Err(e) => Some(format!("could not pin audio thread to CPU {cpu}: {e}")),
+        Ok(()) => {
+            let mut note = format!("audio thread pinned to CPU {cpu}");
+            let siblings = cpu_siblings(cpu);
+            if !siblings.is_empty() {
+                note.push_str(&format!(
+                    ". NOTE: CPU {cpu} shares a physical core with {siblings:?} — keep DSP \
+                     workers off those or the pin costs more than it saves"
+                ));
+            }
+            if !has_isolated_cpus() {
+                note.push_str(
+                    ". NOTE: no isolcpus/nohz_full, so this CPU is not reserved — other tasks \
+                     still run on it and the pin buys cache locality only",
+                );
+            }
+            Some(note)
+        }
+    }
+}
+
+/// Logical CPUs that share a physical core with `cpu` (its SMT/hyperthread
+/// siblings), `cpu` itself excluded.
+///
+/// Pinning without knowing this is guesswork. Two logical CPUs on one physical
+/// core share execution units and L1/L2, so putting the audio thread on one and
+/// a DSP worker on its sibling is worse than not pinning at all — the "isolated"
+/// thread now contends for the very resources isolation was meant to protect.
+/// Returns empty on a machine without SMT, or if the topology cannot be read.
+pub fn cpu_siblings(cpu: usize) -> Vec<usize> {
+    #[cfg(target_os = "linux")]
+    {
+        let path = format!("/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list");
+        let Ok(raw) = std::fs::read_to_string(&path) else { return Vec::new() };
+        let mut out = Vec::new();
+        // Format is a comma-separated list of ids and ranges, e.g. "0,2" or "0-1".
+        for part in raw.trim().split(',') {
+            match part.split_once('-') {
+                Some((lo, hi)) => {
+                    if let (Ok(lo), Ok(hi)) = (lo.trim().parse::<usize>(), hi.trim().parse::<usize>()) {
+                        out.extend((lo..=hi).filter(|&c| c != cpu));
+                    }
+                }
+                None => {
+                    if let Ok(c) = part.trim().parse::<usize>()
+                        && c != cpu { out.push(c); }
+                }
+            }
+        }
+        out
+    }
+    #[cfg(not(target_os = "linux"))]
+    { let _ = cpu; Vec::new() }
+}
+
+/// Whether the kernel was booted with CPUs held back from the general scheduler
+/// (`isolcpus=` / `nohz_full=`).
+///
+/// This is the difference between pinning that helps and pinning that only
+/// feels like it does. `sched_setaffinity` restricts where OUR thread may run;
+/// it does not stop the scheduler placing anything else on that CPU. Without
+/// isolation the audio thread gains cache locality and nothing more — it still
+/// shares the CPU with every other runnable task on the system.
+pub fn has_isolated_cpus() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(s) = std::fs::read_to_string("/sys/devices/system/cpu/isolated")
+            && !s.trim().is_empty() {
+            return true;
+        }
+        if let Ok(s) = std::fs::read_to_string("/sys/devices/system/cpu/nohz_full")
+            && !s.trim().is_empty() {
+            return true;
+        }
+        false
+    }
+    #[cfg(not(target_os = "linux"))]
+    { false }
+}
+
 pub fn pin_thread_to_core(core_id: usize) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
@@ -692,6 +805,142 @@ pub fn pin_thread_to_core(core_id: usize) -> Result<(), String> {
         let _ = core_id;
         Ok(())
     }
+}
+
+/// Lock the process's pages into RAM so the audio thread can never take a page
+/// fault.
+///
+/// Call ONCE at startup, from the non-RT setup path, before any audio thread
+/// exists. Without it, a block deadline can turn into a disk read: the kernel is
+/// free to swap out pages the audio thread is about to touch, and on a machine
+/// with swap enabled and memory pressure it will. That is a multi-millisecond
+/// stall on a path with a sub-6 ms budget — heard as a dropout, and it does not
+/// look like a DSP problem when you profile it, because it isn't one.
+///
+/// `MCL_FUTURE` matters as much as `MCL_CURRENT`: buffers are allocated after
+/// startup (topology commits, session cache), and only `MCL_FUTURE` covers them.
+///
+/// Failure is NOT fatal. The limit is `RLIMIT_MEMLOCK`, which is commonly small
+/// for unprivileged users; audio simply reverts to being swappable, which is what
+/// it was before. Returns the error so the caller can say so once, loudly, rather
+/// than silently pretending the guarantee holds.
+pub fn lock_memory() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let rc = unsafe { libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE) };
+        if rc != 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(())
+    }
+}
+
+/// The `RLIMIT_MEMLOCK` ceiling in bytes, or `None` if it cannot be read.
+/// `u64::MAX` means unlimited.
+pub fn memlock_limit() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        if unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut lim) } == 0 {
+            Some(lim.rlim_cur)
+        } else {
+            None
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// The CPU frequency governor, if the platform exposes one.
+///
+/// Reported, never changed: the governor is a system-wide setting and an audio
+/// application has no business rewriting it behind the user's back.
+pub fn cpu_governor() -> Option<String> {
+    std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
+        .ok()
+        .map(|s| s.trim().to_string())
+}
+
+/// The cpufreq scaling driver (`intel_pstate`, `acpi-cpufreq`, …).
+///
+/// The driver matters more than the governor name, because the same word means
+/// different things. Under `acpi-cpufreq`, `powersave` genuinely holds the CPU at
+/// a low P-state. Under `intel_pstate`, `powersave` is the DEFAULT mode and ramps
+/// opportunistically to maximum under load — the cost there is ramp latency after
+/// idle, not sustained downclocking. Warning about the wrong one trains people to
+/// dismiss the warning.
+pub fn cpufreq_driver() -> Option<String> {
+    std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_driver")
+        .ok()
+        .map(|s| s.trim().to_string())
+}
+
+/// One-shot report of the realtime environment: what was obtained, and what was
+/// not.
+///
+/// Returns human-readable warnings for everything that will degrade realtime
+/// behaviour. An empty vector means the process is configured as well as it can
+/// be. Nothing here is fatal — the point is that a machine which cannot meet the
+/// guarantees says so once at startup, instead of presenting as mysterious xruns
+/// hours later.
+pub fn realtime_environment_warnings() -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    if let Some(g) = cpu_governor()
+        && g != "performance"
+    {
+        // Same word, different behaviour per driver — say which one applies.
+        let driver = cpufreq_driver().unwrap_or_default();
+        if driver == "intel_pstate" {
+            warnings.push(format!(
+                "CPU governor is '{g}' on intel_pstate. This is the normal mode \
+                 and DOES reach full clock under load, so it is not holding the \
+                 CPU down — but it ramps up rather than starting there, so the \
+                 first blocks after an idle gap can run slow. Switch to \
+                 'performance' for the lowest jitter: \
+                 cpupower frequency-set -g performance"
+            ));
+        } else {
+            warnings.push(format!(
+                "CPU governor is '{g}' (driver {driver}) — the CPU will run below \
+                 full clock under exactly the load the audio thread cares about. \
+                 Expect xruns that look like DSP problems. Switch with: \
+                 cpupower frequency-set -g performance"
+            ));
+        }
+    }
+
+    match memlock_limit() {
+        Some(l) if l == u64::MAX => {}
+        Some(l) if l < 64 * 1024 * 1024 => warnings.push(format!(
+            "RLIMIT_MEMLOCK is {} KiB — too small to lock the audio buffers into \
+             RAM, so they remain swappable and a block deadline can become a disk \
+             read. Raise it via /etc/security/limits.d (the audio group convention \
+             is 'memlock unlimited').",
+            l / 1024
+        )),
+        _ => {}
+    }
+
+    #[cfg(target_os = "linux")]
+    if let Ok(swaps) = std::fs::read_to_string("/proc/swaps") {
+        // First line is a header; any further line is an active swap area.
+        if swaps.lines().nth(1).is_some() {
+            warnings.push(
+                "Swap is enabled. That is fine ONLY if memory locking succeeded — \
+                 otherwise the audio thread's pages can be paged out mid-stream."
+                    .to_string(),
+            );
+        }
+    }
+
+    warnings
 }
 
 pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {

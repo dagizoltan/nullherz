@@ -30,6 +30,21 @@ impl CompressorProcessor {
 impl nullherz_traits::RtSafe for CompressorProcessor {}
 
 impl nullherz_traits::SignalProcessor for CompressorProcessor {
+    /// Re-derive the envelope coefficients for the negotiated rate.
+    ///
+    /// Attack and release are specified in MILLISECONDS but stored as
+    /// per-sample coefficients, so they are only correct at the rate they were
+    /// computed at. A 10 ms attack built for 44.1 kHz becomes ~9.2 ms at
+    /// 48 kHz — small, but it is a time constant silently drifting with an
+    /// unrelated setting, which is the kind of thing that is impossible to
+    /// diagnose by ear later.
+    fn setup(&mut self, config: nullherz_traits::AudioConfig) {
+        if config.sample_rate > 0.0 {
+            self.envelope_follower =
+                EnvelopeFollower::new(config.sample_rate, self.attack_ms, self.release_ms);
+        }
+    }
+
 fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
 

@@ -90,6 +90,20 @@ struct Stats {
     /// Timing tells load spikes (first seconds) apart from steady-state trouble.
     overrun_events: Vec<(Duration, u64)>,
     overrun_count: u64,
+    /// Loudest sample seen on any node across the whole run.
+    ///
+    /// Without this the harness happily reports PASS on a completely silent
+    /// graph: zero xruns is trivially true when there is no audio to drop. The
+    /// golden render and the block benchmark both already refuse to trust a
+    /// silent run; this is the same guard for the one test that is supposed to
+    /// prove the console survives real playback.
+    peak_output_level: f32,
+    /// Underruns as counted by the BACKEND, which is the only party that
+    /// actually observes them. `None` = the running backend does not report.
+    backend_xruns: Option<u64>,
+    /// Telemetry frames where the graph produced actual signal, so a run that
+    /// starts loud and dies silent halfway is distinguishable from a good one.
+    frames_with_signal: u64,
 }
 
 #[tokio::main]
@@ -286,6 +300,11 @@ async fn main() {
                 }
             }
             stats.resource_leaks_final = tel.resource_leaks;
+            let block_peak = tel.peak_levels.iter().copied().fold(0.0f32, f32::max);
+            if block_peak > 1e-6 {
+                stats.frames_with_signal += 1;
+            }
+            stats.peak_output_level = stats.peak_output_level.max(block_peak);
             if tel.xrun_count != last_xrun_count {
                 let elapsed = started.elapsed();
                 println!(
@@ -315,6 +334,8 @@ async fn main() {
     }
 
     // --- Report ---
+    // Sample the backend's own underrun counter before anything tears down.
+    stats.backend_xruns = conductor.engine_coordinator.backend_manager.xruns();
     let elapsed = started.elapsed();
     let mean_block_us = if stats.frames > 0 { stats.sum_process_time_ns / stats.frames / 1000 } else { 0 };
     // DSP headroom: peak block time vs the period budget implied by the config.
@@ -323,9 +344,51 @@ async fn main() {
         .and_then(|c| serde_json::from_str::<nullherz_conductor::persistence::SystemConfig>(&c).ok())
         .map(|cfg| (cfg.period_size as f64 / stats.sample_rate.max(1.0) as f64 * 1_000_000.0) as u64)
         .unwrap_or(0);
-    let pass = stats.xrun_count_final == 0 && stats.frames > 0;
+    // A run is only meaningful if audio actually flowed. Require signal in a
+    // solid majority of frames, not merely at some point: a deck that stops
+    // early (voice deactivating at buffer end, a sampler wedging) would
+    // otherwise leave the remainder silent and still pass on its first second.
+    let signal_ratio = if stats.frames > 0 {
+        stats.frames_with_signal as f64 / stats.frames as f64
+    } else {
+        0.0
+    };
+    let audio_flowed = stats.peak_output_level > 1e-6 && signal_ratio > 0.90;
+
+    // Grade on the BACKEND's counter. `telemetry.xrun_count` is plumbed from an
+    // atomic in audio-core that nothing ever increments, so the old criterion
+    // `xrun_count_final == 0` was true no matter what happened — including the
+    // runs where the threaded backend printed "Total Xruns: 13" to stderr while
+    // this report said zero. A gate that cannot fail is not a gate.
+    let xruns = stats.backend_xruns;
+    let xruns_clean = matches!(xruns, Some(0));
+    let pass = stats.frames > 0 && audio_flowed && xruns_clean;
+
+    match xruns {
+        None => eprintln!(
+            "FATAL: the {backend:?} backend does not report underruns, so this run cannot \
+             demonstrate anything about xruns. Treating that as a failure rather than \
+             silently passing."
+        ),
+        Some(n) if n > 0 => eprintln!(
+            "FAIL: {n} underrun(s) reported by the {backend:?} backend."
+        ),
+        Some(_) => {}
+    }
     if stats.frames == 0 {
         eprintln!("FATAL: zero telemetry frames received — the audio thread never ran.");
+    } else if stats.peak_output_level <= 1e-6 {
+        eprintln!(
+            "FATAL: the graph was SILENT for the entire run (peak {:.2e}). Zero xruns \
+             is meaningless without audio — this is a failed run, not a passed one.",
+            stats.peak_output_level
+        );
+    } else if signal_ratio <= 0.90 {
+        eprintln!(
+            "FATAL: audio stopped part-way — only {:.1}% of frames carried signal. \
+             Playback did not survive the run even though no xrun was reported.",
+            signal_ratio * 100.0
+        );
     }
 
     let report = format!(
@@ -337,7 +400,10 @@ async fn main() {
         | Sample rate | {} Hz |\n\
         | Samples processed | {} |\n\
         | Telemetry frames | {} |\n\
-        | **Xruns** | **{}** |\n\
+        | **Xruns (backend)** | **{}** |\n\
+        | Xruns (engine telemetry) | {} (counter is never incremented — see notes) |\n\
+        | Peak output level | {:.4} |\n\
+        | Frames with signal | {:.1}% |\n\
         | Peak block time | {} µs |\n\
         | Mean block time | {} µs |\n\
         | Period budget | {} µs |\n\
@@ -349,7 +415,10 @@ async fn main() {
         stats.sample_rate,
         stats.samples_processed,
         stats.frames,
+        match xruns { Some(n) => n.to_string(), None => "NOT REPORTED".to_string() },
         stats.xrun_count_final,
+        stats.peak_output_level,
+        signal_ratio * 100.0,
         stats.peak_process_time_ns / 1000,
         mean_block_us,
         period_budget_us,
@@ -398,7 +467,10 @@ async fn main() {
     println!(
         "\n=== {} — {} xrun(s) in {:.1} min on {:?} (peak block {} µs / budget {} µs) ===",
         if pass { "PASS" } else { "FAIL" },
-        stats.xrun_count_final,
+        // The backend's count, same as the verdict. Printing the engine
+        // telemetry counter here produced the contradiction this whole fix is
+        // about: a headline "0 xrun(s)" next to a FAIL verdict.
+        match xruns { Some(n) => n.to_string(), None => "unreported".to_string() },
         elapsed.as_secs_f64() / 60.0,
         backend,
         stats.peak_process_time_ns / 1000,

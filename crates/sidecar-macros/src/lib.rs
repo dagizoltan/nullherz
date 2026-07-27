@@ -47,7 +47,18 @@ pub fn sidecar(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
 
                 unsafe {
-                    let _ = ipc_layer::pin_thread_to_core(1); // Pin sidecars to core 1 by default
+                    // Sidecar affinity is opt-in via NULLHERZ_SIDECAR_CPU.
+                    //
+                    // This used to hardcode core 1 for EVERY sidecar. Two things
+                    // are wrong with that: every sidecar lands on the same CPU
+                    // and contends with the others instead of spreading, and on
+                    // the reference machine CPU1 is where snd_hda_intel's IRQ is
+                    // serviced — so the fixed choice put DSP work on the one CPU
+                    // the audio device most needs responsive.
+                    if let Ok(v) = std::env::var("NULLHERZ_SIDECAR_CPU")
+                        && let Ok(cpu) = v.trim().parse::<usize>() {
+                        let _ = ipc_layer::pin_thread_to_core(cpu);
+                    }
                     let mut sidecar = sidecar_sdk::SidecarHost::new(cmd_shm, sig_shm, &inputs, &outputs, efd_val);
                     sidecar.run(processor);
                 }
@@ -86,7 +97,18 @@ pub fn sidecar_builder(_item: TokenStream) -> TokenStream {
                 }
 
                 unsafe {
-                    let _ = ipc_layer::pin_thread_to_core(1);
+                    // Sidecar affinity is opt-in via NULLHERZ_SIDECAR_CPU.
+                    //
+                    // This used to hardcode core 1 for EVERY sidecar. Two things
+                    // are wrong with that: every sidecar lands on the same CPU
+                    // and contends with the others instead of spreading, and on
+                    // the reference machine CPU1 is where snd_hda_intel's IRQ is
+                    // serviced — so the fixed choice put DSP work on the one CPU
+                    // the audio device most needs responsive.
+                    if let Ok(v) = std::env::var("NULLHERZ_SIDECAR_CPU")
+                        && let Ok(cpu) = v.trim().parse::<usize>() {
+                        let _ = ipc_layer::pin_thread_to_core(cpu);
+                    }
                     let mut sidecar = sidecar_sdk::SidecarHost::new(cmd_shm, sig_shm, &inputs, &sc_names, &outputs, efd_val);
                     sidecar.run(processor);
                 }

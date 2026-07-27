@@ -1,9 +1,50 @@
 use crate::*;
 
+/// The rate the engine *requests* from the audio device before any device has
+/// answered, and the rate any offline path uses when no device is involved.
+///
+/// This is a request, not a guarantee. The backend calls `set_rate_near`, and
+/// whatever the device negotiates is fed back through
+/// [`RenderingEngine::set_config`] — so the running engine's rate is the
+/// device's rate, not this. The only thing this constant decides is what we ask
+/// for, which matters because the sound server will resample if we ask for
+/// something it is not already running at.
+///
+/// Every runtime duration must derive from the *live* rate
+/// (`AudioConfig::sample_rate` / `Transport::sample_rate`), never from this.
+/// Reach for this constant only where no config is in scope. Anything that
+/// hardcodes a literal instead is a latent bug that stays invisible for exactly
+/// as long as this value and the device's value happen to agree.
+/// 48 kHz because that is what the sound server is already running. Measured on
+/// the reference machine: asking for 44100 got 44100 back, because PipeWire's
+/// ALSA plugin accepts it and resamples to its own 48 kHz graph rate. Playback
+/// was pitch-correct but passed through a resampler that exists purely because
+/// we asked for the wrong number. Asking for 48000 removes that stage.
+///
+/// This is still only a request. A device that genuinely runs at 44.1 kHz will
+/// negotiate 44.1 kHz and the engine will adopt it — see the note above.
+pub const DEFAULT_SAMPLE_RATE: f32 = 48_000.0;
+
+/// What a source file's rate is assumed to be when the file itself does not say.
+///
+/// Deliberately separate from [`DEFAULT_SAMPLE_RATE`] despite currently sharing
+/// a value: this one is a claim about *media on disk*, and the honest legacy
+/// assumption for a library entry recorded before rates were stored is CD rate.
+/// It must not track changes to the rate we ask the *device* for — moving the
+/// session to 48 kHz does not retroactively change what an old MP3 was encoded
+/// at, and coupling them would silently transpose everyone's existing library.
+pub const LEGACY_SOURCE_SAMPLE_RATE: u32 = 44_100;
+
 #[derive(Debug, Clone, Copy)]
 pub struct AudioConfig {
     pub sample_rate: f32,
     pub block_size: usize,
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self { sample_rate: DEFAULT_SAMPLE_RATE, block_size: IPC_BLOCK_SIZE }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

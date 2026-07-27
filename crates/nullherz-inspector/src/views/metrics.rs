@@ -2,6 +2,26 @@ use egui::{Ui, Frame, Margin, Rounding, Stroke, RichText, Sense};
 use crate::InspectorApp;
 use nullherz_ui_hal::widgets;
 
+/// Wall-clock time one render block is allowed to take, in milliseconds.
+///
+/// Both terms are runtime values reported by the engine. Assuming either one
+/// makes the load figure wrong by exactly the ratio of assumption to reality —
+/// at 48 kHz with a 44100 assumption the old code overstated load by 8.8%, and
+/// with a 1024-frame period against an assumed 256 it overstated it by 4x.
+fn block_budget_ms(t: &audio_core::Telemetry) -> f32 {
+    let rate = if t.sample_rate > 0.0 { t.sample_rate } else { nullherz_traits::DEFAULT_SAMPLE_RATE };
+    let frames = if t.block_size > 0 { t.block_size } else { nullherz_traits::IPC_BLOCK_SIZE as u32 };
+    frames as f32 / rate * 1000.0
+}
+
+/// DSP load as a fraction of the block budget. 1.0 means the engine used its
+/// entire deadline; above 1.0 an xrun is arithmetically guaranteed.
+fn dsp_load(t: &audio_core::Telemetry) -> f32 {
+    let budget = block_budget_ms(t);
+    if budget <= 0.0 { return 0.0; }
+    (t.process_time_ns as f32 / 1_000_000.0) / budget
+}
+
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let telemetry = *app.last_telemetry.lock();
     let frame_width = ui.available_width().min(400.0);
@@ -12,8 +32,16 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             // 1. Performance Section
             render_metric_group(ui, "DSP EXECUTION PLANE", frame_width, &theme, |ui| {
                 if let Some(t) = &telemetry {
-                    let load = (t.process_time_ns as f32 / 1_000_000.0) / (256.0 / 44100.0 * 1000.0) * 100.0;
+                    let load = dsp_load(t) * 100.0;
                     ui.label(format!("Engine Load: {:.1}%", load));
+                    ui.label(
+                        RichText::new(format!(
+                            "{:.0} Hz · {} frames · {:.2} ms budget",
+                            t.sample_rate, t.block_size, block_budget_ms(t)
+                        ))
+                        .small()
+                        .color(theme.text_secondary),
+                    );
                     ui.label(format!("X-RUNS: {}", t.xrun_count));
                     ui.label(format!("Resource Leaks: {}", t.resource_leaks));
 
@@ -164,11 +192,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         let (r, _) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
 
                         // Color based on engine load as a proxy for thread activity
-                        let load = if let Some(t) = &telemetry {
-                            (t.process_time_ns as f32 / 1_000_000.0) / (256.0 / 44100.0 * 1000.0)
-                        } else {
-                            0.0
-                        };
+                        let load = telemetry.as_ref().map(dsp_load).unwrap_or(0.0);
 
                         let color = if load > 0.9 {
                             theme.danger // Stress

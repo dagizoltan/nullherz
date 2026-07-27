@@ -45,7 +45,7 @@ pub fn run_cycle(
     outputs_raw: &mut [Vec<f32>],
     period_size: u64,
 ) -> f64 {
-    let mut sample_rate = 44100.0f64;
+    let mut sample_rate = nullherz_traits::DEFAULT_SAMPLE_RATE as f64;
     if let Some(ref engine_arc) = *engine_handle.lock() {
         sample_rate = engine_arc.target_sample_rate() as f64;
         let (out0, rest) = outputs_raw.split_at_mut(1);
@@ -77,7 +77,7 @@ impl AudioBackend for ThreadedBackend {
                     let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
                     unsafe {
                         (*engine_ptr).set_config(nullherz_traits::AudioConfig {
-                            sample_rate: 44100.0,
+                            sample_rate: nullherz_traits::DEFAULT_SAMPLE_RATE,
                             block_size: period_size as usize,
                         });
                     }
@@ -123,6 +123,10 @@ impl AudioBackend for ThreadedBackend {
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
+    }
+
+    fn xruns(&self) -> Option<u64> {
+        Some(self.xrun_counter.load(Ordering::SeqCst))
     }
 }
 
@@ -190,7 +194,14 @@ mod tests {
 
         let rate = run_cycle(&handle, &mut outputs, 64);
 
-        assert_eq!(rate, 44100.0, "no engine -> default pacing so the loop still sleeps sanely");
+        // The property is "falls back to the documented default", not "is
+        // 44100" — pinning the literal here is the same mistake this test
+        // exists to guard against, one layer up.
+        assert_eq!(
+            rate,
+            nullherz_traits::DEFAULT_SAMPLE_RATE as f64,
+            "no engine -> default pacing so the loop still sleeps sanely"
+        );
         assert!(outputs.iter().all(|ch| ch.iter().all(|&v| v == 0.0)), "no engine -> untouched buffers");
     }
 

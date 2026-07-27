@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use serde_big_array::BigArray;
 use serde::{Serialize, Deserialize};
-use crate::MAX_NODES;
+use crate::{MAX_NODES, DEFAULT_SAMPLE_RATE, IPC_BLOCK_SIZE};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -40,6 +40,13 @@ pub struct Telemetry {
     pub remote_latency_ms: [f32; 8],
     pub calibration_samples: u32,
     pub sample_rate: f32,
+    /// Frames rendered in the block that `process_time_ns` measured.
+    ///
+    /// Required to state DSP load as a percentage: load is
+    /// `process_time_ns / (block_size / sample_rate)`, and both terms are
+    /// runtime values. Without this the UI had to assume a period, which made
+    /// the headline load figure wrong by the ratio of assumed to actual.
+    pub block_size: u32,
     /// Proactive matchmaking suggestions: (Sample ID, Similarity Score)
     pub suggestions: [(u64, f32); 4],
     pub active_master_deck: char,
@@ -121,7 +128,8 @@ impl Default for Telemetry {
             remote_cpu_usage: [0.0; 8],
             remote_latency_ms: [0.0; 8],
             calibration_samples: 0,
-            sample_rate: 44100.0,
+            sample_rate: DEFAULT_SAMPLE_RATE,
+            block_size: IPC_BLOCK_SIZE as u32,
             suggestions: [(0, 0.0); 4],
             active_master_deck: 'A',
             waveform_peaks: [0.0; 256],

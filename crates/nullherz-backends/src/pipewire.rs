@@ -338,7 +338,7 @@ impl AudioBackend for PipewireBackend {
             if inner.lib.is_none() { inner.lib = Some(PwLib::load()?); }
             inner.period_size = period_size;
 
-            let mut target_rate = 44100u32;
+            let mut target_rate = nullherz_traits::DEFAULT_SAMPLE_RATE as u32;
             {
                 if let Some(ref engine_arc) = *engine_handle.lock() {
                     target_rate = engine_arc.target_sample_rate() as u32;

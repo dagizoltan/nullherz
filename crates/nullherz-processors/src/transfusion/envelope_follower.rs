@@ -16,6 +16,16 @@ impl EnvelopeFollowerProcessor {
 }
 
 impl nullherz_traits::SignalProcessor for EnvelopeFollowerProcessor {
+    /// Re-derive the attack/release coefficients for the negotiated rate.
+    ///
+    /// The 10 ms / 100 ms envelope times are stored as per-sample coefficients,
+    /// so they only mean 10 ms and 100 ms at the rate they were computed at.
+    fn setup(&mut self, config: nullherz_traits::AudioConfig) {
+        if config.sample_rate > 0.0 {
+            self.kernel = EnvelopeFollower::new(config.sample_rate, 10.0, 100.0);
+        }
+    }
+
 fn reset(&mut self) {
         self.kernel.reset();
     }

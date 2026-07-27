@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicU64, Ordering};
-use ipc_layer::AudioBlock;
+use super::buffer_pool::RenderBlock;
 use crate::processors::graph::GraphTopology;
 
 /// Encapsulates all real-time telemetry gathered during graph execution.
@@ -23,7 +23,7 @@ impl GraphTelemetry {
     pub fn update_peak_levels(
         &self,
         topo: &GraphTopology,
-        buffers: &[AudioBlock; crate::MAX_BUFFERS],
+        buffers: &[RenderBlock; crate::MAX_BUFFERS],
         offset: usize,
         num_samples: usize
     ) {

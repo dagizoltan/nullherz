@@ -10,6 +10,10 @@ mod verification;
 
 pub use node::{ProcessorNode, DummyProcessor};
 pub use pool::{TaskPool, Job};
+/// Exposed so the render-capacity invariant can be asserted from outside the
+/// crate: the backends decide chunk sizes from `MAX_BLOCK_SIZE`, and nothing
+/// but a test that can see the buffer keeps those two in agreement.
+pub use buffer_pool::RenderBlock;
 pub use telemetry::GraphTelemetry;
 pub use topology_types::{GraphTopology, NodeRouting, CrossfadeState};
 pub use nullherz_topology::GraphCompiler;
@@ -140,7 +144,9 @@ impl ProcessorGraph {
         if self.topology_coordinator.needs_commit {
             let old_node_count = self.topology_coordinator.active_topology().node_count;
             if old_node_count > 0 && self.morph_duration_samples > 0 {
-                self.buffer_pool.capture_old_buffers();
+                // Commit runs between blocks, so there is no "frames rendered
+                // this block" to scope this to; take the full width.
+                self.buffer_pool.capture_old_buffers(ipc_layer::MAX_BLOCK_SIZE);
                 self.morph_samples_total = self.morph_duration_samples;
                 self.morph_samples_remaining = self.morph_samples_total;
             }
@@ -373,7 +379,7 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
 
         if is_last_sub_block
             && self.topology_coordinator.has_active_crossfades() {
-                self.buffer_pool.capture_old_buffers();
+                self.buffer_pool.capture_old_buffers(offset + num_samples);
             }
 
         if let Some(ref mut p) = pool
@@ -562,7 +568,9 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         graph.add_node(Box::new(IdentityProcessor), vec![2], vec![0]);
         let mut input_data = [0.0f32; 256];
         for i in 0..256 { input_data[i] = i as f32; }
-        graph.buffer_pool.buffers[2].data.copy_from_slice(&input_data);
+        // Fill only the leading frames: the buffer is MAX_BLOCK_SIZE wide,
+        // and this test renders a 100-frame block out of the first 256.
+        graph.buffer_pool.buffers[2].data[..input_data.len()].copy_from_slice(&input_data);
         let mut out_data = [0.0f32; 100];
         let out_slice = &mut out_data[..];
         let mut outputs = [out_slice];
@@ -850,7 +858,9 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         // Process a block to verify it runs end-to-end
         let mut input_data = [0.0f32; 256];
         for i in 0..256 { input_data[i] = i as f32; }
-        graph.buffer_pool.buffers[10].data.copy_from_slice(&input_data);
+        // Fill only the leading frames: the buffer is MAX_BLOCK_SIZE wide,
+        // and this test renders a 100-frame block out of the first 256.
+        graph.buffer_pool.buffers[10].data[..input_data.len()].copy_from_slice(&input_data);
 
         let mut out_data = [0.0f32; 100];
         {

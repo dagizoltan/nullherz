@@ -438,7 +438,7 @@ impl CommandHandler {
             CoreCommand::CalibrateLatency => {
                 let sample_rate = {
                     let engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
-                    engine_lock.as_ref().map(|e| e.target_sample_rate()).unwrap_or(44100.0)
+                    engine_lock.as_ref().map(|e| e.target_sample_rate()).unwrap_or(nullherz_traits::DEFAULT_SAMPLE_RATE)
                 };
                 let samples = (sample_rate * 0.01) as u32;
                 conductor.calibration_samples = samples;
@@ -709,7 +709,11 @@ impl CommandHandler {
                          let win_size = 256;
                          if sample.buffer.len() >= win_size * 4 {
                              let mut last_transient = 0u64;
-                             let min_gap = 44100 / 10; // min 100ms between transients
+                             // 100 ms, against the rate this sample was
+                             // recorded at — not the session's and not a
+                             // constant. A 96 kHz one-shot sliced with a
+                             // 44100-derived gap gets transients 46 ms apart.
+                             let min_gap = (sample.metadata.sample_rate.max(1) / 10) as u64;
                              let threshold = 1.8f32;
                              let mut env = 0.0f32;
 

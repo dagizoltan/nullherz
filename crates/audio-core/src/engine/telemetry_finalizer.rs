@@ -188,6 +188,7 @@ impl TelemetryFinalizer {
             remote_latency_ms: [0.0; 8],
             calibration_samples: 0,
             sample_rate: transport.sample_rate,
+            block_size: num_samples as u32,
             suggestions: [(0, 0.0); 4],
             active_master_deck: 'A',
             waveform_peaks: [0.0; 256],

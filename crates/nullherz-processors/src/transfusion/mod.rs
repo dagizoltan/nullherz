@@ -19,7 +19,7 @@ mod tests {
 
     #[test]
     fn test_personality_inheritance_dna_update() {
-        let mut proc = PersonalityInheritanceProcessor::new(1234, 1024);
+        let mut proc = PersonalityInheritanceProcessor::new(1234, 1024, 44_100.0);
         let mut dna = SoundDNA::default();
         dna.spectral.latent_space[0] = 0.5;
 

@@ -46,6 +46,7 @@ pub struct Conductor {
     last_autosave_secs: u64,
     pub last_genetic_evolve_secs: u64,
     last_metadata_sync_secs: u64,
+    last_registry_reap_secs: u64,
     pub focused_node_idx: Option<u32>,
     pub active_transitions: Vec<DnaTransition>,
     pub undo_stack: Vec<(
@@ -165,6 +166,7 @@ impl Conductor {
             last_autosave_secs: 0,
             last_genetic_evolve_secs: 0,
             last_metadata_sync_secs: 0,
+            last_registry_reap_secs: 0,
             focused_node_idx: None,
             active_transitions: Vec::new(),
             undo_stack: Vec::new(),
@@ -240,6 +242,7 @@ impl Conductor {
             last_autosave_secs: 0,
             last_genetic_evolve_secs: 0,
             last_metadata_sync_secs: 0,
+            last_registry_reap_secs: 0,
             focused_node_idx: None,
             active_transitions: Vec::new(),
             undo_stack: Vec::new(),
@@ -346,7 +349,35 @@ impl Conductor {
     }
 
     pub fn start_backend(&mut self, backend_type: nullherz_traits::AudioBackendType) -> Result<(), String> {
+        Self::prepare_realtime_environment();
         self.engine_coordinator.backend_manager.start(backend_type, self.period_size)
+    }
+
+    /// Lock memory and report anything that will degrade realtime behaviour.
+    ///
+    /// Runs once, before the first audio thread exists — `mlockall` must precede
+    /// the allocations it is meant to protect, and `MCL_FUTURE` then covers
+    /// everything allocated afterwards (topology commits, session buffers).
+    ///
+    /// Nothing here is fatal. A machine that cannot meet the guarantees says so
+    /// ONCE, at startup, instead of presenting as unexplained xruns hours into a
+    /// set. Idempotent: repeated `start_backend` calls (backend switching) report
+    /// only the first time.
+    fn prepare_realtime_environment() {
+        use std::sync::Once;
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| {
+            match ipc_layer::lock_memory() {
+                Ok(()) => println!("[RT] memory locked (mlockall) — audio pages cannot be swapped out"),
+                Err(e) => eprintln!(
+                    "[RT] WARNING: could not lock memory ({e}). Audio buffers stay \
+                     swappable, so a block deadline can become a disk read."
+                ),
+            }
+            for w in ipc_layer::realtime_environment_warnings() {
+                eprintln!("[RT] WARNING: {w}");
+            }
+        });
     }
 
     pub fn stop_backend(&mut self) {
@@ -572,9 +603,152 @@ impl Conductor {
         }
     }
 
+    /// Whether the registry reaper is enabled. See [`Conductor::reap_registry`]
+    /// for why the default is off.
+    pub fn registry_reap_enabled() -> bool {
+        matches!(
+            std::env::var("NULLHERZ_REGISTRY_REAP").ok().as_deref(),
+            Some("1") | Some("true") | Some("yes")
+        )
+    }
+
+    /// Release decoded audio the session is not using and can decode again.
+    ///
+    /// The library scanner registers the FULL decoded audio of every file it
+    /// finds so the analysis worker can read it, and nothing ever released it:
+    /// a 500-track library meant every track resident for the whole session,
+    /// tens of gigabytes. Analysis needs the samples exactly once, and the
+    /// deck-load path already decodes on demand when the registry misses, so
+    /// holding them afterwards buys nothing.
+    ///
+    /// Two predicates decide, and both matter:
+    ///
+    /// **Not in use.** A sample on a deck stays. Evicting one would not free it
+    /// anyway (the sampler holds its own `Arc`), and it would drop the entry
+    /// that `sync_sampler_metadata` reads. Anything mid-hydration stays too, or
+    /// the decode that is running right now would be discarded on arrival.
+    ///
+    /// **Recoverable.** Only evict what we can produce again — a library track
+    /// whose file is still on disk. The registry also holds samples that exist
+    /// NOWHERE else: transfusion children, captures, chopped edits. Those have
+    /// no file to decode from, so evicting one destroys the user's work. This
+    /// is the reason the predicate is "recoverable" and not merely "unused".
+    ///
+    /// Runs on the orchestration thread, so the `Arc` released here is dropped
+    /// here — never on the audio thread.
+    fn reap_registry(&mut self, now: u64) {
+        // OFF BY DEFAULT — the policy is not finished, though the mechanism is.
+        //
+        // The reason is a correctness race, NOT performance. Observed live: the
+        // 1 Hz sweep evicts a track the scanner has just registered, before the
+        // analysis worker has read it — the log shows "Hydrated registry for X"
+        // immediately followed by "released 1 sample, 121 MB". The scanner
+        // registers a decoded track *precisely* as the hand-off to analysis, so
+        // reaping first can skip enrichment for that track altogether.
+        //
+        // Explicitly NOT the reason: underruns. A 2-minute survival run failed
+        // with 3 underruns both with this enabled and with it disabled, and peak
+        // block time stayed at ~500 µs of a 5333 µs budget — those were the
+        // development machine being busy, not this code. An earlier version of
+        // this comment blamed the reaper for them; that was wrong.
+        //
+        // What it needs before defaulting on:
+        //   - An "analysis finished" signal. The conductor cannot currently see
+        //     `AnalysisWorker::processed_ids`, so it cannot tell a track that is
+        //     done from one that is queued.
+        //   - Trigger on memory pressure or an LRU threshold instead of a fixed
+        //     1 Hz sweep, so a quiet session does no work at all.
+        //   - Evidence from a full Gate 1 run, not a 2-minute smoke test.
+        //
+        // The eviction primitive and its tests are correct and stay — this gate
+        // is about the *policy* of when to call it. Enable with
+        // NULLHERZ_REGISTRY_REAP=1 to experiment.
+        if !Self::registry_reap_enabled() { return; }
+
+        // Sweeping the whole registry against the library is not free; once a
+        // second is far more often than a scan can grow it.
+        if self.last_registry_reap_secs == now { return; }
+        self.last_registry_reap_secs = now;
+
+        let ids = self.transfusion_manager.sample_registry.list_ids();
+        if ids.is_empty() { return; }
+
+        let pinned: std::collections::HashSet<u64> = self
+            .mixer_manager
+            .deck_samples
+            .values()
+            .copied()
+            .chain(self.hydration_pending.iter().copied())
+            .collect();
+
+        let mut evicted = 0usize;
+        let mut freed_frames = 0usize;
+        for id in ids {
+            if pinned.contains(&id) { continue; }
+
+            let recoverable = {
+                let lib = self.library.lock();
+                lib.get_track(id)
+                    .ok()
+                    .flatten()
+                    .map(|t| !t.path.is_empty() && std::path::Path::new(&t.path).exists())
+                    .unwrap_or(false)
+            };
+            if !recoverable { continue; }
+
+            if let Some(sample) = self.transfusion_manager.sample_registry.remove(id) {
+                freed_frames += sample.buffer.len();
+                evicted += 1;
+                // `sample` drops here, on the orchestration thread. If a
+                // processor still holds a reference the buffer simply survives
+                // until that one goes — the refcount decides, not this call.
+            }
+        }
+
+        if evicted > 0 {
+            self.transfusion_manager.sample_registry.drain_garbage();
+            println!(
+                "Registry reap: released {} sample(s), ~{:.1} MB of decoded audio (re-decoded on demand)",
+                evicted,
+                freed_frames as f64 * 4.0 / (1024.0 * 1024.0)
+            );
+        }
+    }
+
+    /// Adopt the rate the audio device actually negotiated.
+    ///
+    /// The backend calls `set_config` on the engine once the device answers,
+    /// which fixes the transport and re-runs `setup` on nodes already in the
+    /// ACTIVE graph. It does not reach two other places, and both matter:
+    ///
+    ///  - `topology_manager.current_sample_rate` is what the factory passes to
+    ///    every node it CONSTRUCTS. Left stale, every node added after the
+    ///    device opened is built for the wrong rate — filter corners and
+    ///    envelope times land in the wrong place, and `setup` never revisits
+    ///    them because it already ran.
+    ///  - `timeline.sample_rate` converts between samples and musical time.
+    ///
+    /// Cheap enough to run every tick (one lock, one compare) and self-healing:
+    /// it also covers a device change mid-session.
+    fn sync_session_rate(&mut self) {
+        let device_rate = {
+            let lock = self.engine_coordinator.backend_manager.engine_handle.lock();
+            lock.as_ref().map(|e| e.target_sample_rate()).unwrap_or(0.0)
+        };
+        if device_rate <= 0.0 || device_rate == self.topology_manager.current_sample_rate {
+            return;
+        }
+        self.topology_manager.current_sample_rate = device_rate;
+        self.mixer_bridge.timeline.sample_rate = device_rate;
+        self.transfusion_manager.set_device_sample_rate(device_rate as u32);
+    }
+
     pub fn tick(&mut self) {
         use std::time::{SystemTime, UNIX_EPOCH};
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+
+        self.sync_session_rate();
+        self.reap_registry(now);
 
         // Complete background hydrations: the decode thread has registered
         // the sample; re-drive the load for every deck still mapped to it so

@@ -20,6 +20,17 @@ pub trait AudioBackend: Send {
     fn start(&mut self, engine: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>, period_size: u64) -> Result<(), String>;
     fn stop(&mut self);
     fn enumerate_devices(&self) -> Vec<String> { Vec::new() }
+
+    /// Buffer underruns this backend has observed since `start`.
+    ///
+    /// `Option`, not `u64`, and that distinction is the whole point. Returning
+    /// `0` from a backend that does not measure underruns is indistinguishable
+    /// from a backend reporting a clean run — which is precisely how the
+    /// survival harness came to grade every run against a counter that was
+    /// never incremented, making its central "zero xruns" criterion vacuously
+    /// true. `None` means "this backend does not report"; a caller must then
+    /// say so rather than infer success.
+    fn xruns(&self) -> Option<u64> { None }
 }
 
 pub struct BackendFactory;

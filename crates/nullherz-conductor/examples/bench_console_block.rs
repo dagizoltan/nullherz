@@ -22,7 +22,20 @@ use nullherz_dna::GeneticLibrary;
 use nullherz_traits::{Command, PerformanceCommand};
 
 const SR: f32 = 44_100.0;
-const BLOCK: usize = 256;
+/// Realtime block, overridable with NULLHERZ_BENCH_BLOCK_SIZE.
+///
+/// Configurable so the claim on `MAX_BLOCK_SIZE` — that larger blocks are
+/// "markedly cheaper per sample", which is the whole justification for offline
+/// rendering using them — can be measured rather than assumed. Capped at
+/// MAX_BLOCK_SIZE: beyond that the graph buffers cannot hold the block.
+fn block_size() -> usize {
+    std::env::var("NULLHERZ_BENCH_BLOCK_SIZE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&v| v > 0)
+        .map(|v| v.min(nullherz_traits::MAX_BLOCK_SIZE))
+        .unwrap_or(256)
+}
 /// Same deterministic pre-roll the golden render uses to stream-install the
 /// bootstrap topology (bounded mutations per block).
 const INSTALL_BLOCKS: usize = 256;
@@ -87,17 +100,20 @@ fn register_stereo_tone(conductor: &Conductor, id: u64, left_hz: [f32; 3], right
 }
 
 fn pump_block(conductor: &mut Conductor, left: &mut [f32], right: &mut [f32]) {
+    // The block size IS the buffer length — deriving it here keeps the render
+    // call and the allocation from ever disagreeing.
+    let block = left.len().min(right.len());
     let inputs: Vec<&[f32]> = vec![];
     let mut outputs = vec![left, right];
     let mut engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
     let engine_arc = engine_lock.as_mut().expect("setup_engine must install an engine");
     if let Some(engine) = Arc::get_mut(engine_arc) {
-        engine.process_block(&inputs, &mut outputs, BLOCK);
+        engine.process_block(&inputs, &mut outputs, block);
     } else {
         // No other thread runs in this harness; exclusive access holds by
         // construction (same pattern as the golden render test).
         let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn nullherz_traits::RenderingEngine;
-        unsafe { (*engine_ptr).process_block(&inputs, &mut outputs, BLOCK); }
+        unsafe { (*engine_ptr).process_block(&inputs, &mut outputs, block); }
     }
 }
 
@@ -109,8 +125,9 @@ fn main() {
     register_stereo_tone(&conductor, 9_901, [220.0, 1_470.0, 6_300.0], [330.0, 2_210.0, 9_500.0]);
     register_stereo_tone(&conductor, 9_902, [440.0, 3_150.0, 11_000.0], [550.0, 4_400.0, 13_200.0]);
 
-    let mut left = vec![0.0f32; BLOCK];
-    let mut right = vec![0.0f32; BLOCK];
+    let block = block_size();
+    let mut left = vec![0.0f32; block];
+    let mut right = vec![0.0f32; block];
 
     for _ in 0..INSTALL_BLOCKS {
         pump_block(&mut conductor, &mut left, &mut right);
@@ -145,7 +162,7 @@ fn main() {
         let t0 = Instant::now();
         pump_block(&mut conductor, &mut left, &mut right);
         samples_ns.push(t0.elapsed().as_nanos() as u64);
-        for i in 0..BLOCK {
+        for i in 0..block {
             peak = peak.max(left[i].abs()).max(right[i].abs());
         }
     }
@@ -154,10 +171,11 @@ fn main() {
     let sum: u64 = samples_ns.iter().sum();
     let mean = sum as f64 / samples_ns.len() as f64;
     let pct = |p: f64| samples_ns[((samples_ns.len() as f64 * p) as usize).min(samples_ns.len() - 1)];
-    let budget_ns = BLOCK as f64 / SR as f64 * 1e9;
+    let budget_ns = block as f64 / SR as f64 * 1e9;
 
     println!("blocks measured : {}", measure);
-    println!("block size      : {} @ {} Hz (budget {:.0} us)", BLOCK, SR, budget_ns / 1e3);
+    println!("block size      : {} @ {} Hz (budget {:.0} us)", block, SR, budget_ns / 1e3);
+    println!("ns per sample   : {:>9.2}", pct(0.50) as f64 / block as f64);
     println!("output peak     : {:.4} (must be > 0 — silence means a broken run)", peak);
     println!("mean            : {:>9.2} us  ({:.1}% of budget)", mean / 1e3, mean / budget_ns * 100.0);
     println!("p50             : {:>9.2} us", pct(0.50) as f64 / 1e3);

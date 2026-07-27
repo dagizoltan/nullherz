@@ -27,7 +27,10 @@ pub struct PersonalityInheritanceProcessor {
 }
 
 impl PersonalityInheritanceProcessor {
-    pub fn new(id: u64, fft_size: usize) -> Self {
+    /// `sample_rate` sizes the delay line. It is a duration (1 second), not a
+    /// frame count — passing a rate keeps that true at any session rate instead
+    /// of only at 44.1 kHz.
+    pub fn new(id: u64, fft_size: usize, sample_rate: f32) -> Self {
         Self {
             id,
             pipeline: SpectralPipeline::new(fft_size),
@@ -39,7 +42,7 @@ impl PersonalityInheritanceProcessor {
             rhythmic_bias: 0.5,
             artifact_bias: 0.5,
             spatial_bias: 0.5,
-            delay_buffer: vec![0.0; 44100], // 1 second max delay
+            delay_buffer: vec![0.0; sample_rate.max(1.0) as usize], // 1 second max delay
             write_ptr: 0,
         }
     }

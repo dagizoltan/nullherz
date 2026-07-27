@@ -60,7 +60,23 @@ Engine driven directly — **no backend, no driver, no worker-pool contention.**
 
 Cost model fitted to those points: **~18 µs fixed per block + ~0.39 µs per frame** — i.e. **1.7% of one core per second of audio** for the full 4-deck console. [M]
 
-**The tail does not scale with block size** (462 → 418 → 732 µs). A roughly constant-magnitude spike independent of workload indicates scheduler preemption, page faults, or frequency transitions — *not* DSP. See §5.2.
+**The tail does not scale with block size** (462 → 418 → 732 µs) — but see the correction below before drawing any RT conclusion from it.
+
+> **CORRECTION (measured during Phase 1).** The max column above says nothing
+> about realtime behaviour. `bench_console_block` drives the engine on a **plain
+> thread with default scheduling** — it never calls `setup_rt_thread`, so it has
+> no RT priority and is freely preempted by whatever else is on the desktop. The
+> real audio path *does* take RT priority (`threaded.rs:74`
+> `setup_rt_thread(90, Some(0))`; ALSA likewise).
+>
+> Measured with `/usr/bin/time -v` across repeated runs: **major page faults were
+> 0 every time**, and the max tracks **involuntary context switches** —
+> 944 → 1415 µs, 629 → 898 µs, 126 → 440 µs. It is desktop preemption of a
+> non-RT thread, not swapping and not DSP.
+>
+> The **mean and percentiles remain valid** (that is what this harness measures
+> well, and they are stable at ~120–128 µs). The tail must be re-measured on the
+> actual RT path via `bin/survival` before any RT claim rests on it.
 
 ### 2.3 Memory
 
@@ -260,7 +276,7 @@ It is also strategic. **Permissive (MIT/Apache-2.0) on the engine** is close to 
 
 | # | Issue | Consequence |
 | :-- | :-- | :-- |
-| 5.2.1 | **No `mlock` anywhere** [V], and **swap is enabled** (4 GB) [M]. The system *grants* 4 GB memlock (`ulimit -l = 4194304`) and none is used | Failure chain: unbounded registry → 51.7 GB on a 500-track library → memory pressure on 14 GiB → kernel swaps → **the audio thread's pages go to a SATA SSD** → a block deadline becomes a multi-millisecond dropout. **The most likely explanation for the 462–732 µs tail** — a constant-magnitude spike independent of workload is the signature of a page fault or scheduler event. Fix: `mlockall(MCL_CURRENT\|MCL_FUTURE)` + pre-touch every audio buffer |
+| 5.2.1 | ~~**No `mlock` anywhere**~~ **FIXED in Phase 1.** `mlockall(MCL_CURRENT\|MCL_FUTURE)` now runs once in `start_backend`, verified by reading back `VmLck` from `/proc/self/status`. Swap remains enabled (4 GB), which is fine now that locking succeeds | Failure chain it closes: unbounded registry → 51.7 GB on a 500-track library → memory pressure on 14 GiB → kernel swaps → the audio thread's pages go to a SATA SSD → a block deadline becomes a multi-millisecond dropout. **Note this was NOT the cause of the observed tail** — measurement showed 0 major page faults; see the correction in §2.2. It is correct insurance against the residency problem, not a fix for the tail |
 | 5.2.2 | **Pinning implemented but unused.** `pin_thread_to_core` exists; `setup_rt_thread(80, None)` is called without a core id [V] | On 2 cores, pinning the RT thread and keeping workers off its sibling hyperthread matters a great deal |
 | 5.2.3 | **`DEFAULT_WORKER_COUNT = 4`** on a 2-core machine [V][M] | RT thread + 4 workers = 5 threads on 4 hardware threads. Actively harmful; must derive from `available_parallelism()` |
 | 5.2.4 | **CPU governor is `powersave`** [M] | Aggressive downclocking precisely when the RT thread needs clocks. Detect and warn at startup (~20 lines) |

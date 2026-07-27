@@ -52,6 +52,30 @@ use nullherz_traits::{Command, PerformanceCommand};
 const AUDIBLE_PEAK_DIFF: f32 = 1e-3;
 
 const SR: f32 = 44_100.0;
+
+/// Pin the engine to `SR`, the rate this file's fixtures were rendered at.
+///
+/// Without this the console runs at whatever `DEFAULT_SAMPLE_RATE` currently
+/// says, so moving the session rate resamples every tone and invalidates the
+/// golden fixture. That would make a *config* change look identical to a DSP
+/// regression — and the only available response, regenerating the fixture,
+/// silently discards exactly the signal this test exists to provide.
+fn pin_session_rate(conductor: &mut nullherz_conductor::orchestrator::Conductor) {
+    // Must run BEFORE bootstrap. `current_sample_rate` is what the factory hands
+    // to every node it constructs, and a node's rate-derived coefficients are
+    // fixed at construction — pinning only the engine afterwards leaves the
+    // nodes themselves built for whatever the default happened to be.
+    conductor.topology_manager.current_sample_rate = SR;
+    conductor.mixer_bridge.timeline.sample_rate = SR;
+    let lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
+    if let Some(engine) = lock.as_ref() {
+        let ptr = std::sync::Arc::as_ptr(engine) as *mut dyn nullherz_traits::RenderingEngine;
+        unsafe {
+            (*ptr).set_config(nullherz_traits::AudioConfig { sample_rate: SR, block_size: BLOCK });
+        }
+    }
+}
+
 const BLOCK: usize = 256;
 /// Fixed pre-roll: enough blocks to stream-install the whole bootstrap
 /// topology (bounded mutations per block) with headroom. Fixed, not
@@ -171,6 +195,7 @@ fn pump_block(conductor: &mut Conductor, left: &mut [f32], right: &mut [f32]) {
 fn test_golden_stereo_master_render() {
     let mut conductor = Conductor::with_library_path(":memory:");
     conductor.setup_engine();
+    pin_session_rate(&mut conductor);
     conductor.bootstrap_4channel_mixer();
 
     // Low / mid / high partials per channel, all sets disjoint: full-band
@@ -313,6 +338,7 @@ fn test_golden_stereo_master_render() {
 fn test_capture_records_master_as_planar_stereo() {
     let mut conductor = Conductor::with_library_path(":memory:");
     conductor.setup_engine();
+    pin_session_rate(&mut conductor);
     conductor.bootstrap_4channel_mixer();
 
     register_stereo_tone(&conductor, 5_601, [220.0, 1_470.0, 6_300.0], [330.0, 2_210.0, 9_500.0]);
@@ -391,6 +417,7 @@ fn test_master_eq_setparam_audibly_shapes_master() {
     let render = |low_gain: Option<f32>| -> Vec<f32> {
         let mut conductor = Conductor::with_library_path(":memory:");
         conductor.setup_engine();
+        pin_session_rate(&mut conductor);
         conductor.bootstrap_4channel_mixer();
         register_stereo_tone(&conductor, 5_701, [220.0, 1_470.0, 6_300.0], [330.0, 2_210.0, 9_500.0]);
 

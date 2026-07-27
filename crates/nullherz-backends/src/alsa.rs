@@ -26,6 +26,13 @@ struct AlsaLib {
     snd_pcm_recover: unsafe extern "C" fn(*mut std::ffi::c_void, std::os::raw::c_int, std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_close: unsafe extern "C" fn(*mut std::ffi::c_void) -> std::os::raw::c_int,
     snd_pcm_prepare: unsafe extern "C" fn(*mut std::ffi::c_void) -> std::os::raw::c_int,
+    // Device discovery. Optional because the PCM path — the part that actually
+    // makes sound — must not fail to load just because a stripped libasound is
+    // missing the hint API. Absence degrades enumeration to ["default"], which
+    // is honest; it never degrades playback.
+    snd_device_name_hint: Option<unsafe extern "C" fn(std::os::raw::c_int, *const std::os::raw::c_char, *mut *mut *mut std::ffi::c_void) -> std::os::raw::c_int>,
+    snd_device_name_get_hint: Option<unsafe extern "C" fn(*const std::ffi::c_void, *const std::os::raw::c_char) -> *mut std::os::raw::c_char>,
+    snd_device_name_free_hint: Option<unsafe extern "C" fn(*mut *mut std::ffi::c_void) -> std::os::raw::c_int>,
 }
 unsafe impl Send for AlsaLib {}
 
@@ -56,6 +63,12 @@ impl AlsaLib {
                 snd_pcm_recover: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, i32, i32) -> i32>(load_sym(c"snd_pcm_recover").ok_or("sym failed")?),
                 snd_pcm_close: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void) -> i32>(load_sym(c"snd_pcm_close").ok_or("sym failed")?),
                 snd_pcm_prepare: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void) -> i32>(load_sym(c"snd_pcm_prepare").ok_or("sym failed")?),
+                snd_device_name_hint: load_sym(c"snd_device_name_hint")
+                    .map(|s| std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(i32, *const i8, *mut *mut *mut std::ffi::c_void) -> i32>(s)),
+                snd_device_name_get_hint: load_sym(c"snd_device_name_get_hint")
+                    .map(|s| std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*const std::ffi::c_void, *const i8) -> *mut i8>(s)),
+                snd_device_name_free_hint: load_sym(c"snd_device_name_free_hint")
+                    .map(|s| std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut *mut std::ffi::c_void) -> i32>(s)),
             })
         }
     }
@@ -69,6 +82,8 @@ pub struct AlsaBackend {
     /// thread in place of a blocking `eprintln!` — RT-safe observability that
     /// never issues a `write(2)` on the SCHED_FIFO callback.
     xruns: std::sync::Arc<AtomicU64>,
+    /// ALSA device to open. Defaults to `$NULLHERZ_ALSA_DEVICE` or `"default"`.
+    device: String,
 }
 
 impl Default for AlsaBackend {
@@ -78,7 +93,38 @@ impl Default for AlsaBackend {
 }
 
 impl AlsaBackend {
-    pub fn new() -> Self { Self { running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), handle: None, xruns: std::sync::Arc::new(AtomicU64::new(0)) } }
+    pub fn new() -> Self {
+        Self {
+            running: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            handle: None,
+            xruns: std::sync::Arc::new(AtomicU64::new(0)),
+            device: Self::default_device(),
+        }
+    }
+
+    /// Where the device name comes from when nobody sets one explicitly.
+    ///
+    /// `default` routes through whatever the user's ALSA config points at
+    /// (PipeWire, PulseAudio, or bare hardware), which is the right choice for
+    /// almost everyone. The escape hatch matters for the case `default` cannot
+    /// serve: bypassing the sound server to reach an interface directly.
+    pub fn default_device() -> String {
+        std::env::var("NULLHERZ_ALSA_DEVICE")
+            .ok()
+            .map(|v| device_id(&v).to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| "default".to_string())
+    }
+
+    /// Open a specific ALSA device instead of `default`. Accepts either a raw
+    /// device id or an entry from [`AudioBackend::enumerate_devices`].
+    pub fn set_device(&mut self, device: &str) {
+        let id = device_id(device);
+        self.device = if id.is_empty() { "default".to_string() } else { id.to_string() };
+    }
+
+    /// The device this backend will open (or has opened).
+    pub fn device(&self) -> &str { &self.device }
 
     /// Total ALSA xruns (buffer underruns) recovered since `start`, updated
     /// lock-free from the audio thread. Read it from any thread for metering
@@ -100,13 +146,20 @@ impl AudioBackend for AlsaBackend {
         // avoids this entirely.
         // =====================================================================
         let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
-        let name = std::ffi::CString::new("default").unwrap();
+        let name = std::ffi::CString::new(self.device.as_str())
+            .map_err(|_| format!("ALSA device name contains a NUL byte: {:?}", self.device))?;
 
         let open_ret = unsafe { (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) };
         if open_ret != 0 {
-            return Err(format!("snd_pcm_open failed with error code: {}", open_ret));
+            // Name the device that failed. "error code -2" against an unnamed
+            // device is unactionable when the name is configurable.
+            return Err(format!(
+                "snd_pcm_open failed on device '{}' with error code: {} \
+                 (set NULLHERZ_ALSA_DEVICE to pick another; see the device list for valid names)",
+                self.device, open_ret
+            ));
         }
-        eprintln!("[ALSA] snd_pcm_open SUCCESS on 'default'");
+        eprintln!("[ALSA] snd_pcm_open SUCCESS on '{}'", self.device);
 
         const SND_PCM_ACCESS_RW_INTERLEAVED: i32 = 3;
         const SND_PCM_FORMAT_S16_LE: i32 = 2;
@@ -134,7 +187,7 @@ impl AudioBackend for AlsaBackend {
 
             (alsa.snd_pcm_hw_params_set_channels)(pcm, hw_params, 2);
 
-            let mut target_rate = 44100u32;
+            let mut target_rate = nullherz_traits::DEFAULT_SAMPLE_RATE as u32;
             {
                 let lock = engine_handle.lock();
                 if let Some(ref engine) = *lock {
@@ -162,7 +215,31 @@ impl AudioBackend for AlsaBackend {
             period_size = ps;
 
             negotiated_buffer = buffer_size;
-            eprintln!("[ALSA] Negotiated: rate={} period={} buffer={}", rate, period_size, buffer_size);
+            eprintln!(
+                "[ALSA] Negotiated: rate={} period={} buffer={} ({:.1} ms)",
+                rate, period_size, buffer_size,
+                buffer_size as f64 * 1000.0 / rate.max(1) as f64
+            );
+            // `*_near` silently substitutes when it cannot honour a request, so
+            // a mismatch is invisible unless we look. Both cases are real:
+            // a rate substitution means someone is resampling us, and a period
+            // substitution means every duration derived from the requested
+            // period (bridge pacing, DSP-load percentages) is computed against
+            // a period the device never agreed to.
+            if rate != target_rate {
+                eprintln!(
+                    "[ALSA] NOTE: requested {} Hz, device negotiated {} Hz. The engine adopts \
+                     {} Hz, so pitch is correct — but something in the chain is resampling. \
+                     Matching the sound server's rate removes that stage.",
+                    target_rate, rate, rate
+                );
+            }
+            if period_size != requested_period_size {
+                eprintln!(
+                    "[ALSA] NOTE: requested period {} frames, device negotiated {}.",
+                    requested_period_size, period_size
+                );
+            }
             #[cfg(debug_assertions)]
             eprintln!("[ALSA] WARNING: DEBUG build — DSP runs 10-30x slower and WILL underrun. Use --release.");
 
@@ -190,6 +267,14 @@ impl AudioBackend for AlsaBackend {
             match ipc_layer::set_rt_priority(80) {
                 Ok(()) => eprintln!("[ALSA] RT scheduling: ACQUIRED (SCHED_FIFO direct or SCHED_RR via RTKit)"),
                 Err(_) => eprintln!("[ALSA] RT scheduling: DENIED — running at normal priority. Underruns likely under load. Fix: add '@audio - rtprio 95' to /etc/security/limits.d/audio.conf and re-login."),
+            }
+
+            // Opt-in only (NULLHERZ_AUDIO_CPU). See
+            // ipc_layer::apply_audio_thread_affinity for why this is not a
+            // default: without isolcpus it reserves nothing, and on an SMT
+            // machine it can put the audio thread on a worker's sibling.
+            if let Some(note) = ipc_layer::apply_audio_thread_affinity() {
+                eprintln!("[ALSA] {note}");
             }
 
             // Denormal protection (FTZ/DAZ) for this audio thread. Without it,
@@ -307,13 +392,90 @@ impl AudioBackend for AlsaBackend {
         }
     }
 
+    /// Real playback devices, queried from ALSA via `snd_device_name_hint`.
+    ///
+    /// This used to return a fabricated `["default", "hw:0,0"]`. That is worse
+    /// than returning nothing: the UI presents the list as selectable devices,
+    /// so a user could pick `hw:0,0` on a machine where it does not exist and
+    /// get an open failure from a menu entry we invented. Everything below
+    /// comes from the driver, and the only synthesised entry is `default`,
+    /// which is guaranteed to resolve by ALSA's own configuration.
+    fn xruns(&self) -> Option<u64> {
+        Some(self.xruns.load(Ordering::Relaxed))
+    }
+
     fn enumerate_devices(&self) -> Vec<String> {
+        let Ok(alsa) = AlsaLib::load() else { return Vec::new() };
+        let (Some(hint), Some(get_hint), Some(free_hint)) = (
+            alsa.snd_device_name_hint,
+            alsa.snd_device_name_get_hint,
+            alsa.snd_device_name_free_hint,
+        ) else {
+            // Hint API unavailable: say only what we can stand behind.
+            return vec!["default".to_string()];
+        };
+
         let mut devices = Vec::new();
-        if let Ok(_alsa) = AlsaLib::load() {
-             // In a real implementation, we'd use snd_device_name_hint
-             devices.push("default".to_string());
-             devices.push("hw:0,0".to_string());
+        unsafe {
+            let mut hints: *mut *mut std::ffi::c_void = std::ptr::null_mut();
+            // card = -1 asks for every card rather than a specific index.
+            if hint(-1, c"pcm".as_ptr(), &mut hints) != 0 || hints.is_null() {
+                return vec!["default".to_string()];
+            }
+
+            // Each `snd_device_name_get_hint` result is a strdup'd C string that
+            // belongs to the caller; not freeing it leaks once per device per
+            // call, and this is called from the telemetry loop.
+            let fetch = |h: *const std::ffi::c_void, id: &std::ffi::CStr| -> Option<String> {
+                let raw = get_hint(h, id.as_ptr());
+                if raw.is_null() { return None; }
+                let s = std::ffi::CStr::from_ptr(raw).to_string_lossy().into_owned();
+                libc::free(raw as *mut libc::c_void);
+                if s == "null" || s.is_empty() { None } else { Some(s) }
+            };
+
+            let mut p = hints;
+            while !(*p).is_null() {
+                let h = *p as *const std::ffi::c_void;
+                p = p.add(1);
+
+                // IOID is absent for duplex devices and "Input"/"Output"
+                // otherwise. Capture-only devices cannot be a playback target.
+                if let Some(ioid) = fetch(h, c"IOID")
+                    && ioid != "Output" { continue; }
+                let Some(name) = fetch(h, c"NAME") else { continue };
+
+                // The description's first line is the human-readable card name;
+                // the rest is verbose sub-device detail nobody reads in a list.
+                match fetch(h, c"DESC") {
+                    Some(desc) => {
+                        let short = desc.lines().next().unwrap_or("").trim().to_string();
+                        if short.is_empty() || short == name {
+                            devices.push(name);
+                        } else {
+                            devices.push(format!("{name} — {short}"));
+                        }
+                    }
+                    None => devices.push(name),
+                }
+            }
+            free_hint(hints);
+        }
+
+        // `default` is not always emitted as a hint but always resolves, and it
+        // is what we open when nothing is configured — so it must be offerable.
+        if !devices.iter().any(|d| d == "default" || d.starts_with("default —")) {
+            devices.insert(0, "default".to_string());
         }
         devices
+    }
+}
+
+/// Strip the human-readable suffix that [`enumerate_devices`] appends, so a
+/// string taken straight from the device list can be handed to `snd_pcm_open`.
+pub fn device_id(entry: &str) -> &str {
+    match entry.split_once(" — ") {
+        Some((id, _)) => id.trim(),
+        None => entry.trim(),
     }
 }

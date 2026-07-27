@@ -2,7 +2,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering, AtomicBool, AtomicU64};
 use std::thread;
-use ipc_layer::{AudioBlock, RingBuffer, Producer};
+use ipc_layer::{RingBuffer, Producer};
+use super::buffer_pool::RenderBlock;
 use super::node::ProcessorNode;
 
 #[derive(Clone, Copy)]
@@ -10,8 +11,8 @@ pub struct Job {
     pub node_ptr: *const ProcessorNode,
     pub num_samples: usize,
     pub sub_block_offset: usize,
-    pub buffers_ptr: *mut AudioBlock,
-    pub x_buffers_ptr: *mut AudioBlock,
+    pub buffers_ptr: *mut RenderBlock,
+    pub x_buffers_ptr: *mut RenderBlock,
     pub input_indices: [usize; crate::MAX_CHANNELS],
     pub sidechain_indices: [usize; crate::MAX_CHANNELS],
     pub input_delays: [f32; crate::MAX_CHANNELS],

@@ -131,7 +131,7 @@ impl SamplerProcessor {
 
     fn trigger_slice(&mut self, slice_idx: u32, context: Option<&nullherz_traits::ProcessContext>) {
         let (frames, channels) = (self.source_frames(), self.source_channels());
-        let sample_rate = context.and_then(|c| c.transport).map(|t| t.sample_rate).unwrap_or(44100.0);
+        let sample_rate = context.and_then(|c| c.transport).map(|t| t.sample_rate).unwrap_or(nullherz_traits::DEFAULT_SAMPLE_RATE);
         let rate_ratio = self.source_rate_ratio(sample_rate);
         let bpm = self.metadata.as_ref().map(|m| m.bpm).unwrap_or(120.0);
         let samples_per_beat = self.source_samples_per_beat(sample_rate, bpm);
@@ -322,7 +322,7 @@ impl nullherz_traits::MidiResponder for SamplerProcessor {
                 }
             } else {
                 let (frames, channels) = (self.source_frames(), self.source_channels());
-                let device_rate = context.and_then(|c| c.transport).map(|t| t.sample_rate).unwrap_or(44100.0);
+                let device_rate = context.and_then(|c| c.transport).map(|t| t.sample_rate).unwrap_or(nullherz_traits::DEFAULT_SAMPLE_RATE);
                 let rate_ratio = self.source_rate_ratio(device_rate);
                 if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
                     let freq = 440.0 * 2.0f32.powf((event.data1 as f32 - 69.0) / 12.0);

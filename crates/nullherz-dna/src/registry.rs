@@ -39,6 +39,30 @@ impl nullherz_traits::SampleRegistry for SampleRegistry {
         self.garbage.lock().push(old_ptr);
     }
 
+    fn remove(&self, id: u64) -> Option<RegisteredSample> {
+        let _lock = self.write_lock.lock();
+
+        let old_ptr = self.inner.load(Ordering::Acquire);
+        // Check before cloning: a miss is the common case when a caller sweeps
+        // ids speculatively, and cloning the whole map to discover that would
+        // make eviction cost more than the leak.
+        if unsafe { !(*old_ptr).contains_key(&id) } {
+            return None;
+        }
+
+        let mut new_map = unsafe { (*old_ptr).clone() };
+        let evicted = new_map.remove(&id);
+
+        let new_ptr = Box::into_raw(Box::new(new_map));
+        self.inner.store(new_ptr, Ordering::Release);
+        // The retired map is reclaimed by drain_garbage once no reader holds
+        // it. Note this frees the MAP, not the sample: the sample's buffer is
+        // owned by the `Arc` we hand back, and dies with the caller's copy.
+        self.garbage.lock().push(old_ptr);
+
+        evicted
+    }
+
     fn drain_garbage(&self) {
         if self.readers.load(Ordering::SeqCst) > 0 { return; }
         let mut g = self.garbage.lock();

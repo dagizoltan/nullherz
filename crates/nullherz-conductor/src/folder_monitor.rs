@@ -12,6 +12,20 @@ use std::time::Duration;
 pub struct FolderMonitor {
     sample_registry: Arc<dyn SampleRegistry>,
     library: Arc<parking_lot::Mutex<LibraryDatabase>>,
+    /// Ids this monitor has already decoded and handed to the registry.
+    ///
+    /// The scan used to dedupe purely on registry residency ("already
+    /// registered? skip"). That conflated two different questions — *is this
+    /// audio resident* and *have we already ingested this file* — and they
+    /// stopped being the same thing the moment residency became reclaimable:
+    /// the reaper would release a track, the next 10-second sweep would see a
+    /// registry miss, re-decode the entire file, and the reaper would release
+    /// it again. A permanent decode/evict treadmill on the largest files in the
+    /// library, plus the memory spike the residency check was added to prevent.
+    ///
+    /// Session-scoped, matching the previous behaviour exactly: a content change
+    /// at a known path is still only picked up on the next app start.
+    scanned: Arc<parking_lot::Mutex<std::collections::HashSet<u64>>>,
 }
 
 impl Clone for FolderMonitor {
@@ -19,6 +33,7 @@ impl Clone for FolderMonitor {
         Self {
             sample_registry: self.sample_registry.clone(),
             library: self.library.clone(),
+            scanned: self.scanned.clone(),
         }
     }
 }
@@ -28,6 +43,7 @@ impl FolderMonitor {
         Self {
             sample_registry,
             library,
+            scanned: Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new())),
         }
     }
 
@@ -92,11 +108,16 @@ impl FolderMonitor {
         // (A content change to an already-loaded file is now only picked up on
         // the next app start; detecting it live without re-decoding would need
         // an mtime/size check — a follow-up, not worth re-freezing for.)
-        if self.sample_registry.get(id).is_some() {
+        // Resident OR already ingested this session. The second clause is what
+        // keeps this from re-decoding a track the reaper legitimately released.
+        if self.sample_registry.get(id).is_some() || self.scanned.lock().contains(&id) {
             return;
         }
 
         let decoded = decode_audio_file(path);
+        // Record before registering: if anything below bails out early we still
+        // must not decode this file again on the next sweep.
+        self.scanned.lock().insert(id);
 
         // The SampleRegistry is in-memory and empty on EVERY boot; the library
         // is persistent. A library hit must still hydrate the registry, or every
@@ -223,7 +244,7 @@ where
                     // The source rate, which the old code read and discarded.
                     // Fall back to 44.1 kHz only if the container genuinely does
                     // not declare one.
-                    let source_rate = track.codec_params.sample_rate.unwrap_or(44_100);
+                    let source_rate = track.codec_params.sample_rate.unwrap_or(nullherz_traits::LEGACY_SOURCE_SAMPLE_RATE);
                     let mut decoded_frames = 0u64;
                     let mut planes: Vec<Vec<f32>> = Vec::new();
                     let mut sample_buf = None;

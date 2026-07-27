@@ -32,6 +32,19 @@ impl nullherz_traits::SignalProcessor for DjIsolatorProcessor {
         }
     }
 
+    /// Re-derive the crossover when the device rate changes.
+    ///
+    /// `SignalProcessor::setup` defaults to a no-op, so omitting this compiled
+    /// fine and silently kept 44.1 kHz-derived coefficients on a 48 kHz device.
+    /// The backend calls `set_config` with the negotiated rate precisely so
+    /// that processors can re-derive; a processor that ignores it makes that
+    /// feedback path a lie.
+    fn setup(&mut self, config: nullherz_traits::AudioConfig) {
+        if config.sample_rate > 0.0 {
+            self.inner.set_sample_rate(config.sample_rate);
+        }
+    }
+
     fn reset(&mut self) {
         self.inner.reset();
     }

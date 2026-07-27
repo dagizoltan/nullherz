@@ -11,6 +11,11 @@ pub struct DelayProcessor {
 }
 
 impl DelayProcessor {
+    /// Allocated delay line length in frames. The maximum delay this instance
+    /// can represent — exposed so callers can verify it covers the duration
+    /// they asked for rather than assuming a rate.
+    pub fn capacity(&self) -> usize { self.capacity }
+
     pub fn new(id: u64, max_delay: usize) -> Self {
         let capacity = max_delay.next_power_of_two().max(1024);
         let buffers = std::array::from_fn(|_| vec![0.0; capacity]);

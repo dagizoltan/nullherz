@@ -48,7 +48,7 @@ impl TopologyManager {
         Self {
             registry: ProcessorRegistry::new(),
             topo_producer: None,
-            current_sample_rate: 44100.0,
+            current_sample_rate: nullherz_traits::DEFAULT_SAMPLE_RATE,
             active_node_types: std::collections::HashMap::new(),
             id_allocator: nullherz_traits::IdAllocator::new(100, 100),
             current_topology: GraphTopology {

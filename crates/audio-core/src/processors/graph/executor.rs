@@ -1,5 +1,5 @@
 use std::sync::atomic::Ordering;
-use ipc_layer::AudioBlock;
+use super::buffer_pool::RenderBlock;
 use crate::processors::graph::{GraphTopology, Job, ProcessorNode};
 
 pub struct GraphExecutor {}
@@ -11,9 +11,9 @@ impl GraphExecutor {
         topo_idx: usize,
         offset: usize,
         num_samples: usize,
-        old_path_buffers: &[AudioBlock; crate::MAX_BUFFERS],
-        buffers: &[AudioBlock; crate::MAX_BUFFERS],
-        crossfade_buffers: &mut [AudioBlock; crate::MAX_CROSSFADE_BUFFERS],
+        old_path_buffers: &[RenderBlock; crate::MAX_BUFFERS],
+        buffers: &[RenderBlock; crate::MAX_BUFFERS],
+        crossfade_buffers: &mut [RenderBlock; crate::MAX_CROSSFADE_BUFFERS],
         block_x_map: &mut [[u8; crate::MAX_CHANNELS]; crate::MAX_NODES]
     ) {
         for i in 0..crate::MAX_CROSSFADE_BUFFERS {
@@ -77,8 +77,8 @@ impl GraphExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn execute_stage(
         nodes: &[ProcessorNode; crate::MAX_NODES],
-        buffers: &mut [AudioBlock; crate::MAX_BUFFERS],
-        crossfade_buffers: &mut [AudioBlock; crate::MAX_CROSSFADE_BUFFERS],
+        buffers: &mut [RenderBlock; crate::MAX_BUFFERS],
+        crossfade_buffers: &mut [RenderBlock; crate::MAX_CROSSFADE_BUFFERS],
         topo: &GraphTopology,
         s_idx: usize,
         num_samples: usize,

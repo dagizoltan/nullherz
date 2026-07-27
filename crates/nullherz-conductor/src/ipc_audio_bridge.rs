@@ -12,6 +12,11 @@ pub struct JitterBuffer {
     // STAGE 8: Adaptive Statistics
     pub arrival_times: VecDeque<std::time::Instant>,
     pub stats_update_counter: usize,
+    /// Session rate, used to convert a block count into wall-clock time. Set it
+    /// from the running engine via [`JitterBuffer::set_sample_rate`]; leaving it
+    /// at the default makes the adaptive target size wrong by the ratio between
+    /// the two rates.
+    pub sample_rate: f32,
 }
 
 impl JitterBuffer {
@@ -24,6 +29,14 @@ impl JitterBuffer {
             clock: None,
             arrival_times: VecDeque::with_capacity(32),
             stats_update_counter: 0,
+            sample_rate: nullherz_traits::DEFAULT_SAMPLE_RATE,
+        }
+    }
+
+    /// Point the jitter maths at the rate the engine actually runs at.
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        if sample_rate > 0.0 {
+            self.sample_rate = sample_rate;
         }
     }
 
@@ -62,9 +75,13 @@ impl JitterBuffer {
         let variance = (sum_x2 / count as f32) - (mean * mean);
         let std_dev = variance.max(0.0).sqrt();
 
-        // Rule: Target size should be enough to cover 3 standard deviations of jitter.
-        // Assuming block size is ~5ms (256 samples @ 48k).
-        let block_duration = 256.0 / 44100.0;
+        // Rule: Target size should be enough to cover 3 standard deviations of
+        // jitter. A block is IPC_BLOCK_SIZE frames — that part is an ABI
+        // constant, not a guess — but how long those frames *take* depends
+        // entirely on the session rate, which the old comment acknowledged
+        // ("@ 48k") while the code divided by 44100 anyway.
+        let block_duration =
+            nullherz_traits::IPC_BLOCK_SIZE as f32 / self.sample_rate.max(1.0);
         let jitter_blocks = (std_dev * 3.0 / block_duration).ceil() as usize;
 
         self.target_size = jitter_blocks.clamp(2, 16);

@@ -47,18 +47,38 @@ Three rules govern the sequence:
 | # | Item | Size |
 | :-- | :-- | :-- |
 | 1.1 | **`mlockall(MCL_CURRENT\|MCL_FUTURE)` + pre-touch all audio buffers.** The system grants 4 GB memlock and none is used; swap is on | S |
-| 1.2 | **Use the existing `pin_thread_to_core`** — `setup_rt_thread(80, None)` currently pins nothing | S |
+| 1.2 | ~~**Pin the RT thread to a core**~~ **DONE, as opt-in — default-on was not justified.** The primitive already existed (`ipc_layer::pin_thread_to_core`) but was never called for the audio thread. Two reasons not to default it: this row's original justification was the 462–732 µs tail, which 1.10 showed to be a non-RT benchmark artifact; and the reference machine has no `isolcpus`/`nohz_full`, so affinity restricts only our own thread and reserves nothing. Added `NULLHERZ_AUDIO_CPU` opt-in plus `cpu_siblings()`/`has_isolated_cpus()`, and the startup note states both caveats. **Also fixed: every sidecar was hardcoded to `pin_thread_to_core(1)`** — all of them onto one CPU, and on this machine CPU1 is where `snd_hda_intel`'s IRQ is serviced. Now opt-in via `NULLHERZ_SIDECAR_CPU`. Real benefit still unmeasured; needs Gate 1 conditions | S |
 | 1.3 | **Worker count from `available_parallelism()`**, not `DEFAULT_WORKER_COUNT = 4` | S |
 | 1.4 | **Governor detection + startup warning** (`scaling_governor` is `powersave` on the reference machine) | S |
 | 1.5 | **Warm calibration.** Never calibrate in the first 30 s — a 15 W part measures turbo and sets budgets it cannot sustain. FLOOR targets ~50% of nominal budget | M |
-| 1.6 | **Backend honesty:** query and report the rate/period actually obtained; warn on mismatch with `system_config.json`; make the device string configurable (stop hardcoding `"default"`); replace the stubbed `enumerate_devices()` | M |
-| 1.7 | **Remove the 73 hardcoded `44100`s;** sample rate becomes a session parameter. Express **all buffer/ring/FFT sizes in time, not frames** | M |
-| 1.8 | **Canonical rate → 48 kHz.** This *deletes a resampling stage* — the hardware runs at 48 k and `clock.allowed-rates` is `[48000]` | S |
+| 1.6 | ~~**Backend honesty**~~ **DONE.** Report rate/period + buffer in ms; NOTE on any `*_near` substitution; device configurable via `NULLHERZ_ALSA_DEVICE`/`set_device`; `enumerate_devices()` now queries `snd_device_name_hint` (25 real devices here) instead of returning a fabricated `["default", "hw:0,0"]`. **Correction to this row's premise:** the negotiated rate was *already* fed back via `set_config` (alsa.rs:215) — the gap was elsewhere, see 1.8 | M |
+| 1.7 | ~~**Remove the hardcoded `44100`s**~~ **DONE.** Only ~14 of the 73 were runtime paths; the rest are DSP unit tests (valid) or *source*-rate fallbacks where 44100 is the correct legacy guess about a file. Split into `DEFAULT_SAMPLE_RATE` (what we ask the device for) and `LEGACY_SOURCE_SAMPLE_RATE` (deliberately pinned at 44100 so moving the session rate cannot transpose an existing library). Delay lines now sized in seconds; `Telemetry` gained `block_size` so DSP load is exact. **Found and fixed en route: an RT-thread crash** — the graph buffer pool was built from `AudioBlock` (`IPC_BLOCK_SIZE` = 256) while both backends chunked to `MAX_BLOCK_SIZE` = 1024, so any device period > 256 indexed out of bounds on the SCHED_FIFO thread. Reproduced at period 512, fixed with a distinct `RenderBlock` type | M |
+| 1.8 | ~~**Canonical rate → 48 kHz**~~ **DONE.** Verified on hardware: `[ALSA] Negotiated: rate=48000`, so the resampling stage is gone (we previously asked for 44100, PipeWire accepted it and resampled to its own 48 k graph). **Was not an S.** Flipping the constant exposed that `set_config` only re-runs `setup()` on nodes already in the *active* graph, while `topology_manager.current_sample_rate` — what the factory passes to every node it CONSTRUCTS — was never updated from the device at all. Added `Conductor::sync_session_rate()`. Also: `SignalProcessor::setup` defaults to a no-op, so `DjIsolator`, `Compressor` and `EnvelopeFollower` silently kept construction-rate coefficients (the isolator's 300 Hz/3 kHz crossover landed at ~276 Hz/2.76 kHz). Guarded by a sweep test asserting build-at-A-then-setup(B) ≡ build-at-B | M |
 | 1.9 | **Two backend modes:** *Studio/desktop* (PipeWire native or JACK API, quantum configurable) and *Performance* (`hw:N,M` exclusive with `org.freedesktop.ReserveDevice1` handshake — PipeWire holds the card, so `hw:` returns `EBUSY` without it) | M |
 | 1.10 | **Diagnose the 462–732 µs tail.** It doesn't scale with block size, so it's page faults / scheduler / frequency — 1.1–1.4 are the prime suspects | M |
 | 1.11 | **Tier probe + budget table** (FLOOR/STANDARD/STUDIO). Tiers set budgets, never code paths. Overload response is subtractive: shed taps, coarsen telemetry, never allocate | M |
 
 **Gate 1 — the floor contract:** `bin/survival` green on the reference machine — **4 decks, warm, 60 minutes, zero xruns**, `mlockall` on, governor `performance`, at 256 quantum. (Today: 453–642 xruns.)
+
+> **The harness could not fail this gate until 2026-07-27.** It graded on
+> `telemetry.xrun_count`, plumbed from an `AtomicU32` in audio-core that
+> **nothing ever incremented** — so `xruns == 0` was unconditionally true. A
+> 2-minute run where the threaded backend printed `Total Xruns: 13` to stderr
+> still reported `Xruns: 0` and PASS. It also had no output-level check, so a
+> completely silent graph would have passed too (zero underruns is trivially
+> true with no audio).
+>
+> Fixed: `AudioBackend::xruns() -> Option<u64>` (the `Option` is load-bearing —
+> `None` means "this backend does not measure", which must not read as clean),
+> implemented for ALSA and Threaded; the verdict now grades on the backend's
+> counter and additionally requires signal in >90% of frames. Failure path
+> verified by fault injection (7 injected underruns → FAIL). **Any Gate 1 PASS
+> recorded before this date is void.**
+>
+> Interim evidence (not Gate 1): 2 min on Threaded at 48 kHz, 0 backend xruns,
+> peak output 1.01, 100% frames with signal, peak block 615 µs against a
+> 5333 µs budget. Held 0 xruns with 6 spinner processes on 4 logical CPUs
+> (peak block rose to 1438 µs, still 27% of budget).
 
 ---
 
@@ -67,7 +87,9 @@ Three rules govern the sequence:
 | # | Item | Size |
 | :-- | :-- | :-- |
 | 2.1 | **Sample buffer abstraction** — replace `Arc<Vec<f32>>` in `RegisteredSample`, `SamplerVoice` and `TopologyMutation::AddSource` with something that can be a `Vec` *or* an mmap | M |
-| 2.2 | **Registry eviction / bounded residency.** `SampleRegistry` has no removal method and the scanner registers every file it finds → **51.7 GB for 500 tracks** | M |
+| 2.2a | **Registry eviction: mechanism DONE, policy OPT-IN.** `SampleRegistry::remove()` added (no default impl — a defaulted `None` would let residency silently stay unbounded), plus `Conductor::reap_registry()`, gated behind `NULLHERZ_REGISTRY_REAP=1`. Two predicates, both load-bearing: **not in use** (deck-held or mid-hydration stays) and **recoverable** (only evict a library track whose file is still on disk) — the second matters because the registry also holds transfusion children, captures and chops that exist NOWHERE else. **Default-off because the 1 Hz sweep races ingest:** the scanner registers a decoded track as the hand-off to the analysis worker, and the reap was evicting it before analysis read it ("Hydrated registry for X" then "released 1 sample, 121 MB"). Needs an analysis-complete signal (the conductor cannot see `AnalysisWorker::processed_ids`) and a pressure/LRU trigger rather than a fixed sweep. Note also that eviction alone does not free — RCU retires the map, so `drain_garbage()` must follow | M |
+| 2.2c | ~~**Scanner dedup decoupled from residency**~~ **DONE — regression found by enabling 2.2a.** The scan deduped on registry residency, so a reclaimed track caused the next 10-second sweep to re-decode the whole file and the following reap to release it again: a decode/evict treadmill on the largest files (observed: the same 121 MB track released twice in one minute). `FolderMonitor` now carries a session-scoped `scanned` set, preserving prior behaviour exactly (a content change at a known path is still only picked up on next start). The comment above that guard records an earlier incident where re-decoding "exhausted RAM and froze the app" — this reopened it | S |
+| 2.2b | **LRU eviction of deck-loaded samples — BLOCKED on an RT-safety prerequisite the original row missed.** `SamplerProcessor` holds `Arc<Vec<f32>>` and drops it on `AddSource` (sampler.rs:382); the comment at :376 says outright that this is safe *because* "the registry retains the buffers". The unbounded registry is therefore currently load-bearing for RT safety — evict a loaded sample and that drop becomes a multi-hundred-MB `free()` on the SCHED_FIFO thread. Needs a buffer garbage-return channel first: `apply_topology_mutation` takes no `ProcessContext`, and `GarbageProducer` only accepts `Box<dyn AudioProcessor>` | M |
 | 2.3 | **Streaming against plain files** — disk thread → SPSC ring → RT consumer. Rewrite `StreamingManager` (it downmixes to mono, pushes one sample at a time with 2 ms sleeps, and is bound to a node type never instantiated) and actually wire it | L |
 | 2.4 | **mmap session cache**, keyed by content hash, f32, kernel-evicted | M |
 | 2.5 | **Reference-based edit list.** A clip is `(sample_id, start, end, gain, fades)` over an immutable source; render only on bounce | L |

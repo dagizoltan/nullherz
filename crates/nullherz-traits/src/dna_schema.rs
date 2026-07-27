@@ -148,7 +148,7 @@ impl BandWaveform {
 fn default_channels() -> u16 { 1 }
 
 /// Pre-`sample_rate` library rows were all implicitly 44.1 kHz.
-fn default_sample_rate() -> u32 { 44_100 }
+fn default_sample_rate() -> u32 { crate::LEGACY_SOURCE_SAMPLE_RATE }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]

@@ -28,8 +28,13 @@ impl ProcessorFactory for GainFactory {
 
 pub struct DelayFactory;
 impl ProcessorFactory for DelayFactory {
-    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        Some(Box::new(DelayProcessor::new(node_idx as u64, 44100))) // 1s max delay
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        // 1 second of delay line, in frames at the rate we actually run at.
+        // The factory is handed the rate; ignoring it and hardcoding 44100 made
+        // the "1s max delay" comment true only at CD rate — at 48 kHz the same
+        // buffer is 0.92 s, so a delay set to a full second wraps early.
+        let max_delay_frames = sample_rate.max(1.0) as usize;
+        Some(Box::new(DelayProcessor::new(node_idx as u64, max_delay_frames)))
     }
     fn name(&self) -> &'static str { "Delay" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::DELAY }
@@ -201,8 +206,8 @@ impl ProcessorFactory for KeySyncFactory {
 
 pub struct PersonalityInheritanceFactory;
 impl ProcessorFactory for PersonalityInheritanceFactory {
-    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        Some(Box::new(PersonalityInheritanceProcessor::new(node_idx as u64, 1024)))
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(PersonalityInheritanceProcessor::new(node_idx as u64, 1024, sample_rate)))
     }
     fn name(&self) -> &'static str { "PersonalityInheritance" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::PERSONALITY_INHERITANCE }

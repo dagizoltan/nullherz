@@ -16,7 +16,7 @@ impl Default for Timeline {
     fn default() -> Self {
         Self {
             bpm: 120.0,
-            sample_rate: 44100.0,
+            sample_rate: nullherz_traits::DEFAULT_SAMPLE_RATE,
             signature_num: 4,
             signature_den: 4,
             current_beat: 0.0,

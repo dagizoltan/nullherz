@@ -1081,6 +1081,19 @@ impl DjIsolatorStereo {
         }
     }
 
+    /// Re-derive the crossover for a new sample rate, preserving band gains.
+    ///
+    /// The 300 Hz / 3 kHz corners are baked into coefficients at construction.
+    /// Running those coefficients at a different rate moves the real corner
+    /// frequencies by the ratio of the rates — a 48 kHz-built isolator running
+    /// at 44.1 kHz crosses over at ~276 Hz and ~2.76 kHz instead. Audible, and
+    /// invisible without something like this to call.
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        let gains = self.gains;
+        *self = Self::with_sample_rate(sample_rate);
+        self.gains = gains;
+    }
+
     pub fn set_gain(&mut self, band: usize, value: f32) {
         if band < 3 && value.is_finite() {
             self.gains[band] = value.clamp(0.0, 10.0);
