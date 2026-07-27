@@ -154,7 +154,7 @@ fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: 
                         let duration_samples = (self.grain_duration_ms * 0.001 * self.sample_rate) as u32;
 
                         self.voices[idx].trigger(source, playback_rate, 1.0);
-                        self.voices[idx].play_head = start_pos;
+                        self.voices[idx].play_head = start_pos as f64;
                         self.voices[idx].interpolation = self.interpolation;
                         self.voice_ages[idx] = 0;
                         self.voice_durations[idx] = duration_samples;

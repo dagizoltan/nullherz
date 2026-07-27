@@ -203,9 +203,18 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 .stroke(app.theme.border_stroke)
                 .inner_margin(app.theme.space_md)
                 .show(ui, |ui| {
+                    // The slicer drives the FOCUSED DECK's sampler, resolved by
+                    // name. Both controls here used to resolve "sampler_node",
+                    // which the mixer never registers — so the enable checkbox and
+                    // all sixteen pads silently did nothing, forever. Resolving an
+                    // unregistered name fails safe (the command is skipped), which
+                    // is exactly why it went unnoticed.
+                    let slicer_deck = (b'a' + app.decks.focused_deck.min(3) as u8) as char;
+                    let slicer_node = app.get_node_id(&format!("deck_{slicer_deck}_sampler"));
+
                     ui.horizontal(|ui| {
                         if ui.checkbox(&mut app.sampler.sampler_slicer_mode, "ENABLE SLICER").changed() {
-                            if let Some(resolved_node) = app.get_node_id("sampler_node") {
+                            if let Some(resolved_node) = slicer_node {
                                 let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                     target_id: resolved_node as u64, param_id: 3, value: if app.sampler.sampler_slicer_mode { 1.0 } else { 0.0 }, ramp_duration_samples: 0,
                                 }));
@@ -226,7 +235,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     .fill(if is_active { app.theme.accent.linear_multiply(0.4) } else { app.theme.bg_inset });
 
                                 if ui.add(btn).clicked() {
-                                    if let Some(resolved_node) = app.get_node_id("sampler_node") {
+                                    if let Some(resolved_node) = slicer_node {
                                         let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::TriggerSlice {
                                             node_idx: resolved_node, slice_idx: idx as u32,
                                         }));

@@ -111,10 +111,24 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &
         const STALL_THRESHOLD: u32 = 10;
         let force_bypass = is_stalled || self.missed_deadline_count > STALL_THRESHOLD;
 
+        // `IPC_BLOCK_SIZE` is a protocol ABI size, independent of the engine's
+        // render capacity (`MAX_BLOCK_SIZE`). A render block larger than one
+        // AudioBlock must therefore be SPLIT across several pushes; clamping
+        // would silently drop the tail, which is the same defect class as the
+        // PipeWire backend's truncation. Chunking here is a follow-up; until
+        // then this asserts in debug rather than losing audio quietly, and the
+        // realtime block size (128–256) stays well inside IPC_BLOCK_SIZE.
+        debug_assert!(
+            inputs.iter().all(|c| c.len() <= ipc_layer::IPC_BLOCK_SIZE),
+            "render block exceeds IPC_BLOCK_SIZE ({}); the sidecar bridge would \
+             truncate — it needs to chunk across multiple AudioBlocks",
+            ipc_layer::IPC_BLOCK_SIZE
+        );
+
         for i in 0..self.num_channels {
             if i < inputs.len() {
-                let mut block = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] };
-                let len = inputs[i].len().min(ipc_layer::MAX_BLOCK_SIZE);
+                let mut block = AudioBlock { data: [0.0; ipc_layer::IPC_BLOCK_SIZE], len: 0, _pad: [0; 15] };
+                let len = inputs[i].len().min(ipc_layer::IPC_BLOCK_SIZE);
                 block.data[..len].copy_from_slice(&inputs[i][..len]);
                 block.len = len as u32;
                 unsafe { let _ = (*self.input_shm[i]).push(block); }
@@ -125,8 +139,8 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &
         for i in 0..self.num_sidechains {
             let input_idx = self.num_channels + i;
             if input_idx < inputs.len() {
-                let mut block = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] };
-                let len = inputs[input_idx].len().min(ipc_layer::MAX_BLOCK_SIZE);
+                let mut block = AudioBlock { data: [0.0; ipc_layer::IPC_BLOCK_SIZE], len: 0, _pad: [0; 15] };
+                let len = inputs[input_idx].len().min(ipc_layer::IPC_BLOCK_SIZE);
                 block.data[..len].copy_from_slice(&inputs[input_idx][..len]);
                 block.len = len as u32;
                 unsafe { let _ = (*self.sidechain_shm[i]).push(block); }
@@ -206,7 +220,7 @@ impl NetworkProxySend {
         if let Some(ref s) = stream { let _ = s.set_nonblocking(true); }
         Self {
             stream,
-            buffer: AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] },
+            buffer: AudioBlock { data: [0.0; ipc_layer::IPC_BLOCK_SIZE], len: 0, _pad: [0; 15] },
         }
     }
 }
@@ -216,7 +230,7 @@ impl nullherz_traits::SignalProcessor for NetworkProxySend {
         use audio_dsp::simd_vec::{load_f32x16, store_f32x16};
         if let Some(ref mut stream) = self.stream {
             for input in inputs {
-                let len = input.len().min(ipc_layer::MAX_BLOCK_SIZE);
+                let len = input.len().min(ipc_layer::IPC_BLOCK_SIZE);
                 // SIMD optimized copy
                 for i in (0..len).step_by(16) {
                     let rem = (len - i).min(16);
@@ -257,7 +271,7 @@ impl NetworkProxyReceive {
             listener,
             stream: None,
             ipc_consumer: None,
-            buffer: AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] },
+            buffer: AudioBlock { data: [0.0; ipc_layer::IPC_BLOCK_SIZE], len: 0, _pad: [0; 15] },
         }
     }
 
@@ -266,7 +280,7 @@ impl NetworkProxyReceive {
             listener: None,
             stream: None,
             ipc_consumer: Some(consumer),
-            buffer: AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] },
+            buffer: AudioBlock { data: [0.0; ipc_layer::IPC_BLOCK_SIZE], len: 0, _pad: [0; 15] },
         }
     }
 }
@@ -430,7 +444,7 @@ mod tests {
             assert!(proc.missed_deadline_count > 0);
 
             // 2. Simulate sidecar recovery: push a block and update heartbeat
-            let mut block = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 128, _pad: [0; 15] };
+            let mut block = AudioBlock { data: [0.0; ipc_layer::IPC_BLOCK_SIZE], len: 128, _pad: [0; 15] };
             block.data[0] = 0.888; // Signature value
             let _ = (*out_ptr).push(block);
             (*sig_ptr).pulse_heartbeat();

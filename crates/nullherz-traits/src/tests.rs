@@ -15,6 +15,7 @@ mod tests {
             peaks: Arc::new((0..1024).map(|i| (i as f32 / 1024.0).sin().abs()).collect()),
             total_samples: 44100,
             channels: 1,
+            sample_rate: 48_000,
             mip_waveform: MipWaveform {
                 levels: vec![Arc::new(vec![0.0, 0.5, 1.0])],
             },
@@ -39,6 +40,9 @@ mod tests {
         // pre-band payloads deserialize — checked separately below).
         assert_eq!(deserialized.band_waveform.low.levels[0].as_slice(), &[0.1, 0.2]);
         assert_eq!(deserialized.band_waveform.env_min.levels[0].as_slice(), &[-0.8, -0.6]);
+        // The rate the frame counts are measured in must survive: without it
+        // every cue, loop point and beat-grid offset in the row is ambiguous.
+        assert_eq!(deserialized.sample_rate, 48_000);
 
         // Pre-band payload (field absent) must still deserialize.
         let mut v: serde_json::Value = serde_json::from_str(&serialized).unwrap();
@@ -46,6 +50,15 @@ mod tests {
         let legacy: SampleMetadata = serde_json::from_value(v).expect("legacy payload without band_waveform must load");
         assert!(legacy.band_waveform.is_empty());
         assert_eq!(deserialized.mip_waveform.levels[0].as_slice(), &[0.0, 0.5, 1.0]);
+
+        // Pre-sample_rate payload must default to 44.1 kHz, which is what every
+        // such row implicitly assumed. The folder scanner treats a rate mismatch
+        // as a content change, so a wrongly-defaulted row self-heals on rescan.
+        let mut v: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        v.as_object_mut().unwrap().remove("sample_rate");
+        let legacy: SampleMetadata =
+            serde_json::from_value(v).expect("payload without sample_rate must load");
+        assert_eq!(legacy.sample_rate, 44_100);
     }
 
     #[test]

@@ -75,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // If we receive a command that indicates we should start streaming back audio,
                     // we'd spawn a sender task. For now, we simulate by sending a dummy block on RequestSnapshots.
                     if let Command::Core(CoreCommand::RequestSnapshots) = cmd.command {
-                        let dummy_block = ipc_layer::AudioBlock { data: [0.5; ipc_layer::MAX_BLOCK_SIZE], len: 256, _pad: [0; 15] };
+                        let dummy_block = ipc_layer::AudioBlock { data: [0.5; ipc_layer::IPC_BLOCK_SIZE], len: 256, _pad: [0; 15] };
                         let block_bytes = bytemuck::bytes_of(&dummy_block);
                         let mut header = Vec::with_capacity(5);
                         header.push(3u8); // Type 3: Audio Return Block

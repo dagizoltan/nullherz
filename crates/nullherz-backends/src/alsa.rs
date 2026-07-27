@@ -244,10 +244,9 @@ impl AudioBackend for AlsaBackend {
                 eprintln!("[ALSA] Audio thread running. period={} engine_bound={}", actual_period, engine_arc_opt.is_some());
 
                 while running.load(Ordering::SeqCst) {
-                    let mut offset = 0;
-                    while offset < actual_period {
-                        let chunk_size = (actual_period - offset).min(ipc_layer::MAX_BLOCK_SIZE);
-
+                    // Shared with the PipeWire callback so the split arithmetic
+                    // is written and tested once (see `crate::chunking`).
+                    for (offset, chunk_size) in crate::chunking::render_blocks(actual_period, ipc_layer::MAX_BLOCK_SIZE) {
                         if let Some(ref engine_arc) = engine_arc_opt {
                             let (ch1, ch2) = outputs_raw.split_at_mut(1);
                             let mut out_refs = [
@@ -260,7 +259,6 @@ impl AudioBackend for AlsaBackend {
                             outputs_raw[0][offset..offset + chunk_size].fill(0.0);
                             outputs_raw[1][offset..offset + chunk_size].fill(0.0);
                         }
-                        offset += chunk_size;
                     }
 
                     // (No per-block diagnostics on the audio thread: the old

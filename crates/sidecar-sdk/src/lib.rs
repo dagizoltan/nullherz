@@ -243,9 +243,9 @@ impl<'a, P: AudioProcessor> SidecarContext<'a, P> {
             }
         }
 
-        let mut in_blocks = [AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; 16];
-        let mut sc_blocks = [AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; 16];
-        let mut out_blocks = [AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len: 0, _pad: [0; 15] }; 16];
+        let mut in_blocks = [AudioBlock { data: [0.0; ipc_layer::IPC_BLOCK_SIZE], len: 0, _pad: [0; 15] }; 16];
+        let mut sc_blocks = [AudioBlock { data: [0.0; ipc_layer::IPC_BLOCK_SIZE], len: 0, _pad: [0; 15] }; 16];
+        let mut out_blocks = [AudioBlock { data: [0.0; ipc_layer::IPC_BLOCK_SIZE], len: 0, _pad: [0; 15] }; 16];
         let num_channels = self.input_buffers.len().min(self.output_buffers.len()).min(16);
         let num_sidechains = self.sidechain_buffers.len().min(16);
 
@@ -580,7 +580,7 @@ mod tests {
     }
 
     fn make_block(value: f32, len: u32) -> AudioBlock {
-        let mut b = AudioBlock { data: [0.0; ipc_layer::MAX_BLOCK_SIZE], len, _pad: [0; 15] };
+        let mut b = AudioBlock { data: [0.0; ipc_layer::IPC_BLOCK_SIZE], len, _pad: [0; 15] };
         b.data[..len as usize].fill(value);
         b
     }

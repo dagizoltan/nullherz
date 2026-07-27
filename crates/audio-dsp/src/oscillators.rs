@@ -352,8 +352,33 @@ pub enum InterpolationType {
 #[derive(Debug, Clone)]
 pub struct SamplerVoice {
     pub buffer: Option<std::sync::Arc<Vec<f32>>>,
-    pub play_head: f32,
+    /// Position accumulators are f64, NOT f32.
+    ///
+    /// f32 holds integers exactly only to 2^24. Past 2^26 = 67,108,864 frames
+    /// the spacing between representable values is 8, so `play_head += 1.0`
+    /// rounds straight back to the same value and PLAYBACK FREEZES — at 25.4
+    /// minutes for 44.1 kHz material, and at 5.8 minutes for 192 kHz. Well
+    /// before that the fractional part is quantised away (spacing 0.5 from
+    /// 2^23, 0.25 from 2^22) and the interpolator silently degrades to
+    /// sample-and-hold, so the requested playback rate stops being honoured.
+    ///
+    /// Only the ACCUMULATORS need the extra range. Rates, gains and the
+    /// interpolation fraction stay f32: they are small, bounded values where
+    /// f32 has ample precision, and keeping them f32 keeps the SIMD paths and
+    /// the `wide` vector types unchanged.
+    pub play_head: f64,
     pub playback_rate: f32,
+    /// Multiplier that compensates for a source recorded at a different sample
+    /// rate than the device (`source_rate / device_rate`).
+    ///
+    /// SEPARATE from `playback_rate` on purpose. `playback_rate` is musical
+    /// intent — tempo sync, the pitch fader, MIDI note transposition — and each
+    /// of those is set by a different code path. Folding rate compensation into
+    /// it would mean every one of those paths has to remember to apply it, and
+    /// whichever wrote last would clobber the others. Keeping it a distinct
+    /// factor makes compensation automatic for every trigger path and impossible
+    /// to double-apply.
+    pub source_rate_ratio: f32,
     pub is_active: bool,
     pub velocity: f32,
     pub interpolation: InterpolationType,
@@ -361,13 +386,16 @@ pub struct SamplerVoice {
     pub loop_start: u64,
     pub loop_end: u64,
     pub slip_enabled: bool,
-    pub background_playhead: f32,
+    /// Slip-mode shadow of `play_head`; same f64 reasoning applies.
+    pub background_playhead: f64,
     pub grain_pos: f32,
     pub time_stretch_ratio: f32,
     pub grain_duration_samples: u32,
     pub overlap_count: u32,
     pub window_lut: [f32; 1024],
-    pub trigger_offset: f32,
+    /// Frame offset this voice was triggered at; f64 for the same reason as
+    /// `play_head`, since the slicer phase-lock adds it to a beat delta.
+    pub trigger_offset: f64,
     pub trigger_beat: f64,
     /// Frames PER CHANNEL in `buffer`. Sample buffers are PLANAR, so channel
     /// `c` lives at `buffer[c * buffer_frames .. (c + 1) * buffer_frames]` and
@@ -390,6 +418,7 @@ impl SamplerVoice {
             buffer: None,
             play_head: 0.0,
             playback_rate: 1.0,
+            source_rate_ratio: 1.0,
             is_active: false,
             velocity: 0.0,
             interpolation: InterpolationType::Lagrange,
@@ -420,7 +449,7 @@ impl SamplerVoice {
         self.trigger_at(buffer, playback_rate, velocity, 0.0, 0.0);
     }
 
-    pub fn trigger_at(&mut self, buffer: std::sync::Arc<Vec<f32>>, playback_rate: f32, velocity: f32, offset: f32, beat: f64) {
+    pub fn trigger_at(&mut self, buffer: std::sync::Arc<Vec<f32>>, playback_rate: f32, velocity: f32, offset: f64, beat: f64) {
         self.buffer_frames = buffer.len();
         self.buffer_channels = 1;
         self.buffer = Some(buffer);
@@ -433,7 +462,7 @@ impl SamplerVoice {
     }
 
     /// RT-Safe variant that avoids atomic increment of the Arc if possible.
-    pub fn trigger_at_ref(&mut self, buffer: &std::sync::Arc<Vec<f32>>, playback_rate: f32, velocity: f32, offset: f32, beat: f64) {
+    pub fn trigger_at_ref(&mut self, buffer: &std::sync::Arc<Vec<f32>>, playback_rate: f32, velocity: f32, offset: f64, beat: f64) {
         // Only clone if the buffer actually changed
         let needs_clone = match &self.buffer {
             Some(existing) => !std::sync::Arc::ptr_eq(existing, buffer),
@@ -466,16 +495,20 @@ impl SamplerVoice {
             return 0.0;
         }
 
+        // The FRACTION is taken in f64 and only then narrowed to f32: it lands
+        // in [0, 1), where f32 has plenty of precision, but computing it as
+        // `f64_playhead - idx as f32` would round the position first and throw
+        // the fraction away on long buffers.
         let sample = match self.interpolation {
             InterpolationType::Linear => {
-                let x = self.play_head - idx as f32;
+                let x = (self.play_head - idx as f64) as f32;
                 let p1 = buffer[idx];
                 let p2 = buffer[idx + 1];
                 p1 + (p2 - p1) * x
             }
             InterpolationType::Lagrange => {
                 // 4-point Lagrange interpolation
-                let x = self.play_head - idx as f32;
+                let x = (self.play_head - idx as f64) as f32;
                 let p0 = *buffer.get(idx.saturating_sub(1)).unwrap_or(&0.0);
                 let p1 = buffer[idx];
                 let p2 = buffer[idx + 1];
@@ -491,8 +524,16 @@ impl SamplerVoice {
             }
         };
 
-        self.play_head += self.playback_rate;
+        self.play_head += self.effective_rate() as f64;
         sample * self.velocity
+    }
+
+    /// Frames of source consumed per frame of output: musical rate times
+    /// source-rate compensation. This is the only value that should ever advance
+    /// a playhead.
+    #[inline]
+    pub fn effective_rate(&self) -> f32 {
+        self.playback_rate * self.source_rate_ratio
     }
 
     /// Declare the planar layout of the buffer most recently triggered.
@@ -533,11 +574,12 @@ impl SamplerVoice {
                 output[i] += self.interpolate_sample(slice, self.play_head, idx) * self.velocity;
             }
 
-            self.play_head += self.playback_rate;
-            self.background_playhead += self.playback_rate;
+            let step = self.effective_rate() as f64;
+            self.play_head += step;
+            self.background_playhead += step;
 
-            if self.loop_enabled && self.play_head >= self.loop_end as f32 {
-                self.play_head = self.loop_start as f32 + (self.play_head - self.loop_end as f32);
+            if self.loop_enabled && self.play_head >= self.loop_end as f64 {
+                self.play_head = self.loop_start as f64 + (self.play_head - self.loop_end as f64);
             }
         }
     }
@@ -555,11 +597,12 @@ impl SamplerVoice {
 
                 let sample = self.interpolate_sample(buffer, self.play_head, idx);
                 *sample_out += sample * self.velocity;
-                self.play_head += self.playback_rate;
-                self.background_playhead += self.playback_rate;
+                let step = self.effective_rate() as f64;
+                self.play_head += step;
+                self.background_playhead += step;
 
-                if self.loop_enabled && self.play_head >= self.loop_end as f32 {
-                    self.play_head = self.loop_start as f32 + (self.play_head - self.loop_end as f32);
+                if self.loop_enabled && self.play_head >= self.loop_end as f64 {
+                    self.play_head = self.loop_start as f64 + (self.play_head - self.loop_end as f64);
                 }
             }
         } else {
@@ -572,7 +615,7 @@ impl SamplerVoice {
                     let lut_idx = (phase * 1023.0 / (self.grain_duration_samples as f32 - 1.0)) as usize;
                     let window = self.window_lut[lut_idx.min(1023)];
 
-                    let grain_offset = self.play_head + phase;
+                    let grain_offset = self.play_head + phase as f64;
                     let idx = grain_offset.floor() as usize;
 
                     if idx + 4 < buffer.len() {
@@ -583,28 +626,32 @@ impl SamplerVoice {
                 *sample_out += sum * self.velocity;
 
                 // Advance grain position and playhead separately
-                self.grain_pos += self.playback_rate;
+                self.grain_pos += self.effective_rate();
                 if self.grain_pos >= (self.grain_duration_samples as f32 / self.overlap_count as f32) {
                     self.grain_pos -= self.grain_duration_samples as f32 / self.overlap_count as f32;
-                    self.play_head += (self.grain_duration_samples as f32 / self.overlap_count as f32) * self.time_stretch_ratio;
+                    self.play_head += ((self.grain_duration_samples as f32 / self.overlap_count as f32) * self.time_stretch_ratio) as f64;
                 }
 
-                self.background_playhead += self.playback_rate;
-                if self.play_head >= buffer.len() as f32 { self.is_active = false; break; }
+                self.background_playhead += self.effective_rate() as f64;
+                if self.play_head >= buffer.len() as f64 { self.is_active = false; break; }
             }
         }
     }
 
-    fn interpolate_sample(&self, buffer: &[f32], play_head: f32, idx: usize) -> f32 {
+    /// `play_head` arrives as f64 so the fraction survives on long buffers; it
+    /// is narrowed to f32 only after subtracting `idx`, where the value is in
+    /// [0, 1) and f32 is ample. Narrowing before the subtraction would discard
+    /// the fraction entirely past 2^23 frames.
+    fn interpolate_sample(&self, buffer: &[f32], play_head: f64, idx: usize) -> f32 {
         match self.interpolation {
             InterpolationType::Linear => {
-                let x = play_head - idx as f32;
+                let x = (play_head - idx as f64) as f32;
                 let p1 = buffer[idx];
                 let p2 = buffer[idx + 1];
                 p1 + (p2 - p1) * x
             }
             InterpolationType::Lagrange => {
-                let x = play_head - idx as f32;
+                let x = (play_head - idx as f64) as f32;
                 let start_idx = idx.saturating_sub(1);
 
                 if start_idx + 4 <= buffer.len() {

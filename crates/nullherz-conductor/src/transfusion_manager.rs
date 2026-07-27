@@ -183,6 +183,14 @@ pub struct TransfusionManager {
     pub evolutionary_breeder: Option<EvolutionaryBreeder>,
     pub discovery_service: Option<Arc<parking_lot::Mutex<nullherz_dna::DiscoveryService>>>,
     transient_detector: TransientDetector,
+    /// Device rate that captures are recorded at, stamped onto their metadata.
+    ///
+    /// A capture is by definition at the device rate, and getting this WRONG is
+    /// worse than omitting it: the sampler compensates using
+    /// `metadata.sample_rate / device_rate`, so a capture taken at 48 kHz but
+    /// labelled 44.1 kHz would be played back at 0.919x — flat by nearly a
+    /// semitone. Kept in sync by `Conductor::load_system_config`.
+    device_sample_rate: u32,
 }
 
 impl TransfusionManager {
@@ -192,6 +200,15 @@ impl TransfusionManager {
             evolutionary_breeder: None,
             discovery_service: None,
             transient_detector: TransientDetector::new(1024, 0.5),
+            device_sample_rate: 44_100,
+        }
+    }
+
+    /// Tell the manager what rate the engine is actually running at, so captures
+    /// are stamped with their true rate rather than an assumption.
+    pub fn set_device_sample_rate(&mut self, rate: u32) {
+        if rate > 0 {
+            self.device_sample_rate = rate;
         }
     }
 
@@ -380,6 +397,8 @@ impl TransfusionManager {
                 // half the buffer.
                 total_samples: (snapshot.len() / 2) as u64,
                 channels: 2,
+                // A capture comes off the engine, so its rate IS the device rate.
+                sample_rate: self.device_sample_rate,
                 mip_waveform: nullherz_traits::MipWaveform::default(),
                 band_waveform: nullherz_traits::BandWaveform::default(),
                 dna: nullherz_traits::SoundDNA::default(),

@@ -59,7 +59,12 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
         }
     }
 
-    let sr = 44_100.0f32;
+    // The track's OWN rate, not the device's. Every quantity below —
+    // `total_frames`, `deck_positions`, the beat grid, hot cues — is measured in
+    // SOURCE frames, so converting them to seconds or to a needle window must
+    // divide by the rate those frames were recorded at. A hardcoded 44.1 kHz put
+    // the beat grid and the elapsed/total readout 8.8% out on 48 kHz material.
+    let sr = (t.metadata.sample_rate.max(1)) as f32;
     let total_frames = t.metadata.total_samples.max(1);
     let elapsed_samples = telemetry.as_ref().map(|tel| tel.deck_positions[i]).unwrap_or(0);
 

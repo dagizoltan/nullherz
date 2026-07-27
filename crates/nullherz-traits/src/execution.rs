@@ -41,8 +41,48 @@ pub trait ExecutionProvider: Send + Sync {
 
 /// Alignment for SIMD (AVX-512 requires 64 bytes).
 pub const SIMD_ALIGNMENT: usize = 64;
-pub const MAX_BLOCK_SIZE: usize = 256;
-pub const MAX_NODES: usize = 64;
+
+/// CAPACITY of an in-process render block, not the realtime block size.
+///
+/// The realtime block comes from `system_config.json` and should stay at
+/// 128–256: at large block sizes a stereo buffer pair no longer fits
+/// comfortably in L2 once several decks are live, so big blocks are WORSE per
+/// sample for live playback. The capacity exists so that (a) a weak machine can
+/// run a 512/1024 safe-mode block, and (b) offline rendering can use larger
+/// blocks, where it is markedly cheaper per sample.
+///
+/// DISTINCT from `IPC_BLOCK_SIZE`. This one sizes engine-internal buffers, which
+/// are cheap to grow. `AudioBlock` — the shared-memory type sent to sidecars —
+/// is a protocol ABI whose size multiplies across every SHM ring, so it has its
+/// own constant and does not follow this one.
+pub const MAX_BLOCK_SIZE: usize = 1024;
+
+/// Frames per `AudioBlock`, the shared-memory audio unit exchanged with
+/// sidecars. This is a PROTOCOL ABI size — deliberately NOT `MAX_BLOCK_SIZE`.
+///
+/// `AudioBlock` is allocated in fixed 16-deep SHM rings, one per input, output
+/// and sidechain channel of every sidecar. At 256 frames a block is 1088 bytes
+/// and a ring is ~17 KB; the size scales linearly, so tying it to the render
+/// capacity would multiply every ring by the same factor while `len` still
+/// reported the (much smaller) realtime block — paying the bandwidth and
+/// residency for frames that are never used.
+///
+/// Because these are separate, a render block LARGER than this must be split
+/// before it crosses the IPC boundary. The sidecar bridge currently clamps
+/// instead of chunking; until that is fixed it asserts rather than truncating
+/// silently.
+pub const IPC_BLOCK_SIZE: usize = 256;
+
+/// Node (processor) address space. See `NodeConventions` for the LOGICAL id
+/// range that must stay disjoint from this one.
+///
+/// Raised from 64: the 4-deck bootstrap already used ~46, and exposing tap
+/// points between EQ bands means decomposing processors into more nodes. Cost
+/// is modest but not free — `CompiledGraphPlan` holds `[[u32; MAX_NODES];
+/// MAX_NODES]`, so its allocation grows as 4N² (21 KB at 64, ~74 KB at 128).
+/// That is allocation, not traversal: the graph walk reads only populated
+/// stages, so the working set stays proportional to the nodes actually in use.
+pub const MAX_NODES: usize = 128;
 /// Audio-buffer (edge) address space, decoupled from MAX_NODES. A stereo
 /// console needs roughly two buffers per strip stage: 4 decks x 8 stages x 2
 /// channels plus buses and master already exceeds 64, and the graph clamps or
@@ -50,7 +90,14 @@ pub const MAX_NODES: usize = 64;
 /// buffer — instant corruption, no error). Kept within u8 sentinel range:
 /// `block_x_map` encodes crossfade overrides as `MAX_BUFFERS + k` in a u8, so
 /// MAX_BUFFERS + MAX_CROSSFADE_BUFFERS must stay <= 255.
-pub const MAX_BUFFERS: usize = 128;
+///
+/// Raised from 128 with the node-space increase: the 4-deck console already
+/// reaches buffer ~87, and decomposing deck EQs to expose per-band tap points
+/// adds roughly eight buffers per deck — 128 would have been one feature from
+/// the wall. This is also the TAP BUDGET: a tap is a subscription on an existing
+/// buffer edge, so the number of addressable taps is bounded by this constant.
+/// The u8 encoding caps it at 247; 240 leaves headroom for crossfade sentinels.
+pub const MAX_BUFFERS: usize = 240;
 pub const MAX_CHANNELS: usize = 16;
 pub const MAX_CROSSFADE_BUFFERS: usize = 8;
 
@@ -103,29 +150,65 @@ impl BufferSlot {
 // The block_x_map u8 sentinel space must fit: 0 = no override, then pool ids,
 // then crossfade slots.
 const _: () = assert!(MAX_BUFFERS + MAX_CROSSFADE_BUFFERS <= 255);
-pub const MAX_MUTATIONS: usize = 64;
+/// Topology mutations that can be staged for one commit.
+///
+/// Overflow is a SILENT DROP — `apply_mutation` is guarded by
+/// `if self.pending_mutation_count < MAX_MUTATIONS`, so a graph that needs more
+/// than this arrives partially built with no error. The 4-deck bootstrap already
+/// issues roughly that many AddNode/Connect mutations, so 64 was on the edge
+/// before the node-space increase and would be over it once processors are
+/// decomposed for tap points.
+pub const MAX_MUTATIONS: usize = 256;
 pub const DEFAULT_WORKER_COUNT: usize = 4;
 pub const MAX_COMMANDS_PER_BLOCK: usize = 256;
 
 /// Centralized LOGICAL node id conventions.
 ///
-/// These are sentinels for UI/protocol use, deliberately >= MAX_NODES so they
-/// can never collide with (or be mistaken for) a real graph index. The
+/// These are sentinels for UI/protocol use, deliberately far above MAX_NODES so
+/// they can never collide with (or be mistaken for) a real graph index. The
 /// conductor translates them to actual allocated node indices (e.g. PREVIEW
 /// -> `node_names["preview_node"]` in `apply_mixer_commands`). Never pass one
-/// to the engine as a graph index — the graph drops indices >= MAX_NODES.
+/// to the engine as a graph index — the graph's `idx < MAX_NODES` guards
+/// (`topology_coordinator::apply_mutation`) drop them.
+///
+/// They used to live at 70–73 and 111, which was "safely" out of range only
+/// because MAX_NODES happened to be 64. Raising MAX_NODES to 128 would have
+/// made all five of them LEGAL graph indices, silently turning every sentinel
+/// into a command aimed at a real node. They now sit in a range no graph will
+/// ever reach, and `_SENTINELS_ABOVE_MAX_NODES` below turns any future
+/// MAX_NODES increase that reopens the hole into a compile error rather than
+/// an audio bug.
 pub struct NodeConventions;
 impl NodeConventions {
-    pub const PREVIEW: u32 = 111;
-    pub const DECK_A_SEQUENCER: u32 = 70;
-    pub const DECK_B_SEQUENCER: u32 = 71;
-    pub const DECK_C_SEQUENCER: u32 = 72;
-    pub const DECK_D_SEQUENCER: u32 = 73;
+    /// Base of the logical-sentinel range. Nothing below this is a sentinel.
+    pub const LOGICAL_BASE: u32 = 0xFFFF_FF00;
+
+    pub const PREVIEW: u32 = Self::LOGICAL_BASE + 0x01;
+    pub const DECK_A_SEQUENCER: u32 = Self::LOGICAL_BASE + 0x10;
+    pub const DECK_B_SEQUENCER: u32 = Self::LOGICAL_BASE + 0x11;
+    pub const DECK_C_SEQUENCER: u32 = Self::LOGICAL_BASE + 0x12;
+    pub const DECK_D_SEQUENCER: u32 = Self::LOGICAL_BASE + 0x13;
 
     pub fn sequencer_for_deck(deck_id: char) -> u32 {
         Self::DECK_A_SEQUENCER + (deck_id.to_ascii_uppercase() as u32 - 'A' as u32)
     }
+
+    /// True when `node_idx` is a logical sentinel rather than a graph index.
+    ///
+    /// Prefer this over comparing against individual constants: it stays correct
+    /// as sentinels are added, and it reads as the question the caller is
+    /// actually asking.
+    #[inline]
+    pub const fn is_logical(node_idx: u32) -> bool {
+        node_idx >= Self::LOGICAL_BASE
+    }
 }
+
+/// The sentinel range must stay disjoint from the graph index space, or a
+/// sentinel becomes addressable as a real node. Raising MAX_NODES past the
+/// sentinel base breaks the build here instead of corrupting live decks.
+const _SENTINELS_ABOVE_MAX_NODES: () =
+    assert!(NodeConventions::LOGICAL_BASE as usize > MAX_NODES);
 
 pub struct SubBlock {
     pub offset: usize,
@@ -176,7 +259,7 @@ impl SubBlockIterator {
 #[repr(C, align(64))]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct AudioBlock {
-    pub data: [f32; MAX_BLOCK_SIZE],
+    pub data: [f32; IPC_BLOCK_SIZE],
     pub len: u32,
     pub _pad: [u32; 15], // Pad to 64-byte alignment (1024 + 4 + 60 = 1088)
 }

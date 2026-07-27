@@ -226,7 +226,16 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
     let pw_buf = unsafe { &*(buffer as *const PwBuffer) };
     let spa_buf = unsafe { &*pw_buf.buffer };
 
-    let mut num_samples = backend.period_size as usize;
+    // Frames PipeWire is asking for this cycle. NOT clamped to MAX_BLOCK_SIZE:
+    // that is the engine's render CAPACITY, not a limit on what the graph may
+    // request. PipeWire commonly negotiates a 1024-frame quantum and allows up
+    // to `clock.max-quantum` (2048 on a default install).
+    //
+    // Clamping here used to both shorten the output slices AND report the
+    // clamped count back in `chunk.size`, so the stream was handed fewer frames
+    // than its quantum — a short buffer every cycle. ALSA gets this right by
+    // looping in chunks; do the same rather than truncating.
+    let mut total_frames = backend.period_size as usize;
     if spa_buf.n_datas > 0 {
         let first_data = unsafe { &*spa_buf.datas.add(0) };
         let mut size_bytes = first_data.maxsize;
@@ -236,22 +245,21 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
                 size_bytes = chunk_size;
             }
         }
-        num_samples = (size_bytes as usize / 4).min(ipc_layer::MAX_BLOCK_SIZE);
+        total_frames = size_bytes as usize / 4;
     }
     let num_channels = spa_buf.n_datas.min(16) as usize;
-    let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
 
-    for (i, out_ref) in out_refs_storage.iter_mut().enumerate().take(num_channels) {
+    // Base pointers for each channel's full-quantum buffer. Sub-slices are cut
+    // per chunk inside the render loop below.
+    let mut bases: [*mut f32; 16] = [std::ptr::null_mut(); 16];
+    for (i, base) in bases.iter_mut().enumerate().take(num_channels) {
         let data = unsafe { &*spa_buf.datas.add(i) };
-        if !data.data.is_null() {
-            *out_ref = unsafe {
-                std::slice::from_raw_parts_mut(data.data as *mut f32, num_samples)
-            };
-        }
+        *base = data.data as *mut f32;
         if !data.chunk.is_null() {
             unsafe {
                 (*data.chunk).offset = 0;
-                (*data.chunk).size = (num_samples * 4) as u32;
+                // Report the FULL quantum: the loop below fills all of it.
+                (*data.chunk).size = (total_frames * 4) as u32;
                 (*data.chunk).stride = 4;
             }
         }
@@ -268,8 +276,24 @@ unsafe extern "C" fn pw_process_callback(data: *mut std::ffi::c_void) {
         // processing context, or we'd use internal mutability.
         // For now, we'll use a hack or ensure only one thread ever calls this.
         let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-        unsafe {
-            (*engine_ptr).process_block(&[], &mut out_refs_storage[..num_channels], num_samples);
+
+        for (offset, chunk) in crate::chunking::render_blocks(total_frames, ipc_layer::MAX_BLOCK_SIZE) {
+            let mut out_refs_storage: [&mut [f32]; 16] = std::array::from_fn(|_| &mut [][..]);
+            for (i, out_ref) in out_refs_storage.iter_mut().enumerate().take(num_channels) {
+                if !bases[i].is_null() {
+                    // SAFETY: `bases[i]` points at a buffer of `total_frames`
+                    // f32s (from `maxsize`/`chunk.size`), and
+                    // `offset + chunk <= total_frames`, so this sub-slice stays
+                    // in bounds. Channels are distinct SPA data pointers, so the
+                    // mutable slices do not alias.
+                    *out_ref = unsafe {
+                        std::slice::from_raw_parts_mut(bases[i].add(offset), chunk)
+                    };
+                }
+            }
+            unsafe {
+                (*engine_ptr).process_block(&[], &mut out_refs_storage[..num_channels], chunk);
+            }
         }
     }
 

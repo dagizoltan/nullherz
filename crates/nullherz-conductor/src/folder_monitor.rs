@@ -106,8 +106,15 @@ impl FolderMonitor {
         // or stale metadata/waveforms live forever.
         let existing = { let lib = self.library.lock(); lib.get_track(id).ok().flatten() };
         if let Some(track) = existing {
+            // `sample_rate` is part of the freshness check, not just frames and
+            // channels. Rows written before the field existed default to 44.1 kHz,
+            // so a genuinely 48 kHz file would otherwise match on frames+channels
+            // and be hydrated with a rate that transposes it — and stay that way
+            // forever. Including it here makes an existing library self-heal on
+            // the next scan.
             if track.metadata.total_samples == decoded.frames as u64
                 && track.metadata.channels as usize == decoded.channels
+                && track.metadata.sample_rate == decoded.sample_rate
             {
                 self.sample_registry.register_with_metadata(id, decoded.samples, track.metadata.clone());
                 println!("FolderMonitor: Hydrated registry for {}", path);
@@ -120,6 +127,7 @@ impl FolderMonitor {
         let mut metadata = SampleMetadata::new_empty();
         metadata.total_samples = decoded.frames as u64;
         metadata.channels = decoded.channels as u16;
+        metadata.sample_rate = decoded.sample_rate;
 
         let track = LibraryTrack {
             id,
@@ -163,6 +171,15 @@ pub struct DecodedAudio {
     /// Frames PER CHANNEL (not total samples).
     pub frames: usize,
     pub channels: usize,
+    /// Sample rate of the SOURCE FILE, which is not necessarily the device rate.
+    ///
+    /// This used to be discarded: the decoder read `codec_params.sample_rate`
+    /// and threw it away, so every file was implicitly treated as 44.1 kHz.
+    /// Since the sampler advances one frame per output frame, that transposed
+    /// anything else — a 48 kHz file played 1.5 semitones flat, 96 kHz an octave
+    /// down. Carrying it lets the sampler compensate and lets frame-denominated
+    /// metadata (cues, beat grid) be interpreted against the right clock.
+    pub sample_rate: u32,
 }
 
 impl DecodedAudio {
@@ -177,7 +194,7 @@ impl DecodedAudio {
 
     fn silent_fallback() -> Self {
         let frames = 44100 * 5;
-        Self { samples: Arc::new(vec![0.0f32; frames]), frames, channels: 1 }
+        Self { samples: Arc::new(vec![0.0f32; frames]), frames, channels: 1, sample_rate: 44100 }
     }
 }
 
@@ -203,6 +220,10 @@ where
                     // in chunks, so channels can only be laid out contiguously
                     // once the whole file is known.
                     let total_frames = track.codec_params.n_frames;
+                    // The source rate, which the old code read and discarded.
+                    // Fall back to 44.1 kHz only if the container genuinely does
+                    // not declare one.
+                    let source_rate = track.codec_params.sample_rate.unwrap_or(44_100);
                     let mut decoded_frames = 0u64;
                     let mut planes: Vec<Vec<f32>> = Vec::new();
                     let mut sample_buf = None;
@@ -242,7 +263,7 @@ where
                     for plane in &planes {
                         samples.extend_from_slice(&plane[..frames]);
                     }
-                    return DecodedAudio { samples: Arc::new(samples), frames, channels };
+                    return DecodedAudio { samples: Arc::new(samples), frames, channels, sample_rate: source_rate };
                 }
                 eprintln!("decode_audio_file: Unsupported codec for: {}", path);
             } else {

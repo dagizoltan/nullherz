@@ -50,10 +50,10 @@ impl TelemetryFinalizer {
         transport: &nullherz_traits::Transport,
         spectral_cache: &mut SpectralTelemetryCache,
     ) -> Telemetry {
-        let mut node_times = [0u64; 64];
-        let mut node_peak_times = [0u64; 64];
-        let mut peak_levels = [0.0f32; 64];
-        let mut node_times_cycles = [0u64; 64];
+        let mut node_times = [0u64; nullherz_traits::MAX_NODES];
+        let mut node_peak_times = [0u64; nullherz_traits::MAX_NODES];
+        let mut peak_levels = [0.0f32; nullherz_traits::MAX_NODES];
+        let mut node_times_cycles = [0u64; nullherz_traits::MAX_NODES];
 
         graph.collect_telemetry(&mut node_times_cycles, &mut peak_levels);
 

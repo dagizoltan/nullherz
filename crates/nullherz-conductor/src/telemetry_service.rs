@@ -1,7 +1,6 @@
 #![allow(clippy::collapsible_if)]
 use crate::orchestrator::Conductor;
 use nullherz_traits::telemetry::Telemetry;
-use nullherz_dna::GeneticLibrary;
 
 pub struct TelemetryService;
 
@@ -65,32 +64,30 @@ impl TelemetryService {
             }
         }
 
-        // Waveform Telemetry Extraction
-        let decks = ['A', 'B', 'C', 'D'];
-        for (i, &deck_id) in decks.iter().enumerate().take(4) {
-            if let Some(nodes) = conductor.mixer_manager.deck_mappings.get(&deck_id) {
-                { let engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
-                    if let Some(ref engine) = *engine_lock {
-                        let resource_id = engine.list_children().iter()
-                            .find(|c| c.metadata().map(|m| m.processor_id as u32) == Some(nodes.sampler_id))
-                            .and_then(|c| c.resource_id());
-
-                        if let Some(rid) = resource_id {
-                            { let lib = conductor.library.lock();
-                                if let Ok(Some(track)) = lib.get_track(rid) {
-                                    if let Some(level) = track.metadata.mip_waveform.levels.get(4) {
-                                        let offset = i * 64;
-                                        for (j, &peak) in level.iter().enumerate().take(64) {
-                                            let p: f32 = peak;
-                                            telemetry.waveform_peaks[offset + j] = p;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // NOTE: `telemetry.waveform_peaks` is deliberately NOT produced here.
+        //
+        // This function runs once per TELEMETRY FRAME — one per audio block, so
+        // ~172 Hz at 44.1 kHz / 256. It used to fill that field by locking the
+        // engine, scanning `list_children()` for each of the four decks, and then
+        // calling `library.get_track()` per deck to keep 64 floats.
+        //
+        // `get_track()` deserializes the WHOLE row, and library rows are stored
+        // as JSON — for a 6-minute track that is ~1.6 million floats of peaks,
+        // MIP levels and band waveform parsed from text. Measured: 61 ms per
+        // call, versus 2.5 ms for a 17-second demo WAV. With one real track on a
+        // deck this loop alone cost 64 ms per telemetry frame against a 5.8 ms
+        // budget — 11x realtime, and 22x with two decks loaded. The conductor
+        // thread could never drain the telemetry queue, and because the read held
+        // the library mutex it also starved every command that needs the library:
+        // LoadTrackToDeck and PlayDeck queued behind it indefinitely. The console
+        // played short WAVs fine and appeared unable to play full-length tracks
+        // at all.
+        //
+        // Nothing ever read `waveform_peaks`: the deck lanes render from the
+        // cached library row's `mip_waveform` / `band_waveform` on the UI side.
+        // The field stays in `Telemetry` (fixed-size, ABI-stable protocol
+        // struct); only the producer is gone. Reviving it must not put a library
+        // read back on this path — cache per deck, keyed by the loaded sample id,
+        // and refresh only when that id changes.
     }
 }

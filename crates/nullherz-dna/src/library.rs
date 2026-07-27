@@ -133,6 +133,21 @@ pub struct SmartCrateDefinition {
 
 pub trait GeneticLibrary: Send + Sync {
     fn get_track(&self, id: u64) -> Result<Option<LibraryTrack>, Box<dyn std::error::Error>>;
+    /// One track's query facets — bpm, key, DNA, short text — with NO waveform
+    /// deserialization.
+    ///
+    /// Prefer this over `get_track` on any latency-critical path. A full row is
+    /// stored as JSON and carries the peaks, MIP levels and band waveform: for a
+    /// 6-minute track that is ~1.6 million floats parsed from text, measured at
+    /// 61 ms against 2.5 ms for a 17-second one. Deck-load translation only ever
+    /// wanted bpm/key/DNA, and paying full-row cost there made loading a
+    /// full-length track feel broken next to a short demo file.
+    ///
+    /// The default forwards to `get_track` so implementors keep working;
+    /// `LibraryDatabase` overrides it with an in-memory index hit.
+    fn get_track_facets(&self, id: u64) -> Result<Option<TrackFacets>, Box<dyn std::error::Error>> {
+        Ok(self.get_track(id)?.map(|t| t.facets()))
+    }
     fn list_tracks(&self) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>>;
     fn save_track(&self, track: &LibraryTrack) -> Result<(), Box<dyn std::error::Error>>;
     fn add_to_crate(&self, crate_name: &str, track_id: u64) -> Result<(), Box<dyn std::error::Error>>;
@@ -174,6 +189,15 @@ impl GeneticLibrary for LibraryDatabase {
             return Ok(Some(track));
         }
         Ok(None)
+    }
+
+    /// Index hit, no waveform parsed. `ensure_index` builds the facet map from
+    /// the small persisted facet rows (or backfills it once), so this stays flat
+    /// regardless of how long the track is.
+    fn get_track_facets(&self, id: u64) -> Result<Option<TrackFacets>, Box<dyn std::error::Error>> {
+        self.ensure_index()?;
+        let guard = self.facets.read();
+        Ok(guard.as_ref().expect("ensure_index just built it").get(&id).cloned())
     }
 
     fn list_tracks(&self) -> Result<Vec<LibraryTrack>, Box<dyn std::error::Error>> {

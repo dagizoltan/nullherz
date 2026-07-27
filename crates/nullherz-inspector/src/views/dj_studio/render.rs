@@ -244,7 +244,11 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
                 if is_loading {
                     ui.add(egui::ProgressBar::new(progress).desired_width(120.0).text(format!("LOADING {:.0}%", progress * 100.0)).fill(theme.accent));
                 } else {
-                    let sample_rate = telemetry.as_ref().map(|t| t.sample_rate).unwrap_or(44100.0);
+                    // The TRACK's rate, not the device's: `deck_positions` and
+                    // `total_samples` both count source frames, so the device
+                    // rate would misreport the time on any material whose rate
+                    // differs from the output's.
+                    let sample_rate = t.metadata.sample_rate.max(1) as f32;
                     let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[i]).unwrap_or(0);
                     let total_samples = t.metadata.total_samples;
 

@@ -84,8 +84,15 @@ impl AnalysisWorker {
                 // Arc clone (refcount only) so the buffer can be borrowed for
                 // analysis and still handed on without copying the samples.
                 let buffer = sample.buffer.clone();
+                // The kernel is a thread_local built once at 44.1 kHz; point it
+                // at THIS sample's rate before analysing. Otherwise a 48 kHz
+                // file reports a BPM 8.8% low, splits its bands at the wrong
+                // frequencies, and resolves the wrong key — every derived value
+                // in the kernel is scaled by the rate.
+                let source_rate = sample.metadata.sample_rate;
                 KERNEL.with(|kernel_cell| {
                     let mut kernel = kernel_cell.borrow_mut();
+                    kernel.set_sample_rate(source_rate as f32);
                     let first_channel = buffer.get(..frames).unwrap_or(&buffer);
                     let (metadata, dna) = kernel.analyze(first_channel);
                     let mut final_metadata = metadata;
@@ -95,6 +102,7 @@ impl AnalysisWorker {
                     // sample as mono and undo the planar layout entirely.
                     final_metadata.channels = channels as u16;
                     final_metadata.total_samples = frames as u64;
+                    final_metadata.sample_rate = source_rate;
                     Some((id, final_metadata, sample.buffer))
                 })
             }).collect();

@@ -35,7 +35,7 @@ impl std::fmt::Display for IpcError {
 
 impl std::error::Error for IpcError {}
 
-pub use nullherz_traits::{AudioBlock, MidiEvent, SIMD_ALIGNMENT, MAX_BLOCK_SIZE};
+pub use nullherz_traits::{AudioBlock, MidiEvent, SIMD_ALIGNMENT, MAX_BLOCK_SIZE, IPC_BLOCK_SIZE};
 
 impl nullherz_traits::GarbageProducer for crate::Producer<Box<dyn nullherz_traits::AudioProcessor>> {
     fn push_processor(&mut self, processor: Box<dyn nullherz_traits::AudioProcessor>) -> Result<(), Box<dyn nullherz_traits::AudioProcessor>> {

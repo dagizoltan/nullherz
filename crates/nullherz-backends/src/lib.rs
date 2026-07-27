@@ -3,6 +3,7 @@ pub mod pipewire;
 pub mod jack;
 pub mod threaded;
 pub mod mock;
+pub mod chunking;
 
 pub use alsa::AlsaBackend;
 pub use pipewire::PipewireBackend;

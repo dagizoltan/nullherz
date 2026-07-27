@@ -63,6 +63,12 @@ pub struct Conductor {
     pub hydration_progress: std::sync::Arc<parking_lot::Mutex<std::collections::HashMap<u64, f32>>>,
     pub(crate) hydration_done_tx: std::sync::mpsc::Sender<u64>,
     hydration_done_rx: std::sync::mpsc::Receiver<u64>,
+    /// Last metadata `sync_sampler_metadata` pushed to each sampler node, so the
+    /// once-a-second reconciliation re-pushes only on a real change. The Arc is
+    /// held (not just its address) because that is what makes `Arc::ptr_eq` a
+    /// sound identity test — a dropped allocation could otherwise be reused at
+    /// the same address and read as "unchanged".
+    synced_node_metadata: std::collections::HashMap<u32, Arc<nullherz_traits::SampleMetadata>>,
     pub is_streaming: bool,
     pub stream_start_time: Option<std::time::Instant>,
     pub stream_bitrate: f32,
@@ -81,6 +87,36 @@ pub struct DnaTransition {
 impl Default for Conductor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Spawn background work, but only when a Tokio runtime is actually present.
+///
+/// `tick()` is periodic housekeeping and may legitimately be driven from a
+/// NON-async host: tests, an offline render, or an embedding application that
+/// owns its own event loop. `tokio::spawn` PANICS without a runtime, so an
+/// unguarded call turns "this host isn't async" into a crash on the conductor
+/// thread — and one that fires on a schedule, which is how it stayed hidden.
+///
+/// Everything spawned from `tick()` is optional: autosave, remote-node audio
+/// forwarding, matchmaking suggestions. None of it is required for audio to keep
+/// playing, so skipping is always the better failure than aborting the tick.
+fn spawn_background<F>(future: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::spawn(future);
+    }
+}
+
+/// `spawn_blocking` counterpart of [`spawn_background`], with the same rationale.
+fn spawn_blocking_background<F>(f: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::task::spawn_blocking(f);
     }
 }
 
@@ -137,6 +173,7 @@ impl Conductor {
             hydration_progress: std::sync::Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
             hydration_done_tx,
             hydration_done_rx,
+            synced_node_metadata: std::collections::HashMap::new(),
             is_streaming: false,
             stream_start_time: None,
             stream_bitrate: 256.0,
@@ -211,6 +248,7 @@ impl Conductor {
             hydration_progress: std::sync::Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
             hydration_done_tx,
             hydration_done_rx,
+            synced_node_metadata: std::collections::HashMap::new(),
             is_streaming: false,
             stream_start_time: None,
             stream_bitrate: 256.0,
@@ -332,6 +370,9 @@ impl Conductor {
             if let Ok(config) = serde_json::from_str::<crate::persistence::SystemConfig>(&content) {
                 self.calibration_samples = config.calibration_samples;
                 self.period_size = config.period_size;
+                // Captures are stamped with the device rate; a wrong value there
+                // makes the sampler transpose them on playback.
+                self.transfusion_manager.set_device_sample_rate(config.sample_rate);
             }
         }
         Ok(())
@@ -395,7 +436,7 @@ impl Conductor {
                     if !blocks.is_empty() {
                         let remote_manager = self.sidecar_supervisor.remote_manager.clone();
                         let node_idx_u32 = node_idx as u32;
-                        tokio::spawn(async move {
+                        spawn_background(async move {
                             let mut manager = remote_manager.lock().await;
                             for block in blocks {
                                 let _ = manager.send_audio_block(node_idx_u32, block).await;
@@ -447,10 +488,14 @@ impl Conductor {
             }
 
             if let Some(id) = current_sample_id {
-                tokio::spawn(async move {
+                spawn_background(async move {
+                    // FACETS: only `dna` is wanted here, and a full row would
+                    // deserialize the master deck's whole waveform (61 ms for a
+                    // 6-minute track) while holding the library mutex that the
+                    // command path needs.
                     { let lib_lock = lib.lock();
-                        if let Ok(Some(track)) = lib_lock.get_track(id) {
-                            if let Ok(matches) = nullherz_dna::Matchmaker::find_best_matches(&lib_lock, &track.metadata.dna, 3) {
+                        if let Ok(Some(track)) = lib_lock.get_track_facets(id) {
+                            if let Ok(matches) = nullherz_dna::Matchmaker::find_best_matches(&lib_lock, &track.dna, 3) {
                                 { let mut sugg_lock = suggestions.lock();
                                     *sugg_lock = matches;
                                 }
@@ -558,7 +603,7 @@ impl Conductor {
         if now % 60 == 0 && self.last_autosave_secs != now {
             self.last_autosave_secs = now;
             let state = self.capture_state();
-            tokio::task::spawn_blocking(move || {
+            spawn_blocking_background(move || {
                 let _ = state.save_to_file("autosave.json");
                 let _ = state.save_to_rkyv("autosave.rkyv");
                 println!("Conductor: Background Auto-Save complete.");
@@ -668,33 +713,59 @@ impl Conductor {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
         if self.last_metadata_sync_secs == now { return; }
         self.last_metadata_sync_secs = now;
-        { let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock();
-            if let Some(ref engine) = *engine_lock {
-                for child in engine.list_children() {
-                    if let Some(id) = child.resource_id() {
-                        // Reconcile with LibraryDatabase for persistent metadata updates
-                        let lib_lock = self.library.lock();
-                        if let Ok(Some(track)) = lib_lock.get_track(id) {
-                            if let Some(m) = child.metadata() {
-                                if let Some(ref mut prod) = self.topology_manager.topo_producer {
-                                    let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
-                                        node_idx: m.processor_id as u32,
-                                        metadata: track.metadata.clone(),
-                                    });
-                                }
-                            }
-                        } else if let Some(sample) = self.transfusion_manager.sample_registry.get(id) {
-                            // Fallback to transient registry if not in persistent library
-                            if let Some(m) = child.metadata() {
-                                if let Some(ref mut prod) = self.topology_manager.topo_producer {
-                                    let _ = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
-                                        node_idx: m.processor_id as u32,
-                                        metadata: sample.metadata.clone(),
-                                    });
-                                }
-                            }
-                        }
-                    }
+
+        // Snapshot (node, sample) pairs and RELEASE the engine lock before
+        // resolving any metadata. The backend takes that same lock to render
+        // every block, so anything slow held across it stalls the audio thread
+        // outright — and this loop used to hold it while calling
+        // `library.get_track()` per loaded deck. A library row is JSON with the
+        // whole waveform inside it: 61 ms for a 6-minute track against 2.5 ms
+        // for a 17-second one. Two full-length decks meant a ~120 ms audio
+        // dropout every single second, which is why long tracks were unplayable
+        // while the short demo WAVs sounded fine.
+        let loaded: Vec<(u32, u64)> = {
+            let engine_lock = self.engine_coordinator.backend_manager.engine_handle.lock();
+            match *engine_lock {
+                Some(ref engine) => engine
+                    .list_children()
+                    .iter()
+                    .filter_map(|c| Some((c.metadata()?.processor_id as u32, c.resource_id()?)))
+                    .collect(),
+                None => Vec::new(),
+            }
+        };
+
+        for (node_idx, id) in loaded {
+            // REGISTRY FIRST, library only as a fallback. The registry is the
+            // in-memory Arc every mutation path writes before it touches the
+            // library (analysis enrichment, hot cues, stretch, chop), so it is
+            // both fresher and free — no deserialization at all.
+            let metadata = match self.transfusion_manager.sample_registry.get(id) {
+                Some(sample) => Some(sample.metadata),
+                None => {
+                    let lib_lock = self.library.lock();
+                    lib_lock.get_track(id).ok().flatten().map(|t| t.metadata)
+                }
+            };
+            let Some(metadata) = metadata else { continue };
+
+            // Nothing changed since the last push: the sampler already holds
+            // this exact Arc, and re-pushing floods the topology ring alongside
+            // the user's commands.
+            if self.synced_node_metadata.get(&node_idx).is_some_and(|prev| Arc::ptr_eq(prev, &metadata)) {
+                continue;
+            }
+            // Record the sync ONLY if the push landed. The topology ring is
+            // bounded and drops on overflow; marking a dropped push as synced
+            // would strand the node on stale metadata until the next real
+            // change, where the old unconditional re-push self-healed.
+            if let Some(ref mut prod) = self.topology_manager.topo_producer {
+                let landed = prod.push(nullherz_traits::TopologyMutation::UpdateMetadata {
+                    node_idx,
+                    metadata: metadata.clone(),
+                }).is_ok();
+                if landed {
+                    self.synced_node_metadata.insert(node_idx, metadata);
                 }
             }
         }

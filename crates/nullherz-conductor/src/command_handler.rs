@@ -49,9 +49,9 @@ impl CommandHandler {
 
         // 0a. Resolve the PREVIEW sentinel. NodeConventions::PREVIEW is a
         // LOGICAL id the UI may target without knowing the graph; the real
-        // preview node index is allocated by the mixer at bootstrap (it used
-        // to BE the sentinel, 111 — which is >= MAX_NODES, so the graph
-        // silently dropped the node and preview never played).
+        // preview node index is allocated by the mixer at bootstrap (the node
+        // used to BE the sentinel, which sits outside the graph index space, so
+        // the graph silently dropped it and preview never played).
         let commands: Vec<Command> = commands
             .into_iter()
             .map(|cmd| {
@@ -59,6 +59,11 @@ impl CommandHandler {
                     if node_idx == nullherz_traits::NodeConventions::PREVIEW {
                         conductor.mixer_manager.node_names.get("preview_node").cloned().unwrap_or(node_idx)
                     } else {
+                        debug_assert!(
+                            !nullherz_traits::NodeConventions::is_logical(node_idx),
+                            "unresolved logical node sentinel {node_idx:#x} reached the engine; \
+                             add it to this resolve() or the graph will drop the command"
+                        );
                         node_idx
                     }
                 };
@@ -143,6 +148,7 @@ impl CommandHandler {
                                 let mut metadata = (*meta_template).clone();
                                 metadata.total_samples = decoded.frames as u64;
                                 metadata.channels = decoded.channels as u16;
+                                metadata.sample_rate = decoded.sample_rate;
                                 registry.register_with_metadata(id, decoded.samples, std::sync::Arc::new(metadata));
                                 // Receiver gone means the conductor is shutting
                                 // down; the registry entry still landed.
@@ -157,6 +163,7 @@ impl CommandHandler {
                             let mut metadata = (*track.metadata).clone();
                             metadata.total_samples = decoded.frames as u64;
                             metadata.channels = decoded.channels as u16;
+                            metadata.sample_rate = decoded.sample_rate;
                             conductor.transfusion_manager.sample_registry.register_with_metadata(
                                 *sample_id, decoded.samples, std::sync::Arc::new(metadata));
                         }
@@ -246,6 +253,28 @@ impl CommandHandler {
                 }
                 Command::Performance(PerformanceCommand::Preview { sample_id }) => {
                     if let Some(node_idx) = Self::stage_preview_source(conductor, sample_id) {
+                        // Preview runs UNQUANTIZED (sampler param 2 = 0).
+                        //
+                        // A quantized sampler outputs SILENCE whenever the
+                        // transport is stopped — that gate is what keeps decks
+                        // locked to the grid, and `PlayDeck` satisfies it by also
+                        // emitting `Core::Play`. `Preview` deliberately must not:
+                        // auditioning a track in headphones cannot be allowed to
+                        // start the set. So with the default (quantized) the
+                        // preview node produced nothing whenever the transport was
+                        // stopped — which is exactly when previewing is most
+                        // useful, and why preview had never made a sound.
+                        //
+                        // Set here rather than at bootstrap: `AddNode` rides the
+                        // topology ring and `SetParam` the command bus, so a
+                        // parameter sent during bootstrap lands before the node
+                        // exists and is dropped. By preview time the node is live.
+                        final_commands.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                            target_id: node_idx as u64,
+                            param_id: 2,
+                            value: 0.0,
+                            ramp_duration_samples: 0,
+                        }));
                         final_commands.push(Command::Performance(PerformanceCommand::PlayNode { node_idx }));
                     }
                     true
@@ -586,6 +615,7 @@ impl CommandHandler {
         let mut metadata = (*track.metadata).clone();
         metadata.total_samples = decoded.frames as u64;
         metadata.channels = decoded.channels as u16;
+        metadata.sample_rate = decoded.sample_rate;
         conductor.transfusion_manager.sample_registry.register_with_metadata(
             sample_id, decoded.samples, std::sync::Arc::new(metadata));
     }

@@ -147,6 +147,9 @@ impl BandWaveform {
 
 fn default_channels() -> u16 { 1 }
 
+/// Pre-`sample_rate` library rows were all implicitly 44.1 kHz.
+fn default_sample_rate() -> u32 { 44_100 }
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]
 pub struct SampleMetadata {
@@ -167,6 +170,25 @@ pub struct SampleMetadata {
     /// Defaulted so libraries written before the field existed still load.
     #[serde(default = "default_channels")]
     pub channels: u16,
+    /// Sample rate the frame counts in this record are measured in.
+    ///
+    /// WITHOUT this, every frame-denominated field here — `total_samples`,
+    /// `hot_cues`, `loop_points`, `beat_grid_offset`, `transients` — is
+    /// meaningless on its own. A cue stored at frame 1,323,000 is 30.00 s of
+    /// 44.1 kHz material but 27.56 s of 48 kHz material, so interpreting frames
+    /// against the wrong rate puts every cue and the whole beat grid 8.2% out
+    /// with no error anywhere.
+    ///
+    /// It is also what lets playback correct pitch: the sampler advances one
+    /// frame per output frame, so a source recorded at a different rate than the
+    /// device must be played at `sample_rate / device_rate` or it is transposed.
+    /// A 48 kHz file on a 44.1 kHz device is 1.5 semitones flat; 96 kHz is an
+    /// octave down.
+    ///
+    /// Defaulted to 44100 so libraries written before the field existed still
+    /// load — those rows were all implicitly assumed to be 44.1 kHz.
+    #[serde(default = "default_sample_rate")]
+    pub sample_rate: u32,
     pub mip_waveform: MipWaveform,
     /// Frequency-colored waveform (band peaks + signed envelope). Defaulted
     /// so pre-band libraries load; empty means "render the mono silhouette".
@@ -188,6 +210,7 @@ impl SampleMetadata {
             peaks: Arc::new(Vec::new()),
             total_samples: 0,
             channels: 1,
+            sample_rate: default_sample_rate(),
             mip_waveform: MipWaveform::default(),
             band_waveform: BandWaveform::default(),
             dna: SoundDNA::default(),

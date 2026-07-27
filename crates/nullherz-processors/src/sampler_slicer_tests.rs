@@ -18,6 +18,7 @@ fn test_sampler_slicer_offsets() {
         beat_grid_offset: 0,
         peaks: Arc::new(Vec::new()),
         channels: 1,
+        sample_rate: 44_100,
             total_samples: buffer.len() as u64,
         mip_waveform: nullherz_traits::MipWaveform::default(),
         band_waveform: nullherz_traits::BandWaveform::default(),
@@ -56,17 +57,17 @@ fn test_sampler_slicer_offsets() {
     sampler.apply_command(&Command::Performance(nullherz_traits::PerformanceCommand::TriggerSlice { node_idx: 0, slice_idx: 4 }));
 
     // Offset should be: slice_idx(4) * grid(0.25) * samples_per_beat(22050) = 1.0 * 22050 = 22050
-    let samples_per_beat = 22050.0;
+    let samples_per_beat: f64 = 22050.0;
     let expected_offset = 4.0 * 0.25 * samples_per_beat;
 
     let active_voice = sampler.voices.iter().find(|v| v.is_active).expect("No active voice after trigger");
-    assert_eq!(active_voice.play_head, expected_offset as f32);
+    assert_eq!(active_voice.play_head, expected_offset);
 
     // Now test with context
     sampler.reset();
     sampler.apply_command_with_context(&Command::Performance(nullherz_traits::PerformanceCommand::TriggerSlice { node_idx: 0, slice_idx: 8 }), Some(&context));
     let active_voice = sampler.voices.iter().find(|v| v.is_active).expect("No active voice after trigger");
-    assert_eq!(active_voice.play_head, 8.0 * 0.25 * samples_per_beat as f32);
+    assert_eq!(active_voice.play_head, 8.0 * 0.25 * samples_per_beat);
     assert_eq!(active_voice.trigger_beat, 1.0);
 }
 
@@ -86,6 +87,7 @@ fn test_sampler_slicer_phase_lock() {
         beat_grid_offset: 0,
         peaks: Arc::new(Vec::new()),
         channels: 1,
+        sample_rate: 44_100,
             total_samples: buffer.len() as u64,
         mip_waveform: nullherz_traits::MipWaveform::default(),
         band_waveform: nullherz_traits::BandWaveform::default(),

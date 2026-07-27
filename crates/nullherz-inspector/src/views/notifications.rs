@@ -28,9 +28,20 @@ pub fn render(app: &InspectorApp, ui: &mut Ui) {
                             });
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui.button("LOAD").clicked() {
-                                     let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
-                                        granular_node_idx: 4, sample_id: id,
-                                     }));
+                                    // Resolve the FOCUSED deck's sampler by name.
+                                    // This used to be a hardcoded `4`, which is a
+                                    // real node in deck A's chain — so the
+                                    // suggestion was loaded onto whatever happened
+                                    // to sit at index 4 rather than onto a deck.
+                                    // A literal is not merely fragile here: node
+                                    // ids and type ids overlap, so it addresses the
+                                    // WRONG node instead of failing.
+                                    let deck = (b'a' + app.decks.focused_deck.min(3) as u8) as char;
+                                    if let Some(node_idx) = app.get_node_id(&format!("deck_{deck}_sampler")) {
+                                        let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
+                                            granular_node_idx: node_idx, sample_id: id,
+                                        }));
+                                    }
                                 }
                             });
                         });

@@ -21,9 +21,30 @@ impl AnalysisKernel {
         }
     }
 
+    /// Point the kernel at the rate the buffer it is about to analyse was
+    /// recorded at.
+    ///
+    /// Nearly every derived quantity depends on this: BPM is
+    /// `sample_rate * 60 / interval`, band-split filter cutoffs are relative to
+    /// it, FFT bins map to frequency through it, and micro-timing deviations are
+    /// reported in milliseconds. The kernel lives in a `thread_local!` built once
+    /// with 44.1 kHz, so before this existed a 48 kHz file was analysed as if it
+    /// were 44.1 kHz — reporting a BPM 8.8% low, band splits at the wrong
+    /// frequencies, and a mis-detected key.
+    ///
+    /// FFT size is independent of rate, so the buffers and detector are reused.
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        if sample_rate > 0.0 {
+            self.sample_rate = sample_rate;
+        }
+    }
+
     pub fn analyze(&mut self, buffer: &[f32]) -> (nullherz_traits::SampleMetadata, nullherz_traits::SoundDNA) {
         let mut metadata = nullherz_traits::SampleMetadata::new_empty();
         let mut dna = nullherz_traits::SoundDNA::default();
+        // Carry the analysis rate onto the record, so the frame-denominated
+        // fields produced below (transients, beat grid) are interpretable.
+        metadata.sample_rate = self.sample_rate as u32;
 
         // 1. Detect Transients
         let transients = self.detect_transients(buffer);
@@ -243,10 +264,27 @@ impl AnalysisKernel {
             dna.spectral.formant_peaks[i] = (freq, 100, (mag * 1000.0) as u16);
         }
 
-        // 3c. MFCC-like Feature Vector Extraction (SIMD Optimized Summation)
+        // 3c. Band-energy feature vector: 8 log-spaced bands over the spectrum
+        // the FFT can actually resolve.
+        //
+        // The bands used to run 20 Hz -> 5.12 kHz in fixed octaves, which failed
+        // twice over at this resolution. Bin width is `sample_rate / 1024`
+        // (43 Hz at 44.1 kHz), so the 20-40 Hz octave spanned bins 0..0 — ZERO
+        // bins — and `feature_vector[0]` was structurally 0.0 for every track
+        // ever analysed. At the other end the top octave stopped at 5.12 kHz, so
+        // bins 118..512 (5 kHz - Nyquist) contributed to `total_energy` but to no
+        // band: seven eighths of the audible spectrum was described by nothing,
+        // while an eighth of the vector was a constant.
+        //
+        // Spacing the bands logarithmically between the first resolvable bin and
+        // Nyquist keeps the perceptually-even spacing the octave layout intended,
+        // guarantees every band has at least one bin, and covers the whole range.
+        let nyquist_bin = 512usize;
         for octave in 0..8 {
-            let start = (2.0f32.powi(octave as i32) * 20.0 * 1024.0 / self.sample_rate) as usize;
-            let end = (2.0f32.powi(octave as i32 + 1) * 20.0 * 1024.0 / self.sample_rate) as usize;
+            let lo = (nyquist_bin as f32).powf(octave as f32 / 8.0).max(1.0) as usize;
+            let hi = (nyquist_bin as f32).powf((octave + 1) as f32 / 8.0) as usize;
+            let start = lo.min(nyquist_bin - 1);
+            let end = hi.max(start + 1);
 
             if start < 512 {
                 let actual_end = end.min(512);

@@ -56,7 +56,7 @@ fn process(&mut self, inputs: &[&[f32]], _out: &mut [&mut [f32]], _context: &mut
 
         // Package as interleaved stereo for the stream into a pre-allocated block
         let mut block = ipc_layer::AudioBlock {
-            data: [0.0; ipc_layer::MAX_BLOCK_SIZE],
+            data: [0.0; ipc_layer::IPC_BLOCK_SIZE],
             len: (left.len() * 2).min(ipc_layer::MAX_BLOCK_SIZE) as u32,
             _pad: [0; 15],
         };

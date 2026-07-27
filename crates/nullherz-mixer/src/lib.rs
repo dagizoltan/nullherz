@@ -277,6 +277,13 @@ impl MixerManager {
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: preview_id, processor_type_id: ProcessorTypeId::SAMPLER }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: preview_id, output_idx: 0, new_buffer_idx: preview_l }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateOutputEdge { node_idx: preview_id, output_idx: 1, new_buffer_idx: preview_r }));
+        // NOTE: the preview node must run UNQUANTIZED, but that cannot be set
+        // here. `AddNode` rides the TOPOLOGY ring while `SetParam` rides the
+        // COMMAND bus, and the bus is drained against whatever graph is
+        // currently installed — so a parameter sent during bootstrap arrives
+        // before this node exists and is silently dropped. It is applied in
+        // `CommandHandler::stage_preview_source` instead, where the node is
+        // guaranteed to be live.
 
         // Summing to FX Chain: one summing node PER SIDE. SummingProcessor
         // mixes all its inputs into outputs[0] only — a single node wired

@@ -257,7 +257,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         let Some(node_idx) = app.get_node_id(node_name) else { return; };
                                         // Send loop configuration command
                                         let start = elapsed_samples;
-                                        let sample_rate = telemetry.as_ref().map(|t| t.sample_rate).unwrap_or(44100.0);
+                                        // Loop points are compared against the
+                                        // voice playhead, which counts SOURCE
+                                        // frames — so a beat must be measured in
+                                        // the track's own rate, not the device's.
+                                        let sample_rate = track.as_ref().map(|t| t.metadata.sample_rate.max(1) as f32).unwrap_or(44100.0);
                                         let bpm = track.as_ref().map(|t| t.metadata.bpm).unwrap_or(120.0);
                                         let beat_duration_samples = (60.0 / bpm * sample_rate) as u64;
                                         let end = start + (sz as u64 * beat_duration_samples);

@@ -90,18 +90,59 @@ impl SamplerProcessor {
         voice.set_layout(frames, channels);
     }
 
+    /// Playback-rate multiplier that keeps a source at its recorded pitch when
+    /// its sample rate differs from the device's.
+    ///
+    /// The voice advances exactly one frame of source per frame of output, so
+    /// without this a 48 kHz file on a 44.1 kHz device plays 8.8% slow — about
+    /// 1.5 semitones flat — and a 96 kHz file plays an octave down. The decoder
+    /// used to discard the source rate entirely, so this was every non-44.1 kHz
+    /// file. Returns 1.0 when either rate is unknown or they match.
+    ///
+    /// This is resampling by playback rate (the interpolator does the work), not
+    /// a bandlimited resampler: fine for pitch-correct playback, and the same
+    /// mechanism the sync/pitch controls already use.
+    fn source_rate_ratio(&self, device_rate: f32) -> f32 {
+        let source_rate = self.metadata.as_ref().map(|m| m.sample_rate).unwrap_or(0);
+        if source_rate == 0 || device_rate <= 0.0 {
+            return 1.0;
+        }
+        source_rate as f32 / device_rate
+    }
+
+    /// SOURCE frames per beat at the loaded sample's tempo.
+    ///
+    /// Every beat-derived position in this processor — slice offsets, hot-cue
+    /// grid snapping, beat jumps, the sync target — is written to or compared
+    /// against `play_head`, which counts SOURCE frames. Computing them from the
+    /// DEVICE rate therefore puts them out by exactly the rate mismatch: on a
+    /// 48 kHz track at a 44.1 kHz device, every beat jump and cue snap lands
+    /// 8.8% short.
+    ///
+    /// Falls back to the device rate when the source rate is unknown, which
+    /// reproduces the previous behaviour for un-analysed sources.
+    fn source_samples_per_beat(&self, device_rate: f32, bpm: f32) -> f64 {
+        let source_rate = match self.metadata.as_ref().map(|m| m.sample_rate).unwrap_or(0) {
+            0 => device_rate,
+            r => r as f32,
+        };
+        (source_rate * 60.0 / bpm.max(1.0)) as f64
+    }
+
     fn trigger_slice(&mut self, slice_idx: u32, context: Option<&nullherz_traits::ProcessContext>) {
         let (frames, channels) = (self.source_frames(), self.source_channels());
+        let sample_rate = context.and_then(|c| c.transport).map(|t| t.sample_rate).unwrap_or(44100.0);
+        let rate_ratio = self.source_rate_ratio(sample_rate);
+        let bpm = self.metadata.as_ref().map(|m| m.bpm).unwrap_or(120.0);
+        let samples_per_beat = self.source_samples_per_beat(sample_rate, bpm);
         if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
-            let bpm = self.metadata.as_ref().map(|m| m.bpm).unwrap_or(120.0);
-            let sample_rate = context.and_then(|c| c.transport).map(|t| t.sample_rate).unwrap_or(44100.0);
             let beat_pos = context.and_then(|c| c.transport).map(|t| t.beat_position).unwrap_or(0.0);
 
-            let samples_per_beat = (sample_rate * 60.0 / bpm.max(1.0)) as f64;
-            let offset = slice_idx as f32 * self.slice_grid_beats * samples_per_beat as f32;
+            let offset = slice_idx as f64 * self.slice_grid_beats as f64 * samples_per_beat;
 
             // RT-HARDENING: Use buffer_ref instead of clone to avoid atomic overhead in the hot path
             voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, offset, beat_pos);
+            voice.source_rate_ratio = rate_ratio;
             Self::apply_layout(voice, frames, channels);
         }
     }
@@ -134,44 +175,104 @@ fn process_parallel(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], c
         }
 
         // SYNC LOGIC
-        let source_frames = self.source_frames();
+        //
+        // Note there is no `source_frames` here any more: the only thing that
+        // needed it was the `% source_frames` wrap on the old absolute-position
+        // sync target, which phase locking replaced.
+
+        // Refresh source-rate compensation on every voice, every block.
+        //
+        // Doing it here rather than only at trigger time covers the paths that
+        // have no transport to consult — `AddSource` arrives as a topology
+        // mutation with no `ProcessContext`, so a voice fired by `pending_play`
+        // has never seen the device rate — and it keeps voices correct if the
+        // device rate changes under a live session.
+        let rate_ratio = context.transport.map(|t| self.source_rate_ratio(t.sample_rate)).unwrap_or(1.0);
+        for voice in self.voices.iter_mut() {
+            voice.source_rate_ratio = rate_ratio;
+        }
+
+        // Computed before the sync block borrows `self.metadata` immutably.
+        let source_samples_per_beat = match (context.transport, &self.metadata) {
+            (Some(t), Some(m)) => self.source_samples_per_beat(t.sample_rate, m.bpm),
+            _ => 0.0,
+        };
+
         if self.quantize_enabled
             && let (Some(transport), Some(meta)) = (context.transport, &self.metadata)
                 && meta.bpm > 10.0 {
+                    // Source-rate compensation is NOT folded in here: it lives on
+                    // the voice as `source_rate_ratio`, so tempo sync only has to
+                    // reason about musical rate.
                     let sync_rate = (transport.bpm / meta.bpm) * self.playback_rate;
                     for voice in self.voices.iter_mut() {
                         let prev_rate = if voice.playback_rate == 0.0 { sync_rate } else { voice.playback_rate };
                         let mut target_rate = sync_rate;
 
                         // PHASE LOCK
+                        //
+                        // Positions stay in f64 throughout. The original code
+                        // narrowed the beat-position product to f32, which on a
+                        // multi-million-frame track quantised the target to whole
+                        // frames before it was ever compared to the playhead.
                         if transport.is_playing && voice.is_active {
-                            let samples_per_beat = (transport.sample_rate * 60.0 / meta.bpm) as f64;
+                            let spb = source_samples_per_beat;
 
-                            let expected_pos_samples = if self.slicer_mode {
-                                // Slicer-aware phase locking
-                                let beat_diff = transport.beat_position - voice.trigger_beat;
-                                voice.trigger_offset + (beat_diff as f32 * samples_per_beat as f32)
-                            } else {
-                                let expected_pos_beats = transport.beat_position;
-                                (expected_pos_beats * samples_per_beat) as f32 % source_frames.max(1) as f32
-                            };
-
-                            let diff = expected_pos_samples - voice.play_head;
                             if self.slicer_mode {
+                                // Slicer: the target is relative to the TRIGGER, so
+                                // an absolute comparison is meaningful here —
+                                // `trigger_offset` anchors it to a known point in
+                                // the buffer.
+                                let beat_diff = transport.beat_position - voice.trigger_beat;
+                                let expected = voice.trigger_offset + (beat_diff * spb);
+                                let diff = expected - voice.play_head;
                                 if diff.abs() > 0.001 {
-                                    voice.play_head += diff * 0.01; // Smooth convergence for slicer
+                                    voice.play_head += diff * 0.01; // smooth convergence
                                 }
-                            } else {
-                                // Smooth Phase Correction (PLL) for normal track playback:
-                                // Adjust playback_rate smoothly by up to ±2% to align phase, completely avoiding step discontinuities.
-                                let beat_threshold_samples = samples_per_beat as f32;
-                                if diff.abs() > beat_threshold_samples {
-                                    voice.play_head = expected_pos_samples;
-                                    target_rate = sync_rate;
-                                } else if diff.abs() > 1.0 {
-                                    // Deadband of 1.0 sample avoids continuous micro-oscillations at steady state.
-                                    let k_p = 0.001; // Gentler proportional gain (down from 0.005) to reduce correction speed jitter.
-                                    let rate_correction = (diff * k_p).clamp(-0.02, 0.02);
+                            } else if spb > 0.0 {
+                                // Track sync locks BEAT PHASE, not absolute position.
+                                //
+                                // Comparing absolute positions — the old
+                                // `beat_position * spb` target — silently assumed
+                                // the deck had been playing since transport beat 0.
+                                // Load a track ten minutes into a set and the
+                                // "expected" position is ten minutes deep, so the
+                                // deck was slammed there on its first block. The
+                                // `% source_frames` was a patch for that: it kept
+                                // the target inside the buffer, but wrapped the
+                                // TARGET while leaving the PLAYHEAD unwrapped, so
+                                // near the end of a track the two diverged by
+                                // almost a whole buffer and the deck jumped back to
+                                // the start instead of ending.
+                                //
+                                // What sync actually means is that downbeats line
+                                // up. Comparing position WITHIN the beat makes no
+                                // assumption about how long the deck has been
+                                // playing, is bounded to half a beat by
+                                // construction, and needs neither a modulo nor a
+                                // hard positional jump.
+                                let grid_offset = meta.beat_grid_offset as f64;
+                                let transport_phase = transport.beat_position.fract() * spb;
+                                let head_phase = (voice.play_head - grid_offset).rem_euclid(spb);
+
+                                // Correct toward the NEAREST beat, not always
+                                // forward, so a small lag does not chase a whole
+                                // beat around.
+                                let mut phase_err = transport_phase - head_phase;
+                                if phase_err > spb * 0.5 {
+                                    phase_err -= spb;
+                                } else if phase_err < -spb * 0.5 {
+                                    phase_err += spb;
+                                }
+
+                                // Deadband of one frame avoids continuous
+                                // micro-oscillation at steady state. Gentle
+                                // proportional gain, clamped to ±2%: the pitch
+                                // change stays inaudible while still pulling into
+                                // lock within a few beats.
+                                if phase_err.abs() > 1.0 {
+                                    let k_p = 0.001;
+                                    let rate_correction = (phase_err * k_p).clamp(-0.02, 0.02) as f32;
                                     target_rate = sync_rate * (1.0 + rate_correction);
                                 }
                             }
@@ -221,11 +322,17 @@ impl nullherz_traits::MidiResponder for SamplerProcessor {
                 }
             } else {
                 let (frames, channels) = (self.source_frames(), self.source_channels());
+                let device_rate = context.and_then(|c| c.transport).map(|t| t.sample_rate).unwrap_or(44100.0);
+                let rate_ratio = self.source_rate_ratio(device_rate);
                 if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
                     let freq = 440.0 * 2.0f32.powf((event.data1 as f32 - 69.0) / 12.0);
                     let playback_rate = (freq / 440.0) * self.playback_rate;
                     let velocity = event.data2 as f32 / 127.0;
                     voice.trigger(self.sample_buffer.clone(), playback_rate, velocity);
+                    // Note transposition composes with source-rate compensation
+                    // rather than replacing it: a 48 kHz sample must still sound
+                    // at concert pitch for A4.
+                    voice.source_rate_ratio = rate_ratio;
                     Self::apply_layout(voice, frames, channels);
                 }
             }
@@ -367,7 +474,7 @@ impl SamplerProcessor {
                     && let (Some(ctx), Some(meta)) = (context, &self.metadata)
                         && let Some(transport) = ctx.transport
                             && meta.bpm > 0.0 {
-                                let samples_per_beat = (transport.sample_rate * 60.0 / meta.bpm) as f64;
+                                let samples_per_beat = self.source_samples_per_beat(transport.sample_rate, meta.bpm);
                                 // Align to beat grid
                                 let grid_pos = (offset as f64 / samples_per_beat).round() * samples_per_beat;
                                 offset = grid_pos as u64;
@@ -378,7 +485,7 @@ impl SamplerProcessor {
                 // re-seat the held position.
                 for voice in self.voices.iter_mut() {
                     if voice.is_active || voice.buffer.is_some() {
-                        voice.play_head = offset as f32;
+                        voice.play_head = offset as f64;
                     }
                 }
             }
@@ -390,8 +497,8 @@ impl SamplerProcessor {
                 if let (Some(ctx), Some(meta)) = (context, &self.metadata)
                     && let Some(transport) = ctx.transport
                         && meta.bpm > 0.0 {
-                            let samples_per_beat = (transport.sample_rate * 60.0 / meta.bpm) as f64;
-                            let jump_samples = (beats as f64 * samples_per_beat) as f32;
+                            let samples_per_beat = self.source_samples_per_beat(transport.sample_rate, meta.bpm);
+                            let jump_samples = beats as f64 * samples_per_beat;
 
                             // Paused voices jump too — pause holds a voice
                             // inactive with its position, and beat-jumping a
@@ -404,8 +511,8 @@ impl SamplerProcessor {
 
                                     // Clamp to buffer range
                                     if voice.play_head < 0.0 { voice.play_head = 0.0; }
-                                    if voice.play_head >= source_frames as f32 {
-                                        voice.play_head = (source_frames as f32 - 1.0).max(0.0);
+                                    if voice.play_head >= source_frames as f64 {
+                                        voice.play_head = (source_frames as f64 - 1.0).max(0.0);
                                     }
                                 }
                             }
