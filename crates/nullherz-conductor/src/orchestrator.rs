@@ -47,6 +47,17 @@ pub struct Conductor {
     pub last_genetic_evolve_secs: u64,
     last_metadata_sync_secs: u64,
     last_registry_reap_secs: u64,
+    /// Audio device names, refreshed on a slow timer rather than per frame.
+    ///
+    /// `enumerate_devices()` is a real driver query: dlopen + ~18 dlsym +
+    /// `snd_device_name_hint`, which parses ALSA's config to build the list.
+    /// Measured at 74.6 ms on the reference machine. Telemetry runs ~187 times
+    /// a second, so calling it there costs ~14 SECONDS of work per second of
+    /// audio and the conductor can never drain its telemetry queue — decks stop
+    /// responding to load and play entirely. The device list changes when
+    /// hardware is plugged in, not 187 times a second.
+    cached_audio_devices: Vec<String>,
+    last_device_scan: Option<std::time::Instant>,
     pub focused_node_idx: Option<u32>,
     pub active_transitions: Vec<DnaTransition>,
     pub undo_stack: Vec<(
@@ -167,6 +178,8 @@ impl Conductor {
             last_genetic_evolve_secs: 0,
             last_metadata_sync_secs: 0,
             last_registry_reap_secs: 0,
+            cached_audio_devices: Vec::new(),
+            last_device_scan: None,
             focused_node_idx: None,
             active_transitions: Vec::new(),
             undo_stack: Vec::new(),
@@ -243,6 +256,8 @@ impl Conductor {
             last_genetic_evolve_secs: 0,
             last_metadata_sync_secs: 0,
             last_registry_reap_secs: 0,
+            cached_audio_devices: Vec::new(),
+            last_device_scan: None,
             focused_node_idx: None,
             active_transitions: Vec::new(),
             undo_stack: Vec::new(),
@@ -715,6 +730,21 @@ impl Conductor {
         }
     }
 
+    /// Re-scan audio devices at most every few seconds. See
+    /// [`Conductor::cached_audio_devices`] for why this must never run per frame.
+    fn refresh_audio_devices(&mut self) {
+        const RESCAN: std::time::Duration = std::time::Duration::from_secs(5);
+        let due = self.last_device_scan.map(|t| t.elapsed() >= RESCAN).unwrap_or(true);
+        if !due { return; }
+        self.last_device_scan = Some(std::time::Instant::now());
+        if let Some(ref backend) = self.engine_coordinator.backend_manager.backend {
+            self.cached_audio_devices = backend.enumerate_devices();
+        }
+    }
+
+    /// Device names for telemetry, from the cache.
+    pub fn audio_device_names(&self) -> &[String] { &self.cached_audio_devices }
+
     /// Adopt the rate the audio device actually negotiated.
     ///
     /// The backend calls `set_config` on the engine once the device answers,
@@ -748,6 +778,7 @@ impl Conductor {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
 
         self.sync_session_rate();
+        self.refresh_audio_devices();
         self.reap_registry(now);
 
         // Complete background hydrations: the decode thread has registered

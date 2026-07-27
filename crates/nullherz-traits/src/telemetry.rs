@@ -3,6 +3,14 @@ use serde_big_array::BigArray;
 use serde::{Serialize, Deserialize};
 use crate::{MAX_NODES, DEFAULT_SAMPLE_RATE, IPC_BLOCK_SIZE};
 
+/// Slots in the telemetry node-name map.
+///
+/// A 4-deck console registers 30 names, which sat two under the previous cap of
+/// 32. Adding two named nodes anywhere would have started dropping names — and
+/// because the source is a `HashMap`, which ones vanished would vary run to run.
+/// Sized with real headroom so that stays a non-event.
+pub const NODE_MAP_SLOTS: usize = 64;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Telemetry {
@@ -47,6 +55,22 @@ pub struct Telemetry {
     /// runtime values. Without this the UI had to assume a period, which made
     /// the headline load figure wrong by the ratio of assumed to actual.
     pub block_size: u32,
+    /// Whether `xrun_count` is a real measurement.
+    ///
+    /// `xrun_count` is a `u32`, so it cannot say "nobody counted". For a long
+    /// time nobody did: the engine-side atomic it is read from is never
+    /// incremented by anything, so the metrics view rendered a confident
+    /// `X-RUNS: 0` no matter how many underruns the device reported. The value
+    /// now comes from the backend, which is the only party that observes them,
+    /// and this flag distinguishes "the backend reported zero" from "this
+    /// backend does not report".
+    pub xruns_reported: bool,
+    /// Whether `clock_jitter_ns` is a real measurement.
+    ///
+    /// Same failure as above and the same remedy: with no PTP clock installed
+    /// the field sat at a hardcoded `0`, which the calibration view read as
+    /// perfect sync and reported as such.
+    pub clock_jitter_available: bool,
     /// Proactive matchmaking suggestions: (Sample ID, Similarity Score)
     pub suggestions: [(u64, f32); 4],
     pub active_master_deck: char,
@@ -56,10 +80,20 @@ pub struct Telemetry {
     pub deck_positions: [u64; 4],
     pub deck_playback_rates: [f32; 4],
     /// Current mapping of well-known node names to indices.
+    ///
+    /// The UI resolves every named node through this — hot cues, the sync
+    /// toggle, scroll-to-scrub on a deck lane. A name that does not make it
+    /// into the map makes the control bound to it silently do nothing.
+    ///
+    /// Sized well above the 30 names a 4-deck bootstrap registers, because the
+    /// producer fills it from a `HashMap` and truncating that drops an
+    /// ARBITRARY subset — iteration order is not stable, so the same build
+    /// would lose different controls on different runs. See
+    /// [`NODE_MAP_SLOTS`].
     #[serde(with = "BigArray")]
-    pub node_map_keys: [[u8; 32]; 32],
+    pub node_map_keys: [[u8; 32]; NODE_MAP_SLOTS],
     #[serde(with = "BigArray")]
-    pub node_map_values: [u32; 32],
+    pub node_map_values: [u32; NODE_MAP_SLOTS],
     /// List of detected audio devices.
     pub audio_devices: [DeviceName; 16],
     pub is_streaming: bool,
@@ -130,13 +164,15 @@ impl Default for Telemetry {
             calibration_samples: 0,
             sample_rate: DEFAULT_SAMPLE_RATE,
             block_size: IPC_BLOCK_SIZE as u32,
+            xruns_reported: false,
+            clock_jitter_available: false,
             suggestions: [(0, 0.0); 4],
             active_master_deck: 'A',
             waveform_peaks: [0.0; 256],
             deck_positions: [0; 4],
             deck_playback_rates: [1.0; 4],
-            node_map_keys: [[0u8; 32]; 32],
-            node_map_values: [0u32; 32],
+            node_map_keys: [[0u8; 32]; NODE_MAP_SLOTS],
+            node_map_values: [0u32; NODE_MAP_SLOTS],
             audio_devices: [DeviceName::default(); 16],
             is_streaming: false,
             stream_bitrate: 0.0,

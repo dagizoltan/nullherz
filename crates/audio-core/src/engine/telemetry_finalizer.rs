@@ -182,20 +182,25 @@ impl TelemetryFinalizer {
             starting_clips_mask: [0; 8],
             system_time_ns: transport.system_time_ns,
             device_time_ns: transport.device_time_ns,
-            clock_jitter_ns: 0, // Should be populated by Engine if available
+            clock_jitter_ns: 0, // Filled by TelemetryService from the clock provider
             remote_node_count: 0,
             remote_cpu_usage: [0.0; 8],
             remote_latency_ms: [0.0; 8],
             calibration_samples: 0,
             sample_rate: transport.sample_rate,
             block_size: num_samples as u32,
+            // The engine observes neither of these; the conductor fills them in
+            // from the backend and the clock provider. Claiming otherwise here
+            // is what made both read as a confident zero.
+            xruns_reported: false,
+            clock_jitter_available: false,
             suggestions: [(0, 0.0); 4],
             active_master_deck: 'A',
             waveform_peaks: [0.0; 256],
             deck_positions,
             deck_playback_rates,
-            node_map_keys: [[0u8; 32]; 32],
-            node_map_values: [0u32; 32],
+            node_map_keys: [[0u8; 32]; nullherz_traits::telemetry::NODE_MAP_SLOTS],
+            node_map_values: [0u32; nullherz_traits::telemetry::NODE_MAP_SLOTS],
             audio_devices: [nullherz_traits::telemetry::DeviceName::default(); 16],
             // Remaining fields written out explicitly: `..Telemetry::default()`
             // here constructed and dropped an ENTIRE second multi-KB Telemetry

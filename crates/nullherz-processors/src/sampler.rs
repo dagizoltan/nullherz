@@ -14,6 +14,21 @@ pub struct SamplerProcessor {
     /// AddSource rides the sample-accurate queue, PlayNode the bundle bus).
     /// Fire the trigger as soon as the source lands.
     pending_play: bool,
+    /// Playhead for a deck that has no sounding voice.
+    ///
+    /// Position lived only inside a triggered voice, and `AddSource` clears
+    /// every voice's buffer — so a track that was loaded but never played had
+    /// nowhere to hold a position at all. Scrubbing it moved nothing and
+    /// `get_playback_position` reported 0 no matter what the user did. This is
+    /// where the needle sits between triggers, and where the next trigger
+    /// starts from.
+    cue_position: f64,
+    /// A gesture currently owns this deck's rate, and what to restore after.
+    ///
+    /// `Some(was_playing)` while a scratch is in progress. Held so releasing the
+    /// hand puts the deck back the way it was found — scratching a stopped deck
+    /// must not leave it running, and scratching a playing one must not stop it.
+    scratch: Option<bool>,
     pub slicer_mode: bool,
     pub slice_grid_beats: f32,
     pub beats_per_bar: f32,
@@ -31,6 +46,8 @@ impl SamplerProcessor {
             quantize_enabled: true,
             playback_rate: 1.0,
             pending_play: false,
+            cue_position: 0.0,
+            scratch: None,
             slicer_mode: false,
             slice_grid_beats: 0.25,
             beats_per_bar: 4.0,
@@ -380,13 +397,14 @@ fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutatio
                     v.buffer = None;
                 }
                 self.sample_buffer = buffer;
+                self.cue_position = 0.0; // a new track starts at its beginning
                 self.sample_id = Some(sample_id);
                 self.metadata = metadata;
                 if self.pending_play && !self.sample_buffer.is_empty() {
                     self.pending_play = false;
                     let (frames, channels) = (self.source_frames(), self.source_channels());
                     if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
-                        voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, 0.0, 0.0);
+                        voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, self.cue_position, 0.0);
                         Self::apply_layout(voice, frames, channels);
                     }
                 }
@@ -445,6 +463,12 @@ fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
                 return voice.play_head as u64;
             }
         }
+        // Nothing sounding and nothing paused: the needle is wherever the user
+        // last scrubbed it. Returning 0 here made a scrubbed-but-unplayed deck
+        // look like it was still at the start.
+        if self.cue_position > 0.0 {
+            return self.cue_position as u64;
+        }
         0
     }
 }
@@ -491,6 +515,70 @@ impl SamplerProcessor {
             }
             Command::Performance(PerformanceCommand::TriggerSlice { node_idx, slice_idx }) if node_idx as u64 == self.id => {
                 self.trigger_slice(slice_idx, context);
+            }
+            Command::Performance(PerformanceCommand::SetScratch { node_idx, active, rate }) if node_idx as u64 == self.id => {
+                if active {
+                    // First frame of the gesture: remember what to restore, and
+                    // make sure a voice exists to be heard. A stopped deck has
+                    // no sounding voice, but a scratch on one still has to make
+                    // noise — that is the whole gesture.
+                    if self.scratch.is_none() {
+                        let was_playing = self.voices.iter().any(|v| v.is_active);
+                        self.scratch = Some(was_playing);
+                        if !was_playing && !self.sample_buffer.is_empty() {
+                            let (frames, channels) = (self.source_frames(), self.source_channels());
+                            let start = self.cue_position;
+                            if let Some(voice) = self.voices.iter_mut()
+                                .find(|v| v.buffer.is_some() || !v.is_active)
+                            {
+                                voice.trigger_at_ref(&self.sample_buffer, 1.0, 1.0, start, 0.0);
+                                Self::apply_layout(voice, frames, channels);
+                            }
+                        }
+                    }
+                    // Rate, not position: the voice keeps advancing by
+                    // `effective_rate()` per frame, so handing it the gesture's
+                    // rate reproduces the pitch bend and the reverse sweep.
+                    for voice in self.voices.iter_mut() {
+                        if voice.buffer.is_some() {
+                            voice.playback_rate = rate;
+                            voice.is_active = true;
+                        }
+                    }
+                } else if let Some(was_playing) = self.scratch.take() {
+                    for voice in self.voices.iter_mut() {
+                        if voice.buffer.is_some() {
+                            voice.playback_rate = self.playback_rate;
+                            voice.is_active = was_playing;
+                            self.cue_position = voice.play_head;
+                        }
+                    }
+                }
+            }
+            Command::Performance(PerformanceCommand::NudgePosition { node_idx, frames }) if node_idx as u64 == self.id => {
+                // No transport, no metadata, no BPM required — see the command's
+                // docs. This is the scrub path, and it must work on any audio
+                // that is loaded, including material with no detectable tempo.
+                let source_frames = self.source_frames();
+                let limit = (source_frames as f64 - 1.0).max(0.0);
+                let delta = frames as f64;
+                let mut moved_a_voice = false;
+                for voice in self.voices.iter_mut() {
+                    if voice.is_active || voice.buffer.is_some() {
+                        voice.play_head = (voice.play_head + delta).clamp(0.0, limit);
+                        moved_a_voice = true;
+                    }
+                }
+                // Keep the cue in step with whatever is sounding, so stopping
+                // and restarting resumes where the scrub left the needle.
+                self.cue_position = if moved_a_voice {
+                    self.voices.iter()
+                        .filter(|v| v.is_active || v.buffer.is_some())
+                        .map(|v| v.play_head)
+                        .fold(0.0f64, f64::max)
+                } else {
+                    (self.cue_position + delta).clamp(0.0, limit)
+                };
             }
             Command::Performance(PerformanceCommand::JumpByBeats { node_idx, beats }) if node_idx as u64 == self.id => {
                 let source_frames = self.source_frames();
@@ -552,7 +640,7 @@ impl SamplerProcessor {
                         let channels = self.source_channels();
                         if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
                             let beat_pos = context.and_then(|c| c.transport).map(|t| t.beat_position).unwrap_or(0.0);
-                            voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, 0.0, beat_pos);
+                            voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, self.cue_position, beat_pos);
                             Self::apply_layout(voice, frames, channels);
                         }
                     }

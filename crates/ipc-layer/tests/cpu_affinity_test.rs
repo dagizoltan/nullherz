@@ -10,8 +10,23 @@
 //! So the contract under test is not "pinning works" but "pinning does nothing
 //! unless asked, refuses impossible requests, and states its own limits".
 
+/// `NULLHERZ_AUDIO_CPU` is process-wide, so any test that sets it races every
+/// test that reads it. This serialises them.
+///
+/// The default-off test passed three consecutive runs before this existed and
+/// then failed in the full suite — three passes is not evidence about a race,
+/// only about how often it happens to lose. Preventing the interleaving is the
+/// only fix that holds.
+fn env_guard() -> parking_lot::MutexGuard<'static, ()> {
+    // parking_lot per the workspace lint: no poisoning, so a panicking test
+    // cannot leave the gate permanently unusable for the rest.
+    static GATE: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    GATE.lock()
+}
+
 #[test]
 fn test_affinity_is_off_unless_requested() {
+    let _g = env_guard();
     // Guard the default. If this ever starts returning Some() with the variable
     // unset, every user silently gets a pin chosen by us rather than by them.
     if std::env::var("NULLHERZ_AUDIO_CPU").is_err() {
@@ -24,6 +39,7 @@ fn test_affinity_is_off_unless_requested() {
 
 #[test]
 fn test_out_of_range_cpu_is_refused_not_clamped() {
+    let _g = env_guard();
     // Clamping would silently pin to some other CPU than the one asked for,
     // which is the kind of "helpful" behaviour that makes a misconfiguration
     // impossible to notice. Refusing and saying so is the correct response.
@@ -47,6 +63,7 @@ fn test_out_of_range_cpu_is_refused_not_clamped() {
 
 #[test]
 fn test_non_numeric_cpu_is_refused() {
+    let _g = env_guard();
     unsafe { std::env::set_var("NULLHERZ_AUDIO_CPU", "first") };
     let note = ipc_layer::apply_audio_thread_affinity();
     unsafe { std::env::remove_var("NULLHERZ_AUDIO_CPU") };

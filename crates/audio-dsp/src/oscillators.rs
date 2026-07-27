@@ -562,6 +562,22 @@ impl SamplerVoice {
         let num_samples = outputs.iter().map(|o| o.len()).min().unwrap_or(0).min(num_samples);
 
         for i in 0..num_samples {
+            // START boundary. Only the END used to be checked, which was fine
+            // while the rate was always positive. A scrubbed or scratched deck
+            // moves backwards, and `play_head.floor() as usize` SATURATES a
+            // negative value to 0 — so the voice did not read out of bounds, it
+            // silently kept sampling index 0 while handing the interpolator a
+            // negative fraction. That is extrapolation, not interpolation: the
+            // output was wrong rather than absent, which is the harder failure
+            // to notice.
+            //
+            // Held at the start rather than deactivated: a record pushed back to
+            // its lead-in has not finished playing, and a scratch that killed
+            // the voice could not be pulled forward again.
+            if self.play_head < 0.0 {
+                self.play_head = 0.0;
+                if self.effective_rate() < 0.0 { break; }
+            }
             let idx = self.play_head.floor() as usize;
             if idx + 4 >= frames { self.is_active = false; break; }
 
@@ -592,6 +608,12 @@ impl SamplerVoice {
             // NORMAL MODE
             let frames = if self.buffer_frames > 0 { self.buffer_frames.min(buffer.len()) } else { buffer.len() };
             for sample_out in output.iter_mut() {
+                // See the note in the stereo path: the start is a real boundary
+                // once the rate can be negative.
+                if self.play_head < 0.0 {
+                    self.play_head = 0.0;
+                    if self.effective_rate() < 0.0 { break; }
+                }
                 let idx = self.play_head.floor() as usize;
                 if idx + 4 >= frames { self.is_active = false; break; }
 

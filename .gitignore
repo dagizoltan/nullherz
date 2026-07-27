@@ -11,3 +11,10 @@ library.redb.bak
 # ignore the local working library dropped into tracks/ (imports, mixes, etc.)
 /tracks/*
 !/tracks/examples/
+
+# Survival-harness output. `bin/survival` writes survival_report_<backend>_<n>min.md
+# into the working directory on every run, so these accumulate as a side effect of
+# testing and are specific to one machine at one moment — two committed by accident
+# were both FAILs from a run on a busy dev box, which is worse than no data.
+# Pass --report <path> to keep one deliberately.
+/survival_report_*.md

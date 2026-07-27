@@ -6,19 +6,47 @@ use audio_core::Telemetry;
 /// center needle: half the lane is history, half is what's coming.
 const NEEDLE_WINDOW_SECS: f32 = 8.0;
 
-/// Beats the playhead moves per unit of wheel scroll. A typical mouse notch is
-/// ~50 raw units, so this is roughly one beat per notch — coarse enough to
-/// nudge for beat-matching, fine enough on a trackpad to scrub smoothly.
-const SCRUB_BEATS_PER_SCROLL_UNIT: f32 = 0.02;
+/// Seconds of audio the playhead moves per unit of wheel scroll.
+///
+/// A mouse notch is ~50 raw units, so a notch moves ~0.25 s — a nudge you can
+/// hear without losing your place. A trackpad emits many small deltas and
+/// scrubs smoothly at the same constant.
+///
+/// Expressed in TIME, not beats. The previous version sent `JumpByBeats`, which
+/// the sampler ignores unless it has a transport AND `metadata.bpm > 0.0`, so
+/// scrubbing silently did nothing on any track whose tempo had not been
+/// detected — and gave a different distance per notch depending on the track's
+/// tempo, which is not what dragging a needle should feel like.
+const SCRUB_SECONDS_PER_SCROLL_UNIT: f32 = 0.005;
+
+/// Hold SHIFT for a fine scrub — a tenth of the distance, for setting a cue
+/// point exactly.
+const SCRUB_FINE_FACTOR: f32 = 0.1;
+
+/// Ceiling on scratch speed, in multiples of normal playback.
+///
+/// A fast flick across a short lane can compute an enormous rate from one
+/// frame's drag delta, and the voice advances `rate` frames per output sample —
+/// so an unclamped spike would tear through the buffer in a single block and
+/// deactivate the voice mid-gesture. 8x forward or back is well past anything
+/// a hand does on a platter.
+const MAX_SCRATCH_RATE: f32 = 8.0;
 
 /// Deck lane waveform — NEEDLE STYLE for every deck: a zoomed window that
 /// scrolls under a fixed center line, the beat-matching view. (The lanes
 /// used to show static whole-track overviews with a moving playhead; the
 /// full-track position survives as the thin progress bar along the bottom
 /// plus the elapsed/total readout.)
-pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>, deck_color: Color32, height: f32) {
+pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>, deck_color: Color32, height: f32) {
     let theme = app.theme;
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), egui::Sense::hover());
+    // The waveform owns its own gestures: drag to scratch, click to focus.
+    // (`render_waveform_lane` used to `interact` over the whole lane, which won
+    // every pointer event here and made scroll-to-scrub dead code; it now covers
+    // only the header strip.)
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), height),
+        egui::Sense::click_and_drag(),
+    );
     ui.painter().rect_filled(rect, theme.radius_sm, theme.bg_inset);
 
     let track = app.decks.cached_tracks[i].clone();
@@ -35,8 +63,16 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
     // the deck's playhead. JumpByBeats moves the sampler voice whether it is
     // playing or paused, so the needle follows the wheel. Consume the scroll
     // delta so the surrounding mixer ScrollArea does not pan at the same time.
-    if response.hovered() {
-        let scroll_y = ui.input(|inp| inp.raw_scroll_delta.y);
+    // Pointer test against the rect, NOT `response.hovered()`.
+    //
+    // `render_waveform_lane` calls `ui.interact()` over the whole lane after
+    // this function returns, to make clicking anywhere focus the deck. That
+    // interaction covers the waveform and is registered later, so it wins the
+    // hover and `response.hovered()` here is always false — the scrub handler
+    // was correct and simply unreachable. `rect_contains_pointer` asks where the
+    // pointer is rather than which widget claimed it, so the two can coexist.
+    if ui.rect_contains_pointer(rect) {
+        let (scroll_y, fine) = ui.input(|inp| (inp.raw_scroll_delta.y, inp.modifiers.shift));
         if scroll_y.abs() > f32::EPSILON {
             let node_name = match i {
                 0 => "deck_a_sampler",
@@ -46,17 +82,67 @@ pub fn render_deck_waveform_zone(app: &InspectorApp, ui: &mut Ui, i: usize, tele
                 _ => "",
             };
             if let Some(node_idx) = app.get_node_id(node_name) {
-                // Wheel-up (positive delta) seeks forward in the track.
-                let beats = scroll_y * SCRUB_BEATS_PER_SCROLL_UNIT;
-                let _ = app.command_sender.send(nullherz_traits::Command::Performance(
-                    nullherz_traits::PerformanceCommand::JumpByBeats { node_idx, beats },
-                ));
+                // Wheel-up (positive delta) moves forward through the track.
+                //
+                // Frames are the TRACK's own frames: `play_head` indexes the
+                // decoded source buffer, so a 44.1 kHz file scrubs by its own
+                // sample rate regardless of what the device negotiated.
+                let src_sr = t.metadata.sample_rate.max(1) as f32;
+                let scale = if fine { SCRUB_FINE_FACTOR } else { 1.0 };
+                let frames = (scroll_y * SCRUB_SECONDS_PER_SCROLL_UNIT * scale * src_sr) as i64;
+                if frames != 0 {
+                    let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                        nullherz_traits::PerformanceCommand::NudgePosition { node_idx, frames },
+                    ));
+                }
                 ui.input_mut(|inp| {
                     inp.raw_scroll_delta = Vec2::ZERO;
                     inp.smooth_scroll_delta = Vec2::ZERO;
                 });
             }
         }
+    }
+
+    // --- scratch ------------------------------------------------------------
+    //
+    // Drag the waveform and the deck plays at the speed of your hand, backwards
+    // included. Rate rather than position is what makes it sound like a record:
+    // moving the playhead in jumps just chops the audio, while handing the voice
+    // the gesture's rate reproduces the pitch bend.
+    //
+    // Direction follows the waveform, not the track: the lane scrolls right to
+    // left as it plays, so dragging LEFT pulls the track forward.
+    if response.dragged() || response.drag_stopped() {
+        let node_name = match i {
+            0 => "deck_a_sampler",
+            1 => "deck_b_sampler",
+            2 => "deck_c_sampler",
+            3 => "deck_d_sampler",
+            _ => "",
+        };
+        if let Some(node_idx) = app.get_node_id(node_name) {
+            if response.drag_stopped() {
+                // Let go: the deck goes back to whatever it was doing.
+                let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                    nullherz_traits::PerformanceCommand::SetScratch { node_idx, active: false, rate: 0.0 },
+                ));
+            } else {
+                let src_sr = t.metadata.sample_rate.max(1) as f32;
+                let dt = ui.input(|inp| inp.stable_dt).max(1.0e-4);
+                // Pixels -> source frames, via the lane's own time window.
+                let frames_per_px = (NEEDLE_WINDOW_SECS * src_sr) / rect.width().max(1.0);
+                let frames_moved = -response.drag_delta().x * frames_per_px;
+                // Normal playback covers src_sr frames per second, so this is
+                // the gesture expressed as a playback-rate multiplier.
+                let rate = (frames_moved / (src_sr * dt)).clamp(-MAX_SCRATCH_RATE, MAX_SCRATCH_RATE);
+                let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                    nullherz_traits::PerformanceCommand::SetScratch { node_idx, active: true, rate },
+                ));
+            }
+        }
+    }
+    if response.clicked() {
+        app.decks.focused_deck = i;
     }
 
     // The track's OWN rate, not the device's. Every quantity below —

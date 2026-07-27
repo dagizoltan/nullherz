@@ -42,7 +42,18 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         .small()
                         .color(theme.text_secondary),
                     );
-                    ui.label(format!("X-RUNS: {}", t.xrun_count));
+                    // Distinguish "the backend counted none" from "nobody
+                    // counted". This read a never-incremented engine atomic and
+                    // showed a confident 0 while the device was underrunning.
+                    if t.xruns_reported {
+                        let c = if t.xrun_count == 0 { theme.text_primary } else { theme.danger };
+                        ui.label(RichText::new(format!("X-RUNS: {}", t.xrun_count)).color(c));
+                    } else {
+                        ui.label(
+                            RichText::new("X-RUNS: not reported by this backend")
+                                .color(theme.text_secondary),
+                        );
+                    }
                     ui.label(format!("Resource Leaks: {}", t.resource_leaks));
 
                     let pressure_norm = (t.last_xrun_magnitude_ns as f32 / 1_000_000.0).clamp(0.0, 5.0) / 5.0;

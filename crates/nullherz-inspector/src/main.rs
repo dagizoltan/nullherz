@@ -743,11 +743,13 @@ impl eframe::App for InspectorApp {
                 self.viz.damped_master_peaks[i] += (target_m_peak - self.viz.damped_master_peaks[i]) * alpha_mp;
             }
 
-            // Sync node map from telemetry
-            for i in 0..32 {
-                let key_bytes = t.node_map_keys[i];
+            // Sync node map from telemetry.
+            // Iterate the array's real length rather than a literal — a hardcoded
+            // 32 here would have kept reading only half the slots after the map
+            // was widened, which looks exactly like the overflow it fixed.
+            for (i, key_bytes) in t.node_map_keys.iter().enumerate() {
                 if key_bytes[0] != 0 {
-                    let name = String::from_utf8_lossy(&key_bytes).trim_matches(char::from(0)).to_string();
+                    let name = String::from_utf8_lossy(key_bytes).trim_matches(char::from(0)).to_string();
                     self.topo.node_map.insert(name, t.node_map_values[i]);
                 }
             }

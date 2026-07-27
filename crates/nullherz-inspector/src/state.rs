@@ -12,6 +12,13 @@ pub struct MixerState {
     pub channel_eq_mid: [f32; 4],
     pub channel_eq_low: [f32; 4],
     pub channel_filter: [f32; 4],
+    /// Stereo position, 0.0 = hard left, 0.5 = centre, 1.0 = hard right.
+    /// Drives DeckParamType::Pan, which the mixer orchestrator already routes
+    /// to the deck's stereo-util node — it simply had no control bound to it.
+    pub channel_balance: [f32; 4],
+    /// Stereo width, 1.0 = unmodified. Drives DeckParamType::Width, likewise
+    /// already routed and previously unexposed.
+    pub channel_width: [f32; 4],
     pub channel_personality_metallic: [f32; 4],
     pub channel_personality_organic: [f32; 4],
     pub channel_personality_warm: [f32; 4],
@@ -48,6 +55,8 @@ impl Default for MixerState {
             channel_eq_mid: [1.0; 4],
             channel_eq_low: [1.0; 4],
             channel_filter: [0.5; 4],
+            channel_balance: [0.5; 4],
+            channel_width: [1.0; 4],
             channel_personality_metallic: [0.0; 4],
             channel_personality_organic: [0.0; 4],
             channel_personality_warm: [0.0; 4],

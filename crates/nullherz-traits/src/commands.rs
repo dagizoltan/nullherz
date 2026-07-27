@@ -240,6 +240,35 @@ pub enum PerformanceCommand {
         node_idx: u32,
         beats: f32,
     },
+    /// Move the playhead by a signed number of SOURCE frames.
+    ///
+    /// Deliberately separate from [`PerformanceCommand::JumpByBeats`], which
+    /// requires a transport AND `metadata.bpm > 0.0` and silently does nothing
+    /// when either is missing. That is the right guard for a musical jump and
+    /// the wrong one for dragging the needle: scrubbing a deck is a movement in
+    /// TIME, and it has to work on a track that has not been analysed, has no
+    /// detectable beat, or is not the kind of material that has a tempo at all.
+    ///
+    /// Negative moves backwards. The voice clamps at the buffer start.
+    NudgePosition {
+        node_idx: u32,
+        frames: i64,
+    },
+    /// Hand the deck's playback rate to a gesture, or give it back.
+    ///
+    /// While `active`, the voice plays at `rate` instead of its own — `1.0` is
+    /// normal speed, `0.0` is a stopped record under a held hand, and negative
+    /// values play backwards. That is what makes a scratch audible: the pitch
+    /// and direction follow the hand rather than the playhead teleporting.
+    ///
+    /// Releasing restores whatever the deck was doing before the gesture
+    /// started, so scratching a stopped deck leaves it stopped and scratching a
+    /// playing one drops it back into play at its own rate.
+    SetScratch {
+        node_idx: u32,
+        active: bool,
+        rate: f32,
+    },
     SetLoop {
         node_idx: u32,
         enabled: bool,

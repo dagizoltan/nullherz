@@ -44,7 +44,12 @@ pub fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
             if let Some(t) = app.last_telemetry.lock().as_ref() {
                 ui.horizontal(|ui| {
                     ui.label("Sync Status:");
-                    if t.clock_jitter_ns < 1000 {
+                    // "No clock installed" is not "perfectly locked". With no
+                    // provider the jitter field sits at 0, which this panel used
+                    // to read as flawless synchronisation and report as LOCKED.
+                    if !t.clock_jitter_available {
+                        ui.label(RichText::new("— NO CLOCK SOURCE").color(theme.text_secondary));
+                    } else if t.clock_jitter_ns < 1000 {
                         ui.label(RichText::new("● LOCKED").color(theme.success));
                     } else {
                         ui.label(RichText::new("○ SEEKING").color(theme.warning));
@@ -52,7 +57,11 @@ pub fn render_calibration(app: &mut InspectorApp, ui: &mut Ui) {
                 });
                 ui.label(format!("System Time: {} ns", t.system_time_ns));
                 ui.label(format!("Device Time: {} ns", t.device_time_ns));
-                ui.label(format!("Jitter: {} ns", t.clock_jitter_ns));
+                if t.clock_jitter_available {
+                    ui.label(format!("Jitter: {} ns", t.clock_jitter_ns));
+                } else {
+                    ui.label(RichText::new("Jitter: not measured (no clock provider)").color(theme.text_secondary));
+                }
                 ui.label(format!("Offset: {} ns", (t.device_time_ns as i64 - t.system_time_ns as i64)));
             } else {
                 ui.label("No clock telemetry available.");

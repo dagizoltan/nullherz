@@ -90,7 +90,17 @@ struct Stats {
     /// Timing tells load spikes (first seconds) apart from steady-state trouble.
     overrun_events: Vec<(Duration, u64)>,
     overrun_count: u64,
-    /// Loudest sample seen on any node across the whole run.
+    /// Loudest sample the MASTER output produced across the run.
+    ///
+    /// Specifically the master limiter's output — the last node before the
+    /// device — not the loudest node anywhere. Those are very different
+    /// numbers: a summing bus routinely exceeds full scale, which is precisely
+    /// what the limiter downstream of it exists to catch. Reporting the global
+    /// max made the console look like it was clipping when the signal actually
+    /// leaving it was fine.
+    peak_master_level: f32,
+    /// Loudest sample on any node, pre-limiter stages included. Not a clipping
+    /// indicator — it is headroom telemetry, and >1.0 here is normal.
     ///
     /// Without this the harness happily reports PASS on a completely silent
     /// graph: zero xruns is trivially true when there is no audio to drop. The
@@ -156,9 +166,23 @@ async fn main() {
             if let Ok(tracks) = lib.list_tracks() {
                 // Only tracks whose file actually exists: stale library entries
                 // (e.g. old auto-breeder children) must not be selected.
-                track_ids = tracks.iter()
+                // LONGEST first, and only tracks whose file still exists
+                // (stale library rows, e.g. old auto-breeder children, must not
+                // be selected).
+                //
+                // Order matters. This used to take whatever `list_tracks()`
+                // returned first, and the demo folder holds ten 5-12 second WAVs
+                // alongside two ~140 s mixes — so the run's verdict depended on
+                // which the library happened to list. Drawing short ones meant
+                // the decks played out in the first ten seconds and the harness
+                // failed on "audio stopped part-way" with a perfectly healthy
+                // engine. Looping (below) covers the rest; this just makes the
+                // choice deterministic and starts from the best material.
+                let mut rows: Vec<_> = tracks.iter()
                     .filter(|t| std::path::Path::new(&t.path).exists())
-                    .map(|t| t.id).collect();
+                    .collect();
+                rows.sort_by_key(|t| std::cmp::Reverse(t.metadata.total_samples));
+                track_ids = rows.iter().map(|t| t.id).collect();
             }
         }
         conductor.tick();
@@ -203,6 +227,30 @@ async fn main() {
         Command::Performance(PerformanceCommand::PlayDeck { deck_id: 'A' }),
         Command::Performance(PerformanceCommand::PlayDeck { deck_id: 'B' }),
     ]);
+
+    // Loop both decks for the whole run.
+    //
+    // The harness asserts that signal is present in >90% of frames, which is
+    // the check that stops a silent graph reporting PASS. Without looping that
+    // assertion is really a statement about track length: a 60-minute Gate 1
+    // run against a 140-second mix is silent for 96% of it and fails no matter
+    // how healthy the engine is. Looping makes the duration the operator asks
+    // for the duration that actually gets tested.
+    for (deck, id) in [('A', track_ids[0]), ('B', track_ids[1])] {
+        let node = conductor.mixer_manager.deck_mappings.get(&deck).map(|n| n.sampler_id);
+        let len = {
+            let lib = conductor.library.lock();
+            lib.get_track(id).ok().flatten().map(|t| t.metadata.total_samples).unwrap_or(0)
+        };
+        match (node, len) {
+            (Some(node_idx), n) if n > 1 => {
+                conductor.apply_mixer_commands(vec![Command::Performance(
+                    PerformanceCommand::SetLoop { node_idx, enabled: true, start_samples: 0, end_samples: n - 1 },
+                )]);
+            }
+            _ => eprintln!("WARN: deck {deck} could not be looped; a run longer than the track will report a false failure."),
+        }
+    }
 
     // Diagnostic: give the engine 3s, then ask the samplers what they hold.
     {
@@ -257,6 +305,17 @@ async fn main() {
         }
     }
 
+    // Which node is the master output. Everything downstream of it goes to the
+    // device, so this is the only peak that says anything about clipping.
+    let master_node_idx: Option<usize> = conductor
+        .mixer_manager
+        .node_names
+        .get("master_limiter")
+        .map(|&i| i as usize);
+    if master_node_idx.is_none() {
+        eprintln!("WARN: master_limiter node not found; master level will not be reported.");
+    }
+
     // --- Main survival loop ---
     let run_duration = Duration::from_secs(args.minutes * 60);
     println!("Running for {} minute(s)...\n", args.minutes);
@@ -305,6 +364,10 @@ async fn main() {
                 stats.frames_with_signal += 1;
             }
             stats.peak_output_level = stats.peak_output_level.max(block_peak);
+            if let Some(idx) = master_node_idx
+                && let Some(p) = tel.peak_levels.get(idx) {
+                stats.peak_master_level = stats.peak_master_level.max(*p);
+            }
             if tel.xrun_count != last_xrun_count {
                 let elapsed = started.elapsed();
                 println!(
@@ -402,7 +465,8 @@ async fn main() {
         | Telemetry frames | {} |\n\
         | **Xruns (backend)** | **{}** |\n\
         | Xruns (engine telemetry) | {} (counter is never incremented — see notes) |\n\
-        | Peak output level | {:.4} |\n\
+        | **Peak MASTER level** | **{:.4}** |\n\
+        | Peak level, any node (pre-limiter; >1.0 is normal) | {:.4} |\n\
         | Frames with signal | {:.1}% |\n\
         | Peak block time | {} µs |\n\
         | Mean block time | {} µs |\n\
@@ -417,6 +481,7 @@ async fn main() {
         stats.frames,
         match xruns { Some(n) => n.to_string(), None => "NOT REPORTED".to_string() },
         stats.xrun_count_final,
+        stats.peak_master_level,
         stats.peak_output_level,
         signal_ratio * 100.0,
         stats.peak_process_time_ns / 1000,
