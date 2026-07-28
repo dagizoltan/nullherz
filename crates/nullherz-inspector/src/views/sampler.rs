@@ -30,8 +30,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                  let _wgpu = wgpu_mtx.lock();
                  let mut wf = wf_mtx.lock();
 
-                 let deck_idx = app.decks.focused_deck;
-                 if let Some(track_id) = app.decks.now_playing[deck_idx] {
+                 // Own source first, focused deck only as a fallback. Reading
+                 // the deck directly made this a view onto the console rather
+                 // than a tool: clicking a different deck changed what you were
+                 // editing mid-edit.
+                 let source = app.sampler.source_track
+                     .or(app.decks.now_playing[app.decks.focused_deck]);
+                 if let Some(track_id) = source {
                      if let Some(track) = app.get_cached_track(track_id) {
                          wf.update_from_mip_waveform(&_wgpu.queue, &track.metadata.mip_waveform, app.sampler.sampler_waveform_zoom, rect.width() as u32, app.theme.accent.to_array().map(|v| v as f32 / 255.0));
                      }

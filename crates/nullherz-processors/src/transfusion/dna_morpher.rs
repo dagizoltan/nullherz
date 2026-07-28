@@ -19,6 +19,11 @@ pub struct DnaMorpher {
 
     // Interpolated State
     pub(crate) current_latent: [f32; 16],
+    /// Whether the operator has asked for DNA shaping on this deck.
+    ///
+    /// Separate from `engaged`, which also requires DNA to have arrived.
+    /// Default false: a deck plays what was loaded onto it until told otherwise.
+    pub(crate) allow_engage: bool,
 
     // Parameters
     morph_pos: f32, // 0.0 (A) to 1.0 (B)
@@ -36,6 +41,7 @@ impl DnaMorpher {
             dna_a: Arc::new(SoundDNA::default()),
             dna_b: Arc::new(SoundDNA::default()),
             current_latent: [0.0; 16],
+            allow_engage: false,
             morph_pos: 0.5,
             engaged: false,
         }
@@ -123,14 +129,29 @@ impl AudioProcessor for DnaMorpher {
             // For DnaMorpher, we might treat updates as setting Slot B
             self.dna_a = self.dna_b.clone();
             self.dna_b = Arc::new(metadata.dna.clone());
-            // Real DNA has arrived; the morpher may now shape the signal.
-            self.engaged = true;
+            // Keep the DNA current, but do NOT start shaping the signal.
+            //
+            // This used to set `engaged = true` here, so simply LOADING a track
+            // put spectral resynthesis in the deck's path — measured at roughly
+            // -10 dB RMS against the same audio unengaged. A console advertised
+            // as high precision cannot silently resynthesise everything the
+            // moment a file lands on a deck; DNA shaping is an effect the
+            // operator asks for, via `allow_engage` (param 1).
+            self.engaged = self.allow_engage;
         }
     }
 
     fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
-        if param_id == 0 {
-            self.morph_pos = value.clamp(0.0, 1.0);
+        match param_id {
+            0 => self.morph_pos = value.clamp(0.0, 1.0),
+            // 1 = DNA shaping on/off for this deck. Turning it off drops
+            // straight back to the bit-transparent path, so it is a safe thing
+            // to reach for mid-mix.
+            1 => {
+                self.allow_engage = value > 0.5;
+                self.engaged = self.allow_engage;
+            }
+            _ => {}
         }
     }
 
@@ -177,9 +198,15 @@ mod tests {
         assert_eq!(output, input, "unengaged morpher must pass audio through unchanged");
     }
 
-    /// Loading real DNA (UpdateMetadata) engages the resynthesis path.
+    /// Loading a track must NOT start shaping the signal.
+    ///
+    /// This test previously asserted the opposite — that `UpdateMetadata`
+    /// engages the morpher — which is what made every deck resynthesise its
+    /// audio the moment a file was loaded. Measured against the unengaged path
+    /// on the same input, that cost roughly 10 dB of RMS. Loading a track is
+    /// not a request to process it.
     #[test]
-    fn test_update_metadata_engages_morpher() {
+    fn test_loading_a_track_does_not_engage_the_morpher() {
         use nullherz_traits::AudioProcessor;
         let mut m = DnaMorpher::new(1, 1024);
         assert!(!m.engaged);
@@ -189,6 +216,58 @@ mod tests {
             node_idx: 1,
             metadata: std::sync::Arc::new(meta),
         });
-        assert!(m.engaged, "real DNA must engage the morpher");
+        assert!(
+            !m.engaged,
+            "loading a track engaged DNA resynthesis; the deck is no longer playing what was put on it"
+        );
+    }
+
+    /// ...but asking for it must work, and must survive a later track load.
+    #[test]
+    fn test_enabling_dna_shaping_engages_it() {
+        use nullherz_traits::AudioProcessor;
+        let mut m = DnaMorpher::new(1, 1024);
+        m.set_parameter(1, 1.0, 0);
+        assert!(m.engaged, "param 1 did not turn DNA shaping on");
+
+        let mut meta = nullherz_traits::SampleMetadata::new_empty();
+        meta.dna.spectral.latent_space = [0.5; 16];
+        m.apply_topology_mutation(nullherz_traits::TopologyMutation::UpdateMetadata {
+            node_idx: 1,
+            metadata: std::sync::Arc::new(meta),
+        });
+        assert!(m.engaged, "loading a track switched DNA shaping back off");
+
+        // And off again returns to the transparent path.
+        m.set_parameter(1, 0.0, 0);
+        assert!(!m.engaged);
+
+    }
+
+    /// The default path is bit-transparent even after a track is loaded.
+    #[test]
+    fn test_a_loaded_deck_is_bit_transparent_by_default() {
+        use nullherz_traits::{AudioProcessor, SignalProcessor};
+        let mut m = DnaMorpher::new(1, 1024);
+        let mut meta = nullherz_traits::SampleMetadata::new_empty();
+        meta.dna.spectral.latent_space = [0.31, 0.62, 0.18, 0.77, 0.45, 0.09, 0.88, 0.52,
+                                          0.24, 0.66, 0.13, 0.71, 0.38, 0.95, 0.05, 0.49];
+        m.apply_topology_mutation(nullherz_traits::TopologyMutation::UpdateMetadata {
+            node_idx: 1,
+            metadata: std::sync::Arc::new(meta),
+        });
+
+        let input: Vec<f32> = (0..512).map(|i| ((i as f32) * 0.13).sin() * 0.8).collect();
+        let mut output = vec![0.0f32; 512];
+        let mut ctx = nullherz_traits::ProcessContext {
+            transport: None, host: None, sub_block_offset: 0, is_last_sub_block: true,
+        };
+        let inp: [&[f32]; 1] = [&input];
+        let mut out: [&mut [f32]; 1] = [&mut output];
+        m.process(&inp, &mut out, &mut ctx);
+        assert_eq!(
+            output, input,
+            "a deck with a track loaded is not passing its audio through unchanged"
+        );
     }
 }

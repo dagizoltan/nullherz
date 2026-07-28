@@ -186,6 +186,11 @@ impl MixerManager {
         self.node_names.insert(format!("deck_{}_sequencer", id_lower), nodes.sequencer_id);
         // Strip end: the per-deck level the UI meters should watch.
         self.node_names.insert(format!("deck_{}_isolator", id_lower), nodes.isolator_id);
+        // Named so the UI can reach it: DNA shaping is opt-in per deck and the
+        // control that turns it on has to resolve this node.
+        if let Some(id) = nodes.dna_morph_id {
+            self.node_names.insert(format!("deck_{}_dna_morph", id_lower), id);
+        }
         commands
     }
 

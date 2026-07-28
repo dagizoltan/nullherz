@@ -7,8 +7,39 @@ pub fn render_deck_dna_panel(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
             ui.label(RichText::new("DNA").size(theme.type_caption).color(theme.text_secondary));
+
+            // The master switch for this deck's spectral resynthesis.
+            //
+            // OFF is the default and means the deck plays exactly what was
+            // loaded onto it. This used to switch itself on the moment a track
+            // landed, so every deck was resynthesising its audio whether or not
+            // anyone had asked — about 10 dB of RMS, silently.
+            let mut on = app.mixer.channel_dna_enabled[i];
+            let toggle = ui.checkbox(&mut on, RichText::new("SHAPE").size(theme.type_caption))
+                .on_hover_text("Apply this track's DNA to the deck's sound. Off = raw playback.");
+            if toggle.changed() {
+                app.mixer.channel_dna_enabled[i] = on;
+                if let Some(node) = app.get_node_id(&format!("deck_{}_dna_morph", (b'a' + i as u8) as char)) {
+                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(
+                        nullherz_traits::MixerCommand::SetParam {
+                            target_id: node as u64,
+                            param_id: 1,
+                            value: if on { 1.0 } else { 0.0 },
+                            ramp_duration_samples: 0,
+                        },
+                    ));
+                }
+            }
+
             ui.checkbox(&mut app.mixer.personality_macro_mode, "🔗");
         });
+        if !app.mixer.channel_dna_enabled[i] {
+            ui.label(
+                RichText::new("raw — shaping off")
+                    .size(theme.type_caption)
+                    .color(theme.text_disabled),
+            );
+        }
 
         let traits = [
             ("METALLIC", 0, "metallic"),

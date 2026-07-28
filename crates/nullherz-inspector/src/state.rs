@@ -16,6 +16,12 @@ pub struct MixerState {
     /// Drives DeckParamType::Pan, which the mixer orchestrator already routes
     /// to the deck's stereo-util node — it simply had no control bound to it.
     pub channel_balance: [f32; 4],
+    /// Whether DNA shaping is engaged on each deck.
+    ///
+    /// False by default: loading a track used to switch the deck's spectral
+    /// resynthesis on by itself, costing roughly 10 dB of RMS on audio nobody
+    /// asked to have processed.
+    pub channel_dna_enabled: [bool; 4],
     /// Stereo width, 1.0 = unmodified. Drives DeckParamType::Width, likewise
     /// already routed and previously unexposed.
     pub channel_width: [f32; 4],
@@ -56,6 +62,7 @@ impl Default for MixerState {
             channel_eq_low: [1.0; 4],
             channel_filter: [0.5; 4],
             channel_balance: [0.5; 4],
+            channel_dna_enabled: [false; 4],
             channel_width: [1.0; 4],
             channel_personality_metallic: [0.0; 4],
             channel_personality_organic: [0.0; 4],
@@ -134,6 +141,11 @@ pub struct LibraryState {
     pub smart_crate_builder_open: bool,
     pub smart_crate_def: nullherz_dna::SmartCrateDefinition,
     pub selected_library_track: Option<u64>,
+    /// Track whose details are expanded inline in the list.
+    ///
+    /// Accordion, not multi-open: one row at a time keeps the list scannable
+    /// and keeps the virtualisation maths to a single variable-height row.
+    pub expanded_track: Option<u64>,
     pub playlist_queue: std::collections::VecDeque<u64>,
     pub ingestion_path: String,
     pub _playlists: Vec<crate::Playlist>,
@@ -169,6 +181,7 @@ impl Default for LibraryState {
                 root_key: None,
             },
             selected_library_track: None,
+            expanded_track: None,
             playlist_queue: std::collections::VecDeque::new(),
             ingestion_path: "tracks/".to_string(),
             _playlists: vec![],
@@ -179,6 +192,13 @@ impl Default for LibraryState {
 
 /// Step-sequencer / song-builder grid state.
 pub struct ComposerState {
+    /// Sample assigned to each sequencer track, independent of the decks.
+    ///
+    /// Sequencer tracks used to resolve their audio through
+    /// `decks.now_playing[track_idx % 4]`, so the composer could only sequence
+    /// whatever was on a deck and tracks 4..16 aliased tracks 0..3. This is
+    /// what lets the composer load samples of its own.
+    pub track_sources: [Option<u64>; 16],
     /// Step grids PER DECK: the composer edits the focused deck's
     /// sequencer, so each deck needs its own grid — one shared grid showed
     /// deck A's steps no matter which deck you were editing.
@@ -198,6 +218,7 @@ pub struct ComposerState {
 impl Default for ComposerState {
     fn default() -> Self {
         Self {
+            track_sources: [None; 16],
             sequencer_grid: std::array::from_fn(|_| std::array::from_fn(|_| vec![0.0; 64])),
             selected_composer_track: None,
             sequencer_active_step: 0,
@@ -215,6 +236,15 @@ impl Default for ComposerState {
 
 /// Sampler capture/monitoring state.
 pub struct SamplerState {
+    /// The sample this tool is working on, chosen independently of the decks.
+    ///
+    /// The sampler used to read `decks.now_playing[decks.focused_deck]`, which
+    /// made it a view onto whichever deck happened to have focus rather than a
+    /// tool in its own right: you could not chop a sample without first loading
+    /// it to a deck, and clicking another deck silently changed what you were
+    /// editing. `None` falls back to the focused deck so the old behaviour is
+    /// still the default when nothing has been picked.
+    pub source_track: Option<u64>,
     pub sampler_slicer_mode: bool,
     pub sampler_waveform_zoom: f32,
     pub sampler_input_gain: f32,
@@ -228,6 +258,7 @@ pub struct SamplerState {
 impl Default for SamplerState {
     fn default() -> Self {
         Self {
+            source_track: None,
             sampler_slicer_mode: false,
             sampler_waveform_zoom: 1.0,
             sampler_input_gain: 1.0,

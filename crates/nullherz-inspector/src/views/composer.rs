@@ -366,7 +366,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                         mutation_strength: val,
                                                     }));
 
-                                                    if let Some(track_id) = app.decks.now_playing[track_idx % 4] {
+                                                    // The track's OWN sample, with the deck
+                                                    // as fallback. `% 4` meant tracks 4..16
+                                                    // aliased 0..3 and the composer could only
+                                                    // sequence what was already on a deck.
+                                                    let src = app.composer.track_sources
+                                                        .get(track_idx).copied().flatten()
+                                                        .or(app.decks.now_playing[track_idx % 4]);
+                                                    if let Some(track_id) = src {
                                                         use nullherz_dna::GeneticLibrary;
                                                         if let Some(mut track) = app.get_cached_track(track_id) {
                                                             let mut updated_metadata = (*track.metadata).clone();
@@ -488,27 +495,10 @@ mod tests {
                 ..Default::default()
             },
             composer: crate::state::ComposerState {
-                sequencer_grid: std::array::from_fn(|_| std::array::from_fn(|_| vec![0.0; 64])),
-                selected_composer_track: None,
-                sequencer_active_step: 0,
-                track_mutes: [false; 16],
-                track_solos: [false; 16],
-                track_volumes: [1.0; 16],
-                track_targets: std::array::from_fn(|_| "(default)".to_string()),
-                record_automation: false,
-                _automation_data: std::collections::HashMap::new(),
-                evolution_strengths: [0.0; 16],
-                auto_pollinate_enabled: false,
+                ..Default::default()
             },
             sampler: crate::state::SamplerState {
-                sampler_slicer_mode: false,
-                sampler_waveform_zoom: 1.0,
-                sampler_input_gain: 1.0,
-                sampler_monitor_level: 0.0,
-                sampler_is_recording: false,
-                sampler_is_stereo: false,
-                sampler_input_source: 0,
-                next_sample_id: 1,
+                ..Default::default()
             },
             editor: crate::state::EditorState {
                 editor_time_stretch_ratio: 1.0,

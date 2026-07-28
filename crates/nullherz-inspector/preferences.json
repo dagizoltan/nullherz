@@ -1,9 +1,9 @@
 {
   "restore_last_session": false,
-  "default_view_on_launch": "Console",
+  "default_view_on_launch": "Composer",
   "autosave_enabled": false,
   "autosave_interval_mins": 5,
-  "shortcuts_enabled": true,
+  "shortcuts_enabled": false,
   "theme_accent": [
     0,
     255,

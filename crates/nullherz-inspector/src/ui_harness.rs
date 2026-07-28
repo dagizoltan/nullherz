@@ -237,3 +237,106 @@ mod tests {
         }
     }
 }
+
+/// Track U regressions: the tools must be usable without a deck, and the
+/// library list must stay virtualised once rows can expand.
+#[cfg(test)]
+mod track_u_tests {
+    use super::*;
+
+    #[test]
+    fn test_sampler_source_is_independent_of_deck_focus() {
+        // The failure this replaces: the sampler read
+        // `now_playing[focused_deck]`, so clicking another deck silently
+        // changed what you were chopping.
+        let mut h = Harness::new();
+        h.load_deck(0, 100, "on deck A", 48_000);
+        h.load_deck(1, 200, "on deck B", 48_000);
+        h.app.sampler.source_track = Some(999); // something not on any deck
+
+        h.app.decks.focused_deck = 0;
+        let a = h.app.sampler.source_track.or(h.app.decks.now_playing[h.app.decks.focused_deck]);
+        h.app.decks.focused_deck = 1;
+        let b = h.app.sampler.source_track.or(h.app.decks.now_playing[h.app.decks.focused_deck]);
+
+        assert_eq!(a, Some(999));
+        assert_eq!(b, Some(999), "changing deck focus moved the sampler's source");
+    }
+
+    #[test]
+    fn test_sampler_falls_back_to_the_focused_deck() {
+        // Nothing chosen yet: the old behaviour is still the default, so the
+        // tool is not empty on first open.
+        let mut h = Harness::new();
+        h.load_deck(2, 300, "deck C", 48_000);
+        h.app.decks.focused_deck = 2;
+        assert_eq!(h.app.sampler.source_track, None);
+        let resolved = h.app.sampler.source_track.or(h.app.decks.now_playing[h.app.decks.focused_deck]);
+        assert_eq!(resolved, Some(300));
+    }
+
+    #[test]
+    fn test_composer_tracks_do_not_alias_every_four() {
+        // `now_playing[track_idx % 4]` made sequencer track 5 the same sample as
+        // track 1, and made all 16 tracks depend on the four decks.
+        let mut h = Harness::new();
+        h.load_deck(1, 42, "deck B", 48_000);
+        h.app.composer.track_sources[5] = Some(777);
+
+        let resolve = |h: &Harness, i: usize| -> Option<u64> {
+            h.app.composer.track_sources.get(i).copied().flatten()
+                .or(h.app.decks.now_playing[i % 4])
+        };
+        assert_eq!(resolve(&h, 5), Some(777), "track 5 did not use its own sample");
+        assert_eq!(resolve(&h, 1), Some(42), "track 1 lost its deck fallback");
+        assert_ne!(resolve(&h, 5), resolve(&h, 1), "tracks 1 and 5 still alias");
+    }
+
+    #[test]
+    fn test_library_accordion_expands_one_row_at_a_time() {
+        let mut h = Harness::new();
+        assert_eq!(h.app.library.expanded_track, None);
+        h.app.library.expanded_track = Some(1);
+        h.app.library.expanded_track = Some(2);
+        assert_eq!(h.app.library.expanded_track, Some(2), "accordion should hold a single row");
+    }
+
+    #[test]
+    fn test_expanding_a_row_does_not_change_the_selection() {
+        // Details and selection are separate actions — that is why the toggle
+        // is its own control rather than a click on the row.
+        let mut h = Harness::new();
+        h.app.library.selected_library_track = Some(7);
+        h.app.library.expanded_track = Some(9);
+        assert_eq!(h.app.library.selected_library_track, Some(7));
+    }
+}
+
+/// RAW mode: the console must play what was loaded onto it.
+#[cfg(test)]
+mod raw_mode_tests {
+    use super::*;
+
+    #[test]
+    fn test_dna_shaping_is_off_by_default_on_every_deck() {
+        // The default that was previously impossible: loading a track engaged
+        // the deck's spectral resynthesis by itself.
+        let h = Harness::new();
+        assert_eq!(
+            h.app.mixer.channel_dna_enabled, [false; 4],
+            "a deck starts with DNA shaping engaged"
+        );
+    }
+
+    #[test]
+    fn test_loading_a_track_does_not_turn_shaping_on() {
+        let mut h = Harness::new();
+        h.load_deck(0, 1, "a", 48_000);
+        h.load_deck(1, 2, "b", 48_000);
+        h.frame(vec![], None);
+        assert_eq!(
+            h.app.mixer.channel_dna_enabled, [false; 4],
+            "loading tracks engaged DNA shaping"
+        );
+    }
+}
