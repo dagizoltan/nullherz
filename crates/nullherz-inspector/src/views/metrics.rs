@@ -22,6 +22,73 @@ fn dsp_load(t: &audio_core::Telemetry) -> f32 {
     (t.process_time_ns as f32 / 1_000_000.0) / budget
 }
 
+
+/// Output latency implied by the device ring buffer, in ms.
+///
+/// `block_size` alone does not answer "how far behind the speaker am I" — the
+/// device holds several periods. Returns None when the backend does not report
+/// a buffer, rather than showing a confident zero.
+fn output_latency_ms(t: &audio_core::Telemetry) -> Option<f32> {
+    if t.device_buffer_frames == 0 || t.sample_rate <= 0.0 { return None; }
+    Some(t.device_buffer_frames as f32 / t.sample_rate * 1000.0)
+}
+
+/// Worst-case DSP load since the engine started, as a fraction of budget.
+///
+/// The headline mean is a comfort number; this is the one that predicts
+/// dropouts, because a single block over budget is an audible click.
+fn peak_load(t: &audio_core::Telemetry) -> f32 {
+    let budget = block_budget_ms(t);
+    if budget <= 0.0 { return 0.0; }
+    (t.peak_process_time_ns as f32 / 1_000_000.0) / budget
+}
+
+/// Node index -> name, from the telemetry map.
+fn node_names(t: &audio_core::Telemetry) -> std::collections::HashMap<u32, String> {
+    let mut m = std::collections::HashMap::new();
+    for (i, key) in t.node_map_keys.iter().enumerate() {
+        if key[0] != 0 {
+            let name = String::from_utf8_lossy(key).trim_matches(char::from(0)).to_string();
+            m.insert(t.node_map_values[i], name);
+        }
+    }
+    m
+}
+
+/// The `n` most expensive nodes this block, named.
+///
+/// Replaces a row of 64 anonymous bars scaled by an arbitrary constant and
+/// clamped to 30 px. That drew something for every node but answered no
+/// question: you could not tell which processor was expensive, and with
+/// MAX_NODES at 128 it silently showed only the first half.
+fn hottest_nodes(t: &audio_core::Telemetry, n: usize) -> Vec<(String, u64, f32)> {
+    let names = node_names(t);
+    let budget_ns = block_budget_ms(t) * 1_000_000.0;
+    let mut v: Vec<(String, u64, f32)> = t
+        .node_times_ns
+        .iter()
+        .enumerate()
+        .filter(|(_, ns)| **ns > 0)
+        .map(|(idx, ns)| {
+            let name = names
+                .get(&(idx as u32))
+                .cloned()
+                .unwrap_or_else(|| format!("node {idx}"));
+            let share = if budget_ns > 0.0 { *ns as f32 / budget_ns } else { 0.0 };
+            (name, *ns, share)
+        })
+        .collect();
+    v.sort_by_key(|(_, ns, _)| std::cmp::Reverse(*ns));
+    v.truncate(n);
+    v
+}
+
+fn human_bytes(b: u64) -> String {
+    const MB: f64 = 1024.0 * 1024.0;
+    let mb = b as f64 / MB;
+    if mb >= 1024.0 { format!("{:.2} GB", mb / 1024.0) } else { format!("{mb:.1} MB") }
+}
+
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let telemetry = *app.last_telemetry.lock();
     let frame_width = ui.available_width().min(400.0);
@@ -60,15 +127,62 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     ui.add(egui::ProgressBar::new(pressure_norm).fill(theme.accent).text("PRESSURE"));
 
                     ui.add_space(theme.space_xs);
-                    ui.label(RichText::new("NODE PERFORMANCE BREAKDOWN").small().color(theme.text_secondary));
-                    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), Sense::hover());
-                    let node_w = rect.width() / 64.0;
-                    for i in 0..64 {
-                        let time = t.node_times_ns[i] as f32 / 100_000.0; // Scaled
-                        let h = time.clamp(1.0, 30.0);
-                        let r = egui::Rect::from_min_max(egui::pos2(rect.left() + i as f32 * node_w, rect.bottom() - h), egui::pos2(rect.left() + (i+1) as f32 * node_w - 1.0, rect.bottom()));
-                        ui.painter().rect_filled(r, 0.0, theme.track_colors[1]);
+
+                    // Headroom, not just load: one block over budget is a click.
+                    let pk = peak_load(t) * 100.0;
+                    let pk_color = if pk >= 100.0 { theme.danger }
+                        else if pk >= 70.0 { theme.warning }
+                        else { theme.success };
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Peak block").small().color(theme.text_secondary));
+                        ui.label(RichText::new(format!("{:.1}% of budget", pk)).strong().color(pk_color));
+                        ui.label(RichText::new(format!("({:.2} ms)", t.peak_process_time_ns as f32 / 1.0e6))
+                            .small().color(theme.text_secondary));
+                    });
+
+                    match output_latency_ms(t) {
+                        Some(ms) => {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("Output latency").small().color(theme.text_secondary));
+                                ui.label(RichText::new(format!("{ms:.1} ms")).strong());
+                                ui.label(RichText::new(format!("({} frames)", t.device_buffer_frames))
+                                    .small().color(theme.text_secondary));
+                            });
+                        }
+                        None => {
+                            ui.label(RichText::new("Output latency: not reported by this backend")
+                                .small().color(theme.text_secondary));
+                        }
                     }
+
+                    ui.add_space(theme.space_xs);
+                    ui.label(RichText::new("HOTTEST NODES").small().color(theme.text_secondary));
+                    let hot = hottest_nodes(t, 6);
+                    if hot.is_empty() {
+                        ui.label(RichText::new("no node time recorded").small().color(theme.text_disabled));
+                    } else {
+                        for (name, ns, share) in hot {
+                            ui.horizontal(|ui| {
+                                ui.add(egui::ProgressBar::new(share.clamp(0.0, 1.0))
+                                    .desired_width(frame_width * 0.42)
+                                    .fill(if share > 0.5 { theme.warning } else { theme.accent })
+                                    .text(RichText::new(format!("{:.0}%", share * 100.0)).small()));
+                                ui.label(RichText::new(&name).small());
+                                ui.label(RichText::new(format!("{:.0} us", ns as f32 / 1000.0))
+                                    .small().color(theme.text_secondary));
+                            });
+                        }
+                    }
+
+                    ui.add_space(theme.space_xs);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Resident audio").small().color(theme.text_secondary));
+                        let big = t.registry_bytes > 2 * 1024 * 1024 * 1024;
+                        ui.label(RichText::new(human_bytes(t.registry_bytes)).strong()
+                            .color(if big { theme.warning } else { theme.text_primary }));
+                        ui.label(RichText::new(format!("in {} sample(s)", t.registry_samples))
+                            .small().color(theme.text_secondary));
+                    });
                 } else {
                     ui.label("No Telemetry Connection");
                 }
@@ -237,4 +351,100 @@ where F: FnOnce(&mut Ui)
             ui.set_width(width);
             add_contents(ui);
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use audio_core::Telemetry;
+
+    fn tel() -> Telemetry {
+        Telemetry { sample_rate: 48_000.0, block_size: 256, ..Telemetry::default() }
+    }
+
+    #[test]
+    fn test_latency_is_none_when_the_backend_does_not_report_a_buffer() {
+        // A confident "0.0 ms" would read as a perfect low-latency setup, which
+        // is the opposite of the truth. Same failure the clock-jitter readout
+        // had before it grew an availability flag.
+        let t = tel();
+        assert_eq!(t.device_buffer_frames, 0);
+        assert!(output_latency_ms(&t).is_none(), "unreported buffer produced a latency figure");
+    }
+
+    #[test]
+    fn test_latency_matches_the_ring_buffer() {
+        let mut t = tel();
+        t.device_buffer_frames = 2048; // what ALSA negotiates here
+        let ms = output_latency_ms(&t).expect("buffer reported");
+        assert!((ms - 42.67).abs() < 0.1, "2048 frames at 48 kHz is ~42.7 ms, got {ms}");
+    }
+
+    #[test]
+    fn test_peak_load_is_relative_to_the_live_budget() {
+        // Not a hardcoded period: at 256/48000 the budget is 5.33 ms, so a
+        // 5.33 ms block is exactly 100% and one click away from a dropout.
+        let mut t = tel();
+        t.peak_process_time_ns = 5_333_333;
+        let pk = peak_load(&t);
+        assert!((pk - 1.0).abs() < 0.02, "expected ~100% of budget, got {:.1}%", pk * 100.0);
+
+        // Double the block, halve the load: the budget must follow the config.
+        t.block_size = 512;
+        assert!((peak_load(&t) - 0.5).abs() < 0.02, "budget did not track block_size");
+    }
+
+    #[test]
+    fn test_hottest_nodes_are_named_and_ordered() {
+        let mut t = tel();
+        t.node_times_ns[3] = 900_000;
+        t.node_times_ns[7] = 2_400_000;
+        t.node_times_ns[1] = 100_000;
+        for (slot, (name, idx)) in [("deck_a_sampler", 7u32), ("master_limiter", 3), ("deck_b_gain", 1)]
+            .iter().enumerate()
+        {
+            let b = name.as_bytes();
+            t.node_map_keys[slot][..b.len()].copy_from_slice(b);
+            t.node_map_values[slot] = *idx;
+        }
+
+        let hot = hottest_nodes(&t, 3);
+        assert_eq!(hot.len(), 3);
+        assert_eq!(hot[0].0, "deck_a_sampler", "most expensive node is not first: {hot:?}");
+        assert_eq!(hot[1].0, "master_limiter");
+        assert!(hot[0].1 > hot[1].1, "not ordered by cost");
+        // Share is against the real budget, not an arbitrary scale factor.
+        assert!((hot[0].2 - 0.45).abs() < 0.02, "2.4 ms of a 5.33 ms budget is ~45%, got {:.1}%", hot[0].2 * 100.0);
+    }
+
+    #[test]
+    fn test_hottest_nodes_falls_back_to_an_index_when_unnamed() {
+        // Every node must be identifiable even if the name map is incomplete —
+        // "node 42" is useless-ish but honest; a blank row is worse.
+        let mut t = tel();
+        t.node_times_ns[42] = 500_000;
+        let hot = hottest_nodes(&t, 3);
+        assert_eq!(hot.len(), 1);
+        assert_eq!(hot[0].0, "node 42");
+    }
+
+    #[test]
+    fn test_hottest_nodes_sees_the_whole_node_range() {
+        // The old chart drew 64 bars while MAX_NODES is 128, so anything in the
+        // upper half was invisible — including every node a 4-deck bootstrap
+        // allocates past the first 64.
+        let mut t = tel();
+        let last = t.node_times_ns.len() - 1;
+        t.node_times_ns[last] = 3_000_000;
+        let hot = hottest_nodes(&t, 3);
+        assert_eq!(hot[0].0, format!("node {last}"), "the top of the node range is not reported");
+    }
+
+    #[test]
+    fn test_human_bytes_reads_at_a_glance() {
+        assert_eq!(human_bytes(0), "0.0 MB");
+        assert_eq!(human_bytes(512 * 1024 * 1024), "512.0 MB");
+        // The residency figure that motivated this readout.
+        assert_eq!(human_bytes(51_700_000_000), "48.15 GB");
+    }
 }

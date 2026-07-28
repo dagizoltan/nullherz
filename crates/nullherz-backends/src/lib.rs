@@ -31,6 +31,11 @@ pub trait AudioBackend: Send {
     /// true. `None` means "this backend does not report"; a caller must then
     /// say so rather than infer success.
     fn xruns(&self) -> Option<u64> { None }
+
+    /// Frames in the device ring buffer, as negotiated. `None` when the backend
+    /// does not have one (or is not running) — same reasoning as `xruns`: a
+    /// zero that means "unknown" is indistinguishable from a real measurement.
+    fn buffer_frames(&self) -> Option<u32> { None }
 }
 
 pub struct BackendFactory;

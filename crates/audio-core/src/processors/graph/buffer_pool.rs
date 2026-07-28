@@ -95,13 +95,28 @@ pub struct GraphBufferPool {
     pub(crate) pdc_write_pos: usize,
 }
 
+/// Allocate `N` silent blocks straight onto the heap.
+///
+/// `Box::new([block; N])` builds the whole array as a STACK temporary first and
+/// only then moves it into the box. At `MAX_BLOCK_SIZE` a `RenderBlock` is ~4 KB
+/// and `MAX_BUFFERS` is 240, so each array is close to a megabyte and the pool
+/// wants three of them — about 3 MB against a 2 MB thread stack. The optimiser
+/// elides the temporary in release, which is exactly why this only ever showed
+/// up as a stack overflow in a debug test run. `vec![]` allocates on the heap to
+/// begin with, so there is no temporary to elide.
+fn boxed_blocks<const N: usize>() -> Box<[RenderBlock; N]> {
+    let v: Vec<RenderBlock> = vec![RenderBlock::silent(); N];
+    v.into_boxed_slice()
+        .try_into()
+        .unwrap_or_else(|_| unreachable!("vec was built with exactly N elements"))
+}
+
 impl GraphBufferPool {
     pub fn new() -> Self {
-        let empty_block = RenderBlock::silent();
         Self {
-            buffers: Box::new([empty_block; crate::MAX_BUFFERS]),
-            crossfade_buffers: Box::new([empty_block; crate::MAX_CROSSFADE_BUFFERS]),
-            old_path_buffers: Box::new([empty_block; crate::MAX_BUFFERS]),
+            buffers: boxed_blocks::<{ crate::MAX_BUFFERS }>(),
+            crossfade_buffers: boxed_blocks::<{ crate::MAX_CROSSFADE_BUFFERS }>(),
+            old_path_buffers: boxed_blocks::<{ crate::MAX_BUFFERS }>(),
             // RT-Safety: Pre-allocate PDC lines in the Orchestration plane
             pdc_lines: Some(PdcLines::new()),
             pdc_write_pos: 0,

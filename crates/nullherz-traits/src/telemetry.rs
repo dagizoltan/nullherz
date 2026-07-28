@@ -71,6 +71,22 @@ pub struct Telemetry {
     /// the field sat at a hardcoded `0`, which the calibration view read as
     /// perfect sync and reported as such.
     pub clock_jitter_available: bool,
+    /// Frames in the device's ring buffer, as negotiated. Output latency is
+    /// this over `sample_rate` — the number that answers "how far behind the
+    /// speaker am I", which `block_size` alone does not.
+    ///
+    /// 0 means no backend is running or it does not report one.
+    pub device_buffer_frames: u32,
+    /// Decoded samples currently resident in the registry, and their audio in
+    /// bytes.
+    ///
+    /// Surfaced because residency is a real failure mode that is otherwise
+    /// invisible: the library scanner registers every track it decodes, and
+    /// with nothing reclaiming them a 500-track folder holds tens of gigabytes
+    /// of f32 for the whole session. A number on screen is what turns that from
+    /// a mystery into an observation.
+    pub registry_samples: u32,
+    pub registry_bytes: u64,
     /// Proactive matchmaking suggestions: (Sample ID, Similarity Score)
     pub suggestions: [(u64, f32); 4],
     pub active_master_deck: char,
@@ -166,6 +182,9 @@ impl Default for Telemetry {
             block_size: IPC_BLOCK_SIZE as u32,
             xruns_reported: false,
             clock_jitter_available: false,
+            device_buffer_frames: 0,
+            registry_samples: 0,
+            registry_bytes: 0,
             suggestions: [(0, 0.0); 4],
             active_master_deck: 'A',
             waveform_peaks: [0.0; 256],

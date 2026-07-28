@@ -11,6 +11,8 @@ use std::sync::mpsc;
 use nullherz_dna::GeneticLibrary;
 
 mod views;
+#[cfg(test)]
+mod ui_harness;
 pub(crate) mod state;
 
 pub fn default_coordinate() -> f32 {

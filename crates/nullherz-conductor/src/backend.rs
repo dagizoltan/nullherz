@@ -28,6 +28,11 @@ impl BackendManager {
         self.backend.as_ref().and_then(|b| b.xruns())
     }
 
+    /// Device ring-buffer size in frames, or `None` if unavailable.
+    pub fn buffer_frames(&self) -> Option<u32> {
+        self.backend.as_ref().and_then(|b| b.buffer_frames())
+    }
+
     pub fn start(&mut self, backend_type: AudioBackendType, period_size: u64) -> Result<(), String> {
         // The graph indexes its internal AudioBlock buffers with period-global
         // offsets, so a period longer than MAX_BLOCK_SIZE overruns them on the

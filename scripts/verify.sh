@@ -4,8 +4,9 @@
 # with:  git config core.hooksPath .githooks
 #
 # Usage:
-#   scripts/verify.sh          # gate: check (-D warnings) + full test suite
+#   scripts/verify.sh          # gate: check + tests + smoke run
 #   scripts/verify.sh --full   # gate + advisory clippy report
+#   scripts/verify.sh --audio  # gate, with the smoke run on a real ALSA device
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -22,6 +23,14 @@ cargo test --workspace --quiet 2>&1 | awk '
         printf "    %d passed, %d failed\n", passed, failed
         exit (failed > 0)
     }'
+
+# The unit suite passes green through defects that stop the application dead —
+# see the header of scripts/smoke.sh for the list. Running the console is the
+# only check that catches them, so it is part of the gate, not an extra.
+SMOKE_ARGS=()
+for arg in "$@"; do [[ "$arg" == "--audio" ]] && SMOKE_ARGS+=(--audio); done
+bold "==> smoke run (console must survive and produce audio)"
+scripts/smoke.sh "${SMOKE_ARGS[@]}"
 
 if [[ "${1:-}" == "--full" ]]; then
     bold "==> cargo clippy (advisory — style backlog, target: 0)"

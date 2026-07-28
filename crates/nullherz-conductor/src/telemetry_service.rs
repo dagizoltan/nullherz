@@ -48,6 +48,18 @@ impl TelemetryService {
             }
         }
 
+        // Output latency depends on the ring buffer, which only the backend
+        // knows. 0 reads as "not reported" in the view.
+        telemetry.device_buffer_frames =
+            conductor.engine_coordinator.backend_manager.buffer_frames().unwrap_or(0);
+
+        // Resident decoded audio, FROM THE CACHE (refreshed in tick()).
+        // Walking the registry here would be the third time this function has
+        // been given a per-frame job that scales with the session.
+        let (samples, bytes) = conductor.residency();
+        telemetry.registry_samples = samples;
+        telemetry.registry_bytes = bytes;
+
         // Clock jitter, when a clock provider is actually installed. Without
         // one this stayed at the engine's hardcoded 0, which the calibration
         // view rendered as perfect synchronisation.

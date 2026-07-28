@@ -84,6 +84,9 @@ pub struct AlsaBackend {
     xruns: std::sync::Arc<AtomicU64>,
     /// ALSA device to open. Defaults to `$NULLHERZ_ALSA_DEVICE` or `"default"`.
     device: String,
+    /// Ring-buffer size the device negotiated, published for the latency
+    /// readout. Zero until `start` has configured the PCM.
+    buffer_frames: std::sync::Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl Default for AlsaBackend {
@@ -99,6 +102,7 @@ impl AlsaBackend {
             handle: None,
             xruns: std::sync::Arc::new(AtomicU64::new(0)),
             device: Self::default_device(),
+            buffer_frames: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
         }
     }
 
@@ -215,6 +219,7 @@ impl AudioBackend for AlsaBackend {
             period_size = ps;
 
             negotiated_buffer = buffer_size;
+            self.buffer_frames.store(buffer_size as u32, Ordering::Relaxed);
             eprintln!(
                 "[ALSA] Negotiated: rate={} period={} buffer={} ({:.1} ms)",
                 rate, period_size, buffer_size,
@@ -402,6 +407,13 @@ impl AudioBackend for AlsaBackend {
     /// which is guaranteed to resolve by ALSA's own configuration.
     fn xruns(&self) -> Option<u64> {
         Some(self.xruns.load(Ordering::Relaxed))
+    }
+
+    fn buffer_frames(&self) -> Option<u32> {
+        match self.buffer_frames.load(Ordering::Relaxed) {
+            0 => None,
+            n => Some(n),
+        }
     }
 
     fn enumerate_devices(&self) -> Vec<String> {

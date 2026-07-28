@@ -76,6 +76,23 @@ fn parse_args() -> Args {
     args
 }
 
+/// Frames left untouched at the end of a loop.
+///
+/// The sampler voice needs four samples of lookahead for its interpolator and
+/// deactivates when it gets within that of the buffer end — a check that runs
+/// before the loop wrap. Eight gives that margin room to spare.
+const LOOP_TAIL_GUARD: u64 = 8;
+
+/// Settling time before underruns start counting.
+///
+/// The Gate 1 contract is "4 decks, WARM, 60 minutes, zero xruns" and the
+/// harness never honoured the warm part. The first moments of a run are cold
+/// caches, a CPU still ramping up from powersave, and threads that have not
+/// been scheduled yet — a single transient there says nothing about whether the
+/// console holds up, but it failed the whole run. They are reported separately
+/// rather than hidden.
+const WARMUP: Duration = Duration::from_secs(5);
+
 #[derive(Default)]
 struct Stats {
     frames: u64,
@@ -111,6 +128,8 @@ struct Stats {
     /// Underruns as counted by the BACKEND, which is the only party that
     /// actually observes them. `None` = the running backend does not report.
     backend_xruns: Option<u64>,
+    /// Underruns during warm-up, excluded from the verdict but reported.
+    warmup_xruns: u64,
     /// Telemetry frames where the graph produced actual signal, so a run that
     /// starts loud and dies silent halfway is distinguishable from a good one.
     frames_with_signal: u64,
@@ -243,9 +262,17 @@ async fn main() {
             lib.get_track(id).ok().flatten().map(|t| t.metadata.total_samples).unwrap_or(0)
         };
         match (node, len) {
-            (Some(node_idx), n) if n > 1 => {
+            (Some(node_idx), n) if n > LOOP_TAIL_GUARD => {
+                // Stop short of the very end. The voice checks
+                // `idx + 4 >= frames -> deactivate` BEFORE it checks the loop
+                // wrap, because the 4-point interpolator needs that lookahead.
+                // A loop point at `n - 1` is therefore unreachable: the voice
+                // deactivates four samples before it can ever wrap, the deck
+                // falls silent, and the run fails on "audio stopped part-way"
+                // with looping apparently enabled.
+                let end = n - LOOP_TAIL_GUARD;
                 conductor.apply_mixer_commands(vec![Command::Performance(
-                    PerformanceCommand::SetLoop { node_idx, enabled: true, start_samples: 0, end_samples: n - 1 },
+                    PerformanceCommand::SetLoop { node_idx, enabled: true, start_samples: 0, end_samples: end },
                 )]);
             }
             _ => eprintln!("WARN: deck {deck} could not be looped; a run longer than the track will report a false failure."),
@@ -334,7 +361,22 @@ async fn main() {
     // panic) — that must read as FAIL, never as a quiet PASS.
     let mut last_frame_at = Instant::now();
 
+    let mut warm = false;
     while started.elapsed() < run_duration {
+        // Latch the underrun count once the machine has settled. Everything
+        // before this is startup transient and is reported separately.
+        if !warm && started.elapsed() >= WARMUP {
+            warm = true;
+            stats.warmup_xruns = conductor
+                .engine_coordinator
+                .backend_manager
+                .xruns()
+                .unwrap_or(0);
+            if stats.warmup_xruns > 0 {
+                println!("[warm] {} underrun(s) during the first {}s, excluded from the verdict",
+                         stats.warmup_xruns, WARMUP.as_secs());
+            }
+        }
         if last_frame_at.elapsed() > Duration::from_secs(10) {
             eprintln!(
                 "FATAL: no telemetry for 10s — the audio thread has stopped (panic or stall). \
@@ -397,8 +439,13 @@ async fn main() {
     }
 
     // --- Report ---
-    // Sample the backend's own underrun counter before anything tears down.
-    stats.backend_xruns = conductor.engine_coordinator.backend_manager.xruns();
+    // Sample the backend's own underrun counter before anything tears down,
+    // discounting anything that happened while the machine was still settling.
+    stats.backend_xruns = conductor
+        .engine_coordinator
+        .backend_manager
+        .xruns()
+        .map(|n| n.saturating_sub(stats.warmup_xruns));
     let elapsed = started.elapsed();
     let mean_block_us = if stats.frames > 0 { stats.sum_process_time_ns / stats.frames / 1000 } else { 0 };
     // DSP headroom: peak block time vs the period budget implied by the config.
@@ -463,7 +510,8 @@ async fn main() {
         | Sample rate | {} Hz |\n\
         | Samples processed | {} |\n\
         | Telemetry frames | {} |\n\
-        | **Xruns (backend)** | **{}** |\n\
+        | **Xruns (backend, after warm-up)** | **{}** |\n\
+        | Xruns during warm-up (excluded) | {} |\n\
         | Xruns (engine telemetry) | {} (counter is never incremented — see notes) |\n\
         | **Peak MASTER level** | **{:.4}** |\n\
         | Peak level, any node (pre-limiter; >1.0 is normal) | {:.4} |\n\
@@ -480,6 +528,7 @@ async fn main() {
         stats.samples_processed,
         stats.frames,
         match xruns { Some(n) => n.to_string(), None => "NOT REPORTED".to_string() },
+        stats.warmup_xruns,
         stats.xrun_count_final,
         stats.peak_master_level,
         stats.peak_output_level,

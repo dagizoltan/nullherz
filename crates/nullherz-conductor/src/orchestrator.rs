@@ -57,6 +57,14 @@ pub struct Conductor {
     /// responding to load and play entirely. The device list changes when
     /// hardware is plugged in, not 187 times a second.
     cached_audio_devices: Vec<String>,
+    /// Resident sample count and bytes, refreshed on a slow timer.
+    ///
+    /// Same reasoning as [`Conductor::cached_audio_devices`]: computing this
+    /// walks every registered sample, and telemetry runs ~187 times a second.
+    /// With a real library that is tens of thousands of refcount operations per
+    /// second to render a number nobody watches change that fast.
+    cached_residency: (u32, u64),
+    last_residency_scan: Option<std::time::Instant>,
     last_device_scan: Option<std::time::Instant>,
     pub focused_node_idx: Option<u32>,
     pub active_transitions: Vec<DnaTransition>,
@@ -179,6 +187,8 @@ impl Conductor {
             last_metadata_sync_secs: 0,
             last_registry_reap_secs: 0,
             cached_audio_devices: Vec::new(),
+            cached_residency: (0, 0),
+            last_residency_scan: None,
             last_device_scan: None,
             focused_node_idx: None,
             active_transitions: Vec::new(),
@@ -257,6 +267,8 @@ impl Conductor {
             last_metadata_sync_secs: 0,
             last_registry_reap_secs: 0,
             cached_audio_devices: Vec::new(),
+            cached_residency: (0, 0),
+            last_residency_scan: None,
             last_device_scan: None,
             focused_node_idx: None,
             active_transitions: Vec::new(),
@@ -742,6 +754,26 @@ impl Conductor {
         }
     }
 
+    /// Re-measure resident decoded audio at most twice a second.
+    fn refresh_residency(&mut self) {
+        const RESCAN: std::time::Duration = std::time::Duration::from_millis(500);
+        let due = self.last_residency_scan.map(|t| t.elapsed() >= RESCAN).unwrap_or(true);
+        if !due { return; }
+        self.last_residency_scan = Some(std::time::Instant::now());
+        let reg = &self.transfusion_manager.sample_registry;
+        let ids = reg.list_ids();
+        let mut bytes = 0u64;
+        for id in &ids {
+            if let Some(s) = reg.get(*id) {
+                bytes += (s.buffer.len() * std::mem::size_of::<f32>()) as u64;
+            }
+        }
+        self.cached_residency = (ids.len() as u32, bytes);
+    }
+
+    /// Resident sample count and audio bytes, from the cache.
+    pub fn residency(&self) -> (u32, u64) { self.cached_residency }
+
     /// Device names for telemetry, from the cache.
     pub fn audio_device_names(&self) -> &[String] { &self.cached_audio_devices }
 
@@ -779,6 +811,7 @@ impl Conductor {
 
         self.sync_session_rate();
         self.refresh_audio_devices();
+        self.refresh_residency();
         self.reap_registry(now);
 
         // Complete background hydrations: the decode thread has registered

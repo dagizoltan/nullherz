@@ -118,6 +118,15 @@ fn test_the_device_list_still_reaches_telemetry() {
     );
 }
 
+/// Release-only, deliberately.
+///
+/// An absolute wall-clock bound in an unoptimised build measures rustc's output
+/// quality, not this code — a debug build runs the same work 10-30x slower, so
+/// any threshold loose enough to pass there is too loose to catch the 12x and
+/// 14x overruns this exists for. The call-COUNTING test above carries the real
+/// guarantee and is profile-independent; this is the backstop for expensive
+/// work that is not a device query.
+#[cfg(not(debug_assertions))]
 #[test]
 fn test_a_second_of_telemetry_fits_well_inside_its_budget() {
     // Backstop for the general class rather than this one call. Deliberately

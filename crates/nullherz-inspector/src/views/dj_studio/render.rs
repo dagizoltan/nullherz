@@ -227,11 +227,12 @@ fn render_waveform_lane(app: &mut InspectorApp, ui: &mut Ui, i: usize, lane_h: f
 
     // Clicking the lane's HEADER focuses the deck.
     //
-    // Deliberately not the whole lane. A lane-wide `interact` sits on top of the
-    // waveform and wins every pointer event over it, which is what made
-    // scroll-to-scrub unreachable; extending that to drag would do the same to
-    // scratching. The waveform owns its own gestures and focuses the deck on
-    // click, so the header strip is all this needs to cover.
+    // Narrowed from the whole lane so the waveform owns its own gestures. This
+    // was originally believed to be starving the waveform's hover; the headless
+    // harness disproved that. It IS a genuine conflict for DRAG, though —
+    // scratching needs `Sense::click_and_drag()` on the waveform, and two
+    // overlapping drag senses in the same layer is not something to leave to
+    // chance. The header strip is all this needs to cover either way.
     let header_rect = egui::Rect::from_min_max(
         rect.min,
         egui::pos2(rect.max.x, (rect.min.y + header_h).min(rect.max.y)),

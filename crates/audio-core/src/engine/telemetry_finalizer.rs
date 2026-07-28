@@ -194,6 +194,10 @@ impl TelemetryFinalizer {
             // is what made both read as a confident zero.
             xruns_reported: false,
             clock_jitter_available: false,
+            // Backend- and conductor-owned; the engine cannot see either.
+            device_buffer_frames: 0,
+            registry_samples: 0,
+            registry_bytes: 0,
             suggestions: [(0, 0.0); 4],
             active_master_deck: 'A',
             waveform_peaks: [0.0; 256],

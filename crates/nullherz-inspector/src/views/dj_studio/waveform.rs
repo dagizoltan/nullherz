@@ -63,14 +63,18 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
     // the deck's playhead. JumpByBeats moves the sampler voice whether it is
     // playing or paused, so the needle follows the wheel. Consume the scroll
     // delta so the surrounding mixer ScrollArea does not pan at the same time.
-    // Pointer test against the rect, NOT `response.hovered()`.
+    // Pointer containment rather than `response.hovered()`.
     //
-    // `render_waveform_lane` calls `ui.interact()` over the whole lane after
-    // this function returns, to make clicking anywhere focus the deck. That
-    // interaction covers the waveform and is registered later, so it wins the
-    // hover and `response.hovered()` here is always false — the scrub handler
-    // was correct and simply unreachable. `rect_contains_pointer` asks where the
-    // pointer is rather than which widget claimed it, so the two can coexist.
+    // Robustness, NOT a fix: `response.hovered()` was suspected of being
+    // starved by the lane-wide `ui.interact()` in `render_waveform_lane`, but
+    // the headless UI harness renders this view with both the old gate and the
+    // old lane-wide interaction and the scroll still lands. That diagnosis was
+    // wrong; scrubbing was broken by the two engine-side causes described on
+    // `PerformanceCommand::NudgePosition`.
+    //
+    // Kept because it is the stronger formulation regardless — it asks where
+    // the pointer IS rather than which widget won the claim to it, so adding an
+    // overlay here later cannot silently kill scrubbing.
     if ui.rect_contains_pointer(rect) {
         let (scroll_y, fine) = ui.input(|inp| (inp.raw_scroll_delta.y, inp.modifiers.shift));
         if scroll_y.abs() > f32::EPSILON {
