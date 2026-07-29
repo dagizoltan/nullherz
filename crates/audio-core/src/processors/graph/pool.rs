@@ -254,6 +254,35 @@ pub struct TaskPool {
 /// stage; a stage must out-cost that to be worth parallelizing. Conservative
 /// by design — it never regresses a cheap stage, and on faster/many-core
 /// hardware with cheaper dispatch it can be lowered via the env override.
+///
+/// # Before you lower this, or conclude the pool is dead weight
+///
+/// Re-measured 2026-07-29 (4-core @ 3.28 GHz, no `isolcpus`, 8000 blocks per
+/// configuration, bootstrapped 4-deck console). The result depends entirely on
+/// BLOCK SIZE, so a benchmark at one size answers only for that size:
+///
+/// * **256 samples (DJ latency): the gate never fires.** The whole 34-node graph
+///   costs ~126 µs spread over many stages; one stage must clear this threshold
+///   (~46 µs at 3.28 GHz) alone. `NULLHERZ_WORKERS=0` and the default are the
+///   same code path here. Forcing dispatch (`NULLHERZ_PARALLEL_THRESHOLD_CYCLES=0`)
+///   makes it *worse*: 140 µs vs 117 µs mean.
+/// * **1024 samples (offline bounce): it fires and wins.** 350 µs vs 377 µs mean,
+///   and it beats FORCED dispatch (412 µs) because it parallelizes only the
+///   stages worth it. `bounce.rs` renders at `MAX_BLOCK_SIZE`, so the offline
+///   path benefits today.
+///
+/// The mechanism: forced-parallel p99.9 is roughly CONSTANT in absolute terms
+/// across block sizes (2662 / 1900 / 2410 µs at 256 / 512 / 1024) — it is
+/// dispatch and scheduler-wakeup jitter, a fixed cost, not proportional to the
+/// work. As a fraction of the deadline that is 50% → 18% → 11%. The pool does
+/// not improve with larger blocks; the deadline gets more forgiving.
+///
+/// So lowering this constant to chase the median at live block sizes trades a
+/// small mean win for a tail that eats half the budget. The tail is the only
+/// number that matters in RT audio. Attack the jitter itself (core isolation)
+/// or raise per-stage cost (Phase 5 tap bus, convolution) instead.
+///
+/// Full write-up: `docs/system/ARCHITECTURE.md`, "Cost-gated parallelism".
 pub const DEFAULT_PARALLEL_THRESHOLD_CYCLES: u64 = 150_000;
 
 impl TaskPool {

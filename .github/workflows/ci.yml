@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check (warnings as errors)
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+
+  test:
+    name: Test (Mock backend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Audio backends are dlopen'd at runtime; tests run on the Mock backend,
+      # so no sound card or ALSA/JACK/PipeWire system packages are required.
+      - run: cargo test --workspace
+
+  test-release:
+    name: Test (release — timing budgets)
+    runs-on: ubuntu-latest
+    # The debug job above cannot enforce the wall-clock assertions in
+    # long_track_control_path_test / the RT budget tests: an unoptimized build
+    # misses a 5.8 ms audio block budget on merit, not on regression. Those
+    # assertions are compiled in only when debug_assertions is off, so this job
+    # is the only place they actually run. Without it they are dead code.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --release
+
+  clippy:
+    name: Clippy (advisory)
+    runs-on: ubuntu-latest
+    # 603 pre-existing lints as of 2026-07-18; advisory until the backlog is
+    # burned down, then flip to a hard gate by removing continue-on-error.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings

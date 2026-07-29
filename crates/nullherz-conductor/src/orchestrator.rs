@@ -39,7 +39,6 @@ pub struct Conductor {
     midi_child: Option<std::process::Child>,
     midi_shm: Option<Arc<ipc_layer::SharedMemory>>,
     pub matchmaking_suggestions: Arc<Mutex<Vec<(u64, f32)>>>,
-    pub active_master_deck: char,
     pub calibration_samples: u32,
     pub period_size: u64,
     pub ptp_clock: Option<Arc<nullherz_traits::PtpClockProvider>>,
@@ -178,7 +177,6 @@ impl Conductor {
             midi_child: None,
             midi_shm: None,
             matchmaking_suggestions: Arc::new(Mutex::new(Vec::new())),
-            active_master_deck: 'A',
             calibration_samples: 0,
             period_size: 128,
             ptp_clock: None,
@@ -211,11 +209,24 @@ impl Conductor {
         let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
         let library = match nullherz_dna::LibraryDatabase::load(path) {
             Ok(db) => Arc::new(parking_lot::Mutex::new(db)),
-            Err(_) => {
-                // If it's already open (e.g. in tests), we load it with a unique path
-                // to avoid concurrent database access/locking collisions in tests.
+            Err(e) => {
+                // redb holds an exclusive file lock, so a second opener of the
+                // same path lands here and gets a private database instead.
+                //
+                // ANNOUNCED, not silent. This branch is a RACE: whoever opens
+                // first gets the real library and everyone after gets an empty
+                // one, so a caller's view of the library depends on scheduling.
+                // Under `cargo test --workspace` that meant a test could see the
+                // developer's 233 MB library on one run and an empty database on
+                // the next — the same test, two different worlds. Silence is what
+                // made the resulting flake unfindable; if this line appears in a
+                // test run, that test should be asking for `":memory:"`.
                 static FALLBACK_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
                 let count = FALLBACK_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                eprintln!(
+                    "Conductor: library {path:?} unavailable ({e}); falling back to a private \
+                     database. The caller will NOT see the real library."
+                );
                 let fallback_path = std::env::temp_dir()
                     .join(format!("nullherz_fallback_{}_{}.redb", std::process::id(), count));
                 let fallback = nullherz_dna::LibraryDatabase::load(&fallback_path.to_string_lossy())
@@ -258,7 +269,6 @@ impl Conductor {
             midi_child: None,
             midi_shm: None,
             matchmaking_suggestions: Arc::new(Mutex::new(Vec::new())),
-            active_master_deck: 'A',
             calibration_samples: 0,
             period_size: 128,
             ptp_clock: None,
@@ -530,7 +540,7 @@ impl Conductor {
         let suggestions = self.matchmaking_suggestions.clone();
 
         // identify master track DNA using active_master_deck
-        let master_sampler_id = self.mixer_manager.deck_mappings.get(&self.active_master_deck).map(|d| d.sampler_id);
+        let master_sampler_id = self.mixer_manager.deck_mappings.get(&self.mixer_manager.active_master_deck).map(|d| d.sampler_id);
 
         if let Some(sampler_node_idx) = master_sampler_id {
             // Resolve the resource_id (sample_id) currently loaded in the master sampler

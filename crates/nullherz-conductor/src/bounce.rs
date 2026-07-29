@@ -5,8 +5,20 @@ pub struct OfflineRenderer {
 }
 
 impl OfflineRenderer {
+    /// Render against the real library. Production entry point.
     pub fn new(state: crate::persistence::ProjectState) -> Self {
-        let mut conductor = crate::orchestrator::Conductor::new();
+        Self::with_library_path(state, "library.redb")
+    }
+
+    /// Same, with the library path injected.
+    ///
+    /// Exists so tests can pass `":memory:"`. `new()` opens `library.redb` in the
+    /// working directory — a real library on a developer machine — and redb's
+    /// exclusive lock means a second opener silently gets a private fallback
+    /// instead of an error, so a test using `new()` sees the real library or an
+    /// empty one depending on who won the race.
+    pub fn with_library_path(state: crate::persistence::ProjectState, library_path: &str) -> Self {
+        let mut conductor = crate::orchestrator::Conductor::with_library_path(library_path);
         conductor.setup_engine();
         conductor.apply_state(state);
         Self { conductor }
@@ -133,6 +145,9 @@ mod tests {
     #[test]
     fn test_offline_renderer_creation() {
         let state = crate::persistence::ProjectState::empty();
-        let _renderer = OfflineRenderer::new(state);
+        // NOT `new()`: that opens the developer's real library.redb in the
+        // working directory (this test was creating a 3.6 MB one in the crate
+        // directory on every run).
+        let _renderer = OfflineRenderer::with_library_path(state, ":memory:");
     }
 }

@@ -478,6 +478,7 @@ mod tests {
                 focused_deck: 0,
                 deck_playing: [false; 4],
                 global_playing: false,
+                ..Default::default()
             },
             library: crate::state::LibraryState {
                 active_crate: None,

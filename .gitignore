@@ -1,9 +1,17 @@
 target/
 *.redb
 
-# Runtime state — written by the app on every run; never commit
+# Runtime state — written by the app on every run; never commit.
+# These patterns have no leading slash, so they match at any depth: the
+# inspector writes its own copies into its crate directory when run from there.
+# NOTE: a .gitignore rule does not untrack a file that is already committed.
+# autosave.{json,rkyv} and preferences.json sat in the index for months despite
+# being listed here; `git rm --cached` was needed (done 2026-07-28). If one
+# reappears in `git status` as modified after merely running the app, it is
+# tracked again and should be removed from the index, not committed.
 autosave.json
 autosave.rkyv
+preferences.json
 library.redb
 library.redb.bak
 

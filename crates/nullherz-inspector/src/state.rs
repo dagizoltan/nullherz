@@ -100,6 +100,13 @@ pub struct DeckState {
     pub focused_deck: usize,
     pub deck_playing: [bool; 4],
     pub global_playing: bool,
+    /// Per-deck SYNC latch, mirroring `MixerManager::sync_decks`. **False is
+    /// RAW and is the default** — the deck plays at the file's native tempo
+    /// until the operator asks otherwise.
+    pub deck_sync: [bool; 4],
+    /// Per-deck KEY latch, mirroring `MixerManager::key_sync_decks`. False is
+    /// RAW: no pitch shift.
+    pub deck_key_sync: [bool; 4],
 }
 
 impl Default for DeckState {
@@ -115,6 +122,8 @@ impl Default for DeckState {
             focused_deck: 0,
             deck_playing: [false; 4],
             global_playing: false,
+            deck_sync: [false; 4],
+            deck_key_sync: [false; 4],
         }
     }
 }

@@ -1,6 +1,14 @@
 use nullherz_traits::AudioProcessor;
 use audio_dsp::SamplerVoice;
 
+/// Parameter id for the tempo-sync / quantize latch (`> 0.5` engages it).
+///
+/// Named because the conductor's deck SYNC latch has to address it from another
+/// crate, and an untyped `2` travelling between crates is how this codebase has
+/// repeatedly mis-addressed things (see `AGENTS.md` on node vs. buffer id
+/// spaces). One definition, imported by the caller.
+pub const PARAM_QUANTIZE: u32 = 2;
+
 #[derive(Debug)]
 pub struct SamplerProcessor {
     pub id: u64,
@@ -43,7 +51,15 @@ impl SamplerProcessor {
             sample_buffer: std::sync::Arc::new(Vec::new()),
             sample_id: None,
             metadata: None,
-            quantize_enabled: true,
+            // RAW by default: a sampler nobody has configured plays its source
+            // at the source's own tempo. With this true, a freshly built deck
+            // time-stretched by `transport.bpm / meta.bpm` before the user had
+            // touched anything, and — because the quantize path also gates output
+            // on `transport.is_playing` — a deck could sit silent for reasons the
+            // UI never showed. The conductor states the intended mode explicitly
+            // on every load (`PARAM_QUANTIZE`), so this default only governs a
+            // node no one has spoken to yet.
+            quantize_enabled: false,
             playback_rate: 1.0,
             pending_play: false,
             cue_position: 0.0,
@@ -66,7 +82,7 @@ impl SamplerProcessor {
                     voice.playback_rate = value;
                 }
             }
-            2 => {
+            PARAM_QUANTIZE => {
                 self.quantize_enabled = value > 0.5;
             }
             3 => {

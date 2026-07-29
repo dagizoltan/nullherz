@@ -20,9 +20,9 @@ pub fn render_deck_transport(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
         ui.spacing_mut().item_spacing.x = theme.space_xs;
         let h = 28.0;
         let avail = ui.available_width();
-        // Transport gets half the row; CUE and SYNC split the rest.
-        let play_w = (avail * 0.44).max(56.0);
-        let side_w = ((avail - play_w - theme.space_xs * 2.0) / 2.0).max(34.0);
+        // Transport gets a bit under half; CUE, SYNC and KEY split the rest.
+        let play_w = (avail * 0.40).max(56.0);
+        let side_w = ((avail - play_w - theme.space_xs * 3.0) / 3.0).max(30.0);
 
         // --- PLAY / STOP -----------------------------------------------------
         // Filled while playing so deck state reads from across the room; the
@@ -78,29 +78,73 @@ pub fn render_deck_transport(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
         }
         cue.on_hover_text("Jump to hot cue 1");
 
-        // --- SYNC ------------------------------------------------------------
-        // Dimmed on the master deck: syncing a deck to itself is a no-op, and a
-        // live-looking button that does nothing is worse than a dim one.
-        let is_master = app.decks.master_deck == Some(i);
-        let sync = ui.add_enabled_ui(!is_master, |ui| {
-            ui.add_sized(
-                [side_w, h],
-                egui::Button::new(RichText::new("SYNC").size(theme.type_caption).strong())
-                    .fill(if is_master { theme.bg_surface } else { theme.accent_muted }),
+        // --- SYNC / KEY -------------------------------------------------------
+        // Both are LATCHES, and both are off by default: the console plays a
+        // track the way it was recorded until the operator says otherwise.
+        //
+        // SYNC used to send `SyncDecks`, which `MixerOrchestrator` matches and
+        // then does nothing with ("Future: implementation for BPM/Phase sync
+        // logic") — a lit, enabled button wired to a no-op. Meanwhile the tempo
+        // and pitch changes it appeared to offer were being applied to every deck
+        // automatically, with no control at all. This inverts that: the automatic
+        // path is gone and these two buttons are how you ask for it.
+        //
+        // Lit = engaged, so a glance at the deck answers "is this track being
+        // altered?" — which under the old behaviour was unanswerable.
+        let sync_on = app.decks.deck_sync[i];
+        let sync = ui.add_sized(
+            [side_w, h],
+            egui::Button::new(
+                RichText::new("SYNC")
+                    .size(theme.type_caption)
+                    .strong()
+                    .color(if sync_on { theme.bg_dark } else { theme.text_secondary }),
             )
-        })
-        .inner;
+            .fill(if sync_on { theme.accent } else { theme.bg_surface }),
+        );
         if sync.clicked() {
-            let master_deck_id = (b'A' + app.decks.master_deck.unwrap_or(0) as u8) as char;
+            app.decks.deck_sync[i] = !sync_on;
             let _ = app.command_sender.send(nullherz_traits::Command::Performance(
-                nullherz_traits::PerformanceCommand::SyncDecks {
-                    source_deck: master_deck_id,
-                    target_deck: deck_id,
-                },
+                nullherz_traits::PerformanceCommand::SetDeckSync { deck_id, enabled: !sync_on },
             ));
         }
-        if !is_master {
-            sync.on_hover_text("Match tempo and phase to the master deck");
+        sync.on_hover_text(if sync_on {
+            "SYNC on: deck follows the master tempo. Click to return to the track's own tempo."
+        } else {
+            "RAW: playing at the track's own tempo. Click to tempo-match to the transport."
+        });
+
+        // KEY matches this deck to the MASTER DECK's key, so it is meaningless on
+        // the master itself — dimmed rather than lit-and-inert, which is the
+        // state the old SYNC button was in.
+        let is_master = app.decks.master_deck == Some(i);
+        let key_on = app.decks.deck_key_sync[i];
+        let key = ui
+            .add_enabled_ui(!is_master, |ui| {
+                ui.add_sized(
+                    [side_w, h],
+                    egui::Button::new(
+                        RichText::new("KEY")
+                            .size(theme.type_caption)
+                            .strong()
+                            .color(if key_on { theme.bg_dark } else { theme.text_secondary }),
+                    )
+                    .fill(if key_on { theme.accent } else { theme.bg_surface }),
+                )
+            })
+            .inner;
+        if key.clicked() {
+            app.decks.deck_key_sync[i] = !key_on;
+            let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                nullherz_traits::PerformanceCommand::SetDeckKeySync { deck_id, enabled: !key_on },
+            ));
         }
+        key.on_hover_text(if is_master {
+            "This deck IS the master — it defines the key others match to."
+        } else if key_on {
+            "KEY on: pitch-shifted to match the master deck's key. Click to return to the track's own pitch."
+        } else {
+            "RAW: playing at the track's own pitch. Click to match the master deck's key."
+        });
     });
 }

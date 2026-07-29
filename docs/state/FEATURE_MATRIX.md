@@ -1,6 +1,6 @@
 # Nullherz System Feature Matrix (Stage 6: Evolutionary Intelligence)
 
-**Current State:** Production Beta (see [SYSTEM_STATUS.md](./SYSTEM_STATUS.md) for qualifications)
+**Current State:** see [IMPLEMENTATION_ROADMAP_2026_07.md](../roadmap/IMPLEMENTATION_ROADMAP_2026_07.md) for what is done and what is next. A ✅ below must mean **a user can reach it**, not that a test passes — the difference is enforced by `crates/nullherz-conductor/tests/reachability_gate_test.rs`, which found four fully-built, fully-tested, completely unreachable subsystems.
 **Last Updated:** July 20, 2026 — verified against code (reverse-engineering pass; see [ARCHITECTURE.md](../system/ARCHITECTURE.md))
 
 ---
@@ -20,7 +20,8 @@
 | **Clip Orchestrator** | ✅ | 8×8 clip grid with quantized launch, row transfusion, and active/starting-clip telemetry. |
 | **Genetic Sequencer** | 🧪 | DNA-driven pattern evolution (`evolve_pattern`); heuristic kernel. |
 | **Hot Cue Persistence** | ✅ | SetHotCue persists to registry + library + live node; cue set at the deck playhead; numbered markers on the waveform. |
-| **Groove Transfusion** | ✅ | DNA micro-timing lands on live per-deck sequencer nodes and shifts step fire times (was silently dropped: sentinel targets 70–73 had no backing nodes and the sequencer ignored the params). |
+| **Groove Transfusion** | ✅ | DNA micro-timing lands on live per-deck sequencer nodes and shifts step fire times (was silently dropped: sentinel targets 70–73 had no backing nodes and the sequencer ignored the params). Rides the deck's SYNC latch — opt-in, not automatic (see RAW mode). |
+| **RAW mode** | ✅ | Loading a track does not alter it: native tempo, native pitch, no groove transfusion. Tempo-match and harmonic shift are per-deck SYNC/KEY latches, off by default and lit when engaged. |
 | **Modulation Matrix** | ✅ | Macro → multi-target parameter broadcast with `TemporalShape` ramps. |
 | **Master-Deck Suggestion**| ✅ | DNA suggestions bound to `active_master_deck` state (A–D). |
 | **Offline Rendering** | ✅ | Safe bit-perfect WAV export with safe engine access. |

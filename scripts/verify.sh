@@ -24,6 +24,20 @@ cargo test --workspace --quiet 2>&1 | awk '
         exit (failed > 0)
     }'
 
+# The debug run above SKIPS every wall-clock assertion (control-path budgets,
+# RT block budgets): an unoptimized build misses a 5.8 ms audio block budget on
+# merit rather than on regression, and a gate that cries wolf is a gate the team
+# learns to bypass. Those assertions are compiled in only when debug_assertions
+# is off, so this is the only place they run. The smoke step below already
+# builds release, so the marginal cost here is the test targets.
+bold "==> cargo test --workspace --release (timing budgets)"
+cargo test --workspace --release --quiet 2>&1 | awk '
+    /^test result:/ { passed += $4; failed += $6 }
+    END {
+        printf "    %d passed, %d failed\n", passed, failed
+        exit (failed > 0)
+    }'
+
 # The unit suite passes green through defects that stop the application dead —
 # see the header of scripts/smoke.sh for the list. Running the console is the
 # only check that catches them, so it is part of the gate, not an extra.

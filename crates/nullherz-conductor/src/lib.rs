@@ -51,7 +51,7 @@ mod tests {
 
     #[test]
     fn test_conductor_mixer_integration() {
-        let mut conductor = Conductor::new();
+        let mut conductor = Conductor::with_library_path(":memory:");
         conductor.setup_engine();
 
         let mut mixer = MixerManager::new();
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn test_conductor_dj_workflow() {
-        let mut conductor = Conductor::new();
+        let mut conductor = Conductor::with_library_path(":memory:");
         conductor.setup_engine();
 
         // 1. Setup 4-channel mixer

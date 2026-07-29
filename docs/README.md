@@ -1,12 +1,23 @@
 # Nullherz Documentation Hub
 
-Welcome to the centralized knowledge base for the Nullherz engine. This hub organizes all technical, strategic, and business intelligence required for the platform's development and evolution.
+Technical, strategic, and business knowledge base for the Nullherz engine.
+
+**Three documents carry the plan of record. Everything else is context.**
+
+1. [System Architecture Reference](./system/ARCHITECTURE.md) — what the system *is*.
+2. [Pre-Implementation Design Gate](./system/PRE_IMPLEMENTATION_DESIGN_GATE_2026_07.md) — the measurements and the defect inventory.
+3. [Implementation Roadmap, July 2026](./roadmap/IMPLEMENTATION_ROADMAP_2026_07.md) — what happens next, in order, each phase ending in a number or a green test.
+
+Status claims live in the document that also carries the way to disprove them.
+Documents that asserted maturity without that are in [`archive/`](./archive/) —
+read [`archive/README.md`](./archive/README.md) before citing anything from there.
 
 ---
 
 ## 🏗 [System Architecture](./system/)
 Core technical specifications and engineering principles.
 - [System Architecture Reference](./system/ARCHITECTURE.md) — **start here**: reverse-engineered crate map, data flow, protocols, on-disk state
+- [Pre-Implementation Design Gate (July 2026)](./system/PRE_IMPLEMENTATION_DESIGN_GATE_2026_07.md) — design decisions, measurements, defect inventory
 - [AnaWaves Genetic Schema](./system/ANAWAVES_GENETIC_SCHEMA_RFC.md)
 - [Sidecar Protocol v2](./system/SIDECAR_PROTOCOL_V2.md)
 - [SDK Developer Guide](./system/SDK_DEVELOPER_GUIDE.md)
@@ -16,19 +27,21 @@ Core technical specifications and engineering principles.
 - [Validation Runbook (Survival & RTL)](./system/VALIDATION_RUNBOOK.md) — procedures for the Validation Gate's blocking tests
 
 ## 📊 [Current State & Health](./state/)
-Real-time tracking of system maturity and technical debt.
-- [System Status Overview](./state/SYSTEM_STATUS.md)
-- [Feature Matrix](./state/FEATURE_MATRIX.md)
-- [Lead Architect's Report](./state/SYSTEM_STATUS_REPORT.md)
-- [Reverse Engineering Evaluation](./state/REVERSE_ENGINEERING_EVALUATION.md)
+Tracking of system maturity and technical debt.
+- [Feature Matrix](./state/FEATURE_MATRIX.md) — a ✅ here means *reachable by a user*, not *a test passes*; the gate is `crates/nullherz-conductor/tests/reachability_gate_test.rs`
 - [Technical Debt & Stubs Log](./state/TECHNICAL_DEBT_AND_STUBS.md)
+- [Reverse Engineering Evaluation](./state/REVERSE_ENGINEERING_EVALUATION.md)
 - [Optimization & Hardening Log](./state/TECHNICAL_OPTIMIZATION_LOG.md)
 
 ## 🗺 [Roadmaps](./roadmap/)
 Strategic direction and detailed task orchestration.
+- [Implementation Roadmap (July 2026)](./roadmap/IMPLEMENTATION_ROADMAP_2026_07.md) — **plan of record**: Phases 0–7 + Track U, each with a measurable gate
 - [Strategic Roadmap (3-Month)](./roadmap/STRATEGIC_ROADMAP.md)
-- [Lead Architect's Directive Q3 2026](./roadmap/LEAD_ARCHITECT_DIRECTIVE_07_2026.md)
 - [Detailed Task List](./roadmap/DETAILED_TASKS.md)
+
+## 🗄 [Archive](./archive/)
+Superseded documents, kept for history. Not maintained, not citable.
+- [Why these were archived](./archive/README.md)
 
 ## 💼 [Business & Strategy](./business/)
 Financial planning, market analysis, and ecosystem growth.

@@ -454,11 +454,16 @@ fn register_stereo_tone(conductor: &Conductor, id: u64, left_hz: f32, right_hz: 
 /// (70-73, all >= MAX_NODES) that no processor backed — the engine dropped
 /// them silently and rhythmic transfusion did nothing. Deck sequencers are
 /// real graph nodes now; the orchestrator resolves them by name.
+///
+/// Groove now rides the deck's SYNC latch (RAW mode), so this engages SYNC
+/// first — the addressing invariant being tested is unchanged, but it is only
+/// reachable when the operator has asked for tempo processing.
 #[test]
 fn test_groove_commands_target_live_sequencer_nodes() {
     let mut conductor = Conductor::with_library_path(":memory:");
     conductor.setup_engine();
     conductor.bootstrap_4channel_mixer();
+    conductor.mixer_manager.sync_decks.insert('A');
 
     // A track whose DNA carries a nonzero groove.
     let tone_id = 6_600;

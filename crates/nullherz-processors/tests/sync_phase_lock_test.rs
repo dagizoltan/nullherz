@@ -33,6 +33,11 @@ impl Rig {
     fn new(track_bpm: f32, master_bpm: f32, frames: usize) -> Self {
         let id = 1u64;
         let mut sampler = SamplerProcessor::new(id);
+        // Tempo sync is opt-in since RAW mode: the whole point of this file is
+        // the phase-lock path, which only runs with the latch engaged. Without
+        // this the rig measures RAW playback and the sync assertions below are
+        // vacuous rather than failing.
+        sampler.set_parameter(nullherz_processors::sampler::PARAM_QUANTIZE, 1.0);
         let mut metadata = SampleMetadata::new_empty();
         metadata.total_samples = frames as u64;
         metadata.channels = 1;

@@ -177,6 +177,19 @@ fn measure(frames: u64) -> Costs {
     costs
 }
 
+/// The absolute wall-clock budgets below only mean something in an optimized
+/// build. A debug build runs this same control path 10–20x slower, so measuring
+/// it against the 5.8 ms audio block budget says nothing about the code — it
+/// says the build is unoptimized. It failed at 6.13 ms vs 5.80 ms under
+/// `cargo test --workspace` (debug) while passing in release, which is exactly
+/// the false alarm that teaches a team to ignore its own gate.
+///
+/// The profile-INDEPENDENT half of this invariant — control-path cost flat in
+/// track length, the 46x regression that motivated the file — is a ratio, so
+/// `test_control_path_cost_does_not_scale_with_track_length` asserts it in both
+/// profiles and is the real guard.
+///
+/// Enforced in release by the `test-release` CI job and by `scripts/verify.sh`.
 #[test]
 fn test_long_track_does_not_stall_the_control_path() {
     // 6 minutes stereo — a normal DJ track, and ~21x the demo WAVs the console
@@ -185,6 +198,19 @@ fn test_long_track_does_not_stall_the_control_path() {
     let budget = block_budget();
 
     assert!(long.audible, "decks carrying a full-length track never produced audio");
+
+    if cfg!(debug_assertions) {
+        // Still report the numbers: a 46x regression is visible here even
+        // unoptimized, it just cannot be asserted against an absolute budget.
+        eprintln!(
+            "note: wall-clock budget assertions skipped (debug build). \
+             worst_tick={:?}, worst_telemetry={:?}, block budget={:?}. \
+             Enforce with: cargo test --release -p nullherz-conductor \
+             --test long_track_control_path_test",
+            long.worst_tick, long.worst_telemetry, budget
+        );
+        return;
+    }
 
     // update_timeline runs once per audio block: over budget means the control
     // thread can never drain telemetry, and it holds the library mutex the

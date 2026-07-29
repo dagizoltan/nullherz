@@ -1,3 +1,10 @@
+> **ARCHIVED 2026-07-28 — superseded, not maintained.** See
+> [`README.md`](./README.md) for why, and
+> [`../system/ARCHITECTURE.md`](../system/ARCHITECTURE.md) +
+> [`../roadmap/IMPLEMENTATION_ROADMAP_2026_07.md`](../roadmap/IMPLEMENTATION_ROADMAP_2026_07.md)
+> for the current account. The "PRODUCTION BETA" verdict and the `[VERIFIED]`
+> tags below were not backed by anything that would fail if they were wrong.
+
 # Nullherz System Architecture: Lead Architect's Comprehensive Report
 
 **Author:** Senior Lead Audio & Rust Systems Architect

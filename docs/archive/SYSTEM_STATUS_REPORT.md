@@ -1,3 +1,8 @@
+> **ARCHIVED 2026-07-28 — superseded, not maintained.** See
+> [`README.md`](./README.md) for why, and
+> [`../system/ARCHITECTURE.md`](../system/ARCHITECTURE.md) for the current
+> account of the system.
+
 # Nullherz System Architecture: Lead Architect's Comprehensive Report
 
 **Author:** Senior Lead Audio & Rust Systems Architect

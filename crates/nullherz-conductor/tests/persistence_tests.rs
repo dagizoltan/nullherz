@@ -5,7 +5,7 @@ use std::fs;
 
 #[test]
 fn test_project_persistence_roundtrip() {
-    let mut conductor = Conductor::new();
+    let mut conductor = Conductor::with_library_path(":memory:");
     let temp_path = "test_project.json";
 
     let mut state = ProjectState::empty();
@@ -31,7 +31,7 @@ fn test_project_persistence_roundtrip() {
 #[test]
 fn test_conductor_undo_redo() {
     use nullherz_traits::Command;
-    let mut conductor = Conductor::new();
+    let mut conductor = Conductor::with_library_path(":memory:");
 
     // Initialize the topology mutation producer so handle_topology_command works in unit/integration test mode
     let mpsc_buf = std::sync::Arc::new(ipc_layer::MpscRingBuffer::new(128));
@@ -77,7 +77,7 @@ fn test_conductor_undo_redo() {
 #[test]
 fn test_project_state_restore_node_removal() {
     use nullherz_traits::Command;
-    let mut conductor = Conductor::new();
+    let mut conductor = Conductor::with_library_path(":memory:");
 
     // Initialize the topology mutation producer so handle_topology_command works in unit/integration test mode
     let mpsc_buf = std::sync::Arc::new(ipc_layer::MpscRingBuffer::new(128));

@@ -102,6 +102,9 @@ fn test_sampler_slicer_phase_lock() {
         metadata: Some(Arc::new(metadata)),
     });
 
+    // Tempo sync is opt-in since RAW mode, and slicer phase lock lives inside
+    // that path — without engaging it this test measures free-running playback.
+    sampler.set_parameter(crate::sampler::PARAM_QUANTIZE, 1.0);
     sampler.set_parameter(3, 1.0); // Slicer Mode
     sampler.set_parameter(4, 0.25); // 1/16
 

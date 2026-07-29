@@ -174,6 +174,40 @@ impl CommandHandler {
             }
         }
 
+        // 0b. Update console state that TRANSLATION READS, before translating.
+        //
+        // Ordering is load-bearing: `translate_command` consults the SYNC/KEY
+        // latches and the master deck to decide what a `LoadTrackToDeck` in this
+        // same batch means. Applied afterwards, pressing SYNC and loading a track
+        // together would translate the load against the stale (raw) state, and
+        // the button would appear to need pressing twice.
+        for cmd in &commands {
+            match cmd {
+                // The authoritative SetMasterDeck arm (logging, matchmaking) is
+                // in handle_core_command, which runs on the TRANSLATED stream —
+                // too late for translation itself to see the new master. This is
+                // the only writer of the field; that arm no longer assigns it.
+                Command::Core(CoreCommand::SetMasterDeck(deck_id)) => {
+                    conductor.mixer_manager.active_master_deck = *deck_id;
+                }
+                Command::Performance(PerformanceCommand::SetDeckSync { deck_id, enabled }) => {
+                    if *enabled {
+                        conductor.mixer_manager.sync_decks.insert(*deck_id);
+                    } else {
+                        conductor.mixer_manager.sync_decks.remove(deck_id);
+                    }
+                }
+                Command::Performance(PerformanceCommand::SetDeckKeySync { deck_id, enabled }) => {
+                    if *enabled {
+                        conductor.mixer_manager.key_sync_decks.insert(*deck_id);
+                    } else {
+                        conductor.mixer_manager.key_sync_decks.remove(deck_id);
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // 1. Intercept DJ Deck Commands and Translate them
         let mut translated_commands = Vec::new();
         for cmd in &commands {
@@ -416,7 +450,15 @@ impl CommandHandler {
                 true
             }
             CoreCommand::SetMasterDeck(deck_id) => {
-                conductor.active_master_deck = deck_id;
+                // Assignment lives in the pre-translation pass (step 0b) — this
+                // arm runs on the translated stream, which is after
+                // `translate_command` needed to know the new master in order to
+                // re-align the KEY-latched decks.
+                debug_assert_eq!(
+                    conductor.mixer_manager.active_master_deck, deck_id,
+                    "SetMasterDeck reached handle_core_command without the pre-pass \
+                     having applied it; translation saw a stale master"
+                );
                 println!("Conductor: Master Deck set to {}", deck_id);
                 conductor.trigger_matchmaking_suggestions(); // Trigger immediate update
                 true

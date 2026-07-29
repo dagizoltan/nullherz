@@ -224,7 +224,7 @@ impl ProjectState {
         state.arrangement = conductor.pattern_manager.arrangement.clone();
         state.bpm = conductor.mixer_bridge.timeline.bpm;
         state.transport_playing = true;
-        state.active_master_deck = conductor.active_master_deck;
+        state.active_master_deck = conductor.mixer_manager.active_master_deck;
         state.node_names = conductor.mixer_manager.node_names.clone();
 
         state
@@ -301,7 +301,7 @@ impl ProjectState {
 
         conductor.modulation_matrix = self.modulation_matrix.clone();
         conductor.pattern_manager.set_arrangement(self.arrangement.clone());
-        conductor.active_master_deck = self.active_master_deck;
+        conductor.mixer_manager.active_master_deck = self.active_master_deck;
         conductor.mixer_manager.node_names = self.node_names.clone();
 
         if let Some(ref mut prod) = conductor.engine_coordinator.command_producer {

@@ -24,7 +24,6 @@ pub struct DeckNodes {
     pub cue_out_r: u32,
 }
 
-#[derive(Default)]
 pub struct MixerManager {
     pub id_allocator: std::sync::Arc<nullherz_traits::IdAllocator>,
     pub config: MixerConfig,
@@ -40,6 +39,37 @@ pub struct MixerManager {
     /// would run forever after the first play. Tracking this lets the command
     /// handler freeze the transport once the LAST deck stops.
     pub playing_decks: std::collections::HashSet<char>,
+    /// Decks whose SYNC latch is engaged. **Empty is RAW, and RAW is the
+    /// default**: a deck absent from this set plays at the file's native tempo
+    /// and `LoadTrackToDeck` publishes no transport BPM for it.
+    ///
+    /// Previously every load fired `Core::SetBpm(track.bpm)` unconditionally, so
+    /// the most recently loaded deck silently re-tempoed the whole console and
+    /// time-stretched every other playing deck to match it.
+    pub sync_decks: std::collections::HashSet<char>,
+    /// Decks whose KEY latch is engaged. Empty is RAW and is the default; see
+    /// [`nullherz_traits::PerformanceCommand::SetDeckKeySync`] for what the
+    /// automatic version did.
+    pub key_sync_decks: std::collections::HashSet<char>,
+    /// The deck other decks harmonically sync TO.
+    ///
+    /// Lives here, next to `deck_samples`, because resolving the master KEY
+    /// means asking "what track is on the master deck" — and holding the master
+    /// id somewhere else would mean two structs that must agree about console
+    /// state. `Conductor` reads it through here rather than keeping a copy.
+    pub active_master_deck: char,
+}
+
+/// Delegates to [`MixerManager::new`] rather than deriving.
+///
+/// A derived `Default` would give `active_master_deck = '\0'` — not a deck, so
+/// the master-key lookup would find nothing and every KEY-latched deck would
+/// silently fall back to no shift. Deck ids are a small named set, not a
+/// numeric space with a meaningful zero.
+impl Default for MixerManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MixerManager {
@@ -51,6 +81,9 @@ impl MixerManager {
             node_names: HashMap::new(),
             deck_samples: HashMap::new(),
             playing_decks: std::collections::HashSet::new(),
+            sync_decks: std::collections::HashSet::new(),
+            key_sync_decks: std::collections::HashSet::new(),
+            active_master_deck: 'A',
         }
     }
 

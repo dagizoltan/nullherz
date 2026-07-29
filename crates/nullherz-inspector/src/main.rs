@@ -1148,13 +1148,13 @@ mod tests {
         loop {
             {
                 let cond = conductor_arc.lock();
-                if cond.active_master_deck == expected {
+                if cond.mixer_manager.active_master_deck == expected {
                     return;
                 }
                 if std::time::Instant::now() >= deadline {
                     panic!(
                         "Timed out waiting for active_master_deck == '{}' (still '{}')",
-                        expected, cond.active_master_deck
+                        expected, cond.mixer_manager.active_master_deck
                     );
                 }
             }
@@ -1183,7 +1183,7 @@ mod tests {
         // Initial state check
         {
             let cond = conductor_arc.lock();
-            assert_eq!(cond.active_master_deck, 'A'); // Starts as 'A' by default
+            assert_eq!(cond.mixer_manager.active_master_deck, 'A'); // Starts as 'A' by default
         }
 
         // Send a Command to mutate conductor's state and wait for the drain loop to apply it

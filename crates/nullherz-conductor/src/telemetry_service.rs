@@ -15,7 +15,7 @@ impl TelemetryService {
                 telemetry.suggestions[i] = (*id, *score);
             }
         }
-        telemetry.active_master_deck = conductor.active_master_deck;
+        telemetry.active_master_deck = conductor.mixer_manager.active_master_deck;
 
         // Update Remote Node Telemetry
         if let Ok(manager) = conductor.sidecar_supervisor.remote_manager.try_lock() {

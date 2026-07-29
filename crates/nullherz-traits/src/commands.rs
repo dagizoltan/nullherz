@@ -298,6 +298,32 @@ pub enum PerformanceCommand {
         source_deck: char,
         target_deck: char,
     },
+    /// Per-deck SYNC latch — tempo-match this deck to the master transport.
+    ///
+    /// OFF is the default, and that default is the product decision: loading a
+    /// track must not change how it sounds. With the latch off the deck plays at
+    /// the file's own tempo and the sampler's quantize/phase-lock path is
+    /// disengaged; with it on, `LoadTrackToDeck` publishes the track's BPM as the
+    /// transport tempo and the deck time-stretches to follow it.
+    ///
+    /// Latching (rather than a per-load flag) is what makes it honest: the state
+    /// is visible on the deck, survives the next load, and is only ever set by
+    /// the user pressing SYNC.
+    SetDeckSync {
+        deck_id: char,
+        enabled: bool,
+    },
+    /// Per-deck KEY latch — harmonic pitch-shift toward the master key.
+    ///
+    /// OFF by default for the same reason, and with more urgency: the auto path
+    /// this replaces resolved the master key to a hardcoded C and shifted every
+    /// loaded track toward it, measured at −5 semitones on real material, with no
+    /// UI affordance and no way to decline. Turning the latch off re-centres the
+    /// deck's KeySync node at 0 semitones.
+    SetDeckKeySync {
+        deck_id: char,
+        enabled: bool,
+    },
     PlayDeck {
         deck_id: char,
     },

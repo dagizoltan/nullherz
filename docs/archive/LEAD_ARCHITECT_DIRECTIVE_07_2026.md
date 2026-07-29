@@ -1,3 +1,13 @@
+> **ARCHIVED 2026-07-28 — superseded, not maintained.** The four pillars below
+> (libp2p, DNA-driven sequencing, WASM SDK, RDMA) were set while the same month's
+> measured roadmap recorded 453–642 xruns at Gate 1 and a −5 semitone pitch shift
+> applied to every track on load. Expanding the distributed surface was not the
+> next step; making the console play a track correctly was.
+>
+> Current plan of record:
+> [`../roadmap/IMPLEMENTATION_ROADMAP_2026_07.md`](../roadmap/IMPLEMENTATION_ROADMAP_2026_07.md).
+> See [`README.md`](./README.md) for the full comparison.
+
 # Lead Architect's Directive: Q3 2026
 **Theme**: Evolutionary Scalability and Real-time Distributed Resilience
 
