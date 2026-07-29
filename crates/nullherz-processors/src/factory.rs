@@ -17,6 +17,20 @@ use crate::keysync::*;
 use crate::limiter::*;
 use crate::streaming_sampler::*;
 
+/// Identity pass-through, used to hold an insert slot open.
+///
+/// `FallbackProcessor` already implements exactly this and is battle-tested as
+/// the sidecar soft-fallback; this makes it reachable by type id so the
+/// conductor can swap a slot back to "empty".
+pub struct BypassFactory;
+impl ProcessorFactory for BypassFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(crate::FallbackProcessor::new(node_idx as u64)))
+    }
+    fn name(&self) -> &'static str { "Bypass" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::BYPASS }
+}
+
 pub struct GainFactory;
 impl ProcessorFactory for GainFactory {
     fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {

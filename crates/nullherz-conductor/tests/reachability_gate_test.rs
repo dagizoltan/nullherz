@@ -57,7 +57,12 @@ fn known_unreachable() -> Vec<(&'static str, &'static str)> {
         ("Analysis", "measurement tap, inserted on demand"),
         ("Delay", "available for FX chains; not in the default master chain"),
         ("SimdBiquad", "multi-channel biquad used by FX chains, not the deck EQ"),
-        ("DnaMorph", "in the deck chain but disengaged until real DNA is fed (Phase 6)"),
+        ("KeySync", "INSTALLED ON DEMAND, not absent: the KEY latch swaps it into \
+          the deck's pitch slot (SetDeckKeySync -> SwapProcessor). It is out of the \
+          default chain because its 1024-sample FFT window cost every deck 21.3 ms \
+          of latency to serve a latch that defaults OFF (roadmap 1.12)"),
+        ("DnaMorph", "INSTALLED ON DEMAND into the deck's DNA slot, same mechanism \
+          as KeySync; also still disengaged until real DNA is fed (Phase 6)"),
     ]
 }
 

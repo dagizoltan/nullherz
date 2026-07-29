@@ -38,6 +38,7 @@ Strategic direction and detailed task orchestration.
 - [Implementation Roadmap (July 2026)](./roadmap/IMPLEMENTATION_ROADMAP_2026_07.md) — **plan of record**: Phases 0–7 + Track U, each with a measurable gate
 - [Strategic Roadmap (3-Month)](./roadmap/STRATEGIC_ROADMAP.md)
 - [Detailed Task List](./roadmap/DETAILED_TASKS.md)
+- [Hardware Direction](./roadmap/HARDWARE_DIRECTION.md) — standalone units / mixer / controllers. **Not scheduled, not started**; desktop ships first. Read only §4, which lists what not to foreclose in current work
 
 ## 🗄 [Archive](./archive/)
 Superseded documents, kept for history. Not maintained, not citable.

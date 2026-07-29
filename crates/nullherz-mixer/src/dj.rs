@@ -36,17 +36,36 @@ pub fn create_dj_deck(
     let resample_id = id_allocator.allocate_node_id();
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: resample_id, processor_type_id: ProcessorTypeId::SAMPLER }));
 
-    let dna_morph_id = id_allocator.allocate_node_id();
-    commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: dna_morph_id, processor_type_id: ProcessorTypeId::DNA_MORPH }));
-    link_stereo(id_allocator, &mut commands, resample_id, dna_morph_id);
+    // SOURCE INSERT SLOT — empty by default.
+    //
+    // This position used to hold a DnaMorph and a KeySync unconditionally. The
+    // KeySync is a phase vocoder, so **every deck carried 1024 samples (21.3 ms)
+    // of latency on every block** to serve the KEY latch — which defaults to
+    // OFF. Measured deck→master latency was 28.7 ms; detaching it gives 7.3 ms
+    // at a 256 block and 3.33 ms at 64 (`examples/probe_deck_latency.rs`).
+    //
+    // The slot stays in the graph as an identity pass-through and is swapped to
+    // a real processor when the operator engages something
+    // (`TopologyCommand::SwapProcessor`, which preserves routing — the same
+    // mechanism `SidecarSupervisor` uses for its fallback swap). Holding it open
+    // costs one buffer copy and zero latency.
+    //
+    // Making "engaged" a TYPE change rather than a parameter change is also what
+    // keeps PDC honest: the swap triggers the commit, and the commit is where
+    // `sync_node_latencies` re-reads the chain.
+    // TWO source slots, because pitch and DNA are independently engageable and
+    // a single slot could only hold one of them.
+    let pitch_slot_id = id_allocator.allocate_node_id();
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: pitch_slot_id, processor_type_id: ProcessorTypeId::BYPASS }));
+    link_stereo(id_allocator, &mut commands, resample_id, pitch_slot_id);
 
-    let keysync_id = id_allocator.allocate_node_id();
-    commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: keysync_id, processor_type_id: ProcessorTypeId::KEY_SYNC }));
-    link_stereo(id_allocator, &mut commands, dna_morph_id, keysync_id);
+    let dna_slot_id = id_allocator.allocate_node_id();
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: dna_slot_id, processor_type_id: ProcessorTypeId::BYPASS }));
+    link_stereo(id_allocator, &mut commands, pitch_slot_id, dna_slot_id);
 
     let gain_id = id_allocator.allocate_node_id();
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: gain_id, processor_type_id: ProcessorTypeId::GAIN }));
-    link_stereo(id_allocator, &mut commands, keysync_id, gain_id);
+    link_stereo(id_allocator, &mut commands, dna_slot_id, gain_id);
 
     let filter_id = id_allocator.allocate_node_id();
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: filter_id, processor_type_id: ProcessorTypeId::BIQUAD }));
@@ -56,11 +75,18 @@ pub fn create_dj_deck(
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: stereo_util_id, processor_type_id: ProcessorTypeId(160) }));
     link_stereo(id_allocator, &mut commands, filter_id, stereo_util_id);
 
+    // FX INSERT SLOTS — the traditional post-EQ effect chain.
+    //
+    // Same slot discipline as the source insert: whatever type is requested here
+    // is what the slot starts as, and `SwapProcessor` changes it later. Passing
+    // `BYPASS` gives an empty, swappable slot; passing a real type pre-loads it.
+    let mut fx_slot_ids = Vec::with_capacity(fx_ids.len());
     let mut prev_id = stereo_util_id;
     for &fx_type in fx_ids {
         let fx_id = id_allocator.allocate_node_id();
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: fx_id, processor_type_id: ProcessorTypeId(fx_type) }));
         link_stereo(id_allocator, &mut commands, prev_id, fx_id);
+        fx_slot_ids.push(fx_id);
         prev_id = fx_id;
     }
 
@@ -115,9 +141,10 @@ pub fn create_dj_deck(
         isolator_id: eq_id,
         gain_id,
         filter_id,
-        keysync_id,
+        pitch_slot_id,
+        dna_slot_id,
+        fx_slot_ids,
         stereo_util_id,
-        dna_morph_id: Some(dna_morph_id),
         sequencer_id,
         cue_out_l,
         cue_out_r,

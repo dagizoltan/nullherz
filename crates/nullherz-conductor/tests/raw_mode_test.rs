@@ -107,8 +107,8 @@ fn load(conductor: &Conductor, deck_id: char, sample_id: u64) -> Vec<Command> {
     translate(conductor, Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id, sample_id }))
 }
 
-fn keysync_node(conductor: &Conductor, deck_id: char) -> u64 {
-    conductor.mixer_manager.deck_mappings[&deck_id].keysync_id as u64
+fn pitch_slot_node(conductor: &Conductor, deck_id: char) -> u64 {
+    conductor.mixer_manager.deck_mappings[&deck_id].pitch_slot_id as u64
 }
 
 fn sampler_node(conductor: &Conductor, deck_id: char) -> u64 {
@@ -148,7 +148,7 @@ fn test_load_does_not_change_tempo_or_pitch_by_default() {
         set_bpms(&translated)
     );
 
-    let shifts = params_for(&translated, keysync_node(&conductor, 'A'), 0);
+    let shifts = params_for(&translated, pitch_slot_node(&conductor, 'A'), 0);
     assert!(
         shifts.is_empty(),
         "a plain load pitch-shifted the deck by {:?} semitones. This is the −5 \
@@ -285,7 +285,7 @@ fn test_key_latch_shifts_toward_the_master_decks_key() {
     conductor.mixer_manager.key_sync_decks.insert('B');
 
     let translated = load(&conductor, 'B', 7_004);
-    let shifts = params_for(&translated, keysync_node(&conductor, 'B'), 0);
+    let shifts = params_for(&translated, pitch_slot_node(&conductor, 'B'), 0);
 
     assert_eq!(
         shifts,
@@ -312,7 +312,7 @@ fn test_unknown_master_key_does_not_shift() {
     let translated = load(&conductor, 'B', 7_102);
 
     assert_eq!(
-        params_for(&translated, keysync_node(&conductor, 'B'), 0),
+        params_for(&translated, pitch_slot_node(&conductor, 'B'), 0),
         vec![0.0],
         "an unanalysed master key must mean no shift; a hardcoded-C fallback \
          would transpose this deck by {}",
@@ -331,7 +331,7 @@ fn test_no_master_track_does_not_shift() {
     let translated = load(&conductor, 'B', 7_103);
 
     assert_eq!(
-        params_for(&translated, keysync_node(&conductor, 'B'), 0),
+        params_for(&translated, pitch_slot_node(&conductor, 'B'), 0),
         vec![0.0],
         "an empty master deck must mean no shift"
     );
@@ -348,7 +348,7 @@ fn test_master_deck_never_shifts_itself() {
     let translated = load(&conductor, 'A', 7_104);
 
     assert_eq!(
-        params_for(&translated, keysync_node(&conductor, 'A'), 0),
+        params_for(&translated, pitch_slot_node(&conductor, 'A'), 0),
         vec![0.0],
         "the master deck defines the key; syncing it to itself must be a no-op"
     );
@@ -375,7 +375,7 @@ fn test_new_master_track_realigns_latched_decks() {
     let translated = load(&conductor, 'A', 7_107);
 
     assert_eq!(
-        params_for(&translated, keysync_node(&conductor, 'B'), 0),
+        params_for(&translated, pitch_slot_node(&conductor, 'B'), 0),
         vec![new_master_key - TRACK_ROOT_KEY],
         "loading a new master track left deck B on its old, now-wrong shift"
     );
@@ -399,7 +399,7 @@ fn test_changing_master_deck_realigns_latched_decks() {
     assert_eq!(conductor.mixer_manager.active_master_deck, 'C');
 
     let translated = translate(&conductor, Command::Core(CoreCommand::SetMasterDeck('C')));
-    let shift = params_for(&translated, keysync_node(&conductor, 'B'), 0);
+    let shift = params_for(&translated, pitch_slot_node(&conductor, 'B'), 0);
 
     // C(9) - D(2) = 7, which wraps to -5 as the shorter path around the circle.
     let mut expected = c_key - TRACK_ROOT_KEY;
@@ -430,7 +430,7 @@ fn test_releasing_key_recentres_the_deck() {
         Command::Performance(PerformanceCommand::SetDeckKeySync { deck_id: 'B', enabled: true }),
     );
     assert_eq!(
-        params_for(&engaged, keysync_node(&conductor, 'B'), 0),
+        params_for(&engaged, pitch_slot_node(&conductor, 'B'), 0),
         vec![MASTER_ROOT_KEY - TRACK_ROOT_KEY],
         "engaging KEY must shift toward the master deck's key"
     );
@@ -441,7 +441,7 @@ fn test_releasing_key_recentres_the_deck() {
         Command::Performance(PerformanceCommand::SetDeckKeySync { deck_id: 'B', enabled: false }),
     );
     assert_eq!(
-        params_for(&released, keysync_node(&conductor, 'B'), 0),
+        params_for(&released, pitch_slot_node(&conductor, 'B'), 0),
         vec![0.0],
         "releasing KEY left the deck transposed"
     );
@@ -506,5 +506,124 @@ fn test_raw_load_emits_only_the_source_and_the_tempo_mode() {
         unexpected.is_empty(),
         "a RAW load must be the source plus its tempo mode and nothing else; \
          also emitted: {unexpected:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// KEY LOCK (master tempo)
+// ---------------------------------------------------------------------------
+
+/// Key lock must cancel the pitch shift that tempo sync introduces.
+///
+/// Tempo sync resamples, so a deck pulled from 174 to 120 BPM runs at rate
+/// 120/174 and drops `12·log2(rate)` semitones — over 6 semitones, more than a
+/// tritone. Key lock applies the inverse so the track keeps its pitch.
+#[test]
+fn test_key_lock_cancels_tempo_pitch_shift() {
+    let mut conductor = console();
+    register_track(&conductor, 7_200); // TRACK_BPM = 174
+    conductor.mixer_manager.deck_samples.insert('B', 7_200);
+    conductor.mixer_manager.sync_decks.insert('B');
+    conductor.mixer_manager.key_lock_decks.insert('B');
+    conductor.mixer_manager.transport_bpm = 120.0;
+
+    let translated = translate(
+        &conductor,
+        Command::Performance(PerformanceCommand::SetDeckKeyLock { deck_id: 'B', enabled: true }),
+    );
+
+    let expected = -12.0 * (120.0f32 / TRACK_BPM).log2();
+    let got = params_for(&translated, pitch_slot_node(&conductor, 'B'), 0);
+    assert_eq!(got.len(), 1, "expected exactly one pitch correction, got {got:?}");
+    assert!(
+        (got[0] - expected).abs() < 0.001,
+        "key lock applied {} semitones; resampling 174->120 BPM shifts pitch by \
+         {:.3}, so the correction must be {expected:.3}",
+        got[0],
+        12.0 * (120.0f32 / TRACK_BPM).log2()
+    );
+}
+
+/// Key lock on an UNSYNCED deck is a no-op, because rate is 1.0.
+#[test]
+fn test_key_lock_without_tempo_sync_does_not_shift() {
+    let mut conductor = console();
+    register_track(&conductor, 7_201);
+    conductor.mixer_manager.deck_samples.insert('B', 7_201);
+    conductor.mixer_manager.key_lock_decks.insert('B');
+    conductor.mixer_manager.transport_bpm = 120.0;
+
+    let translated = translate(
+        &conductor,
+        Command::Performance(PerformanceCommand::SetDeckKeyLock { deck_id: 'B', enabled: true }),
+    );
+    assert_eq!(
+        params_for(&translated, pitch_slot_node(&conductor, 'B'), 0),
+        vec![0.0],
+        "a deck at native tempo has no resampling shift to cancel"
+    );
+}
+
+/// KEY and KEY LOCK drive the same vocoder, and their corrections ADD.
+///
+/// This is why one function decides the slot's state: handled separately, the
+/// second latch would overwrite the first's shift, or releasing one would remove
+/// a node the other still needs.
+#[test]
+fn test_key_and_key_lock_compose() {
+    let mut conductor = console();
+    register_master_track(&mut conductor, 7_202, Some(MASTER_ROOT_KEY));
+    register_track(&conductor, 7_203);
+    conductor.mixer_manager.deck_samples.insert('B', 7_203);
+    conductor.mixer_manager.sync_decks.insert('B');
+    conductor.mixer_manager.key_sync_decks.insert('B');
+    conductor.mixer_manager.key_lock_decks.insert('B');
+    conductor.mixer_manager.transport_bpm = 120.0;
+
+    let translated = translate(
+        &conductor,
+        Command::Performance(PerformanceCommand::SetDeckKeyLock { deck_id: 'B', enabled: true }),
+    );
+
+    let harmonic = MASTER_ROOT_KEY - TRACK_ROOT_KEY;
+    let lock = -12.0 * (120.0f32 / TRACK_BPM).log2();
+    let got = params_for(&translated, pitch_slot_node(&conductor, 'B'), 0);
+    assert!(
+        (got[0] - (harmonic + lock)).abs() < 0.001,
+        "with both latches engaged the vocoder must receive harmonic ({harmonic:.3}) \
+         PLUS tempo compensation ({lock:.3}) = {:.3}; got {}",
+        harmonic + lock,
+        got[0]
+    );
+}
+
+/// Releasing ONE latch must not remove a vocoder the other still needs.
+#[test]
+fn test_releasing_key_lock_keeps_the_vocoder_for_key() {
+    let mut conductor = console();
+    register_master_track(&mut conductor, 7_204, Some(MASTER_ROOT_KEY));
+    register_track(&conductor, 7_205);
+    conductor.mixer_manager.deck_samples.insert('B', 7_205);
+    conductor.mixer_manager.key_sync_decks.insert('B');
+    // KEY LOCK was on and is now released; KEY stays engaged.
+    conductor.mixer_manager.key_lock_decks.remove(&'B');
+
+    let translated = translate(
+        &conductor,
+        Command::Performance(PerformanceCommand::SetDeckKeyLock { deck_id: 'B', enabled: false }),
+    );
+
+    let swapped_to: Vec<u32> = translated
+        .iter()
+        .filter_map(|c| match c {
+            Command::Topology(nullherz_traits::TopologyCommand::SwapProcessor { processor_type_id, .. }) =>
+                Some(processor_type_id.0),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        swapped_to,
+        vec![nullherz_traits::ProcessorTypeId::KEY_SYNC.0],
+        "releasing KEY LOCK removed the vocoder while KEY was still engaged"
     );
 }

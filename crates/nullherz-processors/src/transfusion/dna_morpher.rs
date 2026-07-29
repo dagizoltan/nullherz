@@ -58,6 +58,31 @@ impl DnaMorpher {
 }
 
 impl nullherz_traits::SignalProcessor for DnaMorpher {
+    /// Zero while disengaged, one analysis window once engaged — because that is
+    /// what this processor actually does: `process` returns a bit-transparent
+    /// copy before `engaged`, and only then routes through the FFT pipeline.
+    ///
+    /// **This latency is CONDITIONAL, and the graph does not re-poll it.**
+    /// `latency_samples()` is read when the topology is compiled
+    /// (`audio-core/processors/graph/mod.rs:121`), not per block, so a deck that
+    /// engages DNA morphing mid-session gains 1024 samples (21.3 ms at 48 kHz)
+    /// of real delay that PDC never learns about — that deck silently drifts
+    /// against the others by a fifth of a beat at 120 BPM.
+    ///
+    /// Reporting a constant `fft_size` instead would be honest for PDC but would
+    /// force the dry path through the pipeline to earn it, taxing every deck for
+    /// a feature that ships off. The real fix is to trigger a topology recompile
+    /// when `engaged` flips; that belongs with 6.4, which is what first makes
+    /// this reachable. Until then this reports the truth and the hazard is
+    /// written down rather than latent.
+    fn latency_samples(&self) -> usize {
+        if self.engaged {
+            self.pipelines.first().map(|p| p.fft.size).unwrap_or(0)
+        } else {
+            0
+        }
+    }
+
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         if inputs.is_empty() || outputs.is_empty() { return; }
 

@@ -12,7 +12,25 @@ impl SummingProcessor {
         Self {
             id,
             inner: audio_dsp::SummingNode::new(),
-            soft_clip: true,
+            // OFF by default. `tanh()` is a WAVESHAPER, not a limiter: it
+            // distorts everything, always, in proportion to level — it does not
+            // wait for a threshold. With this on, measured THD+N through the
+            // console at unity was **1.23% at −6 dBFS** and still 0.046% at
+            // −40 dBFS (analyser floor 0.006%). Studio converters sit at
+            // 0.001–0.01%; the audible threshold on music is around 0.1%.
+            //
+            // It was applied to EVERY summing node — seven of them, including
+            // per-bus and cue sums — although the intent recorded in
+            // `SOLUTION_DESIGN_OPTIMIZATION.md` was a "musical master" ceiling on
+            // the MASTER bus alone. The console already has a real ceiling there:
+            // the chain is summing → MASTERING_EQ → **LIMITER** → out, so this
+            // was a second, undefeatable ceiling that coloured the signal on the
+            // way to the first one.
+            //
+            // Param 1 turns it back on for anything that genuinely wants
+            // saturation. Nothing sets it today, which is the point: it should be
+            // a control someone reaches for, not a tax on every sum.
+            soft_clip: false,
             threshold: 1.0,
         }
     }

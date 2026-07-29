@@ -69,6 +69,15 @@ impl ProcessorTypeId {
     pub const DELAY: Self = Self(0);
     pub const BIQUAD: Self = Self(1);
     pub const GAIN: Self = Self(2);
+    /// Identity pass-through — what an empty insert slot holds.
+    ///
+    /// A deck's insert slots exist in the graph from bootstrap and are swapped
+    /// to a real processor on demand (`TopologyCommand::SwapProcessor`, which
+    /// preserves routing). Holding the slot open costs one buffer copy and
+    /// **zero latency**, and means engaging an effect is a type swap rather than
+    /// a graph rebuild — which is also what makes PDC recompile at the right
+    /// moment, since the type change is what triggers the commit.
+    pub const BYPASS: Self = Self(3);
     pub const SAMPLER: Self = Self(10);
     pub const BIQUAD_EQ: Self = Self(11);
     pub const CROSSFADER: Self = Self(20);
@@ -321,6 +330,25 @@ pub enum PerformanceCommand {
     /// UI affordance and no way to decline. Turning the latch off re-centres the
     /// deck's KeySync node at 0 semitones.
     SetDeckKeySync {
+        deck_id: char,
+        enabled: bool,
+    },
+    /// Per-deck KEY LOCK (master tempo) — hold pitch constant while tempo moves.
+    ///
+    /// Tempo sync is implemented by resampling (`playback_rate`), which shifts
+    /// pitch and tempo together like a turntable. Key lock cancels that: at a
+    /// playback rate `r` the pitch moves by `12·log2(r)` semitones, so the deck's
+    /// vocoder is driven to `-12·log2(r)` to put it back.
+    ///
+    /// This is why key lock is **inherently realtime and cannot be pre-rendered**
+    /// — the correction changes whenever the tempo does, unlike a static
+    /// transpose. It composes with [`Self::SetDeckKeySync`]: with both engaged the
+    /// vocoder receives harmonic shift *plus* tempo compensation.
+    ///
+    /// OFF by default, like every other processing latch, and it installs the
+    /// vocoder into the deck's pitch slot — so engaging it costs the 21.3 ms
+    /// window, declared to PDC.
+    SetDeckKeyLock {
         deck_id: char,
         enabled: bool,
     },

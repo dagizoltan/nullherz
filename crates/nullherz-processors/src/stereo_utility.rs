@@ -35,10 +35,23 @@ fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &
         let pan = self.pan;
         let width = self.width;
 
-        // Constant Power Panning
-        let pan_angle = (pan + 1.0) * (std::f32::consts::PI / 4.0);
-        let pan_l = pan_angle.cos();
-        let pan_r = pan_angle.sin();
+        // BALANCE, not constant-power pan.
+        //
+        // The previous law was `cos/sin((pan+1)·π/4)`, which at centre gives
+        // 0.7071 on both channels — **−3.01 dB on a stereo signal that was asked
+        // to be left alone**. Measured as part of a −9.10 dB total loss through
+        // the console at unity.
+        //
+        // Constant-power panning is correct for placing a MONO source in a
+        // stereo field: the −3 dB compensates for the source now appearing in
+        // both channels. Applied to an already-stereo deck it just attenuates.
+        // This node sits on every deck, so every deck was 3 dB down for nothing.
+        //
+        // A stereo channel wants BALANCE: unity at centre, attenuate the side you
+        // move away from, never boost. `1 ∓ pan` clamped at 1.0 does exactly
+        // that, and is what a mixing desk's balance pot does.
+        let pan_l = (1.0 - pan).clamp(0.0, 1.0);
+        let pan_r = (1.0 + pan).clamp(0.0, 1.0);
 
         for i in 0..len {
             let mut l = inputs[0][i];

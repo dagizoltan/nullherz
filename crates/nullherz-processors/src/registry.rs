@@ -27,6 +27,7 @@ impl ProcessorRegistry {
     }
 
     fn register_defaults(&mut self) {
+        self.register_factory(Box::new(BypassFactory));
         self.register_factory(Box::new(BiquadFactory));
         self.register_factory(Box::new(GainFactory));
         self.register_factory(Box::new(SamplerFactory));
@@ -60,6 +61,36 @@ impl ProcessorRegistry {
 
     pub fn create_by_id(&self, id: u32, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
         self.factories.get(&id).and_then(|f| f.create_processor(node_idx, sample_rate))
+    }
+
+    /// Intrinsic latency of a processor type, in samples, at `sample_rate`.
+    ///
+    /// The conductor needs this **off the audio thread**, before the graph
+    /// exists, because it compiles the plan that PDC uses. Until this existed,
+    /// `TopologyManager` compiled with `node_latencies` left at zero and pushed
+    /// that plan to the RT thread via `SetTopology` — which is authoritative, and
+    /// which the RT thread deliberately does NOT recompile (see
+    /// `test_rt_topology_commit_is_no_op`). So every path latency the compiler
+    /// derived was computed from zeros.
+    ///
+    /// That was invisible while every deck carried an identical chain: with
+    /// nothing to compensate, compensating with the wrong number looks the same
+    /// as being right. It stops being invisible the moment one deck gets an FFT
+    /// insert and another does not.
+    ///
+    /// Answered by constructing the processor and asking it, which is honest
+    /// about processors whose latency is not a constant of the type. Note this
+    /// reports the latency of a **freshly built** processor: for a type whose
+    /// latency depends on runtime state, that is the default-state answer. The
+    /// insert design sidesteps this by making "engaged" a *type* change (swap the
+    /// slot) rather than a parameter change, so the latency moves when the type
+    /// does — and the type change is what triggers the recompile.
+    pub fn latency_for_type(&self, id: u32, sample_rate: f32) -> u32 {
+        self.factories
+            .get(&id)
+            .and_then(|f| f.create_processor(0, sample_rate))
+            .map(|p| p.latency_samples() as u32)
+            .unwrap_or(0)
     }
 
     pub fn create_by_name(&self, name: &str, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {

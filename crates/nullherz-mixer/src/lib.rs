@@ -15,9 +15,16 @@ pub struct DeckNodes {
     pub isolator_id: u32,
     pub gain_id: u32,
     pub filter_id: u32,
-    pub keysync_id: u32,
+    /// Pitch insert slot: identity pass-through until KEY is engaged, then
+    /// swapped to `KEY_SYNC`. Empty by default — see `dj.rs`.
+    pub pitch_slot_id: u32,
+    /// DNA insert slot: identity pass-through until DNA shaping is engaged.
+    /// Separate from the pitch slot because the two are independently
+    /// engageable and one slot can only hold one processor.
+    pub dna_slot_id: u32,
+    /// Post-EQ FX insert slots, in chain order. Swappable at runtime.
+    pub fx_slot_ids: Vec<u32>,
     pub stereo_util_id: u32,
-    pub dna_morph_id: Option<u32>,
     pub sequencer_id: u32,
     /// Private per-deck cue-send buffers (summed onto the global cue bus).
     pub cue_out_l: u32,
@@ -51,6 +58,15 @@ pub struct MixerManager {
     /// [`nullherz_traits::PerformanceCommand::SetDeckKeySync`] for what the
     /// automatic version did.
     pub key_sync_decks: std::collections::HashSet<char>,
+    /// Decks whose KEY LOCK latch is engaged (master tempo). Empty is the
+    /// default. Independent of `key_sync_decks`: KEY matches another deck's key,
+    /// KEY LOCK stops tempo changes from moving pitch. Both drive the same
+    /// vocoder in the pitch slot, and their corrections ADD.
+    pub key_lock_decks: std::collections::HashSet<char>,
+    /// Master transport tempo, mirrored here so command translation can compute
+    /// a deck's resampling ratio without reaching into the timeline. Key lock
+    /// needs it: the correction is a function of `transport_bpm / track_bpm`.
+    pub transport_bpm: f32,
     /// The deck other decks harmonically sync TO.
     ///
     /// Lives here, next to `deck_samples`, because resolving the master KEY
@@ -83,6 +99,8 @@ impl MixerManager {
             playing_decks: std::collections::HashSet::new(),
             sync_decks: std::collections::HashSet::new(),
             key_sync_decks: std::collections::HashSet::new(),
+            key_lock_decks: std::collections::HashSet::new(),
+            transport_bpm: 120.0,
             active_master_deck: 'A',
         }
     }
@@ -219,10 +237,15 @@ impl MixerManager {
         self.node_names.insert(format!("deck_{}_sequencer", id_lower), nodes.sequencer_id);
         // Strip end: the per-deck level the UI meters should watch.
         self.node_names.insert(format!("deck_{}_isolator", id_lower), nodes.isolator_id);
-        // Named so the UI can reach it: DNA shaping is opt-in per deck and the
-        // control that turns it on has to resolve this node.
-        if let Some(id) = nodes.dna_morph_id {
-            self.node_names.insert(format!("deck_{}_dna_morph", id_lower), id);
+        // The source insert slot. Named because every opt-in source processor
+        // (KeySync, DnaMorph) is installed HERE by swapping the slot's type, so
+        // the UI and the command path both need to resolve it by name. The old
+        // `deck_x_dna_morph` name pointed at a permanently-present node; there
+        // is no such node now, which is the point.
+        self.node_names.insert(format!("deck_{}_pitch_slot", id_lower), nodes.pitch_slot_id);
+        self.node_names.insert(format!("deck_{}_dna_slot", id_lower), nodes.dna_slot_id);
+        for (i, fx) in nodes.fx_slot_ids.iter().enumerate() {
+            self.node_names.insert(format!("deck_{}_fx{}", id_lower, i + 1), *fx);
         }
         commands
     }

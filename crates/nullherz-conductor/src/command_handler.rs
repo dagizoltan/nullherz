@@ -204,6 +204,18 @@ impl CommandHandler {
                         conductor.mixer_manager.key_sync_decks.remove(deck_id);
                     }
                 }
+                Command::Performance(PerformanceCommand::SetDeckKeyLock { deck_id, enabled }) => {
+                    if *enabled {
+                        conductor.mixer_manager.key_lock_decks.insert(*deck_id);
+                    } else {
+                        conductor.mixer_manager.key_lock_decks.remove(deck_id);
+                    }
+                }
+                // Key lock's correction is a function of the transport tempo, so
+                // translation needs the NEW tempo, not the previous one.
+                Command::Core(CoreCommand::SetBpm(bpm)) if *bpm > 0.0 => {
+                    conductor.mixer_manager.transport_bpm = *bpm;
+                }
                 _ => {}
             }
         }

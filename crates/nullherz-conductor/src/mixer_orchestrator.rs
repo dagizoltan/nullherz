@@ -49,6 +49,91 @@ fn harmonic_shift(
     diff
 }
 
+/// Semitone correction that cancels resampling-induced pitch shift.
+///
+/// Tempo sync resamples (`playback_rate`), so a deck running at rate `r` is
+/// transposed by `12·log2(r)`. Key lock applies the inverse. A deck that is not
+/// tempo-synced runs at rate 1.0, where the correction is 0 — so engaging key
+/// lock on an unsynced deck is audibly a no-op, which is correct.
+fn key_lock_semitones(deck_id: char, mixer_manager: &MixerManager, lib: &LibraryDatabase, transport_bpm: f32) -> f32 {
+    if !mixer_manager.sync_decks.contains(&deck_id) {
+        return 0.0;
+    }
+    let Some(sample_id) = mixer_manager.deck_samples.get(&deck_id) else { return 0.0 };
+    let Some(track) = lib.get_track_facets(*sample_id).ok().flatten() else { return 0.0 };
+    if track.bpm <= 0.0 || transport_bpm <= 0.0 {
+        return 0.0;
+    }
+    let rate = transport_bpm / track.bpm;
+    if rate <= 0.0 { return 0.0; }
+    -12.0 * rate.log2()
+}
+
+/// What the deck's pitch slot should currently be: whether a vocoder belongs
+/// there at all, and what it should be shifting by.
+///
+/// ONE place decides this, because two independent latches drive the same node.
+/// KEY contributes a harmonic offset and KEY LOCK a tempo correction, and with
+/// both engaged the corrections ADD — matching another deck's key while refusing
+/// to let a tempo change move the pitch is a coherent thing to ask for, and it
+/// falls out of the arithmetic rather than needing a special case.
+fn pitch_slot_state(
+    deck_id: char,
+    mixer_manager: &MixerManager,
+    lib: &LibraryDatabase,
+    transport_bpm: f32,
+) -> (bool, f32) {
+    let key_on = mixer_manager.key_sync_decks.contains(&deck_id);
+    let lock_on = mixer_manager.key_lock_decks.contains(&deck_id);
+    if !key_on && !lock_on {
+        return (false, 0.0);
+    }
+    let mut semitones = 0.0;
+    if key_on {
+        let track_key = mixer_manager
+            .deck_samples
+            .get(&deck_id)
+            .and_then(|id| lib.get_track_facets(*id).ok().flatten())
+            .and_then(|f| f.root_key);
+        semitones += harmonic_shift(deck_id, track_key, mixer_manager, lib);
+    }
+    if lock_on {
+        semitones += key_lock_semitones(deck_id, mixer_manager, lib, transport_bpm);
+    }
+    (true, semitones)
+}
+
+/// Install or remove the deck's vocoder to match `pitch_slot_state`, and set its
+/// shift. Emits a topology commit only when the slot's TYPE actually changes —
+/// a recompile per parameter tweak would be wasteful, and PDC only needs to hear
+/// about the transitions.
+fn apply_pitch_slot(
+    deck_id: char,
+    mixer_manager: &MixerManager,
+    lib: &LibraryDatabase,
+    transport_bpm: f32,
+    out: &mut Vec<Command>,
+) {
+    let Some(nodes) = mixer_manager.deck_mappings.get(&deck_id) else { return };
+    let (needs_vocoder, semitones) = pitch_slot_state(deck_id, mixer_manager, lib, transport_bpm);
+
+    out.push(Command::Topology(nullherz_traits::TopologyCommand::SwapProcessor {
+        node_idx: nodes.pitch_slot_id,
+        processor_type_id: if needs_vocoder {
+            nullherz_traits::ProcessorTypeId::KEY_SYNC
+        } else {
+            nullherz_traits::ProcessorTypeId::BYPASS
+        },
+    }));
+    out.push(Command::Core(nullherz_traits::CoreCommand::CommitTopology));
+    out.push(Command::Mixer(MixerCommand::SetParam {
+        target_id: nodes.pitch_slot_id as u64,
+        param_id: 0,
+        value: semitones,
+        ramp_duration_samples: 1024,
+    }));
+}
+
 /// Re-shift every KEY-latched deck against the CURRENT master key.
 ///
 /// Needed because the master key is no longer a constant: loading a new track on
@@ -78,7 +163,7 @@ fn realign_key_latched_decks(
             .and_then(|id| lib.get_track_facets(*id).ok().flatten())
             .and_then(|f| f.root_key);
         out.push(Command::Mixer(MixerCommand::SetParam {
-            target_id: nodes.keysync_id as u64,
+            target_id: nodes.pitch_slot_id as u64,
             param_id: 0,
             value: harmonic_shift(*deck_id, track_key, mixer_manager, lib),
             ramp_duration_samples: 1024,
@@ -150,7 +235,7 @@ impl MixerOrchestrator {
                             if key_on {
                                 let diff = harmonic_shift(*deck_id, track.root_key, mixer_manager, &lib);
                                 translated.push(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: nodes.keysync_id as u64,
+                                    target_id: nodes.pitch_slot_id as u64,
                                     param_id: 0,
                                     value: diff,
                                     ramp_duration_samples: 1024,
@@ -249,14 +334,15 @@ impl MixerOrchestrator {
                         _ => 'A',
                     };
                     if let Some(nodes) = mixer_manager.deck_mappings.get(&deck_id) {
-                        if let Some(morph_id) = nodes.dna_morph_id {
-                            translated.push(Command::Mixer(MixerCommand::SetParam {
-                                target_id: morph_id as u64,
-                                param_id: 0, // Morph Position
-                                value: *value,
-                                ramp_duration_samples: 1024,
-                            }));
-                        }
+                        // Targets the DNA SLOT. Harmless while the slot is a
+                        // bypass (it ignores params); takes effect once DNA
+                        // shaping is engaged and the slot holds a real morpher.
+                        translated.push(Command::Mixer(MixerCommand::SetParam {
+                            target_id: nodes.dna_slot_id as u64,
+                            param_id: 0, // Morph Position
+                            value: *value,
+                            ramp_duration_samples: 1024,
+                        }));
                     }
                 }
             }
@@ -351,24 +437,15 @@ impl MixerOrchestrator {
                     }
                 }
             }
-            Command::Performance(PerformanceCommand::SetDeckKeySync { deck_id, enabled }) => {
-                if let Some(nodes) = mixer_manager.deck_mappings.get(deck_id) {
-                    // Releasing KEY must re-centre the node at 0 semitones, not
-                    // just stop updating it — otherwise the last shift stays
-                    // applied and the deck is still transposed with the light off.
-                    let mut semitones = 0.0f32;
-                    if *enabled && let Some(sample_id) = mixer_manager.deck_samples.get(deck_id) {
-                        let lib = library.lock();
-                        let track_key = lib.get_track_facets(*sample_id).ok().flatten().and_then(|f| f.root_key);
-                        semitones = harmonic_shift(*deck_id, track_key, mixer_manager, &lib);
-                    }
-                    translated.push(Command::Mixer(MixerCommand::SetParam {
-                        target_id: nodes.keysync_id as u64,
-                        param_id: 0,
-                        value: semitones,
-                        ramp_duration_samples: 1024,
-                    }));
-                }
+            // Both pitch latches route through one place: they drive the same
+            // vocoder, and only `pitch_slot_state` knows whether it belongs in
+            // the slot at all once BOTH are considered. Handling them separately
+            // is how you get a release that removes a node the other latch still
+            // needs.
+            Command::Performance(PerformanceCommand::SetDeckKeySync { deck_id, .. })
+            | Command::Performance(PerformanceCommand::SetDeckKeyLock { deck_id, .. }) => {
+                let lib = library.lock();
+                apply_pitch_slot(*deck_id, mixer_manager, &lib, mixer_manager.transport_bpm, &mut translated);
             }
             Command::Performance(PerformanceCommand::PlayDeck { deck_id }) => {
                 if let Some(nodes) = mixer_manager.deck_mappings.get(deck_id) {

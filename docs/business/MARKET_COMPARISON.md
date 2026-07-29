@@ -107,6 +107,62 @@
 
 ---
 
-[1] **Jitter/latency claims:** the survival harness (xrun + budget-overrun timeline) and RTL calibration exist and are verified in CI [V]; production-hardware numbers are pending the Validation Gate runs and will be published in `docs/state/` when measured. Until then, latency language stays qualitative by policy.
+[1] **Jitter/latency claims — MEASURED 2026-07-29, policy retired.** See §8.
 
-**Comparison Integrity:** *Maintained by the Nullherz Engineering & Product Strategy Team. Every [V] tag is backed by a test or CI check in this repository; challenge any tag that isn't.*
+**Correction to the previous text of this footnote**, which read *"the survival harness … and RTL calibration exist and are verified in CI [V]"*. The survival harness is real and does gate xruns. **RTL calibration is not.** `calibration_samples` is a config field plumbed through `SystemConfig` with no measurement behind it — there is no round-trip latency routine anywhere in the tree. A `[V]` tag on a thing that does not exist is the exact failure this document's tagging system is meant to prevent, so it is called out rather than quietly edited.
+
+Consequence: the converter/interface term in §8 is an **estimate**, not a measurement, and will stay that way until a real loopback RTL exists.
+
+---
+
+## 8. Latency — measured, 2026-07-29
+
+**This section replaces the "qualitative by policy" rule in [1].** Nullherz figures are measured on the reference laptop (4-core, ALC298 onboard codec, ALSA, 48 kHz). **Competitor figures are typical operating ranges from published specs and community reporting — NOT measured here**, and methodology across vendors is inconsistent (most quote buffer size, not round-trip). Treat the competitor column as an order-of-magnitude sanity check, not a benchmark.
+
+Latency decomposes into three terms, and only the last is hardware:
+
+| term | set by | Nullherz status |
+| :--- | :--- | :--- |
+| Signal path (DSP) | code — identical on any machine | **[M]** measured per block size |
+| Output buffer | period × buffer-periods | **[M]** measured on the ALC298 |
+| Converter (DAC) | the interface | **[D]** estimated; no RTL exists (see [1]) |
+
+**Signal path, measured** (impulse fed to a deck, observed at master; `conductor/examples/probe_deck_latency.rs`):
+
+| block | RAW | + KeySync (realtime) |
+| ---: | ---: | ---: |
+| 256 | 7.33 ms | 28.67 ms |
+| 64 | **3.33 ms** | 24.67 ms |
+| 32 | 2.67 ms | 24.00 ms |
+
+Each FFT node adds a flat **21.33 ms** irrespective of block size — that is the analysis window, not the workload. Verified by detaching KeySync and re-measuring (352 and 160 samples, matching the arithmetic exactly).
+
+**Total output latency:**
+
+| configuration | Nullherz (measured + est. DAC) | typical competitor range [unverified] |
+| :--- | ---: | :--- |
+| **Shipping default** (period 256 × 8 buffers) | **~51–53 ms** | — |
+| Tuned (period 64 × 3), RAW | **~8–10 ms** | Traktor / Serato / rekordbox: ~5–15 ms on a good interface |
+| Tuned, DNA via **pre-rendered** key shift | **~8–10 ms** | — (no competitor does this) |
+| Tuned, realtime spectral (key lock class) | ~30–32 ms | Key-lock engaged costs competitors a window too |
+| Aggressive (period 32 × 2), RAW | **~5–7 ms** | Dedicated hardware (CDJ/SC6000): ~2–5 ms |
+
+**Three honest readings of this table:**
+
+1. **The engine is competitive; the shipping default is not.** ~8–10 ms tuned sits inside the range serious DJ software operates in. **~52 ms out of the box does not**, and it is an environment variable away (`NULLHERZ_BUFFER_PERIODS`, period size). Fix the default before quoting any of this externally.
+2. **The 21 ms FFT is not a Nullherz weakness — it is physics everyone pays.** Traktor, Serato and Mixxx all use phase-vocoder-class pitch shifting and all incur window latency when key lock is on. The difference today is that **Nullherz pays it unconditionally, for a feature that defaults to off.**
+3. **Pre-rendering is a genuine structural advantage, and it exists only because of a gap.** A static key shift can be rendered at load (~6 s for a 6-minute stereo track, ~120× realtime — `probe_prerender_keyshift.rs`), giving DNA-with-key at **zero** added latency. Competitors cannot do this for *key lock*, because key lock is dynamic. Nullherz can only do it because it has no key lock — see §9.
+
+---
+
+## 9. The gap this comparison does not currently show: key lock
+
+**No row in §2 or §3 covers master tempo / key lock, and it is table stakes.** Traktor, Serato, rekordbox and Mixxx all hold pitch constant while tempo varies. Nullherz does not: tempo sync changes `playback_rate`, which resamples, so **changing tempo changes pitch** — turntable behaviour. `KeySync` is written to only from the KEY latch and is never driven by tempo.
+
+That is a defensible *design* position (some DJs want vinyl behaviour) but it must be a stated choice, not an omission. As of this document it was neither stated nor visible in any comparison table, which meant the feature matrix implied parity that does not exist.
+
+If key lock is ever added it is **inherently realtime** — the correction changes every block, so it cannot be pre-rendered, and it will cost a window like everyone else's.
+
+---
+
+**Comparison Integrity:** *Maintained by the Nullherz Engineering & Product Strategy Team. Every [V] tag is backed by a test or CI check in this repository; challenge any tag that isn't.* Footnote [1] records a `[V]` tag that did not survive that challenge.

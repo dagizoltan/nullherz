@@ -224,6 +224,25 @@ fn wrap_phase(x: f32) -> f32 {
 }
 
 impl nullherz_traits::SignalProcessor for KeySyncProcessor {
+    /// One analysis window, always.
+    ///
+    /// This was inheriting the trait default of `0` while running a phase
+    /// vocoder — so every deck in the console carried **1024 samples (21.3 ms at
+    /// 48 kHz) that the graph believed was zero**. Measured end to end: an
+    /// impulse fed to a deck emerged at master after 1376 samples (28.7 ms)
+    /// while `latency_samples()` summed to 0 across every node
+    /// (`conductor/examples/probe_deck_latency.rs`).
+    ///
+    /// PDC is only as good as this number. A path latency of 0 means the
+    /// compiler aligns nothing, the RTL calibration compensates the wrong
+    /// amount, and any future chain where decks differ is silently misaligned by
+    /// the difference. Unconditional here because the vocoder runs on every
+    /// block regardless of `ratio` — a lane at ratio 1.0 still goes through the
+    /// window, so the delay is there whether or not the pitch is being shifted.
+    fn latency_samples(&self) -> usize {
+        self.lanes.first().map(|l| l.pipeline.fft.size).unwrap_or(0)
+    }
+
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
         let n_ch = inputs.len().min(outputs.len());
         for ch in 0..n_ch {

@@ -20,9 +20,9 @@ pub fn render_deck_transport(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
         ui.spacing_mut().item_spacing.x = theme.space_xs;
         let h = 28.0;
         let avail = ui.available_width();
-        // Transport gets a bit under half; CUE, SYNC and KEY split the rest.
-        let play_w = (avail * 0.40).max(56.0);
-        let side_w = ((avail - play_w - theme.space_xs * 3.0) / 3.0).max(30.0);
+        // Transport gets a bit over a third; CUE, SYNC, KEY and LOCK split the rest.
+        let play_w = (avail * 0.34).max(52.0);
+        let side_w = ((avail - play_w - theme.space_xs * 4.0) / 4.0).max(26.0);
 
         // --- PLAY / STOP -----------------------------------------------------
         // Filled while playing so deck state reads from across the room; the
@@ -145,6 +145,36 @@ pub fn render_deck_transport(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
             "KEY on: pitch-shifted to match the master deck's key. Click to return to the track's own pitch."
         } else {
             "RAW: playing at the track's own pitch. Click to match the master deck's key."
+        });
+
+        // --- LOCK (master tempo) -----------------------------------------------
+        // Distinct from KEY: KEY matches ANOTHER deck's key, LOCK stops THIS
+        // deck's own tempo changes from moving its pitch. Both install the same
+        // vocoder in the pitch slot and their corrections add, so either one lit
+        // means this deck is paying the 21.3 ms window.
+        let lock_on = app.decks.deck_key_lock[i];
+        let lock = ui.add_sized(
+            [side_w, h],
+            egui::Button::new(
+                RichText::new("LOCK")
+                    .size(theme.type_caption)
+                    .strong()
+                    .color(if lock_on { theme.bg_dark } else { theme.text_secondary }),
+            )
+            .fill(if lock_on { theme.accent } else { theme.bg_surface }),
+        );
+        if lock.clicked() {
+            app.decks.deck_key_lock[i] = !lock_on;
+            let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                nullherz_traits::PerformanceCommand::SetDeckKeyLock { deck_id, enabled: !lock_on },
+            ));
+        }
+        lock.on_hover_text(if lock_on {
+            "KEY LOCK on: tempo changes keep the original pitch (master tempo)."
+        } else if sync_on {
+            "RAW: SYNC changes pitch along with tempo, like a turntable. Click to hold the pitch."
+        } else {
+            "Master tempo — holds pitch when SYNC changes the tempo. No effect while this deck runs at its own tempo."
         });
     });
 }

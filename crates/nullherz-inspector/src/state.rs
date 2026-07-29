@@ -107,6 +107,10 @@ pub struct DeckState {
     /// Per-deck KEY latch, mirroring `MixerManager::key_sync_decks`. False is
     /// RAW: no pitch shift.
     pub deck_key_sync: [bool; 4],
+    /// Per-deck KEY LOCK (master tempo) latch, mirroring
+    /// `MixerManager::key_lock_decks`. False is RAW: tempo changes move pitch,
+    /// turntable-style.
+    pub deck_key_lock: [bool; 4],
 }
 
 impl Default for DeckState {
@@ -124,6 +128,7 @@ impl Default for DeckState {
             global_playing: false,
             deck_sync: [false; 4],
             deck_key_sync: [false; 4],
+            deck_key_lock: [false; 4],
         }
     }
 }

@@ -41,6 +41,29 @@ impl Default for TopologyManager {
 }
 
 impl TopologyManager {
+    /// Refresh `current_topology.plan.node_latencies` from the registry.
+    ///
+    /// Runs off the audio thread, on commit only. Nodes with no recorded type
+    /// (never added, or removed) contribute 0, which is correct — an absent node
+    /// delays nothing.
+    /// Takes its inputs as separate borrows rather than `&mut self`: the caller
+    /// is inside a `self.topo_producer` borrow that spans the whole function, so
+    /// a `&mut self` method here would conflict.
+    pub fn sync_node_latencies(
+        topo: &mut nullherz_traits::GraphTopology,
+        active_node_types: &std::collections::HashMap<u32, u32>,
+        registry: &ProcessorRegistry,
+        sample_rate: f32,
+    ) {
+        for idx in 0..topo.node_count.min(nullherz_traits::MAX_NODES) {
+            let lat = active_node_types
+                .get(&(idx as u32))
+                .map(|&t| registry.latency_for_type(t, sample_rate))
+                .unwrap_or(0);
+            topo.plan.node_latencies[idx] = lat;
+        }
+    }
+
     pub fn new() -> Self {
         let mut v2p = [nullherz_traits::BufferId(0); nullherz_traits::MAX_BUFFERS];
         for (i, val) in v2p.iter_mut().enumerate() { *val = nullherz_traits::BufferId(i as u32); }
@@ -257,6 +280,27 @@ impl TopologyManager {
                 return true;
             }
             Command::Core(nullherz_traits::CoreCommand::CommitTopology) => {
+                // Populate intrinsic latencies BEFORE compiling.
+                //
+                // `GraphCompiler` copies `plan.node_latencies` and derives every
+                // path latency from it; its comment says "populated by
+                // GraphManager", which is the RT-side path in `audio-core`. But
+                // the plan this function produces is pushed as `SetTopology`, and
+                // the RT thread does not recompile it — that is the entire point
+                // of off-thread compilation. So THIS plan is authoritative, and
+                // it was being compiled with node_latencies all zero.
+                //
+                // Harmless while every deck carries the same chain (nothing to
+                // compensate), silently wrong the moment they differ — e.g. one
+                // deck with an FFT insert engaged and one without, which is
+                // exactly what runtime inserts introduce.
+                Self::sync_node_latencies(
+                    &mut self.current_topology,
+                    &self.active_node_types,
+                    &self.registry,
+                    sr,
+                );
+
                 // RT-2: Off-thread compilation
                 match GraphCompiler::compile(&self.current_topology) {
                     Ok(plan) => {
