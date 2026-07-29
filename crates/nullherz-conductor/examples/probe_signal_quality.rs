@@ -20,6 +20,10 @@ use nullherz_traits::{Command, PerformanceCommand};
 const SR: f32 = 48_000.0;
 const BLOCK: usize = 256;
 const FFT: usize = 16_384;
+/// Blocks pumped before capture, and the sample offset into the source file
+/// that puts the capture at. The CONTROL is taken at this same offset.
+const SETTLE_BLOCKS: usize = 256;
+const SETTLE_SAMPLES: usize = SETTLE_BLOCKS * BLOCK;
 
 fn pump(c: &mut nullherz_conductor::Conductor, l: &mut [f32], r: &mut [f32]) {
     let n = l.len();
@@ -38,35 +42,17 @@ fn rms(x: &[f32]) -> f32 {
     (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt()
 }
 
-/// THD+N against the bin holding `freq`, using a Hann window so leakage does not
-/// masquerade as distortion.
-fn thd_n(x: &[f32], freq: f32) -> (f32, f32) {
-    let mut re = vec![0.0f32; FFT];
-    let mut im = vec![0.0f32; FFT];
-    for i in 0..FFT.min(x.len()) {
-        let w = 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / FFT as f32).cos();
-        re[i] = x[i] * w;
-    }
-    let fft = audio_dsp::SimdFft::new(FFT);
-    fft.process(&mut re, &mut im);
+/// The tone generator and the analyser both live in `audio_dsp::measurement`,
+/// not here — they are the measurement CONTRACT, and this probe is only one of
+/// its callers (`signal_transparency_test` is the other, and the two have to be
+/// grading on the same ruler to be comparable). That module's docs carry the
+/// f32-phase trap this probe walked into, and its tests pin the analyser floor.
+fn tone_sample(i: usize, freq: f32, amp: f32) -> f32 {
+    audio_dsp::measurement::tone_sample(i, freq, SR, amp)
+}
 
-    let mags: Vec<f32> = (0..FFT / 2).map(|b| (re[b] * re[b] + im[b] * im[b]).sqrt()).collect();
-    let fund_bin = (freq / SR * FFT as f32).round() as usize;
-
-    // A windowed tone occupies a few bins; +/-3 was NOT enough — it left enough
-    // main-lobe energy outside the fundamental to register a 0.63% floor, which
-    // is above where a clean digital path actually sits. Widened until the
-    // control signal measures clean.
-    let mut fund_energy = 0.0f64;
-    let mut total_energy = 0.0f64;
-    for (b, m) in mags.iter().enumerate() {
-        let e = (*m as f64) * (*m as f64);
-        total_energy += e;
-        if b.abs_diff(fund_bin) <= 24 { fund_energy += e; }
-    }
-    let rest = (total_energy - fund_energy).max(0.0);
-    let thd = if fund_energy > 0.0 { (rest / fund_energy).sqrt() as f32 } else { 0.0 };
-    (thd, mags[fund_bin])
+fn thd_n(x: &[f32], freq: f32) -> f32 {
+    audio_dsp::measurement::thd_n(x, freq, SR, FFT)
 }
 
 fn main() {
@@ -90,13 +76,25 @@ fn main() {
     // every number below has to be read against it. Without this control the
     // first run of this probe would have reported the console's THD as 0.635%
     // when much of that is window leakage.
+    //
+    // It must be the SAME WINDOW OF THE SAME BUFFER the console is graded on.
+    // A control taken from sample 0 of a freshly generated sine grades the
+    // analyser but not the STIMULUS, and the stimulus is where the last bogus
+    // number lived: the deck is 65_536 samples into the file by the time the
+    // capture starts, and a generator whose phase error grows with sample index
+    // is a different, dirtier signal there than at sample 0. Reading a
+    // sample-0 control against a sample-65_536 measurement compared two
+    // different tones and charged the difference to the console.
     {
-        let pure: Vec<f32> = (0..FFT)
-            .map(|i| (i as f32 * 997.0 * std::f32::consts::TAU / SR).sin() * 0.5)
+        let pure: Vec<f32> = (0..SETTLE_SAMPLES + FFT)
+            .map(|i| tone_sample(i, 997.0, 0.5))
             .collect();
-        let (t, _) = thd_n(&pure, 997.0);
+        let head = thd_n(&pure, 997.0);
+        let at_capture = thd_n(&pure[SETTLE_SAMPLES..], 997.0);
         println!("=== CONTROL: analyser floor on a pure sine (never touched the console) ===");
-        println!("  THD+N of the measurement itself: {:.5}%  ({:.1} dB)", t * 100.0, db(t));
+        println!("  THD+N of the measurement itself: {:.5}%  ({:.1} dB)", at_capture * 100.0, db(at_capture));
+        println!("  (same tone measured from sample 0: {:.5}% — these must agree, or the", head * 100.0);
+        println!("   generator is drifting and the console is being blamed for it)");
         println!("  Any console reading at or near this number is MEASUREMENT, not distortion.\n");
     }
 
@@ -119,7 +117,7 @@ fn main() {
         let mut samples = vec![0.0f32; frames * 2];
         for ch in 0..2 {
             for i in 0..frames {
-                samples[ch * frames + i] = (i as f32 * TONE * std::f32::consts::TAU / SR).sin() * amp;
+                samples[ch * frames + i] = tone_sample(i, TONE, amp);
             }
         }
         let mut meta = nullherz_traits::SampleMetadata::new_empty();
@@ -136,7 +134,7 @@ fn main() {
         ]);
 
         // Let the chain settle, then capture steady state.
-        for _ in 0..256 { l.fill(0.0); r.fill(0.0); pump(&mut c, &mut l, &mut r); }
+        for _ in 0..SETTLE_BLOCKS { l.fill(0.0); r.fill(0.0); pump(&mut c, &mut l, &mut r); }
         let mut out = Vec::with_capacity(FFT);
         while out.len() < FFT {
             l.fill(0.0); r.fill(0.0);
@@ -144,24 +142,15 @@ fn main() {
             out.extend_from_slice(&l);
         }
 
-        // Localise any gain error: peak at each named node down the chain.
-        if (amp_db - -6.0).abs() < 0.01 {
-            let mut tel = nullherz_traits::telemetry::Telemetry::default();
-            c.update_timeline(&mut tel);
-            let peaks = tel.peak_levels;
-            let mut named: Vec<(&String, &u32)> = c.mixer_manager.node_names.iter().collect();
-            named.sort_by_key(|(_, v)| **v);
-            println!("\n  --- per-node peak (input tone peak {:.4}) ---", amp);
-            for (name, idx) in named {
-                if name.starts_with("deck_a") || name.starts_with("master") {
-                    let pk = peaks[*idx as usize];
-                    println!("      {:<22} node {:>3}  peak {:.4}  ({:+.2} dB vs input)",
-                        name, idx, pk, db(pk) - db(amp));
-                }
-            }
-        }
+        // NOT a per-node peak table here. `Telemetry::peak_levels` is populated
+        // by the RT-side finalizer on its own cadence, NOT by
+        // `Conductor::update_timeline` — pulling it this way returns zeros, and
+        // this block used to print a full chain of confident `-394.00 dB` rows
+        // that read as "every node is silent". A bisect built on that is built
+        // on nothing. To localise a stage, drive the kernels directly
+        // (`probe_thd_bisect`) or render through progressively shorter chains.
 
-        let (thd, _) = thd_n(&out, TONE);
+        let thd = thd_n(&out, TONE);
         let out_rms = rms(&out);
         // A full-scale sine has rms = amp/sqrt(2).
         let expected_rms = amp / std::f32::consts::SQRT_2;
