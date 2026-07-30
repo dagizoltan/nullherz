@@ -25,20 +25,16 @@ const FFT: usize = 16_384;
 const TONE: f32 = 997.0;
 const AMP: f32 = 0.5;
 
-fn db(x: f32) -> f32 { 20.0 * x.max(1e-20).log10() }
-
-/// Magnitude at the fundamental, for separating "wrong level" (an LTI gain
+/// Level at the fundamental in dB, for separating "wrong level" (an LTI gain
 /// error) from "wrong waveform" (energy that was not there before).
-fn fundamental(x: &[f32]) -> f32 {
-    let mut re = vec![0.0f32; FFT];
-    let mut im = vec![0.0f32; FFT];
-    for i in 0..FFT.min(x.len()) {
-        let w = 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / FFT as f32).cos();
-        re[i] = x[i] * w;
-    }
-    audio_dsp::SimdFft::new(FFT).process(&mut re, &mut im);
-    let b = (TONE / SR * FFT as f32).round() as usize;
-    (re[b] * re[b] + im[b] * im[b]).sqrt()
+///
+/// Uses the shared analyser's window via `measurement::spectrum`, NOT a
+/// hand-rolled one. This function used to build its own Hann-windowed FFT while
+/// `thd_n` used Blackman-Harris, so the gain column and the THD column on the
+/// same row came off two different instruments.
+fn fundamental_db(x: &[f32]) -> f32 {
+    let mags = audio_dsp::measurement::spectrum(x, FFT);
+    audio_dsp::measurement::level_db_at(&mags, TONE, SR, FFT)
 }
 
 /// Run `f` over `warmup + FFT` samples in `block`-sized chunks, discard the
@@ -56,9 +52,9 @@ fn measure(name: &str, warmup: usize, block: usize, mut f: impl FnMut(&[f32], &m
 
     let out_thd = thd_n(&output[warmup..], TONE, SR, FFT);
     let in_thd = thd_n(&input[warmup..], TONE, SR, FFT);
-    let gain = db(fundamental(&output[warmup..])) - db(fundamental(&input[warmup..]));
+    let gain = fundamental_db(&output[warmup..]) - fundamental_db(&input[warmup..]);
     println!(
-        "  {name:<34} THD+N {:>9.5}%  (input {:>9.5}%)   gain {:+.3} dB",
+        "  {name:<34} THD+N {:>9.7}%  (input {:>9.7}%)   gain {:+.3} dB",
         out_thd * 100.0, in_thd * 100.0, gain
     );
 }
@@ -104,7 +100,7 @@ fn main() {
     {
         let n = 4096 + FFT;
         let input = tone(0, n, TONE, SR, AMP);
-        let reference = db(fundamental(&input[4096..]));
+        let reference = fundamental_db(&input[4096..]);
         let band = |coeffs: Vec<audio_dsp::BiquadCoefficients>, label: &str| {
             let mut fs: Vec<audio_dsp::BiquadFilter> =
                 coeffs.iter().map(|c| audio_dsp::BiquadFilter::new(*c)).collect();
@@ -113,7 +109,7 @@ fn main() {
                 for f in fs.iter_mut() { s = f.process_sample(s); }
                 s
             }).collect();
-            println!("  {label:<28} {:+.3} dB", db(fundamental(&out[4096..])) - reference);
+            println!("  {label:<28} {:+.3} dB", fundamental_db(&out[4096..]) - reference);
         };
         let lp = |hz| audio_dsp::BiquadCoefficients::linkwitz_riley_lp(hz, SR);
         let hp = |hz| audio_dsp::BiquadCoefficients::linkwitz_riley_hp(hz, SR);
@@ -147,7 +143,7 @@ fn main() {
             .map(|i| (i as f32 * TONE * std::f32::consts::TAU / SR).sin() * AMP)
             .collect();
         println!(
-            "  from sample {off:>7}:  wrapped f64 phase {:>9.5}%    naive f32 phase {:>9.5}%",
+            "  from sample {off:>7}:  wrapped f64 phase {:>9.7}%    naive f32 phase {:>9.7}%",
             good * 100.0, thd_n(&naive, TONE, SR, FFT) * 100.0
         );
     }

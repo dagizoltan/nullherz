@@ -44,14 +44,25 @@ const TONE_HZ: f32 = 997.0;
 /// settling. Fixed, not condition-based, so the window is identical every run.
 const SETTLE_BLOCKS: usize = 256;
 
-/// How far above the analyser's own floor a reading may sit before we call it
-/// distortion.
+/// Absolute THD+N limit for the console at unity: 0.005% (-86 dB).
 ///
-/// The console measures 1.004x the floor — its own contribution is ~-107 dB,
-/// below what this analyser resolves. 2x leaves generous room for float
-/// reassociation while still failing hard on anything real: the `tanh()`
-/// waveshaper that used to sit on the summing nodes lands ~200x the floor.
-const FLOOR_MARGIN: f32 = 2.0;
+/// This used to be a MULTIPLE of the analyser floor, which was the right shape
+/// when the floor (-86.8 dB, Hann) was above anything the console did — every
+/// node measured "at the floor" and the only meaningful question was whether a
+/// reading escaped it. The BH7 analyser floor is -134.7 dB, and the console's
+/// real residual is -107 dB, so a floor multiple would now demand the console
+/// be 28 dB quieter than it is and fail on arrival.
+///
+/// An absolute limit says the thing actually worth pinning: no audible colour.
+/// It sits 21 dB above the console's measured -107 dB (room for float
+/// reassociation as nodes are added — the drift that made the old bit-exact
+/// golden hashes cry wolf), 26 dB below the ~0.1% audible threshold on music,
+/// and 54 dB below the `tanh()` waveshaper this test exists to catch.
+///
+/// It is deliberately NOT tightened to just above -107 dB. That would pin the
+/// isolator's f32 arithmetic noise, which is inaudible, platform-sensitive, and
+/// nobody's contract.
+const THD_LIMIT: f32 = 5e-5;
 
 fn pump(conductor: &mut Conductor, left: &mut [f32], right: &mut [f32]) {
     let inputs: Vec<&[f32]> = vec![];
@@ -135,8 +146,17 @@ fn render_master_at(amp: f32, sample_id: u64) -> Vec<f32> {
 /// first bisection of any regression this catches.
 #[test]
 fn test_console_at_unity_adds_no_distortion() {
+    // Guard the instrument before trusting it on the console. An analyser that
+    // has gone blind reports every signal as clean, and this test would pass
+    // loudest at exactly the moment it stopped meaning anything.
     let floor = analyser_floor(TONE_HZ, SR, FFT);
-    let limit = floor * FLOOR_MARGIN;
+    assert!(
+        floor < THD_LIMIT / 10.0,
+        "analyser floor is {:.7}%, within 10x of the {:.5}% limit this test \
+         enforces — it can no longer resolve the thing it is grading, so a pass \
+         here would be meaningless",
+        floor * 100.0, THD_LIMIT * 100.0
+    );
 
     for (amp_db, id) in [(-6.0f32, 9006u64), (-20.0, 9020), (-40.0, 9040)] {
         let amp = 10f32.powf(amp_db / 20.0);
@@ -156,14 +176,16 @@ fn test_console_at_unity_adds_no_distortion() {
 
         let measured = thd_n(&out, TONE_HZ, SR, FFT);
         assert!(
-            measured <= limit,
-            "console THD+N at {amp_db} dBFS is {:.5}%, above the {:.5}% limit \
-             ({FLOOR_MARGIN}x the {:.5}% analyser floor). At unity with every \
-             slot on BYPASS the chain is gain-and-sum plus an allpass re-sum; \
-             it should be transparent. Suspect anything that shapes a waveform \
-             unconditionally (a soft-clip default), a coefficient ramp that \
-             never settles, or a filter that is not the identity it claims.",
-            measured * 100.0, limit * 100.0, floor * 100.0
+            measured <= THD_LIMIT,
+            "console THD+N at {amp_db} dBFS is {:.7}%, above the {:.5}% limit \
+             (analyser floor {:.7}%). At unity with every slot on BYPASS the \
+             chain is gain-and-sum plus an allpass re-sum; it should be \
+             transparent. Expected ~0.00045% — the DjIsolator's f32 biquad \
+             noise, which is the whole of the console's residual. Suspect \
+             anything that shapes a waveform unconditionally (a soft-clip \
+             default), a coefficient ramp that never settles, or a filter that \
+             is not the identity it claims.",
+            measured * 100.0, THD_LIMIT * 100.0, floor * 100.0
         );
     }
 }

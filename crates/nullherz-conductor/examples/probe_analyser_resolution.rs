@@ -1,19 +1,28 @@
-//! **How low can we actually SEE?**
+//! **How low can we actually SEE, and what would better precision buy?**
 //!
-//! The console measures 0.0046% THD+N against a 0.0046% analyser floor — i.e.
-//! we are reading the instrument, not the signal. Before anyone tries to
-//! "reduce THD" they need to know what the console's real residual is, and that
-//! needs a better instrument.
+//! This is the working that produced two decisions now recorded in
+//! ARCHITECTURE.md. It keeps its own f64 analyser deliberately, one notch
+//! sharper than the shipped one in `audio_dsp::measurement`, so it can grade the
+//! instrument itself rather than only what the instrument can see.
 //!
-//! The current analyser is a Hann window with a +/-24-bin fundamental
-//! exclusion. Hann's first sidelobe is -31 dB and its skirts decay slowly, so
-//! the +/-24 bins are not measuring the main lobe — they are hiding sidelobes.
-//! That is why the floor sits at -86.8 dB.
+//! **1. The analyser was the ceiling.** The console read 0.0046% against a
+//! 0.0046% Hann floor — every node measured "at the floor" because the floor WAS
+//! the measurement. Hann's first sidelobe is -31 dB and its skirts decay slowly,
+//! so its +/-24-bin exclusion was not measuring a main lobe, it was hiding
+//! sidelobes. BH7's sidelobes are below -180 dB, so the exclusion NARROWS to
+//! +/-8 and the floor drops ~48 dB. The shipped analyser is now BH7; with the
+//! production f32 `SimdFft` it floors at -134.7 dB, and the f64 FFT here shows
+//! where the remaining limits are (f32 sample storage, -153 dB).
 //!
-//! Compares window choices on three signals:
-//!   1. an IDEAL f64 tone analysed in f64  -> the window's own mathematical floor
-//!   2. the same tone stored as f32        -> adds stimulus quantisation
-//!   3. the real console render            -> what the console actually does
+//! **2. The console's real residual is -107 dB, and it is one node.** Not
+//! distortion — worst harmonic -152 dBc. `DjIsolator` alone accounts for it;
+//! `Gain`, `MasteringEq` and `StereoUtility` are bit-exact identity. The
+//! precision sweep at the end prices up f64 state per band, and finds the MID
+//! band's HP300^2 pair carries 15 of the 43 dB available. Left in f32: -107 dB
+//! is below the 16-bit floor and below any DAC.
+//!
+//! Sections: window floors on an ideal f64 tone -> the same tone in f32 storage
+//! -> the real console -> per-node -> residue shape -> isolator precision.
 //!
 //!   cargo run --release -p nullherz-conductor --example probe_analyser_resolution
 
@@ -180,7 +189,7 @@ fn main() {
         // width. Hann needs the wide one; the BH windows do not.
         for excl in [w.half_width(), 24] {
             let t = thd(&ideal, w, excl);
-            let tag = if excl == w.half_width() { "main lobe" } else { "as shipped" };
+            let tag = if excl == w.half_width() { "main lobe" } else { "wide exclusion" };
             println!("  {:<20} {:>6}  {:>11.7}%  {:>9.1}   {}", w.name(), excl, t * 100.0, db(t), tag);
         }
     }

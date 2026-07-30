@@ -92,8 +92,8 @@ fn main() {
         let head = thd_n(&pure, 997.0);
         let at_capture = thd_n(&pure[SETTLE_SAMPLES..], 997.0);
         println!("=== CONTROL: analyser floor on a pure sine (never touched the console) ===");
-        println!("  THD+N of the measurement itself: {:.5}%  ({:.1} dB)", at_capture * 100.0, db(at_capture));
-        println!("  (same tone measured from sample 0: {:.5}% — these must agree, or the", head * 100.0);
+        println!("  THD+N of the measurement itself: {:.7}%  ({:.1} dB)", at_capture * 100.0, db(at_capture));
+        println!("  (same tone measured from sample 0: {:.7}% — these must agree, or the", head * 100.0);
         println!("   generator is drifting and the console is being blamed for it)");
         println!("  Any console reading at or near this number is MEASUREMENT, not distortion.\n");
     }
@@ -157,7 +157,7 @@ fn main() {
         println!("\n=== {TONE} Hz sine at {amp_db:.0} dBFS, deck A, everything at unity ===");
         println!("  output rms   : {:.1} dBFS (input {:.1} dBFS)", db(out_rms), db(expected_rms));
         println!("  gain error   : {:+.2} dB", db(out_rms) - db(expected_rms));
-        println!("  THD+N        : {:.5}%  ({:.1} dB)", thd * 100.0, db(thd));
+        println!("  THD+N        : {:.7}%  ({:.1} dB)", thd * 100.0, db(thd));
 
     }
 
