@@ -344,7 +344,20 @@ mod tests {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InterpolationType {
     Linear = 0,
+    /// 4-point cubic. **Named Lagrange, but the coefficients
+    /// (`c2 = 0.5*(p2-p0)`) are Catmull-Rom** — cubic Hermite with tangents
+    /// estimated from neighbours, not the 4-point Lagrange polynomial. The name
+    /// is kept because the discriminant is a wire value (`granular.rs` maps
+    /// parameter 1 to it); measured, true Lagrange-4 is ~5 dB better and both
+    /// are 45+ dB behind [`InterpolationType::Sinc`].
+    ///
+    /// Retained for A/B measurement and for anything that wants the cheap path.
+    /// Measured 3.56% THD+N at 10 kHz at a realistic tempo ratio.
     Lagrange = 1,
+    /// Kaiser-windowed sinc, 16 taps, with the anti-alias low-pass scaled by the
+    /// rate. **The default.** See [`crate::resample`] for the numbers and for
+    /// why no polynomial kernel can do this job.
+    Sinc = 2,
 }
 
 /// A high-performance sampler voice with selectable interpolation.
@@ -414,6 +427,10 @@ impl Default for SamplerVoice {
 
 impl SamplerVoice {
     pub fn new() -> Self {
+        // Build the shared sinc table HERE, on a topology-build path, so the
+        // audio thread only ever does an atomic load. `OnceLock::get_or_init`
+        // would otherwise allocate on whichever thread touched it first.
+        crate::resample::prewarm();
         Self {
             buffer: None,
             play_head: 0.0,
@@ -421,7 +438,7 @@ impl SamplerVoice {
             source_rate_ratio: 1.0,
             is_active: false,
             velocity: 0.0,
-            interpolation: InterpolationType::Lagrange,
+            interpolation: InterpolationType::Sinc,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
@@ -506,6 +523,7 @@ impl SamplerVoice {
                 let p2 = buffer[idx + 1];
                 p1 + (p2 - p1) * x
             }
+            InterpolationType::Sinc => self.sinc_sample(buffer, self.play_head, idx),
             InterpolationType::Lagrange => {
                 // 4-point Lagrange interpolation
                 let x = (self.play_head - idx as f64) as f32;
@@ -534,6 +552,36 @@ impl SamplerVoice {
     #[inline]
     pub fn effective_rate(&self) -> f32 {
         self.playback_rate * self.source_rate_ratio
+    }
+
+    /// Bandlimited resampling: 16-tap Kaiser sinc, with the kernel stretched by
+    /// the playback rate so that pitching UP low-passes the source instead of
+    /// folding it back. See [`crate::resample`].
+    ///
+    /// # The unity short-circuit
+    ///
+    /// At `|rate| == 1` with a zero fraction, the input sample is returned
+    /// VERBATIM rather than convolved. This is not an optimisation, it is a
+    /// correctness requirement: a windowed sinc has `h(0) < 1` and
+    /// `h(+/-1) != 0`, so convolving at an integer position is a mild low-pass.
+    /// Without this branch, playback at rate 1.0 would stop being the bit-exact
+    /// identity, and the console's measured -107 dB transparency at unity — the
+    /// property the whole fidelity story rests on — would quietly become a
+    /// filter. It also keeps rate-1.0 playback free.
+    ///
+    /// `resample::test_raw_kernel_is_not_identity_at_integer_positions` pins the
+    /// premise, so this branch cannot rot into dead code unnoticed.
+    #[inline]
+    fn sinc_sample(&self, buffer: &[f32], play_head: f64, idx: usize) -> f32 {
+        let frac = play_head - idx as f64;
+        let rate = self.effective_rate();
+        // `abs`: reverse playback is a real mode, and a stretch must be a
+        // magnitude. A negative stretch would invert the kernel.
+        let stretch = rate.abs();
+        if frac == 0.0 && (stretch - 1.0).abs() < f32::EPSILON {
+            return buffer.get(idx).copied().unwrap_or(0.0);
+        }
+        crate::resample::table().sample(buffer, play_head, stretch)
     }
 
     /// Declare the planar layout of the buffer most recently triggered.
@@ -666,6 +714,7 @@ impl SamplerVoice {
     /// the fraction entirely past 2^23 frames.
     fn interpolate_sample(&self, buffer: &[f32], play_head: f64, idx: usize) -> f32 {
         match self.interpolation {
+            InterpolationType::Sinc => self.sinc_sample(buffer, play_head, idx),
             InterpolationType::Linear => {
                 let x = (play_head - idx as f64) as f32;
                 let p1 = buffer[idx];

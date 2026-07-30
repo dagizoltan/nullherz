@@ -63,12 +63,20 @@ fn test_default_console_reports_no_latency() {
         sr,
     );
 
+    // The master LIMITER legitimately declares its look-ahead delay line (2 ms).
+    // It is terminal, so it delays every path equally and PDC has nothing to
+    // align against it — but it is real latency and declaring it is correct.
+    // This assertion is about the DECK CHAIN, so name the one expected node
+    // rather than demanding the whole console be zero: the previous spelling
+    // scanned every node, which made "the limiter started telling the truth"
+    // look identical to "a deck grew a vocoder".
+    let limiter = conductor.mixer_manager.node_names.get("master_limiter").copied();
     let plan = &conductor.topology_manager.current_topology.plan;
     let with_latency: Vec<(usize, u32)> = plan
         .node_latencies
         .iter()
         .enumerate()
-        .filter(|(_, l)| **l > 0)
+        .filter(|(i, l)| **l > 0 && Some(*i as u32) != limiter)
         .map(|(i, l)| (i, *l))
         .collect();
 
@@ -78,6 +86,19 @@ fn test_default_console_reports_no_latency() {
          is an identity pass-through until the operator engages something. Found: \
          {with_latency:?}"
     );
+
+    // And the limiter must declare the delay it actually applies, not a
+    // placeholder: an undeclared look-ahead was the last unaccounted latency in
+    // the console (353 measured samples against 0 believed).
+    if let Some(idx) = limiter {
+        let expected = (0.002 * sr).round() as u32;
+        assert_eq!(
+            plan.node_latencies[idx as usize], expected,
+            "master limiter declares {} samples but its look-ahead delay line is \
+             {expected} (2 ms at {sr} Hz)",
+            plan.node_latencies[idx as usize]
+        );
+    }
 }
 
 /// Engaging KEY must install the vocoder AND tell the compiler about it.
@@ -161,20 +182,22 @@ fn test_commit_topology_populates_latencies() {
         ));
     assert!(committed, "CommitTopology must be handled by the topology manager");
 
-    let latent = conductor
+    // Assert the SLOT specifically, not a count of latent nodes. A count also
+    // moves when an unrelated node starts declaring honestly (the master
+    // limiter's look-ahead did exactly that), which would fail this test for a
+    // reason that has nothing to do with the commit path it exists to guard.
+    let restored = conductor
         .topology_manager
         .current_topology
         .plan
-        .node_latencies
-        .iter()
-        .filter(|l| **l > 0)
-        .count();
+        .node_latencies[pitch_slot as usize];
 
-    assert_eq!(
-        latent, 1,
+    assert!(
+        restored > 0,
         "committing the topology did not re-read the chain: a vocoder sits in deck \
-         A's pitch slot but the compiled plan still declares zero latency for it. \
-         The commit path must call sync_node_latencies, not merely have it."
+         A's pitch slot (node {pitch_slot}) but the compiled plan still declares \
+         zero latency for it. The commit path must call sync_node_latencies, not \
+         merely have it."
     );
 }
 

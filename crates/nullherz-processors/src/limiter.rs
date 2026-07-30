@@ -133,6 +133,20 @@ impl SignalProcessor for LimiterProcessor {
         }
     }
 
+    /// The look-ahead delay line is REAL latency and has to be declared.
+    ///
+    /// `process` writes each input sample at `write_pos` and reads the output
+    /// from `write_pos - lookahead_samples`, so the output trails the input by
+    /// exactly that many frames. Inheriting the trait default of 0 made this the
+    /// only undeclared latency left in the bootstrapped console: an impulse
+    /// measured 353 samples deck-to-master, which is one 256-frame block plus
+    /// these 96 (2 ms at 48 kHz), while the graph believed the whole path was
+    /// zero. Every FFT-based processor here already declares; this one has a
+    /// delay line rather than a window, which is presumably why it was missed.
+    fn latency_samples(&self) -> usize {
+        self.lookahead_samples
+    }
+
     fn setup(&mut self, config: AudioConfig) {
         self.sample_rate = config.sample_rate;
         self.reset();

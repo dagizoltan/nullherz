@@ -2,6 +2,7 @@
 pub mod filters;
 pub mod measurement;
 pub mod oscillators;
+pub mod resample;
 pub mod spectral;
 pub mod util;
 pub mod simd_vec;
@@ -98,16 +99,46 @@ impl Default for Crossfader {
 }
 
 impl Crossfader {
-    pub fn new() -> Self { Self { position: 0.5, curve: 0.5 } }
+    /// `curve` defaults to CONSTANT POWER.
+    ///
+    /// It used to default to 0.5 against an `if curve > 0.5` branch, so the
+    /// default landed exactly on the boundary and fell through to linear — the
+    /// law was chosen by a comparison operator rather than by anyone. Linear at
+    /// centre is -6.02 dB per side, which is right for CORRELATED material
+    /// (two sides sum to unity amplitude) and 3 dB over-attenuating for the
+    /// normal DJ case of two different tracks. Constant power is the hardware
+    /// convention for that reason.
+    pub fn new() -> Self { Self { position: 0.5, curve: 1.0 } }
     pub fn set_position(&mut self, pos: f32) { self.position = pos.clamp(0.0, 1.0); }
     pub fn set_curve(&mut self, curve: f32) { self.curve = curve.clamp(0.0, 1.0); }
 
+    /// Per-side gains for the current position and curve.
+    ///
+    /// `curve` is a CONTINUOUS blend, as its documentation always claimed:
+    /// 0.0 = linear, 1.0 = constant power, and every value between is a real
+    /// intermediate law. It was previously a binary switch on `curve > 0.5`, so
+    /// the knob had exactly two positions and 84% of its travel did nothing.
+    ///
+    /// Blending the GAINS rather than switching between laws keeps the control
+    /// monotonic and continuous — no click when a curve automation crosses the
+    /// middle, which a threshold would have produced.
+    ///
+    /// One definition, used by both the scalar and SIMD paths. The two used to
+    /// carry independent copies of the law; a fix applied to one would have
+    /// silently diverged from the other depending on block size.
+    #[inline]
+    pub fn gains(&self) -> (f32, f32) {
+        let p = self.position.clamp(0.0, 1.0);
+        let c = self.curve.clamp(0.0, 1.0);
+        // Linear: sides sum to unity AMPLITUDE (correlated material).
+        let (lin_a, lin_b) = (1.0 - p, p);
+        // Constant power: sides sum to unity POWER (uncorrelated material).
+        let (pow_a, pow_b) = ((1.0 - p).sqrt(), p.sqrt());
+        (lin_a + (pow_a - lin_a) * c, lin_b + (pow_b - lin_b) * c)
+    }
+
     pub fn process_block(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
-        let (gain_a, gain_b) = if self.curve > 0.5 {
-            ( (1.0 - self.position).sqrt(), self.position.sqrt() )
-        } else {
-            ( 1.0 - self.position, self.position )
-        };
+        let (gain_a, gain_b) = self.gains();
 
         for i in 0..output.len() {
             output[i] = input_a[i] * gain_a + input_b[i] * gain_b;
@@ -117,11 +148,7 @@ impl Crossfader {
     pub fn process_block_simd(&self, input_a: &[f32], input_b: &[f32], output: &mut [f32]) {
         use crate::simd_vec::*;
         let len = output.len();
-        let (gain_a, gain_b) = if self.curve > 0.5 {
-            ( (1.0 - self.position).sqrt(), self.position.sqrt() )
-        } else {
-            ( 1.0 - self.position, self.position )
-        };
+        let (gain_a, gain_b) = self.gains();
         let b_gain_b_16 = FloatX16::from(gain_b);
         let b_gain_a_16 = FloatX16::from(gain_a);
 

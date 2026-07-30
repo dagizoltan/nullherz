@@ -123,14 +123,18 @@ fn main() {
         audio_dsp::measurement::analyser_floor(997.0, SR, FFT) * 100.0,
         db(audio_dsp::measurement::analyser_floor(997.0, SR, FFT)));
 
-    sweep("Lagrange (SHIPPED DEFAULT)", 997.0, InterpolationType::Lagrange);
-    sweep("Linear (the other option)", 997.0, InterpolationType::Linear);
+    sweep("Sinc 16-tap (SHIPPED DEFAULT)", 997.0, InterpolationType::Sinc);
+    sweep("Catmull-Rom 4-pt (legacy)", 997.0, InterpolationType::Lagrange);
+    sweep("Linear (legacy)", 997.0, InterpolationType::Linear);
 
     // Interpolation error grows with how much of the band the signal occupies:
-    // a cubic kernel tracks a slow sine almost exactly and a fast one poorly.
-    // A bass-heavy 997 Hz test flatters it.
-    sweep("Lagrange at 5 kHz", 5_000.0, InterpolationType::Lagrange);
-    sweep("Lagrange at 10 kHz", 10_000.0, InterpolationType::Lagrange);
+    // a cubic tracks a slow sine almost exactly and a fast one poorly, so a
+    // bass-heavy 997 Hz test flatters it by 60 dB. A windowed sinc is FLAT
+    // across frequency, and that flatness is the property being bought.
+    sweep("Sinc at 5 kHz", 5_000.0, InterpolationType::Sinc);
+    sweep("Catmull-Rom at 5 kHz", 5_000.0, InterpolationType::Lagrange);
+    sweep("Sinc at 10 kHz", 10_000.0, InterpolationType::Sinc);
+    sweep("Catmull-Rom at 10 kHz", 10_000.0, InterpolationType::Lagrange);
 
     // ---- decimation aliasing, a separate defect ----------------------------
     // Above rate 1.0 the source is read faster than it was written, so content
@@ -151,7 +155,7 @@ fn main() {
         level_db_at(&spectrum(&r, FFT), f_src, SR, FFT)
     };
     for rate in [1.2f32, 1.6, 1.8, 2.0, 2.2] {
-        let out = resample(f_src, rate, InterpolationType::Lagrange);
+        let out = resample(f_src, rate, InterpolationType::Sinc);
         let mags = spectrum(&out, FFT);
         let ideal = f_src * rate;
         // Loudest bin in the output — where the energy ACTUALLY went, rather
@@ -168,6 +172,47 @@ fn main() {
             ideal, pk_hz, pk_lvl - ref_lvl, verdict
         );
         let _ = bin_of(ideal, SR, FFT);
+    }
+
+    // ---- CPU, measured on the real voice ------------------------------------
+    // The sampler is the hottest node in the graph and the budget is 5333 us per
+    // 256-frame block at 48 kHz. What matters is not ns/sample but what the
+    // WORST CASE does to that budget: 4 decks x 8 voices = 32 voices.
+    println!("\n=== CPU on the real voice (budget 5333 us / 256-frame block) ===");
+    println!("  {:<24} {:>10} {:>10} {:>10}   {:>22}", "interpolation", "rate 1.0", "+2.5%", "rate 2.0", "32 voices @ +2.5%");
+    for (name, interp) in [
+        ("Catmull-Rom (was)", InterpolationType::Lagrange),
+        ("Sinc 16 (now)", InterpolationType::Sinc),
+    ] {
+        let mut cols = Vec::new();
+        for rate in [1.0f32, 1.029_302_2, 2.0] {
+            let n = 200_000usize;
+            let frames = (n as f32 * rate).ceil() as usize + 4096;
+            let src: Arc<Vec<f32>> =
+                Arc::new((0..frames).map(|i| tone_sample(i, 997.0, SR, AMP)).collect());
+            let mut out = vec![0.0f32; n];
+            // Fresh voice per timing run; the first pass warms caches.
+            let mut run = || {
+                let mut v = SamplerVoice::new();
+                v.interpolation = interp;
+                v.set_layout(frames, 1);
+                v.trigger_at_ref(&src, rate, 1.0, 0.0, 0.0);
+                out.fill(0.0);
+                let mut sl = &mut out[..];
+                let mut outs: [&mut [f32]; 1] = [&mut sl];
+                let t0 = std::time::Instant::now();
+                v.process_block_planar(&mut outs, n);
+                t0.elapsed().as_secs_f64() / n as f64 * 1e9
+            };
+            run();
+            cols.push(run());
+        }
+        // 32 voices, 256 frames, at the realistic tempo rate.
+        let block_us = cols[1] * 32.0 * 256.0 / 1000.0;
+        println!(
+            "  {name:<24} {:>7.1} ns {:>7.1} ns {:>7.1} ns   {:>8.0} us ({:>4.1}% budget)",
+            cols[0], cols[1], cols[2], block_us, block_us / 5333.0 * 100.0
+        );
     }
 
     println!("\nReading it: rate 1.0 and 2.0 are transparent BY CONSTRUCTION (fraction");
