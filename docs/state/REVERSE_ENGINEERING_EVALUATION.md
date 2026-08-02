@@ -111,6 +111,17 @@ still reports failure, so whatever is wrong sits **upstream of every job's conte
 availability, quota, or Actions permissions on the repository. Nothing in the workspace can
 cause this and nothing in the workspace can fix it.
 
+**`kani.yml` is worse, and this one is not a recent regression.** The weekly proof workflow has
+run **exactly twice in the repository's history** — 2026-07-20 and 2026-07-27 — and **both failed
+in under five seconds**, same no-runner signature. *The eight Kani proof harnesses have never
+once been executed by CI.* They are cited across the docs as the formal-verification layer:
+parallel-stage hazard freedom, compiled-plan verification, the PI clock-servo integral clamp,
+jitter-buffer panic freedom, and SHM/MPSC/`ShmSignal` atomic ordering. Those harnesses exist and
+may well pass — this says nothing about their contents — but **no automated run has ever
+demonstrated it**, and a weekly schedule that has fired twice in six weeks is not a schedule
+anyone is watching. Whoever owns the proofs should run `cargo kani` locally at least once and
+record the result, because right now the claim rests entirely on the code having been written.
+
 **Why this belongs in an audit rather than a bug report:** `ARCHITECTURE.md` §5 has carried the
 note that `ci.yml` and `.githooks/pre-push` were deleted in `968cd12` and restored on 2026-07-28,
 with the standing instruction *"if a future audit finds the doc and the workflow disagreeing
