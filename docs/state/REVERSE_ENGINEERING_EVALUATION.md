@@ -102,7 +102,7 @@ The jobs are not failing; they are not running:
 | evidence | reading |
 | :--- | :--- |
 | `runner_id: 0`, `runner_name: ""` | no runner was ever assigned |
-| `started_at` → `completed_at` = **3 seconds** | a `cargo check` of this workspace takes minutes |
+| `started_at` → `completed_at` = **3–9 seconds** | a `cargo check` of this workspace takes minutes |
 | logs return **HTTP 404** | no log stream was ever produced |
 | **`Clippy (advisory)` also "failed"** | it is `continue-on-error: true` and cannot fail on lint count |
 
@@ -118,9 +118,11 @@ once been executed by CI.* They are cited across the docs as the formal-verifica
 parallel-stage hazard freedom, compiled-plan verification, the PI clock-servo integral clamp,
 jitter-buffer panic freedom, and SHM/MPSC/`ShmSignal` atomic ordering. Those harnesses exist and
 may well pass — this says nothing about their contents — but **no automated run has ever
-demonstrated it**, and a weekly schedule that has fired twice in six weeks is not a schedule
-anyone is watching. Whoever owns the proofs should run `cargo kani` locally at least once and
-record the result, because right now the claim rests entirely on the code having been written.
+demonstrated it**. To be fair to the schedule: those two firings are a week apart and the
+workflow is young, so `cron` is working exactly as configured. The problem is not the cadence,
+it is that both firings — 100% of them — died before doing anything. Whoever owns the proofs
+should run `cargo kani` locally once and record the result, because right now the claim rests
+entirely on the harnesses having been written.
 
 **Why this belongs in an audit rather than a bug report:** `ARCHITECTURE.md` §5 has carried the
 note that `ci.yml` and `.githooks/pre-push` were deleted in `968cd12` and restored on 2026-07-28,
