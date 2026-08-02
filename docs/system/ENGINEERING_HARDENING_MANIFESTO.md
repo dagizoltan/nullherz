@@ -20,7 +20,7 @@ Calling `processor.reset()` must return the processor to a state identical to it
 *   **Hardening Goal:** Every processor in the `ProcessorRegistry` must pass the `ConformanceSuite::verify_silence_after_reset` check.
 
 ### 1.3 The Law of SIMD-First Design
-Scalar DSP is a fallback, not the standard. All new kernels must be designed with 64-byte alignment and SIMD throughput (AVX-512/NEON) as the primary execution path.
+Scalar DSP is a fallback, not the standard. All new kernels must be designed with 64-byte alignment and SIMD throughput as the primary execution path — today that means `FloatX8`/`FloatX4` over the `wide` crate, since `FloatX16`'s AVX-512 and wasm arms do not compile and every shipped build is SSE2 baseline ([audit §4](../state/REVERSE_ENGINEERING_EVALUATION.md)). A corollary this principle needs and did not state: **a platform arm without a CI job that compiles it is not a fallback, it is unverified code** — `cfg`-gated arms no build selects are never type-checked.
 *   **Hardening Goal:** 100% coverage of `verify_simd_alignment` across the `audio-dsp` library.
 
 ---

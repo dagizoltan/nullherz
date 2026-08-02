@@ -1,7 +1,7 @@
 # Nullherz System Feature Matrix (Stage 6: Evolutionary Intelligence)
 
 **Current State:** see [IMPLEMENTATION_ROADMAP_2026_07.md](../roadmap/IMPLEMENTATION_ROADMAP_2026_07.md) for what is done and what is next. A ✅ below must mean **a user can reach it**, not that a test passes — the difference is enforced by `crates/nullherz-conductor/tests/reachability_gate_test.rs`, which found four fully-built, fully-tested, completely unreachable subsystems.
-**Last Updated:** July 20, 2026 — verified against code (reverse-engineering pass; see [ARCHITECTURE.md](../system/ARCHITECTURE.md))
+**Last Updated:** August 2, 2026 — re-audited against code at `26c9fb1`. Two entries were downgraded for failing the rule in the paragraph above (Library Analysis Pipeline, Disk Streaming); see [REVERSE_ENGINEERING_EVALUATION.md §3.6](./REVERSE_ENGINEERING_EVALUATION.md). Reference: [ARCHITECTURE.md](../system/ARCHITECTURE.md).
 
 ---
 
@@ -25,8 +25,8 @@
 | **Modulation Matrix** | ✅ | Macro → multi-target parameter broadcast with `TemporalShape` ramps. |
 | **Master-Deck Suggestion**| ✅ | DNA suggestions bound to `active_master_deck` state (A–D). |
 | **Offline Rendering** | ✅ | Safe bit-perfect WAV export with safe engine access. |
-| **Library Analysis Pipeline** | ✅ | `folder_monitor` auto-scan + `analysis_worker` (BPM/key/transient extraction) feeding `library.redb`. |
-| **Disk Streaming** | ✅ | `StreamingManager` double-buffered disk-to-SHM streaming, decoupled from orchestration tick. |
+| **Library Analysis Pipeline** | ✅ | **On-demand** scan (`ResourceCommand::ScanFolder`, Library view button) + `analysis_worker` (BPM/key/transient extraction) feeding `library.redb`. Boot auto-scan was deliberately removed 2026-07-22 — it decoded every file into the in-memory registry at startup and froze on large libraries — and `start_auto_scan` now has zero call sites in either the daemon or the inspector. |
+| **Disk Streaming** | 🔶 | `StreamingManager` is constructed, held on `Conductor`, and `start_stream` has a caller (`command_handler.rs:113`). But its RT consumer, `StreamingSampler`, sits in `known_unreachable()` — the console never instantiates that node type, so **no live graph reads the ring the feeder fills**. Downgraded from ✅ on 2026-08-02: reachable-by-a-user is the bar this table sets for itself, and the debt log already said this one did not clear it. Rewrite is roadmap 2.3; a thread-liveness bug in `start_stream` bites the moment a real graph uses it. |
 
 ---
 
@@ -52,7 +52,7 @@
 | **Static Dispatch VM** | ✅ | Kernel devirtualization (`AudioEngine<K: ProcessingKernel>`) for zero-overhead graph execution. |
 | **Sample-Accurate Commands** | ✅ | Sub-block splitting at command timestamps with same-timestamp batch draining (`processing_kernel.rs`). |
 | **RT-Safe Sample Registry**| ✅ | Atomic-swap registry for lock-free sample/source access. |
-| **SIMD Kernel Foundation** | ✅ | AVX-512/NEON optimized `FloatX16` and core math primitives. |
+| **SIMD Kernel Foundation** | 🔶 | `FloatX4`/`FloatX8` over the `wide` crate, and core math primitives, are real and exercised. **`FloatX16`'s AVX-512 and wasm-simd128 arms do not compile** and never have — `wide 0.7` has no `f32x16`, and consumers in `oscillators.rs`/`spectral.rs` reach for the fallback arm's `.low`/`.high` fields behind a two-way `cfg` the type splits three ways. Only the two-`f32x8` fallback is viable, so every build is SSE2 baseline. See [REVERSE_ENGINEERING_EVALUATION.md §4](./REVERSE_ENGINEERING_EVALUATION.md). |
 | **4x Unrolled Scalar Kernels**| ✅ | Optimized fallback paths for non-SIMD processors (e.g., `DjIsolator`). |
 | **Exact Filter Math** | ✅ | Runtime Linkwitz-Riley coefficient generation for exact crossovers. |
 | **Soft Fallback** | ✅ | Heartbeat-monitored instant swap to bypass node upon DSP failure; escalation to global Safe Mode. |

@@ -369,7 +369,7 @@ The adaptive default reaches serial-level performance **automatically** on this 
 
 | Task | Priority | Description |
 | :--- | :---: | :--- |
-| **AVX-512 Pathway** | VERIFIED | Implemented 16-wide `FloatX16` path in `simd_vec.rs` and core kernels. Moved state to stack locals for register optimization. |
+| **AVX-512 Pathway** | **RETRACTED 2026-08-02** | Was marked VERIFIED. It is not: the 16-wide `FloatX16` arm in `simd_vec.rs` **does not compile**. `RUSTFLAGS="-C target-feature=+avx512f" cargo check -p audio-dsp` fails with four errors — `wide 0.7.30` has no `f32x16` type — and so does `-C target-cpu=native` on any AVX-512 host. The wasm-simd128 arm fails too, because consumers in `oscillators.rs`/`spectral.rs` gate on a two-way `cfg` and read the fallback arm's `.low`/`.high` fields. This went unnoticed because the reference machine has no AVX-512 (see the design gate's machine spec) and no CI job compiles either arm — **a `cfg` arm that no build configuration selects is not merely unexercised, it is not type-checked**. Retracting rather than deleting: a "VERIFIED" that was never true is the more useful record. See [REVERSE_ENGINEERING_EVALUATION.md §4](./REVERSE_ENGINEERING_EVALUATION.md). |
 | **Zero-Copy Sampler** | VERIFIED | Refactored `SamplerVoice` Lagrange interpolation for direct SIMD pointer loads via `f32x4`. |
 | **Biquad Unrolling** | Medium | Implement 4x unrolled biquad kernels for the `DjIsolator` to reduce the overhead of crossover filtering. |
 | **FFT Twiddle Caching** | Low | Implement a global twiddle-factor cache in `audio-dsp` to avoid re-calculation during dynamic FFT size changes. |
