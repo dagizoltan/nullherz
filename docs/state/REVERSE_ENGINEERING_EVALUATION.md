@@ -25,12 +25,23 @@ signal path has been characterised to a standard most DAWs never publish.
 
 Five things are true at once, and the ranking matters:
 
-0. **Nothing has gated `main` since 2026-07-26.** §2.2. The last 30 CI runs all concluded
-   `failure` without ever acquiring a runner — 3-second jobs, no logs, and even the
-   `continue-on-error` advisory job "failing". The workflow file is present and correct, which is
-   exactly why this is invisible: a green-looking gate that never executes. Listed first because
-   it changes how every other claim on this page should be read, and because it is the only item
-   here that cannot be fixed from inside the repository.
+0. **Nothing verifies this codebase end to end, in three independent ways.** Listed first because
+   it changes how every other claim on this page should be read.
+   - **CI has not run since 2026-07-26** (§2.2): 30 consecutive runs concluded `failure` without
+     ever acquiring a runner. The workflow file is present and correct, which is exactly why it is
+     invisible — a green-looking gate that never executes. The only item here that cannot be fixed
+     from inside the repository.
+   - **The Kani proofs have never run** (§2.2): that workflow has fired twice, both dead on
+     arrival. "Kani-proved" currently means "a harness is written for this".
+   - **`cargo test --workspace` cannot complete** (§2.3): a blocking `std::net::UdpSocket` inside
+     a `tokio::spawn` in `sidecar_supervisor.rs:260` permanently occupies a runtime worker, so
+     dropping the runtime hangs. Excluding the conductor, **287 tests pass and 0 fail** — the
+     rest of the workspace is healthy; the largest crate is simply unrunnable to completion.
+
+   These are three different mechanisms with one shape: verification machinery that is *present*
+   and therefore reads as working. It is the same failure `reachability_gate_test.rs` was written
+   to catch one level down ("a unit test proves a thing WORKS, not that anything CALLS it"),
+   recurring one level up.
 1. **The code is better documented than the docs.** The load-bearing explanations live in
    doc-comments next to the constant or the branch they justify (`execution.rs`,
    `reachability_gate_test.rs`, `dj.rs`). Those comments are correct. The prose docs are where
@@ -137,7 +148,76 @@ could verify anything at all. Wiring it up as the pre-push hook
 (`git config core.hooksPath .githooks`) is currently the *only* gate that actually runs. Until
 Actions is restored, treat a green PR page as unverified.
 
-### 2.3 The bootstrapped 4-deck console, as actually built
+### 2.3 `cargo test --workspace` never finishes: a blocking socket inside `tokio::spawn`
+
+The second thing CI's absence was hiding. **The workspace suite cannot complete on this machine.**
+Two independent runs were killed by their own timeouts (30 min, then 50 min), both stalled at the
+same place, and the stall reproduces in isolation:
+
+```
+$ target/debug/deps/async_hydration_test-<hash> --test-threads=1
+running 2 tests
+test test_load_does_not_block_and_deck_still_sounds ...      # hangs here, forever
+```
+
+33 minutes elapsed for 11 seconds of CPU. `gdb` on the live process gives the mechanism exactly:
+
+| thread | stack |
+| :--- | :--- |
+| test thread | `CachedParkThread::block_on<&mut tokio::sync::oneshot::Receiver<()>>` |
+| **tokio-rt-worker** | `std::net::UdpSocket::recv_from` ← **`sidecar_supervisor.rs:260`** |
+| spawned | `PtpEngine::run_loop` `recv_from` ← `ptp_engine.rs:166` via `orchestrator.rs:310` |
+| spawned | `TcpListener::accept` ← `nullherz-dna/src/network.rs:392` |
+| mDNS ×2 | `epoll_wait` (`mdns_sd`) |
+| main | `thread::park` — waiting to join the test thread |
+
+**The fatal one is `SidecarSupervisor::start_udp_return_listener`:**
+
+```rust
+let socket = UdpSocket::bind(format!("0.0.0.0:{}", port))?;   // std::net — BLOCKING
+tokio::spawn(async move {
+    loop {
+        if let Ok((len, _addr)) = socket.recv_from(&mut buf) { ... }   // blocks the worker
+    }
+});
+```
+
+A `std::net::UdpSocket` (not `tokio::net::UdpSocket`) with **no read timeout and no
+`set_nonblocking`**, blocking inside a `tokio::spawn`ed task, in a loop with no exit condition.
+The task occupies a runtime worker permanently and can never be cancelled — so when the test
+drops its `Runtime`, shutdown waits on a task that will never yield, and the test thread parks in
+`block_on(oneshot::Receiver)` forever.
+
+Contrast that pins it: a probe that built a `Conductor`, ran `setup_engine()` and
+`bootstrap_4channel_mixer()`, and exited **in 1.35 s**. The difference is that
+`async_hydration_test` creates a `tokio::runtime::Runtime` and calls `rt.enter()`. **Inside a
+runtime context the conductor starts listeners it has no way to stop.**
+
+The other two are leaks rather than deadlocks, but they are the same missing idea — a listener
+loop with no shutdown path:
+
+- `ptp_engine.rs` does set a 200 ms read timeout (`:131`), so it wakes and spins; its `loop` still
+  has no exit condition.
+- `nullherz-dna/src/network.rs:392` blocks in `listener.incoming()` forever. The 1000 ms timeouts
+  nearby are on *accepted streams*, not on the listener.
+
+**What can actually be verified today**, with the conductor excluded:
+
+```
+$ cargo test --workspace --no-fail-fast --exclude nullherz-conductor
+66 binaries — 287 passed, 0 failed, 1 ignored      (exit 0)
+```
+
+Plus 158 passing in 23 binaries before the stall on the full run. **Zero failures anywhere.**
+Nothing here suggests the conductor's 113 tests are *wrong* — they are unverifiable, which is a
+different and worse thing. Combined with §2.2, the honest summary of this codebase's verification
+status is: **the parts that can run, pass; the largest crate cannot be run to completion; CI has
+not run at all in over a week; and the proofs have never run.**
+
+This is the first thing to fix, ahead of every performance item on this page. `#[tokio::test]`
+users and `scripts/verify.sh` both hit it, so it is not confined to one test file.
+
+### 2.4 The bootstrapped 4-deck console, as actually built
 
 Measured by instantiating `Conductor::with_library_path(":memory:")` → `setup_engine()` →
 `bootstrap_4channel_mixer()` and reading `topology_manager.active_node_types` directly:
@@ -167,7 +247,7 @@ Three observations fall out of this:
   comment, not a bug — but the margin is a third smaller than stated, and overflow drops an
   *arbitrary* subset (`HashMap` iteration order), which is precisely why the comment exists.
 
-### 2.4 Block cost
+### 2.5 Block cost
 
 `cargo run --release -p nullherz-conductor --example bench_console_block`, 20,000 blocks,
 4 decks live, 256 frames @ 44.1 kHz (budget 5805 µs):
@@ -448,7 +528,7 @@ is `[f32x4; 4]`. The abstraction leaks its fallback representation to its caller
 fallback is the only representation that can ever compile.
 
 This is why nobody noticed: on the default x86-64 target the two-way and three-way splits agree,
-so `cargo check --workspace --all-targets` is clean and the suite is green — neither ever
+so `cargo check --workspace --all-targets` is clean and everything that runs passes — neither ever
 compiles the other two arms. The reference machine in the design gate has no AVX-512, and CI
 builds only `ubuntu-latest` x86-64. **`cfg`-gated code that no build configuration ever selects
 is not merely unexercised — it is not type-checked.** A green workspace says nothing about it.
@@ -458,7 +538,7 @@ is not merely unexercised — it is not type-checked.** A green workspace says n
 With both alternate arms non-viable, a stock `cargo build --release` compiles for the
 **x86-64 baseline, which is SSE2**. `wide`'s `f32x8` lowers to a pair of SSE2 registers, not one
 AVX2 register. The DSP asks for 16-wide; the hardware is handed 4-wide. Given the resampler is
-now 83.5% of console DSP cost (§2.4), the headroom here is not academic.
+now 83.5% of console DSP cost (§2.5), the headroom here is not academic.
 
 The rest of the release profile is cargo defaults: **no LTO, 16 codegen units, `opt-level = 3`**
 — there is no `.cargo/config.toml` and no `[profile.release]` anywhere in the workspace. For an
@@ -581,7 +661,7 @@ being mistaken for clean results:
 - **Behaviour across sample rates.** Contract tests prove coefficients *move* with the rate;
   nothing measures whether the console is transparent at 96 kHz.
 - **Real-hardware jitter with core isolation.** The reference box has no `isolcpus`, so the
-  4041 µs worst-case block in §2.4 measures the VM, not the engine.
+  4041 µs worst-case block in §2.5 measures the VM, not the engine.
 - **A human listen** is owed on the crossfader default change and on a tempo-synced mix after
   the resampler change. Neither is covered by the golden render, because every deck in that
   fixture plays at rate 1.0 and takes the resampler's bit-exact short circuit.
