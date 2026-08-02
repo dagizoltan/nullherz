@@ -23,8 +23,14 @@ execution plane is the strongest part of the codebase: the RT invariants in
 by tests that fail on violation), the graph VM does what the docs claim, and the console's
 signal path has been characterised to a standard most DAWs never publish.
 
-Four things are true at once, and the ranking matters:
+Five things are true at once, and the ranking matters:
 
+0. **Nothing has gated `main` since 2026-07-26.** §2.2. The last 30 CI runs all concluded
+   `failure` without ever acquiring a runner — 3-second jobs, no logs, and even the
+   `continue-on-error` advisory job "failing". The workflow file is present and correct, which is
+   exactly why this is invisible: a green-looking gate that never executes. Listed first because
+   it changes how every other claim on this page should be read, and because it is the only item
+   here that cannot be fixed from inside the repository.
 1. **The code is better documented than the docs.** The load-bearing explanations live in
    doc-comments next to the constant or the branch they justify (`execution.rs`,
    `reachability_gate_test.rs`, `dj.rs`). Those comments are correct. The prose docs are where
@@ -82,9 +88,43 @@ eight sidecar binaries (0) are the thinnest verification in the workspace.** Tha
 out-of-process failure surface — the code path a third-party plugin runs through — and it is
 the least tested. Worth stating plainly rather than leaving it implicit in a table.
 
-`cargo check --workspace --all-targets` completes **clean, zero warnings** (verified this pass).
+`cargo check --workspace --all-targets` completes **clean, zero warnings** (verified this pass,
+locally).
 
-### 2.2 The bootstrapped 4-deck console, as actually built
+### 2.2 CI has not executed successfully once since 2026-07-26
+
+**The last 30 CI runs — every run in the API's first page, back to 2026-07-26 — concluded
+`failure`. Zero successes. That includes every commit on `main`, among them `26c9fb1`, the base
+this branch is cut from.**
+
+The jobs are not failing; they are not running:
+
+| evidence | reading |
+| :--- | :--- |
+| `runner_id: 0`, `runner_name: ""` | no runner was ever assigned |
+| `started_at` → `completed_at` = **3 seconds** | a `cargo check` of this workspace takes minutes |
+| logs return **HTTP 404** | no log stream was ever produced |
+| **`Clippy (advisory)` also "failed"** | it is `continue-on-error: true` and cannot fail on lint count |
+
+That last row is the one that settles it. An advisory job whose only failure mode is disabled
+still reports failure, so whatever is wrong sits **upstream of every job's contents** — runner
+availability, quota, or Actions permissions on the repository. Nothing in the workspace can
+cause this and nothing in the workspace can fix it.
+
+**Why this belongs in an audit rather than a bug report:** `ARCHITECTURE.md` §5 has carried the
+note that `ci.yml` and `.githooks/pre-push` were deleted in `968cd12` and restored on 2026-07-28,
+with the standing instruction *"if a future audit finds the doc and the workflow disagreeing
+again, trust `.github/workflows/`."* This audit is that future audit, and the instruction does
+not help: **the doc and the workflow agree, both are correct, and `main` is ungated anyway** —
+not because the gate was removed, but because it never executes. A workflow file that is present
+and correct reads as a working gate in every review, in every doc, and on every PR page.
+
+The repair is `scripts/verify.sh`, which runs the same checks locally and is the reason this pass
+could verify anything at all. Wiring it up as the pre-push hook
+(`git config core.hooksPath .githooks`) is currently the *only* gate that actually runs. Until
+Actions is restored, treat a green PR page as unverified.
+
+### 2.3 The bootstrapped 4-deck console, as actually built
 
 Measured by instantiating `Conductor::with_library_path(":memory:")` → `setup_engine()` →
 `bootstrap_4channel_mixer()` and reading `topology_manager.active_node_types` directly:
@@ -114,7 +154,7 @@ Three observations fall out of this:
   comment, not a bug — but the margin is a third smaller than stated, and overflow drops an
   *arbitrary* subset (`HashMap` iteration order), which is precisely why the comment exists.
 
-### 2.3 Block cost
+### 2.4 Block cost
 
 `cargo run --release -p nullherz-conductor --example bench_console_block`, 20,000 blocks,
 4 decks live, 256 frames @ 44.1 kHz (budget 5805 µs):
@@ -405,7 +445,7 @@ is not merely unexercised — it is not type-checked.** A green workspace says n
 With both alternate arms non-viable, a stock `cargo build --release` compiles for the
 **x86-64 baseline, which is SSE2**. `wide`'s `f32x8` lowers to a pair of SSE2 registers, not one
 AVX2 register. The DSP asks for 16-wide; the hardware is handed 4-wide. Given the resampler is
-now 83.5% of console DSP cost (§2.3), the headroom here is not academic.
+now 83.5% of console DSP cost (§2.4), the headroom here is not academic.
 
 The rest of the release profile is cargo defaults: **no LTO, 16 codegen units, `opt-level = 3`**
 — there is no `.cargo/config.toml` and no `[profile.release]` anywhere in the workspace. For an
@@ -528,7 +568,7 @@ being mistaken for clean results:
 - **Behaviour across sample rates.** Contract tests prove coefficients *move* with the rate;
   nothing measures whether the console is transparent at 96 kHz.
 - **Real-hardware jitter with core isolation.** The reference box has no `isolcpus`, so the
-  4041 µs worst-case block in §2.3 measures the VM, not the engine.
+  4041 µs worst-case block in §2.4 measures the VM, not the engine.
 - **A human listen** is owed on the crossfader default change and on a tempo-synced mix after
   the resampler change. Neither is covered by the golden render, because every deck in that
   fixture plays at rate 1.0 and takes the resampler's bit-exact short circuit.
