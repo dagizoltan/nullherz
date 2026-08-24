@@ -342,6 +342,10 @@ pub struct SettingsState {
     pub last_saved_time: f64,
     pub autosave_triggered: Option<f64>,
     pub shortcuts_enabled: bool,
+    pub qwerty_midi_enabled: bool,
+    pub qwerty_octave: i8,
+    pub qwerty_held_keys: std::collections::HashSet<eframe::egui::Key>,
+    pub recent_midi_events: std::collections::VecDeque<nullherz_traits::MidiEvent>,
 }
 
 impl Default for SettingsState {
@@ -360,6 +364,10 @@ impl Default for SettingsState {
             last_saved_time: 0.0,
             autosave_triggered: None,
             shortcuts_enabled: true,
+            qwerty_midi_enabled: true,
+            qwerty_octave: 0,
+            qwerty_held_keys: std::collections::HashSet::new(),
+            recent_midi_events: std::collections::VecDeque::with_capacity(30),
         }
     }
 }

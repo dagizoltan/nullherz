@@ -34,6 +34,7 @@ pub struct Conductor {
     pub streaming_manager: crate::streaming_manager::StreamingManager,
     pub library: Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>,
     pub mixer_manager: nullherz_mixer::MixerManager,
+    pub midi_producer: Option<ipc_layer::Producer<nullherz_traits::MidiEvent>>,
     pub midi_consumer: Option<ipc_layer::Consumer<nullherz_traits::MidiEvent>>,
     pub external_midi_consumer: Option<ipc_layer::IpcMidiConsumer>,
     midi_child: Option<std::process::Child>,
@@ -172,6 +173,7 @@ impl Conductor {
             streaming_manager: crate::streaming_manager::StreamingManager::new(),
             library,
             mixer_manager: nullherz_mixer::MixerManager::new(),
+            midi_producer: None,
             midi_consumer: None,
             external_midi_consumer: None,
             midi_child: None,
@@ -264,6 +266,7 @@ impl Conductor {
             streaming_manager: crate::streaming_manager::StreamingManager::new(),
             library,
             mixer_manager: nullherz_mixer::MixerManager::new(),
+            midi_producer: None,
             midi_consumer: None,
             external_midi_consumer: None,
             midi_child: None,
@@ -313,6 +316,7 @@ impl Conductor {
 
         let handle = self.engine_coordinator.setup(registry);
 
+        self.midi_producer = Some(handle.midi_producer.clone());
         self.mixer_bridge.bundle_producer = Some(handle.bundle_producer);
         self.mixer_bridge.bundle_pool = handle.bundle_garbage_consumer;
         self.topology_manager.topo_producer = Some(ipc_layer::NonRtProducer::new(handle.topology_producer));
@@ -602,6 +606,12 @@ impl Conductor {
     }
 
     pub fn handle_midi_events(&mut self, events: Vec<nullherz_traits::MidiEvent>) {
+        if let Some(ref mut prod) = self.midi_producer {
+            for event in &events {
+                let _ = prod.push(*event);
+            }
+        }
+
         for event in events {
             // Handle System Real-time (Clock, Start, Stop)
             if event.status >= 0xF8 {

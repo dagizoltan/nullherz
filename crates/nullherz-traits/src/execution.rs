@@ -266,7 +266,8 @@ pub struct AudioBlock {
 
 /// A standard MIDI event representation for real-time IPC.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub struct MidiEvent {
     pub timestamp_samples: u64,
     pub status: u8,

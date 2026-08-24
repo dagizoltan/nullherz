@@ -19,6 +19,43 @@ pub fn default_coordinate() -> f32 {
     -1.0
 }
 
+pub fn key_to_semitone(key: egui::Key) -> Option<u8> {
+    match key {
+        // Lower row (C4..D5 base)
+        egui::Key::Z => Some(0),  // C
+        egui::Key::S => Some(1),  // C#
+        egui::Key::X => Some(2),  // D
+        egui::Key::D => Some(3),  // D#
+        egui::Key::C => Some(4),  // E
+        egui::Key::V => Some(5),  // F
+        egui::Key::G => Some(6),  // F#
+        egui::Key::B => Some(7),  // G
+        egui::Key::H => Some(8),  // G#
+        egui::Key::N => Some(9),  // A
+        egui::Key::J => Some(10), // A#
+        egui::Key::M => Some(11), // B
+        egui::Key::Comma => Some(12), // C +1
+        egui::Key::L => Some(13), // C# +1
+        egui::Key::Period => Some(14), // D +1
+
+        // Upper row (+1 Octave)
+        egui::Key::Q => Some(12), // C
+        egui::Key::Num2 => Some(13), // C#
+        egui::Key::W => Some(14), // D
+        egui::Key::Num3 => Some(15), // D#
+        egui::Key::E => Some(16), // E
+        egui::Key::R => Some(17), // F
+        egui::Key::Num5 => Some(18), // F#
+        egui::Key::T => Some(19), // G
+        egui::Key::Num6 => Some(20), // G#
+        egui::Key::Y => Some(21), // A
+        egui::Key::Num7 => Some(22), // A#
+        egui::Key::U => Some(23), // B
+        egui::Key::I => Some(24), // C +2
+        _ => None,
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeJson {
     pub inputs: Vec<usize>,
@@ -547,9 +584,11 @@ impl InspectorApp {
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         let current_time = ctx.input(|i| i.time);
+        let wants_kb = ctx.wants_keyboard_input();
+
         if self.settings.shortcuts_enabled {
             ctx.input(|i| {
-                if i.key_pressed(egui::Key::Space) {
+                if i.key_pressed(egui::Key::Space) && !wants_kb {
                     if self.decks.global_playing {
                         let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop));
                         self.decks.global_playing = false;
@@ -590,6 +629,78 @@ impl InspectorApp {
                 if i.key_pressed(egui::Key::Num8) { self.active_view = View::Topology; }
                 if i.key_pressed(egui::Key::Num9) { self.active_view = View::Account; }
             });
+        }
+
+        // QWERTY Virtual MIDI Keyboard
+        if self.settings.qwerty_midi_enabled && !wants_kb {
+            let mut events_to_send = Vec::new();
+            let base_note = (60i16 + (self.settings.qwerty_octave as i16) * 12).clamp(0, 127) as u8;
+
+            ctx.input(|i| {
+                // Octave adjustment
+                if i.key_pressed(egui::Key::OpenBracket) || i.key_pressed(egui::Key::Minus) {
+                    self.settings.qwerty_octave = (self.settings.qwerty_octave - 1).max(-2);
+                }
+                if i.key_pressed(egui::Key::CloseBracket) || i.key_pressed(egui::Key::Equals) {
+                    self.settings.qwerty_octave = (self.settings.qwerty_octave + 1).min(2);
+                }
+
+                let piano_keys = [
+                    egui::Key::Z, egui::Key::S, egui::Key::X, egui::Key::D, egui::Key::C, egui::Key::V, egui::Key::G,
+                    egui::Key::B, egui::Key::H, egui::Key::N, egui::Key::J, egui::Key::M, egui::Key::Comma, egui::Key::L,
+                    egui::Key::Period, egui::Key::Q, egui::Key::Num2, egui::Key::W, egui::Key::Num3, egui::Key::E,
+                    egui::Key::R, egui::Key::Num5, egui::Key::T, egui::Key::Num6, egui::Key::Y, egui::Key::Num7,
+                    egui::Key::U, egui::Key::I
+                ];
+
+                for key in piano_keys {
+                    if i.key_pressed(key) && !i.modifiers.command && !i.modifiers.ctrl && !i.modifiers.alt {
+                        if let Some(semi) = key_to_semitone(key) {
+                            let note = (base_note + semi).min(127);
+                            let event = nullherz_traits::MidiEvent {
+                                timestamp_samples: 0,
+                                status: 0x90, // Note On
+                                data1: note,
+                                data2: 100, // Velocity
+                                _pad: 0,
+                            };
+                            events_to_send.push((key, event));
+                        }
+                    }
+                }
+
+                let held_keys_clone: Vec<egui::Key> = self.settings.qwerty_held_keys.iter().copied().collect();
+                for key in held_keys_clone {
+                    if i.key_released(key) || !i.key_down(key) {
+                        if let Some(semi) = key_to_semitone(key) {
+                            let note = (base_note + semi).min(127);
+                            let event = nullherz_traits::MidiEvent {
+                                timestamp_samples: 0,
+                                status: 0x80, // Note Off
+                                data1: note,
+                                data2: 0,
+                                _pad: 0,
+                            };
+                            events_to_send.push((key, event));
+                        }
+                    }
+                }
+            });
+
+            for (key, event) in events_to_send {
+                if event.status == 0x90 {
+                    self.settings.qwerty_held_keys.insert(key);
+                } else if event.status == 0x80 {
+                    self.settings.qwerty_held_keys.remove(&key);
+                }
+
+                let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::InjectMidi(event)));
+
+                self.settings.recent_midi_events.push_back(event);
+                while self.settings.recent_midi_events.len() > 30 {
+                    self.settings.recent_midi_events.pop_front();
+                }
+            }
         }
     }
 
@@ -1160,6 +1271,17 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn test_qwerty_key_to_semitone() {
+        assert_eq!(key_to_semitone(egui::Key::Z), Some(0)); // C
+        assert_eq!(key_to_semitone(egui::Key::S), Some(1)); // C#
+        assert_eq!(key_to_semitone(egui::Key::X), Some(2)); // D
+        assert_eq!(key_to_semitone(egui::Key::C), Some(4)); // E
+        assert_eq!(key_to_semitone(egui::Key::Q), Some(12)); // C +1
+        assert_eq!(key_to_semitone(egui::Key::I), Some(24)); // C +2
+        assert_eq!(key_to_semitone(egui::Key::Num0), None);
     }
 
     #[test]

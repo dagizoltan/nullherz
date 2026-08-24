@@ -1,74 +1,68 @@
 {
-  "name": "Standard DJ Controller",
+  "name": "Pioneer DDJ-400",
   "controls": [
     {
-      "cc_number": 7,
+      "cc_number": 2,
       "target": { "NamedParam": { "node_name": "deck_a_gain", "param_id": 0 } },
       "min_val": 0.0,
       "max_val": 1.0
     },
     {
-      "cc_number": 8,
+      "cc_number": 3,
       "target": { "NamedParam": { "node_name": "deck_b_gain", "param_id": 0 } },
       "min_val": 0.0,
       "max_val": 1.0
     },
     {
       "cc_number": 9,
-      "target": { "NamedParam": { "node_name": "deck_c_gain", "param_id": 0 } },
-      "min_val": 0.0,
-      "max_val": 1.0
-    },
-    {
-      "cc_number": 10,
-      "target": { "NamedParam": { "node_name": "deck_d_gain", "param_id": 0 } },
-      "min_val": 0.0,
-      "max_val": 1.0
-    },
-    {
-      "cc_number": 12,
       "target": { "NamedParam": { "node_name": "master_crossfader", "param_id": 0 } },
       "min_val": 0.0,
       "max_val": 1.0
     },
     {
-      "cc_number": 13,
-      "target": { "NamedParam": { "node_name": "master_limiter", "param_id": 0 } },
-      "min_val": 0.0,
-      "max_val": 1.0
-    },
-    {
-      "cc_number": 16,
-      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 0 } },
-      "min_val": 0.0,
-      "max_val": 1.0
-    },
-    {
-      "cc_number": 17,
-      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 1 } },
-      "min_val": 0.0,
-      "max_val": 1.0
-    },
-    {
-      "cc_number": 18,
-      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 2 } },
-      "min_val": 0.0,
-      "max_val": 1.0
-    },
-    {
       "cc_number": 19,
-      "target": { "NamedParam": { "node_name": "deck_b_isolator", "param_id": 0 } },
+      "target": { "NamedParam": { "node_name": "deck_a_gain", "param_id": 0 } },
       "min_val": 0.0,
       "max_val": 1.0
     },
     {
       "cc_number": 20,
+      "target": { "NamedParam": { "node_name": "deck_b_gain", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 7,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 11,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 1 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 15,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 2 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 8,
+      "target": { "NamedParam": { "node_name": "deck_b_isolator", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 12,
       "target": { "NamedParam": { "node_name": "deck_b_isolator", "param_id": 1 } },
       "min_val": 0.0,
       "max_val": 1.0
     },
     {
-      "cc_number": 21,
+      "cc_number": 16,
       "target": { "NamedParam": { "node_name": "deck_b_isolator", "param_id": 2 } },
       "min_val": 0.0,
       "max_val": 1.0
@@ -76,36 +70,20 @@
   ],
   "triggers": [
     {
-      "note_number": 60,
+      "note_number": 11,
       "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "A" } } } }
     },
     {
-      "note_number": 61,
+      "note_number": 12,
       "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "A" } } } }
     },
     {
-      "note_number": 62,
+      "note_number": 13,
       "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "B" } } } }
     },
     {
-      "note_number": 63,
+      "note_number": 14,
       "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "B" } } } }
-    },
-    {
-      "note_number": 64,
-      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "C" } } } }
-    },
-    {
-      "note_number": 65,
-      "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "C" } } } }
-    },
-    {
-      "note_number": 66,
-      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "D" } } } }
-    },
-    {
-      "note_number": 67,
-      "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "D" } } } }
     }
   ]
 }
