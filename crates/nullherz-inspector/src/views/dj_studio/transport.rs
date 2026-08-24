@@ -177,4 +177,73 @@ pub fn render_deck_transport(app: &mut InspectorApp, ui: &mut Ui, i: usize) {
             "Master tempo — holds pitch when SYNC changes the tempo. No effect while this deck runs at its own tempo."
         });
     });
+
+    ui.add_space(theme.space_xs);
+
+    // --- Row 2: Pitch Nudges & Slip Mode ------------------------------------
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = theme.space_xs;
+        let h = 22.0;
+        let avail = ui.available_width();
+        let btn_w = (avail - theme.space_xs * 2.0) / 3.0;
+
+        let node_name = match i {
+            0 => "deck_a_sampler",
+            1 => "deck_b_sampler",
+            2 => "deck_c_sampler",
+            3 => "deck_d_sampler",
+            _ => "",
+        };
+        let node_idx = app.get_node_id(node_name);
+
+        // Pitch Nudge (-)
+        let nudge_minus = ui.add_sized(
+            [btn_w, h],
+            egui::Button::new(RichText::new("NUDGE -").size(theme.type_caption).strong()).fill(theme.bg_surface),
+        );
+        if nudge_minus.clicked() {
+            if let Some(idx) = node_idx {
+                let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                    nullherz_traits::PerformanceCommand::NudgePosition { node_idx: idx, frames: -512 },
+                ));
+            }
+        }
+        nudge_minus.on_hover_text("Nudge playhead backward (-512 samples)");
+
+        // Pitch Nudge (+)
+        let nudge_plus = ui.add_sized(
+            [btn_w, h],
+            egui::Button::new(RichText::new("NUDGE +").size(theme.type_caption).strong()).fill(theme.bg_surface),
+        );
+        if nudge_plus.clicked() {
+            if let Some(idx) = node_idx {
+                let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                    nullherz_traits::PerformanceCommand::NudgePosition { node_idx: idx, frames: 512 },
+                ));
+            }
+        }
+        nudge_plus.on_hover_text("Nudge playhead forward (+512 samples)");
+
+        // SLIP Mode
+        let slip_on = app.mixer.channel_slip[i];
+        let slip = ui.add_sized(
+            [btn_w, h],
+            egui::Button::new(
+                RichText::new("SLIP")
+                    .size(theme.type_caption)
+                    .strong()
+                    .color(if slip_on { theme.bg_dark } else { theme.text_secondary }),
+            )
+            .fill(if slip_on { theme.warning } else { theme.bg_surface }),
+        );
+        if slip.clicked() {
+            app.mixer.channel_slip[i] = !slip_on;
+            if let Some(idx) = node_idx {
+                let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                    nullherz_traits::PerformanceCommand::SetSlipMode { node_idx: idx, enabled: !slip_on },
+                ));
+            }
+        }
+        slip.on_hover_text("SLIP Mode: background timeline continues during scratching, loops, and cues.");
+    });
 }
