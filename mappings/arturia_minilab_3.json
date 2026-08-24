@@ -1,0 +1,59 @@
+{
+  "name": "Arturia MiniLab 3",
+  "controls": [
+    {
+      "cc_number": 74,
+      "target": { "NamedParam": { "node_name": "deck_a_gain", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 71,
+      "target": { "NamedParam": { "node_name": "deck_b_gain", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 76,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 77,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 1 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 93,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 2 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 18,
+      "target": { "NamedParam": { "node_name": "master_crossfader", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    }
+  ],
+  "triggers": [
+    {
+      "note_number": 36,
+      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "A" } } } }
+    },
+    {
+      "note_number": 37,
+      "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "A" } } } }
+    },
+    {
+      "note_number": 38,
+      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "B" } } } }
+    },
+    {
+      "note_number": 39,
+      "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "B" } } } }
+    }
+  ]
+}

@@ -79,8 +79,13 @@ pub fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
             ui.add_space(theme.space_md);
             ui.label("Controller Profiles:");
             ui.add_space(theme.space_xs);
-            ui.horizontal(|ui| {
-                let options = ["default", "keyboard", "pioneer_ddj400", "akai_mpk_mini"];
+            ui.horizontal_wrapped(|ui| {
+                let options = [
+                    "default", "keyboard", "pioneer_ddj400", "pioneer_ddj_flx4",
+                    "native_instruments_traktor_s2", "akai_mpk_mini",
+                    "novation_launchkey_mini", "arturia_minilab_3",
+                    "numark_mixtrack_pro_fx", "hercules_djcontrol_inpulse_300"
+                ];
                 for opt in options {
                     let is_active = app.settings.active_midi_profile == opt;
                     let mut btn = egui::Button::new(format!("Load {}", opt));

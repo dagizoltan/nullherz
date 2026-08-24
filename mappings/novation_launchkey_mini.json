@@ -1,0 +1,59 @@
+{
+  "name": "Novation Launchkey Mini Mk3",
+  "controls": [
+    {
+      "cc_number": 21,
+      "target": { "NamedParam": { "node_name": "deck_a_gain", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 22,
+      "target": { "NamedParam": { "node_name": "deck_b_gain", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 23,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 24,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 1 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 25,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 2 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 26,
+      "target": { "NamedParam": { "node_name": "master_crossfader", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    }
+  ],
+  "triggers": [
+    {
+      "note_number": 40,
+      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "A" } } } }
+    },
+    {
+      "note_number": 41,
+      "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "A" } } } }
+    },
+    {
+      "note_number": 42,
+      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "B" } } } }
+    },
+    {
+      "note_number": 43,
+      "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "B" } } } }
+    }
+  ]
+}
