@@ -152,6 +152,11 @@ pub enum CoreCommand {
     SwitchBackend(AudioBackendType),
     CalibrateLatency,
     InjectMidi(MidiEvent),
+    StartMidiLearn {
+        #[serde(with = "serde_big_array::BigArray")]
+        target_json: [u8; 128],
+    },
+    SaveCustomMidiMap,
     #[serde(with = "serde_big_array::BigArray")]
     LoadMidiMap([u8; 32]), // Fixed-size buffer for filename
     #[serde(with = "serde_big_array::BigArray")]

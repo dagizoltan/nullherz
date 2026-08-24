@@ -250,6 +250,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             ui.end_row();
                         }
                     });
+
+                    ui.add_space(10.0);
+                    ui.label(RichText::new("VIRTUAL PIANO KEYBOARD").small().color(app.theme.text_secondary));
+                    crate::views::settings::midi::render_piano_keyboard_widget(ui, app);
                 });
         });
     });

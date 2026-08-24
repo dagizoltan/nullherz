@@ -503,6 +503,17 @@ impl CommandHandler {
                 conductor.handle_midi_events(vec![event]);
                 true
             }
+            CoreCommand::StartMidiLearn { target_json } => {
+                let json_str = String::from_utf8_lossy(&target_json).trim_matches(char::from(0)).to_string();
+                if let Ok(target) = serde_json::from_str::<nullherz_traits::MidiTarget>(&json_str) {
+                    conductor.midi_mapper.start_learning(target);
+                }
+                true
+            }
+            CoreCommand::SaveCustomMidiMap => {
+                conductor.midi_mapper.save_custom_map();
+                true
+            }
             CoreCommand::HotLoadSidecar { name, node_idx } => {
                 let plugin_name = String::from_utf8_lossy(&name).trim_matches(char::from(0)).to_string();
                 let manifest = {

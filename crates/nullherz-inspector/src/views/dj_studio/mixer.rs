@@ -114,6 +114,14 @@ pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_col
                 if r_fader.changed() {
                     send_deck_param(app, deck_id, nullherz_traits::DeckParamType::Gain, app.mixer.channel_faders[i]);
                 }
+                r_fader.context_menu(|ui| {
+                    if ui.button("MIDI Learn Gain").clicked() {
+                        let node_name = format!("deck_{}_gain", deck_id.to_ascii_lowercase());
+                        let target = nullherz_traits::MidiTarget::NamedParam { node_name, param_id: 0 };
+                        crate::views::settings::midi::send_start_midi_learn(app, &target);
+                        ui.close_menu();
+                    }
+                });
                 if r_fader.drag_stopped() || r_fader.lost_focus() { settled = true; }
                 ui.label(
                     RichText::new("VOL")

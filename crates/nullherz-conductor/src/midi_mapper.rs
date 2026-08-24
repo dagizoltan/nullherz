@@ -4,6 +4,8 @@ use parking_lot::Mutex;
 
 pub struct MidiMapper {
     pub active_map: Option<MidiMap>,
+    pub is_learning: bool,
+    pub pending_learn_target: Option<MidiTarget>,
     /// Cache for Most Significant Byte (MSB) of 14-bit CC messages (CC 0-31).
     pub pending_14bit_msb: Mutex<std::collections::HashMap<u8, u8>>,
     /// Cache of last known parameter values to implement Soft Takeover.
@@ -21,8 +23,23 @@ impl MidiMapper {
     pub fn new() -> Self {
         Self {
             active_map: None,
+            is_learning: false,
+            pending_learn_target: None,
             pending_14bit_msb: Mutex::new(std::collections::HashMap::new()),
             parameter_cache: Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    pub fn start_learning(&mut self, target: MidiTarget) {
+        self.is_learning = true;
+        self.pending_learn_target = Some(target);
+    }
+
+    pub fn save_custom_map(&self) {
+        if let Some(ref map) = self.active_map {
+            if let Ok(json) = serde_json::to_string_pretty(map) {
+                let _ = std::fs::write("mappings/user_custom.json", json);
+            }
         }
     }
 
@@ -53,11 +70,44 @@ impl MidiMapper {
         cache.insert((target_id, param_id), value);
     }
 
-    pub fn translate(&self, event: &MidiEvent, node_names: &std::collections::HashMap<String, u32>, focused_node_idx: Option<u32>) -> Vec<Command> {
+    pub fn translate(&mut self, event: &MidiEvent, node_names: &std::collections::HashMap<String, u32>, focused_node_idx: Option<u32>) -> Vec<Command> {
         let mut commands = Vec::new();
-        let Some(ref map) = self.active_map else { return commands; };
 
         let status = event.status & 0xF0;
+
+        // MIDI Learn Intercept Pass
+        if self.is_learning {
+            if let Some(target) = self.pending_learn_target.take() {
+                let mut map = self.active_map.take().unwrap_or_else(|| MidiMap {
+                    name: "Custom Learned Map".to_string(),
+                    controls: Vec::new(),
+                    triggers: Vec::new(),
+                });
+
+                if status == 0xB0 { // CC
+                    map.controls.retain(|ctrl| ctrl.cc_number != event.data1);
+                    map.controls.push(nullherz_traits::ControlMapping {
+                        cc_number: event.data1,
+                        target: target.clone(),
+                        min_val: 0.0,
+                        max_val: 1.0,
+                    });
+                } else if status == 0x90 && event.data2 > 0 { // Note On
+                    map.triggers.retain(|trig| trig.note_number != event.data1);
+                    map.triggers.push(nullherz_traits::TriggerMapping {
+                        note_number: event.data1,
+                        target: target.clone(),
+                    });
+                }
+
+                self.active_map = Some(map);
+                self.is_learning = false;
+                self.save_custom_map();
+                println!("MidiMapper: Successfully learned MIDI control CC/Note {} -> {:?}", event.data1, target);
+            }
+        }
+
+        let Some(ref map) = self.active_map else { return commands; };
 
         match status {
             0x90 => { // Note On
