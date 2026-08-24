@@ -38,3 +38,24 @@ fn test_midi_mapping_translation() {
         panic!("Expected Mixer SetParam command");
     }
 }
+
+#[test]
+fn test_json_midi_profile_loading() {
+    let profiles = ["default", "keyboard", "pioneer_ddj400", "akai_mpk_mini"];
+    for profile in profiles {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path = format!("mappings/{}.json", profile);
+        let manifest_path = format!("{}/../../mappings/{}.json", manifest_dir, profile);
+
+        let content = std::fs::read_to_string(&path)
+            .or_else(|_| std::fs::read_to_string(&manifest_path))
+            .unwrap_or_else(|_| panic!("Failed to read mapping file: {} or {}", path, manifest_path));
+        let mut mapper = MidiMapper::new();
+        assert!(
+            mapper.load_from_json(&content).is_ok(),
+            "Failed to parse MIDI JSON map for profile: {}",
+            profile
+        );
+        assert!(mapper.active_map.is_some());
+    }
+}

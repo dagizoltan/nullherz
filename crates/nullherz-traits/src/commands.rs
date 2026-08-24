@@ -151,6 +151,7 @@ pub enum CoreCommand {
     SetMasterDeck(char),
     SwitchBackend(AudioBackendType),
     CalibrateLatency,
+    InjectMidi(MidiEvent),
     #[serde(with = "serde_big_array::BigArray")]
     LoadMidiMap([u8; 32]), // Fixed-size buffer for filename
     #[serde(with = "serde_big_array::BigArray")]

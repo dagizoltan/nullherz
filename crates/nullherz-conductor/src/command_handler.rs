@@ -499,6 +499,10 @@ impl CommandHandler {
                 let _ = conductor.update_system_config(None, None, Some(samples));
                 true
             }
+            CoreCommand::InjectMidi(event) => {
+                conductor.handle_midi_events(vec![event]);
+                true
+            }
             CoreCommand::HotLoadSidecar { name, node_idx } => {
                 let plugin_name = String::from_utf8_lossy(&name).trim_matches(char::from(0)).to_string();
                 let manifest = {

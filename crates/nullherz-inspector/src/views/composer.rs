@@ -530,6 +530,7 @@ mod tests {
                 last_saved_time: 0.0,
                 autosave_triggered: None,
                 shortcuts_enabled: false,
+                ..Default::default()
             },
             viz: crate::state::VizState {
                 visualizer_damping: 0.1,
