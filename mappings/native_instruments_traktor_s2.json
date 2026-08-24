@@ -1,0 +1,77 @@
+{
+  "name": "Native Instruments Traktor Kontrol S2 Mk3",
+  "controls": [
+    {
+      "cc_number": 0,
+      "target": { "NamedParam": { "node_name": "deck_a_gain", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 1,
+      "target": { "NamedParam": { "node_name": "deck_b_gain", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 2,
+      "target": { "NamedParam": { "node_name": "master_crossfader", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 3,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 4,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 1 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 5,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 2 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 6,
+      "target": { "NamedParam": { "node_name": "deck_b_isolator", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 7,
+      "target": { "NamedParam": { "node_name": "deck_b_isolator", "param_id": 1 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 8,
+      "target": { "NamedParam": { "node_name": "deck_b_isolator", "param_id": 2 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    }
+  ],
+  "triggers": [
+    {
+      "note_number": 48,
+      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "A" } } } }
+    },
+    {
+      "note_number": 49,
+      "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "A" } } } }
+    },
+    {
+      "note_number": 50,
+      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "B" } } } }
+    },
+    {
+      "note_number": 51,
+      "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "B" } } } }
+    }
+  ]
+}

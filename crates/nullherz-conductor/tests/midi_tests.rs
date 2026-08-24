@@ -41,7 +41,12 @@ fn test_midi_mapping_translation() {
 
 #[test]
 fn test_json_midi_profile_loading() {
-    let profiles = ["default", "keyboard", "pioneer_ddj400", "akai_mpk_mini"];
+    let profiles = [
+        "default", "keyboard", "pioneer_ddj400", "pioneer_ddj_flx4",
+        "native_instruments_traktor_s2", "akai_mpk_mini",
+        "novation_launchkey_mini", "arturia_minilab_3",
+        "numark_mixtrack_pro_fx", "hercules_djcontrol_inpulse_300"
+    ];
     for profile in profiles {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let path = format!("mappings/{}.json", profile);
