@@ -288,7 +288,35 @@ impl SharedMemory {
             let ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd, 0);
             libc::close(fd);
             if ptr == libc::MAP_FAILED { return Err(IpcError::MmapFailed(std::io::Error::last_os_error().to_string())); }
-            Ok(Self { ptr: ptr as *mut u8, size, name: name.to_string(), owner: true })
+            let shm = Self { ptr: ptr as *mut u8, size, name: name.to_string(), owner: true };
+            shm.prefault_pages();
+            Ok(shm)
+        }
+    }
+
+    /// Touch every OS page in the memory region to force physical page allocation
+    /// and prevent initial RT thread page-fault latency spikes.
+    pub fn prefault_pages(&self) {
+        if self.ptr.is_null() || self.size == 0 {
+            return;
+        }
+        let page_size = 4096;
+        let mut offset = 0;
+        while offset < self.size {
+            unsafe {
+                let p = self.ptr.add(offset);
+                let val = std::ptr::read_volatile(p);
+                std::ptr::write_volatile(p, val);
+            }
+            offset += page_size;
+        }
+        // Prefault the last byte if size is not a multiple of page_size
+        if self.size > 0 {
+            unsafe {
+                let p = self.ptr.add(self.size - 1);
+                let val = std::ptr::read_volatile(p);
+                std::ptr::write_volatile(p, val);
+            }
         }
     }
 
