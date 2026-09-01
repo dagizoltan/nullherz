@@ -30,7 +30,7 @@ Core technical specifications and engineering principles.
 Tracking of system maturity and technical debt.
 - [Feature Matrix](./state/FEATURE_MATRIX.md) — a ✅ here means *reachable by a user*, not *a test passes*; the gate is `crates/nullherz-conductor/tests/reachability_gate_test.rs`
 - [Technical Debt & Stubs Log](./state/TECHNICAL_DEBT_AND_STUBS.md)
-- [Reverse Engineering Evaluation](./state/REVERSE_ENGINEERING_EVALUATION.md)
+- [Reverse Engineering Evaluation](./state/REVERSE_ENGINEERING_EVALUATION.md) — **audit, 2026-08-02**: what the tree measures today vs. what the docs claimed. Six drifts (five fixed here), plus the `FloatX16` arms that do not compile
 - [Optimization & Hardening Log](./state/TECHNICAL_OPTIMIZATION_LOG.md)
 
 ## 🗺 [Roadmaps](./roadmap/)

@@ -58,7 +58,13 @@ To ensure system stability, your `process()` loop MUST NOT:
 - Use blocking synchronization (standard `Mutex`, `RwLock`)
 - Execute syscalls (File I/O, Networking, `println!`)
 
-**Use `audio_dsp::simd_vec::FloatX16` for high-performance math.**
+**Use `audio_dsp::simd_vec::FloatX8` (or `FloatX4`) for high-performance math.** These are thin
+aliases over the `wide` crate and are what the engine's own kernels use.
+
+> **Do not use `FloatX16` yet.** It presents as a three-platform abstraction, but only its
+> x86-64 fallback arm (two `f32x8`s) compiles — the AVX-512 and wasm-simd128 arms fail to build,
+> so anything you write against it will break as soon as those targets are fixed or enabled.
+> Tracked in [REVERSE_ENGINEERING_EVALUATION.md §4](../state/REVERSE_ENGINEERING_EVALUATION.md).
 
 ## Distributed Protocol (V2)
 
