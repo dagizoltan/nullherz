@@ -472,7 +472,46 @@ async fn main() {
     // this report said zero. A gate that cannot fail is not a gate.
     let xruns = stats.backend_xruns;
     let xruns_clean = matches!(xruns, Some(0));
-    let pass = stats.frames > 0 && audio_flowed && xruns_clean;
+    // HEADROOM is a pass criterion, not a footnote.
+    //
+    // `overrun_count` — blocks whose process time exceeded the device period —
+    // was collected, printed, and then ignored by the verdict, which turned on
+    // xruns and signal presence alone. That leaves the one failure mode the
+    // Threaded backend cannot report (it has no xrun counter) invisible: a
+    // console that overran its budget on 5% of blocks passed clean, and the
+    // problem only appeared as crackle on someone's real hardware.
+    //
+    // Rate, not peak. A single outlier is scheduler noise on any machine
+    // without core isolation — a 4-deck console measured 136 µs mean against a
+    // 5,805 µs budget and still produced one 3,376 µs block in 20,000. What
+    // matters is whether overruns are RARE, so the gate is a fraction of all
+    // blocks. 0.1% is the p99.9 the architecture notes argue is the binding
+    // constraint in RT audio; override for a deliberately loaded run.
+    let overrun_budget_ratio: f64 = std::env::var("NULLHERZ_MAX_OVERRUN_RATIO")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.001);
+    let overrun_ratio = if stats.frames > 0 {
+        stats.overrun_count as f64 / stats.frames as f64
+    } else {
+        0.0
+    };
+    let headroom_ok = overrun_ratio <= overrun_budget_ratio;
+    if !headroom_ok {
+        eprintln!(
+            "FAIL: {} of {} blocks ({:.3}%) exceeded the {} µs period budget — over the \
+             {:.3}% allowed. The run survived, but with no headroom: on hardware that \
+             reports underruns these are dropouts. Peak block {} µs.",
+            stats.overrun_count,
+            stats.frames,
+            overrun_ratio * 100.0,
+            period_budget_us,
+            overrun_budget_ratio * 100.0,
+            stats.peak_process_time_ns / 1000,
+        );
+    }
+
+    let pass = stats.frames > 0 && audio_flowed && xruns_clean && headroom_ok;
 
     match xruns {
         None => eprintln!(

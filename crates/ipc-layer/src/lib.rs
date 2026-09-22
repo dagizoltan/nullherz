@@ -223,17 +223,24 @@ impl nullherz_traits::CommandConsumer for LocalMpscCommandConsumer {
     }
 }
 
-impl nullherz_traits::CommandProducer for Producer<nullherz_traits::TimestampedCommand> {
-    fn push_command(&self, command: nullherz_traits::TimestampedCommand) -> Result<(), nullherz_traits::Command> {
-        let cmd = command.command;
-        // Producer usually needs &mut for push, but ours is an Arc to a RingBuffer which might allow &self.
-        // Looking at Producer::push, it takes &mut self.
-        // We'll need to wrap it or change the trait.
-        // Actually, Producer is just a wrapper around Arc<RingBuffer>.
-        let mut cloned = self.clone();
-        cloned.push(command).map_err(|_| cmd)
-    }
-}
+// DELIBERATELY NOT IMPLEMENTED: `CommandProducer for Producer<TimestampedCommand>`.
+//
+// There used to be one. It took `&self`, cloned the `Producer` to get around
+// `push` needing `&mut self`, and pushed through the clone. `Producer` is an
+// `Arc<RingBuffer>` handle, so the clone shares the ring — and `CommandProducer`
+// is `Send + Sync`, so the trait advertised that concurrent use was fine.
+//
+// `RingBuffer` is SPSC. `push` is `tail.load(Relaxed)` -> `ptr::write(slot)` ->
+// `tail.store(Release)` with no synchronisation between them. Two threads reach
+// the same `tail`, both `ptr::write` the same slot — which does NOT drop what
+// was there, so one command is leaked rather than overwritten — and both store
+// `tail + 1`. One command vanishes, and it is a data race regardless.
+//
+// The correct multi-producer path is `LocalMpscCommandProducer` over
+// `MpscRingBuffer`, which is what `EngineBuilder::build` actually wires. Leaving
+// the SPSC impl available made the wrong thing compile and typecheck; use
+// `NonRtProducer::new(producer)` if you need a `Producer` behind a `&self` API
+// off the audio thread — it serialises on a `parking_lot::Mutex` and says so.
 
 impl nullherz_traits::CommandConsumer for Consumer<nullherz_traits::TimestampedCommand> {
     fn pop_command(&mut self) -> Option<nullherz_traits::TimestampedCommand> {

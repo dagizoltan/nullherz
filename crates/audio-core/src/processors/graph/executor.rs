@@ -92,7 +92,7 @@ impl GraphExecutor {
         pdc_lines: &mut crate::processors::graph::buffer_pool::PdcLines,
         pdc_write_pos: usize,
         faulted_states: &[std::sync::atomic::AtomicBool; crate::MAX_NODES],
-    ) {
+    ) -> bool {
         let stage = &topo.plan.stages[s_idx].0[..topo.plan.stage_counts[s_idx] as usize];
         // SAFETY: buffers_ptr and x_buffers_ptr are used to reconstruct disjoint slices in worker threads.
         // The topological scheduler (GraphCompiler) guarantees that no two nodes in the same stage
@@ -202,6 +202,13 @@ impl GraphExecutor {
             if let Some(tp) = pool_dyn.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
                 let num_workers = tp.worker_producers.len().min(64);
                 let mut wake_mask: u64 = 0;
+                // Jobs the worker ring refused. `wait_for_completion` waits for
+                // a COUNT, so a dropped job used to mean waiting for a
+                // completion that can never arrive: the RT thread parks on the
+                // eventfd forever and audio stops dead. Counting the refusals
+                // and lowering the target turns a full ring into one silent
+                // node for one block — a glitch instead of a hang.
+                let mut dropped = 0usize;
 
                 for &n_idx_u32 in stage {
                     let n_idx = n_idx_u32 as usize;
@@ -231,16 +238,26 @@ impl GraphExecutor {
                     worker_costs[worker_idx] += cost.max(100); // Minimum weight to prevent lopsidedness on zero-telemetry
 
                     let telemetry_ptr = &tp.worker_telemetry[worker_idx] as *const _ as *mut _;
-                    let _ = tp.worker_producers[worker_idx].push(build_job(n_idx, telemetry_ptr));
+                    if tp.worker_producers[worker_idx].push(build_job(n_idx, telemetry_ptr)).is_err() {
+                        // Ring full. The node does not run this block; its
+                        // output buffer keeps last block's contents. Do NOT
+                        // count it towards the completion target.
+                        dropped += 1;
+                        continue;
+                    }
                     wake_mask |= 1u64 << (worker_idx as u32 & 63);
                 }
 
                 tp.notify_workers_masked(wake_mask);
-                nullherz_traits::ParallelExecutor::wait_for_completion(tp, start_count + num_nodes);
+                nullherz_traits::ParallelExecutor::wait_for_completion(tp, start_count + num_nodes - dropped);
+                return true;
             } else {
                 // Generic ParallelExecutor: no assignment cache or per-worker
                 // telemetry storage; least-loaded placement, broadcast wake.
                 let num_workers = pool_dyn.num_workers().min(64);
+                // Same reasoning as the TaskPool path above: a refused job must
+                // not be waited for.
+                let mut dropped = 0usize;
                 for &n_idx_u32 in stage {
                     let n_idx = n_idx_u32 as usize;
                     let mut worker_idx = 0usize;
@@ -257,10 +274,12 @@ impl GraphExecutor {
                     worker_costs[worker_idx] += cost.max(100);
 
                     let job = build_job(n_idx, telemetry_node_times_cycles as *const _ as *mut _);
-                    unsafe { pool_dyn.push_job_raw(worker_idx, &job as *const _ as *const u8, std::mem::size_of::<Job>(), |_| {}); }
+                    let accepted = unsafe { pool_dyn.push_job_raw(worker_idx, &job as *const _ as *const u8, std::mem::size_of::<Job>(), |_| {}) };
+                    if !accepted { dropped += 1; }
                 }
                 pool_dyn.notify_workers();
-                pool_dyn.wait_for_completion(start_count + num_nodes);
+                pool_dyn.wait_for_completion(start_count + num_nodes - dropped);
+                return true;
             }
         } else {
             for &n_idx_u32 in stage {
@@ -397,5 +416,8 @@ impl GraphExecutor {
                 telemetry_node_times_cycles[n_idx].store(elapsed, Ordering::Relaxed);
             }
         }
+        // Serial path: nothing ran on a worker, so there is no worker-local
+        // telemetry to merge.
+        false
     }
 }

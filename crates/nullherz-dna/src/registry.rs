@@ -63,9 +63,35 @@ impl nullherz_traits::SampleRegistry for SampleRegistry {
         evicted
     }
 
+    /// Reclaim retired maps once no reader can be holding one.
+    ///
+    /// # The ordering here is the whole correctness argument
+    ///
+    /// Take the garbage lock FIRST, then check `readers`. It used to be the
+    /// other way round, and that is a use-after-free:
+    ///
+    /// 1. `drain_garbage` reads `readers == 0` and proceeds.
+    /// 2. A reader does `fetch_add` and loads `inner` — call it `ptr_X`.
+    /// 3. A writer replaces `inner` and pushes `ptr_X` onto the garbage list.
+    /// 4. `drain_garbage` finally takes the lock and frees `ptr_X`, which the
+    ///    reader from step 2 is still dereferencing.
+    ///
+    /// With the lock held first, a writer cannot push into the list while we
+    /// are draining it. So anything in the list at the moment we check was
+    /// retired BEFORE we took the lock — meaning any reader still holding it
+    /// must have incremented `readers` before that too, and we see a non-zero
+    /// count and bail. A reader arriving after the check can only observe the
+    /// CURRENT map, which is by construction not in the list.
+    ///
+    /// Coarse by design: a single global reader count means one active reader
+    /// defers all reclamation. That is the price of a hand-rolled quiescence
+    /// check. Retired maps hold `Arc` clones of every sample, so a registry
+    /// under continuous read pressure defers the memory too — if that ever
+    /// shows up in residency numbers, the answer is `arc-swap` or
+    /// `crossbeam-epoch` rather than a cleverer version of this.
     fn drain_garbage(&self) {
-        if self.readers.load(Ordering::SeqCst) > 0 { return; }
         let mut g = self.garbage.lock();
+        if self.readers.load(Ordering::SeqCst) > 0 { return; }
         for ptr in g.drain(..) {
             unsafe { drop(Box::from_raw(ptr)); }
         }

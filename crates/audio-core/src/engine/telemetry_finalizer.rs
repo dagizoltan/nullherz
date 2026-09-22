@@ -49,7 +49,8 @@ impl TelemetryFinalizer {
         fft_im: &mut audio_dsp::AlignedBuffer,
         transport: &nullherz_traits::Transport,
         spectral_cache: &mut SpectralTelemetryCache,
-    ) -> Telemetry {
+        flight_recorder: &mut Option<ipc_layer::Producer<crate::engine::TelemetryLogEntry>>,
+    ) {
         let mut node_times = [0u64; nullherz_traits::MAX_NODES];
         let mut node_peak_times = [0u64; nullherz_traits::MAX_NODES];
         let mut peak_levels = [0.0f32; nullherz_traits::MAX_NODES];
@@ -64,7 +65,12 @@ impl TelemetryFinalizer {
             &mut node_times
         );
 
-        for i in 0..64 {
+        // `MAX_NODES`, not a hardcoded 64. This loop was written when MAX_NODES
+        // WAS 64; after the raise to 128 every node above 63 reported a peak
+        // time of zero forever — including most of a 4-deck console once the
+        // per-band tap points were added, which is exactly the range you look
+        // at when hunting a spike.
+        for i in 0..nullherz_traits::MAX_NODES {
             let cycles = node_times_cycles[i];
             let peak_cycles = nullherz_traits::telemetry::TelemetryProcessor::update_peak(&metrics.node_peak_cycles[i], cycles);
             node_peak_times[i] = (peak_cycles as f64 * ns_per_cycle) as u64;
@@ -219,7 +225,25 @@ impl TelemetryFinalizer {
             hydration_pending: [0; 4],
             hydration_progress: [0.0; 4],
         };
+        // Both consumers are fed from the ONE stack value.
+        //
+        // `Telemetry` is 8,912 bytes and `Copy`. This function used to also
+        // RETURN it, and `AudioEngine::process` then pushed that returned copy
+        // into the flight recorder — so a single block's telemetry was copied
+        // three times (ring push, return, recorder push) instead of twice.
+        // ~9 KB of gratuitous memcpy per block at ~172 blocks/s, through an L1
+        // the DSP working set wants.
+        //
+        // The two ring pushes that remain are inherent to a by-value SPSC ring.
+        // Removing those needs a `push_with(|slot| ...)` on `Producer` so the
+        // value is constructed in place; that is an ipc-layer API change and is
+        // tracked separately.
+        if let Some(log_prod) = flight_recorder {
+            let _ = log_prod.push(crate::engine::TelemetryLogEntry {
+                telemetry,
+                timestamp_cycles: start_cycles,
+            });
+        }
         let _ = telemetry_producer.push_telemetry(telemetry);
-        telemetry
     }
 }
