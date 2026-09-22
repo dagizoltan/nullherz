@@ -216,6 +216,23 @@ impl<K: ProcessingKernel> AudioEngine<K> {
         }
     }
 
+    /// Attach a black-box recorder that captures `Telemetry` per block.
+    ///
+    /// **OFF by default, and you must drain it.** It was previously attached
+    /// unconditionally by `EngineBuilder::build` while nothing anywhere read the
+    /// consumer, which made it worse than useless in two ways:
+    ///
+    ///  * `Telemetry` is 8,912 bytes and `Copy`, so every block paid a full copy
+    ///    into the ring — on the audio thread, forever, for nobody.
+    ///  * The ring is 128 deep and an SPSC `Producer` REFUSES when full rather
+    ///    than overwriting. Undrained it fills in 128 blocks (0.74 s at 256/44.1k)
+    ///    and every push after that fails. So it held the FIRST three quarters of
+    ///    a second of a session and discarded the rest — the opposite of what a
+    ///    flight recorder is for, which is the moments before a fault.
+    ///
+    /// If you attach one, drain `EngineHandle::telemetry_log_consumer` from the
+    /// orchestration thread faster than blocks arrive, or you are recording the
+    /// wrong end of the session.
     pub fn with_flight_recorder(mut self, producer: ipc_layer::Producer<TelemetryLogEntry>) -> Self {
         self.telemetry_log_producer = Some(producer);
         self

@@ -124,7 +124,14 @@ impl<K: ProcessingKernel + 'static> EngineBuilder<K> {
             sample_registry,
             Arc::new(crate::rt_logging::RtLogger::new(256)),
             self.kernel,
-        ).with_flight_recorder(tel_log_prod);
+        );
+        // NOT `.with_flight_recorder(tel_log_prod)`. See that method: attaching
+        // it costs an 8,912-byte copy per block on the audio thread, and nothing
+        // in this workspace drains the consumer — so it recorded the first 0.74
+        // seconds of every session and then failed every push for the rest of it.
+        // The plumbing stays so a caller who wants it (and will drain it) can
+        // attach one; the default no longer pays for a recording nobody reads.
+        let _ = &tel_log_prod;
 
         let engine = Arc::new(engine);
 
