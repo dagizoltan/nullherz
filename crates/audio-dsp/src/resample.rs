@@ -10,9 +10,9 @@
 //!
 //! | source | Catmull-Rom | this kernel |
 //! | ---: | ---: | ---: |
-//! | 997 Hz | -91.8 dB | -94.9 dB |
-//! | 5 kHz | -48.9 dB | -95.0 dB |
-//! | 10 kHz | **-29.0 dB** | **-92.8 dB** |
+//! | 997 Hz | -91.8 dB | **-128.2 dB** |
+//! | 5 kHz | -48.9 dB | **-132.8 dB** |
+//! | 10 kHz | **-29.0 dB** | **-132.2 dB** |
 //!
 //! The audible threshold on music is ~0.1% (-60 dB), so the cubic was 31 dB past
 //! it at 10 kHz. **No polynomial kernel fixes this**: 6-point Lagrange reaches
@@ -34,23 +34,64 @@
 //! is exactly the anti-alias low-pass that decimation needs. That is the
 //! argument for this family that the THD numbers alone do not make.
 //!
-//! # Why 16 taps
+//! # Why 16 taps — and why that was never the interesting question
 //!
-//! Measured knee of the cost/quality curve (`probe_resampler_candidates`),
-//! ns per output sample in a scalar reference implementation:
+//! The original sweep (`probe_resampler_candidates`) measured the tap curve and
+//! found something odd at the end of it:
 //!
 //! | taps | 10 kHz THD+N | cost |
 //! | ---: | ---: | ---: |
 //! | 8 | -73.6 dB | 104 ns |
 //! | **16** | **-92.8 dB** | **196 ns** |
 //! | 32 | -101.2 dB | 356 ns |
-//! | 64 | -99.1 dB | 675 ns |
+//! | 64 | **-99.1 dB** | 675 ns |
 //!
-//! 16 taps buys 19 dB over 8 for 92 ns. 32 buys a further 8 dB for 160 ns more,
-//! on the hottest node in the graph. 64 is WORSE than 32 — past that point the
-//! table's own linear interpolation between entries becomes the floor, so wider
-//! kernels stop helping and only cost. -92.8 dB is 33 dB below the audible
-//! threshold and comparable to good converter hardware.
+//! 64 taps being WORSE than 32 is the whole story: the kernel had stopped being
+//! the binding constraint. THREE limits sat on top of each other near -100 dB —
+//! the table's LINEAR interpolation between entries, the Kaiser window's
+//! sidelobes at `BETA = 9.0`, and (further down, not yet binding) f32
+//! accumulation. Raising any one alone bought nothing, which is why "more taps"
+//! looked like a dead end when it was really a blocked one.
+//!
+//! `probe_resampler_ceiling` sweeps them together, at the ratio a tempo-synced
+//! deck actually runs:
+//!
+//! | config | 997 Hz | 10 kHz | table | ns/sample |
+//! | :--- | ---: | ---: | ---: | ---: |
+//! | 16t, b9.0, linear (was) | -94.9 | -92.8 | 8.1 KB | 220 |
+//! | 16t, b9.0, **cubic** | -96.8 | -93.1 | 8.1 KB | 331 |
+//! | 32t, b14, **linear** | -98.6 | -102.2 | 16.1 KB | 425 |
+//! | **16t, b14, cubic (now)** | **-132.0** | **-132.2** | **8.1 KB** | **327** |
+//! | 24t, b14, cubic | -132.8 | -133.9 | 12.1 KB | 481 |
+//! | 32t, b14, cubic | -132.6 | -133.5 | 16.1 KB | 627 |
+//! | 32t, b14, linear, RES 512 | -122.5 | -124.2 | 64.1 KB | 422 |
+//!
+//! Three things follow, and the first two are the reason this is not a wider
+//! kernel:
+//!
+//! * **Taps still buy nothing past 16.** 24 and 32 land within 2 dB of 16, and
+//!   the analyser floor is -135 dB, so that is measurement noise bought at 1.5x
+//!   to 2x the cost and the table.
+//! * **Raising `RES` is the expensive door and it is worse.** An earlier note
+//!   here named it as the prerequisite for more taps. It is — for LINEAR
+//!   interpolation. RES 512 measures -124 dB with a 64 KB table, twice this
+//!   machine's L1d, which evicts the audio the table shares the cache with. On
+//!   an RT thread that trades a better mean for a worse TAIL, and the tail is
+//!   the only number that decides whether a block lands.
+//! * **Raising the interpolation ORDER costs four floats of table.** Linear
+//!   error falls as `h^2`, cubic as `h^4`. And on the polyphase fast path it is
+//!   unusually cheap: the interpolation weight is SHARED by all sixteen taps, so
+//!   it costs four coefficient rows instead of two — never four times the work.
+//!
+//! **f32 accumulation is not the next floor**: measured against an f64
+//! accumulator the same kernels differ by at most 0.9 dB, so the SIMD path gives
+//! up nothing and no f64 inner product is needed.
+//!
+//! -132 dB is 2.5 dB off what the analyser can resolve, roughly 40 dB below
+//! 16-bit's dithered noise floor, and past the point where repeated resampling
+//! across a project accumulates anything audible. That last property is why this
+//! is worth 1.5x on the hottest node: a deck plays material once, a studio
+//! resamples the same material many times.
 
 use std::sync::OnceLock;
 
@@ -67,10 +108,25 @@ const RES: usize = 128;
 /// WORSE, because the transition has to go somewhere.
 const FC: f64 = 0.90;
 
-/// Kaiser shape parameter. ~9.0 gives sidelobes around -100 dB, which is where
-/// the 16-tap kernel's own limit sits; more window suppression would only trade
-/// stopband for a wider transition.
-const BETA: f64 = 9.0;
+/// Kaiser shape parameter.
+///
+/// Was 9.0, whose ~-100 dB sidelobes were one of THREE limits stacked at the
+/// same level — the others being the table's linear interpolation and, further
+/// down, f32 accumulation. Raising any one alone bought nothing, which is
+/// exactly why the old tap sweep found 64 taps WORSE than 32: the kernel had
+/// stopped being the binding constraint.
+///
+/// 14.0 puts sidelobes near -140 dB, and paired with cubic table interpolation
+/// (see `at`) it moves measured THD+N from -92.8 dB to -132 dB at 10 kHz with
+/// NO change in table footprint. Measured by `probe_resampler_ceiling`.
+const BETA: f64 = 14.0;
+
+/// Index of table entry `j == 0` inside `h`.
+///
+/// `h` carries one entry BEFORE the kernel's support and two after, so cubic
+/// interpolation can read `[i-1, i+2]` at every valid position without a bounds
+/// branch in the inner loop. Costs 3 floats.
+const H_OFF: usize = 1;
 
 /// Largest stretch the anti-alias low-pass is applied at.
 ///
@@ -122,11 +178,13 @@ pub struct SincTable {
 impl SincTable {
     fn build() -> Self {
         let half = TAPS as f64 / 2.0;
-        let n = TAPS * RES + 1;
+        // One entry before the support and two after, so cubic interpolation
+        // reads [i-1, i+2] everywhere without a branch. See `H_OFF`.
+        let n = TAPS * RES + 3;
         let mut h = Vec::with_capacity(n);
         let i0_beta = bessel_i0(BETA);
         for i in 0..n {
-            let u = -half + i as f64 / RES as f64;
+            let u = -half + (i as f64 - H_OFF as f64) / RES as f64;
             let a = std::f64::consts::PI * FC * u;
             let sinc = if a.abs() < 1e-12 { 1.0 } else { a.sin() / a };
             let r = (u / half).clamp(-1.0, 1.0);
@@ -136,33 +194,72 @@ impl SincTable {
 
         // Phase-major, tap-reversed transpose of `h`. Built once, off the audio
         // thread (see `prewarm`).
-        let mut polyr = vec![0.0f32; (RES + 1) * TAPS];
-        for p in 0..=RES {
+        //
+        // Rows now run from phase -1 to RES+1 rather than 0 to RES, stored at
+        // row index `p + 1`, so the cubic blend can reach `p - 1` and `p + 2`.
+        // That is two extra rows: 8,384 bytes against 8,256, which changes
+        // nothing about fitting in L1 beside the audio — and NOT fitting is the
+        // whole reason this is 16 taps at RES 128 rather than something wider.
+        let mut polyr = vec![0.0f32; (RES + 3) * TAPS];
+        for pi in 0..RES + 3 {
+            let p = pi as isize - 1; // phase, -1 ..= RES + 1
             for m in 0..TAPS {
-                polyr[p * TAPS + m] = h[(TAPS - 1 - m) * RES + p];
+                let j = (TAPS - 1 - m) as isize * RES as isize + p + H_OFF as isize;
+                debug_assert!(j >= 0 && (j as usize) < h.len());
+                polyr[pi * TAPS + m] = h[j as usize];
             }
         }
 
         Self { h, polyr }
     }
 
-    /// Kernel value at `u`, linearly interpolated between table entries.
+    /// Catmull-Rom basis weights for a fraction `f` between table entries.
     ///
-    /// MEASURED: `i = pos as usize; f = pos - i as f32` beats the apparently
-    /// cheaper `floor()` here. Replacing the int round trip with one `roundss`
-    /// made the stretched path 40% SLOWER (150 -> 214 ns/sample) — `as usize`
-    /// on a known-positive f32 is a single `cvttss2si`, while `floor()` adds a
-    /// `roundss` in front of the same conversion. Left as it is on purpose.
+    /// Shared by both paths so they cannot drift: the fast path applies these to
+    /// four coefficient ROWS, the general path to four adjacent entries.
+    #[inline(always)]
+    fn cr_weights(f: f32) -> [f32; 4] {
+        let f2 = f * f;
+        let f3 = f2 * f;
+        [
+            -0.5 * f3 + f2 - 0.5 * f,
+            1.5 * f3 - 2.5 * f2 + 1.0,
+            -1.5 * f3 + 2.0 * f2 + 0.5 * f,
+            0.5 * f3 - 0.5 * f2,
+        ]
+    }
+
+    /// Kernel value at `u`, CUBICALLY interpolated between table entries.
+    ///
+    /// Was linear, and that was the binding limit on the whole resampler — not
+    /// the tap count. Linear interpolation error falls as `h^2` and at
+    /// `RES = 128` it floors the kernel around -101 dB, which is why the
+    /// original sweep saw 32 taps beat 64 and concluded wider kernels stop
+    /// helping. They stop helping because this function was the floor.
+    ///
+    /// The module's own note suggested raising `RES` as the prerequisite. That
+    /// works and is the expensive door: `RES` 512 measured -124 dB with a 64 KB
+    /// table — 2x L1, evicting the audio it shares the cache with, which trades
+    /// a better mean for a worse TAIL. Raising the interpolation ORDER instead
+    /// costs four floats of table and no cache at all, and measures -132 dB.
+    ///
+    /// MEASURED, and still true: `i = pos as usize; f = pos - i as f32` beats
+    /// the apparently cheaper `floor()`. Replacing the int round trip with one
+    /// `roundss` made the stretched path 40% SLOWER (150 -> 214 ns/sample) —
+    /// `as usize` on a known-positive f32 is a single `cvttss2si`, while
+    /// `floor()` adds a `roundss` in front of the same conversion.
     #[inline(always)]
     fn at(&self, u: f32) -> f32 {
         let pos = (u + TAPS as f32 * 0.5) * RES as f32;
         if pos < 0.0 { return 0.0; }
         let i = pos as usize;
-        // `h` carries one extra entry so `i + 1` is in range for every valid pos.
-        if i + 1 >= self.h.len() { return 0.0; }
+        // `h` carries H_OFF entries before the support and two after, so
+        // [i-1 .. i+2] in kernel indexing is [i .. i+3] in storage and is in
+        // range for every valid pos. This is the only bounds check.
+        if i + 3 >= self.h.len() { return 0.0; }
         let f = pos - i as f32;
-        let a = self.h[i];
-        a + (self.h[i + 1] - a) * f
+        let w = Self::cr_weights(f);
+        w[0] * self.h[i] + w[1] * self.h[i + 1] + w[2] * self.h[i + 2] + w[3] * self.h[i + 3]
     }
 
     /// Unit-stretch inner product: 16 contiguous taps, one shared weight.
@@ -176,22 +273,37 @@ impl SincTable {
     fn dot_unit(&self, buf: &[f32], ti: usize, p: usize, f: f32) -> f32 {
         use wide::f32x8;
 
-        let c0 = &self.polyr[p * TAPS..p * TAPS + TAPS];
-        let c1 = &self.polyr[(p + 1) * TAPS..(p + 1) * TAPS + TAPS];
+        // Rows are stored at index `phase + 1`, so phase `p` needs storage rows
+        // p, p+1, p+2, p+3 — which ARE phases p-1, p, p+1, p+2. The table is
+        // built with the extra rows at both ends precisely so this needs no
+        // bounds handling; see `build`.
+        let r = |k: usize| &self.polyr[(p + k) * TAPS..(p + k) * TAPS + TAPS];
+        let (cm1, c0, c1, c2) = (r(0), r(1), r(2), r(3));
         let x = &buf[ti - (TAPS / 2 - 1)..ti + TAPS / 2 + 1];
 
-        let vf = f32x8::splat(f);
+        // Four scalars, computed ONCE per output sample rather than per lane —
+        // this is what makes cubic affordable here. The interpolation weight is
+        // shared by all sixteen taps (that is the property the whole polyphase
+        // layout rests on), so raising the order costs four coefficient loads
+        // instead of two and four FMAs instead of one, on data already in L1.
+        let w = Self::cr_weights(f);
+        let (w0, w1, w2, w3) = (
+            f32x8::splat(w[0]), f32x8::splat(w[1]),
+            f32x8::splat(w[2]), f32x8::splat(w[3]),
+        );
+
         let mut acc = f32x8::ZERO;
         // Two halves of the 16-tap window. `wide` lowers these to one AVX
         // register each when the AVX2 instantiation is selected, and to a pair
         // of SSE2 registers otherwise — same result either way.
         for half in 0..2 {
             let o = half * 8;
-            let a = f32x8::new([c0[o], c0[o+1], c0[o+2], c0[o+3], c0[o+4], c0[o+5], c0[o+6], c0[o+7]]);
-            let b = f32x8::new([c1[o], c1[o+1], c1[o+2], c1[o+3], c1[o+4], c1[o+5], c1[o+6], c1[o+7]]);
+            let a = f32x8::new([cm1[o], cm1[o+1], cm1[o+2], cm1[o+3], cm1[o+4], cm1[o+5], cm1[o+6], cm1[o+7]]);
+            let b = f32x8::new([c0[o], c0[o+1], c0[o+2], c0[o+3], c0[o+4], c0[o+5], c0[o+6], c0[o+7]]);
+            let c = f32x8::new([c1[o], c1[o+1], c1[o+2], c1[o+3], c1[o+4], c1[o+5], c1[o+6], c1[o+7]]);
+            let d = f32x8::new([c2[o], c2[o+1], c2[o+2], c2[o+3], c2[o+4], c2[o+5], c2[o+6], c2[o+7]]);
             let s = f32x8::new([x[o], x[o+1], x[o+2], x[o+3], x[o+4], x[o+5], x[o+6], x[o+7]]);
-            // lerp(a, b, f) * sample
-            acc += (a + (b - a) * vf) * s;
+            acc += (a * w0 + b * w1 + c * w2 + d * w3) * s;
         }
         acc.reduce_add()
     }
@@ -229,6 +341,9 @@ impl SincTable {
         }
         let pos = d * RES as f32;
         let p = pos as usize;
+        // Storage rows are 0..=RES+2 and the blend reads p..p+3, so p <= RES-1
+        // is exactly the admissible range — the same bound the linear version
+        // needed, for a different reason.
         if p >= RES {
             // d rounded up to the last phase; let the general path handle the
             // boundary rather than reading past `polyr`.

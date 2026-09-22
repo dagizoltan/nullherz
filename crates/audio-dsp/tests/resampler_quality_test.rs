@@ -66,21 +66,36 @@ fn resample(freq: f32, rate: f32, interp: Option<InterpolationType>) -> Vec<f32>
 /// frequency.
 ///
 /// The old Catmull-Rom cubic measured -29.0 dB here at 10 kHz — 3.56%, which is
-/// 35x past the ~0.1% audible threshold on music. The threshold is set at
-/// -70 dB: 23 dB of margin over the sinc kernel's measured -92.8 dB, and it
-/// fails the cubic by 41 dB.
+/// 35x past the ~0.1% audible threshold on music.
+///
+/// The limit is -115 dB, and the reasoning changed when the kernel did. It used
+/// to be -70 dB: ample against a cubic at -29, and 23 dB of slack over the sinc
+/// at -92.8. The kernel now measures **-128 to -132 dB** (BETA 14 plus cubic
+/// table interpolation), which left the old threshold 60 dB of slack — enough to
+/// sleep through a total regression to linear interpolation and never fail.
+///
+/// -115 dB keeps ~15 dB of headroom over the measured figure for machine and
+/// FFT variation, while failing the PREVIOUS kernel by 22 dB and the cubic by
+/// 86. The analyser's own floor is about -135 dB, so this is roughly as tight as
+/// it can be made without testing the measurement instead of the kernel.
+///
+/// Audibility is no longer the reason for the number — a deck plays material
+/// once and -93 dB was already inaudible. A studio resamples the same material
+/// repeatedly, and what this guards is that the error stays far enough down to
+/// survive being accumulated.
 #[test]
 fn test_resampling_is_bandlimited_at_every_frequency() {
     for freq in [997.0f32, 5_000.0, 10_000.0] {
         let out = resample(freq, TEMPO_RATE, None);
         let t = thd_n(&out, freq * TEMPO_RATE, SR, FFT);
         assert!(
-            db(t) < -70.0,
+            db(t) < -115.0,
             "resampling a {freq} Hz tone at {TEMPO_RATE} measures {:.4}% THD+N \
-             ({:.1} dB), past the -70 dB limit. Interpolation error grows with \
+             ({:.1} dB), past the -115 dB limit. Interpolation error grows with \
              how much of the band the signal occupies, so check the HIGH \
-             frequencies first — a kernel can look perfect at 997 Hz and be \
-             35x past the audible threshold at 10 kHz.",
+             frequencies first. If every frequency regressed together by ~40 dB, \
+             suspect BETA or the table interpolation order in resample.rs rather \
+             than the tap count — those are what put this kernel where it is.",
             t * 100.0, db(t)
         );
     }
