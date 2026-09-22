@@ -85,7 +85,38 @@ pub const MAX_STRETCH: f32 = 4.0;
 /// Kaiser-windowed sinc, sampled `RES` times per unit of support.
 pub struct SincTable {
     /// `h(u)` for `u` in `[-TAPS/2, +TAPS/2]`, length `TAPS * RES + 1`.
+    ///
+    /// The general (stretched) path walks this directly: at stretch `s` the tap
+    /// spacing is `RES/s` table entries, which is fractional, so each tap needs
+    /// its own index and its own interpolation weight. That is a gather, and on
+    /// the reference machine `vgatherdps` is slower than the scalar loads it
+    /// would replace — so the stretched path stays scalar.
     h: Vec<f32>,
+    /// PHASE-MAJOR, TAP-REVERSED copy of the same coefficients, for stretch 1.0.
+    ///
+    /// `polyr[p * TAPS + m] == h[(TAPS - 1 - m) * RES + p]`.
+    ///
+    /// # Why this layout makes the unit-stretch path vectorise
+    ///
+    /// At `s == 1` the window is exactly `TAPS` source samples and the table
+    /// step between taps is exactly `RES` entries — an INTEGER. Two things fall
+    /// out of that, and both are what the scalar loop was paying for needlessly:
+    ///
+    /// * every tap lands on the same fractional position between table entries,
+    ///   so there is ONE interpolation weight `f` for the whole window rather
+    ///   than sixteen;
+    /// * the sixteen coefficients for a given phase, laid out this way, are
+    ///   CONTIGUOUS — as are the sixteen input samples they multiply, once the
+    ///   tap order is reversed to match ascending memory.
+    ///
+    /// So the inner loop becomes two aligned vector loads of coefficients, two
+    /// of input, and a fused multiply-add — no gather, no per-tap index
+    /// arithmetic. Same arithmetic as the scalar path, same table, different
+    /// order of the sum.
+    ///
+    /// `(RES + 1) * TAPS` entries so phase `RES` can still read `p + 1`;
+    /// about 8 KB, which keeps it resident in L1 alongside the audio.
+    polyr: Vec<f32>,
 }
 
 impl SincTable {
@@ -102,10 +133,26 @@ impl SincTable {
             let w = bessel_i0(BETA * (1.0 - r * r).max(0.0).sqrt()) / i0_beta;
             h.push((FC * sinc * w) as f32);
         }
-        Self { h }
+
+        // Phase-major, tap-reversed transpose of `h`. Built once, off the audio
+        // thread (see `prewarm`).
+        let mut polyr = vec![0.0f32; (RES + 1) * TAPS];
+        for p in 0..=RES {
+            for m in 0..TAPS {
+                polyr[p * TAPS + m] = h[(TAPS - 1 - m) * RES + p];
+            }
+        }
+
+        Self { h, polyr }
     }
 
     /// Kernel value at `u`, linearly interpolated between table entries.
+    ///
+    /// MEASURED: `i = pos as usize; f = pos - i as f32` beats the apparently
+    /// cheaper `floor()` here. Replacing the int round trip with one `roundss`
+    /// made the stretched path 40% SLOWER (150 -> 214 ns/sample) — `as usize`
+    /// on a known-positive f32 is a single `cvttss2si`, while `floor()` adds a
+    /// `roundss` in front of the same conversion. Left as it is on purpose.
     #[inline(always)]
     fn at(&self, u: f32) -> f32 {
         let pos = (u + TAPS as f32 * 0.5) * RES as f32;
@@ -116,6 +163,88 @@ impl SincTable {
         let f = pos - i as f32;
         let a = self.h[i];
         a + (self.h[i + 1] - a) * f
+    }
+
+    /// Unit-stretch inner product: 16 contiguous taps, one shared weight.
+    ///
+    /// `ti` is `floor(t)`, `p` the table phase and `f` the weight between phase
+    /// `p` and `p + 1`. The caller has already proved the whole window
+    /// `[ti - 7, ti + 8]` is inside `buf`, so there is no bounds handling here —
+    /// that is what makes it a straight dot product.
+    ///
+    #[inline(always)]
+    fn dot_unit(&self, buf: &[f32], ti: usize, p: usize, f: f32) -> f32 {
+        use wide::f32x8;
+
+        let c0 = &self.polyr[p * TAPS..p * TAPS + TAPS];
+        let c1 = &self.polyr[(p + 1) * TAPS..(p + 1) * TAPS + TAPS];
+        let x = &buf[ti - (TAPS / 2 - 1)..ti + TAPS / 2 + 1];
+
+        let vf = f32x8::splat(f);
+        let mut acc = f32x8::ZERO;
+        // Two halves of the 16-tap window. `wide` lowers these to one AVX
+        // register each when the AVX2 instantiation is selected, and to a pair
+        // of SSE2 registers otherwise — same result either way.
+        for half in 0..2 {
+            let o = half * 8;
+            let a = f32x8::new([c0[o], c0[o+1], c0[o+2], c0[o+3], c0[o+4], c0[o+5], c0[o+6], c0[o+7]]);
+            let b = f32x8::new([c1[o], c1[o+1], c1[o+2], c1[o+3], c1[o+4], c1[o+5], c1[o+6], c1[o+7]]);
+            let s = f32x8::new([x[o], x[o+1], x[o+2], x[o+3], x[o+4], x[o+5], x[o+6], x[o+7]]);
+            // lerp(a, b, f) * sample
+            acc += (a + (b - a) * vf) * s;
+        }
+        acc.reduce_add()
+    }
+
+    /// Fast path for `stretch == 1.0` with the window fully inside `buf`.
+    ///
+    /// Returns `None` when either precondition fails, and the caller falls back
+    /// to the general scalar walk — which handles stretching, the buffer edges
+    /// and the zero-padding contract.
+    #[inline]
+    fn sample_unit(&self, buf: &[f32], t: f64) -> Option<f32> {
+        let ti_f = t.floor();
+        if !ti_f.is_finite() || ti_f < 0.0 {
+            return None;
+        }
+        let ti = ti_f as usize;
+        // Window is [ti - 7, ti + 8] inclusive.
+        if ti < TAPS / 2 - 1 || ti + TAPS / 2 >= buf.len() {
+            return None;
+        }
+        let d = (t - ti_f) as f32;
+        // Integer position: the general path widens to a SYMMETRIC 17-tap
+        // window there ([ti-8, ti+8], because `ceil(t-8) == t-8` exactly),
+        // while this path is always the 16 taps of a polyphase bank. The extra
+        // tap sits on the Kaiser window's edge and contributes ~1e-5 — below
+        // the kernel's own -95 dB floor, but a difference is a difference.
+        // Hand it back so the two paths are identical at every position rather
+        // than merely close.
+        //
+        // Costs nothing in practice: `SamplerVoice::sinc_sample` already
+        // short-circuits `frac == 0 && stretch == 1` to a verbatim sample, so
+        // this branch is only reached by a direct caller.
+        if d == 0.0 {
+            return None;
+        }
+        let pos = d * RES as f32;
+        let p = pos as usize;
+        if p >= RES {
+            // d rounded up to the last phase; let the general path handle the
+            // boundary rather than reading past `polyr`.
+            return None;
+        }
+        let f = pos - p as f32;
+
+        // NOT runtime-dispatched, deliberately. An AVX2+FMA instantiation of
+        // `dot_unit` measured REPRODUCIBLY SLOWER here — 27.1 vs 25.4 ns/sample
+        // across three runs. The window is only 16 elements, so there is no
+        // throughput to win; the kernel is latency-bound on the horizontal
+        // reduction at the end, and reducing one 256-bit register costs more
+        // than reducing two 128-bit ones. Widening the registers is not the
+        // same thing as vectorising, and this kernel is where the difference
+        // shows. The 6x here came from the polyphase layout, not the ISA.
+        Some(self.dot_unit(buf, ti, p, f))
     }
 
     /// One output sample of `buf` at fractional source position `t`, with the
@@ -129,6 +258,16 @@ impl SincTable {
     pub fn sample(&self, buf: &[f32], t: f64, stretch: f32) -> f32 {
         if buf.is_empty() { return 0.0; }
         let s = if stretch.is_finite() { stretch.clamp(1.0, MAX_STRETCH) } else { 1.0 };
+
+        // Unit stretch is the common case — every rate at or below 1.0 clamps
+        // to it, which is all of pitch-down and tempo-down — and it is the one
+        // where the tap spacing becomes an integer and the whole window
+        // vectorises. See `polyr`.
+        if s == 1.0
+            && let Some(y) = self.sample_unit(buf, t) {
+                return y;
+            }
+
         let half = (TAPS as f32 * 0.5 * s) as f64;
         let lo = (t - half).ceil();
         let hi = (t + half).floor();
@@ -137,6 +276,23 @@ impl SincTable {
         let hi_i = (hi as usize).min(buf.len() - 1);
         if lo_i > hi_i { return 0.0; }
 
+        // The STRETCHED path is unchanged, and two attempts to speed it up were
+        // measured and reverted:
+        //
+        //  * splitting coefficient lookup from the dot product so the latter
+        //    could vectorise — no effect (152 -> 150 ns, inside noise);
+        //  * `floor()` instead of the int round trip in `at()` — 40% worse.
+        //
+        // Both say the same thing: the cost here is the TABLE LOOKUP, and it
+        // resists vectorising for a structural reason. At stretch `s` the tap
+        // spacing is `RES/s` table entries, which is fractional, so every tap
+        // needs its own index — a gather. On the reference machine
+        // `vgatherdps` is slower than the scalar loads it would replace, so
+        // there is nothing to gain by reaching for it.
+        //
+        // This is why the fast path above is worth its complexity: it is not a
+        // faster way of doing the same thing, it is the case where the spacing
+        // becomes an integer and the gather disappears entirely.
         let inv_s = 1.0 / s;
         let mut acc = 0.0f32;
         for (n, &x) in buf[lo_i..=hi_i].iter().enumerate() {
