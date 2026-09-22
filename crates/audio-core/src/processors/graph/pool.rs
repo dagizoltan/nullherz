@@ -125,7 +125,9 @@ fn run_job(job: &Job, pdc_scratch: &mut [[f32; ipc_layer::MAX_BLOCK_SIZE]; crate
 
     if !job.pdc_lines_ptr.is_null() {
         let pdc_lines = unsafe { &mut *job.pdc_lines_ptr };
-        for i in 0..input_count {
+        // Same combined slot space as the serial executor — see the note there.
+        let pdc_slots = (input_count + sidechain_count).min(crate::MAX_CHANNELS);
+        for i in 0..pdc_slots {
             let delay_f = job.input_delays[i];
             if delay_f > 0.0 && delay_f < (crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES as f32 - 4.0) {
                 let input = node_inputs_storage[i];
@@ -146,7 +148,7 @@ fn run_job(job: &Job, pdc_scratch: &mut [[f32; ipc_layer::MAX_BLOCK_SIZE]; crate
                 }
             }
         }
-        for i in 0..input_count {
+        for i in 0..pdc_slots {
             // Same condition as the write pass and the serial executor: a
             // purely FRACTIONAL delay (0 < d < 1) must swap the input too —
             // `as usize` truncation used to drop it on this path only.

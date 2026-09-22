@@ -1,4 +1,4 @@
-use nullherz_traits::MAX_NODES;
+use nullherz_traits::{MAX_NODES, MAX_CHANNELS};
 pub use nullherz_traits::{CompiledGraphPlan, GraphTopology};
 use nullherz_traits::error::AudioError;
 
@@ -23,6 +23,23 @@ impl GraphCompiler {
         let mut plan = CompiledGraphPlan::default();
         let n = topo.node_count;
         if n == 0 { return Ok(plan); }
+
+        // A node's inputs and sidechains share one slot space: they occupy
+        // consecutive entries of `node_inputs_storage`, of `input_delays`, and
+        // of the PDC ring's per-node rows, all of which are `MAX_CHANNELS` wide.
+        // Exceeding it would silently drop the delay compensation for the
+        // overflowing slots (and, in the executor, read past the scratch rows).
+        // Fail the compile instead; it runs off-thread, so refusing is free.
+        for i in 0..n.min(MAX_NODES) {
+            let r = &topo.routing[i];
+            let combined = r.input_count + r.sidechain_count;
+            if combined > MAX_CHANNELS {
+                return Err(AudioError::ConfigurationError(format!(
+                    "node {} has {} inputs + {} sidechains = {} slots, over MAX_CHANNELS ({})",
+                    i, r.input_count, r.sidechain_count, combined, MAX_CHANNELS
+                )));
+            }
+        }
 
         // Refuse out-of-range buffer indices instead of %-wrapping them below:
         // a wrapped index aliases another edge's buffer and corrupts audio
@@ -308,15 +325,31 @@ impl GraphCompiler {
             }
         }
 
+        // `input_delays` is indexed by COMBINED SLOT: inputs first, then
+        // sidechains — the same order `node_inputs_storage` uses in the executor
+        // and the worker pool, so slot `k` there is slot `k` here.
+        //
+        // Sidechains were previously left uncompensated: `read_edges` made them
+        // scheduling dependencies (so the producer runs first), but a sidechain
+        // arriving from a deeper path still arrived EARLY relative to the node's
+        // audio input. For a ducking compressor that means the gain reduction
+        // leads the signal it is supposed to be keyed to, by the path-latency
+        // difference. Indexing by combined slot gets them compensated without a
+        // parallel array, a second `PdcLines` bank, or a change to the
+        // serialized plan — the executor's PDC ring already has `MAX_CHANNELS`
+        // rows per node, which is exactly the combined budget asserted above.
         for v in 0..n {
             let routing_v = &topo.routing[v];
             let max_v_path_lat = path_latencies[v];
-            for i in 0..routing_v.input_count {
-                let v_buf = routing_v.input_indices[i].index();
+            let inputs = routing_v.input_indices.iter().take(routing_v.input_count.min(MAX_CHANNELS));
+            let sidechains = routing_v.sidechain_indices.iter().take(routing_v.sidechain_count.min(MAX_CHANNELS));
+            for (slot, v_buf_id) in inputs.chain(sidechains).enumerate() {
+                if slot >= MAX_CHANNELS { break; }
+                let v_buf = v_buf_id.index();
                 if let Some(u) = v_to_producer[v_buf] {
                     let u_path_lat = path_latencies[u] + plan.node_latencies[u];
                     if max_v_path_lat > u_path_lat {
-                        plan.input_delays[v].0[i] = (max_v_path_lat - u_path_lat) as f32;
+                        plan.input_delays[v].0[slot] = (max_v_path_lat - u_path_lat) as f32;
                     }
                 }
             }
@@ -686,6 +719,108 @@ mod tests {
         let err = GraphCompiler::verify_stage_ids_in_range(&plan)
             .expect_err("an id of exactly MAX_NODES is out of range");
         assert!(err.to_string().contains("out of range"), "got: {err}");
+    }
+
+    /// A sidechain from a DEEPER path must be delay-compensated like an input.
+    ///
+    /// Scheduling it after its producer (the test above) is only half the job: a
+    /// sidechain arriving from a shorter path still arrives EARLY relative to the
+    /// node's audio input, by the path-latency difference. For a ducking
+    /// compressor that means the gain reduction leads the signal it is keyed to.
+    ///
+    /// `input_delays` is indexed by COMBINED slot — inputs, then sidechains — so
+    /// the sidechain's compensation lands at slot `input_count + k`.
+    #[test]
+    fn test_sidechain_gets_delay_compensation() {
+        let mut v2p = [BufferId(0); nullherz_traits::MAX_BUFFERS];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = BufferId(i as u32); }
+        let mut topo = GraphTopology {
+            routing: [NodeRouting {
+                input_indices: [BufferId(0); 16],
+                output_indices: [BufferId(0); 16],
+                sidechain_indices: [BufferId(0); 16],
+                input_count: 0,
+                output_count: 0,
+                sidechain_count: 0,
+                input_delays: [0.0; 16],
+            }; MAX_NODES],
+            virtual_to_physical: v2p,
+            plan: CompiledGraphPlan::default(),
+            crossfades: [None; 8],
+            node_count: 4,
+            node_assignments: [nullherz_traits::NodeAssignment([0; 32]); MAX_NODES],
+            node_positions: [None; MAX_NODES],
+            bypass_states: [false; MAX_NODES],
+        };
+
+        // Node 0: a LATENT source (an FFT insert, say) -> buffer 10.
+        topo.routing[0].output_indices[0] = BufferId(10);
+        topo.routing[0].output_count = 1;
+        topo.plan.node_latencies[0] = 512;
+
+        // Node 1: zero-latency source -> buffer 11. This is the key signal.
+        topo.routing[1].output_indices[0] = BufferId(11);
+        topo.routing[1].output_count = 1;
+
+        // Node 2: the compressor. Audio input from the LATENT node 0, sidechain
+        // key from the instant node 1. The key therefore arrives 512 samples
+        // early and must be delayed to match.
+        topo.routing[2].input_indices[0] = BufferId(10);
+        topo.routing[2].input_count = 1;
+        topo.routing[2].sidechain_indices[0] = BufferId(11);
+        topo.routing[2].sidechain_count = 1;
+        topo.routing[2].output_indices[0] = BufferId(12);
+        topo.routing[2].output_count = 1;
+
+        // Node 3 consumes it, so node 2 is not a leaf.
+        topo.routing[3].input_indices[0] = BufferId(12);
+        topo.routing[3].input_count = 1;
+        topo.routing[3].output_indices[0] = BufferId(13);
+        topo.routing[3].output_count = 1;
+
+        let plan = GraphCompiler::compile(&topo).expect("compile");
+
+        // Slot 0 is the audio input (from the latent path — already aligned, so
+        // no delay). Slot 1 is the sidechain, which must be pushed back by the
+        // 512 samples node 0 introduces.
+        let sidechain_slot = topo.routing[2].input_count; // == 1
+        assert_eq!(
+            plan.input_delays[2].0[sidechain_slot], 512.0,
+            "the sidechain key was not delay-compensated: slot delays are {:?}",
+            &plan.input_delays[2].0[..4]
+        );
+    }
+
+    /// Inputs and sidechains share one `MAX_CHANNELS`-wide slot space. Going
+    /// over it would silently drop compensation for the overflow, so the compile
+    /// must refuse rather than truncate.
+    #[test]
+    fn test_combined_slot_overflow_is_rejected() {
+        let mut v2p = [BufferId(0); nullherz_traits::MAX_BUFFERS];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = BufferId(i as u32); }
+        let mut topo = GraphTopology {
+            routing: [NodeRouting {
+                input_indices: [BufferId(0); 16],
+                output_indices: [BufferId(0); 16],
+                sidechain_indices: [BufferId(0); 16],
+                input_count: 0,
+                output_count: 0,
+                sidechain_count: 0,
+                input_delays: [0.0; 16],
+            }; MAX_NODES],
+            virtual_to_physical: v2p,
+            plan: CompiledGraphPlan::default(),
+            crossfades: [None; 8],
+            node_count: 1,
+            node_assignments: [nullherz_traits::NodeAssignment([0; 32]); MAX_NODES],
+            node_positions: [None; MAX_NODES],
+            bypass_states: [false; MAX_NODES],
+        };
+        topo.routing[0].input_count = 10;
+        topo.routing[0].sidechain_count = 10; // 20 > MAX_CHANNELS
+
+        let err = GraphCompiler::compile(&topo).expect_err("20 slots must be refused");
+        assert!(err.to_string().contains("MAX_CHANNELS"), "got: {err}");
     }
 
     /// A sidechain is a read, so its producer must be scheduled earlier.

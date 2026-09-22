@@ -3,9 +3,6 @@ name = "ipc-layer"
 version = "0.1.0"
 edition = "2024"
 
-[features]
-kani-verify = []
-
 [dependencies]
 parking_lot = "0.12"
 libc = "0.2"

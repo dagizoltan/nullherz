@@ -12,6 +12,10 @@ pub struct ThreadedBackend {
     running: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
     pub xrun_counter: Arc<std::sync::atomic::AtomicU64>,
+    /// Wakeups this backend's sleep loop missed by more than 20% of a period,
+    /// on cycles where the ENGINE met its deadline. Its own clock slipping, not
+    /// an underrun — see the loop for why the two must not be added together.
+    pub clock_slips: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl Default for ThreadedBackend {
@@ -26,6 +30,7 @@ impl ThreadedBackend {
             running: Arc::new(AtomicBool::new(false)),
             handle: None,
             xrun_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            clock_slips: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 }
@@ -70,8 +75,21 @@ impl AudioBackend for ThreadedBackend {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let xrun_counter = self.xrun_counter.clone();
+        let clock_slips = self.clock_slips.clone();
         let handle = thread::spawn(move || {
             ipc_layer::setup_rt_thread(90, Some(0));
+            // This is the audio thread for this backend; say so, and report what
+            // the kernel actually granted rather than what was requested.
+            let sched = ipc_layer::register_audio_thread();
+            if sched.is_realtime() {
+                eprintln!("[Threaded] RT scheduling: {sched}");
+            } else {
+                eprintln!(
+                    "[Threaded] RT scheduling: DENIED — {sched}. This backend clocks itself with \
+                     a sleep loop, so without realtime priority its wakeups drift under load and \
+                     the overruns it reports are the scheduler's, not the DSP's."
+                );
+            }
             {
                 if let Some(ref engine_arc) = *engine_handle.lock() {
                     let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
@@ -95,23 +113,59 @@ impl AudioBackend for ThreadedBackend {
 
                 let sample_rate = run_cycle(&engine_handle, &mut outputs_raw, period_size);
                 let expected_ns = period_ns(period_size, sample_rate);
+                let render_ns = cycle_start.elapsed().as_nanos() as u64;
 
-                if !is_first && actual_elapsed_ns > expected_ns + (expected_ns * 20 / 100) {
-                    let total_xruns = xrun_counter.fetch_add(1, Ordering::SeqCst) + 1;
-                    eprintln!(
-                        "Warning: Software XRUN detected! Elapsed: {} ns, Expected: {} ns. Total Xruns: {}",
-                        actual_elapsed_ns, expected_ns, total_xruns
-                    );
+                // AN XRUN IS THE ENGINE MISSING ITS DEADLINE — not this loop's
+                // clock slipping.
+                //
+                // This counted an xrun whenever the WALL GAP between cycles
+                // exceeded the period by 20%, which conflates two different
+                // things: the DSP running long (real, and the engine's fault) and
+                // `thread::sleep` overshooting (this backend's own clock, and
+                // nobody's fault). On Linux a sleep is accurate to roughly a
+                // millisecond under load however high its priority, so on a busy
+                // machine the second dominated — and `scripts/smoke.sh` failed on
+                // it, reporting an engine problem where there was none. Measured
+                // on this machine the same session: real ALSA hardware managed
+                // ZERO xruns at a 10.7 ms buffer while this backend reported
+                // three.
+                //
+                // So attribute them. `render_ns` is the engine's actual block
+                // time, which is the number the deadline applies to.
+                if !is_first {
+                    if render_ns > expected_ns {
+                        let total = xrun_counter.fetch_add(1, Ordering::SeqCst) + 1;
+                        eprintln!(
+                            "Warning: XRUN — the engine took {} us on a {} us period. Total: {}",
+                            render_ns / 1000, expected_ns / 1000, total
+                        );
+                    } else if actual_elapsed_ns > expected_ns + (expected_ns * 20 / 100) {
+                        // Clock slip, reported but NOT counted as an xrun. Worth
+                        // seeing — it means this backend's timing is not
+                        // trustworthy on this machine — but it says nothing about
+                        // whether the engine can meet a deadline.
+                        clock_slips.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
                 is_first = false;
 
                 // Simulate audio hardware clock by sleeping the remaining duration
-                let rendering_duration = cycle_start.elapsed();
+                let rendering_duration = std::time::Duration::from_nanos(render_ns);
                 let sleep_duration = std::time::Duration::from_nanos(expected_ns)
                     .checked_sub(rendering_duration)
                     .unwrap_or(std::time::Duration::ZERO);
 
                 thread::sleep(sleep_duration);
+            }
+
+            let slips = clock_slips.load(Ordering::Relaxed);
+            if slips > 0 {
+                eprintln!(
+                    "[Threaded] {slips} clock slip(s): this loop's sleep woke late by >20% of a \
+                     period on cycles where the engine MET its deadline. Not underruns — a \
+                     software-clocked backend cannot pace better than the OS sleep granularity. \
+                     Use --backend alsa to measure real device timing."
+                );
             }
         });
         self.handle = Some(handle);

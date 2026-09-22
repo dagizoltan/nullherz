@@ -446,16 +446,39 @@ impl Conductor {
         use std::sync::Once;
         static ONCE: Once = Once::new();
         ONCE.call_once(|| {
+            // `mlockall(MCL_CURRENT | MCL_FUTURE)` returns success as soon as the
+            // CURRENT footprint is locked, and then lets every LATER allocation
+            // fail to lock once RLIMIT_MEMLOCK is reached — silently. So an `Ok`
+            // here is not the claim the old message made ("audio pages cannot be
+            // swapped out"); with an 8 MiB limit and a 35 MiB graph it was simply
+            // untrue. Report the call and the limit separately and let the reader
+            // draw the conclusion.
             match ipc_layer::lock_memory() {
-                Ok(()) => println!("[RT] memory locked (mlockall) — audio pages cannot be swapped out"),
+                Ok(()) => match ipc_layer::memlock_limit() {
+                    Some(l) if l == u64::MAX => {
+                        println!("[RT] memory locked (mlockall), RLIMIT_MEMLOCK unlimited — audio pages are resident")
+                    }
+                    Some(l) => println!(
+                        "[RT] mlockall succeeded, but RLIMIT_MEMLOCK is {} KiB — allocations past \
+                         that stay swappable (see the warning below)",
+                        l / 1024
+                    ),
+                    None => println!("[RT] mlockall succeeded; RLIMIT_MEMLOCK unreadable"),
+                },
                 Err(e) => eprintln!(
                     "[RT] WARNING: could not lock memory ({e}). Audio buffers stay \
                      swappable, so a block deadline can become a disk read."
                 ),
             }
+            // Scheduling comes first in this list — see
+            // `realtime_environment_warnings`.
             for w in ipc_layer::realtime_environment_warnings() {
                 eprintln!("[RT] WARNING: {w}");
             }
+            println!(
+                "[RT] realtime policy obtainable: {}",
+                if ipc_layer::realtime_available() { "yes" } else { "NO" }
+            );
         });
     }
 

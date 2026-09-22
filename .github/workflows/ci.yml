@@ -1,0 +1,99 @@
+name: CI
+
+# Nothing gated `main` before this file existed. `ARCHITECTURE.md` described a
+# `ci.yml` running per-PR and a weekly `kani.yml`; neither was in the tree — they
+# had been deleted once before (commit 968cd12) and restored, then went again.
+# If this file and the docs ever disagree, this file is the truth.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Fail the build on a warning. The workspace was clean at the time this landed
+  # and the intent is to keep it that way; `float_literal_f32_fallback` alone
+  # accounted for 66 of them before it was noticed, because nobody ran the gate's
+  # own flags.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  check:
+    name: check (-D warnings)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+
+  test:
+    name: test (debug)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Tests run on the Mock backend; no audio hardware required. The suite used
+      # to DEADLOCK rather than fail (a blocking std socket inside a tokio task
+      # parked a runtime worker forever), which is why every job here carries a
+      # timeout: a hang must report as a failure, not as a slow build.
+      - run: cargo test --workspace
+
+  test-release:
+    name: test (release — timing budgets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The wall-clock assertions (control-path budgets, RT block budgets) are
+      # compiled in only when debug_assertions is OFF, so this job is the only
+      # place they run. A debug build misses a 5.8 ms block budget on merit.
+      - run: cargo test --workspace --release
+
+  smoke:
+    name: smoke (the console must survive and produce audio)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The unit suite has been green through every defect that actually stopped
+      # the application working — see the header of scripts/smoke.sh for the list.
+      # Running the console is the only check that catches them.
+      #
+      # Threaded backend: no audio device on a runner. That backend is
+      # software-clocked, and a shared CI runner's sleep granularity is far worse
+      # than a desktop's, so the clock-slip allowance is raised here. Engine
+      # deadline misses are still counted and still fail.
+      - run: scripts/smoke.sh
+        env:
+          NULLHERZ_MAX_OVERRUN_RATIO: "0.02"
+
+  clippy:
+    name: clippy (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Advisory only: the style backlog is tracked, not gated. Promote to a
+    # blocking job once the count reaches zero.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets
+        env:
+          RUSTFLAGS: ""

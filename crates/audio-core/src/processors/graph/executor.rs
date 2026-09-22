@@ -328,7 +328,17 @@ impl GraphExecutor {
                     }
                 }
 
-                for i in 0..input_count {
+                // PDC runs over the COMBINED slot space — inputs then sidechains,
+                // the same order `node_inputs_storage` was filled in above and the
+                // same order `calculate_pdc` wrote `input_delays` in. It used to
+                // stop at `input_count`, so a sidechain arriving from a deeper
+                // path stayed uncompensated: for a ducking compressor the gain
+                // reduction led the signal it was keyed to by the path-latency
+                // difference. The compiler rejects `input_count + sidechain_count
+                // > MAX_CHANNELS`, which is what keeps this inside the PDC ring's
+                // per-node rows and the scratch.
+                let pdc_slots = (input_count + sidechain_count).min(crate::MAX_CHANNELS);
+                for i in 0..pdc_slots {
                     let delay_f = topo.plan.input_delays[n_idx].0[i];
                     if delay_f > 0.0 && delay_f < (crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES as f32 - 4.0) {
                         // STAGE 8 PDC: Functional ring-buffer based path alignment
@@ -356,7 +366,7 @@ impl GraphExecutor {
                     }
                 }
 
-                for i in 0..input_count {
+                for i in 0..pdc_slots {
                     let delay_f = topo.plan.input_delays[n_idx].0[i];
                     if delay_f > 0.0 && delay_f < (crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES as f32 - 4.0) {
                         node_inputs_storage[i] = &pdc_lines.scratch[i][..num_samples];
