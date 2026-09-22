@@ -576,7 +576,26 @@ impl SimdBiquad {
         self.z2[channel] = z2;
     }
 
+    /// 16-channel biquad. Runtime-dispatched — see [`crate::dispatch`].
     pub fn process_16_channels(&mut self, inputs: [*const f32; 16], outputs: [*mut f32; 16], len: usize) {
+        #[cfg(target_arch = "x86_64")]
+        if crate::dispatch::has_avx2_fma() {
+            // SAFETY: gated on a runtime CPUID probe for exactly these features.
+            return unsafe { self.process_16_channels_avx2(inputs, outputs, len) };
+        }
+        self.process_16_channels_impl(inputs, outputs, len)
+    }
+
+    /// # Safety
+    /// The CPU must support avx2 and fma.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx,avx2,fma")]
+    unsafe fn process_16_channels_avx2(&mut self, inputs: [*const f32; 16], outputs: [*mut f32; 16], len: usize) {
+        self.process_16_channels_impl(inputs, outputs, len)
+    }
+
+    #[inline(always)]
+    fn process_16_channels_impl(&mut self, inputs: [*const f32; 16], outputs: [*mut f32; 16], len: usize) {
         use crate::simd_vec::*;
 
         let b0 = FloatX16::from(self.coeffs.b0);
@@ -611,7 +630,26 @@ impl SimdBiquad {
         unsafe { store_f32x16_ptr(self.z2.as_mut_ptr(), z2) };
     }
 
+    /// 4-channel biquad. Runtime-dispatched — see [`crate::dispatch`].
     pub fn process_4_channels(&mut self, inputs: [*const f32; 4], outputs: [*mut f32; 4], len: usize) {
+        #[cfg(target_arch = "x86_64")]
+        if crate::dispatch::has_avx2_fma() {
+            // SAFETY: gated on a runtime CPUID probe for exactly these features.
+            return unsafe { self.process_4_channels_avx2(inputs, outputs, len) };
+        }
+        self.process_4_channels_impl(inputs, outputs, len)
+    }
+
+    /// # Safety
+    /// The CPU must support avx2 and fma.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx,avx2,fma")]
+    unsafe fn process_4_channels_avx2(&mut self, inputs: [*const f32; 4], outputs: [*mut f32; 4], len: usize) {
+        self.process_4_channels_impl(inputs, outputs, len)
+    }
+
+    #[inline(always)]
+    fn process_4_channels_impl(&mut self, inputs: [*const f32; 4], outputs: [*mut f32; 4], len: usize) {
         use wide::*;
 
         let b0 = f32x4::from(self.coeffs.b0);
@@ -660,7 +698,35 @@ impl SimdBiquad {
         self.z2[0..4].copy_from_slice(&z2_arr);
     }
 
+    /// 8-channel biquad. Runtime-dispatched — see [`crate::dispatch`].
+    ///
+    /// The body lives in `process_8_channels_impl` and is instantiated twice:
+    /// once at the compilation baseline and once under
+    /// `#[target_feature(avx,avx2,fma)]`, where the same `wide::f32x8` source
+    /// becomes 256-bit AVX with FMA. Measured 1.3x on this kernel.
     pub fn process_8_channels(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
+        #[cfg(target_arch = "x86_64")]
+        if crate::dispatch::has_avx2_fma() {
+            // SAFETY: gated on a runtime CPUID probe for exactly these features.
+            return unsafe { self.process_8_channels_avx2(inputs, outputs, len) };
+        }
+        self.process_8_channels_impl(inputs, outputs, len)
+    }
+
+    /// AVX2+FMA instantiation. Never call without checking
+    /// [`crate::dispatch::has_avx2_fma`].
+    ///
+    /// # Safety
+    /// The CPU must support avx2 and fma; the pointer contract of
+    /// `process_8_channels_impl` also applies.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx,avx2,fma")]
+    unsafe fn process_8_channels_avx2(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
+        self.process_8_channels_impl(inputs, outputs, len)
+    }
+
+    #[inline(always)]
+    fn process_8_channels_impl(&mut self, inputs: [*const f32; 8], outputs: [*mut f32; 8], len: usize) {
         use wide::*;
 
         let b0 = f32x8::from(self.coeffs.b0);

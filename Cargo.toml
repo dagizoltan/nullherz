@@ -20,3 +20,45 @@ members = [
     "crates/nullherz-setup",
 ]
 resolver = "2"
+
+# The workspace had NO release profile at all, so release builds ran with
+# cargo's defaults: 16 codegen units and no LTO. For this workspace that is not
+# a small loss — the DSP kernels live in `audio-dsp` and the hot loops that call
+# them live in `audio-core`, so every per-sample call across that boundary was
+# an opaque function call the optimiser could not inline through.
+[profile.release]
+# `thin` LTO, not `fat`, and codegen-units left at the default.
+#
+# Thin LTO is where the benefit is: it lets the optimiser inline `audio-dsp`
+# kernels into `audio-core`'s per-sample loops, which a plain build cannot do
+# across the crate boundary. `codegen-units = 1` adds a few percent on top and
+# costs a great deal of build time on a workspace carrying wasmtime, egui and
+# symphonia — and `scripts/verify.sh` builds this profile on every run, so a
+# slow release profile is a gate people stop running. Shipping builds want the
+# last few percent; use `--profile dist` below for those.
+lto = "thin"
+# Keep frame pointers so `perf` can unwind the audio thread. Profiling an RT
+# path you cannot get a stack out of is guesswork, and the cost is one register.
+debug = "line-tables-only"
+
+# NOT NEGOTIABLE: the engine's per-node fault isolation is `catch_unwind` around
+# `process()` (see `graph/executor.rs` and `graph/pool.rs`). Under `panic =
+# "abort"` that becomes a no-op and one bad processor takes the whole process
+# down instead of being bypassed. It is the default today, which is exactly why
+# it is worth pinning — a future `panic = "abort"` for binary size would remove
+# a safety property silently.
+panic = "unwind"
+
+[profile.bench]
+lto = "thin"
+debug = "line-tables-only"
+
+# Shipping builds: `cargo build --profile dist`.
+#
+# Everything release has, plus full LTO and a single codegen unit. Slow to
+# build, which is exactly why it is not the profile the gate uses.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
