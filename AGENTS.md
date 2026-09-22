@@ -74,11 +74,28 @@ timeout so a hang reports as a failure rather than as a slow build.
 4.  **Check RT-Safety Lints**: `clippy.toml` bans `Mutex`/`RwLock`/`thread::spawn`
     /`thread::sleep`. Note what it does NOT ban: allocation. That is what §2's
     law is about and what the guard in (2) exists to enforce.
-5.  **Executor geometry**: `audio-core/processors/graph/verification.rs` sweeps
+5.  **Render determinism**: an offline bounce must equal the live render BIT
+    FOR BIT. Whether a stage is dispatched to the worker pool is decided by a
+    cost gate against telemetry-measured cycles, so it is a function of machine
+    load and differs between two runs of the same session — if dispatch could
+    reach the output, no render would be reproducible.
+    `render_is_identical_serial_and_pooled` (audio-core `graph/mod.rs`) pins it,
+    and asserts its own precondition so it cannot go vacuous. Anything that adds
+    state SHARED ACROSS a stage — an accumulator, a shared scratch row, a
+    reduction — breaks this and belongs behind that test.
+6.  **Executor geometry**: `audio-core/processors/graph/verification.rs` sweeps
     `execute_stage` over randomized `(num_samples, offset)` against a populated
     graph, with and without PDC. Any change to the executor's slicing arithmetic
     belongs behind that test — a device period the reference machine never
     produces is exactly how the buffers were overrun before.
+
+Scale is part of the gate's blind spot, not part of the gate: every fixture in
+`examples/` except `bench_studio_scale` measures the 4-deck console (~34 nodes)
+while `MAX_NODES` is 128. Numbers from one graph shape do not transfer to
+another — the worker pool's cost gate never fires at 34 nodes and fires
+routinely at 106, with opposite conclusions about whether it helps. Measure at
+the size you intend to claim for, and take REPEATS: tail statistics on a machine
+without core isolation are not stable enough for a single A/B.
 
 **Do not record an invariant as verified in a document.** Record it as a test.
 Every claim in `docs/` that a test could make should be one; the three defects

@@ -284,6 +284,59 @@ pub struct TaskPool {
 /// number that matters in RT audio. Attack the jitter itself (core isolation)
 /// or raise per-stage cost (Phase 5 tap bus, convolution) instead.
 ///
+/// # At studio scale the gate DOES fire at 256 — and the prediction above holds
+///
+/// Everything above was measured on the bootstrapped 4-deck console: 34 nodes.
+/// `MAX_NODES` is 128. Measured 2026-09-22 with
+/// `bench_studio_scale` (AMD Ryzen 5 PRO 4650U, 12 threads, no `isolcpus`, no
+/// `rtprio` allowance — so pool workers get RTKit's SCHED_RR-20, not the
+/// FIFO 85 `setup_rt_thread` asks for), 256-sample blocks throughout:
+///
+/// ```text
+/// SERIAL (gate never fires), 3000 blocks per point:
+///   nodes    mean            max
+///      12    65.4 us (1.1%)   120.6 us ( 2.1% of budget)
+///      20   119.5 us (2.1%)   202.7 us ( 3.5%)
+///      36   230.6 us (4.0%)   381.4 us ( 6.6%)
+///      72   453.7 us (7.8%)   757.3 us (13.0%)
+///     106   683.3 us (11.8%) 1639.3 us (28.2%)
+/// ```
+///
+/// Node cost is essentially linear (5.4 -> 6.4 us/node across a 9x range), so
+/// the engine carries its structural ceiling inside ~14% of a 5.8 ms budget
+/// with no parallelism at all. What limits graph size is `MAX_BUFFERS` (240),
+/// not CPU.
+///
+/// At 106 nodes the stages are finally expensive enough that this gate fires,
+/// and what it buys is the mean — at the tail's expense. Five INTERLEAVED
+/// repeats per configuration (a single A/B is not enough; see below):
+///
+/// ```text
+///            mean            p99.9              max
+///   serial   658-763 us      827-1437 us        940-1763 us (16-30% of budget)
+///   default  237-549 us     1099-5988 us       1274-6200 us (22-107%)
+/// ```
+///
+/// The pool halves the mean and makes the tail unbounded: one repeat in five
+/// exceeded the deadline outright. That is the mechanism this comment already
+/// predicted — dispatch and wakeup jitter is a fixed cost, not proportional to
+/// the work — now observed at the size where the gate actually engages. The
+/// mean it wins is one nobody needs: serial is at 11.8%.
+///
+/// So the gate optimises the wrong statistic at this scale. It compares a
+/// stage's cost to a fixed cycle count, which is a question about throughput;
+/// the question that matters is whether SERIAL would miss the deadline, and at
+/// 106 nodes it does not come close. Whether to make it deadline-aware, raise
+/// the constant, or require core isolation is a product decision and is NOT
+/// made here — but do not lower it on mean-only evidence.
+///
+/// **Measurement note.** The first A/B run of this comparison read as a 6-11x
+/// tail regression from the pool. Five interleaved repeats did not support
+/// that: the honest claim is that serial's tail is BOUNDED and stable while the
+/// pool's is variable and occasionally over budget. Tail statistics on an
+/// unisolated machine need repeats, not a single run — the same discipline this
+/// file's earlier numbers were gathered under.
+///
 /// Full write-up: `docs/system/ARCHITECTURE.md`, "Cost-gated parallelism".
 pub const DEFAULT_PARALLEL_THRESHOLD_CYCLES: u64 = 150_000;
 
