@@ -42,6 +42,12 @@ pub struct ProcessorGraph {
     pub(crate) garbage_producer: Option<Box<dyn nullherz_traits::GarbageProducer>>,
     pub(crate) pending_mutations: [Option<TopologyMutation>; crate::MAX_MUTATIONS],
     pub(crate) pending_mutation_count: usize,
+    /// Structural mutations discarded because `pending_mutations` was full.
+    ///
+    /// Non-zero means the installed graph is NOT the graph that was asked for.
+    /// Reported at commit and then cleared, so the number describes the edit
+    /// that was just installed rather than the session.
+    pub(crate) dropped_mutations: u32,
     pub(crate) faulted_states: Arc<[std::sync::atomic::AtomicBool; crate::MAX_NODES]>,
     /// Peak-metering decimation phase, advanced once per PHYSICAL block (at
     /// offset 0). Metering scans every node's output buffers (~128 KB of
@@ -107,6 +113,7 @@ impl ProcessorGraph {
             garbage_producer: None,
             pending_mutations: std::array::from_fn(|_| None),
             pending_mutation_count: 0,
+            dropped_mutations: 0,
             faulted_states,
             meter_phase: 0,
             meter_this_block: true,
@@ -176,6 +183,21 @@ impl ProcessorGraph {
                 }
             }
             self.pending_mutation_count = 0;
+
+            if self.dropped_mutations > 0 {
+                if let Some(ref logger) = self.logger {
+                    // &'static str: formatting here would allocate on the audio
+                    // thread, which is the law this file is governed by. The
+                    // count goes in the timestamp field, which is what the
+                    // logger has that carries a number.
+                    logger.log(
+                        crate::rt_logging::RtLogLevel::Error,
+                        "topology mutations DROPPED: graph incomplete (n=timestamp)",
+                        self.dropped_mutations as u64,
+                    );
+                }
+                self.dropped_mutations = 0;
+            }
         }
     }
 
@@ -527,7 +549,17 @@ fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
             self.pending_mutations[self.pending_mutation_count] = Some(mutation);
             self.pending_mutation_count += 1;
         } else {
-            // Drop if full.
+            // Overflow. The processor is recycled correctly, but the STRUCTURAL
+            // EDIT is gone — the graph arrives partially built, which
+            // `MAX_MUTATIONS`' own doc comment names as the hazard and which
+            // nothing reported. A half-installed graph is silence or a wrong
+            // signal path, and it looked like neither a crash nor an error.
+            //
+            // Counted rather than logged per-event: overflow arrives in bursts
+            // (a bootstrap that does not fit does not overflow once), and the
+            // log ring would drop the rest of the burst anyway. The count is
+            // read at commit, where one line can say how many were lost.
+            self.dropped_mutations = self.dropped_mutations.saturating_add(1);
             if let TopologyMutation::AddNode { processor, .. } | TopologyMutation::SwapProcessor { processor, .. } = mutation
                  && let Some(ref mut prod) = self.garbage_producer {
                      let _ = prod.push_processor(processor);
@@ -847,6 +879,53 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
                  worker dispatch reached the output, so no render is reproducible"
             );
         }
+    }
+
+    /// Overflowing `MAX_MUTATIONS` must SAY SO.
+    ///
+    /// The constant's own doc comment names this as the hazard — "a graph that
+    /// needs more than this arrives partially built with no error" — and until
+    /// now that was literally true: the mutation was discarded, the processor
+    /// correctly recycled, and nothing anywhere recorded that the installed
+    /// graph was not the graph that had been asked for. A half-built graph is
+    /// silence or a wrong signal path, and it presented as neither a crash nor
+    /// an error, which is the hardest possible thing to debug.
+    ///
+    /// Reachable: the 4-deck bootstrap already issues roughly `MAX_MUTATIONS`
+    /// of them, and the product ceiling is about 2.2x that console.
+    #[test]
+    fn mutation_overflow_is_reported() {
+        let logger = std::sync::Arc::new(crate::rt_logging::RtLogger::new(16));
+        let mut graph = ProcessorGraph::new();
+        graph.logger = Some(logger.clone());
+
+        // One more than fits. Cheap mutations, so this is about the COUNT.
+        let overflow = 5usize;
+        for i in 0..(nullherz_traits::MAX_MUTATIONS + overflow) {
+            graph.apply_topology_mutation(TopologyMutation::SetNodePosition {
+                node_idx: (i % crate::MAX_NODES) as u32,
+                x: 0.0,
+                y: 0.0,
+            });
+        }
+        assert_eq!(
+            graph.dropped_mutations, overflow as u32,
+            "every mutation past MAX_MUTATIONS must be counted"
+        );
+
+        // The drain reports and clears.
+        graph.commit_graph();
+
+        let entry = logger.pop().expect("overflow must reach the RT log");
+        let msg = std::str::from_utf8(&entry.message)
+            .unwrap_or("<invalid utf8>")
+            .trim_end_matches('\0');
+        assert!(
+            msg.contains("DROPPED"),
+            "the log line must name the failure, got: {msg:?}"
+        );
+        assert_eq!(entry.timestamp, overflow as u64, "the count must survive to the reader");
+        assert_eq!(graph.dropped_mutations, 0, "the count describes one edit, not the session");
     }
 
     #[test]
