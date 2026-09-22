@@ -421,7 +421,7 @@ fn render_channel_strip(
 
     Frame::none()
         .fill(if is_focused { theme.bg_surface } else { theme.bg_canvas })
-        .stroke(Stroke::new(if is_focused { 1.5 } else { 1.0 },
+        .stroke(Stroke::new(if is_focused { 1.5_f32 } else { 1.0_f32 },
                             if is_focused { deck_color } else { theme.border }))
         .rounding(theme.radius_md)
         .inner_margin(Margin::symmetric(theme.space_xs, theme.space_sm))

@@ -59,7 +59,7 @@ pub fn render_segmented_control<T: PartialEq + Clone>(
                 ui.painter().rect_stroke(
                     segment_rect.shrink(1.5),
                     theme.radius_md,
-                    Stroke::new(1.0, theme.accent.linear_multiply(0.4)),
+                    Stroke::new(1.0_f32, theme.accent.linear_multiply(0.4)),
                 );
             } else if segment_response.hovered() {
                 ui.painter().rect_filled(
@@ -143,7 +143,7 @@ pub fn render_segmented_control_vertical<T: PartialEq + Clone>(
                 ui.painter().rect_stroke(
                     segment_rect.shrink(1.5),
                     theme.radius_md,
-                    Stroke::new(1.0, theme.accent.linear_multiply(0.4)),
+                    Stroke::new(1.0_f32, theme.accent.linear_multiply(0.4)),
                 );
                 // Active Left accent indicator line (similar to sidebar nav but smaller)
                 let indicator_rect = Rect::from_min_max(

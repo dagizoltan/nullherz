@@ -351,7 +351,7 @@ fn render_track_row(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dna::L
     if is_expanded {
         render_track_details(app, ui, track);
     }
-    ui.painter().hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, theme.border));
+    ui.painter().hline(rect.x_range(), rect.bottom(), Stroke::new(1.0_f32, theme.border));
 }
 
 /// The track inspector, inline under its own row.

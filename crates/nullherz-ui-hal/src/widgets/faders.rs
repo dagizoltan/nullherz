@@ -14,13 +14,13 @@ pub fn render_fader(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusiv
         // Slot
         let slot_rect = Rect::from_center_size(rect.center(), Vec2::new(4.0, rect.height()));
         ui.painter().rect_filled(slot_rect, 2.0, Color32::from_gray(10));
-        ui.painter().rect_stroke(slot_rect, 2.0, Stroke::new(1.0, Color32::from_gray(30)));
+        ui.painter().rect_stroke(slot_rect, 2.0, Stroke::new(1.0_f32, Color32::from_gray(30)));
 
         // Scale Ticks
         for i in 0..=10 {
             let y = rect.min.y + (i as f32 * rect.height() / 10.0);
             let w = if i % 5 == 0 { 8.0 } else { 4.0 };
-            ui.painter().hline(rect.center().x - w..=rect.center().x + w, y, Stroke::new(0.5, Color32::from_gray(50)));
+            ui.painter().hline(rect.center().x - w..=rect.center().x + w, y, Stroke::new(0.5_f32, Color32::from_gray(50)));
         }
 
         // Handle
@@ -31,15 +31,15 @@ pub fn render_fader(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusiv
 
         // Handle Body
         ui.painter().rect_filled(handle_rect, 2.0, Color32::from_gray(40));
-        ui.painter().rect_stroke(handle_rect, 2.0, Stroke::new(1.0, Color32::from_gray(70)));
+        ui.painter().rect_stroke(handle_rect, 2.0, Stroke::new(1.0_f32, Color32::from_gray(70)));
 
         // Handle Indicator
-        ui.painter().hline(handle_rect.x_range(), handle_rect.center().y, Stroke::new(2.0, accent_color));
+        ui.painter().hline(handle_rect.x_range(), handle_rect.center().y, Stroke::new(2.0_f32, accent_color));
 
         // Grip lines
         if handle_h > 15.0 {
             for i in [-1.0, 1.0] {
-                 ui.painter().hline(handle_rect.center().x - 4.0..=handle_rect.center().x + 4.0, handle_rect.center().y + i * (handle_h / 4.0), Stroke::new(1.0, Color32::from_gray(60)));
+                 ui.painter().hline(handle_rect.center().x - 4.0..=handle_rect.center().x + 4.0, handle_rect.center().y + i * (handle_h / 4.0), Stroke::new(1.0_f32, Color32::from_gray(60)));
             }
         }
     }
@@ -61,13 +61,13 @@ pub fn render_horizontal_fader(ui: &mut Ui, value: &mut f32, range: std::ops::Ra
         // Slot
         let slot_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), 4.0));
         ui.painter().rect_filled(slot_rect, 2.0, Color32::from_gray(10));
-        ui.painter().rect_stroke(slot_rect, 2.0, Stroke::new(1.0, Color32::from_gray(30)));
+        ui.painter().rect_stroke(slot_rect, 2.0, Stroke::new(1.0_f32, Color32::from_gray(30)));
 
         // Scale Ticks
         for i in 0..=10 {
             let x = rect.min.x + (i as f32 * rect.width() / 10.0);
             let h = if i % 5 == 0 { 8.0 } else { 4.0 };
-            ui.painter().vline(x, rect.center().y - h..=rect.center().y + h, Stroke::new(0.5, Color32::from_gray(50)));
+            ui.painter().vline(x, rect.center().y - h..=rect.center().y + h, Stroke::new(0.5_f32, Color32::from_gray(50)));
         }
 
         // Handle
@@ -78,15 +78,15 @@ pub fn render_horizontal_fader(ui: &mut Ui, value: &mut f32, range: std::ops::Ra
 
         // Handle Body
         ui.painter().rect_filled(handle_rect, 2.0, Color32::from_gray(40));
-        ui.painter().rect_stroke(handle_rect, 2.0, Stroke::new(1.0, Color32::from_gray(70)));
+        ui.painter().rect_stroke(handle_rect, 2.0, Stroke::new(1.0_f32, Color32::from_gray(70)));
 
         // Handle Indicator
-        ui.painter().vline(handle_rect.center().x, handle_rect.y_range(), Stroke::new(2.0, accent_color));
+        ui.painter().vline(handle_rect.center().x, handle_rect.y_range(), Stroke::new(2.0_f32, accent_color));
 
         // Grip lines
         if handle_w > 15.0 {
             for i in [-1.0, 1.0] {
-                 ui.painter().vline(handle_rect.center().x + i * (handle_w / 4.0), handle_rect.center().y - 4.0..=handle_rect.center().y + 4.0, Stroke::new(1.0, Color32::from_gray(60)));
+                 ui.painter().vline(handle_rect.center().x + i * (handle_w / 4.0), handle_rect.center().y - 4.0..=handle_rect.center().y + 4.0, Stroke::new(1.0_f32, Color32::from_gray(60)));
             }
         }
     }

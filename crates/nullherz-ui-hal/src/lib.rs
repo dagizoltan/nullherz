@@ -126,7 +126,7 @@ impl Default for Theme {
             radius_md: 8.0,
             radius_lg: 12.0,
 
-            border_stroke: egui::Stroke::new(1.0, border_color),
+            border_stroke: egui::Stroke::new(1.0_f32, border_color),
 
             shadow_sm: egui::epaint::Shadow {
                 offset: egui::vec2(0.0, 1.0),

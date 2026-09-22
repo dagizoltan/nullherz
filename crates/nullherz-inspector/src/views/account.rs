@@ -14,7 +14,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         if current_time - t < 4.0 {
             Frame::none()
                 .fill(theme.accent.linear_multiply(0.12))
-                .stroke(egui::Stroke::new(1.0, theme.accent))
+                .stroke(egui::Stroke::new(1.0_f32, theme.accent))
                 .rounding(theme.radius_md)
                 .inner_margin(theme.space_sm)
                 .show(ui, |ui| {
@@ -33,7 +33,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         if current_time - t < 4.0 {
             Frame::none()
                 .fill(theme.danger.linear_multiply(0.12))
-                .stroke(egui::Stroke::new(1.0, theme.danger))
+                .stroke(egui::Stroke::new(1.0_f32, theme.danger))
                 .rounding(theme.radius_md)
                 .inner_margin(theme.space_sm)
                 .show(ui, |ui| {

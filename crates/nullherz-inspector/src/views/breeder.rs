@@ -132,9 +132,9 @@ impl BreederView {
                 // Grid lines (Industrial Look) - Decoupled from hardcoded colors
                 for i in 1..4 {
                     let x = rect.left() + i as f32 * (rect.width() / 4.0);
-                    ui.painter().vline(x, rect.y_range(), Stroke::new(0.5, theme.border.linear_multiply(0.5)));
+                    ui.painter().vline(x, rect.y_range(), Stroke::new(0.5_f32, theme.border.linear_multiply(0.5)));
                     let y = rect.top() + i as f32 * (rect.height() / 4.0);
-                    ui.painter().hline(rect.x_range(), y, Stroke::new(0.5, theme.border.linear_multiply(0.5)));
+                    ui.painter().hline(rect.x_range(), y, Stroke::new(0.5_f32, theme.border.linear_multiply(0.5)));
                 }
 
                 // interact_pointer_pos is None on some drag-release frames;
@@ -149,7 +149,7 @@ impl BreederView {
 
                 let handle_pos = rect.left_top() + Vec2::new(state.transfusion_bias_x * rect.width(), (1.0 - state.transfusion_bias_y) * rect.height());
                 ui.painter().circle_filled(handle_pos, 8.0, theme.accent);
-                ui.painter().circle_stroke(handle_pos, 8.0, Stroke::new(2.0, theme.text_primary));
+                ui.painter().circle_stroke(handle_pos, 8.0, Stroke::new(2.0_f32, theme.text_primary));
             });
 
             ui.add_space(theme.space_md);
@@ -183,7 +183,7 @@ impl BreederView {
                             let color = if i < 8 { theme.track_colors[4] } else { theme.track_colors[2] };
                             ui.painter().rect_filled(r, 1.0, color.gamma_multiply(0.8));
                         }
-                        ui.painter().hline(preview_rect.x_range(), preview_rect.center().y, Stroke::new(1.0, theme.border));
+                        ui.painter().hline(preview_rect.x_range(), preview_rect.center().y, Stroke::new(1.0_f32, theme.border));
                     }
                 } else {
                     ui.painter().text(preview_rect.center(), egui::Align2::CENTER_CENTER, "SELECT PARENTS TO VIEW GENETIC BLUEPRINT", egui::FontId::new(theme.type_caption, egui::FontFamily::Monospace), theme.text_secondary);

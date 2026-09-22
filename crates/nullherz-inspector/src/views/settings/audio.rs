@@ -28,7 +28,7 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                     let mut btn = egui::Button::new(label);
                     if is_active {
                         btn = btn.fill(theme.accent.linear_multiply(0.12))
-                                 .stroke(egui::Stroke::new(1.0, theme.accent));
+                                 .stroke(egui::Stroke::new(1.0_f32, theme.accent));
                     }
                     if ui.add(btn).clicked() {
                         app.settings.active_backend = backend;
