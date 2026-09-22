@@ -386,7 +386,16 @@ pub trait AudioProcessor: SignalProcessor + MidiResponder + SnapshotProvider + S
     fn apply_topology_mutation(&mut self, _mutation: TopologyMutation) {}
     fn collect_telemetry(&self, _node_times: &mut [u64; MAX_NODES], _peak_levels: &mut [f32; MAX_NODES]) {}
     fn metadata(&self) -> Option<ProcessorMetadata> { None }
-    fn set_garbage_producer(&mut self, _producer: Box<dyn GarbageProducer>) {}
+    /// Offer this processor a handle for deferring deallocation off the RT
+    /// thread. Take a clone only if you will use one.
+    ///
+    /// Passed BY REFERENCE, not by `Box`. Handing over an owned box meant the
+    /// caller had to `dyn_clone::clone_box` before every call — one heap
+    /// allocation per `AddNode`/`SwapProcessor`, on the audio thread, landing
+    /// in this no-op default for every processor in the tree. (The only type
+    /// that overrides this is `ProcessorGraph`, for nested graphs.) Now the
+    /// allocation happens only where it is actually wanted.
+    fn set_garbage_producer(&mut self, _producer: &(dyn GarbageProducer + 'static)) {}
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
     fn list_children(&self) -> Vec<&dyn AudioProcessor> { Vec::new() }
