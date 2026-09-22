@@ -15,6 +15,33 @@ pub struct TopologyCoordinator {
     pub(crate) needs_commit: bool,
 }
 
+/// Dispose of a processor from the audio thread without calling the allocator.
+///
+/// `Box<dyn AudioProcessor>` must never be dropped here: `Box::drop` runs
+/// `free()`, and a processor's own `Drop` may free much more than the box. The
+/// garbage ring exists so the non-RT side does it; when there is no ring the
+/// correct answer is to LEAK, because a leak is a bug and a `free()` on the
+/// audio thread is a dropout.
+///
+/// This is a function rather than a pattern because the pattern was already
+/// written correctly in three places and omitted in two — the out-of-range
+/// branches of `AddNode` and `SwapProcessor`, where the processor simply fell
+/// out of scope. See `out_of_range_mutation_does_not_free_on_the_audio_thread`.
+#[inline]
+fn retire(
+    processor: Box<dyn nullherz_traits::AudioProcessor>,
+    garbage_producer: &mut Option<Box<dyn nullherz_traits::GarbageProducer>>,
+) {
+    match garbage_producer.as_deref_mut() {
+        Some(prod) => {
+            if let Err(leaked) = prod.push_processor(processor) {
+                std::mem::forget(leaked);
+            }
+        }
+        None => std::mem::forget(processor),
+    }
+}
+
 impl TopologyCoordinator {
     pub fn new(initial_topo: GraphTopology) -> Self {
         Self {
@@ -123,13 +150,7 @@ impl TopologyCoordinator {
                     // 1. Swap with DummyProcessor and send the old one to garbage_producer
                     let dummy = Box::new(super::DummyProcessor) as Box<dyn nullherz_traits::AudioProcessor>;
                     let old_proc = unsafe { std::ptr::replace(nodes[idx].processor.get(), dummy) };
-                    if let Some(prod) = garbage_producer.as_deref_mut() {
-                        // Straight into the ring. This used to `clone_box` the
-                        // producer first — a second heap allocation per
-                        // mutation, on the audio thread, purely to satisfy
-                        // `push_processor(&mut self)` through a shared ref.
-                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
-                    } else { std::mem::forget(old_proc); }
+                    retire(old_proc, garbage_producer);
 
                     // 2. Clear faulted state for this node_idx
                     faulted_states[idx].store(false, Ordering::Relaxed);
@@ -252,30 +273,34 @@ impl TopologyCoordinator {
             }
             TopologyMutation::SwapProcessor { node_idx, mut processor } => {
                 let n_idx = node_idx as usize;
-                if n_idx < crate::MAX_NODES {
+                if n_idx >= crate::MAX_NODES {
+                    // Same as AddNode: a sentinel aimed at the engine lands here.
+                    retire(processor, garbage_producer);
+                } else {
                     if let Some(prod) = garbage_producer.as_deref() { processor.set_garbage_producer(prod); }
+                    // Straight into the ring. This used to `clone_box` the
+                    // producer first — a second heap allocation per mutation,
+                    // on the audio thread, purely to satisfy
+                    // `push_processor(&mut self)` through a shared ref.
                     let old_proc = unsafe { std::ptr::replace(nodes[n_idx].processor.get(), processor) };
-                    if let Some(prod) = garbage_producer.as_deref_mut() {
-                        // Straight into the ring. This used to `clone_box` the
-                        // producer first — a second heap allocation per
-                        // mutation, on the audio thread, purely to satisfy
-                        // `push_processor(&mut self)` through a shared ref.
-                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
-                    } else { std::mem::forget(old_proc); }
+                    retire(old_proc, garbage_producer);
                 }
             }
             TopologyMutation::AddNode { node_idx, mut processor } => {
                 let idx = node_idx as usize;
-                if idx < crate::MAX_NODES {
+                if idx >= crate::MAX_NODES {
+                    // Reachable by design: NodeConventions sentinels live above
+                    // MAX_NODES precisely so this guard discards them. Discard
+                    // must not mean `free()` on the audio thread.
+                    retire(processor, garbage_producer);
+                } else {
                     if let Some(prod) = garbage_producer.as_deref() { processor.set_garbage_producer(prod); }
+                    // Straight into the ring. This used to `clone_box` the
+                    // producer first — a second heap allocation per mutation,
+                    // on the audio thread, purely to satisfy
+                    // `push_processor(&mut self)` through a shared ref.
                     let old_proc = unsafe { std::ptr::replace(nodes[idx].processor.get(), processor) };
-                    if let Some(prod) = garbage_producer.as_deref_mut() {
-                        // Straight into the ring. This used to `clone_box` the
-                        // producer first — a second heap allocation per
-                        // mutation, on the audio thread, purely to satisfy
-                        // `push_processor(&mut self)` through a shared ref.
-                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
-                    } else { std::mem::forget(old_proc); }
+                    retire(old_proc, garbage_producer);
 
                     if idx >= *node_count { *node_count = idx + 1; }
                     let topo = self.inactive_topology_mut();
@@ -317,6 +342,139 @@ impl TopologyCoordinator {
                     self.topologies[self.active_idx()].bypass_states[n_idx] = enabled;
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod out_of_range_tests {
+    use super::*;
+    use crate::processors::TopologyMutation;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+
+    /// Records its own destruction, so a test can ask WHERE it was freed.
+    struct DropSpy(Arc<AtomicUsize>);
+    impl Drop for DropSpy {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    impl std::fmt::Debug for DropSpy {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "DropSpy") }
+    }
+    impl nullherz_traits::SignalProcessor for DropSpy {
+        fn process(&mut self, _i: &[&[f32]], _o: &mut [&mut [f32]], _c: &mut nullherz_traits::ProcessContext) {}
+    }
+    impl nullherz_traits::MidiResponder for DropSpy {}
+    impl nullherz_traits::SnapshotProvider for DropSpy {}
+    impl nullherz_traits::AudioProcessor for DropSpy {
+        fn as_any(&self) -> &dyn std::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    }
+
+    /// Collects what the coordinator hands it, and keeps it alive — exactly
+    /// what the real garbage ring does until the non-RT side drains it.
+    #[derive(Clone)]
+    struct CollectingGarbage(Arc<std::sync::Mutex<Vec<Box<dyn nullherz_traits::AudioProcessor>>>>);
+    impl nullherz_traits::GarbageProducer for CollectingGarbage {
+        fn push_processor(&mut self, processor: Box<dyn nullherz_traits::AudioProcessor>)
+            -> Result<(), Box<dyn nullherz_traits::AudioProcessor>>
+        {
+            self.0.lock().expect("test mutex").push(processor);
+            Ok(())
+        }
+    }
+
+    fn empty_topology() -> GraphTopology {
+        let mut v2p = [nullherz_traits::BufferId(0); crate::MAX_BUFFERS];
+        for (i, v) in v2p.iter_mut().enumerate() { *v = nullherz_traits::BufferId(i as u32); }
+        GraphTopology {
+            routing: [nullherz_traits::NodeRouting {
+                input_indices: [nullherz_traits::BufferId(0); crate::MAX_CHANNELS],
+                output_indices: [nullherz_traits::BufferId(0); crate::MAX_CHANNELS],
+                sidechain_indices: [nullherz_traits::BufferId(0); crate::MAX_CHANNELS],
+                input_count: 0,
+                output_count: 0,
+                sidechain_count: 0,
+                input_delays: [0.0; crate::MAX_CHANNELS],
+            }; crate::MAX_NODES],
+            virtual_to_physical: v2p,
+            plan: Default::default(),
+            crossfades: [None; crate::MAX_CROSSFADE_BUFFERS],
+            node_count: 0,
+            node_assignments: [nullherz_traits::NodeAssignment([0; 32]); crate::MAX_NODES],
+            node_positions: [None; crate::MAX_NODES],
+            bypass_states: [false; crate::MAX_NODES],
+        }
+    }
+
+    fn fresh_nodes() -> Box<[super::super::node::ProcessorNode; crate::MAX_NODES]> {
+        Box::new(std::array::from_fn(|_| super::super::node::ProcessorNode {
+            processor: std::cell::UnsafeCell::new(
+                Box::new(super::super::DummyProcessor) as Box<dyn nullherz_traits::AudioProcessor>
+            ),
+        }))
+    }
+
+    /// An out-of-range `AddNode`/`SwapProcessor` must not FREE its processor
+    /// here — this runs on the audio thread.
+    ///
+    /// Every in-range path in this file is careful about it: the displaced
+    /// processor goes to the garbage ring, and `std::mem::forget` is used when
+    /// there is no ring, deliberately leaking rather than calling the allocator
+    /// on the RT thread. The out-of-range branch did neither. It was a bare
+    /// `if idx < MAX_NODES { ... }` with no `else`, so the `processor` binding
+    /// fell out of scope and `Box::drop` ran `free()` inline.
+    ///
+    /// It is reachable BY DESIGN, not by accident: `NodeConventions` places its
+    /// logical sentinels at `0xFFFF_FF00+` specifically so these guards discard
+    /// them, and its doc comment says so. Every sentinel that reaches the engine
+    /// as one of these two mutations was a free on the audio thread.
+    ///
+    /// The allocation guard in `test_kit::rt_alloc` cannot catch this — it
+    /// counts `alloc` and deliberately not `dealloc` — so the property is
+    /// tested directly instead: the processor must still be alive when
+    /// `apply_mutation` returns.
+    #[test]
+    fn out_of_range_mutation_does_not_free_on_the_audio_thread() {
+        for (label, make) in [
+            ("AddNode", 0u8),
+            ("SwapProcessor", 1u8),
+        ] {
+            let drops = Arc::new(AtomicUsize::new(0));
+            let collected = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let mut garbage: Option<Box<dyn nullherz_traits::GarbageProducer>> =
+                Some(Box::new(CollectingGarbage(collected.clone())));
+
+            let mut coord = TopologyCoordinator::new(empty_topology());
+            let mut nodes = fresh_nodes();
+            let mut node_count = 0usize;
+            let faulted: [std::sync::atomic::AtomicBool; crate::MAX_NODES] =
+                std::array::from_fn(|_| std::sync::atomic::AtomicBool::new(false));
+
+            let spy = Box::new(DropSpy(drops.clone())) as Box<dyn nullherz_traits::AudioProcessor>;
+            // A logical sentinel — the exact value NodeConventions documents as
+            // being discarded by this guard.
+            let node_idx = nullherz_traits::NodeConventions::PREVIEW;
+            let mutation = if make == 0 {
+                TopologyMutation::AddNode { node_idx, processor: spy }
+            } else {
+                TopologyMutation::SwapProcessor { node_idx, processor: spy }
+            };
+
+            coord.apply_mutation(mutation, nodes.as_mut(), &mut node_count, &mut garbage, &faulted);
+
+            assert_eq!(
+                drops.load(Ordering::Relaxed), 0,
+                "{label} with an out-of-range index freed its processor on the audio thread"
+            );
+            assert_eq!(
+                collected.lock().expect("test mutex").len(), 1,
+                "{label} must hand the rejected processor to the garbage ring for the non-RT side to free"
+            );
+            // And it must not have touched the graph.
+            assert_eq!(node_count, 0, "{label} out of range must not grow node_count");
         }
     }
 }
