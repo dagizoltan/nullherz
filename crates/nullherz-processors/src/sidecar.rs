@@ -17,6 +17,10 @@ pub struct SidecarProcessor {
     event_fd: Option<EventFd>,
     last_heartbeat: u64,
     missed_deadline_count: u32,
+    /// Frames per render block, from `setup`. This is the processor's declared
+    /// latency — see `latency_samples`. Starts at the protocol block size
+    /// because that is the true ring unit before a device has negotiated.
+    block_size: usize,
     // Keep SHM segments alive to prevent use-after-free
     _shm_cmd: Option<Arc<SharedMemory>>,
     _shm_feedback: Option<Arc<SharedMemory>>,
@@ -62,6 +66,7 @@ impl SidecarProcessor {
             event_fd,
             last_heartbeat: 0,
             missed_deadline_count: 0,
+            block_size: ipc_layer::IPC_BLOCK_SIZE,
             _shm_cmd: None,
             _shm_feedback: None,
             shm_midi: None,
@@ -100,6 +105,36 @@ impl nullherz_traits::SignalProcessor for SidecarProcessor {
 fn reset(&mut self) {
         self.last_heartbeat = 0;
         self.missed_deadline_count = 0;
+    }
+
+    /// One render block: a sidecar is PIPELINED, not synchronous.
+    ///
+    /// `process` pushes this block's input into shared memory and then pops an
+    /// output in the same call. The sidecar is a separate process parked on an
+    /// eventfd, so what comes back is the PREVIOUS block — the host never waits
+    /// for the guest, by design, because waiting would put another process's
+    /// scheduling latency inside the audio callback.
+    ///
+    /// That is real, structural latency and it has to be declared. Inheriting
+    /// the trait default of 0 meant PDC compensated none of it, so every path
+    /// running parallel to a sidecar insert — a dry/wet split, another deck, a
+    /// bus send — sat one block ahead of it. For phase-coherent material a
+    /// whole-block offset is comb filtering, not a delay you hear as late.
+    ///
+    /// `setup` records the block size the host negotiated, so this tracks the
+    /// device period rather than assuming one. Before `setup` runs there is no
+    /// negotiated period and the honest answer is `IPC_BLOCK_SIZE`, the
+    /// protocol unit the ring is actually built from.
+    fn latency_samples(&self) -> usize {
+        self.block_size
+    }
+
+    fn setup(&mut self, config: nullherz_traits::AudioConfig) {
+        // Clamped: the bridge cannot send more than one `AudioBlock` per call,
+        // so a period above `IPC_BLOCK_SIZE` is already a debug assertion in
+        // `process`. Reporting more latency than the ring can hold would be a
+        // second wrong answer on top of the first.
+        self.block_size = config.block_size.clamp(1, ipc_layer::IPC_BLOCK_SIZE);
     }
 fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut nullherz_traits::ProcessContext) {
         let current_heartbeat = unsafe { (*self.signal).get_heartbeat() };
