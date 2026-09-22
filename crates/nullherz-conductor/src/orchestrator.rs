@@ -16,6 +16,28 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use nullherz_dna::{ GeneticLibrary};
 
+
+/// Name of the MIDI-bridge shared-memory object, unique to this process.
+///
+/// It used to be the constant `"nullherz_midi_bridge"`, written in two places
+/// that had to agree — and every `Conductor` on the machine therefore raced for
+/// the same object. `SharedMemory::create` opens it `O_TRUNC`, so a second
+/// creator truncated the region while the first still had it MAPPED, and any
+/// later touch of those pages is a SIGBUS.
+///
+/// That was latent for as long as pages were faulted in lazily and sparsely:
+/// the truncated range was usually never touched. Prefaulting the region at
+/// creation (PR #379) touches every page immediately and made it fire — 7 of 30
+/// release runs of `raw_mode_test`, and 0 of 20 with `--test-threads=1`.
+///
+/// Per-process because that is the actual scope: the bridge is a child of THIS
+/// conductor, and two conductors — two app instances, or two parallel test
+/// binaries — must not share a ring. Both the creator and the `--shm` argument
+/// handed to the child call this, so they cannot drift apart again.
+pub fn midi_bridge_shm_name() -> String {
+    format!("nullherz_midi_bridge_{}", std::process::id())
+}
+
 pub struct Conductor {
     pub engine_coordinator: EngineCoordinator,
     pub topology_manager: TopologyManager,
@@ -347,8 +369,8 @@ impl Conductor {
         self.topology_manager.topo_producer = Some(ipc_layer::NonRtProducer::new(handle.topology_producer));
 
         // Setup MIDI Bridge SHM
-        let shm_name = "nullherz_midi_bridge";
-        if let Ok(shm) = ipc_layer::SharedMemory::create(shm_name, 65536) {
+        let shm_name = midi_bridge_shm_name();
+        if let Ok(shm) = ipc_layer::SharedMemory::create(&shm_name, 65536) {
             unsafe { ipc_layer::ShmRingBuffer::<nullherz_traits::MidiEvent>::init(shm.ptr(), 1024); }
             let rb = shm.ptr() as *const ipc_layer::ShmRingBuffer<nullherz_traits::MidiEvent>;
 
@@ -414,7 +436,7 @@ impl Conductor {
     pub fn start_midi_bridge(&mut self, binary_path: &str, port_filter: Option<&str>) {
         if self.midi_child.is_some() { return; }
         let mut cmd = std::process::Command::new(binary_path);
-        cmd.arg("--shm").arg("nullherz_midi_bridge");
+        cmd.arg("--shm").arg(midi_bridge_shm_name());
         if let Some(f) = port_filter { cmd.arg("--port").arg(f); }
 
         if let Ok(child) = cmd.spawn() {

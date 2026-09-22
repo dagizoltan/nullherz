@@ -286,7 +286,39 @@ impl SharedMemory {
     pub fn create(name: &str, size: usize) -> Result<Self, IpcError> {
         let cname = CString::new(name).map_err(|e| IpcError::ShmOpenFailed(e.to_string()))?;
         unsafe {
-            let fd = libc::shm_open(cname.as_ptr(), libc::O_CREAT | libc::O_RDWR | libc::O_TRUNC, 0o600);
+            // O_EXCL, not O_TRUNC. `O_TRUNC` on a name someone else already
+            // holds MAPPED sets that object's length to zero underneath them,
+            // and the next touch of a page past the new end is a SIGBUS in the
+            // OTHER process — a crash with no stack pointing at the cause. It
+            // was survivable only while pages were faulted in lazily and
+            // sparsely enough that the truncated range went untouched.
+            //
+            // POSIX gives no way to ask whether an existing object is STALE
+            // (left by a crashed process) or LIVE (mapped by someone right
+            // now), so neither "always clobber" nor "always fail" is right:
+            // the first is what caused the SIGBUS, and the second bricks
+            // startup after any crash that recycles a name.
+            //
+            // So: take the name exclusively when it is free — the normal path,
+            // and the one that proves no one else holds it. Only on EEXIST
+            // unlink and retry, and SAY SO. Unlinking removes the name without
+            // disturbing anyone's existing mapping, so the other side keeps a
+            // valid region rather than being truncated to zero; it ends up with
+            // a private object instead of a shared one, which is a visible
+            // malfunction rather than a crash in someone else's address space.
+            //
+            // Names must still be unique — see `midi_bridge_shm_name`. This
+            // makes a duplicate survivable and noisy; it does not make it OK.
+            let mut fd = libc::shm_open(cname.as_ptr(), libc::O_CREAT | libc::O_RDWR | libc::O_EXCL, 0o600);
+            if fd < 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EEXIST) {
+                eprintln!(
+                    "[SHM] '{name}' already existed — reclaiming it. If another Nullherz \
+process is running, the two are now using SEPARATE regions under one name and \
+will not see each other's data. Shared-memory names must be unique per process."
+                );
+                libc::shm_unlink(cname.as_ptr());
+                fd = libc::shm_open(cname.as_ptr(), libc::O_CREAT | libc::O_RDWR | libc::O_EXCL, 0o600);
+            }
             if fd < 0 { return Err(IpcError::ShmOpenFailed(std::io::Error::last_os_error().to_string())); }
             if libc::ftruncate(fd, size as libc::off_t) < 0 {
                 libc::close(fd);
