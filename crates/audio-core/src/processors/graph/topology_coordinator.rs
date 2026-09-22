@@ -56,7 +56,30 @@ impl TopologyCoordinator {
         }
     }
 
-    pub fn commit(&mut self) -> Result<(), String> {
+    /// Swap the staged topology onto the active side. Runs on the AUDIO THREAD.
+    ///
+    /// # Why this no longer compiles
+    ///
+    /// It used to call `GraphCompiler::compile()` here when the staged plan was
+    /// empty, with the comment "in a production system, we'd have pre-compiled
+    /// this off-thread". That compile boxes a `[[usize; MAX_NODES]; MAX_NODES]`
+    /// (128 KB) and a `[[usize; MAX_NODES]; MAX_BUFFERS]` (245 KB) — ~373 KB of
+    /// fresh allocation on a SCHED_FIFO thread, per commit. The 245 KB box
+    /// clears glibc's 128 KB mmap threshold, so it is a new mapping plus the
+    /// first-touch page faults to zero it, not just arithmetic; measured
+    /// compute alone was 17 µs at the 46-node console and 75 µs at 128 nodes.
+    /// Every individually-pushed `AddNode`/`UpdateEdge` invalidates the plan
+    /// (`inactive_topology_mut` zeroes `num_stages`), so this fired throughout
+    /// console bootstrap.
+    ///
+    /// It is also redundant: `TopologyManager::handle_topology_command` already
+    /// compiles off-thread and ships the finished plan inside `SetTopology`.
+    /// This branch was the fallback for a plan that arrived uncompiled — and
+    /// the right answer for that is to keep playing the topology we have, not
+    /// to malloc on the audio thread.
+    ///
+    /// [`Self::prepare_commit`] is the off-thread entry point that does compile.
+    pub fn commit(&mut self) -> Result<(), &'static str> {
         // Mid-stream: the input handler saw a full drain chunk, more
         // mutations are queued — apply them all before swapping.
         if self.stream_pending {
@@ -66,12 +89,20 @@ impl TopologyCoordinator {
         let inactive = (active + 1) % 2;
 
         if self.topologies[inactive].plan.num_stages == 0 && self.topologies[inactive].node_count > 0 {
-            // Re-run compilation to be sure.
-            // In a production system, we'd have pre-compiled this off-thread.
-            match GraphCompiler::compile(&self.topologies[inactive]) {
-                Ok(plan) => self.topologies[inactive].plan = plan,
-                Err(e) => return Err(format!("Compilation failed: {}", e)),
-            }
+            // Uncompiled. Refuse the swap and keep the active topology: audio
+            // keeps flowing through the last good graph, and the caller logs.
+            // Swapping anyway would install a plan with zero stages, which
+            // renders silence.
+            self.needs_commit = false;
+            // `&'static str`, not `format!`. This runs on the audio thread, and
+            // building an error message is a heap allocation like any other —
+            // the RT zero-allocation test catches it, which is how this line
+            // came to be written this way the second time.
+            return Err(
+                "staged topology has nodes but no compiled plan; refusing to swap \
+                 (compiling here would allocate on the audio thread). The conductor \
+                 must send a compiled plan via SetTopology."
+            );
         }
 
         self.active_idx.store(inactive, Ordering::Release);
@@ -83,7 +114,7 @@ impl TopologyCoordinator {
         self.active_topology().crossfades.iter().any(|x| x.is_some())
     }
 
-    pub fn apply_mutation(&mut self, mutation: crate::processors::TopologyMutation, nodes: &mut [super::node::ProcessorNode; crate::MAX_NODES], node_count: &mut usize, garbage_producer: &Option<Box<dyn nullherz_traits::GarbageProducer>>, faulted_states: &[std::sync::atomic::AtomicBool; crate::MAX_NODES]) {
+    pub fn apply_mutation(&mut self, mutation: crate::processors::TopologyMutation, nodes: &mut [super::node::ProcessorNode; crate::MAX_NODES], node_count: &mut usize, garbage_producer: &mut Option<Box<dyn nullherz_traits::GarbageProducer>>, faulted_states: &[std::sync::atomic::AtomicBool; crate::MAX_NODES]) {
         use crate::processors::TopologyMutation;
         match mutation {
             TopologyMutation::RemoveNode { node_idx } => {
@@ -92,9 +123,12 @@ impl TopologyCoordinator {
                     // 1. Swap with DummyProcessor and send the old one to garbage_producer
                     let dummy = Box::new(super::DummyProcessor) as Box<dyn nullherz_traits::AudioProcessor>;
                     let old_proc = unsafe { std::ptr::replace(nodes[idx].processor.get(), dummy) };
-                    if let Some(prod) = garbage_producer {
-                        let mut cloned = dyn_clone::clone_box(&**prod);
-                        if let Err(leaked) = cloned.push_processor(old_proc) { std::mem::forget(leaked); }
+                    if let Some(prod) = garbage_producer.as_deref_mut() {
+                        // Straight into the ring. This used to `clone_box` the
+                        // producer first — a second heap allocation per
+                        // mutation, on the audio thread, purely to satisfy
+                        // `push_processor(&mut self)` through a shared ref.
+                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
                     } else { std::mem::forget(old_proc); }
 
                     // 2. Clear faulted state for this node_idx
@@ -219,22 +253,28 @@ impl TopologyCoordinator {
             TopologyMutation::SwapProcessor { node_idx, mut processor } => {
                 let n_idx = node_idx as usize;
                 if n_idx < crate::MAX_NODES {
-                    if let Some(prod) = garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
+                    if let Some(prod) = garbage_producer.as_deref() { processor.set_garbage_producer(prod); }
                     let old_proc = unsafe { std::ptr::replace(nodes[n_idx].processor.get(), processor) };
-                    if let Some(prod) = garbage_producer {
-                        let mut cloned = dyn_clone::clone_box(&**prod);
-                        if let Err(leaked) = cloned.push_processor(old_proc) { std::mem::forget(leaked); }
+                    if let Some(prod) = garbage_producer.as_deref_mut() {
+                        // Straight into the ring. This used to `clone_box` the
+                        // producer first — a second heap allocation per
+                        // mutation, on the audio thread, purely to satisfy
+                        // `push_processor(&mut self)` through a shared ref.
+                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
                     } else { std::mem::forget(old_proc); }
                 }
             }
             TopologyMutation::AddNode { node_idx, mut processor } => {
                 let idx = node_idx as usize;
                 if idx < crate::MAX_NODES {
-                    if let Some(prod) = garbage_producer { processor.set_garbage_producer(dyn_clone::clone_box(&**prod)); }
+                    if let Some(prod) = garbage_producer.as_deref() { processor.set_garbage_producer(prod); }
                     let old_proc = unsafe { std::ptr::replace(nodes[idx].processor.get(), processor) };
-                    if let Some(prod) = garbage_producer {
-                        let mut cloned = dyn_clone::clone_box(&**prod);
-                        if let Err(leaked) = cloned.push_processor(old_proc) { std::mem::forget(leaked); }
+                    if let Some(prod) = garbage_producer.as_deref_mut() {
+                        // Straight into the ring. This used to `clone_box` the
+                        // producer first — a second heap allocation per
+                        // mutation, on the audio thread, purely to satisfy
+                        // `push_processor(&mut self)` through a shared ref.
+                        if let Err(leaked) = prod.push_processor(old_proc) { std::mem::forget(leaked); }
                     } else { std::mem::forget(old_proc); }
 
                     if idx >= *node_count { *node_count = idx + 1; }
