@@ -304,8 +304,18 @@ pub struct TaskPool {
 ///
 /// Node cost is essentially linear (5.4 -> 6.4 us/node across a 9x range), so
 /// the engine carries its structural ceiling inside ~14% of a 5.8 ms budget
-/// with no parallelism at all. What limits graph size is `MAX_BUFFERS` (240),
-/// not CPU.
+/// with no parallelism at all. **CPU is not what limits graph size.**
+///
+/// Which address space limits it depends on the STRIP SHAPE, and the harness's
+/// shape is not the product's. `bench_studio_scale` gives every node its own
+/// output pair (to reach a high node count), so it spends 2 buffers per node
+/// and runs out of `MAX_BUFFERS` first. The real DJ deck strip processes IN
+/// PLACE and spends 1.66 — `cargo run -p nullherz-mixer --example graph_budget`
+/// reports the 4-deck console at 58 nodes / 96 buffers, where `MAX_NODES` binds
+/// first (buffers would allow 145 nodes). A deck strip costs 11 nodes and 19
+/// buffers at the margin, so the product ceiling is about TEN channel strips,
+/// with both ceilings arriving within one strip of each other. Do not carry
+/// this table's buffer arithmetic onto a graph built the other way.
 ///
 /// At 106 nodes the stages are finally expensive enough that this gate fires,
 /// and what it buys is the mean — at the tail's expense. Five INTERLEAVED

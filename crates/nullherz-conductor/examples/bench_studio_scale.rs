@@ -34,6 +34,15 @@
 //! structural ceiling rather than a few fat nodes. The sampler is the real one,
 //! playing real material through the real resampler.
 //!
+//! **This shape is not the product's**, and the difference matters for anything
+//! but the per-node timings. Every node here gets its own output pair, so a
+//! strip costs 2 nodes and 4 buffers. The real DJ deck strip processes IN PLACE:
+//! 11 nodes and 19 buffers at the margin, 1.66 buffers per node against this
+//! harness's 2.0. So this harness exhausts `MAX_BUFFERS` first while the real
+//! console exhausts `MAX_NODES` first. Read the sweep as a statement about NODE
+//! COST, and see `nullherz-mixer --example graph_budget` for what the ceilings
+//! mean for a console anyone would build.
+//!
 //! Run:
 //!   cargo run --release -p nullherz-conductor --example bench_studio_scale
 //!
