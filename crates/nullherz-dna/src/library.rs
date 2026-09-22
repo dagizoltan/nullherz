@@ -4,6 +4,120 @@ use parking_lot::{Mutex, RwLock};
 use redb::{Database, TableDefinition, ReadableTable, ReadableTableMetadata, TableError};
 use crate::*;
 
+/// On-disk row format tag. Rows written before this existed are `serde_json`
+/// and begin with `{`, so the two can never be confused.
+const TRACK_MAGIC: &[u8; 8] = b"NHZTRK01";
+
+/// The row as it is stored: identical fields to [`LibraryTrack`], but with
+/// `SampleMetadata` BY VALUE rather than behind an `Arc`.
+///
+/// rkyv can archive `Arc`, but only through its shared-pointer machinery, which
+/// needs a serializer carrying shared state and buys nothing here — a row is
+/// written once and read into a fresh `Arc` anyway. By value the format is a
+/// flat buffer and the conversion is one allocation on read, which is the same
+/// allocation `Arc::new` was already doing.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
+struct StoredTrack {
+    id: u64,
+    path: String,
+    title: String,
+    artist: String,
+    album: String,
+    genre: String,
+    energy_level: f32,
+    metadata: nullherz_traits::SampleMetadata,
+}
+
+/// Encode a track row.
+///
+/// # Why not JSON any more
+///
+/// A row carries the whole waveform: proportional peaks, the MIP pyramid, and
+/// the per-window `BandWaveform`. As JSON every one of those floats became a
+/// decimal string — `library.redb` reached 470 MB, and `get_track` was measured
+/// at 61 ms for a six-minute release, which is why three separate hot paths had
+/// to be taught NOT to call it and why `FACETS_TABLE` exists at all.
+#[doc(hidden)]
+pub fn encode_track_for_test(track: &LibraryTrack) -> Result<Vec<u8>, Box<dyn std::error::Error>> { encode_track(track) }
+
+#[doc(hidden)]
+pub fn decode_track_for_test(bytes: &[u8]) -> Result<LibraryTrack, Box<dyn std::error::Error>> { decode_track(bytes) }
+
+pub(crate) fn encode_track(track: &LibraryTrack) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let stored = StoredTrack {
+        id: track.id,
+        path: track.path.clone(),
+        title: track.title.clone(),
+        artist: track.artist.clone(),
+        album: track.album.clone(),
+        genre: track.genre.clone(),
+        energy_level: track.energy_level,
+        metadata: (*track.metadata).clone(),
+    };
+    let body = rkyv::to_bytes::<_, 4096>(&stored)
+        .map_err(|e| -> Box<dyn std::error::Error> { format!("rkyv encode: {e}").into() })?;
+    let mut out = Vec::with_capacity(TRACK_MAGIC.len() + body.len());
+    out.extend_from_slice(TRACK_MAGIC);
+    out.extend_from_slice(&body);
+    Ok(out)
+}
+
+/// Decode a track row, in either format.
+///
+/// Reads BOTH: rkyv when the magic is present, `serde_json` otherwise. Existing
+/// libraries are not rewritten or migrated up front — a 470 MB rewrite is not
+/// something to do behind someone's back on startup. Rows convert as they are
+/// saved, so a library moves over as it is used and an old one keeps working
+/// meanwhile.
+pub(crate) fn decode_track(bytes: &[u8]) -> Result<LibraryTrack, Box<dyn std::error::Error>> {
+    if let Some(body) = bytes.strip_prefix(TRACK_MAGIC.as_slice()) {
+        // COPY INTO AN ALIGNED BUFFER FIRST. This is not optional.
+        //
+        // An rkyv archive is read in place through pointers computed from the
+        // buffer's base address, so the base must meet the archive's alignment.
+        // Neither end of this holds for a row out of redb: the page cache hands
+        // back a `&[u8]` at whatever address it likes, and the 8-byte magic
+        // prefix shifts it further.
+        //
+        // Skipping this appears to work — `check_archived_root` succeeds
+        // whenever the slice happens to land aligned, which it did for every row
+        // in the isolated round-trip tests and in the benchmark. It failed on the
+        // SECOND track written by `mixing_test`, because that one's allocation
+        // landed differently. An alignment bug that depends on the allocator is
+        // the worst kind: it passes locally and corrupts somewhere else.
+        //
+        // The copy costs one memcpy of the row. Against the 32 ms JSON parse it
+        // replaces, that is still an order of magnitude ahead.
+        let mut aligned = rkyv::AlignedVec::with_capacity(body.len());
+        aligned.extend_from_slice(body);
+
+        // `check_bytes` validates before any field is touched: a truncated or
+        // corrupt row must be an error, not a wild read. That is the whole
+        // reason the archive derives carry it.
+        let archived = rkyv::check_archived_root::<StoredTrack>(&aligned)
+            .map_err(|e| -> Box<dyn std::error::Error> { format!("rkyv row failed validation: {e}").into() })?;
+        // `SharedDeserializeMap`, not `Infallible`: `SampleMetadata` holds its
+        // waveform data behind `Arc`, so deserialising it needs the registry
+        // that rebuilds shared pointers.
+        let mut de = rkyv::de::deserializers::SharedDeserializeMap::default();
+        let stored: StoredTrack =
+            <ArchivedStoredTrack as rkyv::Deserialize<StoredTrack, _>>::deserialize(archived, &mut de)
+                .map_err(|e| -> Box<dyn std::error::Error> { format!("rkyv decode: {e:?}").into() })?;
+        return Ok(LibraryTrack {
+            id: stored.id,
+            path: stored.path,
+            title: stored.title,
+            artist: stored.artist,
+            album: stored.album,
+            genre: stored.genre,
+            energy_level: stored.energy_level,
+            metadata: Arc::new(stored.metadata),
+        });
+    }
+    Ok(serde_json::from_slice(bytes)?)
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct LibraryTrack {
     pub id: u64,
@@ -185,7 +299,7 @@ impl GeneticLibrary for LibraryDatabase {
         };
         let result = table.get(id)?;
         if let Some(guard) = result {
-            let track: LibraryTrack = serde_json::from_slice(guard.value())?;
+            let track = decode_track(guard.value())?;
             return Ok(Some(track));
         }
         Ok(None)
@@ -210,7 +324,7 @@ impl GeneticLibrary for LibraryDatabase {
         let mut tracks = Vec::new();
         for res in table.iter()? {
             let (_id, val) = res?;
-            let track: LibraryTrack = serde_json::from_slice(val.value())?;
+            let track = decode_track(val.value())?;
             tracks.push(track);
         }
         Ok(tracks)
@@ -221,7 +335,7 @@ impl GeneticLibrary for LibraryDatabase {
         let write_txn = self.db.begin_write()?;
         {
             let mut table = write_txn.open_table(TRACKS_TABLE)?;
-            let serialized = serde_json::to_vec(track)?;
+            let serialized = encode_track(track)?;
             table.insert(track.id, serialized.as_slice())?;
             // Persist the small query facets alongside the full track IN THE SAME
             // transaction, so the two tables can never drift.
@@ -290,7 +404,7 @@ impl GeneticLibrary for LibraryDatabase {
             let (key_guard, _) = res?;
             let (_name, track_id) = key_guard.value();
             if let Some(val) = track_table.get(track_id)? {
-                let track: LibraryTrack = serde_json::from_slice(val.value())?;
+                let track = decode_track(val.value())?;
                 tracks.push(track);
             }
         }
@@ -458,7 +572,7 @@ impl LibraryDatabase {
                 Ok(table) => {
                     for res in table.iter()? {
                         let (_id, val) = res?;
-                        let track: LibraryTrack = serde_json::from_slice(val.value())?;
+                        let track = decode_track(val.value())?;
                         map.insert(track.id, track.facets());
                         // `track` (with its waveform metadata) drops here.
                     }
