@@ -24,6 +24,17 @@ pub struct PersonalityInheritanceProcessor {
     // Layer 3: Rhythmic Pulse Inheritance (Delay Line)
     delay_buffer: Vec<f32>,
     write_ptr: usize,
+    /// Per-block scratch for the rhythmic stage, allocated once in `new`.
+    ///
+    /// This was `vec![0.0; input.len()]` inside `process` — one heap allocation
+    /// per block, on the audio thread, in violation of AGENTS.md §2. It went
+    /// unnoticed for the obvious reason: nothing checked. The conformance
+    /// suite's `verify_zero_allocation` was a stub that returned `Ok(())`, and
+    /// this is the first processor the real guard caught.
+    ///
+    /// Sized to `MAX_BLOCK_SIZE` so it covers any render block the engine can
+    /// hand over; `process` takes `[..len]` of it.
+    rhythmic_scratch: Vec<f32>,
 }
 
 impl PersonalityInheritanceProcessor {
@@ -44,6 +55,7 @@ impl PersonalityInheritanceProcessor {
             spatial_bias: 0.5,
             delay_buffer: vec![0.0; sample_rate.max(1.0) as usize], // 1 second max delay
             write_ptr: 0,
+            rhythmic_scratch: vec![0.0; nullherz_traits::MAX_BLOCK_SIZE],
         }
     }
 
@@ -75,13 +87,20 @@ impl nullherz_traits::SignalProcessor for PersonalityInheritanceProcessor {
         let artifacts = &self.source_artifacts;
         let spatial = &self.source_spatial;
 
-        // Apply Rhythmic Micro-timing (Layer 3)
-        let mut rhythmic_input = vec![0.0; input.len()];
+        // Apply Rhythmic Micro-timing (Layer 3).
+        //
+        // Borrowed out of `self` so the rest of this function can keep using
+        // `&self.*` fields while writing into it; returned before we leave.
+        // The scratch is MAX_BLOCK_SIZE long; every use below is bounded to
+        // `len` so a short block never reads stale tail samples.
+        let mut scratch = std::mem::take(&mut self.rhythmic_scratch);
+        let len = input.len().min(scratch.len()).min(output.len());
+        let rhythmic_input = &mut scratch[..len];
         if let Some(transport) = context.transport {
             let samples_per_beat = (transport.sample_rate as f64 * 60.0) / transport.bpm as f64;
             let current_beat = transport.beat_position;
 
-            for (i, &sample) in input.iter().enumerate() {
+            for (i, &sample) in input.iter().take(len).enumerate() {
                 let sample_beat = current_beat + (i as f64 / samples_per_beat);
                 let _beat_in_pattern = (sample_beat % 4.0) as usize;
                 let step = ((sample_beat * 4.0) % 64.0) as usize;
@@ -109,7 +128,7 @@ impl nullherz_traits::SignalProcessor for PersonalityInheritanceProcessor {
                 self.write_ptr = (self.write_ptr + 1) % self.delay_buffer.len();
             }
         } else {
-            rhythmic_input.copy_from_slice(input);
+            rhythmic_input.copy_from_slice(&input[..len]);
         }
 
         // Apply Artifact Profile (Layer 4) - Simplified Noise Floor Injection
@@ -133,7 +152,7 @@ impl nullherz_traits::SignalProcessor for PersonalityInheritanceProcessor {
             room_env = spatial.room_size * s_bias;
         }
 
-        self.pipeline.process(&rhythmic_input, output, |re, im, n, _window, _fft| {
+        self.pipeline.process(&scratch[..len], &mut output[..len], |re, im, n, _window, _fft| {
             // Atmosphere: Apply a simple spectral reverb simulation
             if room_env > 0.1 {
                 for i in 0..n {
@@ -200,6 +219,12 @@ impl nullherz_traits::SignalProcessor for PersonalityInheritanceProcessor {
                 }
             }
         });
+
+        // Return the scratch buffer. `mem::take` left a zero-capacity Vec in
+        // its place; putting it back is what keeps the next block allocation
+        // free. Dropping out of this function without restoring it would turn
+        // one allocation per block into one per block PLUS a free.
+        self.rhythmic_scratch = scratch;
     }
 }
 

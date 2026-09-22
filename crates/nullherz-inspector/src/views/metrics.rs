@@ -217,7 +217,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
                 let pos = center + egui::vec2(x * scale, y * scale);
                 ui.painter().circle_filled(pos, 6.0, theme.accent);
-                ui.painter().circle_stroke(pos, 8.0, Stroke::new(1.0, theme.text_primary));
+                ui.painter().circle_stroke(pos, 8.0, Stroke::new(1.0_f32, theme.text_primary));
 
                 ui.add_space(theme.space_xs);
                 ui.label(RichText::new("TIMBRAL TRAJECTORY").small().color(theme.text_secondary));

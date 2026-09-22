@@ -37,7 +37,7 @@ The Nullherz engine is built upon a strict separation of concerns, ensuring that
 
 ### 2.1 Real-Time Safety & Performance
 - **Lock-Free Sample Access**: [VERIFIED] `SampleRegistry` uses an atomic-swap pattern.
-- **Zero Heap Allocation**: [VERIFIED] Audit of audio hot-paths indicates zero-allocation for core processors, verified via the gauntlet conformance test suite.
+- **Zero Heap Allocation**: [~~VERIFIED~~ — CORRECTED 2026-09-21] This was false when written. `verify_zero_allocation` was a stub returning `Ok(())`, and the gauntlet it cites had zero callers in the workspace, so nothing had ever been checked. A real counting-allocator guard was added 2026-09-21 and immediately found two live violations. See `docs/system/ARCHITECTURE.md` §5.
 - **CPU Hardening**: [VERIFIED] FTZ/DAZ enabled for RT threads (`crates/ipc-layer/src/lib.rs` - `setup_rt_thread`).
 - **Atomic Topology**: [VERIFIED] Structural shifts are buffered and committed via `TopologyManager` off-thread.
 

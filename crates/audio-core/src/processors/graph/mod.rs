@@ -51,6 +51,12 @@ pub struct ProcessorGraph {
     /// offset==0 reset + accumulate keeps peak-hold within the block).
     pub(crate) meter_phase: u32,
     pub(crate) meter_this_block: bool,
+    /// Did any stage dispatch to the worker pool during this sub-block?
+    ///
+    /// Gates the worker-telemetry merge, which is `workers * MAX_NODES` atomic
+    /// swaps and pointless when nothing ran on a worker. Set by
+    /// `execute_stage`'s return value, cleared after the merge.
+    pub(crate) dispatched_to_pool: bool,
 }
 
 /// Meter every Nth physical block (~43 Hz at 256/44.1k), comfortably above
@@ -104,6 +110,7 @@ impl ProcessorGraph {
             faulted_states,
             meter_phase: 0,
             meter_this_block: true,
+            dispatched_to_pool: false,
         }
     }
 
@@ -151,9 +158,13 @@ impl ProcessorGraph {
                 self.morph_samples_remaining = self.morph_samples_total;
             }
 
+            // `msg` is a `&'static str` and goes to the logger as-is. It used
+            // to be interpolated with `format!` — a heap allocation on the
+            // audio thread, in the error path of the very function whose job is
+            // to keep allocation off it.
             if let Err(msg) = self.topology_coordinator.commit()
                 && let Some(ref logger) = self.logger {
-                    logger.log(crate::rt_logging::RtLogLevel::Error, &format!("Refusing to commit hazardous topology: {}", msg), 0);
+                    logger.log(crate::rt_logging::RtLogLevel::Error, msg, 0);
                 }
         }
 
@@ -161,7 +172,7 @@ impl ProcessorGraph {
         if !self.topology_coordinator.has_active_crossfades() {
             for i in 0..self.pending_mutation_count {
                 if let Some(m) = self.pending_mutations[i].take() {
-                    self.topology_coordinator.apply_mutation(m, self.nodes.as_mut(), &mut self.node_count, &self.garbage_producer, &self.faulted_states);
+                    self.topology_coordinator.apply_mutation(m, self.nodes.as_mut(), &mut self.node_count, &mut self.garbage_producer, &self.faulted_states);
                 }
             }
             self.pending_mutation_count = 0;
@@ -280,7 +291,7 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
             let inactive_idx = (active_idx + 1) % 2;
             let inactive_num_stages = self.topology_coordinator.topologies[inactive_idx].plan.num_stages;
             for s_idx in 0..inactive_num_stages {
-                GraphExecutor::execute_stage(
+                self.dispatched_to_pool |= GraphExecutor::execute_stage(
                     &self.nodes,
                     &mut self.buffer_pool.old_path_buffers,
                     &mut self.buffer_pool.crossfade_buffers,
@@ -302,8 +313,9 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
         }
 
         let num_stages = self.topology_coordinator.topologies[active_idx].plan.num_stages;
+        let mut dispatched = false;
         for s_idx in 0..num_stages {
-            GraphExecutor::execute_stage(
+            dispatched |= GraphExecutor::execute_stage(
                 &self.nodes,
                 &mut self.buffer_pool.buffers,
                 &mut self.buffer_pool.crossfade_buffers,
@@ -323,6 +335,7 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
             );
         }
 
+        self.dispatched_to_pool |= dispatched;
         self.buffer_pool.pdc_write_pos = (self.buffer_pool.pdc_write_pos + num_samples) % crate::processors::graph::buffer_pool::MAX_PDC_SAMPLES;
 
         let topo = &self.topology_coordinator.topologies[active_idx];
@@ -382,10 +395,20 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                 self.buffer_pool.capture_old_buffers(offset + num_samples);
             }
 
-        if let Some(ref mut p) = pool
-             && let Some(p_mut) = p.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
+        // Merge worker-local node times back into the graph accumulator —
+        // but ONLY if a stage actually dispatched to the pool this sub-block.
+        //
+        // This is `workers * MAX_NODES` atomic read-modify-writes: 512 on a
+        // 4-worker build, per SUB-BLOCK, whether or not the pool ran. And the
+        // pool usually does not run: the executor's per-stage cost gate means
+        // that at a 256-frame block no stage clears the dispatch threshold at
+        // all (see `DEFAULT_PARALLEL_THRESHOLD_CYCLES`), which is the normal
+        // live configuration. So this was ~88k atomic RMWs a second of pure
+        // bookkeeping for numbers that had not changed.
+        if self.dispatched_to_pool
+            && let Some(ref mut p) = pool
+            && let Some(p_mut) = p.as_any().downcast_mut::<crate::processors::graph::TaskPool>() {
                  use std::sync::atomic::Ordering;
-                 // Sum worker-local telemetry into the main graph accumulator
                  let num_w = p_mut.worker_producers.len();
                  for w in 0..num_w {
                      for n in 0..crate::MAX_NODES {
@@ -396,6 +419,7 @@ fn process_parallel(&mut self, _external_inputs: &[&[f32]], external_outputs: &m
                      }
                  }
              }
+        self.dispatched_to_pool = false;
 
         // Latch the metering decision once per physical block (offset 0) so
         // every sub-block of the block agrees; decimate to METER_DECIM.
@@ -513,8 +537,10 @@ fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
 fn apply_command(&mut self, command: &nullherz_traits::Command) {
         self.apply_command_with_context(command, None);
     }
-fn set_garbage_producer(&mut self, producer: Box<dyn nullherz_traits::GarbageProducer>) {
-        self.garbage_producer = Some(producer);
+fn set_garbage_producer(&mut self, producer: &(dyn nullherz_traits::GarbageProducer + 'static)) {
+        // A nested graph DOES keep one, so this is the one place the clone is
+        // earned. See the trait's doc comment.
+        self.garbage_producer = Some(dyn_clone::clone_box(producer));
     }
 fn collect_telemetry(&self, node_times: &mut [u64; crate::MAX_NODES], peak_levels: &mut [f32; crate::MAX_NODES]) {
         for i in 0..crate::MAX_NODES {

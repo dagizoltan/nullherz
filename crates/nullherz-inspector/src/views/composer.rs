@@ -318,7 +318,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         }
 
                                         if response.hovered() {
-                                            ui.painter().rect_stroke(rect, Rounding::same(2.0), Stroke::new(1.0, app.theme.text_primary));
+                                            ui.painter().rect_stroke(rect, Rounding::same(2.0), Stroke::new(1.0_f32, app.theme.text_primary));
                                         }
 
                                         if response.clicked() {

@@ -292,7 +292,7 @@ mod tests {
         let sk_bytes = sk.to_bytes();
         let expected_pk = sk.verifying_key().to_bytes();
 
-        DnaServer::start(lib, actual_port, Some(sk_bytes)).unwrap();
+        DnaServer::start(lib, actual_port, Some(sk_bytes), Arc::new(std::sync::atomic::AtomicBool::new(false))).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(100));
 
         let peer = format!("127.0.0.1:{}", actual_port);
@@ -417,7 +417,7 @@ mod tests {
         let sk = SigningKey::generate(&mut csprng);
         let sk_bytes = sk.to_bytes();
 
-        DnaServer::start(lib.clone(), actual_port, Some(sk_bytes)).unwrap();
+        DnaServer::start(lib.clone(), actual_port, Some(sk_bytes), Arc::new(std::sync::atomic::AtomicBool::new(false))).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(100));
 
         let server_addr: SocketAddr = format!("127.0.0.1:{}", actual_port).parse().unwrap();

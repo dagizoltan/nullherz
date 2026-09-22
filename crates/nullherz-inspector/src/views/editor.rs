@@ -62,7 +62,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             // Draw visual transient markers
             let total_samples = track.metadata.total_samples;
             if total_samples > 0 {
-                let transient_stroke = egui::Stroke::new(1.5, theme.success.linear_multiply(0.8));
+                let transient_stroke = egui::Stroke::new(1.5_f32, theme.success.linear_multiply(0.8));
                 for &t in track.metadata.transients.iter() {
                     let ratio = t as f32 / total_samples as f32;
                     let x = rect.left() + ratio * rect.width();

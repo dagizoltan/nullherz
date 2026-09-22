@@ -1,3 +1,5 @@
+pub mod rt_alloc;
+
 use crate::{AudioProcessor, ProcessContext, AudioConfig, Transport};
 
 pub struct MockProcessor {
@@ -61,13 +63,82 @@ impl StabilityTester {
         Ok(())
     }
 
-    pub fn verify_zero_allocation(_processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
-        // Since we can't easily hook into the allocator from within a standard test
-        // without custom test runners or crate-level global allocators,
-        // we'll rely on architectural invariants.
-        // For the ConformanceSuite, we'll mark this as a manual verification requirement
-        // unless we add a specific performance-tracking wrapper.
-        Ok(())
+    /// `process()` must not touch the heap. Measured, not assumed.
+    ///
+    /// Requires the calling test binary to install the guard:
+    ///
+    /// ```ignore
+    /// #[global_allocator]
+    /// static ALLOC: nullherz_traits::test_kit::rt_alloc::CountingAllocator<std::alloc::System> =
+    ///     nullherz_traits::test_kit::rt_alloc::CountingAllocator::new(std::alloc::System);
+    /// ```
+    ///
+    /// Without it this returns `Err`, and that is the point. It used to return
+    /// a bare `Ok(())` — a stub whose comment explained that hooking the
+    /// allocator had been deferred — while the docs recorded zero-allocation as
+    /// verified. A check that cannot fail is worse than no check, because it
+    /// launders an assumption into a claim.
+    ///
+    /// The processor is primed with two un-armed blocks first: lazily-built
+    /// shared state (the resampler's sinc table, an FFT plan) allocates once on
+    /// first use, which is a legitimate warm-up rather than a per-block cost.
+    /// Anything that allocates on the THIRD identical block is allocating per
+    /// block, which is the defect.
+    pub fn verify_zero_allocation(processor: &mut dyn crate::AudioProcessor) -> Result<(), String> {
+        use crate::test_kit::rt_alloc;
+
+        if !rt_alloc::is_installed() {
+            return Err(
+                "allocation guard is not installed in this test binary, so this check \
+                 cannot observe anything. Add:\n\n  #[global_allocator]\n  static ALLOC: \
+                 nullherz_traits::test_kit::rt_alloc::CountingAllocator<std::alloc::System> =\n      \
+                 nullherz_traits::test_kit::rt_alloc::CountingAllocator::new(std::alloc::System);\n"
+                    .to_string(),
+            );
+        }
+
+        const BLOCK: usize = 128;
+        let input = vec![0.25f32; BLOCK];
+        let mut out_a = vec![0.0f32; BLOCK];
+        let mut out_b = vec![0.0f32; BLOCK];
+
+        let transport = Transport {
+            bpm: 120.0,
+            beat_position: 0.0,
+            is_playing: true,
+            sample_rate: 44100.0,
+            absolute_samples: 0,
+            system_time_ns: 0,
+            device_time_ns: 0,
+        };
+
+        let mut run = |out: &mut Vec<f32>| {
+            let mut ctx = ProcessContext {
+                transport: Some(&transport),
+                host: None,
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+            let ins: [&[f32]; 1] = [&input];
+            let mut outs: [&mut [f32]; 1] = [out];
+            processor.process(&ins, &mut outs, &mut ctx);
+        };
+
+        // Warm-up: one-time lazy initialisation is not a per-block allocation.
+        run(&mut out_a);
+        run(&mut out_b);
+
+        let report = rt_alloc::measure(|| run(&mut out_a));
+
+        if report.is_clean() {
+            Ok(())
+        } else {
+            Err(format!(
+                "process() allocated on a steady-state block: {report}. The audio thread \
+                 runs under SCHED_FIFO, where malloc can take the mmap path and fault pages \
+                 in; this is the Law of Zero Allocation (AGENTS.md §2)."
+            ))
+        }
     }
 }
 

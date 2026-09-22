@@ -154,6 +154,12 @@ impl<K: ProcessingKernel> AudioEngine<K> {
         logger: Arc<RtLogger>,
         kernel: K,
     ) -> Self {
+        // Resolve the SIMD dispatch probe HERE, on the setup thread. `level()`
+        // runs CPUID on first use; the audio callback is not where to discover
+        // that. Same reasoning as the resampler's sinc table.
+        audio_dsp::dispatch::prewarm();
+        println!("AudioEngine: DSP SIMD path = {}", audio_dsp::dispatch::level_name());
+
         let command_producer = dyn_clone::clone_box(&*resources.command_producer);
         // Worker-count resolution: explicit resource config, then the
         // NULLHERZ_WORKERS env override (0 = no pool, pure serial execution
@@ -281,7 +287,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             num_samples
         );
 
-        let telemetry = TelemetryFinalizer::finalize_block_telemetry(
+        TelemetryFinalizer::finalize_block_telemetry(
             graph,
             &self.metrics,
             outputs,
@@ -295,14 +301,7 @@ impl<K: ProcessingKernel> AudioEngine<K> {
             &mut self.fft_im,
             &self.transport,
             &mut self.spectral_cache,
+            &mut self.telemetry_log_producer,
         );
-
-        // Black-Box Flight Recorder (RT-Safe SPSC push)
-        if let Some(ref mut log_prod) = self.telemetry_log_producer {
-            let _ = log_prod.push(TelemetryLogEntry {
-                telemetry,
-                timestamp_cycles: start_cycles,
-            });
-        }
     }
 }

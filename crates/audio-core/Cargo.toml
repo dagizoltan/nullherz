@@ -24,6 +24,9 @@ libc = "0.2"
 wide = "0.7.30"
 
 [dev-dependencies]
+# `test-utils` brings in `test_kit`, including the allocation guard the
+# RT zero-allocation tests install as their global allocator.
+nullherz-traits = { path = "../nullherz-traits", features = ["test-utils"] }
 sidecar-sdk = { path = "../sidecar-sdk" }
 nullherz-backends = { path = "../nullherz-backends" }
 nullherz-processors = { path = "../nullherz-processors" }

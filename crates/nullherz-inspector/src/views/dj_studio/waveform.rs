@@ -55,7 +55,7 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
         // Enhanced EMPTY DECK visualization (always shown regardless of GPU/WGPU availability!)
         ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "EMPTY DECK", egui::FontId::monospace(theme.type_caption), theme.text_disabled);
         // Render a dashed border for the empty zone
-        ui.painter().rect_stroke(rect.shrink(2.0), theme.radius_sm, Stroke::new(1.0, theme.border));
+        ui.painter().rect_stroke(rect.shrink(2.0), theme.radius_sm, Stroke::new(1.0_f32, theme.border));
         return;
     };
 
@@ -186,7 +186,7 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
         ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, format!("{} (NO GPU)", t.title), egui::FontId::monospace(theme.type_caption), theme.text_secondary);
         ui.painter().line_segment(
             [egui::pos2(rect.min.x, rect.center().y), egui::pos2(rect.max.x, rect.center().y)],
-            egui::Stroke::new(1.0, theme.border)
+            egui::Stroke::new(1.0_f32, theme.border)
         );
     }
 
@@ -214,7 +214,7 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                 };
                 ui.painter().line_segment(
                     [egui::pos2(x, rect.max.y - h), egui::pos2(x, rect.max.y)],
-                    egui::Stroke::new(1.0, Color32::from_white_alpha(alpha)),
+                    egui::Stroke::new(1.0_f32, Color32::from_white_alpha(alpha)),
                 );
 
                 // Elegant beat counters (1, 2, 3, 4) indicating bar/beat context to the DJ
@@ -239,7 +239,7 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                 let x = to_x(p);
                 ui.painter().line_segment(
                     [egui::pos2(x, rect.min.y), egui::pos2(x, rect.min.y + 10.0)],
-                    egui::Stroke::new(2.0, theme.accent),
+                    egui::Stroke::new(2.0_f32, theme.accent),
                 );
                 ui.painter().text(
                     egui::pos2(x + 3.0, rect.min.y + 1.0),
@@ -269,11 +269,11 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
 
     ui.painter().line_segment(
         [egui::pos2(cx, rect.min.y), egui::pos2(cx, rect.max.y)],
-        egui::Stroke::new(4.0, Color32::from_black_alpha(160)),
+        egui::Stroke::new(4.0_f32, Color32::from_black_alpha(160)),
     );
     ui.painter().line_segment(
         [egui::pos2(cx, rect.min.y), egui::pos2(cx, rect.max.y)],
-        egui::Stroke::new(2.0, theme.text_primary),
+        egui::Stroke::new(2.0_f32, theme.text_primary),
     );
 
     // Whole-track position context: a thin progress bar along the bottom
@@ -296,7 +296,7 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
     // Cue positions on the progress bar keep whole-track orientation.
     for cue in t.metadata.hot_cues.iter().flatten() {
         let x = rect.min.x + (*cue as f32 / total_frames as f32).clamp(0.0, 1.0) * rect.width();
-        ui.painter().vline(x, bar_y..=rect.max.y, Stroke::new(1.0, theme.accent));
+        ui.painter().vline(x, bar_y..=rect.max.y, Stroke::new(1.0_f32, theme.accent));
     }
 
     // Elapsed / total time readout, anchored top-left of the zone.

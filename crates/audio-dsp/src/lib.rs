@@ -6,6 +6,7 @@ pub mod resample;
 pub mod spectral;
 pub mod util;
 pub mod simd_vec;
+pub mod dispatch;
 
 pub use filters::*;
 pub use oscillators::*;
@@ -53,7 +54,28 @@ impl SummingNode {
         }
     }
 
+    /// Runtime-dispatched bus sum — see [`crate::dispatch`]. Every mix bus and
+    /// the master sum go through here, so it is one of the two kernels worth
+    /// multiversioning (the other is the biquad).
     pub fn process_16_to_1_simd(&self, inputs: &[&[f32]], output: &mut [f32]) {
+        #[cfg(target_arch = "x86_64")]
+        if crate::dispatch::has_avx2_fma() {
+            // SAFETY: gated on a runtime CPUID probe for exactly these features.
+            return unsafe { self.process_16_to_1_avx2(inputs, output) };
+        }
+        self.process_16_to_1_impl(inputs, output)
+    }
+
+    /// # Safety
+    /// The CPU must support avx2 and fma.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx,avx2,fma")]
+    unsafe fn process_16_to_1_avx2(&self, inputs: &[&[f32]], output: &mut [f32]) {
+        self.process_16_to_1_impl(inputs, output)
+    }
+
+    #[inline(always)]
+    fn process_16_to_1_impl(&self, inputs: &[&[f32]], output: &mut [f32]) {
         use crate::simd_vec::*;
         let len = output.len();
         output.fill(0.0);

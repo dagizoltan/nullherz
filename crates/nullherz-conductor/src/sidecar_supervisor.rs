@@ -7,7 +7,16 @@ use tokio::sync::Mutex;
 use ipc_layer::tcp::{TcpIpcConsumer, TcpIpcProducer};
 use tokio::io::AsyncReadExt;
 use std::time::{Instant, Duration};
-use std::net::UdpSocket;
+use tokio::net::UdpSocket;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// How often a listener wakes to notice `shutdown` when no packet arrives.
+///
+/// The listeners `select!` between their socket and this tick, so a quiet
+/// socket still observes the flag within one interval. Polling an atomic is
+/// what makes shutdown *bounded*; the socket side is fully event-driven, so
+/// this timer costs one wakeup per interval per listener and nothing else.
+const SHUTDOWN_POLL: Duration = Duration::from_millis(250);
 
 pub struct RemoteSidecar {
     pub addr: String,
@@ -168,15 +177,31 @@ impl SidecarSupervisor {
         }
     }
 
-    pub async fn start_discovery_listener(remote_manager: Arc<Mutex<RemoteSidecarManager>>, audio_bridge: Arc<IpcAudioBridge>, port: u16) -> std::io::Result<()> {
-        let socket = UdpSocket::bind(format!("0.0.0.0:{}", port))?;
-        socket.set_nonblocking(true)?;
-        println!("Conductor: UDP Discovery listening on port {}", port);
+    /// UDP beacon listener: discovers sidecars announcing themselves.
+    ///
+    /// The socket is a `tokio::net::UdpSocket` and the receive is awaited. It
+    /// used to be a blocking `std::net::UdpSocket` set non-blocking, polled
+    /// once per 500 ms sleep — so a quiet network was fine but a busy one
+    /// discovered at most two sidecars a second, and the poll interval was
+    /// load-bearing for correctness rather than for pacing.
+    pub async fn start_discovery_listener(
+        remote_manager: Arc<Mutex<RemoteSidecarManager>>,
+        audio_bridge: Arc<IpcAudioBridge>,
+        port: u16,
+        shutdown: Arc<AtomicBool>,
+    ) -> std::io::Result<u16> {
+        let socket = UdpSocket::bind(format!("0.0.0.0:{}", port)).await?;
+        let bound = socket.local_addr()?.port();
+        println!("Conductor: UDP Discovery listening on port {}", bound);
 
         tokio::spawn(async move {
             let mut buf = [0u8; 1024];
-            loop {
-                if let Ok((len, addr)) = socket.recv_from(&mut buf) {
+            while !shutdown.load(Ordering::Relaxed) {
+                let recv = tokio::select! {
+                    r = socket.recv_from(&mut buf) => r,
+                    _ = tokio::time::sleep(SHUTDOWN_POLL) => continue,
+                };
+                if let Ok((len, addr)) = recv {
                     let msg = String::from_utf8_lossy(&buf[..len]);
                     if msg.starts_with("nullherz_sidecar:") {
                         let sidecar_port = msg.split(':').nth(1).and_then(|p| p.parse::<u16>().ok()).unwrap_or(9001);
@@ -244,21 +269,38 @@ impl SidecarSupervisor {
                         }
                     }
                 }
-                tokio::time::sleep(Duration::from_millis(500)).await;
             }
         });
-        Ok(())
+        Ok(bound)
     }
 
-    pub async fn start_udp_return_listener(audio_bridge: Arc<IpcAudioBridge>, port: u16) -> std::io::Result<()> {
-        let socket = UdpSocket::bind(format!("0.0.0.0:{}", port))?;
-        println!("Conductor: UDP Return listening on port {}", port);
+    /// Audio-return listener (protocol type 6).
+    ///
+    /// This is the one that used to deadlock the process. It bound a BLOCKING
+    /// `std::net::UdpSocket` and called `recv_from` inside `tokio::spawn`, which
+    /// parks a runtime worker in the kernel until a packet arrives — forever, on
+    /// a machine with no remote sidecars. A parked worker cannot be reclaimed, so
+    /// `Runtime::drop` never completes and the process cannot exit: every test
+    /// that built a `Conductor` hung at teardown, which is why
+    /// `cargo test --workspace` never finished.
+    pub async fn start_udp_return_listener(
+        audio_bridge: Arc<IpcAudioBridge>,
+        port: u16,
+        shutdown: Arc<AtomicBool>,
+    ) -> std::io::Result<u16> {
+        let socket = UdpSocket::bind(format!("0.0.0.0:{}", port)).await?;
+        let bound = socket.local_addr()?.port();
+        println!("Conductor: UDP Return listening on port {}", bound);
 
         tokio::spawn(async move {
             let mut buf = [0u8; 2048];
-            loop {
-                if let Ok((len, _addr)) = socket.recv_from(&mut buf) {
-                    if len >= 5 && buf[0] == 6 {
+            while !shutdown.load(Ordering::Relaxed) {
+                let recv = tokio::select! {
+                    r = socket.recv_from(&mut buf) => r,
+                    _ = tokio::time::sleep(SHUTDOWN_POLL) => continue,
+                };
+                if let Ok((len, _addr)) = recv
+                    && len >= 5 && buf[0] == 6 {
                         let node_idx = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]);
                         let block_data = &buf[5..len];
                         if block_data.len() == std::mem::size_of::<nullherz_traits::AudioBlock>() {
@@ -266,19 +308,27 @@ impl SidecarSupervisor {
                             let _ = audio_bridge.push_block(node_idx, block);
                         }
                     }
-                }
             }
         });
-        Ok(())
+        Ok(bound)
     }
 
-    pub async fn listen_for_remote_sidecars(remote_manager: Arc<Mutex<RemoteSidecarManager>>, audio_bridge: Arc<IpcAudioBridge>, addr: &str) -> std::io::Result<()> {
+    pub async fn listen_for_remote_sidecars(
+        remote_manager: Arc<Mutex<RemoteSidecarManager>>,
+        audio_bridge: Arc<IpcAudioBridge>,
+        addr: &str,
+        shutdown: Arc<AtomicBool>,
+    ) -> std::io::Result<()> {
         let consumer = TcpIpcConsumer::bind(addr).await?;
         println!("Conductor: Listening for remote sidecars on {}", addr);
 
         tokio::spawn(async move {
-            loop {
-                match consumer.accept().await {
+            while !shutdown.load(Ordering::Relaxed) {
+                let accepted = tokio::select! {
+                    r = consumer.accept() => r,
+                    _ = tokio::time::sleep(SHUTDOWN_POLL) => continue,
+                };
+                match accepted {
                     Ok(stream) => {
                         let peer_addr = stream.peer_addr().map(|a| a.to_string()).unwrap_or_else(|_| "unknown".to_string());
                         let remote_manager_clone = remote_manager.clone();

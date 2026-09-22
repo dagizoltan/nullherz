@@ -8,7 +8,14 @@ pub struct EngineMetrics {
     pub calibration_start_cycles: AtomicU64,
     pub ns_per_cycle: Arc<AtomicU64>,
     pub peak_ns: AtomicU64,
-    pub node_peak_cycles: [AtomicU64; 64],
+    /// Per-node peak cycle count, one slot per graph node.
+    ///
+    /// Sized by `MAX_NODES`, not a literal 64. It WAS a literal 64, written
+    /// when that was `MAX_NODES`; after the raise to 128 the telemetry loop
+    /// that fills it kept its matching `0..64` bound, so every node from 64 up
+    /// reported a peak time of exactly zero — permanently, and silently. The
+    /// bootstrapped 4-deck console already reaches into that range.
+    pub node_peak_cycles: [AtomicU64; nullherz_traits::MAX_NODES],
     pub resource_leaks: AtomicU64,
     pub last_xrun_magnitude_ns: AtomicU64,
     /// Sliding window of block processing times for predictive X-RUN mitigation.

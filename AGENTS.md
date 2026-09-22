@@ -52,10 +52,32 @@ Any code that runs within the `process()` or `process_block()` path of a `Signal
 
 ## 4. Verification Requirements
 
-Before submitting any DSP or Core changes:
-1.  **Run the Conformance Suite**: Ensure all processors pass the `Gauntlet` stress-tests (NaN ingestion, buffer oscillation).
-2.  **Verify Reset Determinism**: Ensure `reset()` returns the processor to a silent, clean state.
-3.  **Check RT-Safety Lints**: If custom lints are available, ensure they pass.
+Before submitting any DSP or Core changes, run `scripts/verify.sh`. It is the
+gate; every check below is part of it, and every step runs under a wall-clock
+timeout so a hang reports as a failure rather than as a slow build.
+
+1.  **Conformance Gauntlet** — `nullherz-processors/tests/conformance_gauntlet.rs`
+    runs every registered processor through NaN ingestion and buffer-size
+    oscillation. This requirement was stated here for a long time while
+    `GauntletRunner` had **zero callers in the workspace**, so neither check had
+    ever executed. If you add a check to `test_kit`, add the call site in the
+    same change.
+2.  **Zero Allocation** — the same file asserts that no processor allocates on a
+    steady-state block, and `audio-core/tests/rt_zero_allocation_test.rs` asserts
+    the same for the engine's whole block cycle (command drain, topology commit,
+    graph execution, telemetry). This is measured by a counting global
+    allocator (`nullherz_traits::test_kit::rt_alloc`), not asserted by review.
+    The check FAILS if the guard is not installed in the test binary — a check
+    that cannot fail is worse than no check.
+3.  **Verify Reset Determinism**: Ensure `reset()` returns the processor to a
+    silent, clean state.
+4.  **Check RT-Safety Lints**: `clippy.toml` bans `Mutex`/`RwLock`/`thread::spawn`
+    /`thread::sleep`. Note what it does NOT ban: allocation. That is what §2's
+    law is about and what the guard in (2) exists to enforce.
+
+**Do not record an invariant as verified in a document.** Record it as a test.
+Every claim in `docs/` that a test could make should be one; the three defects
+that most recently took the audio thread down were all covered by prose.
 
 ---
 

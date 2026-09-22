@@ -45,7 +45,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
         .fill(theme.bg_surface)
         .rounding(Rounding::same(theme.radius_md))
         .inner_margin(Margin::same(theme.space_md))
-        .stroke(Stroke::new(1.0, theme.border))
+        .stroke(Stroke::new(1.0_f32, theme.border))
         .show(ui, |ui| {
             ui.set_width(STRIP_W);
             ui.vertical(|ui| {
@@ -107,7 +107,7 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
         .fill(theme.bg_surface)
         .rounding(Rounding::same(theme.radius_md))
         .inner_margin(Margin::same(theme.space_md))
-        .stroke(Stroke::new(1.0, accent.gamma_multiply(0.6)))
+        .stroke(Stroke::new(1.0_f32, accent.gamma_multiply(0.6)))
         .show(ui, |ui| {
             ui.set_width(STRIP_W);
             ui.vertical(|ui| {

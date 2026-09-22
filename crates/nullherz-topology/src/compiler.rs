@@ -5,6 +5,20 @@ use nullherz_traits::error::AudioError;
 pub struct GraphCompiler {}
 
 impl GraphCompiler {
+    /// Every buffer a node READS in one `process()` call: its inputs and its
+    /// sidechains.
+    ///
+    /// Sidechains were treated as reads in the executor (which resolves and
+    /// passes them) but not by the scheduler, which is how a sidechain could
+    /// be both read and written inside one parallel stage. One helper, used by
+    /// the dependency build, the stage packer and the hazard verifier, is what
+    /// keeps the three from drifting apart again.
+    fn read_edges(routing: &nullherz_traits::NodeRouting) -> impl Iterator<Item = nullherz_traits::BufferId> + '_ {
+        routing.input_indices.iter().take(routing.input_count.min(nullherz_traits::MAX_CHANNELS))
+            .chain(routing.sidechain_indices.iter().take(routing.sidechain_count.min(nullherz_traits::MAX_CHANNELS)))
+            .copied()
+    }
+
     pub fn compile(topo: &GraphTopology) -> Result<CompiledGraphPlan, AudioError> {
         let mut plan = CompiledGraphPlan::default();
         let n = topo.node_count;
@@ -36,9 +50,13 @@ impl GraphCompiler {
         let mut v_producer_counts = Box::new([0usize; nullherz_traits::MAX_BUFFERS]);
         for j in 0..n {
             let routing_j = &topo.routing[j];
-            for k in 0..routing_j.output_count {
+            // `.min(MAX_CHANNELS)`: `output_count` is data, and indexing
+            // `output_indices[k]` past 16 is a panic. Every other read of these
+            // arrays clamps; this one did not.
+            for k in 0..routing_j.output_count.min(nullherz_traits::MAX_CHANNELS) {
                 let v_out = routing_j.output_indices[k].index();
-                if v_out < nullherz_traits::MAX_BUFFERS {
+                if v_out < nullherz_traits::MAX_BUFFERS
+                    && v_producer_counts[v_out] < MAX_NODES {
                     v_to_producers[v_out][v_producer_counts[v_out]] = j;
                     v_producer_counts[v_out] += 1;
                 }
@@ -47,11 +65,26 @@ impl GraphCompiler {
 
         for (i, in_degree_val) in in_degree.iter_mut().enumerate().take(n) {
             let routing_i = &topo.routing[i];
-            // RT-9: side-chain dependency resolution
-            // We iterate through all active inputs (including potential side-chains)
-            // and ensure the producer is processed in an earlier stage.
-            for l in 0..routing_i.input_count {
-                let v_in = routing_i.input_indices[l].index();
+            // Side-chain dependency resolution.
+            //
+            // Sidechains are read by the node exactly like inputs are, so their
+            // producers must be scheduled EARLIER — the chain is what this loop
+            // builds. It previously walked `input_indices` only, while the
+            // comment above it claimed to cover sidechains. That is not a
+            // cosmetic gap: `unsafe impl Sync for ProcessorNode` justifies
+            // itself with "the topological scheduler guarantees no RAW, WAR, or
+            // WAW hazards exist within a parallel stage". Without a sidechain
+            // edge, a sidechained compressor can be packed into the same stage
+            // as its sidechain producer, and two workers then touch the same
+            // buffer — the exact data race that safety comment rules out.
+            //
+            // Latent rather than live only because every production write site
+            // sets `sidechain_count = 0` today. It would have become real with
+            // the first sidechain compressor.
+            let inputs = routing_i.input_indices.iter().take(routing_i.input_count.min(nullherz_traits::MAX_CHANNELS));
+            let sidechains = routing_i.sidechain_indices.iter().take(routing_i.sidechain_count.min(nullherz_traits::MAX_CHANNELS));
+            for v_in_id in inputs.chain(sidechains) {
+                let v_in = v_in_id.index();
                 if v_in < nullherz_traits::MAX_BUFFERS {
                     for &j in v_to_producers[v_in].iter().take(v_producer_counts[v_in]) {
                         if i == j { continue; }
@@ -78,7 +111,12 @@ impl GraphCompiler {
         plan.num_stages = 0;
 
         while processed_count < n {
-            let mut stage_nodes = [0u32; nullherz_traits::MAX_BUFFERS];
+            // Sized by the NODE address space, not the buffer one. It held
+            // `MAX_BUFFERS` entries, which was harmless only because a stage
+            // cannot contain more nodes than exist — but it is exactly the
+            // node-vs-buffer index confusion `BufferId` was introduced to kill,
+            // and `plan.stages[..].0` it is copied into is `[u32; MAX_NODES]`.
+            let mut stage_nodes = [0u32; MAX_NODES];
             let mut stage_count = 0;
             let mut physical_writes_in_stage = [false; nullherz_traits::MAX_BUFFERS];
             let mut physical_reads_in_stage = [false; nullherz_traits::MAX_BUFFERS];
@@ -112,9 +150,10 @@ impl GraphCompiler {
                     }
                     if collision { continue; }
 
-                    for k in 0..routing.input_count {
-                        let v_in = routing.input_indices.get(k).copied().unwrap_or_default().index();
-                        let p_in = topo.virtual_to_physical[v_in].index();
+                    // Reads cover sidechains too — the node consumes them in
+                    // the same `process()` call as its inputs.
+                    for v_in_id in Self::read_edges(routing) {
+                        let p_in = topo.virtual_to_physical[v_in_id.index()].index();
                         if physical_writes_in_stage[p_in] {
                             collision = true;
                             break;
@@ -124,14 +163,13 @@ impl GraphCompiler {
                     if !collision {
                         stage_nodes[stage_count] = i as u32;
                         stage_count += 1;
-                        for k in 0..routing.output_count {
+                        for k in 0..routing.output_count.min(nullherz_traits::MAX_CHANNELS) {
                             let v_out = routing.output_indices.get(k).copied().unwrap_or_default().index();
                             let p_out = topo.virtual_to_physical[v_out].index();
                             physical_writes_in_stage[p_out] = true;
                         }
-                        for k in 0..routing.input_count {
-                            let v_in = routing.input_indices.get(k).copied().unwrap_or_default().index();
-                            let p_in = topo.virtual_to_physical[v_in].index();
+                        for v_in_id in Self::read_edges(routing) {
+                            let p_in = topo.virtual_to_physical[v_in_id.index()].index();
                             physical_reads_in_stage[p_in] = true;
                         }
                     }
@@ -160,52 +198,76 @@ impl GraphCompiler {
             return Err(AudioError::Generic("Cycle detected in graph".into()));
         }
 
-        // --- STAGE 3: NETWORK PROXY INSERTION ---
-        // Synthetic Proxy IDs start above MAX_NODES to avoid collision
-        let mut next_proxy_id = MAX_NODES as u32;
-
-        for node_idx in 0..n {
-            let local_assignment = &topo.node_assignments[node_idx];
-            let routing = &topo.routing[node_idx];
-
-            for &v_out_id in routing.output_indices.iter().take(routing.output_count) {
-                let v_out = v_out_id.index();
-                for consumer_idx in 0..n {
-                    if consumer_idx == node_idx { continue; }
-                    let consumer_assignment = &topo.node_assignments[consumer_idx];
-
-                    if local_assignment != consumer_assignment {
-                        let consumer_routing = &topo.routing[consumer_idx];
-                        if consumer_routing.input_indices.iter().take(consumer_routing.input_count).any(|&v_in| v_in.index() == v_out) {
-                            // Boundary crossed! We inject two distinct proxy nodes:
-                            // 1. A PROXY_SENDER on the source workstation
-                            // 2. A PROXY_RECEIVER on the target workstation
-                            if plan.num_stages < MAX_NODES - 2 {
-                                let p_sender_idx = plan.num_stages;
-                                plan.stages[p_sender_idx].0[0] = next_proxy_id; // PROXY_SENDER node
-                                plan.stage_counts[p_sender_idx] = 1;
-                                plan.num_stages += 1;
-                                next_proxy_id += 1;
-
-                                let p_receiver_idx = plan.num_stages;
-                                plan.stages[p_receiver_idx].0[0] = next_proxy_id; // PROXY_RECEIVER node
-                                plan.stage_counts[p_receiver_idx] = 1;
-                                plan.num_stages += 1;
-                                next_proxy_id += 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // --- NETWORK PROXY INSERTION: REMOVED ---
+        //
+        // This used to append two stages per cross-machine edge, each holding a
+        // synthetic "proxy" id counted up from `MAX_NODES` so it could not
+        // collide with a real node. It crashed the audio thread.
+        //
+        // `plan.stages` is not an annotation, it is the executor's work list:
+        // `execute_stage` does `&nodes[n_idx]` against a `[ProcessorNode;
+        // MAX_NODES]`. An id of exactly MAX_NODES is an out-of-bounds index, and
+        // it lands OUTSIDE the `catch_unwind` that guards `process()`, so the
+        // per-node fault isolation does not catch it — on a SCHED_FIFO callback
+        // it is a hard stop. `verify_no_hazards` skipped these ids
+        // (`if n_idx >= MAX_NODES { continue }`), so compilation reported
+        // success and the plan shipped to the RT thread inside `SetTopology`.
+        // `TopologyCommand::MigrateNode` is all it took to trigger: it writes
+        // `node_assignments` and commits.
+        //
+        // Nothing consumed the proxies. Distributed audio is routed by
+        // `Conductor::process_distributed_audio`, which walks `node_assignments`
+        // and moves blocks through `IpcAudioBridge` from the ORCHESTRATION
+        // thread; it never reads `plan.stages`. So this was a crash with no
+        // feature attached to it.
+        //
+        // A real implementation needs proxies to be allocated graph nodes with
+        // actual processors (like `SidecarProcessor`), inside the node address
+        // space, with routing and latency of their own — not ids invented by the
+        // compiler. Until then the boundary lives where it is actually used,
+        // in `node_assignments`.
 
         Self::identify_islands(n, &adj, &adj_count, &mut plan);
 
         Self::calculate_pdc(n, &adj, &adj_count, &mut plan, topo);
 
         Self::verify_no_hazards(topo, &plan)?;
+        Self::verify_stage_ids_in_range(&plan)?;
 
         Ok(plan)
+    }
+
+    /// Every id in the plan must be a legal index into the engine's node array.
+    ///
+    /// The executor indexes `nodes[n_idx]` directly, so this is the boundary
+    /// where an out-of-range id has to stop. Failing the compile costs nothing
+    /// — it runs off the audio thread — and the alternative is an index panic
+    /// on the RT callback. Checked as its own pass rather than inside the
+    /// producer so that ANY future stage-writing code is covered by it.
+    pub fn verify_stage_ids_in_range(plan: &CompiledGraphPlan) -> Result<(), AudioError> {
+        if plan.num_stages > MAX_NODES {
+            return Err(AudioError::ConfigurationError(format!(
+                "plan declares {} stages, more than MAX_NODES ({})", plan.num_stages, MAX_NODES
+            )));
+        }
+        for s_idx in 0..plan.num_stages {
+            let count = plan.stage_counts[s_idx] as usize;
+            if count > MAX_NODES {
+                return Err(AudioError::ConfigurationError(format!(
+                    "stage {} declares {} nodes, more than MAX_NODES ({})", s_idx, count, MAX_NODES
+                )));
+            }
+            for &id in &plan.stages[s_idx].0[..count] {
+                if id as usize >= MAX_NODES {
+                    return Err(AudioError::ConfigurationError(format!(
+                        "stage {} carries node id {}, out of range for the engine's \
+                         node array (MAX_NODES = {}) — the executor would index past it",
+                        s_idx, id, MAX_NODES
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn calculate_pdc(n: usize, adj: &[[usize; MAX_NODES]; MAX_NODES], adj_count: &[usize; MAX_NODES], plan: &mut CompiledGraphPlan, topo: &GraphTopology) {
@@ -315,13 +377,20 @@ impl GraphCompiler {
 
             for &n_idx_u32 in stage {
                 let n_idx = n_idx_u32 as usize;
-                if n_idx >= MAX_NODES { continue; } // Skip synthetic proxy nodes for hazard check
+                // An id past the node array is not something to skip over: the
+                // executor would index `nodes[n_idx]` with it. Report it.
+                if n_idx >= MAX_NODES {
+                    return Err(AudioError::ConfigurationError(format!(
+                        "stage {} carries node id {}, out of range (MAX_NODES = {})", s_idx, n_idx, MAX_NODES
+                    )));
+                }
                 let routing = &topo.routing[n_idx];
 
                 // Check for RAW/WAR/WAW hazards with OTHER nodes in the same stage.
                 // Intra-node reuse is permitted for in-place processing.
+                // "Reads" includes sidechains — see `read_edges`.
 
-                for k in 0..routing.output_count {
+                for k in 0..routing.output_count.min(nullherz_traits::MAX_CHANNELS) {
                     let v_out = routing.output_indices.get(k).copied().unwrap_or_default().index();
                     let p_out = topo.virtual_to_physical[v_out].index();
 
@@ -330,9 +399,8 @@ impl GraphCompiler {
                     }
                 }
 
-                for k in 0..routing.input_count {
-                    let v_in = routing.input_indices.get(k).copied().unwrap_or_default().index();
-                    let p_in = topo.virtual_to_physical[v_in].index();
+                for v_in_id in Self::read_edges(routing) {
+                    let p_in = topo.virtual_to_physical[v_in_id.index()].index();
 
                     if physical_writes[p_in] {
                         return Err(AudioError::IpcError(format!("RAW Hazard at stage {}. Node {} input collides with physical buffer {} being written to.", s_idx, n_idx, p_in)));
@@ -340,15 +408,13 @@ impl GraphCompiler {
                 }
 
                 // After checking, MARK them as used by this node for the rest of the stage
-                for k in 0..routing.output_count {
+                for k in 0..routing.output_count.min(nullherz_traits::MAX_CHANNELS) {
                     let v_out = routing.output_indices.get(k).copied().unwrap_or_default().index();
                     let p_out = topo.virtual_to_physical[v_out].index();
                     physical_writes[p_out] = true;
                 }
-                for k in 0..routing.input_count {
-                    let v_in = routing.input_indices.get(k).copied().unwrap_or_default().index();
-                    let p_in = topo.virtual_to_physical[v_in].index();
-                    physical_reads[p_in] = true;
+                for v_in_id in Self::read_edges(routing) {
+                    physical_reads[topo.virtual_to_physical[v_in_id.index()].index()] = true;
                 }
             }
         }
@@ -552,8 +618,15 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("collides with physical buffer 10 already in use"));
     }
 
+    /// A cross-machine edge must never put an unrunnable id in the plan.
+    ///
+    /// Replaces `test_proxy_injection_on_boundary_cross`, which asserted the
+    /// OPPOSITE — that the compiler emits a stage id `>= MAX_NODES`. That id is
+    /// what `execute_stage` indexes `nodes[n_idx]` with, so the old test was
+    /// pinning an out-of-bounds index on the audio thread as correct behaviour.
+    /// `TopologyCommand::MigrateNode` is the reachable path to it.
     #[test]
-    fn test_proxy_injection_on_boundary_cross() {
+    fn test_cross_boundary_plan_stays_in_node_range() {
         let mut v2p = [BufferId(0); nullherz_traits::MAX_BUFFERS];
         for (i, val) in v2p.iter_mut().enumerate() { *val = BufferId(i as u32); }
         let mut node_assignments = [nullherz_traits::NodeAssignment([0; 32]); MAX_NODES];
@@ -587,18 +660,88 @@ mod tests {
 
         let plan = GraphCompiler::compile(&topo).expect("Compilation failed");
 
-        // Stage 0: Node 0
-        // Stage 1: Proxy Injection (since cross-boundary)
-        // Stage 2: Node 1
-        assert!(plan.num_stages >= 2);
-        let mut proxy_detected = false;
+        // The dependency is still honoured: node 0 before node 1.
+        assert!(plan.num_stages >= 2, "producer and consumer must be in different stages");
+
         for s in 0..plan.num_stages {
-            if plan.stages[s].0[0] >= MAX_NODES as u32 {
-                proxy_detected = true;
+            for &id in &plan.stages[s].0[..plan.stage_counts[s] as usize] {
+                assert!(
+                    (id as usize) < MAX_NODES,
+                    "stage {s} carries node id {id}; the executor indexes nodes[{id}] \
+                     against a [ProcessorNode; {MAX_NODES}] and would panic on the audio thread"
+                );
             }
         }
-        assert!(proxy_detected, "Proxy node was not injected for cross-boundary edge");
+        // And the standalone pass agrees.
+        GraphCompiler::verify_stage_ids_in_range(&plan).expect("plan must pass the range gate");
     }
+
+    /// The range gate must reject a hand-built plan, not just a compiled one —
+    /// it is the last boundary before the executor.
+    #[test]
+    fn test_range_gate_rejects_out_of_range_stage_id() {
+        let mut plan = CompiledGraphPlan { num_stages: 1, ..Default::default() };
+        plan.stage_counts[0] = 1;
+        plan.stages[0].0[0] = MAX_NODES as u32;
+        let err = GraphCompiler::verify_stage_ids_in_range(&plan)
+            .expect_err("an id of exactly MAX_NODES is out of range");
+        assert!(err.to_string().contains("out of range"), "got: {err}");
+    }
+
+    /// A sidechain is a read, so its producer must be scheduled earlier.
+    ///
+    /// Without a dependency edge the two land in one stage, and the parallel
+    /// executor then has one worker writing the buffer while another reads it —
+    /// the data race `unsafe impl Sync for ProcessorNode` claims cannot happen.
+    #[test]
+    fn test_sidechain_producer_is_scheduled_before_consumer() {
+        let mut v2p = [BufferId(0); nullherz_traits::MAX_BUFFERS];
+        for (i, val) in v2p.iter_mut().enumerate() { *val = BufferId(i as u32); }
+        let mut topo = GraphTopology {
+            routing: [NodeRouting {
+                input_indices: [BufferId(0); 16],
+                output_indices: [BufferId(0); 16],
+                sidechain_indices: [BufferId(0); 16],
+                input_count: 0,
+                output_count: 0,
+                sidechain_count: 0,
+                input_delays: [0.0; 16],
+            }; MAX_NODES],
+            virtual_to_physical: v2p,
+            plan: CompiledGraphPlan::default(),
+            crossfades: [None; 8],
+            node_count: 2,
+            node_assignments: [nullherz_traits::NodeAssignment([0; 32]); MAX_NODES],
+            node_positions: [None; MAX_NODES],
+            bypass_states: [false; MAX_NODES],
+        };
+
+        // Node 0 produces buffer 10. Node 1 takes buffer 10 as a SIDECHAIN only
+        // (its audio input is an unrelated buffer) — a ducking compressor.
+        topo.routing[0].output_indices[0] = BufferId(10);
+        topo.routing[0].output_count = 1;
+        topo.routing[1].input_indices[0] = BufferId(20);
+        topo.routing[1].input_count = 1;
+        topo.routing[1].sidechain_indices[0] = BufferId(10);
+        topo.routing[1].sidechain_count = 1;
+        topo.routing[1].output_indices[0] = BufferId(21);
+        topo.routing[1].output_count = 1;
+
+        let plan = GraphCompiler::compile(&topo).expect("Compilation failed");
+
+        let stage_of = |target: u32| -> usize {
+            (0..plan.num_stages)
+                .find(|&s| plan.stages[s].0[..plan.stage_counts[s] as usize].contains(&target))
+                .unwrap_or_else(|| panic!("node {target} missing from the plan"))
+        };
+        assert!(
+            stage_of(0) < stage_of(1),
+            "the sidechain producer (node 0, stage {}) must run before its consumer \
+             (node 1, stage {}) — same stage means a concurrent read/write of buffer 10",
+            stage_of(0), stage_of(1)
+        );
+    }
+
 
     #[test]
     fn test_static_graph_pruning() {

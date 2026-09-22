@@ -382,15 +382,45 @@ fn handle_gossip(payload: &str, lib_clone: &Arc<Mutex<LibraryDatabase>>, stream:
 pub struct DnaServer;
 
 impl DnaServer {
-    pub fn start(lib: Arc<Mutex<LibraryDatabase>>, port: u16, signing_key: Option<[u8; 32]>) -> std::io::Result<()> {
+    /// Start the federated DNA pull server.
+    ///
+    /// `shutdown` is polled between accepts. The listener used to run
+    /// `for stream in listener.incoming()` on a blocking socket with no exit
+    /// path at all: the thread sat in `accept(2)` for the life of the process
+    /// and there was no way to ask it to stop. Detached threads do not hold up
+    /// process exit, so that was survivable in the app — but it left the port
+    /// bound and the library `Arc` alive for as long as the thread existed,
+    /// which in a test binary is until the harness gives up.
+    ///
+    /// Returns the port actually bound, so a caller passing 0 can learn it.
+    pub fn start(
+        lib: Arc<Mutex<LibraryDatabase>>,
+        port: u16,
+        signing_key: Option<[u8; 32]>,
+        shutdown: Arc<std::sync::atomic::AtomicBool>,
+    ) -> std::io::Result<u16> {
         let listener = std::net::TcpListener::bind(format!("0.0.0.0:{}", port))?;
-        println!("DNA Server listening on port {}", port);
+        let bound = listener.local_addr()?.port();
+        listener.set_nonblocking(true)?;
+        println!("DNA Server listening on port {}", bound);
 
         std::thread::spawn(move || {
             let mesh_peers: Arc<Mutex<std::collections::HashSet<String>>> = Arc::new(Mutex::new(std::collections::HashSet::new()));
 
-            for stream in listener.incoming() {
-                if let Ok(mut stream) = stream {
+            while !shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+                let accepted = match listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        continue;
+                    }
+                    Err(_) => break,
+                };
+                // Per-connection work stays blocking; the read/write timeouts
+                // below bound it. Only the ACCEPT had to become pollable.
+                let _ = accepted.set_nonblocking(false);
+                {
+                    let mut stream = accepted;
                     let lib_clone = lib.clone();
                     let mesh_peers_clone = mesh_peers.clone();
                     std::thread::spawn(move || {
@@ -524,6 +554,6 @@ impl DnaServer {
                 }
             }
         });
-        Ok(())
+        Ok(bound)
     }
 }

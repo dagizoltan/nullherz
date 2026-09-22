@@ -13,7 +13,7 @@ pub fn calculate_ballistic_vu(peak: f32, smoothed_peak: f32, decay: f32) -> f32 
 pub fn render_spectrum_analyzer(ui: &mut Ui, spectrum: &[f32; 128], accent_color: Color32, height: f32) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(10, 10, 12));
-    ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_gray(30)));
+    ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0_f32, Color32::from_gray(30)));
 
     let w = rect.width();
     let bin_w = w / 128.0;
@@ -45,14 +45,14 @@ pub fn render_spectrum_analyzer(ui: &mut Ui, spectrum: &[f32; 128], accent_color
 pub fn render_goniometer(ui: &mut Ui, pts: &[f32; 128], size: f32, accent_color: Color32) {
     let (rect, _) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
     ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(10, 10, 12));
-    ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_gray(30)));
+    ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0_f32, Color32::from_gray(30)));
 
     let center = rect.center();
     let half_s = size / 2.0;
 
     // 45-degree axis lines
-    ui.painter().line_segment([center - vec2(half_s * 0.7, half_s * 0.7), center + vec2(half_s * 0.7, half_s * 0.7)], Stroke::new(0.5, Color32::from_gray(50)));
-    ui.painter().line_segment([center - vec2(-half_s * 0.7, half_s * 0.7), center + vec2(-half_s * 0.7, half_s * 0.7)], Stroke::new(0.5, Color32::from_gray(50)));
+    ui.painter().line_segment([center - vec2(half_s * 0.7, half_s * 0.7), center + vec2(half_s * 0.7, half_s * 0.7)], Stroke::new(0.5_f32, Color32::from_gray(50)));
+    ui.painter().line_segment([center - vec2(-half_s * 0.7, half_s * 0.7), center + vec2(-half_s * 0.7, half_s * 0.7)], Stroke::new(0.5_f32, Color32::from_gray(50)));
 
     // Optimized batched line rendering for the phase scope
     let mut points = Vec::with_capacity(64);
@@ -68,7 +68,7 @@ pub fn render_goniometer(ui: &mut Ui, pts: &[f32; 128], size: f32, accent_color:
 
     if points.len() > 1 {
         // egui's Shape::line is efficient and maps directly to vertex buffers
-        ui.painter().add(egui::Shape::line(points, Stroke::new(1.2, accent_color)));
+        ui.painter().add(egui::Shape::line(points, Stroke::new(1.2_f32, accent_color)));
     }
 }
 
@@ -84,7 +84,7 @@ pub fn render_vu_meter(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Col
         let val = 10.0f32.powf(db as f32 / 20.0);
         let ty = rect.max.y - (val * (height / 1.2)).min(height);
         if ty >= rect.min.y && ty <= rect.max.y {
-            ui.painter().hline(rect.x_range(), ty, Stroke::new(0.5, Color32::from_gray(60)));
+            ui.painter().hline(rect.x_range(), ty, Stroke::new(0.5_f32, Color32::from_gray(60)));
         }
     }
 
@@ -114,7 +114,7 @@ pub fn render_vu_meter(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Col
     let ph_h = (peak_hold * (height / 1.2)).min(height);
     let ph_y = rect.max.y - ph_h;
     if ph_y >= rect.min.y {
-        ui.painter().hline(rect.x_range(), ph_y, Stroke::new(1.0, Color32::WHITE));
+        ui.painter().hline(rect.x_range(), ph_y, Stroke::new(1.0_f32, Color32::WHITE));
     }
 }
 

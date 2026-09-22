@@ -90,20 +90,32 @@ impl SignalProcessor for LimiterProcessor {
             }
             self.peak_buffer[self.write_pos] = current_peak;
 
-            // Look-ahead peak detection via monotonic deque (sliding-window
-            // max over the last `lookahead_samples` samples, current included).
-            // Drop candidates the new peak dominates, append it, then drop the
-            // front once it falls out of the window. Front = window max — the
-            // same value the old O(window) rescan produced.
+            // Look-ahead peak detection via monotonic deque: the sliding-window
+            // max over `[t - lookahead, t]`. Drop candidates the new peak
+            // dominates, append it, then drop the front once it falls out of
+            // the window. Front = window max.
             let t = self.sample_counter;
             while let Some(&(_, v)) = self.max_deque.back() {
                 if v <= current_peak { self.max_deque.pop_back(); } else { break; }
             }
             self.max_deque.push_back((t, current_peak));
-            // saturating: at startup t+1 < lookahead, so the window simply
-            // starts at sample 0 (matches the old scan, whose extra slots read
-            // zero-initialized peaks that never beat a real |sample| >= 1e-6).
-            let window_start = (t + 1).saturating_sub(self.lookahead_samples as u64);
+            // THE WINDOW MUST INCLUDE THE SAMPLE BEING EMITTED.
+            //
+            // `read_pos` below is `write_pos - lookahead`, i.e. this iteration
+            // emits the input from sample `t - lookahead`. The window was
+            // `[t - lookahead + 1, t]`, which starts one sample AFTER the one
+            // being scaled — so the gain applied to a peak was the envelope as
+            // it stood one sample later, already decayed by one release step.
+            //
+            // The overshoot is exactly `exp(1 / release_samples)`: +0.002 dB at
+            // the 100 ms default (the `1.0002` the console benchmark prints as
+            // its master peak) and +0.20 dB at the fastest release the parameter
+            // clamp allows, 1 ms — which is the setting a DJ master actually
+            // uses. A brickwall that passes the transient it exists to catch.
+            //
+            // saturating: at startup t < lookahead, so the window simply starts
+            // at sample 0.
+            let window_start = t.saturating_sub(self.lookahead_samples as u64);
             while let Some(&(idx, _)) = self.max_deque.front() {
                 if idx < window_start { self.max_deque.pop_front(); } else { break; }
             }
@@ -288,7 +300,17 @@ mod tests {
         limiter.set_parameter(2, 3.5, 0);   // lookahead ms
         limiter.set_parameter(3, 0.9, 0);   // ceiling
 
-        // Reference state mirroring the ORIGINAL algorithm exactly.
+        // Independent brute-force reference: an O(window) rescan, against which
+        // the O(1) monotonic deque must be bit-exact.
+        //
+        // The reference used to scan `0..lookahead`, i.e. the window
+        // `[wpos - lookahead + 1, wpos]` — which EXCLUDES `wpos - lookahead`,
+        // the very sample the delay line emits. It matched the deque exactly,
+        // because the deque had been built to reproduce it; the two agreed on
+        // a gain that was one release step stale, and a 12 dB overshoot left
+        // the brickwall at 1.000227 against a ceiling of 1.0. The scan is now
+        // `0..=lookahead`, the window that actually contains the emitted
+        // sample. See `tests/limiter_ceiling_test.rs`.
         let lookahead = (3.5 * 0.001 * sr).round() as usize;
         let cap = 2048usize;
         let mut ref_buf_l = vec![0.0f32; cap];
@@ -337,7 +359,7 @@ mod tests {
                 ref_buf_r[ref_wpos] = in_r[k];
                 ref_peak[ref_wpos] = cur;
                 let mut wmax = 0.0f32;
-                for off in 0..lookahead {
+                for off in 0..=lookahead {
                     let idx = (ref_wpos + cap - off) % cap;
                     wmax = wmax.max(ref_peak[idx]);
                 }

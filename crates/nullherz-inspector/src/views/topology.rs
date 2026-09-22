@@ -181,9 +181,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                     let is_compatible = app.topo.active_connection_source.is_some();
                     let stroke = if is_compatible {
-                        egui::Stroke::new(2.0, theme.warning) // Gold/warning stroke for compatible inputs
+                        egui::Stroke::new(2.0_f32, theme.warning) // Gold/warning stroke for compatible inputs
                     } else {
-                        egui::Stroke::new(1.0, theme.text_primary)
+                        egui::Stroke::new(1.0_f32, theme.text_primary)
                     };
 
                     let socket_rect = egui::Rect::from_center_size(socket_pos, Vec2::splat(socket_radius * 2.5));
@@ -193,7 +193,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     ui.painter().circle_stroke(socket_pos, socket_radius, stroke);
 
                     if socket_resp.hovered() {
-                        ui.painter().circle_stroke(socket_pos, socket_radius + 2.0, egui::Stroke::new(1.0, theme.warning));
+                        ui.painter().circle_stroke(socket_pos, socket_radius + 2.0, egui::Stroke::new(1.0_f32, theme.warning));
                         if ui.input(|i| i.pointer.any_released())
                             && let Some((src_node, src_out)) = app.topo.active_connection_source {
                                 let _ = app.command_sender.send(Command::Topology(TopologyCommand::Connect {
@@ -224,7 +224,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     let socket_resp = ui.interact(socket_rect, node_id.with(("out", out_idx)), Sense::click_and_drag());
 
                     ui.painter().circle_filled(socket_pos, socket_radius, theme.text_disabled);
-                    ui.painter().circle_stroke(socket_pos, socket_radius, egui::Stroke::new(1.0, theme.text_primary));
+                    ui.painter().circle_stroke(socket_pos, socket_radius, egui::Stroke::new(1.0_f32, theme.text_primary));
 
                     if socket_resp.clicked() || socket_resp.drag_started() {
                         app.topo.active_connection_source = Some((idx as u32, out_idx as u32));
@@ -263,7 +263,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 points: [start, cp1, cp2, end],
                 closed: false,
                 fill: Color32::TRANSPARENT,
-                stroke: egui::Stroke::new(2.0, base_color.gamma_multiply(glow)),
+                stroke: egui::Stroke::new(2.0_f32, base_color.gamma_multiply(glow)),
             };
             painter.add(egui::Shape::CubicBezier(bezier));
 
@@ -292,7 +292,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     points: [start, cp1, cp2, mouse_pos],
                     closed: false,
                     fill: Color32::TRANSPARENT,
-                    stroke: egui::Stroke::new(2.0, theme.warning),
+                    stroke: egui::Stroke::new(2.0_f32, theme.warning),
                 }));
             }
 

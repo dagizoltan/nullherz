@@ -69,7 +69,7 @@ pub fn render(app: &InspectorApp, ui: &mut Ui) {
                     let y = rect.center().y + (latent_val * 20.0) + (deck_bias * 15.0);
                     points.push(egui::pos2(x, y));
                 }
-                ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.5, theme.accent)));
+                ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.5_f32, theme.accent)));
                 ui.painter().text(rect.left_top() + egui::vec2(5.0, 5.0), egui::Align2::LEFT_TOP, "STABLE", egui::FontId::monospace(theme.type_caption), theme.text_secondary);
             }
 

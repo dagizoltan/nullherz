@@ -55,9 +55,9 @@ pub fn render_knob_sized(
         let p = ui.painter();
         p.circle_filled(center + Vec2::new(0.0, 2.0), radius, Color32::from_black_alpha(80));
         p.circle_filled(center, radius, Color32::from_gray(25));
-        p.circle_stroke(center, radius, Stroke::new(1.0, Color32::from_gray(50)));
+        p.circle_stroke(center, radius, Stroke::new(1.0_f32, Color32::from_gray(50)));
         p.circle_filled(center, inner_radius, Color32::from_gray(35));
-        p.circle_stroke(center, inner_radius, Stroke::new(0.5, Color32::from_gray(80)));
+        p.circle_stroke(center, inner_radius, Stroke::new(0.5_f32, Color32::from_gray(80)));
 
         // Pointer (Dynamic)
         let normalized = (*value - *range.start()) / (*range.end() - *range.start());
@@ -72,11 +72,11 @@ pub fn render_knob_sized(
         let pointer_color = if is_center { accent_color } else { Color32::from_gray(200) };
 
         if is_center {
-             ui.painter().line_segment([pointer_start, pointer_end], Stroke::new(4.0, accent_color.linear_multiply(0.2)));
+             ui.painter().line_segment([pointer_start, pointer_end], Stroke::new(4.0_f32, accent_color.linear_multiply(0.2)));
         }
 
-        ui.painter().line_segment([pointer_start, pointer_end], Stroke::new(3.0, Color32::BLACK));
-        ui.painter().line_segment([pointer_start, pointer_end], Stroke::new(1.5, pointer_color));
+        ui.painter().line_segment([pointer_start, pointer_end], Stroke::new(3.0_f32, Color32::BLACK));
+        ui.painter().line_segment([pointer_start, pointer_end], Stroke::new(1.5_f32, pointer_color));
 
         // Center Cap
         ui.painter().circle_filled(center, 3.0, Color32::from_gray(15));

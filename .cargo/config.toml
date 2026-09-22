@@ -1,0 +1,40 @@
+# Codegen configuration for the workspace.
+#
+# DELIBERATELY DOES NOT SET `target-cpu`. The binary stays portable; the speed
+# comes from runtime dispatch instead. See `crates/audio-dsp/src/dispatch.rs`.
+#
+# # What the default costs, and why we are not paying it
+#
+# With no flags, cargo targets the bare `x86-64` baseline: SSE and SSE2, a 2003
+# instruction set. Every `wide::f32x8` then lowers to TWO SSE2 128-bit registers
+# rather than one AVX register, and the filter inner loops get separate multiply
+# and add instead of FMA. Measured on `bench_simd` (8-channel biquad, 100k
+# iterations, Ryzen 5 PRO 4650U):
+#
+#     baseline (SSE2)        ~82 ms
+#     AVX2 + FMA             ~60 ms      1.3x
+#
+# The scalar reference path is unchanged either way, as expected: a serial IIR
+# recurrence does not vectorise.
+#
+# # Why not `-C target-cpu=x86-64-v3`
+#
+# It would get that 1.3x for one line, and it emits AVX2 unconditionally — so
+# the binary SIGILLs on anything older than Haswell (2013) / Excavator (2015)
+# rather than merely running slower. That is the wrong failure mode for a
+# distributable workstation.
+#
+# Instead, the hot kernels are compiled twice — once at this baseline, once under
+# `#[target_feature(enable = "avx,avx2,fma")]` — and selected on one relaxed
+# atomic load after a CPUID probe at setup. Portable binary, full width on any
+# CPU that has it.
+#
+# # If you want to measure the ceiling
+#
+# `RUSTFLAGS="-C target-cpu=native" cargo build --release` compiles everything
+# for the build machine. The dispatch notices (`cfg!(target_feature = "avx2")`)
+# and reports the higher level, so the fast path is not double-counted. Useful
+# for finding out what is left on the table; not something to commit, because it
+# bakes in whichever CPU did the build.
+
+# Intentionally empty of rustflags. Add nothing here without reading the above.

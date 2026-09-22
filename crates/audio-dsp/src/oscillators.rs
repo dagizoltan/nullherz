@@ -431,6 +431,8 @@ impl SamplerVoice {
         // audio thread only ever does an atomic load. `OnceLock::get_or_init`
         // would otherwise allocate on whichever thread touched it first.
         crate::resample::prewarm();
+        // Same reasoning, for the CPU-feature probe the dispatched kernels read.
+        crate::dispatch::prewarm();
         Self {
             buffer: None,
             play_head: 0.0,

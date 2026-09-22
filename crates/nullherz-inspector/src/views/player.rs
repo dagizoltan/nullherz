@@ -63,13 +63,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         let (rect, _response) = ui.allocate_exact_size(Vec2::splat(120.0), Sense::click_and_drag());
 
                         // Jog Wheel outer ring
-                        ui.painter().circle_stroke(rect.center(), 58.0, Stroke::new(2.0, theme.border));
+                        ui.painter().circle_stroke(rect.center(), 58.0, Stroke::new(2.0_f32, theme.border));
                         ui.painter().circle_filled(rect.center(), 56.0, theme.bg_inset);
-                        ui.painter().circle_stroke(rect.center(), 48.0, Stroke::new(1.0, theme.border));
+                        ui.painter().circle_stroke(rect.center(), 48.0, Stroke::new(1.0_f32, theme.border));
 
                         // Rotational vinyl grooves
                         for radius in [12.0, 20.0, 28.0, 36.0, 44.0] {
-                            ui.painter().circle_stroke(rect.center(), radius, Stroke::new(0.5, theme.border.linear_multiply(0.5)));
+                            ui.painter().circle_stroke(rect.center(), radius, Stroke::new(0.5_f32, theme.border.linear_multiply(0.5)));
                         }
 
                         // Center hub (accent color)
@@ -79,7 +79,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         // Rotational position indicator marker (Turntable tape marker)
                         let marker_len = 54.0;
                         let marker_end = rect.center() + Vec2::new(rotation_angle.cos() * marker_len, rotation_angle.sin() * marker_len);
-                        ui.painter().line_segment([rect.center(), marker_end], Stroke::new(2.0, deck_color));
+                        ui.painter().line_segment([rect.center(), marker_end], Stroke::new(2.0_f32, deck_color));
 
                         ui.add_space(theme.space_sm);
                         ui.label(RichText::new("SCRATCH / JOG").color(theme.text_disabled).size(theme.type_caption));
@@ -154,7 +154,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             ui.painter().text(wf_rect.center(), egui::Align2::CENTER_CENTER, format!("{} (NO GPU)", t.title), egui::FontId::monospace(theme.type_caption), theme.text_secondary);
                             ui.painter().line_segment(
                                 [egui::pos2(wf_rect.min.x, wf_rect.center().y), egui::pos2(wf_rect.max.x, wf_rect.center().y)],
-                                egui::Stroke::new(1.0, theme.border)
+                                egui::Stroke::new(1.0_f32, theme.border)
                             );
                         }
 
@@ -164,7 +164,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         let playhead_x = wf_rect.min.x + (playhead_ratio.clamp(0.0, 1.0) * wf_rect.width());
                         ui.painter().line_segment(
                             [egui::pos2(playhead_x, wf_rect.min.y), egui::pos2(playhead_x, wf_rect.max.y)],
-                            egui::Stroke::new(2.0, deck_color)
+                            egui::Stroke::new(2.0_f32, deck_color)
                         );
                     }
 

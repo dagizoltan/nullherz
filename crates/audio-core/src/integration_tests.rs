@@ -50,7 +50,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         let (garbage_prod, _garbage_cons) = RingBuffer::new(1024).split();
 
         let mut graph = ProcessorGraph::new();
-        graph.set_garbage_producer(Box::new(garbage_prod));
+        graph.set_garbage_producer(&garbage_prod);
 
         let dynamic_proc = registry.create_by_id(dynamic_id, 0, 44100.0).expect("Failed to create dynamic processor");
         graph.add_node(dynamic_proc, vec![], vec![0]);
@@ -157,7 +157,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         let (garbage_prod, _garbage_cons) = RingBuffer::new(1024).split();
 
         let mut graph = ProcessorGraph::new();
-        graph.set_garbage_producer(Box::new(garbage_prod));
+        graph.set_garbage_producer(&garbage_prod);
 
         // 2. Register and create a custom processor via registry
         let mut mock = Box::new(MockProcessor::new());
@@ -208,7 +208,7 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         let (garbage_prod, _garbage_cons) = RingBuffer::<Box<dyn nullherz_traits::AudioProcessor>>::new(1024).split();
 
         let mut graph = ProcessorGraph::new();
-        graph.set_garbage_producer(Box::new(garbage_prod));
+        graph.set_garbage_producer(&garbage_prod);
 
         // Path A: Dry (0 latency)
         struct DryProcessor;
