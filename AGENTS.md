@@ -74,6 +74,11 @@ timeout so a hang reports as a failure rather than as a slow build.
 4.  **Check RT-Safety Lints**: `clippy.toml` bans `Mutex`/`RwLock`/`thread::spawn`
     /`thread::sleep`. Note what it does NOT ban: allocation. That is what §2's
     law is about and what the guard in (2) exists to enforce.
+5.  **Executor geometry**: `audio-core/processors/graph/verification.rs` sweeps
+    `execute_stage` over randomized `(num_samples, offset)` against a populated
+    graph, with and without PDC. Any change to the executor's slicing arithmetic
+    belongs behind that test — a device period the reference machine never
+    produces is exactly how the buffers were overrun before.
 
 **Do not record an invariant as verified in a document.** Record it as a test.
 Every claim in `docs/` that a test could make should be one; the three defects

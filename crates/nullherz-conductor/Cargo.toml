@@ -30,11 +30,5 @@ rayon = "1.10"
 walkdir = "2.5"
 symphonia = { version = "0.5", features = ["all"] }
 
-[features]
-kani-verify = ["nullherz-traits/kani-verify", "audio-core/kani-verify"]
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
-
 [dev-dependencies]
 proptest = "1"

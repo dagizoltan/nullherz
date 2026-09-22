@@ -254,24 +254,49 @@ impl Default for ClockServo {
     }
 }
 
-#[cfg(all(feature = "kani-verify", kani))]
-mod clock_verification {
+
+#[cfg(test)]
+mod servo_tests {
     use super::*;
+    use proptest::prelude::*;
 
-    #[kani::proof]
-    pub fn prove_clock_servo_integral_clamping() {
-        let servo = ClockServo::new(0.1, 0.01);
-
-        // Push a very large offset repeatedly
-        for _ in 0..10 {
-            let offset: i64 = kani::any();
-            // We only care about large values for overflow testing
-            kani::assume(offset > 1_000_000_000);
-            servo.sample(offset);
+    proptest! {
+        /// Anti-windup: the PI integral stays clamped however adversarial the
+        /// offsets.
+        ///
+        /// Replaces `prove_clock_servo_integral_clamping`, which asserted the
+        /// same bound under `cfg(kani)` and therefore never ran. A proptest is
+        /// arguably the better tool: the proof assumed `offset > 1e9` — only the
+        /// huge-POSITIVE case — while this sweeps both signs and the mixed
+        /// sequences that actually wind an integrator up and back.
+        #[test]
+        fn integral_stays_clamped(
+            offsets in proptest::collection::vec(-4_000_000_000i64..4_000_000_000, 1..200)
+        ) {
+            let servo = ClockServo::new(0.1, 0.01);
+            for o in offsets {
+                prop_assert!(servo.sample(o).is_finite(), "servo output went non-finite on {o}");
+            }
+            let integral = f64::from_bits(
+                servo.integral.load(std::sync::atomic::Ordering::Relaxed)
+            );
+            prop_assert!(
+                (-1_000_000.0..=1_000_000.0).contains(&integral),
+                "integral wound up to {integral}, outside the anti-windup clamp"
+            );
         }
+    }
 
-        let integral = f64::from_bits(servo.integral.load(std::sync::atomic::Ordering::Relaxed));
-        kani::assert(integral <= 1_000_000.0, "Integral must be clamped to prevent windup");
-        kani::assert(integral >= -1_000_000.0, "Integral must be clamped to prevent windup");
+    /// `reset` must actually return the servo to a clean state — a property the
+    /// clamp test cannot see, since a permanently-saturated integral also
+    /// satisfies the clamp.
+    #[test]
+    fn reset_clears_the_integral() {
+        let servo = ClockServo::new(0.1, 0.01);
+        for _ in 0..500 { servo.sample(2_000_000_000); }
+        let wound = f64::from_bits(servo.integral.load(std::sync::atomic::Ordering::Relaxed));
+        assert!(wound.abs() > 0.0, "the test did not wind the integral up at all");
+        servo.reset();
+        assert_eq!(f64::from_bits(servo.integral.load(std::sync::atomic::Ordering::Relaxed)), 0.0);
     }
 }

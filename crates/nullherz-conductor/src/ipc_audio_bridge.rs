@@ -19,8 +19,20 @@ pub struct JitterBuffer {
     pub sample_rate: f32,
 }
 
+/// The range the adaptive target is allowed to occupy.
+///
+/// `update_adaptive_target` already clamps to this; the constructor now does
+/// too, so the invariant holds from construction rather than from the first
+/// adaptation 32 pushes later. It also closes `new(0)`, which made the capacity
+/// bound in `push` (`len < target_size * 8`) evaluate to `0 < 0` — a buffer that
+/// silently discarded every block it was given and reported nothing.
+///
+/// No production caller is affected: the only one asks for 4.
+pub const JITTER_TARGET_RANGE: std::ops::RangeInclusive<usize> = 2..=16;
+
 impl JitterBuffer {
     pub fn new(target_size: usize) -> Self {
+        let target_size = target_size.clamp(*JITTER_TARGET_RANGE.start(), *JITTER_TARGET_RANGE.end());
         Self {
             buffer: VecDeque::with_capacity(target_size * 8),
             target_size,
@@ -84,7 +96,7 @@ impl JitterBuffer {
             nullherz_traits::IPC_BLOCK_SIZE as f32 / self.sample_rate.max(1.0);
         let jitter_blocks = (std_dev * 3.0 / block_duration).ceil() as usize;
 
-        self.target_size = jitter_blocks.clamp(2, 16);
+        self.target_size = jitter_blocks.clamp(*JITTER_TARGET_RANGE.start(), *JITTER_TARGET_RANGE.end());
     }
 
     pub fn pop(&mut self) -> Option<AudioBlock> {
@@ -310,36 +322,92 @@ impl IpcAudioBridge {
     }
 }
 
-#[cfg(all(feature = "kani-verify", kani))]
-mod verification {
-    use super::*;
-    use ipc_layer::AudioBlock;
-
-    #[kani::proof]
-    #[kani::unwind(10)]
-    pub fn prove_jitter_buffer_no_panic() {
-        let mut jb = JitterBuffer::new(2);
-        let block = AudioBlock { data: [0.0; 256], len: 256, _pad: [0; 15] };
-
-        // Symbols for symbolic execution
-        let num_pushes: usize = kani::any_where(|&n: &usize| n < 10);
-        let num_pops: usize = kani::any_where(|&n: &usize| n < 10);
-
-        for _ in 0..num_pushes {
-            jb.push(block);
-        }
-
-        for _ in 0..num_pops {
-            jb.pop();
-        }
-
-        kani::assert(jb.target_size == 2, "Target size must remain constant");
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Panic freedom over arbitrary push/pop sequences, and the bounds the buffer
+    /// actually respects.
+    ///
+    /// Replaces `prove_jitter_buffer_no_panic`, which drove fewer than ten pushes
+    /// and pops under `cfg(kani)` and therefore never ran — and which asserted
+    /// `target_size == 2`, a property that IS NOT TRUE. `update_adaptive_target`
+    /// recomputes the target every 32 pushes from measured arrival jitter, by
+    /// design. The proof had the design wrong and nobody found out, because a
+    /// harness gated on a cfg no build sets cannot be wrong out loud.
+    ///
+    /// So this asserts what the code actually guarantees: the adaptation stays
+    /// inside its `clamp(2, 16)`, the queue respects its own `target_size * 8`
+    /// capacity bound, and nothing is handed back that was not put in.
+    #[test]
+    fn jitter_buffer_survives_arbitrary_push_pop_sequences() {
+        // Deterministic xorshift rather than a proptest: the sequence space is
+        // small and a fixed seed makes a failure reproducible from the message.
+        let mut seed = 0x9E3779B9u32;
+        let mut next = move || { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; seed };
+
+        // Includes 0 and 1, which the constructor must clamp up.
+        for initial_target in [0usize, 1, 2, 4, 99] {
+            let mut jb = JitterBuffer::new(initial_target);
+            let block = AudioBlock { data: [0.25; 256], len: 256, _pad: [0; 15] };
+            let mut pushed = 0usize;
+            let mut popped = 0usize;
+
+            for i in 0..4_000 {
+                if next() % 2 == 0 {
+                    // `target_size * 8` is a PUSH-ADMISSION rule, not a bound on
+                    // length: the adaptive target can SHRINK while blocks are
+                    // already queued, and the backlog then drains through `pop`
+                    // rather than being discarded. Dropping it would be a glitch
+                    // to reclaim latency the buffer had already committed to, so
+                    // draining is right — but it means `len <= target * 8` is
+                    // simply not an invariant, and asserting it fails honestly
+                    // within a hundred iterations.
+                    //
+                    // What IS guaranteed: a push that finds the queue at or over
+                    // the admission bound must not make it longer.
+                    let bound = jb.target_size * 8;
+                    let before = jb.buffer.len();
+                    jb.push(block);
+                    pushed += 1;
+                    if before >= bound {
+                        assert_eq!(
+                            jb.buffer.len(), before,
+                            "iteration {i}: push admitted a block at/over the {bound} bound"
+                        );
+                    } else {
+                        assert!(
+                            jb.buffer.len() <= before + 1,
+                            "iteration {i}: one push grew the queue by more than one"
+                        );
+                    }
+                } else if jb.pop().is_some() {
+                    popped += 1;
+                }
+                // The adaptive target must stay inside the clamp in
+                // `update_adaptive_target`. Running away would make the queue
+                // grow without bound, which for a jitter buffer is latency.
+                assert!(
+                    JITTER_TARGET_RANGE.contains(&jb.target_size),
+                    "iteration {i}: target_size escaped its clamp at {}",
+                    jb.target_size
+                );
+            }
+            // The queue must not be left holding an unbounded backlog either:
+            // it can exceed the CURRENT target after a shrink, but never the
+            // widest admission bound the range allows.
+            assert!(
+                jb.buffer.len() <= *JITTER_TARGET_RANGE.end() * 8,
+                "queue ended holding {} blocks, past any admission bound",
+                jb.buffer.len()
+            );
+            assert!(
+                popped <= pushed,
+                "target {initial_target}: handed back {popped} blocks having been given {pushed}"
+            );
+        }
+    }
 
     #[test]
     fn test_jitter_buffer_flow() {

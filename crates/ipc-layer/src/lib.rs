@@ -1242,66 +1242,54 @@ impl Default for RdmaBridge {
     }
 }
 
-#[cfg(all(feature = "kani-verify", kani))]
-#[allow(unexpected_cfgs)]
-mod proofs {
-    use super::*;
-
-    #[kani::proof]
-    #[kani::unwind(5)]
-    fn prove_shm_ring_buffer_safety() {
-        let capacity = kani::any_where(|&c: &usize| c > 1 && c < 5);
-        let (layout, _) = ShmRingBuffer::<u32>::layout(capacity);
-
-        // Use a small fixed buffer for verification to stay within bounds
-        let mut mem = [0u8; 1024];
-        if layout.size() + 64 > mem.len() { return; }
-
-        let ptr = mem.as_mut_ptr();
-        let aligned_ptr = unsafe { ptr.add(ptr.align_offset(64)) };
-
-        let rb_ptr = unsafe { ShmRingBuffer::<u32>::init(aligned_ptr, capacity) };
-        let rb = unsafe { &*rb_ptr };
-
-        let val: u32 = kani::any();
-        if rb.push(val).is_ok() {
-            let popped = rb.pop();
-            kani::assert(popped == Some(val), "Popped value must match pushed value");
-        }
-    }
-
-    #[kani::proof]
-    #[kani::unwind(5)]
-    fn prove_mpsc_ring_buffer_safety() {
-        // MpscRingBuffer requires power-of-two capacity
-        let capacity = 4;
-        let buffer = MpscRingBuffer::<u32>::new(capacity);
-
-        let val: u32 = kani::any();
-        if buffer.push(val).is_ok() {
-            let popped = buffer.pop();
-            kani::assert(popped == Some(val), "Popped value must match pushed value");
-        }
-    }
-
-    #[kani::proof]
-    fn prove_shm_signal_atomic_ordering() {
-        let signal = ShmSignal::new();
-        kani::assert(!signal.check_and_clear(), "Initial flag must be false");
-        signal.notify();
-        kani::assert(signal.check_and_clear(), "Flag must be true after notify");
-        kani::assert(!signal.check_and_clear(), "Flag must be cleared after check");
-
-        let initial_heartbeat = signal.get_heartbeat();
-        signal.pulse_heartbeat();
-        kani::assert(signal.get_heartbeat() == initial_heartbeat + 1, "Heartbeat must increment");
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    /// Ring-buffer round trip at every small capacity.
+    ///
+    /// Replaces `prove_shm_ring_buffer_safety`, which pushed ONE symbolic value
+    /// into a capacity-2-to-4 ring and popped it — gated on `cfg(kani)`, so it
+    /// never ran in CI, and less coverage than this gives for free.
+    #[test]
+    fn shm_ring_round_trips_at_every_small_capacity() {
+        for capacity in 2..=8usize {
+            let (layout, _) = ShmRingBuffer::<u32>::layout(capacity);
+            let mut mem = vec![0u8; layout.size() + 128];
+            let ptr = mem.as_mut_ptr();
+            let aligned = unsafe { ptr.add(ptr.align_offset(64)) };
+            let rb = unsafe { &*ShmRingBuffer::<u32>::init(aligned, capacity) };
+
+            // A ring of `capacity` holds `capacity - 1`: one slot is what
+            // distinguishes full from empty.
+            for i in 0..(capacity - 1) as u32 {
+                assert!(rb.push(i).is_ok(), "capacity {capacity}: push {i} rejected early");
+            }
+            assert!(rb.push(999).is_err(), "capacity {capacity}: accepted one item too many");
+            for i in 0..(capacity - 1) as u32 {
+                assert_eq!(rb.pop(), Some(i), "capacity {capacity}: FIFO order broken");
+            }
+            assert_eq!(rb.pop(), None, "capacity {capacity}: popped from an empty ring");
+        }
+    }
+
+    /// Replaces `prove_shm_signal_atomic_ordering`, which was a plain unit test
+    /// with no symbolic input at all — it only ever ran under a driver nobody
+    /// invoked. Same assertions, now executed.
+    #[test]
+    fn shm_signal_latches_and_clears() {
+        let signal = ShmSignal::new();
+        assert!(!signal.check_and_clear(), "a fresh signal must not be set");
+        signal.notify();
+        assert!(signal.check_and_clear(), "notify must latch");
+        assert!(!signal.check_and_clear(), "check_and_clear must consume the latch");
+
+        let before = signal.get_heartbeat();
+        signal.pulse_heartbeat();
+        assert_eq!(signal.get_heartbeat(), before + 1);
+    }
 
     proptest! {
         #[test]
