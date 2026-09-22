@@ -94,6 +94,18 @@ pub struct Conductor {
     pub stream_bitrate: f32,
     pub stream_dropped_frames: u32,
     pub stream_viewers: u32,
+    /// Which listeners `setup_engine` starts. See [`NetworkConfig`].
+    pub network: NetworkConfig,
+    /// Tripped by `Drop`. Every long-lived listener this conductor spawned
+    /// polls it and exits, so a dropped `Conductor` does not leave sockets
+    /// bound and threads running for the life of the process.
+    shutdown: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for Conductor {
+    fn drop(&mut self) {
+        self.shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 pub struct DnaTransition {
@@ -102,6 +114,59 @@ pub struct DnaTransition {
     pub start_beat: f64,
     pub duration_beats: f64,
     pub is_complete: bool,
+}
+
+/// Which network listeners `setup_engine` starts, and on which ports.
+///
+/// These used to be four hardcoded constants started unconditionally whenever
+/// a tokio runtime was present — which includes every test that builds a
+/// `Conductor`. Two consequences followed. Parallel test binaries fought over
+/// the same fixed ports, and a test process inherited four listeners it had no
+/// way to stop. `listeners_enabled` is the switch; port 0 asks the OS for an
+/// ephemeral port and the `start_*` functions report back what they got.
+#[derive(Debug, Clone, Copy)]
+pub struct NetworkConfig {
+    /// Start the remote-sidecar, discovery, audio-return and DNA listeners.
+    pub listeners_enabled: bool,
+    /// TCP: remote sidecars attach here.
+    pub sidecar_port: u16,
+    /// UDP: sidecar discovery beacons arrive here.
+    pub discovery_port: u16,
+    /// UDP: distributed audio-return blocks (protocol type 6).
+    pub audio_return_port: u16,
+    /// TCP: federated DNA pull server.
+    pub dna_port: u16,
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self {
+            listeners_enabled: true,
+            sidecar_port: 9000,
+            discovery_port: 9001,
+            audio_return_port: 9002,
+            dna_port: 9003,
+        }
+    }
+}
+
+impl NetworkConfig {
+    /// Every listener off. What tests want, and what `":memory:"` selects.
+    pub fn disabled() -> Self {
+        Self { listeners_enabled: false, ..Self::default() }
+    }
+
+    /// Listeners on, but every port ephemeral — for an integration test that
+    /// genuinely exercises the network without colliding with a parallel one.
+    pub fn ephemeral() -> Self {
+        Self {
+            listeners_enabled: true,
+            sidecar_port: 0,
+            discovery_port: 0,
+            audio_return_port: 0,
+            dna_port: 0,
+        }
+    }
 }
 
 impl Default for Conductor {
@@ -204,12 +269,30 @@ impl Conductor {
             stream_bitrate: 256.0,
             stream_dropped_frames: 0,
             stream_viewers: 42,
+            network: NetworkConfig::default(),
+            shutdown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
+    /// Open (or fall back to) the library at `path` and build a conductor on it.
+    ///
+    /// `":memory:"` is the established test sentinel (see
+    /// `tests/test_isolation_gate_test.rs`); it also turns the network
+    /// listeners OFF. Tests do not want four fixed ports bound, and parallel
+    /// test binaries fighting over 9000-9003 is not a thing any of them meant
+    /// to exercise. A test that genuinely wants listeners sets
+    /// `network = NetworkConfig::ephemeral()` before `setup_engine`.
     pub fn with_library_path(path: &str) -> Self {
-        let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
-        let library = match nullherz_dna::LibraryDatabase::load(path) {
+        let library = Self::open_library(path);
+        let mut conductor = Self::with_library(library);
+        if path == ":memory:" {
+            conductor.network = NetworkConfig::disabled();
+        }
+        conductor
+    }
+
+    fn open_library(path: &str) -> Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>> {
+        match nullherz_dna::LibraryDatabase::load(path) {
             Ok(db) => Arc::new(parking_lot::Mutex::new(db)),
             Err(e) => {
                 // redb holds an exclusive file lock, so a second opener of the
@@ -239,64 +322,6 @@ impl Conductor {
                     .expect("in-memory library database cannot fail to open");
                 Arc::new(parking_lot::Mutex::new(fallback))
             }
-        };
-        let sidecar_discovery = crate::discovery::SidecarDiscoveryService::new("plugins").with_library(library.clone());
-        let dna_discovery = sidecar_discovery.dna_discovery.clone();
-
-        let mut transfusion_manager = TransfusionManager::new(sample_registry.clone());
-        transfusion_manager.discovery_service = Some(dna_discovery);
-        transfusion_manager = transfusion_manager.with_library(library.clone());
-
-        let (hydration_done_tx, hydration_done_rx) = std::sync::mpsc::channel();
-        Self {
-            engine_coordinator: EngineCoordinator::new(),
-            topology_manager: TopologyManager::new(),
-            transfusion_manager,
-            mixer_bridge: MixerBridge::new(),
-            sidecar_supervisor: SidecarSupervisor::new(),
-            pattern_manager: PatternManager::new(),
-            clip_orchestrator: ClipOrchestrator::new(),
-            modulation_matrix: ModulationMatrix::new(),
-            audio_bridge: Arc::new(IpcAudioBridge::new()),
-            sidecar_discovery,
-            midi_mapper: MidiMapper::new(),
-            midi_clock: crate::midi_clock::MidiClockTracker::new(),
-            analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
-            folder_monitor: Some(crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())),
-            streaming_manager: crate::streaming_manager::StreamingManager::new(),
-            library,
-            mixer_manager: nullherz_mixer::MixerManager::new(),
-            midi_producer: None,
-            midi_consumer: None,
-            external_midi_consumer: None,
-            midi_child: None,
-            midi_shm: None,
-            matchmaking_suggestions: Arc::new(Mutex::new(Vec::new())),
-            calibration_samples: 0,
-            period_size: 128,
-            ptp_clock: None,
-            last_autosave_secs: 0,
-            last_genetic_evolve_secs: 0,
-            last_metadata_sync_secs: 0,
-            last_registry_reap_secs: 0,
-            cached_audio_devices: Vec::new(),
-            cached_residency: (0, 0),
-            last_residency_scan: None,
-            last_device_scan: None,
-            focused_node_idx: None,
-            active_transitions: Vec::new(),
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
-            hydration_pending: std::collections::HashSet::new(),
-            hydration_progress: std::sync::Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
-            hydration_done_tx,
-            hydration_done_rx,
-            synced_node_metadata: std::collections::HashMap::new(),
-            is_streaming: false,
-            stream_start_time: None,
-            stream_bitrate: 256.0,
-            stream_dropped_frames: 0,
-            stream_viewers: 42,
         }
     }
 
@@ -335,35 +360,48 @@ impl Conductor {
             });
         }
 
-        // Setup Remote Sidecar Listener (Stage 2 Distributed DSP)
-        if let Ok(_handle) = tokio::runtime::Handle::try_current() {
+        // Setup Remote Sidecar Listener (Stage 2 Distributed DSP).
+        //
+        // Gated on `network.listeners_enabled`, not merely on "is there a tokio
+        // runtime". Every test that builds a Conductor runs inside one, so the
+        // old condition started four fixed-port listeners in every test process
+        // — including the blocking UDP receive that made the process unable to
+        // exit. See `NetworkConfig`.
+        if self.network.listeners_enabled && tokio::runtime::Handle::try_current().is_ok() {
+            let net = self.network;
+            let shutdown = self.shutdown.clone();
+
             let remote_manager = self.sidecar_supervisor.remote_manager.clone();
             let audio_bridge = self.audio_bridge.clone();
+            let sd = shutdown.clone();
             tokio::spawn(async move {
-                let _ = crate::sidecar_supervisor::SidecarSupervisor::listen_for_remote_sidecars(remote_manager, audio_bridge, "0.0.0.0:9000").await;
+                let addr = format!("0.0.0.0:{}", net.sidecar_port);
+                let _ = crate::sidecar_supervisor::SidecarSupervisor::listen_for_remote_sidecars(remote_manager, audio_bridge, &addr, sd).await;
             });
 
             // Start UDP Discovery Beacon (Conductor identifying itself)
-            let discovery = crate::discovery::DiscoveryBeacon::new(9000, "Conductor");
+            let discovery = crate::discovery::DiscoveryBeacon::new(net.sidecar_port, "Conductor");
             discovery.start_broadcast();
 
             // Start UDP Discovery Listener (Conductor finding sidecars)
             let remote_manager = self.sidecar_supervisor.remote_manager.clone();
             let audio_bridge = self.audio_bridge.clone();
+            let sd = shutdown.clone();
             tokio::spawn(async move {
-                let _ = crate::sidecar_supervisor::SidecarSupervisor::start_discovery_listener(remote_manager, audio_bridge, 9001).await;
+                let _ = crate::sidecar_supervisor::SidecarSupervisor::start_discovery_listener(remote_manager, audio_bridge, net.discovery_port, sd).await;
             });
 
             // Start UDP Return Listener (Type 6)
             let audio_bridge = self.audio_bridge.clone();
+            let sd = shutdown.clone();
             tokio::spawn(async move {
-                let _ = crate::sidecar_supervisor::SidecarSupervisor::start_udp_return_listener(audio_bridge, 9002).await;
+                let _ = crate::sidecar_supervisor::SidecarSupervisor::start_udp_return_listener(audio_bridge, net.audio_return_port, sd).await;
             });
 
             // Start Federated DNA Server (TCP pull)
             let lib = self.library.clone();
             let signing_key = self.sidecar_discovery.dna_discovery.lock().signing_key;
-            let _ = nullherz_dna::DnaServer::start(lib, 9003, signing_key);
+            let _ = nullherz_dna::DnaServer::start(lib, net.dna_port, signing_key, shutdown);
         }
 
         crate::EngineContext {
