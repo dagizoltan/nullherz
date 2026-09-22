@@ -719,6 +719,136 @@ fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         for i in 0..128 { assert_eq!(graph.buffer_pool.buffers[11].data[i], i as f32); }
     }
 
+    /// A stateful processor whose output depends on how many blocks it has
+    /// seen — so if worker dispatch ever changed the ORDER nodes ran in, or ran
+    /// one twice, the render would diverge instead of merely being reordered.
+    struct RampProcessor { n: u32 }
+    impl std::fmt::Debug for RampProcessor {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "RampProcessor") }
+    }
+    impl nullherz_traits::SignalProcessor for RampProcessor {
+        fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _c: &mut nullherz_traits::ProcessContext) {
+            self.n = self.n.wrapping_add(1);
+            let k = self.n as f32 * 1e-4;
+            for i in 0..inputs.len().min(outputs.len()) {
+                let n = outputs[i].len().min(inputs[i].len());
+                for j in 0..n {
+                    outputs[i][j] = inputs[i][j].mul_add(0.5, k);
+                }
+            }
+        }
+    }
+    impl nullherz_traits::MidiResponder for RampProcessor {}
+    impl nullherz_traits::SnapshotProvider for RampProcessor {}
+    impl AudioProcessor for RampProcessor {
+        fn as_any(&self) -> &dyn std::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    }
+
+    /// Mixes every input into `outputs[0]`, in slot order — a local stand-in for
+    /// `nullherz_processors::SummingProcessor`, which audio-core cannot depend
+    /// on. Slot order is the property under test: it must not follow completion
+    /// order.
+    struct SumInOrder;
+    impl std::fmt::Debug for SumInOrder {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "SumInOrder") }
+    }
+    impl nullherz_traits::SignalProcessor for SumInOrder {
+        fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _c: &mut nullherz_traits::ProcessContext) {
+            let Some(out) = outputs.first_mut() else { return };
+            out.fill(0.0);
+            for input in inputs {
+                let n = out.len().min(input.len());
+                for j in 0..n {
+                    out[j] += input[j];
+                }
+            }
+        }
+    }
+    impl nullherz_traits::MidiResponder for SumInOrder {}
+    impl nullherz_traits::SnapshotProvider for SumInOrder {}
+    impl AudioProcessor for SumInOrder {
+        fn as_any(&self) -> &dyn std::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    }
+
+    /// **An offline bounce must equal the live render, bit for bit.**
+    ///
+    /// A DJ console never needed that; a studio suite does. It is not obvious
+    /// here, because whether a stage is dispatched to the worker pool is decided
+    /// by the per-stage COST GATE against telemetry-measured cycles — so it is a
+    /// function of machine load, and varies between two runs of the same
+    /// session. If dispatch could reach the output at all, no render would be
+    /// reproducible.
+    ///
+    /// It cannot: nodes in one stage are hazard-free by construction (see
+    /// `verify_no_hazards`), and a summing node reads its inputs in a fixed slot
+    /// order regardless of which worker produced them. This pins that, because
+    /// the argument is exactly the kind that stays true until someone adds an
+    /// accumulator shared across a stage.
+    ///
+    /// Measured at scale by `bench_studio_scale` (nullherz-conductor): 32 tracks
+    /// / 72 nodes, 200 blocks, identical FNV hash with the pool disabled, at the
+    /// default gate, and forced on.
+    #[test]
+    fn render_is_identical_serial_and_pooled() {
+        const BLOCKS: usize = 64;
+        const N: usize = 128;
+
+        let render = |mut pool: Option<TaskPool>| -> Vec<f32> {
+            let mut graph = ProcessorGraph::new();
+            // Two independent producers feeding one summing consumer: the
+            // producers share a stage (so they can be dispatched in parallel),
+            // and their results are combined afterwards.
+            graph.add_node(Box::new(RampProcessor { n: 0 }), vec![10], vec![11]);
+            graph.add_node(Box::new(RampProcessor { n: 0 }), vec![12], vec![13]);
+            graph.add_node(Box::new(SumInOrder), vec![11, 13], vec![0]);
+
+            // Precondition, asserted so this test cannot quietly become
+            // vacuous: the two producers must SHARE a stage. If a future
+            // compiler change serialised them, both renders below would take
+            // the same path and the comparison would prove nothing.
+            let active = graph.topology_coordinator.active_idx();
+            assert_eq!(
+                graph.topology_coordinator.topologies[active].plan.stage_counts[0], 2,
+                "the two producers must share stage 0 for dispatch to be exercised"
+            );
+
+            for i in 0..N {
+                graph.buffer_pool.buffers[10].data[i] = i as f32 * 0.01;
+                graph.buffer_pool.buffers[12].data[i] = (N - i) as f32 * 0.013;
+            }
+
+            let mut out = Vec::with_capacity(BLOCKS * N);
+            for _ in 0..BLOCKS {
+                let mut out_data = [0.0f32; N];
+                let mut outputs = [&mut out_data[..]];
+                let mut context = ProcessContext {
+                    transport: None, host: None, sub_block_offset: 0, is_last_sub_block: true,
+                };
+                graph.process_parallel(&[], &mut outputs, &mut context, pool.as_mut().map(|p| p as &mut (dyn nullherz_traits::ParallelExecutor + '_)));
+                out.extend_from_slice(&out_data);
+            }
+            out
+        };
+
+        let serial = render(None);
+
+        let mut forced = TaskPool::new(2);
+        forced.parallel_threshold_cycles = 0; // dispatch every multi-node stage
+        let pooled = render(Some(forced));
+
+        assert_eq!(serial.len(), pooled.len());
+        assert!(serial.iter().any(|v| *v != 0.0), "render was silent — the graph never ran");
+        for (i, (a, b)) in serial.iter().zip(pooled.iter()).enumerate() {
+            assert_eq!(
+                a.to_bits(), b.to_bits(),
+                "sample {i} differs: serial {a:e} vs pooled {b:e} — \
+                 worker dispatch reached the output, so no render is reproducible"
+            );
+        }
+    }
+
     #[test]
     fn test_rt_topology_commit_is_no_op() {
         let mut graph = ProcessorGraph::new();
