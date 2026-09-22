@@ -3288,6 +3288,7 @@ dependencies = [
  "rand 0.8.6",
  "rayon",
  "redb",
+ "rkyv",
  "serde",
  "serde-big-array",
  "serde_json",
