@@ -378,6 +378,139 @@ impl Drop for EventFd {
     fn drop(&mut self) { if self.owner { unsafe { libc::close(self.fd); } } }
 }
 
+/// What scheduling policy and priority a thread ACTUALLY has.
+///
+/// # Why this exists
+///
+/// `set_rt_priority` returning `Ok` does not mean you got what you asked for.
+/// The RTKit fallback grants `SCHED_RR` capped at priority 20 regardless of the
+/// 85 the engine requests, and `setup_rt_thread` discarded the result entirely
+/// (`let _ = set_rt_priority(..)`), so an audio thread running at
+/// `SCHED_OTHER` was indistinguishable from one running at FIFO 85. On the
+/// reference machine that was the actual state — `rtprio` rlimit 0, no group
+/// membership — and it is the reason block times had a 3.4 ms tail.
+///
+/// This reads the kernel back rather than trusting the request. It is the same
+/// distinction as `AudioBackend::xruns` returning `Option`: a number you did not
+/// measure must not look like one you did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SchedStatus {
+    /// Policy with `SCHED_RESET_ON_FORK` masked off.
+    pub policy: i32,
+    pub priority: i32,
+}
+
+impl SchedStatus {
+    /// Read the calling thread's live scheduling state.
+    pub fn current() -> Self {
+        unsafe {
+            // `sched_getscheduler` ORs in SCHED_RESET_ON_FORK (0x4000_0000) when
+            // set, which RTKit always sets — so a naive comparison against
+            // SCHED_RR fails and reports "unknown policy" on a thread that is
+            // correctly realtime.
+            let raw = libc::sched_getscheduler(0);
+            let policy = if raw < 0 { -1 } else { raw & !0x4000_0000 };
+            let mut param: libc::sched_param = std::mem::zeroed();
+            let priority = if libc::sched_getparam(0, &mut param) == 0 {
+                param.sched_priority
+            } else {
+                0
+            };
+            Self { policy, priority }
+        }
+    }
+
+    /// Is this a realtime policy at all?
+    pub fn is_realtime(&self) -> bool {
+        self.policy == libc::SCHED_FIFO || self.policy == libc::SCHED_RR
+    }
+
+    pub fn policy_name(&self) -> &'static str {
+        match self.policy {
+            libc::SCHED_OTHER => "SCHED_OTHER",
+            libc::SCHED_FIFO => "SCHED_FIFO",
+            libc::SCHED_RR => "SCHED_RR",
+            libc::SCHED_BATCH => "SCHED_BATCH",
+            libc::SCHED_IDLE => "SCHED_IDLE",
+            _ => "unknown",
+        }
+    }
+}
+
+impl std::fmt::Display for SchedStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} prio {}", self.policy_name(), self.priority)
+    }
+}
+
+/// The `RLIMIT_RTPRIO` ceiling, or `None` if it cannot be read.
+///
+/// Zero means this user cannot obtain a realtime policy directly; RTKit may
+/// still grant one over D-Bus.
+pub fn rtprio_limit() -> Option<u64> {
+    let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    if unsafe { libc::getrlimit(libc::RLIMIT_RTPRIO, &mut lim) } == 0 {
+        Some(lim.rlim_cur)
+    } else {
+        None
+    }
+}
+
+/// Packed `SchedStatus` of the audio thread, or `i64::MIN` before one has
+/// registered. Written once by `setup_rt_thread`, read by the backends (to size
+/// the device buffer) and by diagnostics.
+static AUDIO_THREAD_SCHED: std::sync::atomic::AtomicI64 =
+    std::sync::atomic::AtomicI64::new(i64::MIN);
+
+/// What the audio thread actually got, once it has called
+/// [`register_audio_thread`].
+pub fn audio_thread_sched() -> Option<SchedStatus> {
+    let packed = AUDIO_THREAD_SCHED.load(Ordering::Acquire);
+    if packed == i64::MIN {
+        return None;
+    }
+    Some(SchedStatus {
+        policy: (packed >> 32) as i32,
+        priority: (packed & 0xFFFF_FFFF) as i32,
+    })
+}
+
+/// Declare the calling thread THE audio thread, recording what the kernel
+/// actually gave it.
+///
+/// Call once, from a backend's audio thread, after asking for realtime. Not from
+/// `setup_rt_thread`: the worker pool and the streaming feeder call that too, and
+/// whichever ran last would have overwritten the number everything else reads.
+/// The audio thread is a specific thread and this says which.
+pub fn register_audio_thread() -> SchedStatus {
+    let s = SchedStatus::current();
+    let packed = ((s.policy as i64) << 32) | (s.priority as i64 & 0xFFFF_FFFF);
+    AUDIO_THREAD_SCHED.store(packed, Ordering::Release);
+    s
+}
+
+/// Can this process obtain a realtime policy at all?
+///
+/// Answered by TRYING, on a throwaway thread, and reading the kernel back —
+/// `rtprio_limit() == 0` is not the answer, because RTKit grants over D-Bus
+/// without touching rlimits. Cached: the probe spawns one thread, once.
+///
+/// Backends use this to size the device ring BEFORE the audio thread exists.
+/// Asking for a 3-period buffer without realtime scheduling is how you get the
+/// 411-underruns-in-18-seconds result that set the old 8-period default; asking
+/// for 8 when you DO have realtime throws away 30 ms of latency for nothing.
+pub fn realtime_available() -> bool {
+    static PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *PROBE.get_or_init(|| {
+        std::thread::spawn(|| {
+            let _ = set_rt_priority(85);
+            SchedStatus::current().is_realtime()
+        })
+        .join()
+        .unwrap_or(false)
+    })
+}
+
 pub fn set_rt_priority(priority: i32) -> Result<(), IpcError> {
     if set_rt_priority_for(0, priority).is_ok() {
         return Ok(());
@@ -897,7 +1030,49 @@ pub fn cpufreq_driver() -> Option<String> {
 /// guarantees says so once at startup, instead of presenting as mysterious xruns
 /// hours later.
 pub fn realtime_environment_warnings() -> Vec<String> {
-    let mut warnings = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+
+    // SCHEDULING FIRST. Everything else on this list is a refinement; this one
+    // decides whether the audio thread can preempt anything at all, and it was
+    // the omission that mattered — `setup_rt_thread` discarded the result of its
+    // own request, so an engine running at SCHED_OTHER looked exactly like one
+    // running at FIFO 85. On the reference machine it WAS SCHED_OTHER until
+    // RTKit was reached, and the block-time tail showed it.
+    match audio_thread_sched() {
+        None => {
+            // No audio thread has registered yet; report the capability instead.
+            if !realtime_available() {
+                warnings.push(format!(
+                    "This process cannot obtain a realtime scheduling policy (RLIMIT_RTPRIO \
+                     is {}, and RTKit did not grant one). The audio thread will run at normal \
+                     priority and WILL be preempted by ordinary work — expect dropouts that \
+                     look like DSP problems. Fix with a limits.d entry for your user's group, \
+                     e.g.  @audio - rtprio 95",
+                    rtprio_limit().map(|l| l.to_string()).unwrap_or_else(|| "unreadable".into())
+                ));
+            }
+        }
+        Some(s) if !s.is_realtime() => warnings.push(format!(
+            "The audio thread is running at {s} — NOT a realtime policy. It will be preempted \
+             by ordinary work. RLIMIT_RTPRIO is {}. Fix with a limits.d entry, e.g. \
+             @audio - rtprio 95",
+            rtprio_limit().map(|l| l.to_string()).unwrap_or_else(|| "unreadable".into())
+        )),
+        Some(s) if s.policy == libc::SCHED_RR && s.priority <= 20 => warnings.push(format!(
+            "The audio thread is at {s}, which is RTKit's ceiling rather than what was \
+             requested (SCHED_FIFO 85). Workable, but it shares the CPU round-robin with \
+             other RT threads at the same priority instead of pre-empting them. A limits.d \
+             entry (@audio - rtprio 95) gets the requested policy."
+        )),
+        Some(_) => {}
+    }
+
+    // Memory locking, reported honestly. `lock_memory()` calls
+    // `mlockall(MCL_CURRENT | MCL_FUTURE)`, which returns success immediately and
+    // then lets LATER allocations silently fail to lock once the rlimit is hit.
+    // So an `Ok` from it says nothing; the rlimit is the real constraint and is
+    // checked below.
+
 
     if let Some(g) = cpu_governor()
         && g != "performance"

@@ -22,6 +22,11 @@ struct AlsaLib {
     snd_pcm_hw_params_set_period_size_max: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, *mut std::os::raw::c_ulong, *mut std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_hw_params: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> std::os::raw::c_int,
     snd_pcm_hw_params_free: unsafe extern "C" fn(*mut std::ffi::c_void),
+    // SOFTWARE params. Optional as a GROUP: if a stripped libasound lacks any
+    // of them the stream still plays on ALSA's defaults, which is what happened
+    // before this was wired at all. Same reasoning as the device-hint API below
+    // — never fail playback over a tuning knob.
+    sw: Option<AlsaSwParams>,
     snd_pcm_writei: unsafe extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void, std::os::raw::c_ulong) -> isize,
     snd_pcm_recover: unsafe extern "C" fn(*mut std::ffi::c_void, std::os::raw::c_int, std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_close: unsafe extern "C" fn(*mut std::ffi::c_void) -> std::os::raw::c_int,
@@ -34,6 +39,17 @@ struct AlsaLib {
     snd_device_name_get_hint: Option<unsafe extern "C" fn(*const std::ffi::c_void, *const std::os::raw::c_char) -> *mut std::os::raw::c_char>,
     snd_device_name_free_hint: Option<unsafe extern "C" fn(*mut *mut std::ffi::c_void) -> std::os::raw::c_int>,
 }
+/// The `snd_pcm_sw_params_*` family, loaded or not loaded as one unit.
+struct AlsaSwParams {
+    malloc: unsafe extern "C" fn(*mut *mut std::ffi::c_void) -> std::os::raw::c_int,
+    free: unsafe extern "C" fn(*mut std::ffi::c_void),
+    current: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> std::os::raw::c_int,
+    set_start_threshold: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_ulong) -> std::os::raw::c_int,
+    set_stop_threshold: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_ulong) -> std::os::raw::c_int,
+    set_avail_min: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_ulong) -> std::os::raw::c_int,
+    apply: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> std::os::raw::c_int,
+}
+
 unsafe impl Send for AlsaLib {}
 
 impl AlsaLib {
@@ -59,6 +75,18 @@ impl AlsaLib {
                 snd_pcm_hw_params_set_period_size_max: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void, *mut u64, *mut i32) -> i32>(load_sym(c"snd_pcm_hw_params_set_period_size_max").ok_or("sym failed")?),
                 snd_pcm_hw_params: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void) -> i32>(load_sym(c"snd_pcm_hw_params").ok_or("sym failed")?),
                 snd_pcm_hw_params_free: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void)>(load_sym(c"snd_pcm_hw_params_free").ok_or("sym failed")?),
+                // Already inside the enclosing `unsafe` block.
+                sw: (|| {
+                    Some(AlsaSwParams {
+                        malloc: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut *mut libc::c_void) -> i32>(load_sym(c"snd_pcm_sw_params_malloc")?),
+                        free: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void)>(load_sym(c"snd_pcm_sw_params_free")?),
+                        current: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void) -> i32>(load_sym(c"snd_pcm_sw_params_current")?),
+                        set_start_threshold: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void, u64) -> i32>(load_sym(c"snd_pcm_sw_params_set_start_threshold")?),
+                        set_stop_threshold: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void, u64) -> i32>(load_sym(c"snd_pcm_sw_params_set_stop_threshold")?),
+                        set_avail_min: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void, u64) -> i32>(load_sym(c"snd_pcm_sw_params_set_avail_min")?),
+                        apply: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void) -> i32>(load_sym(c"snd_pcm_sw_params")?),
+                    })
+                })(),
                 snd_pcm_writei: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *const std::ffi::c_void, u64) -> isize>(load_sym(c"snd_pcm_writei").ok_or("sym failed")?),
                 snd_pcm_recover: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, i32, i32) -> i32>(load_sym(c"snd_pcm_recover").ok_or("sym failed")?),
                 snd_pcm_close: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void) -> i32>(load_sym(c"snd_pcm_close").ok_or("sym failed")?),
@@ -208,12 +236,32 @@ impl AudioBackend for AlsaBackend {
             (alsa.snd_pcm_hw_params_set_period_size_near)(pcm, hw_params, &mut ps, &mut dir);
             let mut max_period = ipc_layer::MAX_BLOCK_SIZE as u64;
             (alsa.snd_pcm_hw_params_set_period_size_max)(pcm, hw_params, &mut max_period, &mut dir);
-            // Buffer depth = scheduling slack. period*4 (~23ms at 256/44k1) is
-            // not enough on a loaded 2-core desktop (measured: 411 underruns in
-            // 18s under stress); default to 8 periods (~46ms), overridable via
-            // NULLHERZ_BUFFER_PERIODS for low-latency setups with RT privileges.
+            // Buffer depth = scheduling slack, so it should depend on how much
+            // slack the scheduler will actually give us.
+            //
+            // It was a flat 8 periods — ~43 ms at 256/48k, which is SIX TIMES the
+            // engine's own 7.3 ms deck-to-master latency and the dominant term in
+            // the whole product. The 8 came from measuring 411 underruns in 18 s
+            // at 4 periods on a loaded desktop. That measurement was real, but it
+            // was taken without realtime scheduling: `setup_rt_thread` discarded
+            // the result of its own `set_rt_priority` call, so nobody knew
+            // whether the run that produced it had RT at all.
+            //
+            // So ask. `realtime_available()` probes on a throwaway thread and
+            // reads the policy back from the kernel:
+            //
+            //   * realtime obtainable -> 3 periods (~16 ms at 256/48k). Enough to
+            //     ride out a scheduling gap when we can preempt the thing causing
+            //     it.
+            //   * not obtainable -> 8 periods, as before. Without RT the audio
+            //     thread is just another task and needs the depth.
+            //
+            // `NULLHERZ_BUFFER_PERIODS` still overrides either way.
+            let rt = ipc_layer::realtime_available();
+            let default_periods: u64 = if rt { 3 } else { 8 };
             let buffer_periods: u64 = std::env::var("NULLHERZ_BUFFER_PERIODS")
-                .ok().and_then(|v| v.parse().ok()).filter(|&v| (2..=32).contains(&v)).unwrap_or(8);
+                .ok().and_then(|v| v.parse().ok()).filter(|&v| (2..=32).contains(&v))
+                .unwrap_or(default_periods);
             let mut buffer_size = ps * buffer_periods;
             (alsa.snd_pcm_hw_params_set_buffer_size_near)(pcm, hw_params, &mut buffer_size);
             period_size = ps;
@@ -221,9 +269,11 @@ impl AudioBackend for AlsaBackend {
             negotiated_buffer = buffer_size;
             self.buffer_frames.store(buffer_size as u32, Ordering::Relaxed);
             eprintln!(
-                "[ALSA] Negotiated: rate={} period={} buffer={} ({:.1} ms)",
+                "[ALSA] Negotiated: rate={} period={} buffer={} ({:.1} ms, {} periods; realtime {})",
                 rate, period_size, buffer_size,
-                buffer_size as f64 * 1000.0 / rate.max(1) as f64
+                buffer_size as f64 * 1000.0 / rate.max(1) as f64,
+                buffer_size / period_size.max(1),
+                if rt { "available" } else { "UNAVAILABLE — using a deep buffer" }
             );
             // `*_near` silently substitutes when it cannot honour a request, so
             // a mismatch is invisible unless we look. Both cases are real:
@@ -255,6 +305,50 @@ impl AudioBackend for AlsaBackend {
                 return Err(format!("snd_pcm_hw_params failed with error code: {}", hw_ret));
             }
             (alsa.snd_pcm_hw_params_free)(hw_params);
+
+            // SOFTWARE params. Previously never set at all, so the stream ran on
+            // ALSA's defaults for both of these.
+            //
+            //  * start_threshold = buffer_size: begin playing only once the ring
+            //    is full. The prefill below fills it, so playback starts from a
+            //    complete buffer rather than from whatever the default threshold
+            //    happened to be — which is the difference between starting with
+            //    full slack and starting one period from an underrun.
+            //  * avail_min = period_size: wake us when exactly one period is
+            //    free. The default can be larger, which coalesces wakeups and
+            //    makes the write loop arrive in bursts — the opposite of what a
+            //    low-latency ring wants.
+            //  * stop_threshold = buffer_size: stop on a real underrun so
+            //    `snd_pcm_recover` can see it, rather than letting the stream
+            //    free-run into an inconsistent state.
+            if let Some(ref sw) = alsa.sw {
+                let mut sw_params: *mut std::ffi::c_void = std::ptr::null_mut();
+                if (sw.malloc)(&mut sw_params) == 0 && !sw_params.is_null() {
+                    if (sw.current)(pcm, sw_params) == 0 {
+                        let _ = (sw.set_start_threshold)(pcm, sw_params, buffer_size);
+                        let _ = (sw.set_stop_threshold)(pcm, sw_params, buffer_size);
+                        let _ = (sw.set_avail_min)(pcm, sw_params, period_size);
+                        let rc = (sw.apply)(pcm, sw_params);
+                        if rc != 0 {
+                            // Not fatal — the stream plays on the defaults, which
+                            // is what it did before. Say so rather than leave it
+                            // looking configured.
+                            eprintln!("[ALSA] NOTE: snd_pcm_sw_params failed ({rc}); \
+                                       running on ALSA's default start/avail thresholds.");
+                        } else {
+                            eprintln!(
+                                "[ALSA] sw_params: start_threshold={} avail_min={}",
+                                buffer_size, period_size
+                            );
+                        }
+                    }
+                    (sw.free)(sw_params);
+                }
+            } else {
+                eprintln!("[ALSA] NOTE: libasound lacks the snd_pcm_sw_params_* API; \
+                           running on default start/avail thresholds.");
+            }
+
             (alsa.snd_pcm_prepare)(pcm);
         }
 
@@ -269,9 +363,22 @@ impl AudioBackend for AlsaBackend {
             // RT scheduling is the difference between riding out scheduler
             // gaps and drowning in them; report the outcome loudly so a
             // denied request is never mistaken for an engine problem.
-            match ipc_layer::set_rt_priority(80) {
-                Ok(()) => eprintln!("[ALSA] RT scheduling: ACQUIRED (SCHED_FIFO direct or SCHED_RR via RTKit)"),
-                Err(_) => eprintln!("[ALSA] RT scheduling: DENIED — running at normal priority. Underruns likely under load. Fix: add '@audio - rtprio 95' to /etc/security/limits.d/audio.conf and re-login."),
+            let _ = ipc_layer::set_rt_priority(80);
+            // Report the policy the KERNEL gives back, not the verdict of the
+            // request. `set_rt_priority` returns Ok when RTKit grants SCHED_RR at
+            // priority 20 instead of the FIFO 80 asked for, so its Ok/Err told
+            // you almost nothing — and the old message said "FIFO direct or RR
+            // via RTKit" precisely because it could not tell which.
+            let sched = ipc_layer::register_audio_thread();
+            if sched.is_realtime() {
+                eprintln!("[ALSA] RT scheduling: {sched}");
+            } else {
+                eprintln!(
+                    "[ALSA] RT scheduling: DENIED — {sched}. The audio thread will be preempted \
+                     by ordinary work; underruns are likely under load. Fix: add \
+                     '@audio - rtprio 95' to /etc/security/limits.d/audio.conf, add yourself to \
+                     that group, and re-login."
+                );
             }
 
             // Opt-in only (NULLHERZ_AUDIO_CPU). See
