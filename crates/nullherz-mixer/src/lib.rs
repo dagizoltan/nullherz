@@ -67,6 +67,16 @@ pub struct MixerManager {
     /// a deck's resampling ratio without reaching into the timeline. Key lock
     /// needs it: the correction is a function of `transport_bpm / track_bpm`.
     pub transport_bpm: f32,
+    /// Each deck's manual pitch-fader position, as a RATE multiplier. Absent
+    /// means 1.0 — the track's recorded speed.
+    ///
+    /// Mirrored here, next to the latches, because key lock needs it. Its
+    /// correction is `-12*log2(total_rate)`, and the total rate is the sync ratio
+    /// TIMES this fader. Reading only the sync ratio — which is what it did
+    /// before a fader existed — makes key lock compute zero correction on a deck
+    /// pitched by hand, so KEY LOCK would light up and the pitch would drop
+    /// anyway.
+    pub deck_pitch: std::collections::HashMap<char, f32>,
     /// The deck other decks harmonically sync TO.
     ///
     /// Lives here, next to `deck_samples`, because resolving the master KEY
@@ -100,6 +110,7 @@ impl MixerManager {
             sync_decks: std::collections::HashSet::new(),
             key_sync_decks: std::collections::HashSet::new(),
             key_lock_decks: std::collections::HashSet::new(),
+            deck_pitch: std::collections::HashMap::new(),
             transport_bpm: 120.0,
             active_master_deck: 'A',
         }

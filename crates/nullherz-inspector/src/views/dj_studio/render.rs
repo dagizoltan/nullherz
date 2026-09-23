@@ -17,10 +17,20 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     render_header(ui, telemetry, &theme);
     ui.add_space(theme.space_xs);
 
-    // Waveform stack (top half of the window)
-    // Consumes exactly 30% of the available central-panel height.
-    // It sits OUTSIDE any ScrollArea so it remains persistent and visible at all times.
-    let waveform_section_h = total_h * 0.30;
+    // Waveform stack (top of the window).
+    //
+    // 44% of the central panel, up from 30%. Four lanes share it, so 30% gave
+    // each deck 7.5% of the window — about 65 px on a 1080p screen, which is not
+    // enough to read a frequency-banded waveform, and the banding is the whole
+    // reason the analyser computes `BandWaveform` (low/mid/high plus asymmetric
+    // env_min/env_max). At 44% each lane gets 11%, and the mixer below still
+    // takes over half the window.
+    //
+    // Four EQUAL lanes on purpose. Giving the focused deck a big lane and the
+    // others slivers is tempting and wrong: beat matching is a comparison
+    // between two waveforms, so the one you are cueing has to be as legible as
+    // the one that is playing.
+    let waveform_section_h = total_h * 0.44;
     let spacing_h = 2.0;
     let lane_h = (waveform_section_h - spacing_h * 3.0) / 4.0;
 

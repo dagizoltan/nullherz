@@ -56,16 +56,35 @@ fn harmonic_shift(
 /// tempo-synced runs at rate 1.0, where the correction is 0 — so engaging key
 /// lock on an unsynced deck is audibly a no-op, which is correct.
 fn key_lock_semitones(deck_id: char, mixer_manager: &MixerManager, lib: &LibraryDatabase, transport_bpm: f32) -> f32 {
-    if !mixer_manager.sync_decks.contains(&deck_id) {
+    // TWO sources move a deck's rate and key lock has to cancel both.
+    //
+    // This used to return early unless the deck was tempo-synced, because sync
+    // was the only thing that could change the rate. A manual pitch fader is the
+    // second source, so that early return meant KEY LOCK lit up on a hand-pitched
+    // deck and corrected nothing — the pitch dropped anyway, which is the exact
+    // opposite of what the latch promises.
+    let manual = mixer_manager.deck_pitch.get(&deck_id).copied().unwrap_or(1.0);
+
+    let sync = if mixer_manager.sync_decks.contains(&deck_id) {
+        match mixer_manager
+            .deck_samples
+            .get(&deck_id)
+            .and_then(|id| lib.get_track_facets(*id).ok().flatten())
+        {
+            Some(track) if track.bpm > 0.0 && transport_bpm > 0.0 => transport_bpm / track.bpm,
+            _ => 1.0,
+        }
+    } else {
+        1.0
+    };
+
+    // The two compose multiplicatively: sync sets the tempo ratio, the fader
+    // scales whatever that is, exactly as turning a platter faster while the
+    // motor is already running.
+    let rate = manual * sync;
+    if rate <= 0.0 || !rate.is_finite() {
         return 0.0;
     }
-    let Some(sample_id) = mixer_manager.deck_samples.get(&deck_id) else { return 0.0 };
-    let Some(track) = lib.get_track_facets(*sample_id).ok().flatten() else { return 0.0 };
-    if track.bpm <= 0.0 || transport_bpm <= 0.0 {
-        return 0.0;
-    }
-    let rate = transport_bpm / track.bpm;
-    if rate <= 0.0 { return 0.0; }
     -12.0 * rate.log2()
 }
 
@@ -355,6 +374,22 @@ impl MixerOrchestrator {
                                 param_id: 0,
                                 value: *value,
                                 ramp_duration_samples: 128,
+                            }));
+                        }
+                        // Sampler param 1 is `playback_rate`.
+                        //
+                        // Ramped over 2048 samples (~43 ms at 48 kHz) rather than
+                        // applied as a step. A platter has mass: a rate step is
+                        // an instantaneous frequency jump and clicks, and this is
+                        // a fader an operator sweeps continuously while listening.
+                        // Long enough to sound like a hand, short enough that
+                        // beat matching stays responsive.
+                        DeckParamType::Pitch => {
+                            translated.push(Command::Mixer(MixerCommand::SetParam {
+                                target_id: nodes.sampler_id as u64,
+                                param_id: 1,
+                                value: *value,
+                                ramp_duration_samples: 2048,
                             }));
                         }
                         DeckParamType::EqLow => {
