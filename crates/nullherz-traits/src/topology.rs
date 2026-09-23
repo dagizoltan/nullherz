@@ -35,6 +35,18 @@ pub enum TopologyMutation {
         input_idx: u32,
         new_buffer_idx: u32,
     },
+    /// Drop an input and COMPACT the ones after it.
+    ///
+    /// Distinct from `UpdateEdge { new_buffer_idx: 0 }`, which is what
+    /// `TopologyCommand::Disconnect` used to lower to: that sets the buffer and
+    /// leaves `input_count` alone, so the slot is still an input — reading
+    /// buffer 0 — and is never released. A summing node has `MAX_CHANNELS`
+    /// inputs and every channel strip joining a bus takes one, so a disconnect
+    /// that does not release it leaks the scarcest resource in the graph.
+    Disconnect {
+        node_idx: u32,
+        input_idx: u32,
+    },
     UpdateOutputEdge {
         node_idx: u32,
         output_idx: u32,

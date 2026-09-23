@@ -248,11 +248,39 @@ impl TopologyManager {
                 return true;
             }
             Command::Topology(nullherz_traits::TopologyCommand::Disconnect { node_idx, input_idx }) => {
-                 return self.handle_topology_command(&Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge {
-                    node_idx,
-                    input_idx,
-                    new_buffer_idx: 0,
-                }));
+                // COMPACT, do not merely zero.
+                //
+                // This used to delegate to `UpdateEdge { new_buffer_idx: 0 }`,
+                // which sets the buffer and leaves `input_count` alone — so a
+                // "disconnected" input was still an input, reading buffer 0. The
+                // slot was never released.
+                //
+                // That is a leak of the scarcest resource in the graph. A strip
+                // joins a bus by taking an input on the summing node, and a
+                // summing node has MAX_CHANNELS of them; if removing the strip
+                // does not give the input back, the bus fills after sixteen
+                // edits while the graph itself is nearly empty. Measured: the
+                // twentieth add/remove cycle failed at cycle 12 with "found 0 of
+                // 2 summing nodes with a free input slot".
+                //
+                // Shifting later inputs down rather than leaving a hole, because
+                // `input_count` is what the executor iterates: a gap in the
+                // middle reads as a live input pointing at buffer 0, which is
+                // silence mixed into the signal rather than nothing.
+                let n_idx = node_idx as usize;
+                let i_idx = input_idx as usize;
+                if n_idx < nullherz_traits::MAX_NODES && i_idx < nullherz_traits::MAX_CHANNELS {
+                    let r = &mut self.current_topology.routing[n_idx];
+                    if i_idx < r.input_count {
+                        for j in i_idx..r.input_count.saturating_sub(1) {
+                            r.input_indices[j] = r.input_indices[j + 1];
+                        }
+                        r.input_count -= 1;
+                        r.input_indices[r.input_count] = nullherz_traits::BufferId(0);
+                    }
+                }
+                push_mutation(prod, TopologyMutation::Disconnect { node_idx, input_idx });
+                return true;
             }
             Command::Topology(nullherz_traits::TopologyCommand::SetBypass { node_idx, enabled }) => {
                 let n_idx = node_idx as usize;

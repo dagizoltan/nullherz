@@ -107,6 +107,46 @@ impl DesiredGraphState {
     }
 }
 
+impl DesiredGraphState {
+    /// Read the desired-state view out of the LIVE graph.
+    ///
+    /// The conductor's source of truth is `GraphTopology` (routing) plus the
+    /// topology manager's `active_node_types` (which processor is in each slot).
+    /// `DesiredGraphState` is the editing view of the same thing, and deriving
+    /// it rather than maintaining a second copy is what stops the two drifting —
+    /// a parallel model updated by hand is wrong the first time a path forgets.
+    ///
+    /// A slot counts as occupied only if it has a recorded TYPE. `routing` is a
+    /// fixed `[NodeRouting; MAX_NODES]` where unused slots are zeroed, so
+    /// routing alone cannot distinguish "node with no connections yet" from
+    /// "empty"; `active_node_types` can, and it is what `RemoveNode` clears.
+    pub fn from_live(
+        routing: &[nullherz_traits::NodeRouting; MAX_NODES],
+        active_node_types: &std::collections::HashMap<u32, u32>,
+    ) -> Self {
+        let mut state = Self::empty();
+        for (idx, slot) in state.nodes.iter_mut().enumerate() {
+            let Some(type_id) = active_node_types.get(&(idx as u32)) else { continue };
+            let r = &routing[idx];
+            let mut node = DesiredNode {
+                type_id: ProcessorTypeId(*type_id),
+                input_buffers: [0; MAX_CHANNELS],
+                output_buffers: [0; MAX_CHANNELS],
+                input_count: r.input_count.min(MAX_CHANNELS) as u32,
+                output_count: r.output_count.min(MAX_CHANNELS) as u32,
+            };
+            for j in 0..node.input_count as usize {
+                node.input_buffers[j] = r.input_indices[j].0;
+            }
+            for j in 0..node.output_count as usize {
+                node.output_buffers[j] = r.output_indices[j].0;
+            }
+            *slot = Some(node);
+        }
+        state
+    }
+}
+
 pub struct GraphReconciler;
 
 impl GraphReconciler {
@@ -161,6 +201,27 @@ impl GraphReconciler {
                                 new_buffer_idx: node.output_buffers[j],
                             });
                         }
+                    }
+
+                    // Inputs the target no longer has. Symmetric to the
+                    // `RemoveNode` gap above and just as consequential: without
+                    // it a node's `input_count` can only grow.
+                    //
+                    // That is the bus-slot leak. Every strip added to a session
+                    // takes one input on the bus summing node; if removing the
+                    // strip does not give that input back, the bus fills after
+                    // MAX_CHANNELS edits and the next add fails with the bus
+                    // full while the graph is nearly empty. Measured: the
+                    // twentieth add/remove cycle failed at cycle 12.
+                    //
+                    // Highest index first, so the engine's own compaction (if
+                    // any) cannot renumber a slot out from under a later
+                    // command in the same batch.
+                    for j in (node.input_count as usize..curr.input_count as usize).rev() {
+                        commands.push(nullherz_traits::TopologyCommand::Disconnect {
+                            node_idx: i as u32,
+                            input_idx: j as u32,
+                        });
                     }
                 }
                 (Some(_curr), None) => {
