@@ -39,6 +39,21 @@ fn main() {
     c.setup_engine();
     c.bootstrap_4channel_mixer();
 
+    // NULLHERZ_NO_MASTER_LIMITER=1 takes the master limiter OUT of the chain.
+    //
+    // It is 96 samples of look-ahead — 2.0 ms — and the only processor in the
+    // whole console that adds any latency at all (`probe_chain_taps` measures
+    // every other stage at +0 samples). Look-ahead is counted in SAMPLES, so
+    // that 2.0 ms is flat at every block size: 27% of the total at a 64-frame
+    // period and 43% at 32. This switch is how the claim gets checked rather
+    // than asserted.
+    if std::env::var("NULLHERZ_NO_MASTER_LIMITER").is_ok_and(|v| v == "1") {
+        match c.set_master_limiter(false) {
+            Ok(()) => println!("[probe] master limiter REMOVED from the chain"),
+            Err(e) => println!("[probe] could not remove the limiter: {e}"),
+        }
+    }
+
     // A full-scale tone from sample 0. A single-sample impulse is the cleaner
     // measurement in principle, but it does not survive a phase vocoder's
     // analysis window — the first attempt at this probe read "no output at all"
