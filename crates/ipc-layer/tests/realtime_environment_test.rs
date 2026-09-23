@@ -22,6 +22,17 @@ fn test_lock_memory_actually_locks_pages() {
             .unwrap_or(0)
     }
 
+    // The escape hatch makes `lock_memory` return Err by design, and the Err
+    // branch below blames RLIMIT_MEMLOCK for it — so on a machine with a raised
+    // limit this test failed with "the failure is not a limit problem", which is
+    // true and unhelpful. `scripts/verify.sh` inherits the environment, so
+    // anyone gating with NULLHERZ_MLOCK=0 set to diagnose something else got a
+    // red gate pointing at the wrong thing.
+    if matches!(std::env::var("NULLHERZ_MLOCK").ok().as_deref(), Some("0") | Some("false") | Some("no")) {
+        eprintln!("skipped: NULLHERZ_MLOCK disables locking, which is what this test asserts");
+        return;
+    }
+
     let before = vmlck_kib();
 
     match ipc_layer::lock_memory() {
