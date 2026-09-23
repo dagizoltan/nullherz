@@ -17,25 +17,36 @@ use parking_lot::Mutex;
 use nullherz_dna::{ GeneticLibrary};
 
 
-/// Name of the MIDI-bridge shared-memory object, unique to this process.
+/// Name of the MIDI-bridge shared-memory object, unique to one `Conductor`.
 ///
 /// It used to be the constant `"nullherz_midi_bridge"`, written in two places
 /// that had to agree — and every `Conductor` on the machine therefore raced for
-/// the same object. `SharedMemory::create` opens it `O_TRUNC`, so a second
+/// the same object. `SharedMemory::create` opened it `O_TRUNC`, so a second
 /// creator truncated the region while the first still had it MAPPED, and any
-/// later touch of those pages is a SIGBUS.
+/// later touch of those pages is a SIGBUS. Latent while pages were faulted in
+/// lazily; prefaulting at creation made it fire in 7 of 30 release runs of
+/// `raw_mode_test`, and 0 of 20 with `--test-threads=1`.
 ///
-/// That was latent for as long as pages were faulted in lazily and sparsely:
-/// the truncated range was usually never touched. Prefaulting the region at
-/// creation (PR #379) touches every page immediately and made it fire — 7 of 30
-/// release runs of `raw_mode_test`, and 0 of 20 with `--test-threads=1`.
+/// The first fix keyed this on the PROCESS ID, with a comment saying the scope
+/// was "a child of THIS conductor". The comment was right and the code did not
+/// match it: a process can hold several conductors, which is exactly what a test
+/// binary is — eleven tests in `playback_regression_test` each build one, in
+/// parallel, and every one of them asked for the same pid-keyed name. That
+/// collided on every run and intermittently HUNG, because the reclaim path
+/// (unlink, then retry `O_EXCL`) races when several threads run it at once.
 ///
-/// Per-process because that is the actual scope: the bridge is a child of THIS
-/// conductor, and two conductors — two app instances, or two parallel test
-/// binaries — must not share a ring. Both the creator and the `--shm` argument
-/// handed to the child call this, so they cannot drift apart again.
-pub fn midi_bridge_shm_name() -> String {
-    format!("nullherz_midi_bridge_{}", std::process::id())
+/// So: per INSTANCE. The counter makes two conductors in one process distinct,
+/// and the pid keeps two processes distinct. Both the creator and the `--shm`
+/// argument handed to the child read the same stored string, so they cannot
+/// drift apart again.
+fn next_midi_bridge_shm_name() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "nullherz_midi_bridge_{}_{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 pub struct Conductor {
@@ -70,6 +81,10 @@ pub struct Conductor {
     /// Size of the analysed set at the last reap sweep. Paired with
     /// `last_registry_reap_len` — see `reap_registry` for why one is not enough.
     last_analysed_len: usize,
+    /// This conductor's MIDI-bridge shared-memory name. See
+    /// `next_midi_bridge_shm_name` — it must be stored, not regenerated, because
+    /// the creator and the spawned bridge's `--shm` argument have to agree.
+    midi_shm_name: String,
     /// Ids the analysis worker has finished with.
     ///
     /// Held as a shared handle because `analysis_worker` is `take()`n at startup
@@ -299,6 +314,7 @@ impl Conductor {
             last_registry_reap_len: usize::MAX,
             last_analysed_len: usize::MAX,
             analysed_ids: analysis_worker_handle,
+            midi_shm_name: next_midi_bridge_shm_name(),
             cached_audio_devices: Vec::new(),
             cached_residency: (0, 0),
             last_residency_scan: None,
@@ -395,7 +411,7 @@ impl Conductor {
         self.topology_manager.topo_producer = Some(ipc_layer::NonRtProducer::new(handle.topology_producer));
 
         // Setup MIDI Bridge SHM
-        let shm_name = midi_bridge_shm_name();
+        let shm_name = self.midi_shm_name.clone();
         if let Ok(shm) = ipc_layer::SharedMemory::create(&shm_name, 65536) {
             unsafe { ipc_layer::ShmRingBuffer::<nullherz_traits::MidiEvent>::init(shm.ptr(), 1024); }
             let rb = shm.ptr() as *const ipc_layer::ShmRingBuffer<nullherz_traits::MidiEvent>;
@@ -462,7 +478,7 @@ impl Conductor {
     pub fn start_midi_bridge(&mut self, binary_path: &str, port_filter: Option<&str>) {
         if self.midi_child.is_some() { return; }
         let mut cmd = std::process::Command::new(binary_path);
-        cmd.arg("--shm").arg(midi_bridge_shm_name());
+        cmd.arg("--shm").arg(&self.midi_shm_name);
         if let Some(f) = port_filter { cmd.arg("--port").arg(f); }
 
         if let Ok(child) = cmd.spawn() {
@@ -477,7 +493,37 @@ impl Conductor {
 
     pub fn start_backend(&mut self, backend_type: nullherz_traits::AudioBackendType) -> Result<(), String> {
         Self::prepare_realtime_environment();
-        self.engine_coordinator.backend_manager.start(backend_type, self.period_size)
+        let period = Self::effective_period_size(self.period_size);
+        self.engine_coordinator.backend_manager.start(backend_type, period)
+    }
+
+    /// The period size to ask the device for, with `NULLHERZ_PERIOD_SIZE`
+    /// applied.
+    ///
+    /// The saved session config decides this normally. The override exists
+    /// because period size is the DOMINANT latency term and the only way to
+    /// evaluate a change is to run one: at 256/48k the engine costs one block
+    /// (5.33 ms) and the device ring three more, so the ladder down to 64 frames
+    /// is worth about 16 ms — far more than the 3-to-2 period change
+    /// `NULLHERZ_BUFFER_PERIODS` already exposes.
+    ///
+    /// It asks; ALSA answers. `snd_pcm_hw_params_set_period_size_near` will
+    /// negotiate something else if the device cannot do it, and the backend logs
+    /// what it actually got. A value the hardware refuses is not an error here.
+    ///
+    /// Clamped to `MAX_BLOCK_SIZE` for the same reason `BackendManager::start`
+    /// clamps: the graph's buffers cannot hold a larger block.
+    fn effective_period_size(configured: u64) -> u64 {
+        match std::env::var("NULLHERZ_PERIOD_SIZE").ok().and_then(|v| v.parse::<u64>().ok()) {
+            Some(v) if v > 0 => {
+                let v = v.min(nullherz_traits::MAX_BLOCK_SIZE as u64);
+                if v != configured {
+                    println!("[audio] period size {configured} -> {v} (NULLHERZ_PERIOD_SIZE)");
+                }
+                v
+            }
+            _ => configured,
+        }
     }
 
     /// Lock memory and report anything that will degrade realtime behaviour.

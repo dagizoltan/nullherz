@@ -1027,7 +1027,39 @@ pub fn pin_thread_to_core(core_id: usize) -> Result<(), String> {
 pub fn lock_memory() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        let rc = unsafe { libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE) };
+        // MCL_FUTURE makes every LATER allocation locked too — and an
+        // allocation that would exceed RLIMIT_MEMLOCK then FAILS with ENOMEM
+        // rather than being swappable. That is the right trade for an audio
+        // process whose working set is bounded, and the wrong one for a process
+        // that also decodes a music library: a scan can ask for more than the
+        // limit and get an abort instead of a slow page.
+        //
+        // NULLHERZ_MLOCK=0 turns locking off for diagnosing exactly that.
+        if matches!(std::env::var("NULLHERZ_MLOCK").ok().as_deref(), Some("0") | Some("false") | Some("no")) {
+            return Err("disabled by NULLHERZ_MLOCK=0".to_string());
+        }
+        // MCL_CURRENT only — deliberately NOT MCL_FUTURE.
+        //
+        // MCL_FUTURE locks every LATER allocation too, which sounds like more
+        // safety and is not, for a process that is also a library host:
+        //
+        //   * an allocation that would exceed RLIMIT_MEMLOCK then FAILS with
+        //     ENOMEM rather than being swappable. A scan over a 957 MB folder
+        //     died on "memory allocation of 75497472 bytes failed".
+        //   * it defeats lazy faulting. `PdcLines` is 32 MB of address space
+        //     that is ~3 MB resident because untouched rows are never faulted
+        //     in; under MCL_FUTURE every page must be resident AND locked, per
+        //     graph. Eleven parallel conductors in one test binary turned that
+        //     into a stall — `playback_regression_test` went from 0.55 s to
+        //     hanging when RLIMIT_MEMLOCK was raised from 8 MiB to 4 GiB, which
+        //     is the wrong direction for a limit to make things worse.
+        //
+        // What is actually worth locking is the audio working set, and it
+        // exists by the time this runs: `prepare_realtime_environment` is called
+        // before the first audio thread. Later allocations — topology commits,
+        // session buffers — lose locking, which is a real if smaller
+        // protection; the alternative was losing the ability to open a library.
+        let rc = unsafe { libc::mlockall(libc::MCL_CURRENT) };
         if rc != 0 {
             return Err(std::io::Error::last_os_error().to_string());
         }
@@ -1163,8 +1195,14 @@ pub fn realtime_environment_warnings() -> Vec<String> {
         Some(l) if l < 64 * 1024 * 1024 => warnings.push(format!(
             "RLIMIT_MEMLOCK is {} KiB — too small to lock the audio buffers into \
              RAM, so they remain swappable and a block deadline can become a disk \
-             read. Raise it via /etc/security/limits.d (the audio group convention \
-             is 'memlock unlimited').",
+             read. Raise it via /etc/security/limits.d, and prefer 'memlock \
+             unlimited' over a large finite value: mlockall() is called with \
+             MCL_FUTURE, so once locked memory reaches the limit an allocation \
+             FAILS with ENOMEM instead of merely becoming swappable. A finite \
+             limit is an allocation ceiling for the whole process — a library \
+             scan over a 957 MB folder hit it as 'memory allocation of 75497472 \
+             bytes failed'. NULLHERZ_MLOCK=0 disables locking to confirm that \
+             diagnosis.",
             l / 1024
         )),
         _ => {}

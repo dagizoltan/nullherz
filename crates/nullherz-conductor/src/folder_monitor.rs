@@ -129,25 +129,40 @@ impl FolderMonitor {
     /// library that silently never finishes scanning, because the first is
     /// visible.
     fn wait_for_headroom(&self) {
-        const MAX_PENDING: usize = 4;
+        /// Unreclaimable decoded audio the scan will tolerate before pausing.
+        ///
+        /// BYTES, not a sample count. Counting samples was the first version and
+        /// it does not bound anything: a DJ library is not made of equal-sized
+        /// files, and four of the user's tracks at ~97 MB each is 388 MB of
+        /// pending audio sitting under a limit that reads like "four". The
+        /// 128-frame ALSA run died on "memory allocation of 97336808 bytes
+        /// failed" while the log showed the bound being respected — "held 5
+        /// sample(s)" — which is what a limit in the wrong unit looks like.
+        const MAX_PENDING_BYTES: usize = 192 * 1024 * 1024;
         const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
         let Some(ref analysed) = self.analysed_ids else { return };
         let start = std::time::Instant::now();
         loop {
-            let pending = {
+            let (pending, bytes) = {
                 let done = analysed.lock();
-                self.sample_registry
-                    .list_ids()
-                    .into_iter()
-                    .filter(|id| !done.contains(id))
-                    .count()
+                let mut n = 0usize;
+                let mut b = 0usize;
+                for id in self.sample_registry.list_ids() {
+                    if done.contains(&id) { continue; }
+                    if let Some(sample) = self.sample_registry.get(id) {
+                        n += 1;
+                        b += sample.buffer.len() * std::mem::size_of::<f32>();
+                    }
+                }
+                (n, b)
             };
-            if pending <= MAX_PENDING { return; }
+            if bytes <= MAX_PENDING_BYTES { return; }
             if start.elapsed() >= MAX_WAIT {
                 eprintln!(
-                    "FolderMonitor: {pending} samples still awaiting analysis after \
-                     {}s — proceeding anyway; memory will grow",
+                    "FolderMonitor: {pending} samples ({:.0} MB) still awaiting analysis \
+                     after {}s — proceeding anyway; memory will grow",
+                    bytes as f64 / 1e6,
                     MAX_WAIT.as_secs()
                 );
                 return;
