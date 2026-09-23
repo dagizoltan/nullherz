@@ -17,6 +17,10 @@ use parking_lot::Mutex;
 use nullherz_dna::{ GeneticLibrary};
 
 
+/// Buffer ids below this are FIXED by `MixerConfig`: master, cue and the two DJ
+/// buses. Handing one to a new strip silently reroutes the master.
+const RESERVED_BUFFERS: u32 = 12;
+
 /// Name of the MIDI-bridge shared-memory object, unique to one `Conductor`.
 ///
 /// It used to be the constant `"nullherz_midi_bridge"`, written in two places
@@ -736,6 +740,179 @@ impl Conductor {
 
     pub fn update_timeline(&mut self, telemetry: &mut Telemetry) {
         crate::telemetry_service::TelemetryService::update_timeline(self, telemetry);
+    }
+
+    /// The editing view of the live graph.
+    ///
+    /// Derived on demand rather than held, so it cannot drift from the topology
+    /// the engine is actually running.
+    pub fn desired_graph_state(&self) -> nullherz_topology::DesiredGraphState {
+        nullherz_topology::DesiredGraphState::from_live(
+            &self.topology_manager.current_topology.routing,
+            &self.topology_manager.active_node_types,
+        )
+    }
+
+    /// Add a channel strip to a RUNNING session.
+    ///
+    /// This is the thing the ~10-strip ceiling was hiding: the ceiling was never
+    /// reachable, because nothing could create a strip after bootstrap. The
+    /// machinery all existed — `GraphReconciler` over `DesiredGraphState`, and
+    /// `MixerManager::create_studio_strip` — and neither had a caller.
+    ///
+    /// Sampler -> gain, summed into `bus_l`/`bus_r`. Deliberately the minimum
+    /// that is a usable track rather than a copy of the DJ deck's eleven-node
+    /// strip: the mechanism is identical for a richer one, and a strip nobody
+    /// can remove is not worth building first.
+    ///
+    /// Slots and buffers come from the reconciler's free lists, so a strip
+    /// removed earlier gives its ids back. Returns the node ids placed, in
+    /// signal order, or an error naming which resource ran out — the graph is
+    /// left untouched on failure, since a half-placed strip is a broken signal
+    /// path.
+    pub fn add_channel_strip(&mut self, bus_l: u32, bus_r: u32) -> Result<Vec<u32>, String> {
+        use nullherz_traits::ProcessorTypeId;
+
+        let state = self.desired_graph_state();
+
+        // Two nodes, four buffers: sampler L/R out, gain L/R out.
+        let slots = state
+            .free_slots(2)
+            .ok_or_else(|| format!(
+                "no room for a strip: {} of {} node slots in use",
+                state.occupied(),
+                nullherz_traits::MAX_NODES
+            ))?;
+        let bufs = state
+            .free_buffers(4, RESERVED_BUFFERS)
+            .ok_or_else(|| "no room for a strip: buffer space exhausted".to_string())?;
+
+        let (samp, gain) = (slots[0] as u32, slots[1] as u32);
+        let (s_l, s_r, g_l, g_r) = (bufs[0], bufs[1], bufs[2], bufs[3]);
+
+        let mut target = state;
+        target.nodes[samp as usize] = Some(nullherz_topology::DesiredNode {
+            type_id: ProcessorTypeId::SAMPLER,
+            input_buffers: [0; nullherz_traits::MAX_CHANNELS],
+            output_buffers: {
+                let mut o = [0; nullherz_traits::MAX_CHANNELS];
+                o[0] = s_l; o[1] = s_r; o
+            },
+            input_count: 0,
+            output_count: 2,
+        });
+        target.nodes[gain as usize] = Some(nullherz_topology::DesiredNode {
+            type_id: ProcessorTypeId::GAIN,
+            input_buffers: {
+                let mut i = [0; nullherz_traits::MAX_CHANNELS];
+                i[0] = s_l; i[1] = s_r; i
+            },
+            output_buffers: {
+                let mut o = [0; nullherz_traits::MAX_CHANNELS];
+                o[0] = g_l; o[1] = g_r; o
+            },
+            input_count: 2,
+            output_count: 2,
+        });
+
+        // Join the bus: give each summing node one more input. Growing an
+        // existing node's input_count is an UpdateEdge in the reconciler, which
+        // is why the strip does not need its own mixer node.
+        let mut joined = 0;
+        for (bus_buf, sig) in [(bus_l, g_l), (bus_r, g_r)] {
+            if let Some(sum_idx) = Self::find_producer_of(&target, bus_buf)
+                && let Some(sum) = target.nodes[sum_idx].as_mut()
+                    && (sum.input_count as usize) < nullherz_traits::MAX_CHANNELS {
+                        sum.input_buffers[sum.input_count as usize] = sig;
+                        sum.input_count += 1;
+                        joined += 1;
+                    }
+        }
+        if joined < 2 {
+            return Err(format!(
+                "could not join the bus: found {joined} of 2 summing nodes producing \
+                 buffers {bus_l}/{bus_r} with a free input slot. A strip that does not \
+                 reach the master is silent, so nothing was added."
+            ));
+        }
+
+        let cmds = nullherz_topology::GraphReconciler::reconcile(&self.desired_graph_state(), &target);
+        self.apply_reconciled(cmds);
+        Ok(vec![samp, gain])
+    }
+
+    /// Remove nodes from a running session, returning their slots and buffers.
+    pub fn remove_nodes(&mut self, node_ids: &[u32]) -> Result<(), String> {
+        let mut target = self.desired_graph_state();
+
+        // Everything the departing nodes write. Consumers referencing these are
+        // about to be reading a buffer nobody fills.
+        let mut orphaned = std::collections::HashSet::new();
+        for id in node_ids {
+            let idx = *id as usize;
+            if idx >= nullherz_traits::MAX_NODES {
+                return Err(format!("node {id} is outside the graph"));
+            }
+            if let Some(n) = target.nodes[idx] {
+                for b in n.output_buffers.iter().take(n.output_count as usize) {
+                    orphaned.insert(*b);
+                }
+            }
+            target.nodes[idx] = None;
+        }
+
+        // Disconnect the consumers, COMPACTING their input lists.
+        //
+        // Freeing the node slot and its buffers is not enough: a strip joins the
+        // bus by taking an input on the summing node, and leaving that input
+        // behind leaks the scarcest thing of all — a summing node has
+        // MAX_CHANNELS inputs, so the bus fills after sixteen edits while the
+        // graph itself is nearly empty. The twentieth add/remove cycle failed at
+        // cycle 12 before this.
+        //
+        // Compacting rather than zeroing, because `input_count` is what the
+        // executor iterates: a hole in the middle would be read as a live input
+        // pointing at buffer 0.
+        for slot in target.nodes.iter_mut() {
+            let Some(node) = slot.as_mut() else { continue };
+            let mut kept = [0u32; nullherz_traits::MAX_CHANNELS];
+            let mut n = 0usize;
+            for j in 0..node.input_count as usize {
+                if !orphaned.contains(&node.input_buffers[j]) {
+                    kept[n] = node.input_buffers[j];
+                    n += 1;
+                }
+            }
+            if n != node.input_count as usize {
+                node.input_buffers = kept;
+                node.input_count = n as u32;
+            }
+        }
+        let cmds = nullherz_topology::GraphReconciler::reconcile(&self.desired_graph_state(), &target);
+        self.apply_reconciled(cmds);
+        Ok(())
+    }
+
+    /// Which node writes `buffer`, if any.
+    fn find_producer_of(state: &nullherz_topology::DesiredGraphState, buffer: u32) -> Option<usize> {
+        state.nodes.iter().position(|slot| {
+            slot.as_ref().is_some_and(|n| {
+                n.output_buffers.iter().take(n.output_count as usize).any(|b| *b == buffer)
+            })
+        })
+    }
+
+    /// Push reconciled commands, then COMMIT.
+    ///
+    /// The commit is not optional: the engine executes only what the compiled
+    /// plan stages, and without it the first partial plan stays live forever and
+    /// everything past it renders silence. `bootstrap_4channel_mixer` learned
+    /// this the same way.
+    fn apply_reconciled(&mut self, cmds: Vec<nullherz_traits::TopologyCommand>) {
+        if cmds.is_empty() { return; }
+        let mut out: Vec<Command> = cmds.into_iter().map(Command::Topology).collect();
+        out.push(Command::Core(nullherz_traits::CoreCommand::CommitTopology));
+        self.apply_mixer_commands(out);
     }
 
     pub fn apply_mixer_commands(&mut self, commands: Vec<Command>) {

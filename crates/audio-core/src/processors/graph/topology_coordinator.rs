@@ -242,6 +242,25 @@ impl TopologyCoordinator {
                     proc.load_state(&state_data);
                 }
             }
+            TopologyMutation::Disconnect { node_idx, input_idx } => {
+                // Shift later inputs down and shorten the list. A hole would be
+                // read as a live input pointing at buffer 0 — silence mixed into
+                // the signal rather than nothing — because `input_count` is what
+                // the executor iterates.
+                let n_idx = node_idx as usize;
+                let i_idx = input_idx as usize;
+                if n_idx < crate::MAX_NODES && i_idx < crate::MAX_CHANNELS {
+                    let topo = self.inactive_topology_mut();
+                    let r = &mut topo.routing[n_idx];
+                    if i_idx < r.input_count {
+                        for j in i_idx..r.input_count.saturating_sub(1) {
+                            r.input_indices[j] = r.input_indices[j + 1];
+                        }
+                        r.input_count -= 1;
+                        r.input_indices[r.input_count] = nullherz_traits::BufferId(0);
+                    }
+                }
+            }
             TopologyMutation::UpdateEdge { node_idx, input_idx, new_buffer_idx } => {
                 let n_idx = node_idx as usize;
                 let i_idx = input_idx as usize;
