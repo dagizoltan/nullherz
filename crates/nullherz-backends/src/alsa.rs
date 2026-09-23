@@ -103,6 +103,25 @@ impl AlsaLib {
 }
 impl Drop for AlsaLib { fn drop(&mut self) { unsafe { libc::dlclose(self.handle); } } }
 
+
+/// The sample format negotiated with the device.
+///
+/// Was a `bool is_float`, which could only express "float or 16-bit" — and that
+/// is exactly the gap: a device offering S32_LE but not float fell through to
+/// 16 bits. Three states because there are three formats.
+#[derive(Clone, Copy, PartialEq)]
+enum OutFormat { F32, S32, S16 }
+
+impl OutFormat {
+    fn name(self) -> &'static str {
+        match self {
+            OutFormat::F32 => "FLOAT_LE",
+            OutFormat::S32 => "S32_LE",
+            OutFormat::S16 => "S16_LE (16-bit — the engine is 32-bit float; this truncates)",
+        }
+    }
+}
+
 pub struct AlsaBackend {
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
@@ -195,9 +214,10 @@ impl AudioBackend for AlsaBackend {
 
         const SND_PCM_ACCESS_RW_INTERLEAVED: i32 = 3;
         const SND_PCM_FORMAT_S16_LE: i32 = 2;
+        const SND_PCM_FORMAT_S32_LE: i32 = 10;
         const SND_PCM_FORMAT_FLOAT_LE: i32 = 14;
 
-        let (is_float, rate, period_size, negotiated_buffer);
+        let (out_format, rate, period_size, negotiated_buffer);
 
         unsafe {
             let mut hw_params: *mut std::ffi::c_void = std::ptr::null_mut();
@@ -205,17 +225,31 @@ impl AudioBackend for AlsaBackend {
             (alsa.snd_pcm_hw_params_any)(pcm, hw_params);
             (alsa.snd_pcm_hw_params_set_access)(pcm, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
 
-            let mut float_ok = true;
-            if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_FLOAT_LE) != 0 {
-                float_ok = false;
-                if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_S16_LE) != 0 {
-                    (alsa.snd_pcm_hw_params_free)(hw_params);
-                    (alsa.snd_pcm_close)(pcm);
-                    return Err("Neither FLOAT_LE nor S16_LE format accepted".to_string());
-                }
-            }
-            is_float = float_ok;
-            eprintln!("[ALSA] Format: {}", if is_float { "FLOAT_LE" } else { "S16_LE" });
+            // Best first. S32_LE sits between float and S16 and was MISSING —
+            // the chain measures -148 dB THD+N and this handed it to a 16-bit
+            // truncation whenever float was unavailable.
+            //
+            // That is not hypothetical: the built-in codec here (ALC257) offers
+            // only S16_LE and S32_LE, so any path that reaches the hardware
+            // directly — `NULLHERZ_ALSA_DEVICE=hw:x,y`, or simply no sound
+            // server running — landed on 16 bits. PipeWire masked it by
+            // accepting FLOAT_LE and itself converting to S32LE, so the good
+            // output came from the sound server rather than from this code.
+            //
+            // 24 dB of dynamic range, discarded silently, on the path with the
+            // FEWEST layers between the engine and the converter.
+            out_format = if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_FLOAT_LE) == 0 {
+                OutFormat::F32
+            } else if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_S32_LE) == 0 {
+                OutFormat::S32
+            } else if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, SND_PCM_FORMAT_S16_LE) == 0 {
+                OutFormat::S16
+            } else {
+                (alsa.snd_pcm_hw_params_free)(hw_params);
+                (alsa.snd_pcm_close)(pcm);
+                return Err("No supported format (tried FLOAT_LE, S32_LE, S16_LE)".to_string());
+            };
+            eprintln!("[ALSA] Format: {}", out_format.name());
 
             (alsa.snd_pcm_hw_params_set_channels)(pcm, hw_params, 2);
 
@@ -420,24 +454,26 @@ impl AudioBackend for AlsaBackend {
                 // Dynamically allocated buffers to support any ALSA period size negotiated by PipeWire or local driver
                 let mut outputs_raw = vec![vec![0.0f32; actual_period]; 2];
                 let mut interleaved_f32 = vec![0.0f32; actual_period * 2];
+                let mut interleaved_s32 = vec![0i32; actual_period * 2];
                 let mut interleaved_s16 = vec![0i16; actual_period * 2];
 
                 // Pre-fill the device buffer with silence: starting (or
                 // recovering) with a full buffer of slack instead of one
                 // period is what breaks the endless underrun-recover loop.
-                let prefill = |alsa: &AlsaLib, pcm: *mut std::ffi::c_void, silence_f32: &[f32], silence_s16: &[i16], periods: u64| {
+                let prefill = |alsa: &AlsaLib, pcm: *mut std::ffi::c_void, silence_f32: &[f32], silence_s32: &[i32], silence_s16: &[i16], periods: u64| {
                     for _ in 0..periods.saturating_sub(1) {
-                        if is_float {
-                            (alsa.snd_pcm_writei)(pcm, silence_f32.as_ptr() as *const _, (silence_f32.len() / 2) as u64);
-                        } else {
-                            (alsa.snd_pcm_writei)(pcm, silence_s16.as_ptr() as *const _, (silence_s16.len() / 2) as u64);
+                        match out_format {
+                            OutFormat::F32 => { (alsa.snd_pcm_writei)(pcm, silence_f32.as_ptr() as *const _, (silence_f32.len() / 2) as u64); }
+                            OutFormat::S32 => { (alsa.snd_pcm_writei)(pcm, silence_s32.as_ptr() as *const _, (silence_s32.len() / 2) as u64); }
+                            OutFormat::S16 => { (alsa.snd_pcm_writei)(pcm, silence_s16.as_ptr() as *const _, (silence_s16.len() / 2) as u64); }
                         }
                     }
                 };
                 let silence_f32 = vec![0.0f32; actual_period * 2];
+                let silence_s32 = vec![0i32; actual_period * 2];
                 let silence_s16 = vec![0i16; actual_period * 2];
                 let n_periods = (negotiated_buffer / period_size).max(2);
-                prefill(&alsa, pcm, &silence_f32, &silence_s16, n_periods);
+                prefill(&alsa, pcm, &silence_f32, &silence_s32, &silence_s16, n_periods);
                 eprintln!("[ALSA] Audio thread running. period={} engine_bound={}", actual_period, engine_arc_opt.is_some());
 
                 while running.load(Ordering::SeqCst) {
@@ -464,18 +500,50 @@ impl AudioBackend for AlsaBackend {
                     // carries per-node peaks for the UI; xruns are counted
                     // lock-free below.)
 
-                    let written = if is_float {
-                        for i in 0..actual_period {
-                            interleaved_f32[i*2] = outputs_raw[0][i];
-                            interleaved_f32[i*2+1] = outputs_raw[1][i];
+                    let written = match out_format {
+                        OutFormat::F32 => {
+                            for i in 0..actual_period {
+                                interleaved_f32[i*2] = outputs_raw[0][i];
+                                interleaved_f32[i*2+1] = outputs_raw[1][i];
+                            }
+                            (alsa.snd_pcm_writei)(pcm, interleaved_f32.as_ptr() as *const _, actual_period as u64)
                         }
-                        (alsa.snd_pcm_writei)(pcm, interleaved_f32.as_ptr() as *const _, actual_period as u64)
-                    } else {
-                        for i in 0..actual_period {
-                            interleaved_s16[i*2] = (outputs_raw[0][i] * 32767.0).clamp(-32768.0, 32767.0) as i16;
-                            interleaved_s16[i*2+1] = (outputs_raw[1][i] * 32767.0).clamp(-32768.0, 32767.0) as i16;
+                        OutFormat::S32 => {
+                            // Scale by 2^31-1 and ROUND. The f32 mantissa is 24
+                            // bits, so every value it can hold is representable
+                            // here exactly — 32-bit integer output is lossless
+                            // for this engine and needs no dither. Rounding
+                            // rather than truncating because `as i32` truncates
+                            // toward zero, which is a half-LSB DC bias, and the
+                            // S16 arm below has carried that bug all along.
+                            for i in 0..actual_period {
+                                let l = (outputs_raw[0][i] as f64 * 2_147_483_647.0).round();
+                                let r = (outputs_raw[1][i] as f64 * 2_147_483_647.0).round();
+                                interleaved_s32[i*2] = l.clamp(-2_147_483_648.0, 2_147_483_647.0) as i32;
+                                interleaved_s32[i*2+1] = r.clamp(-2_147_483_648.0, 2_147_483_647.0) as i32;
+                            }
+                            (alsa.snd_pcm_writei)(pcm, interleaved_s32.as_ptr() as *const _, actual_period as u64)
                         }
-                        (alsa.snd_pcm_writei)(pcm, interleaved_s16.as_ptr() as *const _, actual_period as u64)
+                        OutFormat::S16 => {
+                            // ROUND, not truncate. `as i16` rounds toward zero,
+                            // which is up to a full LSB of signal-correlated
+                            // error with a DC bias — audible as distortion on
+                            // fades, which is where 16-bit is heard.
+                            //
+                            // Still undithered: at 16 bits quantisation error IS
+                            // correlated with the signal and TPDF dither is the
+                            // fix. Not added here because this arm should now be
+                            // unreachable on any device offering S32_LE, and a
+                            // dither generator on the RT path deserves its own
+                            // change rather than riding along with a format fix.
+                            for i in 0..actual_period {
+                                let l = (outputs_raw[0][i] * 32767.0).round();
+                                let r = (outputs_raw[1][i] * 32767.0).round();
+                                interleaved_s16[i*2] = l.clamp(-32768.0, 32767.0) as i16;
+                                interleaved_s16[i*2+1] = r.clamp(-32768.0, 32767.0) as i16;
+                            }
+                            (alsa.snd_pcm_writei)(pcm, interleaved_s16.as_ptr() as *const _, actual_period as u64)
+                        }
                     };
 
                     if written < 0 {
@@ -487,7 +555,7 @@ impl AudioBackend for AlsaBackend {
                         xruns.fetch_add(1, Ordering::Relaxed);
                         (alsa.snd_pcm_recover)(pcm, written as i32, 1);
                         (alsa.snd_pcm_prepare)(pcm);
-                        prefill(&alsa, pcm, &silence_f32, &silence_s16, n_periods);
+                        prefill(&alsa, pcm, &silence_f32, &silence_s32, &silence_s16, n_periods);
                     }
                 }
                 eprintln!("[ALSA] Audio loop exiting, closing PCM...");
