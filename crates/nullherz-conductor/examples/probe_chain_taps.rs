@@ -198,7 +198,7 @@ fn main() {
 
     println!("Console tap sweep — deck A only, left channel, {TONE_HZ} Hz at {:.1} dBFS.", db(AMP));
     println!("Bypass is PASSTHROUGH, so each row is the chain up to and including that stage.");
-    println!("Analyser floor is about -135 dB; nothing below that is resolvable.\n");
+    println!("Analyser floor is about -153 dB; nothing below that is resolvable.\n");
     println!("  {:<24} {:>11} {:>9}   {:>10} {:>9}   {}", "tap point", "THD+N", "delta", "latency", "delta", "level");
 
     let mut active: Vec<u32> = Vec::new();
