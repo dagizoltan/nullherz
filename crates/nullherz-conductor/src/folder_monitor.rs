@@ -11,6 +11,14 @@ use std::time::Duration;
 
 pub struct FolderMonitor {
     sample_registry: Arc<dyn SampleRegistry>,
+    /// Ids analysis has finished with — the same handle the reaper consults.
+    ///
+    /// Used for BACKPRESSURE, not for skipping. A sample the worker has not
+    /// reached cannot be reaped (evicting one skips enrichment rather than
+    /// deferring it), so unanalysed samples are exactly the residency this scan
+    /// cannot reclaim, and decoding the next file while they pile up is how a
+    /// 957 MB folder became a 2 GB allocation failure.
+    analysed_ids: Option<Arc<parking_lot::Mutex<std::collections::HashSet<u64>>>>,
     library: Arc<parking_lot::Mutex<LibraryDatabase>>,
     /// Ids this monitor has already decoded and handed to the registry.
     ///
@@ -32,6 +40,7 @@ impl Clone for FolderMonitor {
     fn clone(&self) -> Self {
         Self {
             sample_registry: self.sample_registry.clone(),
+            analysed_ids: self.analysed_ids.clone(),
             library: self.library.clone(),
             scanned: self.scanned.clone(),
         }
@@ -42,6 +51,7 @@ impl FolderMonitor {
     pub fn new(sample_registry: Arc<dyn SampleRegistry>, library: Arc<parking_lot::Mutex<LibraryDatabase>>) -> Self {
         Self {
             sample_registry,
+            analysed_ids: None,
             library,
             scanned: Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new())),
         }
@@ -84,8 +94,65 @@ impl FolderMonitor {
         // for genuinely new files.
         for entry in entries {
             if let Some(path_str) = entry.path().to_str() {
+                self.wait_for_headroom();
                 self.load_and_register(path_str);
             }
+        }
+    }
+
+    /// Ids analysis has finished with, so the reaper can release them.
+    pub fn with_analysed_ids(
+        mut self,
+        ids: Arc<parking_lot::Mutex<std::collections::HashSet<u64>>>,
+    ) -> Self {
+        self.analysed_ids = Some(ids);
+        self
+    }
+
+    /// Hold the scan while too much UNRECLAIMABLE audio is resident.
+    ///
+    /// Decoding one file at a time bounds the transient to a single decode, and
+    /// that was believed to be enough. It is not: each decode STAYS resident
+    /// until analysis reaches it and the reaper releases it, so a scan that
+    /// never pauses accumulates the whole library regardless of how small each
+    /// step is. Measured: a 957 MB folder of 15 WAVs, decoding to roughly 2 GB
+    /// of f32, killed `scripts/smoke.sh` with "memory allocation of 75497472
+    /// bytes failed" before it finished a one-minute run.
+    ///
+    /// Samples awaiting analysis are the right thing to count because they are
+    /// precisely what cannot be reclaimed yet. Analysed ones are the reaper's
+    /// problem and it drains them at 1 Hz.
+    ///
+    /// Bounded rather than unbounded: if nothing is draining — no analysis
+    /// worker, or one that has fallen over — this gives up and proceeds rather
+    /// than stalling the scan forever. Running out of memory is better than a
+    /// library that silently never finishes scanning, because the first is
+    /// visible.
+    fn wait_for_headroom(&self) {
+        const MAX_PENDING: usize = 4;
+        const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+        let Some(ref analysed) = self.analysed_ids else { return };
+        let start = std::time::Instant::now();
+        loop {
+            let pending = {
+                let done = analysed.lock();
+                self.sample_registry
+                    .list_ids()
+                    .into_iter()
+                    .filter(|id| !done.contains(id))
+                    .count()
+            };
+            if pending <= MAX_PENDING { return; }
+            if start.elapsed() >= MAX_WAIT {
+                eprintln!(
+                    "FolderMonitor: {pending} samples still awaiting analysis after \
+                     {}s — proceeding anyway; memory will grow",
+                    MAX_WAIT.as_secs()
+                );
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
         }
     }
 

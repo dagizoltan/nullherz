@@ -64,6 +64,19 @@ pub struct Conductor {
     pub matchmaking_suggestions: Arc<Mutex<Vec<(u64, f32)>>>,
     pub calibration_samples: u32,
     pub period_size: u64,
+    /// Registry length at the last reap sweep — see `reap_registry`. `usize::MAX`
+    /// so the first sweep always runs.
+    last_registry_reap_len: usize,
+    /// Size of the analysed set at the last reap sweep. Paired with
+    /// `last_registry_reap_len` — see `reap_registry` for why one is not enough.
+    last_analysed_len: usize,
+    /// Ids the analysis worker has finished with.
+    ///
+    /// Held as a shared handle because `analysis_worker` is `take()`n at startup
+    /// and moved onto its own thread — reading the worker field instead would
+    /// consult `None` in production and a permanently empty set in tests, which
+    /// is exactly the wrong answer in both directions.
+    analysed_ids: Arc<parking_lot::Mutex<std::collections::HashSet<u64>>>,
     pub ptp_clock: Option<Arc<nullherz_traits::PtpClockProvider>>,
     last_autosave_secs: u64,
     pub last_genetic_evolve_secs: u64,
@@ -242,6 +255,13 @@ impl Conductor {
         transfusion_manager = transfusion_manager.with_library(library.clone());
 
         let (hydration_done_tx, hydration_done_rx) = std::sync::mpsc::channel();
+
+        // Built here so its "finished" set can be shared BEFORE `start()` moves
+        // the worker onto its own thread. See `analysed_ids`.
+        let analysis_worker = crate::analysis_worker::AnalysisWorker::new(sample_registry.clone())
+            .with_library(library.clone());
+        let analysis_worker_handle = analysis_worker.analysed_ids();
+
         Self {
             engine_coordinator: EngineCoordinator::new(),
             topology_manager: TopologyManager::new(),
@@ -255,8 +275,11 @@ impl Conductor {
             sidecar_discovery,
             midi_mapper: MidiMapper::new(),
             midi_clock: crate::midi_clock::MidiClockTracker::new(),
-            analysis_worker: Some(crate::analysis_worker::AnalysisWorker::new(sample_registry.clone()).with_library(library.clone())),
-            folder_monitor: Some(crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())),
+            analysis_worker: Some(analysis_worker),
+            folder_monitor: Some(
+                crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())
+                    .with_analysed_ids(analysis_worker_handle.clone()),
+            ),
             streaming_manager: crate::streaming_manager::StreamingManager::new(),
             library,
             mixer_manager: nullherz_mixer::MixerManager::new(),
@@ -273,6 +296,9 @@ impl Conductor {
             last_genetic_evolve_secs: 0,
             last_metadata_sync_secs: 0,
             last_registry_reap_secs: 0,
+            last_registry_reap_len: usize::MAX,
+            last_analysed_len: usize::MAX,
+            analysed_ids: analysis_worker_handle,
             cached_audio_devices: Vec::new(),
             cached_residency: (0, 0),
             last_residency_scan: None,
@@ -733,12 +759,23 @@ impl Conductor {
         }
     }
 
+    /// The ids analysis has finished with — the set `reap_registry` consults.
+    ///
+    /// Public because "has this been analysed yet?" is a real question about
+    /// session state, and because a reaper whose pin cannot be observed is a
+    /// reaper whose pin cannot be tested. The worker writes it from its own
+    /// thread; readers see a consistent snapshot per lock.
+    pub fn analysed_ids(&self) -> &Arc<parking_lot::Mutex<std::collections::HashSet<u64>>> {
+        &self.analysed_ids
+    }
+
     /// Whether the registry reaper is enabled. See [`Conductor::reap_registry`]
-    /// for why the default is off.
+    /// for why the default is ON, and what had to be true first.
     pub fn registry_reap_enabled() -> bool {
-        matches!(
+        // Opt-OUT. See `reap_registry` for why this flipped.
+        !matches!(
             std::env::var("NULLHERZ_REGISTRY_REAP").ok().as_deref(),
-            Some("1") | Some("true") | Some("yes")
+            Some("0") | Some("false") | Some("no")
         )
     }
 
@@ -767,32 +804,40 @@ impl Conductor {
     /// Runs on the orchestration thread, so the `Arc` released here is dropped
     /// here — never on the audio thread.
     fn reap_registry(&mut self, now: u64) {
-        // OFF BY DEFAULT — the policy is not finished, though the mechanism is.
+        // ON by default as of the analysis-signal fix below. Disable with
+        // NULLHERZ_REGISTRY_REAP=0.
         //
-        // The reason is a correctness race, NOT performance. Observed live: the
-        // 1 Hz sweep evicts a track the scanner has just registered, before the
-        // analysis worker has read it — the log shows "Hydrated registry for X"
-        // immediately followed by "released 1 sample, 121 MB". The scanner
-        // registers a decoded track *precisely* as the hand-off to analysis, so
-        // reaping first can skip enrichment for that track altogether.
+        // This comment used to list three things the policy needed before it
+        // could default on. They are addressed, in order:
         //
-        // Explicitly NOT the reason: underruns. A 2-minute survival run failed
-        // with 3 underruns both with this enabled and with it disabled, and peak
-        // block time stayed at ~500 µs of a 5333 µs budget — those were the
-        // development machine being busy, not this code. An earlier version of
-        // this comment blamed the reaper for them; that was wrong.
+        //   1. "An 'analysis finished' signal. The conductor cannot currently
+        //      see `AnalysisWorker::processed_ids`." — it can now, through
+        //      `has_analysed`, and the sweep below pins anything the worker is
+        //      not done with. That was the actual correctness race: evicting a
+        //      track out of the analysis queue does not defer enrichment, it
+        //      SKIPS it, because the worker finds its work by scanning the
+        //      registry for ids it has not processed.
+        //   2. "Trigger on memory pressure or an LRU threshold instead of a
+        //      fixed 1 Hz sweep, so a quiet session does no work at all." — the
+        //      sweep now returns immediately unless the registry has actually
+        //      grown since the last one. A session that is not scanning does
+        //      nothing beyond one length comparison per second.
+        //   3. "Evidence from a full Gate 1 run, not a 2-minute smoke test." —
+        //      `scripts/verify.sh` passes with this on.
         //
-        // What it needs before defaulting on:
-        //   - An "analysis finished" signal. The conductor cannot currently see
-        //     `AnalysisWorker::processed_ids`, so it cannot tell a track that is
-        //     done from one that is queued.
-        //   - Trigger on memory pressure or an LRU threshold instead of a fixed
-        //     1 Hz sweep, so a quiet session does no work at all.
-        //   - Evidence from a full Gate 1 run, not a 2-minute smoke test.
+        // And the cost of leaving it off turned out not to be a slow session but
+        // a CRASH. The scanner registers the FULL decoded audio of every file it
+        // finds; a 957 MB folder of 15 WAVs decodes to roughly 2 GB of f32, and
+        // the smoke run died on "memory allocation of 75497472 bytes failed"
+        // before finishing a one-minute run — on an unmodified tree. A default
+        // that cannot open the user's own library is not the conservative
+        // choice it looks like.
         //
-        // The eviction primitive and its tests are correct and stay — this gate
-        // is about the *policy* of when to call it. Enable with
-        // NULLHERZ_REGISTRY_REAP=1 to experiment.
+        // Explicitly NOT a reason, then or now: underruns. A 2-minute survival
+        // run failed with 3 underruns both with this enabled and disabled, and
+        // peak block time stayed at ~500 µs of a 5333 µs budget — those were the
+        // development machine being busy. An early version of this comment
+        // blamed the reaper; that was wrong.
         if !Self::registry_reap_enabled() { return; }
 
         // Sweeping the whole registry against the library is not free; once a
@@ -802,6 +847,31 @@ impl Conductor {
 
         let ids = self.transfusion_manager.sample_registry.list_ids();
         if ids.is_empty() { return; }
+
+        // Point 2 above: a quiet session does no work. The per-id library
+        // lookups below are one database read each, and there is nothing to
+        // find unless something changed.
+        //
+        // BOTH lengths, and the second one is not optional. Registry length
+        // alone was the first version of this and it was wrong: a track becomes
+        // reapable when ANALYSIS finishes with it, which does not change the
+        // registry at all. With only the first check a track analysed after its
+        // sweep was never revisited until some unrelated file was scanned —
+        // caught by `test_reap_keeps_a_track_that_analysis_has_not_reached`,
+        // which analyses one track and expects the next sweep to release it.
+        //
+        // Lengths rather than contents, deliberately: hashing both sets every
+        // second to catch an add and a remove landing between two sweeps costs
+        // more than the sweep it saves, and both sets only shrink through paths
+        // that run here. An idle session changes neither and does nothing.
+        let analysed_len = self.analysed_ids.lock().len();
+        if ids.len() == self.last_registry_reap_len
+            && analysed_len == self.last_analysed_len
+        {
+            return;
+        }
+        self.last_registry_reap_len = ids.len();
+        self.last_analysed_len = analysed_len;
 
         let pinned: std::collections::HashSet<u64> = self
             .mixer_manager
@@ -813,8 +883,28 @@ impl Conductor {
 
         let mut evicted = 0usize;
         let mut freed_frames = 0usize;
+        let mut awaiting_analysis = 0usize;
         for id in ids {
             if pinned.contains(&id) { continue; }
+
+            // NOT YET ANALYSED — the race that kept this whole mechanism
+            // switched off. The scanner registers a track's decoded audio
+            // precisely as the hand-off to `AnalysisWorker`, which picks work up
+            // by scanning the registry for ids it has not processed. Evicting
+            // one out of that window does not merely defer analysis, it SKIPS
+            // it: the id disappears from the registry, so the worker never sees
+            // it and the track keeps whatever metadata it arrived with.
+            //
+            // Observed live as "Hydrated registry for X" immediately followed by
+            // "released 1 sample, 121 MB".
+            //
+            // Asking the worker closes it. A sample is reapable only once
+            // analysis is DONE with it, which is the same shape as the two
+            // pins above: in use, or not finished with.
+            if !self.analysed_ids.lock().contains(&id) {
+                awaiting_analysis += 1;
+                continue;
+            }
 
             let recoverable = {
                 let lib = self.library.lock();
@@ -835,6 +925,11 @@ impl Conductor {
             }
         }
 
+        if awaiting_analysis > 0 {
+            println!(
+                "Registry reap: held {awaiting_analysis} sample(s) still queued for analysis"
+            );
+        }
         if evicted > 0 {
             self.transfusion_manager.sample_registry.drain_garbage();
             println!(
