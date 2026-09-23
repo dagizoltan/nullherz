@@ -1,11 +1,27 @@
 //! **Is pre-rendering a key shift at load time practical?**
 //!
 //! KeySync costs 21.3 ms of latency in every deck because a phase vocoder needs
-//! an analysis window. But the job it does — transpose by a fixed number of
-//! semitones — does not have to happen in real time. Nothing couples it to
-//! tempo (it is written only from the KEY latch), so the whole shifted buffer
-//! can be produced once, on the background thread that already decodes the
-//! track, and playback becomes plain sample playback at zero added latency.
+//! an analysis window. For ONE of the two latches that drive it, that cost is
+//! avoidable: KEY is a harmonic offset against the master deck's root key, so
+//! the shift is fixed for as long as the pairing is, and the whole shifted
+//! buffer can be produced once on the background thread that already decodes
+//! the track — playback then becomes plain sample playback at zero added
+//! latency.
+//!
+//! **This does NOT extend to KEY LOCK.** This header used to claim "nothing
+//! couples it to tempo (it is written only from the KEY latch)", and that is no
+//! longer true: `pitch_slot_state` adds a second term,
+//! `-12 * log2(transport_bpm / track_bpm)`, which moves with the tempo fader on
+//! every block (`conductor/src/mixer_orchestrator.rs`). A pre-render cannot
+//! serve a shift that changes continuously, so master tempo keeps both the
+//! 21.3 ms and the real-time vocoder's quality — and master tempo is the latch
+//! a DJ rides constantly. Pre-rendering solves the cheaper half.
+//!
+//! Offline also removes the CPU ceiling, which is the more interesting half of
+//! the trade: the real-time path runs N=1024/hop N/8 (-17.8 dB polyphonic) to
+//! stay inside a block budget, while a background render could afford
+//! N=4096/hop N/16 (-61.3 dB) — see
+//! `nullherz-processors/examples/probe_keysync_quality.rs`.
 //!
 //! That trade is only worth making if the render is fast enough to sit inside a
 //! deck load. This measures it against real track lengths.

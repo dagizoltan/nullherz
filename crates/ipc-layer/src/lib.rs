@@ -1,6 +1,7 @@
 // Non-RT plane (non-RT setup/cleanup helpers): thread spawn/sleep are sanctioned here.
 // The disallowed-methods lint exists to protect the audio hot path only.
 #![allow(clippy::disallowed_methods)]
+pub mod thread_stats;
 use std::sync::atomic::{AtomicUsize, Ordering, AtomicBool};
 use std::cell::UnsafeCell;
 use std::marker::PhantomData;
@@ -991,6 +992,54 @@ pub fn has_isolated_cpus() -> bool {
     { false }
 }
 
+/// The CPUs the audio thread should run on, from `NULLHERZ_AUDIO_CPUS`.
+///
+/// Accepts a comma list, ranges, or a mix: `10,11` / `10-11` / `8,10-11`.
+/// `None` means unset, which means DO NOT PIN — see `setup_rt_thread` for why
+/// that is the right default.
+pub fn audio_cpus_from_env() -> Option<Vec<usize>> {
+    let raw = std::env::var("NULLHERZ_AUDIO_CPUS").ok()?;
+    let mut out = Vec::new();
+    for part in raw.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        match part.split_once('-') {
+            Some((lo, hi)) => {
+                let (lo, hi) = (lo.trim().parse::<usize>().ok()?, hi.trim().parse::<usize>().ok()?);
+                if lo > hi { return None; }
+                out.extend(lo..=hi);
+            }
+            None => out.push(part.parse::<usize>().ok()?),
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    if out.is_empty() { None } else { Some(out) }
+}
+
+/// Restrict the calling thread to `cpus`.
+///
+/// Plural, because the useful unit is a PHYSICAL core and on an SMT machine that
+/// is two logical CPUs. Pinning to one sibling and leaving the other in the
+/// general pool hands half the core's execution resources to whatever the
+/// scheduler puts there — the opposite of isolation. `lscpu` sibling lists say
+/// which ids pair up.
+pub fn pin_thread_to_cpus(cpus: &[usize]) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        use nix::sched::{sched_setaffinity, CpuSet};
+        use nix::unistd::Pid;
+        if cpus.is_empty() {
+            return Err("empty cpu set".to_string());
+        }
+        let mut set = CpuSet::new();
+        for &c in cpus {
+            set.set(c).map_err(|e: nix::Error| format!("cpu {c}: {e}"))?;
+        }
+        sched_setaffinity(Pid::from_raw(0), &set).map_err(|e: nix::Error| e.to_string())
+    }
+    #[cfg(not(target_os = "linux"))]
+    { let _ = cpus; Ok(()) }
+}
+
 pub fn pin_thread_to_core(core_id: usize) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
@@ -1235,6 +1284,9 @@ pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
     nullherz_traits::mark_as_rt_thread();
     let _ = crate::set_rt_priority(priority);
 
+    // Workers spread across distinct cores; that is this function's contract and
+    // it is unchanged. `NULLHERZ_AUDIO_CPUS` is deliberately NOT honoured here —
+    // see `setup_audio_callback_thread`.
     if let Some(id) = cpu_id {
         let _ = pin_thread_to_core(id);
     }
@@ -1243,6 +1295,104 @@ pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
     FpControlGuard::apply_ftz_daz();
 
     INITIALIZED.with(|i| i.set(true));
+}
+
+/// Set up THE audio callback thread — the one the device drives.
+///
+/// Distinct from [`setup_rt_thread`], which is for graph worker threads, and the
+/// distinction is load-bearing in two ways that were both wrong when
+/// `NULLHERZ_AUDIO_CPUS` was first wired into the shared path:
+///
+///   * **Affinity.** The worker pool pins worker `i` to core `i+1` to spread
+///     parallel DSP across cores. Applying one env-supplied CPU set to every
+///     caller crammed all twelve workers AND the callback thread onto a single
+///     physical core, serialising the pool — measured as mean block time rising
+///     from 398 us to 565 us while "pinning for lower latency".
+///   * **Identity.** `thread_stats` samples "the audio thread" by task id. When
+///     every RT thread published one, the global held whichever thread started
+///     last, so the stall attribution could have been watching a worker instead
+///     of the thread that actually misses deadlines.
+///
+/// No default pinning. The Threaded backend asked for CPU 0 unconditionally,
+/// which is the worst available choice — the boot CPU, where the timer tick and
+/// most IRQ handling land. And pinning without `isolcpus` does not hand the
+/// thread a core: `sched_setaffinity` restricts where WE may run and says
+/// nothing about what the scheduler puts there, so it buys cache locality while
+/// removing the scheduler's ability to migrate away from a busy CPU. Opt in
+/// deliberately with `NULLHERZ_AUDIO_CPUS`; the warning says when it is unlikely
+/// to help.
+pub fn setup_audio_callback_thread(priority: i32) {
+    nullherz_traits::mark_as_rt_thread();
+    crate::thread_stats::publish_audio_thread_tid();
+    let _ = crate::set_rt_priority(priority);
+
+    if let Some(cpus) = audio_cpus_from_env() {
+        match pin_thread_to_cpus(&cpus) {
+            Ok(()) => eprintln!(
+                "[rt] audio callback thread pinned to CPU(s) {cpus:?} (NULLHERZ_AUDIO_CPUS){}",
+                if has_isolated_cpus() {
+                    ""
+                } else {
+                    " — WARNING: no isolcpus/nohz_full, so these CPUs are still shared with everything else"
+                }
+            ),
+            Err(e) => eprintln!("[rt] could not pin audio callback thread to {cpus:?}: {e}"),
+        }
+    }
+
+    FpControlGuard::apply_ftz_daz();
+}
+
+/// Has the audio thread's MXCSR lost its denormal flushing since startup?
+///
+/// Set by [`check_ftz_daz`] and never cleared. Read from any thread.
+static FTZ_DAZ_LOST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Are Flush-To-Zero and Denormals-Are-Zero live on THIS thread right now?
+///
+/// MXCSR is per-thread register state, so this answers only for the caller —
+/// asking from a monitor thread tells you nothing about the audio thread.
+#[cfg(target_arch = "x86_64")]
+pub fn ftz_daz_active() -> bool {
+    let mut mxcsr: u32 = 0;
+    unsafe { std::arch::asm!("stmxcsr [{}]", in(reg) &mut mxcsr, options(nostack, preserves_flags)) };
+    // FTZ is bit 15, DAZ is bit 6 — the pair `apply_ftz_daz` sets.
+    mxcsr & 0x8000 != 0 && mxcsr & 0x0040 != 0
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+pub fn ftz_daz_active() -> bool { true }
+
+/// Confirm denormal flushing is still on, from the audio thread, cheaply.
+///
+/// # Why this is worth a check per block
+///
+/// `apply_ftz_daz` runs ONCE when a thread starts and nothing has ever verified
+/// it afterwards. MXCSR is per-thread state that an FFI boundary, a signal
+/// handler, or a library that saves and restores it carelessly can quietly
+/// reset. If that happens, arithmetic on denormal inputs — a reverb tail, filter
+/// ringing, a fading outro — slows by one to two orders of magnitude.
+///
+/// That failure looks EXACTLY like the stall this console is hunting: a block
+/// that takes milliseconds instead of microseconds, purely executing, with zero
+/// page faults, zero preemption and zero clock lost outside the callback,
+/// appearing only on certain audio. `survival.rs` measured precisely that
+/// signature and could not explain it, and a silently cleared MXCSR is the one
+/// cause that fits without involving the kernel at all.
+///
+/// `stmxcsr` is a couple of cycles against a 57 us block, so this is checked
+/// every block rather than sampled: a bit that flips back before the next sample
+/// would be invisible, and one glitched block is the whole phenomenon.
+#[inline(always)]
+pub fn check_ftz_daz() {
+    if !ftz_daz_active() {
+        FTZ_DAZ_LOST.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Whether denormal flushing was ever observed missing on the audio thread.
+pub fn ftz_daz_was_lost() -> bool {
+    FTZ_DAZ_LOST.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// RAII guard for floating-point control state.

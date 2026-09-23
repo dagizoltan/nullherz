@@ -52,6 +52,59 @@ pub struct ProcessorState {
     pub state_data: Vec<u8>,
 }
 
+/// 256 frames — and the reason is ONE expensive block in our own audio code.
+///
+/// Period size sets the device ring (`period x periods`, 3 under RT) and the
+/// graph's block quantisation, which `examples/probe_deck_latency.rs` shows is
+/// exactly one block:
+///
+/// ```text
+/// block 256 -> deck reaches master in 353 samples (96 PDC + 256 + 1)
+/// block 128 -> 225 samples (96 + 128 + 1)
+/// block  64 -> 161 samples (96 + 64 + 1)
+/// ```
+///
+/// MEASURE ON THE REAL DEVICE. Every earlier conclusion here came from
+/// `--backend threaded`, which its own source describes as clocking itself with
+/// a sleep loop; its tail is sleep-granularity jitter, not the audio path. On
+/// real ALSA at 48 kHz the same code scales cleanly and the ladder looks nothing
+/// like it did:
+///
+/// ```text
+///            THREADED (simulated)        ALSA (real device)
+/// period 256   peak ~3500 us  PASS        peak 3694 us, mean 384 us  PASS
+/// period 128   peak 791-2945, 1/3 FAIL    peak  803 us, mean 120 us  PASS
+/// period  64   peak 163-3046, FAIL        peak  308 us, mean  52 us  PASS
+/// ```
+///
+/// A previous revision of this note asserted "the limit is a ~3 ms non-DSP
+/// stall, not DSP cost" and "peak cost is NOT proportional to period size".
+/// Both were artefacts of the Threaded backend and are RETRACTED.
+///
+/// WHAT ACTUALLY BLOCKS A SMALLER DEFAULT. 12 minutes on ALSA at 64 frames under
+/// default system conditions passes with zero underruns and a 57 us mean — 4% of
+/// budget — but one block took **3161 us**, and
+/// `bin/survival.rs`'s stall attribution says of it: zero minor faults, zero
+/// major, zero involuntary context switches, and zero wall-clock lost outside
+/// the callback. The kernel did nothing to that block. It spent 3161 us
+/// EXECUTING, at 55x its own mean.
+///
+/// So the host is exonerated, by measurement rather than by argument: not DSP
+/// throughput, not page faults (`mlockall` is MCL_CURRENT only, and the fault
+/// count is flat zero across 43796 windows), not preemption, not wakeup latency,
+/// not C-states (reproduced with C3 enabled), not the governor (reproduced under
+/// schedutil), not CPU affinity (unpinned, pinned to a spare core, and pinned to
+/// CPU 0 all measure the same). `isolcpus` and an RT kernel would not touch it.
+///
+/// At 256 frames the ring is 16 ms and absorbs that block without a flinch. At
+/// 64 frames the ring is 4 ms, so a 3161 us block leaves 840 us of margin and
+/// survives only because there are three periods — two would underrun. That
+/// margin is why this is still 256: the win is real (about 23 ms of output
+/// latency down to about 7.4 ms) and it is one bug away, not one config value
+/// away. Find the block first.
+///
+/// `NULLHERZ_PERIOD_SIZE` evaluates a change without editing a file, and
+/// `--backend alsa` is the only backend whose numbers mean anything.
 pub fn default_period_size() -> u64 {
     128
 }

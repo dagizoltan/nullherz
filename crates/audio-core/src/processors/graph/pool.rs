@@ -348,7 +348,38 @@ pub struct TaskPool {
 /// file's earlier numbers were gathered under.
 ///
 /// Full write-up: `docs/system/ARCHITECTURE.md`, "Cost-gated parallelism".
-pub const DEFAULT_PARALLEL_THRESHOLD_CYCLES: u64 = 150_000;
+pub const DEFAULT_PARALLEL_THRESHOLD_CYCLES: u64 = 1_000_000;
+// Raised from 150_000. The analysis above was right and its PREMISE expired: it
+// concluded "256 samples: the gate never fires" from a 34-node console, and the
+// graph has since grown past 55 nodes (per-band tap points), so stages now clear
+// 150k cycles at live block sizes and dispatch happens where that analysis says
+// it must not.
+//
+// Measured on real ALSA at 48 kHz, 256-sample blocks, 4 minutes each, paired
+// back to back on an idle machine (`bin/survival.rs`, which attributes each
+// outlier and reports how much of it was NOT in any node):
+//
+//     threshold 150_000 (dispatch fires)  peak 3745 us  mean 306 us  20 outliers
+//     dispatch disabled entirely          peak  528 us  mean 243 us   0 outliers
+//
+// Seven times the tail, and the MEAN was worse too — dispatch at this node count
+// is not a trade, it is pure loss. Every outlier had the same shape: all nodes
+// summed to 178-302 us of a 3745 us block, so 93-95% of it was the main thread
+// sitting in `wait_for_completion`'s 2000-iteration `spin_loop` waiting for a
+// worker that had not been scheduled. That time belongs to no node's timer,
+// which is why it went unexplained for so long, and it shows as pure execution
+// with zero context switches because spinning is exactly that.
+//
+// It needs audio: with the decks stopped (`survival --silence`) stages fall below
+// the gate, nothing dispatches, and the peak drops to 707 us with no outliers.
+// That is also the proof this is the gate and not the audio — the same graph on
+// zeroes never dispatches and never spikes.
+//
+// 1_000_000 cycles is ~400 us at this machine's clock: above the largest stage
+// at 256 samples (the deck samplers share one, ~220-300 us) and below the same
+// stage at 1024 (~4x that), so the offline bounce path documented above keeps its
+// win while live block sizes stay serial. THIS IS A CEILING ON STAGE COST, not a
+// tuning dial: lowering it re-admits a tail worth 70% of a 256-sample budget.
 
 impl TaskPool {
     pub fn new(num_workers: usize) -> Self {

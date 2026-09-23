@@ -4,7 +4,7 @@
     "Pioneer DDJ-400",
     "Generic MIDI Keyboard"
   ],
-  "sample_rate": 44100,
+  "sample_rate": 48000,
   "block_size": 256,
   "calibration_samples": 0,
   "period_size": 256
