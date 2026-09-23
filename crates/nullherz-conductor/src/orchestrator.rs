@@ -841,6 +841,110 @@ impl Conductor {
         Ok(vec![samp, gain])
     }
 
+    /// Take the master limiter in or out of the signal path.
+    ///
+    /// It is 96 samples of look-ahead — **2.0 ms of real output latency** — and
+    /// it is a FIXED node in the bootstrapped master chain, so every session
+    /// pays for it whether or not it is wanted. At the shipped 256-frame period
+    /// that is noise against 23 ms; at 64 frames it is 27% of the total and at
+    /// 32 frames 43%, because look-ahead is measured in SAMPLES and does not
+    /// shrink with the block.
+    ///
+    /// Whether it should be there is a question about the SESSION, not about
+    /// latency:
+    ///
+    /// * A live DJ console wants it. `bench_console_block` measures the master
+    ///   at 1.0000 with four decks summing at full scale — it is actively
+    ///   clamping, and there are no retakes.
+    /// * A studio monitoring path does not. The tap sweep measures 0.3509 at the
+    ///   master with one deck at -6 dBFS: a 2 ms delay line doing nothing. And a
+    ///   limiter you did not ask for flatters the mix — no DAW puts one in the
+    ///   monitor path by default.
+    ///
+    /// Removing beats bypassing. `SetBypass` makes the node a passthrough, which
+    /// drops the delay line but leaves the node in the graph — and PDC still
+    /// compensates for latency that is no longer there, because
+    /// `sync_node_latencies` reads `active_node_types` and not `bypass_states`.
+    /// Taking it out of the graph has no such gap.
+    ///
+    /// Off rewires the mastering EQ straight to the master buffers; on inserts
+    /// the limiter back between them, taking a free slot and a fresh buffer pair
+    /// like any other strip. Idempotent.
+    pub fn set_master_limiter(&mut self, enabled: bool) -> Result<(), String> {
+        use nullherz_traits::ProcessorTypeId;
+
+        let eq = self
+            .mixer_manager
+            .node_names
+            .get("master_eq")
+            .copied()
+            .ok_or("no master_eq in this topology")? as usize;
+        let named_lim = self.mixer_manager.node_names.get("master_limiter").copied();
+        let master_l = self.mixer_manager.config.master_l as u32;
+        let master_r = self.mixer_manager.config.master_r as u32;
+
+        let state = self.desired_graph_state();
+        let live_lim = named_lim.filter(|id| state.nodes[*id as usize].is_some());
+
+        match (enabled, live_lim) {
+            (true, Some(_)) | (false, None) => Ok(()), // already there / already gone
+            (false, Some(lim)) => {
+                // EQ writes the master buffers directly; the limiter goes.
+                let mut target = state;
+                let Some(eq_node) = target.nodes[eq].as_mut() else {
+                    return Err("master_eq is not live".into());
+                };
+                eq_node.output_buffers[0] = master_l;
+                eq_node.output_buffers[1] = master_r;
+                eq_node.output_count = 2;
+                target.nodes[lim as usize] = None;
+
+                let cmds = nullherz_topology::GraphReconciler::reconcile(&self.desired_graph_state(), &target);
+                self.apply_reconciled(cmds);
+                Ok(())
+            }
+            (true, None) => {
+                let slot = state
+                    .free_slots(1)
+                    .ok_or("no free node slot for the master limiter")?[0];
+                let bufs = state
+                    .free_buffers(2, RESERVED_BUFFERS)
+                    .ok_or("no free buffers for the master limiter")?;
+                let (l, r) = (bufs[0], bufs[1]);
+
+                let mut target = state;
+                // EQ -> fresh pair -> limiter -> master.
+                let Some(eq_node) = target.nodes[eq].as_mut() else {
+                    return Err("master_eq is not live".into());
+                };
+                eq_node.output_buffers[0] = l;
+                eq_node.output_buffers[1] = r;
+                eq_node.output_count = 2;
+
+                target.nodes[slot] = Some(nullherz_topology::DesiredNode {
+                    type_id: ProcessorTypeId::LIMITER,
+                    input_buffers: {
+                        let mut i = [0; nullherz_traits::MAX_CHANNELS];
+                        i[0] = l; i[1] = r; i
+                    },
+                    output_buffers: {
+                        let mut o = [0; nullherz_traits::MAX_CHANNELS];
+                        o[0] = master_l; o[1] = master_r; o
+                    },
+                    input_count: 2,
+                    output_count: 2,
+                });
+
+                let cmds = nullherz_topology::GraphReconciler::reconcile(&self.desired_graph_state(), &target);
+                self.apply_reconciled(cmds);
+                self.mixer_manager
+                    .node_names
+                    .insert("master_limiter".to_string(), slot as u32);
+                Ok(())
+            }
+        }
+    }
+
     /// Remove nodes from a running session, returning their slots and buffers.
     pub fn remove_nodes(&mut self, node_ids: &[u32]) -> Result<(), String> {
         let mut target = self.desired_graph_state();

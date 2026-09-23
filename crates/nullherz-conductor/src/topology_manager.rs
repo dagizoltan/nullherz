@@ -56,10 +56,30 @@ impl TopologyManager {
         sample_rate: f32,
     ) {
         for idx in 0..topo.node_count.min(nullherz_traits::MAX_NODES) {
-            let lat = active_node_types
-                .get(&(idx as u32))
-                .map(|&t| registry.latency_for_type(t, sample_rate))
-                .unwrap_or(0);
+            // A BYPASSED node declares nothing, because it does nothing.
+            //
+            // Bypass is a passthrough — `run_job` copies `inputs[0]` to the
+            // outputs without calling `process()` — so the processor's delay
+            // line never runs and its latency is not in the signal. Reading
+            // `active_node_types` alone (which is what this did) kept
+            // compensating for it anyway, and PDC then delays every PARALLEL
+            // path by a latency the bypassed path no longer has. That is a
+            // misalignment in the opposite direction to the one PDC exists to
+            // fix.
+            //
+            // Harmless for a terminal node like the master limiter, where
+            // nothing downstream needs aligning. Not harmless for a bypassed FFT
+            // insert mid-strip: 512 samples of compensation against a processor
+            // now passing through instantly.
+            let bypassed = topo.bypass_states[idx];
+            let lat = if bypassed {
+                0
+            } else {
+                active_node_types
+                    .get(&(idx as u32))
+                    .map(|&t| registry.latency_for_type(t, sample_rate))
+                    .unwrap_or(0)
+            };
             topo.plan.node_latencies[idx] = lat;
         }
     }
