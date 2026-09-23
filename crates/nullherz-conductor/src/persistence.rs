@@ -52,6 +52,76 @@ pub struct ProcessorState {
     pub state_data: Vec<u8>,
 }
 
+/// 256 frames. **The limit is a ~3 ms non-DSP stall, not DSP cost.**
+///
+/// Period size is the dominant latency term — it sets the device ring
+/// (`period x periods`, 3 under RT) and the graph's block quantisation, which
+/// `examples/probe_deck_latency.rs` shows is exactly one block:
+///
+/// ```text
+/// block 256 -> deck reaches master in 353 samples (96 PDC + 256 + 1)
+/// block 128 -> 225 samples (96 + 128 + 1)
+/// block  64 -> 161 samples (96 + 64 + 1)
+/// ```
+///
+/// So halving this halves a real term twice over, and every instinct says keep
+/// halving. Measured, it does not survive (`scripts/verify.sh` smoke, Threaded):
+///
+/// ```text
+/// period 256 -> mean 135 us, peak 3785 us / 5333 us budget   PASS
+/// period 128 -> mean 135 us, peak 2945 us / 2666 us budget   FAIL, 1 xrun at 18.8 s
+/// period  64 -> peak 3046 us / 1333 us budget                FAIL, 1 xrun
+/// ```
+///
+/// Read the mean against the peak: **135 us against 2945 us, a factor of 22.**
+/// Steady-state DSP uses 5% of a 128-frame budget. Nothing about this ceiling is
+/// audio work, and optimising DSP will not move it. One stall of roughly 3 ms
+/// arrives regardless of block size; at 256 a 5333 us budget absorbs it, at 128
+/// it does not.
+///
+/// A 128-frame default was tried and reverted: a single 4-minute run passed with
+/// a 1177 us peak, which was the stall simply not landing. One sample does not
+/// characterise a tail event.
+///
+/// WHAT IT IS NOT: the registry reaper. That was the obvious suspect — it frees
+/// in bursts (`Registry reap: released 2 sample(s), ~107.2 MB of decoded audio`)
+/// and returning 100+ MB at once means munmap, page-table teardown and
+/// cross-core TLB shootdowns. A/B at 128 frames says the opposite:
+///
+/// ```text
+/// NULLHERZ_REGISTRY_REAP=1 -> PASS, peak  823 us   (mean 114 us)
+/// NULLHERZ_REGISTRY_REAP=0 -> FAIL, peak 3482 us, 1 xrun
+/// ```
+///
+/// Disabling it makes the stall WORSE, so reaping is part of the mitigation, not
+/// the cause. That inverts the reading: the cost tracks memory GROWTH, not
+/// freeing. With no reaping the registry retains every decoded track, the heap
+/// climbs, and `mlockall` is `MCL_CURRENT` only (deliberately — see
+/// `ipc-layer`), so everything allocated afterwards faults lazily. First-touch
+/// faults on a growing heap are precisely multi-millisecond events. Bounding the
+/// footprint is what keeps them rare.
+///
+/// The stall is still present with reaping on: three runs at 128 frames gave
+/// PASS 1177 us (4 min), PASS 823 us (2 min), FAIL 2945 us with an xrun at
+/// 18.8 s (1 min). One in three. 128 is not safe, it is lucky, which is why this
+/// is 256.
+///
+/// Next diagnostic, in order:
+///   1. Fix the harness asymmetry below — without it the peak cannot be
+///      attributed to the event that failed the run.
+///   2. Test whether the stall correlates with hydration (decoding a ~100 MB
+///      track) rather than with steady playback. The smoke re-hydrates every
+///      run, so this needs the harness to separate the two.
+///   3. Only then consider pre-faulting or a bounded arena for the decode path.
+/// `isolcpus` is worth trying but will NOT help if the cause is our own
+/// allocation behaviour rather than scheduler noise.
+///
+/// Confirming any of it needs the harness fixed first: `peak_process_time_ns` is
+/// a running max over the WHOLE run including warm-up (`bin/survival.rs`), while
+/// the xrun verdict excludes warm-up — so the peak figure and the pass/fail
+/// verdict are measured over different windows.
+///
+/// `NULLHERZ_PERIOD_SIZE` evaluates a change without editing a file.
 pub fn default_period_size() -> u64 {
     128
 }
