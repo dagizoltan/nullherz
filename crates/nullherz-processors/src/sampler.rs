@@ -78,8 +78,19 @@ impl SamplerProcessor {
         match param_id {
             1 => {
                 self.playback_rate = value;
-                for voice in self.voices.iter_mut() {
-                    voice.playback_rate = value;
+                // A scratch gesture OWNS the voice rate while it is held: the
+                // voice is playing at the speed of a hand, and the deck rate is
+                // what the release restores to. Writing voices here mid-gesture
+                // would clobber the hand's rate for a frame — an audible glitch
+                // that self-corrects on release, so it would present as
+                // "scratching sometimes stutters" and never reproduce.
+                //
+                // The fader still lands: `self.playback_rate` is updated either
+                // way, and release assigns it to every voice.
+                if self.scratch.is_none() {
+                    for voice in self.voices.iter_mut() {
+                        voice.playback_rate = value;
+                    }
                 }
             }
             PARAM_QUANTIZE => {
