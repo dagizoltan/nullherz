@@ -448,12 +448,32 @@ async fn main() {
         .map(|n| n.saturating_sub(stats.warmup_xruns));
     let elapsed = started.elapsed();
     let mean_block_us = if stats.frames > 0 { stats.sum_process_time_ns / stats.frames / 1000 } else { 0 };
-    // DSP headroom: peak block time vs the period budget implied by the config.
-    let period_budget_us = std::fs::read_to_string("system_config.json")
+    // DSP headroom: peak block time vs the period budget.
+    //
+    // NULLHERZ_PERIOD_SIZE must be honoured here or the whole column lies. This
+    // read the saved `system_config.json` alone, so an evaluation run at 64
+    // frames still reported the 5333 us budget of the saved 256 — every
+    // "peak block X / budget 5333" line during the period sweep was wrong by 4x,
+    // and a run at 98% of its real budget read as 25%.
+    //
+    // The backend's own "[ALSA] Negotiated: ..." line remains the authority:
+    // `snd_pcm_hw_params_set_period_size_near` can return something other than
+    // what was asked, and nothing here can see that.
+    let configured_period = std::fs::read_to_string("system_config.json")
         .ok()
         .and_then(|c| serde_json::from_str::<nullherz_conductor::persistence::SystemConfig>(&c).ok())
-        .map(|cfg| (cfg.period_size as f64 / stats.sample_rate.max(1.0) as f64 * 1_000_000.0) as u64)
+        .map(|cfg| cfg.period_size)
         .unwrap_or(0);
+    let period = std::env::var("NULLHERZ_PERIOD_SIZE")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(configured_period);
+    let period_budget_us = if period > 0 {
+        (period as f64 / stats.sample_rate.max(1.0) as f64 * 1_000_000.0) as u64
+    } else {
+        0
+    };
     // A run is only meaningful if audio actually flowed. Require signal in a
     // solid majority of frames, not merely at some point: a deck that stops
     // early (voice deactivating at buffer end, a sampler wedging) would
