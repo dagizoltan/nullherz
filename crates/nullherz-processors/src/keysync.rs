@@ -177,14 +177,30 @@ impl VocoderLane {
 /// Stereo: one `VocoderLane` per channel — phase state is per-signal, so
 /// channels must never share a lane.
 ///
-/// KNOWN LIMITATION: bins are remapped by rounding to the nearest target, so a
-/// partial's bins can still drift in relative phase and the level sags on large
-/// upward shifts — measured RMS runs 0.64 at +5 and +12 semitones against
-/// 0.84-0.96 elsewhere (worst case about -3.9 dB). Classic identity phase
-/// locking does NOT fix this: it assumes bin frequencies stay put, so applied
-/// after a remap it detunes the result (measured +5 st landing at 606 Hz
-/// instead of 587). Closing the gap properly means shifting by time-stretch
-/// plus resampling rather than by bin remapping.
+/// KNOWN LIMITATION: bins are remapped by ROUNDING to the nearest target, and
+/// that rounding is now the component's ceiling. Two measured consequences
+/// (`examples/probe_keysync_quality.rs`):
+///
+/// - **Level sag, and it is timbral.** The fundamental lands up to **-9.8 dB**
+///   low, and on a three-note chord the partials do not sag together: 7.65 dB of
+///   spread at -3 semitones, with one partial rising while another falls. So no
+///   makeup gain can correct it — a scalar tuned on a sine would mis-level every
+///   chord. The figure used to be quoted as "about -3.9 dB" from an RMS
+///   measurement, which was reading artifact energy as signal; see
+///   `test_level_is_read_in_the_lobe_not_the_rms`.
+/// - **Frequency resolution caps the polyphonic result.** Signal-to-artifact on
+///   a chord is -17.8 dB at N=1024, -33.6 dB at N=2048, -61.3 dB at N=4096 —
+///   set by the window length, essentially independent of the hop. That axis
+///   trades against latency (21.3 / 42.7 / 85.3 ms of PDC on every deck
+///   carrying KEY), so it cannot be won by a vocoder at a latency a DJ can beat
+///   match against.
+///
+/// Classic identity phase locking does NOT fix either: it assumes bin
+/// frequencies stay put, so applied after a remap it detunes the result
+/// (measured +5 st landing at 606 Hz instead of 587). Closing the gap properly
+/// means shifting by time-stretch plus resampling rather than by bin remapping —
+/// which puts the pitch change back through the resampler that already measures
+/// -132 dB, and leaves the vocoder responsible for time alone.
 pub struct KeySyncProcessor {
     pub id: u64,
     semitones: f32,
@@ -193,12 +209,64 @@ pub struct KeySyncProcessor {
 }
 
 impl KeySyncProcessor {
+    /// 87.5% overlap — a hop of `fft_size / 8`.
+    ///
+    /// This was `fft_size / 2`, the pipeline's own default, and at that framing
+    /// the vocoder is not a quality compromise but a broken component:
+    /// `examples/probe_keysync_quality.rs` measures **-0.4 dB** of
+    /// signal-to-artifact at +7 semitones on a single 997 Hz tone. Artifact
+    /// energy equal to the signal. Across every interval the parameter allows it
+    /// ran -0.4 to -15 dB, against -132 dB for the varispeed resampler that does
+    /// the same job with keylock off.
+    ///
+    /// The cause is the phase extrapolation: a partial's frequency is estimated
+    /// from the phase advance between frames, and at 50% overlap that estimate
+    /// is stretched across half a window. Dividing the hop by four takes the
+    /// worst interval to **-43.0 dB**, and it costs no latency at all — latency
+    /// is one analysis window whatever the hop. It costs frame rate, so four
+    /// times the FFT work, on a node that is detached by default and only
+    /// instantiated when an operator engages KEY.
+    ///
+    /// `fft_size / 16` buys another 19 dB on a single tone and, measured,
+    /// **nothing** on a chord (-17.8 vs -18.4 dB) for twice the CPU again. N/8
+    /// is the knee.
+    ///
+    /// What the hop does NOT fix is frequency resolution, which is set by
+    /// `fft_size`: the polyphonic worst case is -17.8 dB here, -33.6 dB at
+    /// N=2048 and -61.3 dB at N=4096, essentially independent of the hop. That
+    /// axis trades against latency (21.3 / 42.7 / 85.3 ms) and cannot be won by
+    /// a vocoder at DJ-acceptable latency. Closing it properly means shifting by
+    /// time-stretch plus resampling, which puts the pitch change back through
+    /// the -132 dB resampler — see the KNOWN LIMITATION note on the struct.
     pub fn new(id: u64, fft_size: usize) -> Self {
+        Self::with_framing(id, fft_size, fft_size / 8)
+    }
+
+    /// Explicit framing: window length AND hop.
+    ///
+    /// The hop is the quality knob nobody could reach. `new` picks
+    /// `fft_size / 2` — 50% overlap, two frames per window — which is the
+    /// cheapest framing that reconstructs at all and the coarsest one anybody
+    /// ships. A phase vocoder's artifacts are dominated by how far a partial's
+    /// phase estimate has to be extrapolated between frames, so halving the hop
+    /// halves that extrapolation. It also doubles the frame rate, and with it
+    /// the FFT cost; the trade is measured in
+    /// `examples/probe_keysync_quality.rs`.
+    ///
+    /// Latency is unchanged by the hop — it is one analysis window either way,
+    /// which is what [`SignalProcessor::latency_samples`] reports.
+    pub fn with_framing(id: u64, fft_size: usize, hop_size: usize) -> Self {
         Self {
             id,
             semitones: 0.0,
             ratio: 1.0,
-            lanes: (0..STEREO_LANES).map(|_| VocoderLane::new(fft_size)).collect(),
+            lanes: (0..STEREO_LANES)
+                .map(|_| {
+                    let mut lane = VocoderLane::new(fft_size);
+                    lane.pipeline.set_hop_size(hop_size);
+                    lane
+                })
+                .collect(),
         }
     }
 
@@ -380,21 +448,179 @@ mod keysync_tests {
         );
     }
 
-    /// The defect this replaces: remapping bin magnitudes without advancing
-    /// each partial's phase made overlapping frames cancel, costing 51-85% of
-    /// the level (measured peak ratios ran 0.15-0.49 across these intervals).
-    /// A pitch shift must preserve level, not act as a random attenuator.
+    /// Probe constants, shared with `examples/probe_keysync_quality.rs` so a
+    /// number here and a number there are the same measurement.
+    const P_SR: f32 = 48_000.0;
+    const P_TONE: f32 = 997.0;
+    const P_AMP: f32 = 0.5;
+    /// 8192 rather than the probe's 16384: the analyser is an f64 transform with
+    /// a `sin_cos` per butterfly, and these tests run in debug too.
+    const P_ANA: usize = 8192;
+
+    /// Level error in the shifted fundamental's own main lobe, and the energy
+    /// outside it, for one interval at one framing.
+    ///
+    /// The lobe — not the capture's RMS. See
+    /// `test_level_is_read_in_the_lobe_not_the_rms` for why that distinction is
+    /// the whole point of this helper.
+    fn measure_spectral(semitones: f32, fft_size: usize, hop: usize) -> Measured {
+        use audio_dsp::measurement::{level_db_at, spectrum, thd_n, tone_sample};
+
+        let warmup = 8 * fft_size;
+        let total = warmup + P_ANA;
+        let input: Vec<f32> = (0..total).map(|i| tone_sample(i, P_TONE, P_SR, P_AMP)).collect();
+
+        let mut p = KeySyncProcessor::with_framing(0, fft_size, hop);
+        AudioProcessor::set_parameter(&mut p, 0, semitones, 0);
+
+        let mut out = vec![0.0f32; total];
+        for start in (0..total).step_by(256) {
+            let end = (start + 256).min(total);
+            let ins: [&[f32]; 1] = [&input[start..end]];
+            let mut outs: [&mut [f32]; 1] = [&mut out[start..end]];
+            let mut ctx = ProcessContext {
+                transport: None,
+                host: None,
+                sub_block_offset: 0,
+                is_last_sub_block: true,
+            };
+            p.process(&ins, &mut outs, &mut ctx);
+        }
+
+        let settled = &out[warmup..];
+        let target = P_TONE * 2.0f32.powf(semitones / 12.0);
+        let db = |x: f32| 20.0 * x.max(1e-30).log10();
+
+        let rms = |x: &[f32]| {
+            (x.iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>() / x.len() as f64).sqrt() as f32
+        };
+
+        Measured {
+            lobe: level_db_at(&spectrum(settled, P_ANA), target, P_SR, P_ANA)
+                - level_db_at(&spectrum(&input[..P_ANA], P_ANA), P_TONE, P_SR, P_ANA),
+            rms: db(rms(settled) / rms(&input[..P_ANA]).max(1e-30)),
+            artifacts: db(thd_n(settled, target, P_SR, P_ANA)),
+        }
+    }
+
+    /// What one interval at one framing measures.
+    struct Measured {
+        /// Level of the shifted fundamental's main lobe, relative to the input's.
+        lobe: f32,
+        /// Level of the whole capture's RMS, relative to the input's. Differs
+        /// from `lobe` by however much artifact energy there is to mistake for
+        /// signal.
+        rms: f32,
+        /// Energy outside the fundamental's lobe, against the energy inside it.
+        artifacts: f32,
+    }
+
+    /// The hop is the difference between a working vocoder and a broken one, and
+    /// nothing used to hold it in place.
+    ///
+    /// `new` picks `fft_size / 8`. At the pipeline's own `fft_size / 2` default,
+    /// which this shipped with, the signal-to-artifact ratio at +7 semitones is
+    /// **-0.4 dB** — artifact energy equal to the signal. At N/8 it is -56 dB.
+    /// Asserted at -35 dB: far enough below the real figure to survive CPU
+    /// arithmetic differences, and four orders of magnitude away from what the
+    /// old framing produces, so a revert cannot pass this.
     #[test]
-    fn test_pitch_shift_preserves_level() {
-        for &semis in &[-7.0f32, -5.0, -2.0, 1.0, 2.0, 5.0, 7.0] {
-            let (rms_ratio, _, _) = measure(semis);
+    fn test_default_hop_is_at_the_quality_knee() {
+        let hop = {
+            let p = KeySyncProcessor::new(0, 1024);
+            let lane = p.lanes.first().expect("a lane");
+            lane.pipeline.hop_size
+        };
+        assert_eq!(hop, 1024 / 8, "the default framing is 87.5% overlap");
+
+        for &semis in &[-7.0f32, -5.0, 1.0, 5.0, 7.0, 12.0] {
+            let art = measure_spectral(semis, 1024, hop).artifacts;
             assert!(
-                rms_ratio > 0.6 && rms_ratio < 1.4,
-                "{:+.0} semitones: RMS ratio {:.4} — a pitch shift must preserve level",
-                semis,
-                rms_ratio
+                art < -35.0,
+                "{semis:+.0} semitones: signal-to-artifact {art:.1} dB. The phase \
+                 estimate is extrapolated across the hop, so a wider hop puts \
+                 artifact energy at the signal's own level."
             );
         }
+    }
+
+    /// A pitch shift must not act as a random attenuator.
+    ///
+    /// Two separate defects have lived in this assertion. The first was real
+    /// cancellation: remapping bin magnitudes without advancing each partial's
+    /// phase cost 51-85% of the level (peak ratios 0.15-0.49). The second was in
+    /// the test — it measured the whole capture's RMS, which at the old 50%
+    /// overlap counted artifact energy sitting at the signal's own level AS
+    /// signal, and reported a level 2.8 dB better than the audio was. It passed
+    /// on that padding; remove the artifacts and the same audio fails it.
+    ///
+    /// So the bound here is deliberately wide and the reason is documented
+    /// rather than hidden: the remaining sag is the bin-rounding remap, measured
+    /// at -9.8 dB worst case across the interval range
+    /// (`examples/probe_keysync_quality.rs`), and it is **timbral** — on a
+    /// three-note chord the partials do not move together (7.65 dB of spread,
+    /// one partial rising while another falls), so no makeup gain can correct
+    /// it. Tightening this bound means replacing the remap with time-stretch
+    /// plus resampling, not adjusting a constant. -13 dB leaves 3 dB of headroom
+    /// over the measured worst case; +1 dB catches a shift that gets LOUDER.
+    #[test]
+    fn test_pitch_shift_preserves_level() {
+        for &semis in &[-12.0f32, -7.0, -5.0, -2.0, 1.0, 2.0, 5.0, 7.0, 12.0] {
+            let lobe = measure_spectral(semis, 1024, 1024 / 8).lobe;
+            assert!(
+                (-13.0..=1.0).contains(&lobe),
+                "{semis:+.0} semitones: fundamental landed {lobe:+.2} dB off. Read in \
+                 the lobe, not the capture RMS — RMS credits artifacts as signal."
+            );
+        }
+    }
+
+    /// The instrument check for the test above: an RMS reading of a pitch shift
+    /// counts artifacts as signal, and at the old framing there were enough of
+    /// them to change the answer by 2.8 dB.
+    ///
+    /// This is the guard that stops the level assertion from ever being "fixed"
+    /// by reverting to an RMS measurement, which would make it pass by
+    /// readmitting the distortion it is supposed to be blind to. At +7
+    /// semitones, the worst interval on the legacy framing:
+    ///
+    /// - legacy hop N/2: RMS -5.4 dB, lobe -8.3 dB. The 2.8 dB gap IS the
+    ///   artifact energy, and `test_pitch_shift_preserves_level` used to pass on
+    ///   it while the audio was at -0.4 dB signal-to-artifact.
+    /// - default hop N/8: RMS and lobe agree to a hundredth of a dB, because
+    ///   there is nothing left to pad with.
+    ///
+    /// Note which direction that runs: the clean framing reports the fundamental
+    /// at a level no HIGHER than the dirty one. Removing artifacts does not
+    /// recover level. The sag is a separate, unfixed defect.
+    #[test]
+    fn test_level_is_read_in_the_lobe_not_the_rms() {
+        let legacy = measure_spectral(7.0, 1024, 1024 / 2);
+        let clean = measure_spectral(7.0, 1024, 1024 / 8);
+
+        assert!(
+            legacy.artifacts > -20.0,
+            "the legacy 50% overlap is supposed to be audibly broken here, got \
+             {:.1} dB — if it is not, this test has stopped demonstrating anything",
+            legacy.artifacts
+        );
+        assert!(clean.artifacts < -35.0, "the default framing should be clean, got {:.1} dB", clean.artifacts);
+
+        let legacy_gap = (legacy.rms - legacy.lobe).abs();
+        let clean_gap = (clean.rms - clean.lobe).abs();
+
+        assert!(
+            legacy_gap > 1.5,
+            "at {:.1} dB signal-to-artifact, RMS ({:+.2}) and lobe ({:+.2}) must \
+             disagree — that gap is the artifact energy an RMS reading books as signal",
+            legacy.artifacts, legacy.rms, legacy.lobe
+        );
+        assert!(
+            clean_gap < 0.3,
+            "with artifacts at {:.1} dB there is nothing to pad the RMS with, so RMS \
+             ({:+.2}) and lobe ({:+.2}) must agree",
+            clean.artifacts, clean.rms, clean.lobe
+        );
     }
 
     /// A pitch shift is only correct if it actually lands on the target pitch.

@@ -26,6 +26,9 @@ pub struct SpectralPipeline {
     /// is a flat 2.0. Pre-dividing by that sum makes reconstruction exact for
     /// any window shape and any hop size, at no hot-path cost.
     pub synth_window: AlignedBuffer,
+    /// Samples between successive frames. Read freely; change it only via
+    /// [`SpectralPipeline::set_hop_size`], which rebuilds `synth_window` to
+    /// match — a bare assignment silently breaks reconstruction.
     pub hop_size: usize,
     pub(crate) in_ptr: usize,
     pub(crate) out_ptr: usize,
@@ -52,6 +55,22 @@ impl SpectralPipeline {
         };
         pipeline.update_window(SpectralWindowShape::Hann);
         pipeline
+    }
+
+    /// Set the analysis/synthesis hop and rebuild the synthesis window for it.
+    ///
+    /// `hop_size` is a public field for reading — the vocoder derives its
+    /// oversampling factor from `fft.size / hop_size` — but assigning it
+    /// directly leaves `synth_window` normalised for the OLD hop, and the COLA
+    /// sum is then wrong at every position. Reconstruction stops being exact
+    /// without anything failing loudly. Go through here.
+    ///
+    /// The hop is clamped to `[1, fft.size]`: a zero hop would never advance
+    /// the input pointer, and a hop past the window would leave gaps that no
+    /// synthesis window can fill.
+    pub fn set_hop_size(&mut self, hop_size: usize) {
+        self.hop_size = hop_size.clamp(1, self.fft.size);
+        self.rebuild_synthesis_window();
     }
 
     pub fn update_window(&mut self, shape: SpectralWindowShape) {
