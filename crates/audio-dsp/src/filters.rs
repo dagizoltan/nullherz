@@ -253,8 +253,20 @@ pub struct BiquadFilter {
     pub(crate) b2_step: f32,
     pub(crate) a1_step: f32,
     pub(crate) a2_step: f32,
-    pub(crate) z1: f32,
-    pub(crate) z2: f32,
+    /// **f64, and it is the reference implementation's job to be right.**
+    ///
+    /// TDF-II state holds values far larger than the output and
+    /// `z1 = x*b1 - y*a1 + z2` cancels; for a low corner the poles sit near
+    /// z = 1 and f32 loses the answer. Measured 28-33 dB across the audio band
+    /// on the isolator's 300 Hz section (`examples/probe_biquad_precision.rs`),
+    /// which was the whole console's distortion budget.
+    ///
+    /// `StereoBiquad` carries the same change, and the pair of bit-identity
+    /// tests between them is why both moved together: the scalar filter is the
+    /// definition the SIMD one is checked against, so leaving it in f32 would
+    /// have meant asserting the fast path reproduces the wrong answer exactly.
+    pub(crate) z1: f64,
+    pub(crate) z2: f64,
 }
 
 impl Default for BiquadCoefficients {
@@ -411,11 +423,11 @@ impl BiquadFilter {
 
         let mut z1 = self.z1;
         let mut z2 = self.z2;
-        let b0 = self.coeffs.b0;
-        let b1 = self.coeffs.b1;
-        let b2 = self.coeffs.b2;
-        let a1 = self.coeffs.a1;
-        let a2 = self.coeffs.a2;
+        let b0 = self.coeffs.b0 as f64;
+        let b1 = self.coeffs.b1 as f64;
+        let b2 = self.coeffs.b2 as f64;
+        let a1 = self.coeffs.a1 as f64;
+        let a2 = self.coeffs.a2 as f64;
 
         let mut i = 0;
 
@@ -426,14 +438,14 @@ impl BiquadFilter {
             // For now, we utilize the SIMD lanes for independent filter stages or unroll scalar for throughput.
             unsafe {
                 for _ in 0..4 {
-                    let x = *input.get_unchecked(i);
+                    let x = *input.get_unchecked(i) as f64;
                     let y = x * b0 + z1;
                     if !y.is_finite() {
                         z1 = 0.0; z2 = 0.0; *output.get_unchecked_mut(i) = 0.0;
                     } else {
                         z1 = x * b1 - y * a1 + z2;
                         z2 = x * b2 - y * a2;
-                        *output.get_unchecked_mut(i) = y;
+                        *output.get_unchecked_mut(i) = y as f32;
                     }
                     i += 1;
                 }
@@ -443,7 +455,7 @@ impl BiquadFilter {
         // Scalar fallback for small blocks
         while i < len {
             unsafe {
-                let x = *input.get_unchecked(i);
+                let x = *input.get_unchecked(i) as f64;
                 let mut y = x * b0 + z1;
                 if !y.is_finite() {
                     y = 0.0;
@@ -453,7 +465,7 @@ impl BiquadFilter {
                     z1 = x * b1 - y * a1 + z2;
                     z2 = x * b2 - y * a2;
                 }
-                *output.get_unchecked_mut(i) = y;
+                *output.get_unchecked_mut(i) = y as f32;
             }
             i += 1;
         }
@@ -463,8 +475,18 @@ impl BiquadFilter {
     }
 }
 
-impl Filter for BiquadFilter {
-    fn process_sample(&mut self, input: f32) -> f32 {
+impl BiquadFilter {
+    /// The recurrence in the state's own precision, ramp included.
+    ///
+    /// Callers that CHAIN biquads should use this and convert once at the ends.
+    /// Rounding to f32 between stages throws away most of what f64 state buys:
+    /// a Linkwitz-Riley crossover splits into bands that very nearly cancel when
+    /// summed, so every intermediate rounding lands straight in the residual.
+    /// This is the scalar twin of `StereoBiquad::process_lanes`, and the two
+    /// must stay arithmetically identical — `test_dj_isolator_stereo_matches_two_scalar_bitexact`
+    /// is what holds them together.
+    #[inline(always)]
+    pub fn process_sample_f64(&mut self, x: f64) -> f64 {
         if self.ramp_counter > 0 {
             self.coeffs.b0 += self.b0_step;
             self.coeffs.b1 += self.b1_step;
@@ -479,16 +501,22 @@ impl Filter for BiquadFilter {
             }
         }
 
-        let mut output = input * self.coeffs.b0 + self.z1;
+        let mut output = x * self.coeffs.b0 as f64 + self.z1;
         if !output.is_finite() {
             output = 0.0;
             self.z1 = 0.0;
             self.z2 = 0.0;
         } else {
-            self.z1 = input * self.coeffs.b1 - output * self.coeffs.a1 + self.z2;
-            self.z2 = input * self.coeffs.b2 - output * self.coeffs.a2;
+            self.z1 = x * self.coeffs.b1 as f64 - output * self.coeffs.a1 as f64 + self.z2;
+            self.z2 = x * self.coeffs.b2 as f64 - output * self.coeffs.a2 as f64;
         }
         output
+    }
+}
+
+impl Filter for BiquadFilter {
+    fn process_sample(&mut self, input: f32) -> f32 {
+        self.process_sample_f64(input as f64) as f32
     }
 }
 
@@ -854,20 +882,25 @@ impl DjIsolator {
         let g_h = self.gains[2];
 
         for i in 0..input.len() {
-            let mut s = input[i];
-            if !s.is_finite() { s = 0.0; }
+            let mut s32 = input[i];
+            if !s32.is_finite() { s32 = 0.0; }
+            // f64 from here to the sum: the three bands very nearly cancel, so
+            // an f32 rounding between stages or before the recombination lands
+            // straight in the residual. Matches `DjIsolatorStereo::run_sample`
+            // operation for operation.
+            let s = s32 as f64;
 
             // 4th Order Low (2 cascaded LP)
-            let l = self.low_pass_2.process_sample(self.low_pass_1.process_sample(s));
+            let l = self.low_pass_2.process_sample_f64(self.low_pass_1.process_sample_f64(s));
 
             // 4th Order High (2 cascaded HP)
-            let h = self.high_pass_2.process_sample(self.high_pass_1.process_sample(s));
+            let h = self.high_pass_2.process_sample_f64(self.high_pass_1.process_sample_f64(s));
 
             // 4th Order Mid (HP 300 -> LP 3000)
-            let m_low = self.mid_low_hp_2.process_sample(self.mid_low_hp_1.process_sample(s));
-            let m = self.mid_high_lp_2.process_sample(self.mid_high_lp_1.process_sample(m_low));
+            let m_low = self.mid_low_hp_2.process_sample_f64(self.mid_low_hp_1.process_sample_f64(s));
+            let m = self.mid_high_lp_2.process_sample_f64(self.mid_high_lp_1.process_sample_f64(m_low));
 
-            let out_sample = l * g_l + m * g_m + h * g_h;
+            let out_sample = (l * g_l as f64 + m * g_m as f64 + h * g_h as f64) as f32;
             if out_sample.is_finite() {
                 output[i] = out_sample;
             } else {
@@ -917,13 +950,28 @@ impl BiquadFilter {
 #[derive(Clone, Copy)]
 pub struct StereoBiquad {
     pub coeffs: BiquadCoefficients,
-    z1: wide::f32x4,
-    z2: wide::f32x4,
+    /// **f64, and that is the point.** In TDF-II the state holds values far
+    /// larger than the output and the recurrence `z1 = x*b1 - y*a1 + z2`
+    /// cancels; for a low corner the poles sit near z = 1 and f32 state loses
+    /// the answer. The isolator's 300 Hz Linkwitz-Riley section designs
+    /// `a1 = -1.944478`, within 0.055 of -2.0, and measured 28-33 dB WORSE than
+    /// the same cascade with f64 state across the whole audio band
+    /// (`examples/probe_biquad_precision.rs`). That was the entire console's
+    /// distortion budget: `probe_chain_taps` puts every stage before the
+    /// isolator at the analyser floor and the isolator at -107 dB.
+    ///
+    /// It is free here, which is why this type gets it and the 4/8/16-channel
+    /// biquads do not. State was `f32x4` holding [L, R, 0, 0] — HALF the lanes
+    /// idle — so `f64x2` is the same 128-bit register with both lanes used. The
+    /// wide-channel filters have no spare lanes and would pay for it properly;
+    /// nothing measured implicates them, so they keep f32.
+    z1: wide::f64x2,
+    z2: wide::f64x2,
 }
 
 impl StereoBiquad {
     pub fn new(coeffs: BiquadCoefficients) -> Self {
-        Self { coeffs, z1: wide::f32x4::ZERO, z2: wide::f32x4::ZERO }
+        Self { coeffs, z1: wide::f64x2::ZERO, z2: wide::f64x2::ZERO }
     }
 
     /// One stereo sample. Per lane: `y = x*b0 + z1; z1 = x*b1 - y*a1 + z2;
@@ -934,25 +982,39 @@ impl StereoBiquad {
     #[allow(clippy::eq_op)]
     pub fn process(&mut self, x: wide::f32x4) -> wide::f32x4 {
         use wide::*;
-        let b0 = f32x4::from(self.coeffs.b0);
-        let b1 = f32x4::from(self.coeffs.b1);
-        let b2 = f32x4::from(self.coeffs.b2);
-        let a1 = f32x4::from(self.coeffs.a1);
-        let a2 = f32x4::from(self.coeffs.a2);
+        let xa: [f32; 4] = x.into();
+        let y = self.process_lanes(f64x2::new([xa[0] as f64, xa[1] as f64]));
+        let ya: [f64; 2] = y.into();
+        f32x4::new([ya[0] as f32, ya[1] as f32, 0.0, 0.0])
+    }
+
+    /// The recurrence itself, in the state's own precision.
+    ///
+    /// Callers that chain stages should use this and convert once at the ends
+    /// rather than round-tripping through f32 between every biquad.
+    #[inline(always)]
+    #[allow(clippy::eq_op)]
+    pub fn process_lanes(&mut self, x: wide::f64x2) -> wide::f64x2 {
+        use wide::*;
+        let b0 = f64x2::splat(self.coeffs.b0 as f64);
+        let b1 = f64x2::splat(self.coeffs.b1 as f64);
+        let b2 = f64x2::splat(self.coeffs.b2 as f64);
+        let a1 = f64x2::splat(self.coeffs.a1 as f64);
+        let a2 = f64x2::splat(self.coeffs.a2 as f64);
 
         let y = (x * b0) + self.z1;
-        // finite lanes: (y - y) == 0 (Inf/NaN both fail); == f32::is_finite.
-        let finite = (y - y).cmp_eq(f32x4::ZERO);
+        // finite lanes: (y - y) == 0 (Inf/NaN both fail); == f64::is_finite.
+        let finite = (y - y).cmp_eq(f64x2::ZERO);
         let z1n = ((x * b1) - (y * a1)) + self.z2;
         let z2n = (x * b2) - (y * a2);
-        self.z1 = finite.blend(z1n, f32x4::ZERO);
-        self.z2 = finite.blend(z2n, f32x4::ZERO);
-        finite.blend(y, f32x4::ZERO)
+        self.z1 = finite.blend(z1n, f64x2::ZERO);
+        self.z2 = finite.blend(z2n, f64x2::ZERO);
+        finite.blend(y, f64x2::ZERO)
     }
 
     pub fn reset(&mut self) {
-        self.z1 = wide::f32x4::ZERO;
-        self.z2 = wide::f32x4::ZERO;
+        self.z1 = wide::f64x2::ZERO;
+        self.z2 = wide::f64x2::ZERO;
     }
 
     /// Steady-state block form of `process`: coefficients are splatted once and
@@ -964,25 +1026,25 @@ impl StereoBiquad {
     #[allow(clippy::eq_op)]
     pub fn process_block(&mut self, in_l: &[f32], in_r: &[f32], out_l: &mut [f32], out_r: &mut [f32]) {
         use wide::*;
-        let b0 = f32x4::from(self.coeffs.b0);
-        let b1 = f32x4::from(self.coeffs.b1);
-        let b2 = f32x4::from(self.coeffs.b2);
-        let a1 = f32x4::from(self.coeffs.a1);
-        let a2 = f32x4::from(self.coeffs.a2);
+        let b0 = f64x2::splat(self.coeffs.b0 as f64);
+        let b1 = f64x2::splat(self.coeffs.b1 as f64);
+        let b2 = f64x2::splat(self.coeffs.b2 as f64);
+        let a1 = f64x2::splat(self.coeffs.a1 as f64);
+        let a2 = f64x2::splat(self.coeffs.a2 as f64);
         let mut z1 = self.z1;
         let mut z2 = self.z2;
         let n = in_l.len().min(in_r.len()).min(out_l.len()).min(out_r.len());
         for i in 0..n {
-            let x = f32x4::new([in_l[i], in_r[i], 0.0, 0.0]);
+            let x = f64x2::new([in_l[i] as f64, in_r[i] as f64]);
             let y = (x * b0) + z1;
-            let finite = (y - y).cmp_eq(f32x4::ZERO);
+            let finite = (y - y).cmp_eq(f64x2::ZERO);
             let z1n = ((x * b1) - (y * a1)) + z2;
             let z2n = (x * b2) - (y * a2);
-            z1 = finite.blend(z1n, f32x4::ZERO);
-            z2 = finite.blend(z2n, f32x4::ZERO);
-            let arr: [f32; 4] = finite.blend(y, f32x4::ZERO).into();
-            out_l[i] = arr[0];
-            out_r[i] = arr[1];
+            z1 = finite.blend(z1n, f64x2::ZERO);
+            z2 = finite.blend(z2n, f64x2::ZERO);
+            let arr: [f64; 2] = finite.blend(y, f64x2::ZERO).into();
+            out_l[i] = arr[0] as f32;
+            out_r[i] = arr[1] as f32;
         }
         self.z1 = z1;
         self.z2 = z2;
@@ -1174,14 +1236,28 @@ impl DjIsolatorStereo {
     fn run_sample(&mut self, raw: wide::f32x4, g_l: wide::f32x4, g_m: wide::f32x4, g_h: wide::f32x4) -> wide::f32x4 {
         use wide::*;
         let in_finite = (raw - raw).cmp_eq(f32x4::ZERO);
-        let x = in_finite.blend(raw, f32x4::ZERO);
+        let x32: [f32; 4] = in_finite.blend(raw, f32x4::ZERO).into();
 
-        let l = self.low_pass_2.process(self.low_pass_1.process(x));
-        let h = self.high_pass_2.process(self.high_pass_1.process(x));
-        let m_low = self.mid_low_hp_2.process(self.mid_low_hp_1.process(x));
-        let m = self.mid_high_lp_2.process(self.mid_high_lp_1.process(m_low));
+        // Convert ONCE at the boundary and keep all eight stages plus the band
+        // recombination in the state's own precision. Round-tripping through
+        // f32 between stages would throw away most of what f64 state buys: the
+        // recombination `l + m + h` is where three nearly-cancelling bands are
+        // summed, so it is exactly the step that must not be rounded early.
+        let x = f64x2::new([x32[0] as f64, x32[1] as f64]);
 
-        let out = (l * g_l) + (m * g_m) + (h * g_h);
+        let l = self.low_pass_2.process_lanes(self.low_pass_1.process_lanes(x));
+        let h = self.high_pass_2.process_lanes(self.high_pass_1.process_lanes(x));
+        let m_low = self.mid_low_hp_2.process_lanes(self.mid_low_hp_1.process_lanes(x));
+        let m = self.mid_high_lp_2.process_lanes(self.mid_high_lp_1.process_lanes(m_low));
+
+        let gl: [f32; 4] = g_l.into();
+        let gm: [f32; 4] = g_m.into();
+        let gh: [f32; 4] = g_h.into();
+        let acc = (l * f64x2::splat(gl[0] as f64))
+            + (m * f64x2::splat(gm[0] as f64))
+            + (h * f64x2::splat(gh[0] as f64));
+        let a: [f64; 2] = acc.into();
+        let out = f32x4::new([a[0] as f32, a[1] as f32, 0.0, 0.0]);
         let out_finite = (out - out).cmp_eq(f32x4::ZERO);
         out_finite.blend(out, f32x4::ZERO)
     }
