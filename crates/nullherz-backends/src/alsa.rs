@@ -397,7 +397,7 @@ impl AudioBackend for AlsaBackend {
             // RT scheduling is the difference between riding out scheduler
             // gaps and drowning in them; report the outcome loudly so a
             // denied request is never mistaken for an engine problem.
-            let _ = ipc_layer::set_rt_priority(80);
+            ipc_layer::setup_audio_callback_thread(80);
             // Report the policy the KERNEL gives back, not the verdict of the
             // request. `set_rt_priority` returns Ok when RTKit grants SCHED_RR at
             // priority 20 instead of the FIFO 80 asked for, so its Ok/Err told

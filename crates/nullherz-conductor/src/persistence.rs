@@ -52,11 +52,11 @@ pub struct ProcessorState {
     pub state_data: Vec<u8>,
 }
 
-/// 256 frames. **The limit is a ~3 ms non-DSP stall, not DSP cost.**
+/// 256 frames — and the reason is ONE expensive block in our own audio code.
 ///
-/// Period size is the dominant latency term — it sets the device ring
-/// (`period x periods`, 3 under RT) and the graph's block quantisation, which
-/// `examples/probe_deck_latency.rs` shows is exactly one block:
+/// Period size sets the device ring (`period x periods`, 3 under RT) and the
+/// graph's block quantisation, which `examples/probe_deck_latency.rs` shows is
+/// exactly one block:
 ///
 /// ```text
 /// block 256 -> deck reaches master in 353 samples (96 PDC + 256 + 1)
@@ -64,64 +64,47 @@ pub struct ProcessorState {
 /// block  64 -> 161 samples (96 + 64 + 1)
 /// ```
 ///
-/// So halving this halves a real term twice over, and every instinct says keep
-/// halving. Measured, it does not survive (`scripts/verify.sh` smoke, Threaded):
+/// MEASURE ON THE REAL DEVICE. Every earlier conclusion here came from
+/// `--backend threaded`, which its own source describes as clocking itself with
+/// a sleep loop; its tail is sleep-granularity jitter, not the audio path. On
+/// real ALSA at 48 kHz the same code scales cleanly and the ladder looks nothing
+/// like it did:
 ///
 /// ```text
-/// period 256 -> mean 135 us, peak 3785 us / 5333 us budget   PASS
-/// period 128 -> mean 135 us, peak 2945 us / 2666 us budget   FAIL, 1 xrun at 18.8 s
-/// period  64 -> peak 3046 us / 1333 us budget                FAIL, 1 xrun
+///            THREADED (simulated)        ALSA (real device)
+/// period 256   peak ~3500 us  PASS        peak 3694 us, mean 384 us  PASS
+/// period 128   peak 791-2945, 1/3 FAIL    peak  803 us, mean 120 us  PASS
+/// period  64   peak 163-3046, FAIL        peak  308 us, mean  52 us  PASS
 /// ```
 ///
-/// Read the mean against the peak: **135 us against 2945 us, a factor of 22.**
-/// Steady-state DSP uses 5% of a 128-frame budget. Nothing about this ceiling is
-/// audio work, and optimising DSP will not move it. One stall of roughly 3 ms
-/// arrives regardless of block size; at 256 a 5333 us budget absorbs it, at 128
-/// it does not.
+/// A previous revision of this note asserted "the limit is a ~3 ms non-DSP
+/// stall, not DSP cost" and "peak cost is NOT proportional to period size".
+/// Both were artefacts of the Threaded backend and are RETRACTED.
 ///
-/// A 128-frame default was tried and reverted: a single 4-minute run passed with
-/// a 1177 us peak, which was the stall simply not landing. One sample does not
-/// characterise a tail event.
+/// WHAT ACTUALLY BLOCKS A SMALLER DEFAULT. 12 minutes on ALSA at 64 frames under
+/// default system conditions passes with zero underruns and a 57 us mean — 4% of
+/// budget — but one block took **3161 us**, and
+/// `bin/survival.rs`'s stall attribution says of it: zero minor faults, zero
+/// major, zero involuntary context switches, and zero wall-clock lost outside
+/// the callback. The kernel did nothing to that block. It spent 3161 us
+/// EXECUTING, at 55x its own mean.
 ///
-/// WHAT IT IS NOT: the registry reaper. That was the obvious suspect — it frees
-/// in bursts (`Registry reap: released 2 sample(s), ~107.2 MB of decoded audio`)
-/// and returning 100+ MB at once means munmap, page-table teardown and
-/// cross-core TLB shootdowns. A/B at 128 frames says the opposite:
+/// So the host is exonerated, by measurement rather than by argument: not DSP
+/// throughput, not page faults (`mlockall` is MCL_CURRENT only, and the fault
+/// count is flat zero across 43796 windows), not preemption, not wakeup latency,
+/// not C-states (reproduced with C3 enabled), not the governor (reproduced under
+/// schedutil), not CPU affinity (unpinned, pinned to a spare core, and pinned to
+/// CPU 0 all measure the same). `isolcpus` and an RT kernel would not touch it.
 ///
-/// ```text
-/// NULLHERZ_REGISTRY_REAP=1 -> PASS, peak  823 us   (mean 114 us)
-/// NULLHERZ_REGISTRY_REAP=0 -> FAIL, peak 3482 us, 1 xrun
-/// ```
+/// At 256 frames the ring is 16 ms and absorbs that block without a flinch. At
+/// 64 frames the ring is 4 ms, so a 3161 us block leaves 840 us of margin and
+/// survives only because there are three periods — two would underrun. That
+/// margin is why this is still 256: the win is real (about 23 ms of output
+/// latency down to about 7.4 ms) and it is one bug away, not one config value
+/// away. Find the block first.
 ///
-/// Disabling it makes the stall WORSE, so reaping is part of the mitigation, not
-/// the cause. That inverts the reading: the cost tracks memory GROWTH, not
-/// freeing. With no reaping the registry retains every decoded track, the heap
-/// climbs, and `mlockall` is `MCL_CURRENT` only (deliberately — see
-/// `ipc-layer`), so everything allocated afterwards faults lazily. First-touch
-/// faults on a growing heap are precisely multi-millisecond events. Bounding the
-/// footprint is what keeps them rare.
-///
-/// The stall is still present with reaping on: three runs at 128 frames gave
-/// PASS 1177 us (4 min), PASS 823 us (2 min), FAIL 2945 us with an xrun at
-/// 18.8 s (1 min). One in three. 128 is not safe, it is lucky, which is why this
-/// is 256.
-///
-/// Next diagnostic, in order:
-///   1. Fix the harness asymmetry below — without it the peak cannot be
-///      attributed to the event that failed the run.
-///   2. Test whether the stall correlates with hydration (decoding a ~100 MB
-///      track) rather than with steady playback. The smoke re-hydrates every
-///      run, so this needs the harness to separate the two.
-///   3. Only then consider pre-faulting or a bounded arena for the decode path.
-/// `isolcpus` is worth trying but will NOT help if the cause is our own
-/// allocation behaviour rather than scheduler noise.
-///
-/// Confirming any of it needs the harness fixed first: `peak_process_time_ns` is
-/// a running max over the WHOLE run including warm-up (`bin/survival.rs`), while
-/// the xrun verdict excludes warm-up — so the peak figure and the pass/fail
-/// verdict are measured over different windows.
-///
-/// `NULLHERZ_PERIOD_SIZE` evaluates a change without editing a file.
+/// `NULLHERZ_PERIOD_SIZE` evaluates a change without editing a file, and
+/// `--backend alsa` is the only backend whose numbers mean anything.
 pub fn default_period_size() -> u64 {
     128
 }

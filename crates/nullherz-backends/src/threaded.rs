@@ -77,7 +77,10 @@ impl AudioBackend for ThreadedBackend {
         let xrun_counter = self.xrun_counter.clone();
         let clock_slips = self.clock_slips.clone();
         let handle = thread::spawn(move || {
-            ipc_layer::setup_rt_thread(90, Some(0));
+            // No core id: pinning to CPU 0 was actively harmful (boot CPU, timer
+            // tick, IRQ handling, SMT sibling shared). Pin deliberately with
+            // NULLHERZ_AUDIO_CPUS, which setup_rt_thread honours.
+            ipc_layer::setup_audio_callback_thread(90);
             // This is the audio thread for this backend; say so, and report what
             // the kernel actually granted rather than what was requested.
             let sched = ipc_layer::register_audio_thread();
