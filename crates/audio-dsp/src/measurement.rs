@@ -50,9 +50,8 @@
 //! sidelobes had to be bought off with exclusion width, which is the same move
 //! as widening a window until a residue disappears, just frozen into a
 //! constant. BH7's sidelobes are below -180 dB, so the exclusion NARROWS to
-//! +/-8 and the floor drops to -134.7 dB. See [`analyser_floor`].
+//! +/-8 and the floor drops to -153.1 dB. See [`analyser_floor`].
 
-use crate::SimdFft;
 
 /// 7-term Blackman-Harris cosine-sum coefficients (Nuttall/Rife-Vincent).
 ///
@@ -152,13 +151,81 @@ fn window(i: usize, n: usize) -> f64 {
 /// probe's level column and its THD column came off two different instruments.
 pub fn spectrum(x: &[f32], fft_size: usize) -> Vec<f32> {
     let n = fft_size.min(x.len());
-    let mut re = vec![0.0f32; fft_size];
-    let mut im = vec![0.0f32; fft_size];
+    let mut re = vec![0.0f64; fft_size];
+    let mut im = vec![0.0f64; fft_size];
     for i in 0..n {
-        re[i] = (x[i] as f64 * window(i, fft_size)) as f32;
+        re[i] = x[i] as f64 * window(i, fft_size);
     }
-    SimdFft::new(fft_size).process(&mut re, &mut im);
-    (0..fft_size / 2).map(|b| (re[b] * re[b] + im[b] * im[b]).sqrt()).collect()
+    fft_f64(&mut re, &mut im);
+    (0..fft_size / 2)
+        .map(|b| (re[b] * re[b] + im[b] * im[b]).sqrt() as f32)
+        .collect()
+}
+
+/// Iterative radix-2 Cooley-Tukey in f64. **Measurement only.**
+///
+/// This is deliberately NOT [`SimdFft`], which is f32 and is used on the audio
+/// thread by the vocoder and the spectral processors. Their precision is a
+/// different trade — an analyser is allowed to be slow and must not be the
+/// thing it is measuring.
+///
+/// # Why the instrument had to be rebuilt
+///
+/// The f32 transform put this module's floor at -134.7 dB, and
+/// [`analyser_floor`]'s own note said an f64 FFT would reach about -153 dB
+/// while judging that unnecessary "while the quietest thing being measured (the
+/// console, at -107 dB) sits 28 dB above". That judgement was right and has
+/// since expired: the console now measures -134.4 dB, which is the floor
+/// itself. Every reading had become "at the limit of the instrument" with no
+/// way to tell how far below it the signal actually was.
+///
+/// Twiddles are recomputed with `cos`/`sin` per butterfly rather than carried
+/// by the usual angle recurrence. The recurrence accumulates error across the
+/// 15 stages of a 32k transform, which is exactly the error this function
+/// exists to remove, and an offline analyser has no reason to trade precision
+/// for speed.
+fn fft_f64(re: &mut [f64], im: &mut [f64]) {
+    let n = re.len();
+    debug_assert!(n.is_power_of_two(), "radix-2 needs a power-of-two length");
+    debug_assert_eq!(n, im.len());
+    if n < 2 { return; }
+
+    // Bit-reversal permutation.
+    let mut j = 0usize;
+    for i in 1..n {
+        let mut bit = n >> 1;
+        while j & bit != 0 {
+            j ^= bit;
+            bit >>= 1;
+        }
+        j |= bit;
+        if i < j {
+            re.swap(i, j);
+            im.swap(i, j);
+        }
+    }
+
+    let mut len = 2usize;
+    while len <= n {
+        let half = len / 2;
+        let ang = -std::f64::consts::TAU / len as f64;
+        for base in (0..n).step_by(len) {
+            for k in 0..half {
+                let (w_im, w_re) = (ang * k as f64).sin_cos();
+                let a = base + k;
+                let b = a + half;
+                let v_re = re[b] * w_re - im[b] * w_im;
+                let v_im = re[b] * w_im + im[b] * w_re;
+                let u_re = re[a];
+                let u_im = im[a];
+                re[a] = u_re + v_re;
+                im[a] = u_im + v_im;
+                re[b] = u_re - v_re;
+                im[b] = u_im - v_im;
+            }
+        }
+        len <<= 1;
+    }
 }
 
 /// Bin holding `freq`. Pair with [`spectrum`].
@@ -184,11 +251,19 @@ pub fn level_db_at(mags: &[f32], freq: f32, sample_rate: f32, fft_size: usize) -
 
 /// What [`thd_n`] reports on an ideal tone: the instrument's own noise floor.
 ///
-/// Currently **-134.7 dB** (0.0000183%), and it is set by the f32 arithmetic of
-/// [`SimdFft`], not by window leakage — it is flat across FFT sizes, which is
-/// how you tell those two apart. An f64 FFT would reach about -153 dB, the
-/// point at which f32 sample storage takes over; that is unnecessary while the
-/// quietest thing being measured (the console, at -107 dB) sits 28 dB above.
+/// Currently **-153.1 dB**, set by f32 SAMPLE STORAGE — the captured buffer is
+/// `&[f32]` — and no longer by the transform. It is flat across FFT sizes
+/// (-153.7 at 4k, -153.1 at 32k), which is how you tell arithmetic from window
+/// leakage: leakage would scale with size.
+///
+/// It used to be -134.7 dB, set by the f32 arithmetic of `SimdFft`, and the
+/// note here said an f64 FFT would reach "about -153 dB" while judging that
+/// unnecessary "while the quietest thing being measured (the console, at
+/// -107 dB) sits 28 dB above". Both halves proved right. The judgement then
+/// expired: fixing the biquad state took the console to -148 dB, which the old
+/// instrument could not see — it reported -134.4, its own floor, and made a
+/// 41 dB improvement look like 27. An analyser that is itself the quietest
+/// thing in the room has stopped measuring.
 ///
 /// Every measured number is read AGAINST this. A reading at or near it is
 /// measurement, not distortion — there is no signal below the instrument's own
@@ -211,14 +286,18 @@ mod tests {
     /// this moves, every THD number in the repo — and the tolerance in the
     /// console transparency test — is being read against a different ruler.
     ///
-    /// -134.7 dB measured; asserted at -126 dB to leave room for FFT arithmetic
-    /// differing across CPUs. Reverting the window to Hann reports 4.6e-5
-    /// (-86.8 dB) and fails this by 250x.
+    /// -153.2 dB measured at this size; asserted at **-140 dB** to leave room
+    /// for arithmetic differing across CPUs while still failing anything that
+    /// regresses the instrument. The bound was 5e-7 (-126 dB) when the FFT was
+    /// f32 and the floor was -134.7; leaving it there would have let the
+    /// transform silently revert to f32 and cost 18 dB of resolution without a
+    /// single test noticing. Reverting the window to Hann reports 4.6e-5
+    /// (-86.8 dB) and fails this by four orders of magnitude.
     #[test]
     fn test_analyser_floor_is_where_the_window_was_tuned_for() {
         let floor = analyser_floor(TONE, SR, FFT);
         assert!(
-            floor < 5e-7,
+            floor < 1e-7,
             "analyser floor drifted to {:.7}% ({:.1} dB) — the window, the \
              fundamental exclusion or the FFT changed, and every THD figure now \
              reads against a different ruler; re-validate before trusting any \

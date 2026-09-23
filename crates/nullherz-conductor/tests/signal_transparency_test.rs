@@ -44,25 +44,31 @@ const TONE_HZ: f32 = 997.0;
 /// settling. Fixed, not condition-based, so the window is identical every run.
 const SETTLE_BLOCKS: usize = 256;
 
-/// Absolute THD+N limit for the console at unity: 0.005% (-86 dB).
+/// Absolute THD+N limit for the console at unity: 0.0001% (-120 dB).
 ///
 /// This used to be a MULTIPLE of the analyser floor, which was the right shape
-/// when the floor (-86.8 dB, Hann) was above anything the console did — every
-/// node measured "at the floor" and the only meaningful question was whether a
-/// reading escaped it. The BH7 analyser floor is -134.7 dB, and the console's
-/// real residual is -107 dB, so a floor multiple would now demand the console
-/// be 28 dB quieter than it is and fail on arrival.
+/// when the floor (-86.8 dB, Hann) was above anything the console did. It then
+/// became an absolute 5e-5 (-86 dB), sitting 21 dB above the console's
+/// then-measured -107 dB, with a note saying it was deliberately NOT tightened
+/// because doing so "would pin the isolator's f32 arithmetic noise, which is
+/// inaudible, platform-sensitive, and nobody's contract."
 ///
-/// An absolute limit says the thing actually worth pinning: no audible colour.
-/// It sits 21 dB above the console's measured -107 dB (room for float
-/// reassociation as nodes are added — the drift that made the old bit-exact
-/// golden hashes cry wolf), 26 dB below the ~0.1% audible threshold on music,
-/// and 54 dB below the `tanh()` waveshaper this test exists to catch.
+/// That was correct and is now obsolete on both counts. The isolator's f32
+/// arithmetic noise WAS the -107 dB — `probe_chain_taps` showed it adding
+/// 27.9 dB in one step while every other stage sat at the instrument's floor —
+/// and moving its biquad state to f64 removed it. The console now measures
+/// **-148 dB**, against an analyser floor of -153.
 ///
-/// It is deliberately NOT tightened to just above -107 dB. That would pin the
-/// isolator's f32 arithmetic noise, which is inaudible, platform-sensitive, and
-/// nobody's contract.
-const THD_LIMIT: f32 = 5e-5;
+/// -120 dB keeps 28 dB of headroom for float reassociation as nodes are added
+/// (the drift that made the old bit-exact golden hashes cry wolf), while
+/// failing the PREVIOUS console by 13 dB. Leaving it at -86 would have left
+/// 62 dB of slack — enough to sleep through a total regression of the filter
+/// state to single precision and never fail, which is exactly the kind of
+/// unfalsifiable check this repo keeps finding.
+///
+/// Still 60 dB below the ~0.1% audible threshold on music, and 88 dB below the
+/// `tanh()` waveshaper this test exists to catch.
+const THD_LIMIT: f32 = 1e-6;
 
 fn pump(conductor: &mut Conductor, left: &mut [f32], right: &mut [f32]) {
     let inputs: Vec<&[f32]> = vec![];

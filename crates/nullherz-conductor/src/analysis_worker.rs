@@ -20,7 +20,13 @@ thread_local! {
 pub struct AnalysisWorker {
     sample_registry: Arc<dyn SampleRegistry>,
     library: Option<Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>>,
-    processed_ids: std::collections::HashSet<u64>,
+    /// Ids analysis is FINISHED with, shared with the conductor.
+    ///
+    /// Shared rather than owned because `start()` moves the worker onto its own
+    /// thread (`conductor.analysis_worker.take()`), so a plain field here is
+    /// invisible to the reaper exactly when it matters. An `Arc` survives the
+    /// move; the conductor holds the other end from construction.
+    processed_ids: Arc<parking_lot::Mutex<std::collections::HashSet<u64>>>,
     compatibility_matrix: std::collections::HashMap<u64, Vec<(u64, f32)>>,
     dirty_ids: std::collections::HashSet<u64>,
 }
@@ -30,7 +36,7 @@ impl AnalysisWorker {
         Self {
             sample_registry,
             library: None,
-            processed_ids: std::collections::HashSet::new(),
+            processed_ids: Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new())),
             compatibility_matrix: std::collections::HashMap::new(),
             dirty_ids: std::collections::HashSet::new(),
         }
@@ -42,7 +48,7 @@ impl AnalysisWorker {
     }
 
     pub fn request_analysis(&mut self, id: u64) {
-        self.processed_ids.remove(&id);
+        self.processed_ids.lock().remove(&id);
     }
 
     pub fn start(mut self) {
@@ -54,10 +60,26 @@ impl AnalysisWorker {
         });
     }
 
+    /// A handle to the set of ids analysis is finished with.
+    ///
+    /// The registry reaper needs this. The scanner registers a track's full
+    /// decoded audio PRECISELY as the hand-off to analysis, so a reaper that
+    /// only asks "is it on a deck?" evicts tracks out of the queue before this
+    /// worker sees them — observed live as "Hydrated registry for X" followed
+    /// immediately by "released 1 sample, 121 MB", and the reason reaping was
+    /// off by default.
+    ///
+    /// Returns the shared handle rather than answering a query, because
+    /// `start()` moves the worker to its own thread and the conductor keeps its
+    /// end from construction.
+    pub fn analysed_ids(&self) -> Arc<parking_lot::Mutex<std::collections::HashSet<u64>>> {
+        self.processed_ids.clone()
+    }
+
     fn run_once(&mut self) {
         let ids = self.sample_registry.list_ids();
         let unprocessed_ids: Vec<u64> = ids.into_iter()
-            .filter(|id| !self.processed_ids.contains(id))
+            .filter(|id| !self.processed_ids.lock().contains(id))
             .collect();
 
         if !unprocessed_ids.is_empty() {
@@ -124,7 +146,7 @@ impl AnalysisWorker {
             self.sample_registry.register_with_metadata(id, buffer, Arc::new(metadata.clone()));
 
             tracks_to_save.push((id, metadata));
-            self.processed_ids.insert(id);
+            self.processed_ids.lock().insert(id);
             self.dirty_ids.insert(id);
         }
 
