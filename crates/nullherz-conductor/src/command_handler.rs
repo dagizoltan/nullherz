@@ -211,6 +211,16 @@ impl CommandHandler {
                         conductor.mixer_manager.key_lock_decks.remove(deck_id);
                     }
                 }
+                // Same reason as the tempo below: key lock's correction depends
+                // on the total rate, so the fader position has to be recorded
+                // BEFORE translation reads it.
+                Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam {
+                    deck_id,
+                    param_type: nullherz_traits::DeckParamType::Pitch,
+                    value,
+                }) if *value > 0.0 => {
+                    conductor.mixer_manager.deck_pitch.insert(*deck_id, *value);
+                }
                 // Key lock's correction is a function of the transport tempo, so
                 // translation needs the NEW tempo, not the previous one.
                 Command::Core(CoreCommand::SetBpm(bpm)) if *bpm > 0.0 => {

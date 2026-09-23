@@ -8,6 +8,19 @@ use crate::{SettingsTab, View};
 /// 4-channel console: faders, EQ, personality morphs, mastering chain, macros.
 pub struct MixerState {
     pub channel_faders: [f32; 4],
+    /// Pitch-fader position per deck, as a RATE multiplier. 1.0 is the track's
+    /// recorded speed.
+    ///
+    /// A rate, not a percentage, because that is what the sampler consumes and
+    /// what `-12*log2(rate)` needs. Percent is a display unit.
+    pub channel_pitch: [f32; 4],
+    /// Fader travel per deck, in percent either side of centre: 8, 16 or 50.
+    ///
+    /// 8 is the default because it is the Technics range and the one beat-matching
+    /// muscle memory is built on — the whole fader spans about a semitone and a
+    /// half, so a hand movement maps to a tempo change you can actually place.
+    /// 50 exists for creative work and is unusable for beat matching.
+    pub pitch_range_pct: [f32; 4],
     pub channel_eq_high: [f32; 4],
     pub channel_eq_mid: [f32; 4],
     pub channel_eq_low: [f32; 4],
@@ -57,6 +70,8 @@ impl Default for MixerState {
     fn default() -> Self {
         Self {
             channel_faders: [1.0; 4],
+            channel_pitch: [1.0; 4],
+            pitch_range_pct: [8.0; 4],
             channel_eq_high: [1.0; 4],
             channel_eq_mid: [1.0; 4],
             channel_eq_low: [1.0; 4],

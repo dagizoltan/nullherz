@@ -101,25 +101,101 @@ pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_col
 
             ui.add_space(theme.space_xs);
 
-            // --- volume fader ------------------------------------------------
-            ui.vertical_centered(|ui| {
-                let r_fader = widgets::render_fader(
-                    ui,
-                    &mut app.mixer.channel_faders[i],
-                    0.0..=1.0,
-                    deck_color,
-                    fader_h,
-                    16.0,
-                );
-                if r_fader.changed() {
-                    send_deck_param(app, deck_id, nullherz_traits::DeckParamType::Gain, app.mixer.channel_faders[i]);
-                }
-                if r_fader.drag_stopped() || r_fader.lost_focus() { settled = true; }
-                ui.label(
-                    RichText::new("VOL")
-                        .size(theme.type_caption)
-                        .color(theme.text_secondary),
-                );
+            // --- volume and PITCH faders, side by side -----------------------
+            //
+            // Pitch belongs next to volume rather than buried in a panel: it is
+            // the control an operator rides continuously while beat matching, and
+            // on the hardware this console imitates it is the second-most-used
+            // thing on the deck after the platter.
+            //
+            // It drives the sampler's `playback_rate` — varispeed, so tempo and
+            // pitch move together exactly as a platter does, through the
+            // resampler that measures -132 dB with zero added latency. Leaving
+            // KEY LOCK off keeps the phase vocoder (-17.8 dB polyphonic, 21.3 ms)
+            // out of the signal path entirely, so this is the console's
+            // best-sounding way to change tempo.
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = theme.space_sm;
+
+                ui.vertical_centered(|ui| {
+                    let r_fader = widgets::render_fader(
+                        ui,
+                        &mut app.mixer.channel_faders[i],
+                        0.0..=1.0,
+                        deck_color,
+                        fader_h,
+                        16.0,
+                    );
+                    if r_fader.changed() {
+                        send_deck_param(app, deck_id, nullherz_traits::DeckParamType::Gain, app.mixer.channel_faders[i]);
+                    }
+                    if r_fader.drag_stopped() || r_fader.lost_focus() { settled = true; }
+                    ui.label(
+                        RichText::new("VOL")
+                            .size(theme.type_caption)
+                            .color(theme.text_secondary),
+                    );
+                });
+
+                ui.vertical_centered(|ui| {
+                    let span = app.mixer.pitch_range_pct[i] / 100.0;
+                    let r_pitch = widgets::render_fader(
+                        ui,
+                        &mut app.mixer.channel_pitch[i],
+                        (1.0 - span)..=(1.0 + span),
+                        deck_color,
+                        fader_h,
+                        16.0,
+                    );
+                    if r_pitch.changed() {
+                        send_deck_param(app, deck_id, nullherz_traits::DeckParamType::Pitch, app.mixer.channel_pitch[i]);
+                    }
+                    if r_pitch.drag_stopped() || r_pitch.lost_focus() { settled = true; }
+
+                    // Double-click is the centre detent. A pitch fader that
+                    // cannot be returned to exactly 1.0 is a fader that leaves
+                    // the track permanently slightly off, because landing on the
+                    // centre by hand is luck.
+                    if r_pitch.double_clicked() {
+                        app.mixer.channel_pitch[i] = 1.0;
+                        send_deck_param(app, deck_id, nullherz_traits::DeckParamType::Pitch, 1.0);
+                        settled = true;
+                    }
+
+                    // Signed percent, and the sign is the point: +/- tells the
+                    // operator which way they are pulling without reading the
+                    // handle position.
+                    let pct = (app.mixer.channel_pitch[i] - 1.0) * 100.0;
+                    ui.label(
+                        RichText::new(format!("{pct:+.1}%"))
+                            .size(theme.type_caption)
+                            .color(if pct.abs() < 0.05 { theme.text_secondary } else { deck_color })
+                            .strong(),
+                    );
+
+                    // Range cycles 8 -> 16 -> 50. Rescaling keeps the CURRENT
+                    // rate: switching range must not move the music.
+                    let range_label = format!("±{:.0}", app.mixer.pitch_range_pct[i]);
+                    if ui
+                        .add(egui::Button::new(
+                            RichText::new(range_label)
+                                .size(theme.type_caption)
+                                .color(theme.text_secondary),
+                        ))
+                        .on_hover_text("Pitch fader travel. Double-click the fader to return to 0%.")
+                        .clicked()
+                    {
+                        app.mixer.pitch_range_pct[i] = match app.mixer.pitch_range_pct[i] as i32 {
+                            8 => 16.0,
+                            16 => 50.0,
+                            _ => 8.0,
+                        };
+                        // Clamp into the new travel, which only ever narrows.
+                        let span = app.mixer.pitch_range_pct[i] / 100.0;
+                        app.mixer.channel_pitch[i] = app.mixer.channel_pitch[i].clamp(1.0 - span, 1.0 + span);
+                        send_deck_param(app, deck_id, nullherz_traits::DeckParamType::Pitch, app.mixer.channel_pitch[i]);
+                    }
+                });
             });
 
             if settled {

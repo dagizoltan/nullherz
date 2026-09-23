@@ -177,3 +177,65 @@ fn test_scratch_ignores_other_decks() {
         "a scratch addressed to node 99 hijacked node 1 — dragging one deck would drag them all"
     );
 }
+
+/// The pitch fader and a scratch gesture must not fight over the voice rate.
+///
+/// Both write `playback_rate`: the fader through parameter 1, the gesture
+/// directly. A gesture OWNS that rate while it is held — the voice plays at the
+/// speed of a hand — and the deck's own rate is what the release restores to.
+///
+/// If parameter 1 wrote voices mid-gesture it would clobber the hand's rate for a
+/// frame and then self-correct on release. That presents as "scratching sometimes
+/// stutters", is inaudible in a test that only checks the endpoints, and never
+/// reproduces on demand. Measured through the playhead, which is what a listener
+/// hears.
+#[test]
+fn test_pitch_fader_does_not_disturb_a_held_scratch() {
+    let mut s = loaded();
+    // Start well inside the buffer so a backwards gesture has room.
+    s.apply_command(&Command::Performance(PerformanceCommand::NudgePosition { node_idx: 1, frames: 60_000 }));
+    // +8% on the fader before any gesture.
+    s.set_parameter(1, 1.08);
+    play(&mut s);
+
+    // Grab it: the hand takes the rate, pulling backwards at 2x.
+    scratch(&mut s, true, -2.0);
+    let a = pos(&s);
+    render(&mut s, 512);
+    let b = pos(&s);
+    let held_speed = a as f64 - b as f64; // backwards, so a > b
+    assert!(
+        held_speed > 512.0 * 1.5,
+        "a -2.0 gesture should pull the playhead back ~1024 frames over 512 samples, moved \
+         {held_speed}"
+    );
+
+    // Nudge the fader mid-gesture. The gesture must be unaffected.
+    s.set_parameter(1, 0.96);
+    let c = pos(&s);
+    render(&mut s, 512);
+    let d = pos(&s);
+    let after_nudge = c as f64 - d as f64;
+    assert!(
+        after_nudge > 512.0 * 1.5,
+        "moving the pitch fader mid-scratch must not take the rate away from the hand: the \
+         playhead moved {after_nudge} frames over 512 samples, which is the fader's rate, not \
+         the gesture's"
+    );
+
+    // Let go: the deck plays forward at the fader's NEW position.
+    scratch(&mut s, false, 0.0);
+    let e = pos(&s);
+    render(&mut s, 512);
+    let f = pos(&s);
+    let released = f as f64 - e as f64;
+    assert!(
+        released > 0.0,
+        "release must resume forward playback, moved {released}"
+    );
+    assert!(
+        (released - 512.0 * 0.96).abs() < 512.0 * 0.15,
+        "release must resume at the fader's rate (0.96 -> ~492 frames per 512 samples), got \
+         {released}. 512 would mean the fader was ignored and the deck reset to 1.0."
+    );
+}

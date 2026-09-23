@@ -123,6 +123,26 @@ pub enum DeckParamType {
     Filter,
     Pan,
     Width,
+    /// Playback RATE, as a multiplier — the turntable pitch fader.
+    ///
+    /// 1.0 is the track's recorded speed; 1.08 is +8%. Tempo and pitch move
+    /// together because this is varispeed: the sampler's resampler reads the
+    /// buffer faster or slower, exactly as a platter does. `+12*log2(rate)`
+    /// semitones of transposition come with the tempo change, and that coupling
+    /// is the point rather than a limitation.
+    ///
+    /// This is the console's HIGHEST-QUALITY path for changing tempo: the
+    /// resampler measures -132 dB THD+N with zero added latency
+    /// (`audio-dsp/src/resample.rs`). The alternative — holding pitch while
+    /// changing tempo — needs the phase vocoder in the deck's pitch slot, which
+    /// measures -17.8 dB on polyphonic material and costs 21.3 ms. So an
+    /// operator who beat matches with this fader and leaves KEY LOCK off never
+    /// touches the weakest component in the signal path.
+    ///
+    /// Nothing could reach `playback_rate` before this existed. The only writer
+    /// was tempo sync, computing `transport_bpm / track_bpm` internally, so the
+    /// fader every DJ expects to find had no command behind it.
+    Pitch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
