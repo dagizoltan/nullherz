@@ -1315,6 +1315,58 @@ pub fn setup_audio_callback_thread(priority: i32) {
     FpControlGuard::apply_ftz_daz();
 }
 
+/// Has the audio thread's MXCSR lost its denormal flushing since startup?
+///
+/// Set by [`check_ftz_daz`] and never cleared. Read from any thread.
+static FTZ_DAZ_LOST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Are Flush-To-Zero and Denormals-Are-Zero live on THIS thread right now?
+///
+/// MXCSR is per-thread register state, so this answers only for the caller —
+/// asking from a monitor thread tells you nothing about the audio thread.
+#[cfg(target_arch = "x86_64")]
+pub fn ftz_daz_active() -> bool {
+    let mut mxcsr: u32 = 0;
+    unsafe { std::arch::asm!("stmxcsr [{}]", in(reg) &mut mxcsr, options(nostack, preserves_flags)) };
+    // FTZ is bit 15, DAZ is bit 6 — the pair `apply_ftz_daz` sets.
+    mxcsr & 0x8000 != 0 && mxcsr & 0x0040 != 0
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+pub fn ftz_daz_active() -> bool { true }
+
+/// Confirm denormal flushing is still on, from the audio thread, cheaply.
+///
+/// # Why this is worth a check per block
+///
+/// `apply_ftz_daz` runs ONCE when a thread starts and nothing has ever verified
+/// it afterwards. MXCSR is per-thread state that an FFI boundary, a signal
+/// handler, or a library that saves and restores it carelessly can quietly
+/// reset. If that happens, arithmetic on denormal inputs — a reverb tail, filter
+/// ringing, a fading outro — slows by one to two orders of magnitude.
+///
+/// That failure looks EXACTLY like the stall this console is hunting: a block
+/// that takes milliseconds instead of microseconds, purely executing, with zero
+/// page faults, zero preemption and zero clock lost outside the callback,
+/// appearing only on certain audio. `survival.rs` measured precisely that
+/// signature and could not explain it, and a silently cleared MXCSR is the one
+/// cause that fits without involving the kernel at all.
+///
+/// `stmxcsr` is a couple of cycles against a 57 us block, so this is checked
+/// every block rather than sampled: a bit that flips back before the next sample
+/// would be invisible, and one glitched block is the whole phenomenon.
+#[inline(always)]
+pub fn check_ftz_daz() {
+    if !ftz_daz_active() {
+        FTZ_DAZ_LOST.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Whether denormal flushing was ever observed missing on the audio thread.
+pub fn ftz_daz_was_lost() -> bool {
+    FTZ_DAZ_LOST.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// RAII guard for floating-point control state.
 /// Ensures FTZ/DAZ are set during the lifetime of the guard and restored afterwards.
 pub struct FpControlGuard {

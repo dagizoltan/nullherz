@@ -76,6 +76,13 @@ impl TelemetryFinalizer {
             node_peak_times[i] = (peak_cycles as f64 * ns_per_cycle) as u64;
         }
 
+        // Denormal flushing is set once at thread start and was never checked
+        // again. A silently cleared MXCSR makes denormal arithmetic 10-100x
+        // slower and would present as a multi-millisecond block on decaying
+        // audio with the kernel completely idle — the exact unexplained
+        // signature `bin/survival.rs` captured. Two cycles per block to rule out.
+        ipc_layer::check_ftz_daz();
+
         let elapsed_cycles = crate::get_cycles().wrapping_sub(start_cycles);
         let current_ns = (elapsed_cycles as f64 * ns_per_cycle) as u64;
         let peak = metrics.update_peak(current_ns, transport.sample_rate, sample_counter, num_samples);

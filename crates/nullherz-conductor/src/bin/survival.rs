@@ -21,11 +21,25 @@ struct Args {
     minutes: u64,
     backend: Option<nullherz_traits::AudioBackendType>,
     tracks_dir: String,
+    /// Run the console with the decks STOPPED — a control for "is the cost in
+    /// the audio?".
+    ///
+    /// The stall being hunted executes for milliseconds with the kernel provably
+    /// idle, which is what content-dependent DSP cost looks like: denormals in a
+    /// decaying tail, a limiter's look-ahead window doing more work on one
+    /// envelope shape than another. If the spike still appears with no audio
+    /// playing, the content hypothesis is dead and the cost is structural.
+    ///
+    /// This is a DIAGNOSTIC mode, never a passing run: the harness's own rule is
+    /// that zero xruns means nothing without audio, and that rule is not relaxed
+    /// so much as declared inapplicable — the verdict is printed as
+    /// CONTROL rather than PASS.
+    silence: bool,
     report_path: Option<String>,
 }
 
 fn parse_args() -> Args {
-    let mut args = Args { minutes: 60, backend: None, tracks_dir: "tracks".to_string(), report_path: None };
+    let mut args = Args { minutes: 60, backend: None, tracks_dir: "tracks".to_string(), report_path: None, silence: false };
     let argv: Vec<String> = std::env::args().collect();
     let mut i = 1;
     while i < argv.len() {
@@ -37,6 +51,7 @@ fn parse_args() -> Args {
                     std::process::exit(2);
                 });
             }
+            "--silence" => args.silence = true,
             "--backend" => {
                 i += 1;
                 args.backend = Some(match argv.get(i).map(|s| s.to_lowercase()).as_deref() {
@@ -112,6 +127,22 @@ struct StallRow {
     clock_deficit_ms: f64,
     /// Why this row exists, for the report.
     trigger: &'static str,
+    /// Sum of EVERY node's time in the offending block, in ns.
+    ///
+    /// `block_ns - node_sum_ns` is the engine's non-node overhead: routing,
+    /// buffer copies, PDC input delays, mixing, and the first half of telemetry
+    /// finalisation. Per-node counters cover only each processor's `process()`
+    /// call, so a block whose nodes sum to 110 us out of 3050 us is not slow
+    /// because of DSP — it is slow somewhere no node timer looks, and a top-4
+    /// column alone cannot show that.
+    node_sum_ns: u64,
+    /// Deck playback positions, in samples, at the offending block.
+    ///
+    /// For the hypothesis that the cost is in the AUDIO, not the machine. If the
+    /// spike lands at the same playback position on a second pass over the same
+    /// track, it is the content at that point — which turns a once-per-half-hour
+    /// ghost into a fixed input that can be extracted and replayed in a unit test.
+    deck_positions: [u64; 4],
     /// The slowest graph nodes IN THE BLOCK THAT OVERRAN: (node index, ns).
     ///
     /// The engine already measures this per block and per node
@@ -299,14 +330,24 @@ async fn main() {
             conductor.mixer_manager.deck_mappings.iter().map(|(k,v)| (*k, v.sampler_id)).collect::<Vec<_>>());
         println!("DIAG: registry ids: {:?}", conductor.transfusion_manager.sample_registry.list_ids());
     }
-    println!("Loading track {} -> Deck A, track {} -> Deck B; starting playback.", track_ids[0], track_ids[1]);
     use nullherz_traits::{Command, PerformanceCommand};
-    conductor.apply_mixer_commands(vec![
+    if args.silence {
+        println!(
+            "--silence: decks loaded but NOT started. The graph runs end to end on zeroes, so \
+             any block cost that remains is structural and not the audio."
+        );
+    } else {
+        println!("Loading track {} -> Deck A, track {} -> Deck B; starting playback.", track_ids[0], track_ids[1]);
+    }
+    let mut startup: Vec<Command> = vec![
         Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id: 'A', sample_id: track_ids[0] }),
         Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id: 'B', sample_id: track_ids[1] }),
-        Command::Performance(PerformanceCommand::PlayDeck { deck_id: 'A' }),
-        Command::Performance(PerformanceCommand::PlayDeck { deck_id: 'B' }),
-    ]);
+    ];
+    if !args.silence {
+        startup.push(Command::Performance(PerformanceCommand::PlayDeck { deck_id: 'A' }));
+        startup.push(Command::Performance(PerformanceCommand::PlayDeck { deck_id: 'B' }));
+    }
+    conductor.apply_mixer_commands(startup);
 
     // Loop both decks for the whole run.
     //
@@ -489,6 +530,8 @@ async fn main() {
         // Node times belong to ONE block, so they have to be taken from the
         // frame that overran, not reconstructed afterwards.
         let mut window_top_nodes: Vec<(u32, u64)> = Vec::new();
+        let mut window_deck_positions = [0u64; 4];
+        let mut window_node_sum = 0u64;
         while let Some(mut tel) = context.telemetry_consumer.pop() {
             last_frame_at = Instant::now();
             conductor.update_timeline(&mut tel);
@@ -510,7 +553,23 @@ async fn main() {
             if warm {
                 stats.peak_warm_ns = stats.peak_warm_ns.max(tel.process_time_ns);
             }
-            window_peak_block_ns = window_peak_block_ns.max(tel.process_time_ns);
+            if tel.process_time_ns > window_peak_block_ns {
+                window_peak_block_ns = tel.process_time_ns;
+                // Snapshot unconditionally on a new window peak: an outlier row
+                // is decided at window end, by which point this frame is gone.
+                let mut ranked: Vec<(u32, u64)> = tel
+                    .node_times_ns
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, ns)| **ns > 0)
+                    .map(|(i, ns)| (i as u32, *ns))
+                    .collect();
+                ranked.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+                ranked.truncate(4);
+                window_top_nodes = ranked;
+                window_deck_positions = tel.deck_positions;
+                window_node_sum = tel.node_times_ns.iter().sum();
+            }
             if budget_ns > 0 && tel.process_time_ns > budget_ns {
                 stats.overrun_count += 1;
                 let mut ranked: Vec<(u32, u64)> = tel
@@ -523,6 +582,8 @@ async fn main() {
                 ranked.sort_unstable_by(|a, b| b.1.cmp(&a.1));
                 ranked.truncate(4);
                 window_top_nodes = ranked;
+                window_deck_positions = tel.deck_positions;
+                window_node_sum = tel.node_times_ns.iter().sum();
                 if stats.overrun_events.len() < 64 {
                     stats.overrun_events.push((started.elapsed(), tel.process_time_ns));
                 }
@@ -583,12 +644,25 @@ async fn main() {
         // A third of a window is far above sampling jitter and far below the
         // milliseconds an underrun costs.
         let clock_slipped = warm && deficit_ms > wall_ms / 3.0;
+        // A block can be pathological without exceeding the period budget: at
+        // 256 frames the budget is 5333 us and a 3700 us block — ten times the
+        // mean — sails through. Waiting for a budget breach means only the very
+        // worst events are ever attributed, and at 64 frames that was one event
+        // in half an hour. Anything at 4x the run's own mean is worth a row.
+        let mean_so_far = if stats.frames > 0 { stats.sum_process_time_ns / stats.frames } else { 0 };
+        let outlier = warm
+            && mean_so_far > 0
+            && window_peak_block_ns > mean_so_far * 4
+            // Floor: early in a run the mean is tiny and everything is 4x it.
+            && window_peak_block_ns > 250_000;
         let trigger = if stats.overrun_count != overruns_at_window_start {
             Some("block over budget")
         } else if stats.xrun_count_final != xruns_at_window_start {
             Some("xrun, block within budget")
         } else if clock_slipped {
             Some("audio clock fell behind")
+        } else if outlier {
+            Some("outlier vs mean")
         } else {
             None
         };
@@ -608,6 +682,8 @@ async fn main() {
                                 clock_deficit_ms: deficit_ms,
                                 trigger,
                                 top_nodes: std::mem::take(&mut window_top_nodes),
+                                deck_positions: window_deck_positions,
+                                node_sum_ns: window_node_sum,
                             });
                         }
                     }
@@ -661,7 +737,11 @@ async fn main() {
     } else {
         0.0
     };
-    let audio_flowed = stats.peak_output_level > 1e-6 && signal_ratio > 0.90;
+    // In --silence the decks were never started, so "no audio" is the intended
+    // condition rather than a failure. The rule is not relaxed, it is declared
+    // inapplicable: the verdict prints CONTROL, never PASS, so nobody can cite a
+    // silence run as evidence the console survives playback.
+    let audio_flowed = args.silence || (stats.peak_output_level > 1e-6 && signal_ratio > 0.90);
 
     // Grade on the BACKEND's counter. `telemetry.xrun_count` is plumbed from an
     // atomic in audio-core that nothing ever increments, so the old criterion
@@ -724,6 +804,8 @@ async fn main() {
     }
     if stats.frames == 0 {
         eprintln!("FATAL: zero telemetry frames received — the audio thread never ran.");
+    } else if args.silence {
+        // Expected: this is the control.
     } else if stats.peak_output_level <= 1e-6 {
         eprintln!(
             "FATAL: the graph was SILENT for the entire run (peak {:.2e}). Zero xruns \
@@ -785,7 +867,7 @@ async fn main() {
         let q_minor = stats.quiet_counters.minor_faults as f64 / w as f64;
         let q_invol = stats.quiet_counters.involuntary_switches as f64 / w as f64;
         let mut t = format!(
-            "\n## Stall attribution\n\nAudio-thread kernel counters over the ~16 ms window containing each overrun, sampled from the monitor thread (nothing is added to the audio thread). Read against the quiet baseline, not against zero: the sampler itself costs a couple of minor faults per window.\n\n| Baseline (per quiet window, n={}) | minor faults | major | involuntary sw | voluntary sw |\n| :-- | --: | --: | --: | --: |\n| mean | {:.2} | {:.3} | {:.3} | {:.1} |\n\n| Elapsed (s) | trigger | Block (µs) | clock lost (ms) | minor flt | major | invol sw | reads as | slowest nodes (µs) |\n| --: | :-- | --: | --: | --: | --: | --: | :-- | :-- |\n",
+            "\n## Stall attribution\n\nAudio-thread kernel counters over the ~16 ms window containing each overrun, sampled from the monitor thread (nothing is added to the audio thread). Read against the quiet baseline, not against zero: the sampler itself costs a couple of minor faults per window.\n\n| Baseline (per quiet window, n={}) | minor faults | major | involuntary sw | voluntary sw |\n| :-- | --: | --: | --: | --: |\n| mean | {:.2} | {:.3} | {:.3} | {:.1} |\n\n| Elapsed (s) | trigger | Block (µs) | all nodes (µs) | NOT in nodes (µs) | clock lost (ms) | minor flt | invol sw | reads as | slowest nodes (µs) | deck A pos |\n| --: | :-- | --: | --: | --: | --: | --: | --: | :-- | :-- | --: |\n",
             w,
             q_minor,
             stats.quiet_counters.major_faults as f64 / w as f64,
@@ -813,16 +895,23 @@ async fn main() {
                 (_, true, false, _) => "PAGE FAULTS — memory architecture",
                 (_, false, true, _) => "PREEMPTION — scheduler / IRQ",
                 (_, false, false, true) => "OUTSIDE THE CALLBACK — wakeup latency, not DSP",
+                // Nodes accounting for under a third of the block means the cost
+                // is not DSP at all: it is routing, buffer handling, PDC input
+                // delays, mixing or telemetry — none of which a node timer covers.
+                (_, false, false, false) if row.node_sum_ns * 3 < block_ns => {
+                    "NOT IN ANY NODE — engine overhead outside DSP"
+                }
                 (_, false, false, false) => "unexplained — profile our code",
             };
             t.push_str(&format!(
-                "| {:.1} | {} | {} | {:.2} | {} | {} | {} | {} | {} |\n",
+                "| {:.1} | {} | {} | {} | **{}** | {:.2} | {} | {} | {} | {} | {} |\n",
                 at.as_secs_f64(),
                 row.trigger,
                 block_ns / 1000,
+                row.node_sum_ns / 1000,
+                block_ns.saturating_sub(row.node_sum_ns) / 1000,
                 row.clock_deficit_ms,
                 d.minor_faults,
-                d.major_faults,
                 d.involuntary_switches,
                 reads,
                 if row.top_nodes.is_empty() {
@@ -834,6 +923,7 @@ async fn main() {
                         .collect::<Vec<_>>()
                         .join(", ")
                 },
+                row.deck_positions[0],
             ));
         }
         t
@@ -860,6 +950,7 @@ async fn main() {
         | Period budget | {} µs |\n\
         | Audio thread CPUs (kernel-reported) | {} |\n\
         | Kernel CPU isolation (isolcpus/nohz_full) | {} |\n\
+        | Denormal flushing (FTZ/DAZ) on the audio thread | {} |\n\
         | Resource leaks | {} |\n\
         | **Result** | **{}** |\n{}\n{}",
         chrono_free_timestamp(),
@@ -883,8 +974,18 @@ async fn main() {
             None => "unknown (thread never identified itself)".to_string(),
         },
         if ipc_layer::has_isolated_cpus() { "present" } else { "NONE — pinning shares the CPU with everything else" },
+        if ipc_layer::ftz_daz_was_lost() {
+            "LOST DURING THE RUN — denormal arithmetic ran unflushed; this alone explains \
+             multi-millisecond blocks on decaying audio"
+        } else {
+            "held for the whole run"
+        },
         stats.resource_leaks_final,
-        if pass { "PASS" } else { "FAIL" },
+        match (pass, args.silence) {
+            (true, true) => "CONTROL (no audio — diagnostic only, never a pass)",
+            (true, false) => "PASS",
+            (false, _) => "FAIL",
+        },
         attribution,
         {
             let mut s = String::new();
@@ -928,7 +1029,11 @@ async fn main() {
     }
     println!(
         "\n=== {} — {} xrun(s) in {:.1} min on {:?} (peak block {} µs / budget {} µs) ===",
-        if pass { "PASS" } else { "FAIL" },
+        match (pass, args.silence) {
+            (true, true) => "CONTROL (silence)",
+            (true, false) => "PASS",
+            (false, _) => "FAIL",
+        },
         // The backend's count, same as the verdict. Printing the engine
         // telemetry counter here produced the contradiction this whole fix is
         // about: a headline "0 xrun(s)" next to a FAIL verdict.
