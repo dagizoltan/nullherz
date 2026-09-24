@@ -14,4 +14,5 @@ pub mod player;
 pub mod composer;
 pub mod breeder;
 pub mod editor;
+pub mod store;
 pub mod account;

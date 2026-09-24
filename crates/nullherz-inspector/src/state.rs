@@ -427,6 +427,26 @@ impl Default for VizState {
     }
 }
 
+/// Sidecar store browsing and tag filtering state.
+pub struct StoreState {
+    pub active_tag_filter: Option<String>,
+    pub search_query: String,
+    #[allow(dead_code)]
+    pub selected_sidecar: Option<String>,
+    pub store_catalog: sidecar_sdk::SidecarStore,
+}
+
+impl Default for StoreState {
+    fn default() -> Self {
+        Self {
+            active_tag_filter: None,
+            search_query: String::new(),
+            selected_sidecar: None,
+            store_catalog: sidecar_sdk::SidecarStore::with_defaults(),
+        }
+    }
+}
+
 /// Topology-editor view state (cable drags, bypasses, node naming).
 pub struct TopologyViewState {
     pub active_connection_source: Option<(u32, u32)>,
