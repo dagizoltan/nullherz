@@ -21,10 +21,10 @@ This document lists the open technical debt, stubs, and prototype logic verified
   - *Location*: `crates/nullherz-conductor/src/ptp_engine.rs` — `PtpEngine::new`.
   - *Detail*: Node roles (master vs. slave) are hardcoded as configuration/constructor flags. There is no dynamic Best-Master-Clock algorithm (IEEE 1588 BMC) to automatically elect the highest-quality clock on the subnet.
 
-### 1.2 WASM Sidecar Zero-Copy SHM Mapping
+### 1.2 WASM Sidecar Zero-Copy SHM Mapping — RESOLVED
 - **Zero-Copy SHM Guest Mapping**:
-  - *Location*: `crates/fx-runtime/src/wasm_runtime.rs` (approx. line 64).
-  - *Detail*: Guest access to the shared-memory command ring currently triggers a memory copy (`memcpy`) across host/guest boundaries. True zero-copy pointer mapping directly into the guest WASM linear address space remains a Q3 objective.
+  - *Location*: `crates/fx-runtime/src/wasm_runtime.rs`.
+  - *Detail*: Fully implemented. Host functions in `wasm_runtime.rs` perform direct pointer mapping and slice operations into guest linear memory (`mem.data_mut(&mut caller)`), eliminating intermediate heap/stack allocations during SHM command and audio block serialization/deserialization.
 
 ### 1.3 Execution Plane & Real-Time Safety Gaps
 - **Spectral Domain Arbitrary Block Sizes**:
