@@ -1,5 +1,6 @@
 pub mod resource_limiter;
 pub mod protocol;
+#[cfg(feature = "wasm")]
 pub mod wasm_runtime;
 
 use std::process::{Command, Child};
