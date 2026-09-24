@@ -30,6 +30,42 @@ pub struct CloudPeerSync {
 }
 
 impl CloudPeerSync {
+    /// GRAFT a peer into the active Gossipsub mesh link set.
+    pub fn graft(&self, peer: &str) -> bool {
+        let addr: std::net::SocketAddr = match peer.parse() {
+            Ok(a) => a,
+            Err(_) => return false,
+        };
+        if let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(200)) {
+            let _ = stream.write_all(b"GRAFT\n");
+            let mut reader = BufReader::new(&stream);
+            let mut line = String::new();
+            if reader.read_line(&mut line).is_ok() && line.trim() == "GRAFT_ACK" {
+                self.mesh_links.lock().insert(peer.to_string());
+                return true;
+            }
+        }
+        false
+    }
+
+    /// PRUNE a peer from the active Gossipsub mesh link set.
+    pub fn prune(&self, peer: &str) -> bool {
+        let addr: std::net::SocketAddr = match peer.parse() {
+            Ok(a) => a,
+            Err(_) => return false,
+        };
+        if let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(200)) {
+            let _ = stream.write_all(b"PRUNE\n");
+            let mut reader = BufReader::new(&stream);
+            let mut line = String::new();
+            if reader.read_line(&mut line).is_ok() && line.trim() == "PRUNE_ACK" {
+                self.mesh_links.lock().remove(peer);
+                return true;
+            }
+        }
+        false
+    }
+
     /// HANDSHAKE with a peer and pin its identity key (trust-on-first-use).
     /// Returns the peer's pinned public key, or None if the peer is unreachable,
     /// presents no identity, or presents a key that conflicts with the pin.
