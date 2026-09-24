@@ -511,7 +511,7 @@ impl std::fmt::Display for SchedStatus {
 pub fn rtprio_limit() -> Option<u64> {
     let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
     if unsafe { libc::getrlimit(libc::RLIMIT_RTPRIO, &mut lim) } == 0 {
-        Some(lim.rlim_cur)
+        Some(lim.rlim_cur as u64)
     } else {
         None
     }
@@ -1127,7 +1127,7 @@ pub fn memlock_limit() -> Option<u64> {
     {
         let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
         if unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut lim) } == 0 {
-            Some(lim.rlim_cur)
+            Some(lim.rlim_cur as u64)
         } else {
             None
         }

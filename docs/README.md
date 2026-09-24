@@ -25,6 +25,7 @@ Core technical specifications and engineering principles.
 - [Solution Design & Optimization](./system/SOLUTION_DESIGN_OPTIMIZATION.md)
 - [Verification & QA Strategy](./system/VERIFICATION_AND_QA_STRATEGY.md)
 - [Validation Runbook (Survival & RTL)](./system/VALIDATION_RUNBOOK.md) — procedures for the Validation Gate's blocking tests
+- [Embedded ARM & MPC Architecture](./system/EMBEDDED_ARM_MPC_ARCHITECTURE.md) — ARMv7 cross-compilation target, MPC Live 1 assembly, 32-bit type system, and touch UI
 
 ## 📊 [Current State & Health](./state/)
 Tracking of system maturity and technical debt.
