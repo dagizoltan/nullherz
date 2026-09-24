@@ -1,11 +1,16 @@
-use audio_dsp::{TransientDetector, SimdFft, AlignedBuffer};
+use audio_dsp::{
+    AlignedBuffer, BeatGridInferenceEngine, MultiFeatureOnsetDetector, MultiHypothesisTempoEstimator,
+    SimdFft,
+};
 use std::sync::Arc;
 
 pub struct AnalysisKernel {
     fft: SimdFft,
     re: AlignedBuffer,
     im: AlignedBuffer,
-    transient_detector: TransientDetector,
+    onset_detector: MultiFeatureOnsetDetector,
+    tempo_estimator: MultiHypothesisTempoEstimator,
+    grid_engine: BeatGridInferenceEngine,
     sample_rate: f32,
 }
 
@@ -16,7 +21,9 @@ impl AnalysisKernel {
             fft: SimdFft::new(fft_size),
             re: AlignedBuffer::new(fft_size),
             im: AlignedBuffer::new(fft_size),
-            transient_detector: TransientDetector::new(fft_size, 0.15),
+            onset_detector: MultiFeatureOnsetDetector::new(sample_rate),
+            tempo_estimator: MultiHypothesisTempoEstimator::new(sample_rate),
+            grid_engine: BeatGridInferenceEngine::new(sample_rate),
             sample_rate,
         }
     }
@@ -36,6 +43,9 @@ impl AnalysisKernel {
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         if sample_rate > 0.0 {
             self.sample_rate = sample_rate;
+            self.onset_detector.set_sample_rate(sample_rate);
+            self.tempo_estimator.set_sample_rate(sample_rate);
+            self.grid_engine.set_sample_rate(sample_rate);
         }
     }
 
@@ -46,12 +56,21 @@ impl AnalysisKernel {
         // fields produced below (transients, beat grid) are interpretable.
         metadata.sample_rate = self.sample_rate as u32;
 
-        // 1. Detect Transients
-        let transients = self.detect_transients(buffer);
+        // 1. Multi-feature Onset Detection & Beat-Grid Inference
+        let onsets = self.onset_detector.process_buffer(buffer);
+        let hypotheses = self.tempo_estimator.estimate_tempos(&onsets);
+        let beat_grid = self.grid_engine.infer_beat_grid(&onsets, &hypotheses, buffer.len() as u64);
+
+        metadata.bpm = beat_grid.primary_bpm;
+        metadata.beat_grid_offset = beat_grid.grid_offset_frames;
+
+        let transients: Vec<u64> = onsets.iter().map(|o| o.frame).collect();
         metadata.transients = Arc::new(transients.clone());
 
-        // 2. Detect BPM
-        metadata.bpm = self.detect_bpm_from_transients(&transients);
+        dna.rhythmic.swing_ratio = beat_grid.groove.swing_ratio;
+        if let Some(pre) = beat_grid.pre_beats.first() {
+            dna.rhythmic.pre_beat_offset_ms = pre.offset_ms;
+        }
 
         // 2b. Calculate Peaks — resolution PROPORTIONAL to track length
         // (one peak per 128-sample window, ~345/sec at 44.1k: enough for
@@ -84,60 +103,6 @@ impl AnalysisKernel {
         (metadata, dna)
     }
 
-    fn detect_transients(&mut self, buffer: &[f32]) -> Vec<u64> {
-        let mut transients = Vec::new();
-        let fft_size = 1024;
-        let hop_size = 512;
-
-        for i in (0..buffer.len().saturating_sub(fft_size)).step_by(hop_size) {
-            self.re.fill(0.0);
-            self.im.fill(0.0);
-            let len = (buffer.len() - i).min(fft_size);
-            self.re[..len].copy_from_slice(&buffer[i..i+len]);
-
-            self.fft.process(&mut self.re, &mut self.im);
-
-            if self.transient_detector.is_transient(&self.re, &self.im) {
-                transients.push(i as u64);
-            }
-        }
-        transients
-    }
-
-    fn detect_bpm_from_transients(&self, transients: &[u64]) -> f32 {
-        if transients.len() < 4 { return 128.0; }
-
-        let mut intervals = Vec::new();
-        for i in 1..transients.len() {
-            let diff = transients[i] - transients[i-1];
-            if diff > 5000 {
-                intervals.push(diff);
-            }
-        }
-
-        if intervals.is_empty() { return 128.0; }
-
-        let mut histogram: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
-        for &interval in &intervals {
-            let bucket = (interval / 220) * 220;
-            *histogram.entry(bucket).or_default() += 1;
-        }
-
-        let best_interval = histogram.into_iter()
-            .max_by_key(|&(_, count)| count)
-            .map(|(bucket, _)| bucket)
-            .unwrap_or((self.sample_rate / 2.0) as u64);
-
-        let bpm = (self.sample_rate * 60.0) / best_interval as f32;
-        let mut final_bpm = bpm;
-        if final_bpm > 10.0 {
-            while final_bpm < 70.0 { final_bpm *= 2.0; }
-            while final_bpm > 175.0 { final_bpm /= 2.0; }
-        } else {
-            final_bpm = 120.0;
-        }
-        final_bpm
-    }
 
     fn calculate_peaks(&self, buffer: &[f32], target_width: usize) -> Vec<f32> {
         if buffer.is_empty() { return Vec::new(); }
