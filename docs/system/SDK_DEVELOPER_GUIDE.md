@@ -40,6 +40,37 @@ fn main() {
 }
 ```
 
+## Composite Sidecar Stores (`SidecarStore`)
+
+To chain an instrument sidecar with multiple insert sidecar effects without accumulating IPC block latency, use `SidecarStore`:
+
+```rust
+use sidecar_sdk::SidecarStore;
+
+let mut store = SidecarStore::new();
+
+// 1. Set Instrument Sidecar (source)
+store.set_instrument(Box::new(MyInstrument::new()));
+
+// 2. Add Insert Sidecars sequentially
+store.add_insert(Box::new(MyCompressor::new()));
+store.add_insert(Box::new(MyReverb::new()));
+
+// The store processes instrument generation and insert DSP in-place within
+// a single quantum block cycle, presenting a SINGLE IPC boundary to Nullherz!
+```
+
+## Latency Classes & Asynchronous Neural Workers
+
+Nullherz processors expose explicit latency classification (`LatencyClass`):
+- `UltraRealtime`: < 1 ms (< 48 samples at 48 kHz)
+- `Realtime`: 1–3 ms (48–144 samples)
+- `Performance`: 3–10 ms (144–480 samples)
+- `Musical`: 10–30 ms (480–1440 samples)
+- `Offline`: > 30 ms
+
+For long-context or heavy neural models, integrate using `NeuralWorkerBridge`. The bridge streams audio frames to an off-thread neural worker via `ShmRingBuffer` and non-blockingly polls parameter updates (`NeuralControlMessage`), ensuring neural inference never blocks the real-time audio thread.
+
 ## DNA Transfusion Kernels
 
 The SDK provides `DnaKernel` utilities to assist with genetic audio processing:
