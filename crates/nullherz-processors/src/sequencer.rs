@@ -324,10 +324,12 @@ mod tests {
         assert_eq!(new_seq.track_targets[1], 71);
     }
 
+    #[allow(clippy::disallowed_types)]
     struct CaptureHost {
         events: std::sync::Mutex<Vec<(u64, u64, u32, f32)>>, // (ts, target, param, value)
     }
     impl nullherz_traits::Host for CaptureHost {
+        #[allow(clippy::disallowed_methods)]
         fn push_command(&self, timestamp_samples: u64, command: nullherz_traits::Command) {
             if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { target_id, param_id, value, .. }) = command {
                 self.events.lock().unwrap().push((timestamp_samples, target_id, param_id, value));
@@ -361,6 +363,7 @@ mod tests {
         let mut outputs: [&mut [f32]; 1] = [out_slice];
         seq.process(&[], &mut outputs, &mut ctx);
 
+        #[allow(clippy::disallowed_methods)]
         let events = host.events.lock().unwrap();
         let (ts, _, param, _) = *events
             .iter()
