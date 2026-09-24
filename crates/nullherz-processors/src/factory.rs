@@ -16,6 +16,8 @@ use crate::transfusion::*;
 use crate::keysync::*;
 use crate::limiter::*;
 use crate::streaming_sampler::*;
+use crate::neural_saturator::*;
+use crate::neural_filter::*;
 
 /// Identity pass-through, used to hold an insert slot open.
 ///
@@ -298,4 +300,22 @@ impl ProcessorFactory for StreamingSamplerFactory {
     }
     fn name(&self) -> &'static str { "StreamingSampler" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::STREAMING_SAMPLER }
+}
+
+pub struct NeuralSaturatorFactory;
+impl ProcessorFactory for NeuralSaturatorFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(NeuralSaturatorProcessor::new(node_idx as u64)))
+    }
+    fn name(&self) -> &'static str { "NeuralSaturator" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::NEURAL_SATURATOR }
+}
+
+pub struct NeuralFilterFactory;
+impl ProcessorFactory for NeuralFilterFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(NeuralFilterProcessor::new(node_idx as u64)))
+    }
+    fn name(&self) -> &'static str { "NeuralFilter" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::NEURAL_FILTER }
 }

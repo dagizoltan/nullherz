@@ -50,6 +50,8 @@ impl ProcessorRegistry {
         self.register_factory(Box::new(LimiterFactory));
         self.register_factory(Box::new(StreamingSamplerFactory));
         self.register_factory(Box::new(DelayFactory));
+        self.register_factory(Box::new(NeuralSaturatorFactory));
+        self.register_factory(Box::new(NeuralFilterFactory));
     }
 
     pub fn register_factory(&mut self, factory: Box<dyn ProcessorFactory>) {
