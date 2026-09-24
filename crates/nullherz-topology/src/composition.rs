@@ -228,6 +228,23 @@ pub enum CompositionNode {
     },
 }
 
+impl std::fmt::Debug for CompositionNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CompositionNode::Processor(_) => write!(f, "CompositionNode::Processor"),
+            CompositionNode::NestedComposition(_) => write!(f, "CompositionNode::NestedComposition"),
+            CompositionNode::Analyzer { name, output_port } => f.debug_struct("CompositionNode::Analyzer")
+                .field("name", name)
+                .field("output_port", output_port)
+                .finish(),
+            CompositionNode::NeuralController { name, input_port } => f.debug_struct("CompositionNode::NeuralController")
+                .field("name", name)
+                .field("input_port", input_port)
+                .finish(),
+        }
+    }
+}
+
 impl CompositionNode {
     pub fn latency_samples(&self) -> usize {
         match self {
@@ -240,13 +257,27 @@ impl CompositionNode {
 }
 
 /// Staged transaction for atomic graph mutations.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct CompositionTransaction {
     pub transaction_id: u64,
     pub target_node_idx: u32,
     pub new_composition_name: String,
     pub commit_boundary: EventKind,
     pub status: ModelLifecycle,
+    pub replacement_node: Option<Box<CompositionNode>>,
+}
+
+impl CompositionTransaction {
+    pub fn new(id: u64, boundary: EventKind) -> Self {
+        Self {
+            transaction_id: id,
+            target_node_idx: 0,
+            new_composition_name: String::new(),
+            commit_boundary: boundary,
+            status: ModelLifecycle::Requested,
+            replacement_node: None,
+        }
+    }
 }
 
 /// A Composition graph representation that can be linear, parallel, hybrid, mesh, or nested.
@@ -321,6 +352,8 @@ pub struct CompositionInsert {
     scratch_a: Vec<Vec<f32>>,
     scratch_b: Vec<Vec<f32>>,
     pub feature_bus: AnalysisBus,
+    pub pending_transactions: Vec<CompositionTransaction>,
+    pub control_automation: HashMap<u32, (f32, f32)>, // param_id -> (current_val, target_val)
 }
 
 impl CompositionInsert {
@@ -335,7 +368,18 @@ impl CompositionInsert {
             scratch_a,
             scratch_b,
             feature_bus: AnalysisBus::new(),
+            pending_transactions: Vec::new(),
+            control_automation: HashMap::new(),
         }
+    }
+
+    pub fn set_automation_target(&mut self, param_id: u32, target: f32) {
+        let entry = self.control_automation.entry(param_id).or_insert((0.0, target));
+        entry.1 = target;
+    }
+
+    pub fn submit_transaction(&mut self, tx: CompositionTransaction) {
+        self.pending_transactions.push(tx);
     }
 
     pub fn set_feature(&mut self, port: SemanticPort, value: f32) {
@@ -344,6 +388,84 @@ impl CompositionInsert {
 
     pub fn get_feature(&self, port: &SemanticPort) -> f32 {
         self.feature_bus.get_feature(port)
+    }
+
+    pub fn process_pending_transactions(&mut self, ctx: &ProcessContext, block_len: usize) {
+        if self.pending_transactions.is_empty() {
+            return;
+        }
+
+        let mut i = 0;
+        while i < self.pending_transactions.len() {
+            if Self::evaluate_commit_boundary(&self.pending_transactions[i], ctx, block_len) {
+                let mut tx = self.pending_transactions.remove(i);
+                tx.status = ModelLifecycle::Ready;
+
+                if !tx.new_composition_name.is_empty() {
+                    self.composition.contract.name = tx.new_composition_name;
+                }
+
+                if let Some(new_node) = tx.replacement_node.take() {
+                    let idx = tx.target_node_idx as usize;
+                    if idx < self.composition.nodes.len() {
+                        self.composition.nodes[idx] = *new_node;
+                    } else {
+                        self.composition.add_node(*new_node);
+                    }
+                }
+
+                let timestamp = ctx.transport.map(|t| t.absolute_samples).unwrap_or(0) + ctx.sub_block_offset as u64;
+                self.feature_bus.emit_event(Event {
+                    kind: EventKind::SceneChange(self.composition.contract.name.clone()),
+                    timestamp_samples: timestamp,
+                    payload: [0; 16],
+                });
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    fn evaluate_commit_boundary(tx: &CompositionTransaction, ctx: &ProcessContext, block_len: usize) -> bool {
+        let Some(t) = ctx.transport else {
+            return true;
+        };
+
+        if !t.is_playing {
+            return true;
+        }
+
+        match &tx.commit_boundary {
+            EventKind::Beat(n) => {
+                let interval = (*n as f64).max(1.0);
+                Self::is_boundary_crossed(t, block_len, interval)
+            }
+            EventKind::Bar(n) => {
+                let interval = ((*n as f64) * 4.0).max(4.0);
+                Self::is_boundary_crossed(t, block_len, interval)
+            }
+            EventKind::Phrase(n) => {
+                let interval = ((*n as f64) * 16.0).max(16.0);
+                Self::is_boundary_crossed(t, block_len, interval)
+            }
+            EventKind::TrackStart(s) | EventKind::TrackEnd(s) => {
+                let start_s = t.absolute_samples;
+                let end_s = start_s + block_len as u64;
+                *s >= start_s && *s <= end_s
+            }
+            _ => true,
+        }
+    }
+
+    fn is_boundary_crossed(t: &nullherz_traits::Transport, block_len: usize, interval_beats: f64) -> bool {
+        let bpm = if t.bpm > 0.0 { t.bpm as f64 } else { 120.0 };
+        let sr = if t.sample_rate > 0.0 { t.sample_rate as f64 } else { 48000.0 };
+        let block_beat_delta = (block_len as f64 / sr) * (bpm / 60.0);
+        let prev_beat = t.beat_position;
+        let next_beat = prev_beat + block_beat_delta;
+
+        (prev_beat / interval_beats).floor() != (next_beat / interval_beats).floor()
+            || (prev_beat % interval_beats) < block_beat_delta
     }
 }
 
@@ -370,6 +492,36 @@ impl SignalProcessor for CompositionInsert {
                 self.scratch_a[ch][..block_len].fill(0.0);
             }
         }
+
+        // Automatically populate feature bus from active transport metrics
+        if let Some(t) = ctx.transport {
+            self.feature_bus.publish_feature(SemanticPort::Tempo, t.bpm);
+            self.feature_bus.publish_feature(SemanticPort::BeatPhase, (t.beat_position % 1.0) as f32);
+            self.feature_bus.publish_feature(SemanticPort::BarPhase, ((t.beat_position / 4.0) % 1.0) as f32);
+            self.feature_bus.publish_feature(SemanticPort::PhrasePhase, ((t.beat_position / 16.0) % 1.0) as f32);
+        }
+
+        // Sub-block control-rate parameter smoothing (~100 Hz / sub-block updates)
+        let alpha = 0.15f32; // Smoothing coefficient for sub-block control updates
+        for (param_id, (current, target)) in self.control_automation.iter_mut() {
+            if (*current - *target).abs() > 1e-5 {
+                let smoothed = *current + alpha * (*target - *current);
+                *current = smoothed;
+                let cmd = nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                    target_id: 0,
+                    param_id: *param_id,
+                    value: smoothed,
+                    ramp_duration_samples: 0,
+                });
+                for node in &mut self.composition.nodes {
+                    if let CompositionNode::Processor(p) = node {
+                        p.apply_command(&cmd);
+                    }
+                }
+            }
+        }
+
+        self.process_pending_transactions(ctx, block_len);
 
         let mut current_is_a = true;
 
@@ -594,6 +746,100 @@ mod composition_tests {
 
         // Input = 1.0, Neural = 2.0, Shadow mix = 0.5 -> Output = 1.0*0.5 + 2.0*0.5 = 1.5
         assert!((out_l[0] - 1.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_transaction_commit_boundary_execution() {
+        let comp = Composition::new("Base Composition", CompositionType::Linear);
+        let mut insert = CompositionInsert::new(comp);
+
+        let mut tx = CompositionTransaction::new(101, EventKind::Beat(1));
+        tx.new_composition_name = "New Swapped Composition".to_string();
+        insert.submit_transaction(tx);
+
+        let transport = nullherz_traits::Transport {
+            bpm: 120.0,
+            beat_position: 0.99,
+            is_playing: true,
+            sample_rate: 48000.0,
+            absolute_samples: 0,
+            system_time_ns: 0,
+            device_time_ns: 0,
+        };
+
+        let mut ctx = ProcessContext {
+            transport: Some(&transport),
+            host: None,
+            sub_block_offset: 0,
+            is_last_sub_block: true,
+        };
+
+        let in_l = vec![0.0f32; 256];
+        let mut out_l = vec![0.0f32; 256];
+
+        insert.process(&[&in_l], &mut [&mut out_l], &mut ctx);
+
+        // Position crossed beat boundary -> transaction committed!
+        assert_eq!(insert.composition.contract.name, "New Swapped Composition");
+        assert!(insert.pending_transactions.is_empty());
+
+        let events = insert.feature_bus.drain_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, EventKind::SceneChange("New Swapped Composition".to_string()));
+    }
+
+    #[test]
+    fn test_transport_feature_bus_auto_population() {
+        let comp = Composition::new("Transport Comp", CompositionType::Linear);
+        let mut insert = CompositionInsert::new(comp);
+
+        let transport = nullherz_traits::Transport {
+            bpm: 128.0,
+            beat_position: 2.5,
+            is_playing: true,
+            sample_rate: 48000.0,
+            absolute_samples: 0,
+            system_time_ns: 0,
+            device_time_ns: 0,
+        };
+
+        let mut ctx = ProcessContext {
+            transport: Some(&transport),
+            host: None,
+            sub_block_offset: 0,
+            is_last_sub_block: true,
+        };
+
+        let in_l = vec![0.0f32; 64];
+        let mut out_l = vec![0.0f32; 64];
+
+        insert.process(&[&in_l], &mut [&mut out_l], &mut ctx);
+
+        assert_eq!(insert.get_feature(&SemanticPort::Tempo), 128.0);
+        assert!((insert.get_feature(&SemanticPort::BeatPhase) - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_control_automation_smoothing() {
+        let comp = Composition::new("Automated Comp", CompositionType::Linear);
+        let mut insert = CompositionInsert::new(comp);
+
+        insert.set_automation_target(1, 1.0);
+
+        let mut ctx = ProcessContext {
+            transport: None,
+            host: None,
+            sub_block_offset: 0,
+            is_last_sub_block: true,
+        };
+
+        let in_l = vec![0.0f32; 64];
+        let mut out_l = vec![0.0f32; 64];
+
+        insert.process(&[&in_l], &mut [&mut out_l], &mut ctx);
+
+        let current_val = insert.control_automation.get(&1).unwrap().0;
+        assert!(current_val > 0.0 && current_val < 1.0);
     }
 
     #[test]
