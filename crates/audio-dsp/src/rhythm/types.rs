@@ -26,6 +26,8 @@ pub struct OnsetCandidate {
     pub strength: f32,
     pub band_energy: BandEnergy,
     pub spectral_flux: f32,
+    pub low_freq_flux: f32,
+    pub high_freq_flux: f32,
     pub complex_diff: f32,
     pub phase_deviation: f32,
     pub confidence: f32,

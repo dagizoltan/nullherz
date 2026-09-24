@@ -36,11 +36,11 @@ impl BeatGridInferenceEngine {
             return BeatGrid::default();
         }
 
-        // 1. Phase alignment via Viterbi / Dynamic Programming over onset candidates
+        // 1. Coarse phase search via candidate optimization over onsets
         let mut best_phase_offset = 0.0f64;
         let mut max_evidence = -1.0f32;
 
-        let search_steps = 100;
+        let search_steps = 120;
         for s in 0..search_steps {
             let phase_candidate = (s as f64 / search_steps as f64) * samples_per_beat;
             let mut evidence = 0.0f32;
@@ -62,6 +62,30 @@ impl BeatGridInferenceEngine {
                 max_evidence = evidence;
                 best_phase_offset = phase_candidate;
             }
+        }
+
+        // Fine-grained center-of-gravity phase refinement around coarse estimate
+        let window_samples = samples_per_beat * 0.05;
+        let mut center_sum = 0.0f64;
+        let mut weight_sum = 0.0f64;
+
+        for o in onsets {
+            let diff = (o.frame as f64 - best_phase_offset).rem_euclid(samples_per_beat);
+            let offset = if diff > samples_per_beat * 0.5 {
+                diff - samples_per_beat
+            } else {
+                diff
+            };
+
+            if offset.abs() <= window_samples {
+                let w = (o.strength * (1.0 + o.low_freq_flux * 2.0)) as f64;
+                center_sum += offset * w;
+                weight_sum += w;
+            }
+        }
+
+        if weight_sum > 1e-6 {
+            best_phase_offset = (best_phase_offset + (center_sum / weight_sum)).rem_euclid(samples_per_beat);
         }
 
         let grid_offset_frames = best_phase_offset.round() as u64;

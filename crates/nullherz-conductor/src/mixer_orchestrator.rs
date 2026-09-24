@@ -133,7 +133,7 @@ fn apply_pitch_slot(
     transport_bpm: f32,
     out: &mut Vec<Command>,
 ) {
-    let Some(nodes) = mixer_manager.deck_mappings.get(&deck_id) else { return };
+    let Some(nodes) = mixer_manager.get_deck_nodes(deck_id) else { return };
     let (needs_vocoder, semitones) = pitch_slot_state(deck_id, mixer_manager, lib, transport_bpm);
 
     out.push(Command::Topology(nullherz_traits::TopologyCommand::SwapProcessor {
@@ -175,7 +175,7 @@ fn realign_key_latched_decks(
         if Some(*deck_id) == except {
             continue;
         }
-        let Some(nodes) = mixer_manager.deck_mappings.get(deck_id) else { continue };
+        let Some(nodes) = mixer_manager.get_deck_nodes(*deck_id) else { continue };
         let track_key = mixer_manager
             .deck_samples
             .get(deck_id)
@@ -196,7 +196,7 @@ impl MixerOrchestrator {
         let mut translated = Vec::new();
         match cmd {
             Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id, sample_id }) => {
-                if let Some(nodes) = mixer_manager.deck_mappings.get(deck_id) {
+                if let Some(nodes) = mixer_manager.get_deck_nodes(*deck_id) {
                     translated.push(Command::Resource(nullherz_traits::ResourceCommand::AddSourceFromRegistry {
                         granular_node_idx: nodes.sampler_id,
                         sample_id: *sample_id,
@@ -352,7 +352,7 @@ impl MixerOrchestrator {
                         103 => 'D',
                         _ => 'A',
                     };
-                    if let Some(nodes) = mixer_manager.deck_mappings.get(&deck_id) {
+                    if let Some(nodes) = mixer_manager.get_deck_nodes(deck_id) {
                         // Targets the DNA SLOT. Harmless while the slot is a
                         // bypass (it ignores params); takes effect once DNA
                         // shaping is engaged and the slot holds a real morpher.
@@ -366,7 +366,7 @@ impl MixerOrchestrator {
                 }
             }
             Command::Mixer(MixerCommand::SetDeckParam { deck_id, param_type, value }) => {
-                if let Some(nodes) = mixer_manager.deck_mappings.get(deck_id) {
+                if let Some(nodes) = mixer_manager.get_deck_nodes(*deck_id) {
                     match param_type {
                         DeckParamType::Gain => {
                             translated.push(Command::Mixer(MixerCommand::SetParam {
@@ -451,7 +451,7 @@ impl MixerOrchestrator {
             // engine agree with it immediately, so pressing SYNC or KEY acts on
             // the track already on the deck instead of only on the next load.
             Command::Performance(PerformanceCommand::SetDeckSync { deck_id, enabled }) => {
-                if let Some(nodes) = mixer_manager.deck_mappings.get(deck_id) {
+                if let Some(nodes) = mixer_manager.get_deck_nodes(*deck_id) {
                     translated.push(Command::Mixer(MixerCommand::SetParam {
                         target_id: nodes.sampler_id as u64,
                         param_id: SAMPLER_PARAM_QUANTIZE,
@@ -483,7 +483,7 @@ impl MixerOrchestrator {
                 apply_pitch_slot(*deck_id, mixer_manager, &lib, mixer_manager.transport_bpm, &mut translated);
             }
             Command::Performance(PerformanceCommand::PlayDeck { deck_id }) => {
-                if let Some(nodes) = mixer_manager.deck_mappings.get(deck_id) {
+                if let Some(nodes) = mixer_manager.get_deck_nodes(*deck_id) {
                     // Pressing play starts the clock: with the transport
                     // stopped, beat_position freezes at 0 and the quantize
                     // phase-lock drags every voice back to the track start.
@@ -492,7 +492,7 @@ impl MixerOrchestrator {
                 }
             }
             Command::Performance(PerformanceCommand::StopDeck { deck_id }) => {
-                if let Some(nodes) = mixer_manager.deck_mappings.get(deck_id) {
+                if let Some(nodes) = mixer_manager.get_deck_nodes(*deck_id) {
                     translated.push(Command::Performance(PerformanceCommand::StopNode { node_idx: nodes.sampler_id }));
                 }
             }

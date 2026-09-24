@@ -48,6 +48,8 @@ impl MultiFeatureOnsetDetector {
             window[i] = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / self.fft_size as f32).cos());
         }
 
+        let mut mags = vec![0.0f32; num_bins];
+        let mut phases = vec![0.0f32; num_bins];
         let mut flux_series = Vec::new();
 
         for i in (0..buffer.len().saturating_sub(self.fft_size)).step_by(self.hop_size) {
@@ -61,9 +63,11 @@ impl MultiFeatureOnsetDetector {
 
             self.fft.process(&mut re, &mut im);
 
-            let mut mags = vec![0.0f32; num_bins];
-            let mut phases = vec![0.0f32; num_bins];
+            mags.fill(0.0);
+            phases.fill(0.0);
             let mut spectral_flux = 0.0f32;
+            let mut low_freq_flux_raw = 0.0f32;
+            let mut high_freq_flux_raw = 0.0f32;
             let mut complex_diff = 0.0f32;
             let mut phase_deviation = 0.0f32;
 
@@ -82,8 +86,15 @@ impl MultiFeatureOnsetDetector {
 
                 // 1. Spectral Flux (rectified positive energy increase)
                 let diff = mag - self.prev_mags[k];
+                let freq = k as f32 * bin_hz;
+
                 if diff > 0.0 {
                     spectral_flux += diff;
+                    if freq < 300.0 {
+                        low_freq_flux_raw += diff;
+                    } else if freq > 3000.0 {
+                        high_freq_flux_raw += diff;
+                    }
                 }
 
                 // 2. Complex Spectral Difference
@@ -99,7 +110,6 @@ impl MultiFeatureOnsetDetector {
                 phase_deviation += phase_diff;
 
                 // Band energy breakdown
-                let freq = k as f32 * bin_hz;
                 if freq < 100.0 {
                     sub_low += mag;
                 } else if freq < 500.0 {
@@ -123,6 +133,7 @@ impl MultiFeatureOnsetDetector {
             self.prev_mags.copy_from_slice(&mags);
             self.prev_rms = rms;
 
+            let norm_factor = spectral_flux.max(1e-6);
             let candidate = OnsetCandidate {
                 frame: i as u64,
                 time_sec: i as f64 / self.sample_rate as f64,
@@ -134,6 +145,8 @@ impl MultiFeatureOnsetDetector {
                     high,
                 },
                 spectral_flux,
+                low_freq_flux: (low_freq_flux_raw / norm_factor).clamp(0.0, 1.0),
+                high_freq_flux: (high_freq_flux_raw / norm_factor).clamp(0.0, 1.0),
                 complex_diff,
                 phase_deviation: phase_deviation / num_bins as f32,
                 confidence: (combined_strength * 2.0).clamp(0.0, 1.0),

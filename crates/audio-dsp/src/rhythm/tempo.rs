@@ -41,13 +41,23 @@ impl MultiHypothesisTempoEstimator {
             ];
         }
 
-        // Calculate inter-onset intervals (IOIs)
+        // Calculate inter-onset intervals (IOIs) across time-bounded windows
+        let max_ioi_sec = (60.0 / self.min_bpm as f64) * 4.0; // up to 4 bars at min_bpm (8s)
+        let min_ioi_sec = 60.0 / self.max_bpm as f64;        // 0.272s at 220bpm
+
         let mut intervals_sec = Vec::new();
         for i in 0..onsets.len() {
-            for j in (i + 1)..(i + 12).min(onsets.len()) {
+            for j in (i + 1)..onsets.len().min(i + 32) {
                 let diff_sec = onsets[j].time_sec - onsets[i].time_sec;
-                let weight = onsets[i].strength * onsets[j].strength;
-                if diff_sec >= (60.0 / self.max_bpm as f64) && diff_sec <= (60.0 / self.min_bpm as f64) * 4.0 {
+                if diff_sec > max_ioi_sec {
+                    break;
+                }
+                if diff_sec >= min_ioi_sec {
+                    // Weight onsets by strength + low-frequency kick/bass flux preference
+                    let low_weight_i = 1.0 + onsets[i].band_energy.sub_low * 3.0 + onsets[i].low_freq_flux * 5.0;
+                    let low_weight_j = 1.0 + onsets[j].band_energy.sub_low * 3.0 + onsets[j].low_freq_flux * 5.0;
+                    let weight = onsets[i].strength * low_weight_i * onsets[j].strength * low_weight_j;
+
                     intervals_sec.push((diff_sec, weight));
                 }
             }
@@ -84,12 +94,8 @@ impl MultiHypothesisTempoEstimator {
                 }
             }
 
-            // Metrical preference weighting (slight prior for typical musical tempos 80-140 BPM)
-            let metrical_prior = 1.0 + 0.15 * (-((curr_bpm - 115.0) / 45.0).powi(2)).exp();
-            let final_score = score * metrical_prior;
-
-            bpm_scores.push((curr_bpm, final_score));
-            histogram.insert((curr_bpm * 10.0) as u32, final_score);
+            bpm_scores.push((curr_bpm, score));
+            histogram.insert((curr_bpm * 10.0) as u32, score);
 
             curr_bpm += step_bpm;
         }
@@ -98,22 +104,35 @@ impl MultiHypothesisTempoEstimator {
         bpm_scores.sort_by(|a, b| b.1.total_cmp(&a.1));
 
         let mut hypotheses = Vec::new();
-        for &(bpm, score) in &bpm_scores {
+        for &(raw_bpm, raw_score) in &bpm_scores {
             if hypotheses.len() >= 5 {
                 break;
             }
-            if score <= 0.001 {
+            if raw_score <= 0.001 {
                 continue;
             }
 
-            // Ensure hypotheses are distinct (at least 5% away from already chosen ones)
+            // Parabolic interpolation for sub-0.01 BPM accuracy
+            let bpm_key = (raw_bpm * 10.0) as u32;
+            let y1 = histogram.get(&bpm_key.saturating_sub(5)).cloned().unwrap_or(raw_score);
+            let y2 = raw_score;
+            let y3 = histogram.get(&(bpm_key + 5)).cloned().unwrap_or(raw_score);
+
+            let interpolated_bpm = if (2.0 * y2 - y1 - y3).abs() > 1e-6 {
+                let delta = 0.5 * (y1 - y3) / (y1 - 2.0 * y2 + y3);
+                raw_bpm + delta * step_bpm
+            } else {
+                raw_bpm
+            }.clamp(self.min_bpm, self.max_bpm);
+
+            // Ensure hypotheses are distinct (at least 4% away from already chosen ones)
             let is_duplicate = hypotheses.iter().any(|h: &TempoHypothesis| {
-                (h.bpm - bpm).abs() / h.bpm < 0.04
+                (h.bpm - interpolated_bpm).abs() / h.bpm < 0.04
             });
 
             if !is_duplicate {
                 // Compute phase offset for this tempo
-                let period_frames = (self.sample_rate * 60.0 / bpm) as u64;
+                let period_frames = (self.sample_rate * 60.0 / interpolated_bpm) as u64;
                 let phase_offset = if period_frames > 0 {
                     let mut phase_accum = 0u64;
                     let mut phase_count = 0u32;
@@ -131,10 +150,10 @@ impl MultiHypothesisTempoEstimator {
                 };
 
                 hypotheses.push(TempoHypothesis {
-                    bpm,
-                    confidence: 0.0, // calculated below
+                    bpm: interpolated_bpm,
+                    confidence: 0.0,
                     phase_offset_frames: phase_offset,
-                    score,
+                    score: raw_score,
                 });
             }
         }

@@ -238,6 +238,37 @@ impl MixerManager {
         commands
     }
 
+    pub fn get_deck_nodes(&self, deck_id: char) -> Option<DeckNodes> {
+        if let Some(nodes) = self.deck_mappings.get(&deck_id) {
+            return Some(nodes.clone());
+        }
+        let id_lower = deck_id.to_lowercase();
+        let sampler_id = *self.node_names.get(&format!("deck_{}_sampler", id_lower))?;
+        let gain_id = *self.node_names.get(&format!("deck_{}_gain", id_lower))?;
+        let filter_id = *self.node_names.get(&format!("deck_{}_filter", id_lower))?;
+        let isolator_id = *self.node_names.get(&format!("deck_{}_isolator", id_lower))?;
+        let pitch_slot_id = self.node_names.get(&format!("deck_{}_pitch_slot", id_lower)).copied().unwrap_or(0);
+        let dna_slot_id = self.node_names.get(&format!("deck_{}_dna_slot", id_lower)).copied().unwrap_or(0);
+        let sequencer_id = self.node_names.get(&format!("deck_{}_sequencer", id_lower)).copied().unwrap_or(0);
+        let stereo_util_id = self.node_names.get(&format!("deck_{}_stereo_util", id_lower)).copied().unwrap_or(0);
+
+        Some(DeckNodes {
+            sampler_id,
+            out_l: 0,
+            out_r: 0,
+            isolator_id,
+            gain_id,
+            filter_id,
+            pitch_slot_id,
+            dna_slot_id,
+            fx_slot_ids: Vec::new(),
+            stereo_util_id,
+            sequencer_id,
+            cue_out_l: 0,
+            cue_out_r: 0,
+        })
+    }
+
     pub fn create_dj_deck(&mut self, deck_id: char, fx_ids: &[u32], bus_assignment: char) -> Vec<Command> {
         let (commands, nodes) = dj::create_dj_deck(&self.id_allocator, deck_id, fx_ids, bus_assignment, &self.config);
         self.deck_mappings.insert(deck_id, nodes.clone());
