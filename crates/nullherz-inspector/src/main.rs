@@ -108,6 +108,7 @@ pub enum View {
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum RightTab {
     Library,
+    Store,
     Metrics,
     Notifications,
     GeneticCloud,
@@ -143,6 +144,7 @@ pub struct InspectorApp {
     pub(crate) mixer: state::MixerState,
     pub(crate) decks: state::DeckState,
     pub(crate) library: state::LibraryState,
+    pub(crate) store: state::StoreState,
     pub(crate) composer: state::ComposerState,
     pub(crate) sampler: state::SamplerState,
     pub(crate) editor: state::EditorState,
@@ -286,6 +288,7 @@ impl InspectorApp {
             mixer: Default::default(),
             decks: Default::default(),
             library: Default::default(),
+            store: Default::default(),
             composer: Default::default(),
             sampler: Default::default(),
             editor: Default::default(),
@@ -466,6 +469,7 @@ impl InspectorApp {
                 .show(ctx, |ui| {
                     let tab_info = match tab {
                         RightTab::Library => (egui_phosphor::regular::FOLDER_OPEN, "LIBRARY"),
+                        RightTab::Store => (egui_phosphor::regular::SHOPPING_BAG, "SIDECAR STORE"),
                         RightTab::GeneticCloud => (egui_phosphor::regular::CLOUD, "GENETIC CLOUD"),
                         RightTab::Notifications => (egui_phosphor::regular::BRAIN, "AI & INSIGHTS"),
                         RightTab::Metrics => (egui_phosphor::regular::CHART_BAR, "METRICS"),
@@ -495,6 +499,7 @@ impl InspectorApp {
 
                     match tab {
                         RightTab::Library => views::library::render(self, ui),
+                        RightTab::Store => views::store::render(self, ui),
                         RightTab::GeneticCloud => views::genetic_cloud::render(self, ui),
                         RightTab::Notifications => views::notifications::render(self, ui),
                         RightTab::Metrics => views::metrics::render(self, ui),
@@ -518,6 +523,7 @@ impl InspectorApp {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let tabs = [
                         (RightTab::Library, egui_phosphor::regular::FOLDER_OPEN, "LIBRARY"),
+                        (RightTab::Store, egui_phosphor::regular::SHOPPING_BAG, "STORE"),
                         (RightTab::GeneticCloud, egui_phosphor::regular::CLOUD, "GENETIC CLOUD"),
                         (RightTab::Notifications, egui_phosphor::regular::BRAIN, "AI & INSIGHTS"),
                         (RightTab::Metrics, egui_phosphor::regular::CHART_BAR, "METRICS"),

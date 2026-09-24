@@ -265,8 +265,8 @@ impl SignalProcessor for AlgorithmicDelayProcessor {
 
             // Compute delay read position with Hermite fractional interpolation
             let read_pos_f = (w_pos as f32 + buf_len as f32 - delay_samples) % buf_len as f32;
-            let i1 = read_pos_f.floor() as usize;
-            let frac = read_pos_f - i1 as f32;
+            let i1 = (read_pos_f.floor() as usize) % buf_len;
+            let frac = read_pos_f - read_pos_f.floor();
             let i0 = (i1 + buf_len - 1) % buf_len;
             let i2 = (i1 + 1) % buf_len;
             let i3 = (i1 + 2) % buf_len;
@@ -464,7 +464,9 @@ impl SignalProcessor for AlgorithmicSynthInstrument {
             self.phase_2 = (self.phase_2 + inc2).fract();
 
             for ch in 0..num_ch {
-                outputs[ch][i] = sample;
+                if i < outputs[ch].len() {
+                    outputs[ch][i] = sample;
+                }
             }
         }
     }

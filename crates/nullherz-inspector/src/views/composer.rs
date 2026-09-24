@@ -191,6 +191,17 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                                         ui.add_space(4.0);
 
+                                        // Sidecar Store instrument trigger button
+                                        if ui.button(RichText::new("+ SIDECAR").size(app.theme.type_caption).strong())
+                                            .on_hover_text("Open Sidecar Store to select instruments or inserts")
+                                            .clicked()
+                                        {
+                                            app.active_right_tab = Some(crate::RightTab::Store);
+                                            app.store.active_tag_filter = Some("instrument".to_string());
+                                        }
+
+                                        ui.add_space(2.0);
+
                                         // Sequencer routing target dropdown
                                         let current_target = app.composer.track_targets[track_idx].clone();
                                         let mut sorted_nodes = app.node_names();
@@ -495,6 +506,7 @@ mod tests {
                 playlist_queue: std::collections::VecDeque::new(),
                 ..Default::default()
             },
+            store: Default::default(),
             composer: crate::state::ComposerState {
                 ..Default::default()
             },

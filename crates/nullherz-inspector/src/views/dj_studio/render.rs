@@ -108,6 +108,14 @@ fn render_strip_meta(
             let _ = app.command_sender.send(nullherz_traits::Command::Core(
                 nullherz_traits::CoreCommand::SetMasterDeck(deck_id_label)));
         }
+
+        if ui.button(RichText::new("+ FX").size(theme.type_caption).strong())
+            .on_hover_text("Open Sidecar Store to select insert FX for this deck")
+            .clicked()
+        {
+            app.active_right_tab = Some(crate::RightTab::Store);
+            app.store.active_tag_filter = Some("insert".to_string());
+        }
     });
 
     // Char-safe truncation: byte slicing panics on a UTF-8 boundary.

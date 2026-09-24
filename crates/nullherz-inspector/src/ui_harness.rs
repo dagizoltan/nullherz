@@ -50,6 +50,7 @@ impl Harness {
             mixer: state::MixerState::default(),
             decks: state::DeckState::default(),
             library: state::LibraryState::default(),
+            store: state::StoreState::default(),
             composer: state::ComposerState::default(),
             sampler: state::SamplerState::default(),
             editor: state::EditorState::default(),
