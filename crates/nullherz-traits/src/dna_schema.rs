@@ -34,6 +34,10 @@ pub struct RhythmicDNA {
     pub syncopation_index: f32,
     /// Deviation profile from absolute grid (Early/Late bias)
     pub micro_timing: [i16; 12],
+    #[serde(default)]
+    pub swing_ratio: f32,
+    #[serde(default)]
+    pub pre_beat_offset_ms: f32,
 }
 
 impl Default for RhythmicDNA {
@@ -42,6 +46,8 @@ impl Default for RhythmicDNA {
             onset_mask: [0; 4],
             syncopation_index: 0.0,
             micro_timing: [0; 12],
+            swing_ratio: 0.50,
+            pre_beat_offset_ms: 0.0,
         }
     }
 }

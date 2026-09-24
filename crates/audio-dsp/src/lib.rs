@@ -7,8 +7,10 @@ pub mod spectral;
 pub mod util;
 pub mod simd_vec;
 pub mod dispatch;
+pub mod rhythm;
 
 pub use filters::*;
+pub use rhythm::*;
 pub use oscillators::*;
 pub use spectral::{SpectralPipeline, SpectralProcessor, SpectralWindowShape};
 pub use util::*;
