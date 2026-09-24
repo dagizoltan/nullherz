@@ -1,5 +1,7 @@
 pub mod compiler;
+pub mod presets;
 pub use compiler::GraphCompiler;
+pub use presets::GraphPresetBuilder;
 
 use nullherz_traits::{ProcessorTypeId, MAX_BUFFERS, MAX_CHANNELS, MAX_NODES};
 use serde_big_array::BigArray;

@@ -489,6 +489,169 @@ impl DnaKernel {
     }
 }
 
+/// A composite Sidecar Store that chains an instrument and multiple insert DSP processors
+/// within a single execution process loop. This guarantees that chaining multiple insert sidecars
+/// after an instrument sidecar incurs ZERO additional block latency over the IPC boundary.
+pub struct SidecarStore {
+    instrument: Option<Box<dyn AudioProcessor>>,
+    inserts: Vec<Box<dyn AudioProcessor>>,
+    scratch_buf_a: Vec<Vec<f32>>,
+    scratch_buf_b: Vec<Vec<f32>>,
+}
+
+impl Default for SidecarStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SidecarStore {
+    pub fn new() -> Self {
+        Self {
+            instrument: None,
+            inserts: Vec::new(),
+            scratch_buf_a: Vec::new(),
+            scratch_buf_b: Vec::new(),
+        }
+    }
+
+    pub fn set_instrument(&mut self, instrument: Box<dyn AudioProcessor>) {
+        self.instrument = Some(instrument);
+    }
+
+    pub fn add_insert(&mut self, insert: Box<dyn AudioProcessor>) {
+        self.inserts.push(insert);
+    }
+
+    pub fn len(&self) -> usize {
+        (if self.instrument.is_some() { 1 } else { 0 }) + self.inserts.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.instrument.is_none() && self.inserts.is_empty()
+    }
+
+    fn ensure_scratch_buffers(&mut self, num_channels: usize, block_len: usize) {
+        if self.scratch_buf_a.len() < num_channels {
+            self.scratch_buf_a.resize(num_channels, vec![0.0; block_len]);
+        }
+        if self.scratch_buf_b.len() < num_channels {
+            self.scratch_buf_b.resize(num_channels, vec![0.0; block_len]);
+        }
+        for buf in self.scratch_buf_a.iter_mut() {
+            if buf.len() < block_len {
+                buf.resize(block_len, 0.0);
+            }
+        }
+        for buf in self.scratch_buf_b.iter_mut() {
+            if buf.len() < block_len {
+                buf.resize(block_len, 0.0);
+            }
+        }
+    }
+}
+
+impl nullherz_traits::SignalProcessor for SidecarStore {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], context: &mut ProcessContext) {
+        let num_channels = outputs.len().min(16);
+        if num_channels == 0 { return; }
+        let block_len = if !outputs.is_empty() { outputs[0].len() } else if !inputs.is_empty() { inputs[0].len() } else { 0 };
+        if block_len == 0 { return; }
+
+        self.ensure_scratch_buffers(num_channels, block_len);
+
+        // Stage 1: Generate or copy initial audio
+        if let Some(inst) = &mut self.instrument {
+            let mut out_slices: Vec<&mut [f32]> = self.scratch_buf_a.iter_mut().take(num_channels).map(|v| &mut v[..block_len]).collect();
+            inst.process(inputs, &mut out_slices, context);
+        } else {
+            for i in 0..num_channels {
+                if i < inputs.len() {
+                    let len = inputs[i].len().min(block_len);
+                    self.scratch_buf_a[i][..len].copy_from_slice(&inputs[i][..len]);
+                    if len < block_len {
+                        self.scratch_buf_a[i][len..block_len].fill(0.0);
+                    }
+                } else {
+                    self.scratch_buf_a[i][..block_len].fill(0.0);
+                }
+            }
+        }
+
+        // Stage 2: Process through insert chain in-place
+        let mut ping_pong = true; // true = A holds current audio, false = B holds current audio
+        for insert in &mut self.inserts {
+            if ping_pong {
+                let in_slices: Vec<&[f32]> = self.scratch_buf_a.iter().take(num_channels).map(|v| &v[..block_len]).collect();
+                let mut out_slices: Vec<&mut [f32]> = self.scratch_buf_b.iter_mut().take(num_channels).map(|v| &mut v[..block_len]).collect();
+                insert.process(&in_slices, &mut out_slices, context);
+            } else {
+                let in_slices: Vec<&[f32]> = self.scratch_buf_b.iter().take(num_channels).map(|v| &v[..block_len]).collect();
+                let mut out_slices: Vec<&mut [f32]> = self.scratch_buf_a.iter_mut().take(num_channels).map(|v| &mut v[..block_len]).collect();
+                insert.process(&in_slices, &mut out_slices, context);
+            }
+            ping_pong = !ping_pong;
+        }
+
+        // Stage 3: Copy final scratch buffer into outputs
+        let final_buf = if ping_pong { &self.scratch_buf_a } else { &self.scratch_buf_b };
+        for i in 0..num_channels {
+            outputs[i][..block_len].copy_from_slice(&final_buf[i][..block_len]);
+        }
+    }
+
+    fn setup(&mut self, config: nullherz_traits::AudioConfig) {
+        if let Some(inst) = &mut self.instrument {
+            inst.setup(config);
+        }
+        for insert in &mut self.inserts {
+            insert.setup(config);
+        }
+    }
+
+    fn reset(&mut self) {
+        if let Some(inst) = &mut self.instrument {
+            inst.reset();
+        }
+        for insert in &mut self.inserts {
+            insert.reset();
+        }
+    }
+
+    fn latency_samples(&self) -> usize {
+        let inst_lat = self.instrument.as_ref().map(|i| i.latency_samples()).unwrap_or(0);
+        let insert_lat: usize = self.inserts.iter().map(|i| i.latency_samples()).sum();
+        inst_lat + insert_lat
+    }
+}
+
+impl nullherz_traits::MidiResponder for SidecarStore {
+    fn apply_midi(&mut self, event: nullherz_traits::MidiEvent, context: Option<&ProcessContext>) {
+        if let Some(inst) = &mut self.instrument {
+            inst.apply_midi(event, context);
+        }
+        for insert in &mut self.inserts {
+            insert.apply_midi(event, context);
+        }
+    }
+}
+
+impl nullherz_traits::SnapshotProvider for SidecarStore {}
+
+impl AudioProcessor for SidecarStore {
+    fn apply_command(&mut self, command: &nullherz_traits::ProcessorCommand) {
+        if let Some(inst) = &mut self.instrument {
+            inst.apply_command(command);
+        }
+        for insert in &mut self.inserts {
+            insert.apply_command(command);
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
 /// Example of how to handle Opaque Envelope extensions in a Sidecar.
 pub fn handle_extension(processor: &mut dyn AudioProcessor, envelope: &nullherz_traits::OpaqueEnvelope) {
     // Domain 0x53444B31 is "SDK1"
@@ -503,7 +666,7 @@ pub fn handle_extension(processor: &mut dyn AudioProcessor, envelope: &nullherz_
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nullherz_traits::{Command, CoreCommand, OpaqueEnvelope, TimestampedCommand};
+    use nullherz_traits::{Command, CoreCommand, OpaqueEnvelope, TimestampedCommand, SignalProcessor};
     use std::alloc::Layout;
 
     /// Heap-backed stand-in for shared memory: same layout, no /dev/shm.
@@ -707,5 +870,28 @@ mod tests {
             seen.load(std::sync::atomic::Ordering::SeqCst), 1,
             "Extension envelope must be delivered to the registered handler with its opcode"
         );
+    }
+
+    #[test]
+    fn test_sidecar_store_instrument_and_inserts_chained() {
+        let mut store = SidecarStore::new();
+        // Instrument: Gain x2
+        store.set_instrument(Box::new(TestGain { gain: 2.0, extension_seen: false }));
+        // Insert 1: Gain x3
+        store.add_insert(Box::new(TestGain { gain: 3.0, extension_seen: false }));
+
+        let in_data = vec![0.1f32; 128];
+        let mut out_data = vec![0.0f32; 128];
+        let mut ctx = ProcessContext {
+            transport: None,
+            host: None,
+            sub_block_offset: 0,
+            is_last_sub_block: true,
+        };
+
+        store.process(&[&in_data], &mut [&mut out_data], &mut ctx);
+
+        // Expect 0.1 * 2.0 * 3.0 = 0.6
+        assert!((out_data[0] - 0.6).abs() < 1e-5, "Store must chain instrument x2 and insert x3 to output 0.6, got {}", out_data[0]);
     }
 }
