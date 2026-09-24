@@ -58,7 +58,7 @@ This document describes *what is actually in the tree*, as opposed to the strate
 | `nullherz-ui-hal` | ~1.0k | Backend-agnostic widget/render layer: knobs, faders, VU meters with asymmetric ballistics, WGPU waveform renderer: filled TriangleStrip body, per-vertex frequency-band color (amber lows / teal mids / icy highs), asymmetric signed envelope, MIP/LOD selection with stride-downsampling (never truncation). |
 | `nullherz-gateway` | ~0.2k | WebSocket bridge (default `127.0.0.1:9001`): broadcasts JSON telemetry to any number of clients (non-blocking broadcaster pattern), accepts JSON `TimestampedCommand`s and library queries. |
 | `nullherz-bench` | ~0.2k | A `main()` stress harness (100k redb inserts + matchmaker ranking). Not Criterion — there is no `criterion` dependency anywhere in the workspace. |
-| `nullherz-backends` | ~1.1k | Audio I/O drivers: **ALSA, PipeWire, JACK, Threaded (software clock), Mock** — hot-swappable at runtime via `AudioBackendType`. |
+| `nullherz-backends` | ~1.1k | Audio I/O drivers: **ALSA, PipeWire, JACK, Threaded (software clock), Mock** — hot-swappable at runtime via `AudioBackendType`. Baremetal hardware opportunities (direct MMAP, kernel bypass, `no_std`, AF_XDP/RDMA, HugePages) are detailed in [`BAREMETAL_LATENCY_OPPORTUNITIES.md`](./BAREMETAL_LATENCY_OPPORTUNITIES.md). |
 
 ### 1.7 Sidecars (out-of-process / guest DSP)
 
