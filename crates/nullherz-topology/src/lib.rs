@@ -4,7 +4,9 @@ pub mod composition;
 pub use compiler::GraphCompiler;
 pub use composition::{
     Composition, CompositionNode, CompositionContract, CompositionInsert,
-    CompositionType, ExecutionClass, SemanticPort,
+    CompositionType, ExecutionClass, SemanticPort, SignalType, AutomationRate,
+    EventKind, Event, SpatialDomain, ModelLifecycle, ProcessingPriority, QualityBudget,
+    AnalysisBus, CompositionTransaction,
 };
 
 use nullherz_traits::{ProcessorTypeId, MAX_BUFFERS, MAX_CHANNELS, MAX_NODES};

@@ -16,6 +16,132 @@ pub enum ExecutionClass {
     Offline,   // Pre-rendering / bounce
 }
 
+/// Signal types for strongly typed graph connections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SignalType {
+    Audio,
+    Feature,
+    Control,
+    Event,
+    Spectrum,
+    Envelope,
+    Pitch,
+    BeatPhase,
+    SpatialField,
+}
+
+/// Automation update resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AutomationRate {
+    AudioRate,   // Sample rate (48 kHz)
+    ControlRate, // Frame / control rate (~100 Hz)
+    EventRate,   // Triggered on discrete musical events
+}
+
+/// Discrete musical, performance, or engine triggers.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EventKind {
+    Beat(u32),
+    Bar(u32),
+    Phrase(u32),
+    Drop,
+    Break,
+    TrackStart(u64),
+    TrackEnd(u64),
+    SceneChange(String),
+    DeckChange(char),
+    TopologyChange(u32),
+    ModelReady(String),
+}
+
+/// Timestamped event structure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Event {
+    pub kind: EventKind,
+    pub timestamp_samples: u64,
+    pub payload: [u8; 16],
+}
+
+/// Spatial signal domain representations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SpatialDomain {
+    Mono,
+    Stereo,
+    MidSide,
+    Multichannel,
+    Ambisonic,
+}
+
+/// Neural model lifecycle state machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ModelLifecycle {
+    Requested,
+    Loading,
+    Initializing,
+    Warming,
+    Benchmarking,
+    Ready,
+}
+
+/// Priority classification for resource degradation policies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum ProcessingPriority {
+    Critical = 0, // Transport, Output, Limiter (Never dropped)
+    High = 1,     // Primary channel EQs, Compressors
+    Medium = 2,   // Neural controllers, Feature analyzers
+    Low = 3,      // Shadow neural processing, diagnostics
+}
+
+/// Quality budget specification (0..100 quality scale).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct QualityBudget {
+    pub quality_level: u8, // 0..100
+    pub max_cpu_pct: f32,
+    pub max_latency_samples: usize,
+}
+
+impl Default for QualityBudget {
+    fn default() -> Self {
+        Self {
+            quality_level: 70,
+            max_cpu_pct: 10.0,
+            max_latency_samples: 256,
+        }
+    }
+}
+
+/// Global Analysis & Feature Broadcast Bus across compositions.
+#[derive(Debug, Clone, Default)]
+pub struct AnalysisBus {
+    pub features: HashMap<SemanticPort, f32>,
+    pub events: Vec<Event>,
+}
+
+impl AnalysisBus {
+    pub fn new() -> Self {
+        Self {
+            features: HashMap::new(),
+            events: Vec::new(),
+        }
+    }
+
+    pub fn publish_feature(&mut self, port: SemanticPort, value: f32) {
+        self.features.insert(port, value);
+    }
+
+    pub fn get_feature(&self, port: &SemanticPort) -> f32 {
+        self.features.get(port).copied().unwrap_or(0.0)
+    }
+
+    pub fn emit_event(&mut self, event: Event) {
+        self.events.push(event);
+    }
+
+    pub fn drain_events(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.events)
+    }
+}
+
 /// Semantic / Musical Port identifier for feature and control signal routing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SemanticPort {
@@ -62,6 +188,8 @@ pub struct CompositionContract {
     pub output_channels: usize,
     pub latency_samples: usize,
     pub execution_class: ExecutionClass,
+    pub spatial_domain: SpatialDomain,
+    pub priority: ProcessingPriority,
     pub cpu_cost_pct: f32,
     pub requires_gpu: bool,
     pub exposed_ports: Vec<SemanticPort>,
@@ -77,6 +205,8 @@ impl Default for CompositionContract {
             output_channels: 2,
             latency_samples: 0,
             execution_class: ExecutionClass::Realtime,
+            spatial_domain: SpatialDomain::Stereo,
+            priority: ProcessingPriority::High,
             cpu_cost_pct: 1.0,
             requires_gpu: false,
             exposed_ports: vec![],
@@ -109,6 +239,16 @@ impl CompositionNode {
     }
 }
 
+/// Staged transaction for atomic graph mutations.
+#[derive(Debug, Clone)]
+pub struct CompositionTransaction {
+    pub transaction_id: u64,
+    pub target_node_idx: u32,
+    pub new_composition_name: String,
+    pub commit_boundary: EventKind,
+    pub status: ModelLifecycle,
+}
+
 /// A Composition graph representation that can be linear, parallel, hybrid, mesh, or nested.
 pub struct Composition {
     pub contract: CompositionContract,
@@ -117,6 +257,8 @@ pub struct Composition {
     pub shadow_mode_enabled: bool,
     pub shadow_mix: f32,
     pub confidence: f32,
+    pub quality_budget: QualityBudget,
+    pub random_seed: u64,
 }
 
 impl Composition {
@@ -132,6 +274,8 @@ impl Composition {
             shadow_mode_enabled: false,
             shadow_mix: 0.0,
             confidence: 1.0,
+            quality_budget: QualityBudget::default(),
+            random_seed: 42,
         }
     }
 
@@ -159,7 +303,6 @@ impl Composition {
                 if self.connections.is_empty() {
                     node_lats.iter().sum()
                 } else {
-                    // Compute max path latency across connections
                     let mut max_path = 0;
                     for &(src, dst) in &self.connections {
                         let path_lat = node_lats.get(src).copied().unwrap_or(0) + node_lats.get(dst).copied().unwrap_or(0);
@@ -177,7 +320,7 @@ pub struct CompositionInsert {
     pub composition: Composition,
     scratch_a: Vec<Vec<f32>>,
     scratch_b: Vec<Vec<f32>>,
-    feature_bus: HashMap<SemanticPort, f32>,
+    pub feature_bus: AnalysisBus,
 }
 
 impl CompositionInsert {
@@ -191,16 +334,16 @@ impl CompositionInsert {
             composition,
             scratch_a,
             scratch_b,
-            feature_bus: HashMap::new(),
+            feature_bus: AnalysisBus::new(),
         }
     }
 
     pub fn set_feature(&mut self, port: SemanticPort, value: f32) {
-        self.feature_bus.insert(port, value);
+        self.feature_bus.publish_feature(port, value);
     }
 
     pub fn get_feature(&self, port: &SemanticPort) -> f32 {
-        self.feature_bus.get(port).copied().unwrap_or(0.0)
+        self.feature_bus.get_feature(port)
     }
 }
 
@@ -282,13 +425,12 @@ impl SignalProcessor for CompositionInsert {
                     current_is_a = !current_is_a;
                 }
                 CompositionNode::Analyzer { name: _, output_port } => {
-                    // Compute RMS feature from active scratch
                     let src_scratch = if current_is_a { &self.scratch_a } else { &self.scratch_b };
                     let rms: f32 = (src_scratch[0][..block_len].iter().map(|s| s * s).sum::<f32>() / block_len as f32).sqrt();
-                    self.feature_bus.insert(output_port.clone(), rms);
+                    self.feature_bus.publish_feature(output_port.clone(), rms);
                 }
                 CompositionNode::NeuralController { name: _, input_port } => {
-                    let _val = self.feature_bus.get(input_port).copied().unwrap_or(0.0);
+                    let _val = self.feature_bus.get_feature(input_port);
                 }
             }
         }
@@ -321,7 +463,7 @@ impl MidiResponder for CompositionInsert {
         for node in &mut self.composition.nodes {
             match node {
                 CompositionNode::Processor(p) => p.apply_midi(event, ctx),
-                CompositionNode::NestedComposition(_) => {},
+                CompositionNode::NestedComposition(n) => n.apply_midi(event, ctx),
                 _ => {}
             }
         }
@@ -346,7 +488,7 @@ impl AudioProcessor for CompositionInsert {
         for node in &mut self.composition.nodes {
             match node {
                 CompositionNode::Processor(p) => p.apply_command(command),
-                CompositionNode::NestedComposition(_) => {},
+                CompositionNode::NestedComposition(n) => n.apply_command(command),
                 _ => {}
             }
         }
@@ -452,5 +594,27 @@ mod composition_tests {
 
         // Input = 1.0, Neural = 2.0, Shadow mix = 0.5 -> Output = 1.0*0.5 + 2.0*0.5 = 1.5
         assert!((out_l[0] - 1.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_analysis_bus_publishing_and_retrieval() {
+        let mut bus = AnalysisBus::new();
+        bus.publish_feature(SemanticPort::Tempo, 128.0);
+        bus.publish_feature(SemanticPort::Key, 5.0);
+
+        assert_eq!(bus.get_feature(&SemanticPort::Tempo), 128.0);
+        assert_eq!(bus.get_feature(&SemanticPort::Key), 5.0);
+        assert_eq!(bus.get_feature(&SemanticPort::Peak), 0.0);
+
+        bus.emit_event(Event {
+            kind: EventKind::Drop,
+            timestamp_samples: 48000,
+            payload: [0; 16],
+        });
+
+        let events = bus.drain_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, EventKind::Drop);
+        assert!(bus.drain_events().is_empty());
     }
 }
