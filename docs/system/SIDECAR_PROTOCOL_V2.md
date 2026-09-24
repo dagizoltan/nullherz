@@ -62,6 +62,47 @@ All messages over TCP use a 4-byte Big-Endian length prefix, followed by the pay
 ## Side-Chain Input Support
 Sidecars can now request additional physical buffer assignments during registration. The `sidecar-sdk` supports multi-input mappings, allowing for sophisticated side-chain compression and modular routing configurations within external DSP processes.
 
+## SidecarStore & Composite SidecarChain Architecture
+
+To enable rich instrument synthesis and multi-insert FX chains within sidecar processes without accumulating multi-hop IPC latency, the `sidecar-sdk` includes `SidecarStore` and `SidecarChain`.
+
+### Eliminating Latency Accumulation
+Normally, routing audio through separate IPC sidecars in series introduces a 1-block quantum delay per IPC hop. `SidecarStore` provides a composite container (`SidecarChain`) that encapsulates an optional instrument sidecar followed by sequential insert sidecars in a single execution loop within the same sidecar process.
+
+```
+HOST ENGINE ---> IPC Boundary ---> [ SidecarChain Container ]
+                                     ├── Instrument (Synth / Generator)
+                                     ├── Insert 1 (Neural Saturation)
+                                     ├── Insert 2 (Neural Filter / EQ)
+                                     └── Insert 3 (Algorithmic Tape Delay)
+                 <--- IPC Boundary <--- Single Audio Return Block
+```
+
+By executing instrument generation and sequential insert DSP in-place within a single block quantum, `SidecarStore` presents a single IPC boundary to the audio host engine, maintaining deterministic <1ms real-time latency across arbitrarily deep effect chains.
+
+### Metadata Schema & Tag-Based Query System
+Every sidecar in `SidecarStore` is registered with a `SidecarDescriptor` containing searchable metadata and tags:
+
+- **ID:** Unique string identifier (e.g., `"neural-saturation"`)
+- **Name:** Human-readable label (e.g., `"Neural Saturation / Preamp"`)
+- **Type:** `SidecarType::Instrument`, `SidecarType::Insert`, `SidecarType::NeuralAnalyzer`, or `SidecarType::NeuralProcessor`
+- **Tags:** Array of string category tags (`"delay"`, `"neural"`, `"insert"`, `"real-time"`, `"instrument"`, `"eq"`, `"saturation"`, `"algorithmic"`)
+- **Description:** Summary of DSP/neural modeling behavior
+- **Latency Samples:** Algorithmic lookahead or processing delay
+
+`SidecarStore` supports fast tag filtering:
+- `store.filter_by_tag("neural")`
+- `store.filter_by_tags(&["neural", "insert", "real-time"])`
+- `store.filter_by_type(SidecarType::Insert)`
+
+### Built-in Real-Time Sidecar Library
+`SidecarStore` includes built-in real-time neural and algorithmic sidecars:
+1. **`neural-saturation`** (`NeuralProcessor` / `Insert`): TCN / Padé approximant neural saturation with matrix wave-shaping.
+2. **`neural-filter`** (`NeuralProcessor` / `Insert`): Hypernetwork dynamic filter with Padé SIMD non-linearities.
+3. **`algorithmic-delay`** (`Insert`): Low-latency tape delay with Hermite fractional interpolation, feedback, and dampening.
+4. **`algorithmic-eq`** (`Insert`): Multi-mode State-Variable EQ / Filter (low-pass, high-pass, band-pass, peak).
+5. **`algorithmic-synth`** (`Instrument`): Real-time dual-oscillator synthesizer instrument.
+
 ## Type-Safety & ABI Invariants
 
 1. **Alignment:** All `AudioBlock` payloads MUST be 64-byte aligned and 1088 bytes in size (including padding).

@@ -1,3 +1,10 @@
+pub mod store;
+pub use store::{
+    SidecarStore, SidecarDescriptor, SidecarType, SidecarChain,
+    NeuralSaturationProcessor, NeuralFilterProcessor,
+    AlgorithmicDelayProcessor, AlgorithmicEqProcessor, AlgorithmicSynthInstrument,
+};
+
 use ipc_layer::{ShmRingBuffer, AudioBlock, ShmSignal, EventFd};
 pub use nullherz_traits::{AudioProcessor, ProcessContext};
 
