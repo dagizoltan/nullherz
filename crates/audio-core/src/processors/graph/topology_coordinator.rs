@@ -395,8 +395,10 @@ mod out_of_range_tests {
     /// Collects what the coordinator hands it, and keeps it alive — exactly
     /// what the real garbage ring does until the non-RT side drains it.
     #[derive(Clone)]
+    #[allow(clippy::disallowed_types)]
     struct CollectingGarbage(Arc<std::sync::Mutex<Vec<Box<dyn nullherz_traits::AudioProcessor>>>>);
     impl nullherz_traits::GarbageProducer for CollectingGarbage {
+        #[allow(clippy::disallowed_methods)]
         fn push_processor(&mut self, processor: Box<dyn nullherz_traits::AudioProcessor>)
             -> Result<(), Box<dyn nullherz_traits::AudioProcessor>>
         {
@@ -462,6 +464,7 @@ mod out_of_range_tests {
             ("SwapProcessor", 1u8),
         ] {
             let drops = Arc::new(AtomicUsize::new(0));
+            #[allow(clippy::disallowed_types)]
             let collected = Arc::new(std::sync::Mutex::new(Vec::new()));
             let mut garbage: Option<Box<dyn nullherz_traits::GarbageProducer>> =
                 Some(Box::new(CollectingGarbage(collected.clone())));
@@ -488,10 +491,13 @@ mod out_of_range_tests {
                 drops.load(Ordering::Relaxed), 0,
                 "{label} with an out-of-range index freed its processor on the audio thread"
             );
-            assert_eq!(
-                collected.lock().expect("test mutex").len(), 1,
-                "{label} must hand the rejected processor to the garbage ring for the non-RT side to free"
-            );
+            #[allow(clippy::disallowed_methods)]
+            {
+                assert_eq!(
+                    collected.lock().expect("test mutex").len(), 1,
+                    "{label} must hand the rejected processor to the garbage ring for the non-RT side to free"
+                );
+            }
             // And it must not have touched the graph.
             assert_eq!(node_count, 0, "{label} out of range must not grow node_count");
         }

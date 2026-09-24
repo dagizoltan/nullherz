@@ -349,12 +349,61 @@ impl Default for ProcessorCapability {
     }
 }
 
+#[cfg(test)]
+mod latency_tests {
+    use super::*;
+
+    #[test]
+    fn test_latency_class_classification() {
+        assert_eq!(LatencyClass::classify_samples(0, 48000.0), LatencyClass::UltraRealtime);
+        assert_eq!(LatencyClass::classify_samples(32, 48000.0), LatencyClass::UltraRealtime); // ~0.67ms
+        assert_eq!(LatencyClass::classify_samples(64, 48000.0), LatencyClass::Realtime); // ~1.33ms
+        assert_eq!(LatencyClass::classify_samples(256, 48000.0), LatencyClass::Performance); // ~5.33ms
+        assert_eq!(LatencyClass::classify_samples(1024, 48000.0), LatencyClass::Musical); // ~21.33ms
+        assert_eq!(LatencyClass::classify_samples(2048, 48000.0), LatencyClass::Offline); // ~42.67ms
+    }
+}
+
 pub trait ProcessorFactory: Send + Sync {
     fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>>;
     fn name(&self) -> &'static str;
     fn type_id(&self) -> ProcessorTypeId;
     fn capabilities(&self) -> ProcessorCapability {
         ProcessorCapability::default()
+    }
+}
+
+/// Explicit conceptual latency classification for DSP and Neural processors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub enum LatencyClass {
+    /// Ultra Real-time: < 1 ms (< 48 samples at 48 kHz)
+    UltraRealtime,
+    /// Real-time: 1–3 ms (48–144 samples at 48 kHz)
+    Realtime,
+    /// Performance: 3–10 ms (144–480 samples at 48 kHz)
+    Performance,
+    /// Musical: 10–30 ms (480–1440 samples at 48 kHz)
+    Musical,
+    /// Offline / Asynchronous: > 30 ms (> 1440 samples at 48 kHz)
+    Offline,
+}
+
+impl LatencyClass {
+    /// Classifies latency given a sample count and sample rate (defaults to 48000.0 if invalid).
+    pub fn classify_samples(samples: usize, sample_rate: f32) -> Self {
+        let sr = if sample_rate > 0.0 { sample_rate } else { 48000.0 };
+        let ms = (samples as f32 / sr) * 1000.0;
+        if ms < 1.0 {
+            LatencyClass::UltraRealtime
+        } else if ms < 3.0 {
+            LatencyClass::Realtime
+        } else if ms < 10.0 {
+            LatencyClass::Performance
+        } else if ms < 30.0 {
+            LatencyClass::Musical
+        } else {
+            LatencyClass::Offline
+        }
     }
 }
 
@@ -367,6 +416,9 @@ pub trait SignalProcessor: Send {
     fn set_safe_mode(&mut self, _enabled: bool) {}
     fn reset(&mut self) {}
     fn latency_samples(&self) -> usize { 0 }
+    fn latency_class(&self, sample_rate: f32) -> LatencyClass {
+        LatencyClass::classify_samples(self.latency_samples(), sample_rate)
+    }
 }
 
 pub trait MidiResponder: Send {

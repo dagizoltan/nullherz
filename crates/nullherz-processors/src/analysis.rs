@@ -87,3 +87,124 @@ fn collect_telemetry(&self, _node_times: &mut [u64; nullherz_traits::MAX_NODES],
         // Telemetry mapping logic would populate the global telemetry spectrum from here.
     }
 }
+
+use ipc_layer::{ShmRingBuffer, AudioBlock, SharedMemory};
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct NeuralControlMessage {
+    pub target_param_id: u32,
+    pub value: f32,
+    pub ramp_samples: u32,
+    pub timestamp_samples: u64,
+}
+
+pub struct NeuralWorkerBridge {
+    pub node_id: u64,
+    audio_producer_ptr: Option<*const ShmRingBuffer<AudioBlock>>,
+    control_consumer_ptr: Option<*const ShmRingBuffer<NeuralControlMessage>>,
+    pub last_control_values: [f32; 16],
+    pub missed_inference_count: u64,
+    _shm_audio: Option<Arc<SharedMemory>>,
+    _shm_control: Option<Arc<SharedMemory>>,
+}
+
+unsafe impl Send for NeuralWorkerBridge {}
+
+impl NeuralWorkerBridge {
+    pub fn new(node_id: u64) -> Self {
+        Self {
+            node_id,
+            audio_producer_ptr: None,
+            control_consumer_ptr: None,
+            last_control_values: [0.0; 16],
+            missed_inference_count: 0,
+            _shm_audio: None,
+            _shm_control: None,
+        }
+    }
+
+    pub fn set_shm_buffers(
+        &mut self,
+        audio_rb: *const ShmRingBuffer<AudioBlock>,
+        control_rb: *const ShmRingBuffer<NeuralControlMessage>,
+        shm_audio: Arc<SharedMemory>,
+        shm_control: Arc<SharedMemory>,
+    ) {
+        self.audio_producer_ptr = Some(audio_rb);
+        self.control_consumer_ptr = Some(control_rb);
+        self._shm_audio = Some(shm_audio);
+        self._shm_control = Some(shm_control);
+    }
+}
+
+impl nullherz_traits::RtSafe for NeuralWorkerBridge {}
+
+impl nullherz_traits::SignalProcessor for NeuralWorkerBridge {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: &mut ProcessContext) {
+        for (in_ch, out_ch) in inputs.iter().zip(outputs.iter_mut()) {
+            let len = in_ch.len().min(out_ch.len());
+            out_ch[..len].copy_from_slice(&in_ch[..len]);
+        }
+
+        if let Some(audio_ptr) = self.audio_producer_ptr {
+            if !inputs.is_empty() {
+                let input = inputs[0];
+                let len = input.len().min(ipc_layer::IPC_BLOCK_SIZE);
+                let mut block = AudioBlock { data: [0.0; ipc_layer::IPC_BLOCK_SIZE], len: len as u32, _pad: [0; 15] };
+                block.data[..len].copy_from_slice(&input[..len]);
+                unsafe {
+                    let _ = (*audio_ptr).push(block);
+                }
+            }
+        }
+
+        let mut popped = false;
+        if let Some(ctrl_ptr) = self.control_consumer_ptr {
+            unsafe {
+                while let Some(msg) = (*ctrl_ptr).pop() {
+                    popped = true;
+                    let idx = (msg.target_param_id as usize) % 16;
+                    self.last_control_values[idx] = msg.value;
+                }
+            }
+        }
+
+        if !popped && self.control_consumer_ptr.is_some() {
+            self.missed_inference_count = self.missed_inference_count.saturating_add(1);
+        }
+    }
+}
+
+impl nullherz_traits::MidiResponder for NeuralWorkerBridge {}
+impl nullherz_traits::SnapshotProvider for NeuralWorkerBridge {}
+
+impl AudioProcessor for NeuralWorkerBridge {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn get_parameter(&self, param_id: u32) -> f32 {
+        self.last_control_values[(param_id as usize) % 16]
+    }
+}
+
+#[cfg(test)]
+mod neural_bridge_tests {
+    use super::*;
+    use nullherz_traits::SignalProcessor;
+
+    #[test]
+    fn test_neural_worker_bridge_lock_free_passthrough() {
+        let mut bridge = NeuralWorkerBridge::new(1);
+        let in_data = vec![0.5f32; 128];
+        let mut out_data = vec![0.0f32; 128];
+        let mut ctx = ProcessContext {
+            transport: None,
+            host: None,
+            sub_block_offset: 0,
+            is_last_sub_block: true,
+        };
+
+        bridge.process(&[&in_data], &mut [&mut out_data], &mut ctx);
+        assert_eq!(out_data[0], 0.5);
+    }
+}

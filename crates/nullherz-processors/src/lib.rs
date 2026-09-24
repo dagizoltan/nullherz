@@ -37,7 +37,7 @@ pub use delay::DelayProcessor;
 pub use compressor::CompressorProcessor;
 pub use limiter::LimiterProcessor;
 pub use stereo_utility::StereoUtilityProcessor;
-pub use analysis::AnalysisProcessor;
+pub use analysis::{AnalysisProcessor, NeuralWorkerBridge, NeuralControlMessage};
 pub use streaming_sampler::StreamingSamplerProcessor;
 pub use sampler::SamplerProcessor;
 pub use gain::GainProcessor;

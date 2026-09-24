@@ -152,6 +152,7 @@ fn test_concurrent_readers_survive_eviction() {
         .map(|_| {
             let reg = reg.clone();
             let stop = stop.clone();
+            #[allow(clippy::disallowed_methods)]
             std::thread::spawn(move || {
                 let mut seen = 0u64;
                 while !stop.load(Ordering::Relaxed) {

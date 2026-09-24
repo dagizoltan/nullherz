@@ -92,6 +92,16 @@ This guarantees SIMD vectorization without branching or transcendental microcode
 
 ---
 
+## 3.3 Asynchronous Neural Workers (`NeuralWorkerBridge`)
+
+For neural analyzers (e.g. beat/tempo tracking, key detection, spectral density extraction) or heavy inference models whose context window exceeds real-time audio block sizes:
+
+1. **Non-Blocking Execution Boundary:** The real-time audio thread pushes audio blocks to an off-thread neural worker using lock-free `ShmRingBuffer` queues in `NeuralWorkerBridge`.
+2. **Lock-Free Control Updates:** The neural worker asynchronously computes inference results and pushes parameter updates back via `NeuralControlMessage` ring buffers.
+3. **Dropout Immunity:** If the neural inference worker misses its processing deadline, `NeuralWorkerBridge` non-blockingly holds or extrapolates previous parameters, ensuring zero audio dropouts or callback delays.
+
+---
+
 ## 4. Extensibility & Third-Party Neural Models
 
 Nullherz supports third-party neural model formats via the **Protocol Plane (`sidecar-sdk`, `fx-runtime`)**:
