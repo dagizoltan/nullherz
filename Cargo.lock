@@ -138,6 +138,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "algorithmic-delay"
+version = "0.1.0"
+dependencies = [
+ "nullherz-traits",
+ "sidecar-sdk",
+]
+
+[[package]]
+name = "algorithmic-eq"
+version = "0.1.0"
+dependencies = [
+ "nullherz-traits",
+ "sidecar-sdk",
+]
+
+[[package]]
+name = "algorithmic-synth"
+version = "0.1.0"
+dependencies = [
+ "nullherz-traits",
+ "sidecar-sdk",
+]
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3151,6 +3175,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c196769dd60fd4f363e11d948139556a344e79d451aeb2fa2fd040738ef7691"
 dependencies = [
  "jni-sys 0.3.1",
+]
+
+[[package]]
+name = "neural-filter"
+version = "0.1.0"
+dependencies = [
+ "nullherz-traits",
+ "sidecar-sdk",
+]
+
+[[package]]
+name = "neural-saturation"
+version = "0.1.0"
+dependencies = [
+ "nullherz-traits",
+ "sidecar-sdk",
 ]
 
 [[package]]
