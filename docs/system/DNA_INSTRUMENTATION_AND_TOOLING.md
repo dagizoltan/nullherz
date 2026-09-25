@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-This document formalizes the architectural thesis for **DNA Instrumentation & Tooling** within Nullherz.
+This document formalizes the architectural thesis for **DNA Instrumentation & Tooling** within Nullherz, complementing the [Complete Musical DNA Architecture Specification](./MUSICAL_DNA_ARCHITECTURE_SPECIFICATION.md) and the [DNS & DNA Glossary](./DNS_DNA_GLOSSARY.md).
 
 > **Core Axiom:** DNA is a musical instrumentation domain, not an AI conversation interface.
 
