@@ -103,6 +103,11 @@ impl ProcessorTypeId {
     pub const NEURAL_TCN: Self = Self(232);
     pub const NEURAL_SSM: Self = Self(233);
     pub const NEURAL_NAM: Self = Self(234);
+    pub const HYPERNETWORK_EQ: Self = Self(235);
+    pub const TUBE_PREAMP: Self = Self(236);
+    pub const MULTIBAND_COMPRESSOR: Self = Self(237);
+    pub const REVERB: Self = Self(238);
+    pub const MODULATION_FX: Self = Self(239);
 }
 
 impl From<u32> for ProcessorTypeId {

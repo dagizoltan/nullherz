@@ -238,7 +238,13 @@ fn render_sidecar_card(
                                 "neural-tcn" => Some(nullherz_traits::ProcessorTypeId::NEURAL_TCN),
                                 "neural-ssm" => Some(nullherz_traits::ProcessorTypeId::NEURAL_SSM),
                                 "neural-nam" => Some(nullherz_traits::ProcessorTypeId::NEURAL_NAM),
+                                "hypernetwork-eq" => Some(nullherz_traits::ProcessorTypeId::HYPERNETWORK_EQ),
+                                "tube-preamp" => Some(nullherz_traits::ProcessorTypeId::TUBE_PREAMP),
+                                "multiband-compressor" => Some(nullherz_traits::ProcessorTypeId::MULTIBAND_COMPRESSOR),
+                                "algorithmic-reverb" => Some(nullherz_traits::ProcessorTypeId::REVERB),
+                                "algorithmic-modulation" => Some(nullherz_traits::ProcessorTypeId::MODULATION_FX),
                                 "algorithmic-delay" => Some(nullherz_traits::ProcessorTypeId::DELAY),
+                                "algorithmic-eq" => Some(nullherz_traits::ProcessorTypeId::BIQUAD),
                                 _ => None,
                             };
 
