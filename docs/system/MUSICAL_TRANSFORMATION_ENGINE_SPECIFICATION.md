@@ -13,7 +13,7 @@ The **Nullherz Musical Transformation Engine** defines a unified, multi-layered 
 
 Crucially, **traditional DJ waveform mixing remains a first-class, non-negotiable primitive**. DNA transformation does not replace conventional crossfading, channel gain control, or EQing; rather, it provides a parallel **musical transformation layer** ("Photoshop for Music") allowing tracks to borrow rhythm, groove, timbre, bass character, and atmosphere from reference tracks without requiring waveform mixing.
 
-Furthermore, as detailed in the [DNA Instrumentation & Tooling Specification](./DNA_INSTRUMENTATION_AND_TOOLING.md), **DNA is a musical instrumentation domain, not an AI conversation interface**. The system operates as a tactile DAW, modular synthesizer, and signal-processing instrument rather than a text-driven or chatbot prompt generator.
+Furthermore, as detailed in the [DNA Instrumentation & Tooling Specification](./DNA_INSTRUMENTATION_AND_TOOLING.md) and [Advanced Musical Signal Graph Specification](./ADVANCED_MUSICAL_SIGNAL_GRAPH_SPECIFICATION.md), **DNA is a musical instrumentation domain, not an AI conversation interface**. The system operates as a tactile DAW, modular synthesizer, and signal-processing instrument rather than a text-driven or chatbot prompt generator.
 
 ---
 

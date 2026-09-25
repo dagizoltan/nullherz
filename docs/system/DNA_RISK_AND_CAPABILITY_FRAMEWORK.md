@@ -13,7 +13,7 @@ This document establishes the **Engineering Risk & Capability Framework** for th
 
 Crucially, it establishes the **Observable vs. Controllable vs. Renderable** taxonomy for DNA domains, formalizes the **Three-Gate Entry Rule** for DNA features, introduces the **`DNAField` Metadata Schema**, and outlines the **Five-Transformation Benchmark Strategy** to ensure the DNA engine delivers intentional, repeatable, and musically meaningful outcomes rather than unconstrained acoustic artifacts.
 
-This framework aligns directly with the non-conversational instrumentation philosophy set forth in the [DNA Instrumentation & Tooling Specification](./DNA_INSTRUMENTATION_AND_TOOLING.md), prioritizing observation-first tools (DNA Microscope, DNA Diff) and signal manipulation over conversational AI interfaces.
+This framework aligns directly with the non-conversational instrumentation philosophy set forth in the [DNA Instrumentation & Tooling Specification](./DNA_INSTRUMENTATION_AND_TOOLING.md) and [Advanced Musical Signal Graph Specification](./ADVANCED_MUSICAL_SIGNAL_GRAPH_SPECIFICATION.md), prioritizing observation-first tools (DNA Microscope, DNA Diff) and signal manipulation over conversational AI interfaces.
 
 ---
 
