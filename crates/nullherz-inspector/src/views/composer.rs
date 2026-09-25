@@ -102,6 +102,32 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         ui.add_space(app.theme.space_md);
 
+        // Pattern Length Selector
+        ui.label(RichText::new("LENGTH:").strong().size(app.theme.type_caption).color(app.theme.text_secondary));
+        let steps_count = app.composer.sequencer_grid[grid_deck][0].len();
+        let current_bars = (steps_count / 16).max(1);
+        let mut selected_bars = current_bars;
+
+        egui::ComboBox::from_id_source("pattern_length_select")
+            .width(70.0)
+            .selected_text(RichText::new(format!("{} BARS", current_bars)).size(app.theme.type_caption).strong())
+            .show_ui(ui, |ui| {
+                for bars in [1, 2, 4, 8] {
+                    if ui.selectable_label(current_bars == bars, format!("{} Bars ({} steps)", bars, bars * 16)).clicked() {
+                        selected_bars = bars;
+                    }
+                }
+            });
+
+        if selected_bars != current_bars {
+            let target_steps = selected_bars * 16;
+            for trk in 0..16 {
+                app.composer.sequencer_grid[grid_deck][trk].resize(target_steps, 0.0);
+            }
+        }
+
+        ui.add_space(app.theme.space_md);
+
         let is_recording = app.composer.record_automation;
         ui.toggle_value(&mut app.composer.record_automation, RichText::new("🔴 RECORD AUTOMATION").color(if is_recording { app.theme.danger } else { app.theme.text_secondary }));
         ui.add_space(app.theme.space_md);
@@ -441,16 +467,28 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         .show(ui, |ui| {
                                             ui.set_height(80.0);
                                             ui.horizontal(|ui| {
-                                                ui.label(RichText::new("VOLUME").size(app.theme.type_caption).color(app.theme.text_secondary));
+                                                ui.label(RichText::new("VOL").size(app.theme.type_caption).color(app.theme.text_secondary));
                                                 let volume_color = if is_muted { app.theme.bg_inset } else { track_color };
-                                                widgets::render_horizontal_fader(ui, &mut app.composer.track_volumes[track_idx], 0.0..=1.0, volume_color, 80.0, 10.0)
+                                                widgets::render_horizontal_fader(ui, &mut app.composer.track_volumes[track_idx], 0.0..=1.0, volume_color, 55.0, 10.0)
                                                     .on_hover_text("VOLUME");
 
-                                                ui.add_space(app.theme.space_md);
+                                                ui.add_space(app.theme.space_xs);
 
-                                                ui.label(RichText::new("GENE EVOLVE").size(app.theme.type_caption).color(app.theme.text_secondary));
+                                                ui.label(RichText::new("PAN").size(app.theme.type_caption).color(app.theme.text_secondary));
+                                                widgets::render_horizontal_fader(ui, &mut app.composer.track_pans[track_idx], -1.0..=1.0, app.theme.text_primary, 45.0, 10.0)
+                                                    .on_hover_text("PAN (-1.0 Left .. +1.0 Right)");
+
+                                                ui.add_space(app.theme.space_xs);
+
+                                                ui.label(RichText::new("FLT").size(app.theme.type_caption).color(app.theme.text_secondary));
+                                                widgets::render_horizontal_fader(ui, &mut app.composer.track_filters[track_idx], 0.0..=1.0, app.theme.success, 45.0, 10.0)
+                                                    .on_hover_text("FILTER CUTOFF");
+
+                                                ui.add_space(app.theme.space_xs);
+
+                                                ui.label(RichText::new("EVOLVE").size(app.theme.type_caption).color(app.theme.text_secondary));
                                                 let mut val = app.composer.evolution_strengths[track_idx];
-                                                if widgets::render_horizontal_fader(ui, &mut val, 0.0..=1.0, app.theme.accent, 80.0, 10.0)
+                                                if widgets::render_horizontal_fader(ui, &mut val, 0.0..=1.0, app.theme.warning, 45.0, 10.0)
                                                     .on_hover_text("GENE EVOLVE")
                                                     .changed()
                                                 {
