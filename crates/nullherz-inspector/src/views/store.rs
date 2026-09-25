@@ -52,6 +52,7 @@ fn render_filter_bar(app: &mut InspectorApp, ui: &mut Ui) {
             ("INSERT", Some("insert")),
             ("INSTRUMENT", Some("instrument")),
             ("NEURAL", Some("neural")),
+            ("TCN", Some("tcn")),
             ("DELAY", Some("delay")),
             ("EQ", Some("eq")),
             ("REAL-TIME", Some("real-time")),

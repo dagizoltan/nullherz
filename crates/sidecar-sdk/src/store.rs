@@ -698,6 +698,18 @@ impl SidecarStore {
 
         store.register(
             SidecarDescriptor::new(
+                "neural-tcn",
+                "Neural Deep TCN Saturator",
+                SidecarType::NeuralProcessor,
+                &["neural", "insert", "real-time", "tcn", "saturation"],
+                "Zero-allocation 4-layer dilated Temporal Convolutional Network with FloatX16 SIMD reduction",
+                0,
+            ),
+            || Box::new(NeuralSaturationProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
                 "algorithmic-delay",
                 "Algorithmic Tape Delay",
                 SidecarType::Insert,
@@ -800,7 +812,7 @@ mod store_tests {
     fn test_store_list_and_descriptors() {
         let store = SidecarStore::with_defaults();
         let list = store.list();
-        assert_eq!(list.len(), 5);
+        assert_eq!(list.len(), 6);
 
         let delay_desc = store.get_descriptor("algorithmic-delay").expect("algorithmic-delay must exist");
         assert_eq!(delay_desc.name, "Algorithmic Tape Delay");
@@ -819,7 +831,7 @@ mod store_tests {
         assert_eq!(delays[0].id, "algorithmic-delay");
 
         let neurals = store.filter_by_tag("neural");
-        assert_eq!(neurals.len(), 2);
+        assert_eq!(neurals.len(), 3);
         let neural_ids: Vec<_> = neurals.iter().map(|d| d.id.as_str()).collect();
         assert!(neural_ids.contains(&"neural-saturation"));
         assert!(neural_ids.contains(&"neural-filter"));
@@ -835,11 +847,11 @@ mod store_tests {
         assert_eq!(instruments[0].id, "algorithmic-synth");
 
         let realtimes = store.filter_by_tag("real-time");
-        assert_eq!(realtimes.len(), 5);
+        assert_eq!(realtimes.len(), 6);
 
         // Multi-tag queries
         let neural_inserts = store.filter_by_tags(&["neural", "insert", "real-time"]);
-        assert_eq!(neural_inserts.len(), 2);
+        assert_eq!(neural_inserts.len(), 3);
 
         let neural_eqs = store.filter_by_tags(&["neural", "eq"]);
         assert_eq!(neural_eqs.len(), 1);
@@ -855,7 +867,7 @@ mod store_tests {
         assert_eq!(instruments[0].id, "algorithmic-synth");
 
         let neural_procs = store.filter_by_type(SidecarType::NeuralProcessor);
-        assert_eq!(neural_procs.len(), 2);
+        assert_eq!(neural_procs.len(), 3);
 
         let inserts = store.filter_by_type(SidecarType::Insert);
         assert_eq!(inserts.len(), 2);
