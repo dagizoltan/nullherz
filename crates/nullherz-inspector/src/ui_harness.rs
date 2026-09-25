@@ -47,6 +47,7 @@ impl Harness {
             command_sender: tx,
             last_telemetry: Arc::new(parking_lot::Mutex::new(None)),
             active_view: View::Console,
+            detached_views: std::collections::HashSet::new(),
             mixer: state::MixerState::default(),
             decks: state::DeckState::default(),
             library: state::LibraryState::default(),

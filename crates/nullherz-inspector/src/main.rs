@@ -85,11 +85,13 @@ pub struct GraphJson {
     pub node_assignments: nullherz_traits::NodeAssignmentArray,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash)]
 pub enum View {
     Player,
     Console,
+    Mixer,
     Composer,
+    Library,
     Editor,
     Sampler,
     Breeder,
@@ -98,12 +100,11 @@ pub enum View {
     Account,
     Settings,
     Store,
-    // Secondary/Legacy Views
-    Tools,
     Mastering,
     Modulation,
-    Mixer,
-    Library,
+    Visuals,
+    // Secondary/Legacy Views
+    Tools,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -141,6 +142,7 @@ pub struct InspectorApp {
     pub(crate) command_sender: mpsc::Sender<Command>,
     pub(crate) last_telemetry: Arc<Mutex<Option<Telemetry>>>,
     pub(crate) active_view: View,
+    pub(crate) detached_views: std::collections::HashSet<View>,
     // Per-domain view state (see state.rs)
     pub(crate) mixer: state::MixerState,
     pub(crate) decks: state::DeckState,
@@ -206,6 +208,122 @@ impl InspectorApp {
     /// their command in that case — the old `unwrap_or(0)` fallback silently
     /// redirected every unresolved control to node 0, deck A's sampler
     /// (the crossfader and master gain both did exactly that).
+    pub fn render_view_content(&mut self, view: View, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
+        match view {
+            View::Console => views::dj_studio::render(self, ui, telemetry),
+            View::Player => views::player::render(self, ui, telemetry),
+            View::Sampler => views::sampler::render(self, ui, telemetry),
+            View::Mixer => views::mixer::render(self, ui, telemetry),
+            View::Library => views::library::render(self, ui),
+            View::Topology => views::topology::render(self, ui, telemetry),
+            View::Modulation => views::modulation::render(self, ui, telemetry),
+            View::Composer => views::composer::render(self, ui, telemetry),
+            View::Editor => views::editor::render(self, ui),
+            View::Account => views::account::render(self, ui),
+            View::Breeder => {
+                let mut view_state = std::mem::replace(&mut self.breeding_view, views::breeder::BreederView::new());
+                views::breeder::BreederView::show(ui, &mut view_state, telemetry, self);
+                self.breeding_view = view_state;
+            }
+            View::Mastering => views::mastering::render(self, ui, telemetry),
+            View::Visuals => self.render_visuals_view(ui, telemetry),
+            View::Broadcast => views::broadcast::render(self, ui),
+            View::Settings => views::settings::render(self, ui),
+            View::Store => views::store::render(self, ui),
+            _ => { ui.label("View coming soon..."); }
+        }
+    }
+
+    pub fn render_visuals_view(&mut self, ui: &mut egui::Ui, _telemetry: &Option<Telemetry>) {
+        ui.horizontal(|ui| {
+            ui.heading(egui::RichText::new("NEURAL & ALGORITHMIC LIVE VISUAL SYNTHESIS").strong().color(self.theme.text_primary));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(format!("{} Spawn Detached Visual Window", egui_phosphor::regular::ARROW_SQUARE_OUT)).clicked() {
+                    self.detached_views.insert(View::Visuals);
+                }
+            });
+        });
+        ui.separator();
+        ui.add_space(self.theme.space_sm);
+
+        ui.label(egui::RichText::new("Tapping live telemetry, spectrums, 2D goniometer phase vectors, and 16D DNA latent manifolds for visual modulation.").size(self.theme.type_caption).color(self.theme.text_secondary));
+        ui.add_space(self.theme.space_md);
+
+        egui::ScrollArea::vertical().id_source("visuals_scroll").show(ui, |ui| {
+            ui.columns(2, |columns| {
+                // Column 1: Live Spectrum & Frequency Energy
+                columns[0].group(|ui| {
+                    ui.label(egui::RichText::new("FFT SPECTRUM & FREQUENCY ENERGY").strong().color(self.theme.accent));
+                    ui.add_space(8.0);
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 160.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 4.0, self.theme.bg_inset);
+
+                    let num_bars = 128;
+                    let bar_w = (rect.width() / num_bars as f32).max(1.0);
+                    for i in 0..num_bars {
+                        let amp = self.viz.damped_spectrum[i].clamp(0.0, 1.0);
+                        let bar_h = amp * rect.height();
+                        let bar_rect = egui::Rect::from_min_max(
+                            egui::pos2(rect.left() + i as f32 * bar_w, rect.bottom() - bar_h),
+                            egui::pos2(rect.left() + (i + 1) as f32 * bar_w - 1.0, rect.bottom()),
+                        );
+                        let color = self.theme.accent.linear_multiply(0.3 + 0.7 * amp);
+                        ui.painter().rect_filled(bar_rect, 1.0, color);
+                    }
+                });
+
+                // Column 2: Stereo Phase Goniometer & 16D Latent Manifold
+                columns[1].group(|ui| {
+                    ui.label(egui::RichText::new("STEREO PHASE GONIOMETER & DNA LATENT MANIFOLD").strong().color(self.theme.success));
+                    ui.add_space(8.0);
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 160.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 4.0, self.theme.bg_inset);
+
+                    let center = rect.center();
+                    let radius = (rect.height() * 0.4).min(rect.width() * 0.4);
+
+                    // Draw 16D Latent Ring Points
+                    for i in 0..16 {
+                        let angle = (i as f32 / 16.0) * std::f32::consts::TAU;
+                        let val = self.viz.damped_latent[i].clamp(-1.0, 1.0);
+                        let r = radius * (0.6 + 0.4 * val.abs());
+                        let pt = egui::pos2(center.x + angle.cos() * r, center.y + angle.sin() * r);
+                        ui.painter().circle_filled(pt, 3.5, if val >= 0.0 { self.theme.accent } else { self.theme.danger });
+                        ui.painter().line_segment([center, pt], egui::Stroke::new(1.0, self.theme.text_disabled.linear_multiply(0.3)));
+                    }
+                });
+            });
+
+            ui.add_space(16.0);
+
+            // Live Signal Taps & Attachments Panel
+            ui.group(|ui| {
+                ui.label(egui::RichText::new("LIVE INPUT SIGNAL TAPS & VISUAL PLUGINS").strong().color(self.theme.text_primary));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label("Live Input Source:");
+                    let sources = ["Master Mix Output", "Mic Input", "Deck A Channel", "Deck B Channel", "Deck C Channel", "Deck D Channel", "Camera Feed", "MIDI Trigger Bus"];
+                    let mut current_src = 0;
+                    egui::ComboBox::from_id_source("viz_input_src")
+                        .selected_text(sources[current_src])
+                        .show_ui(ui, |ui| {
+                            for (idx, src) in sources.iter().enumerate() {
+                                if ui.selectable_label(current_src == idx, *src).clicked() {
+                                    current_src = idx;
+                                }
+                            }
+                        });
+
+                    ui.add_space(20.0);
+                    if ui.button(format!("{} Browse Visual Sidecars in Store", egui_phosphor::regular::SHOPPING_BAG)).clicked() {
+                        self.active_view = View::Store;
+                        self.store.active_tag_filter = Some("real-time".to_string());
+                    }
+                });
+            });
+        });
+    }
+
     pub fn get_node_id(&self, name: &str) -> Option<u32> {
         self.topo.node_map.get(name).copied()
     }
@@ -286,6 +404,7 @@ impl InspectorApp {
             last_telemetry,
             _conductor_thread: Some(conductor_thread),
             active_view: default_view,
+            detached_views: std::collections::HashSet::new(),
             mixer: Default::default(),
             decks: Default::default(),
             library: Default::default(),
@@ -371,15 +490,19 @@ impl InspectorApp {
                     let top_nav = [
                         (View::Player, egui_phosphor::regular::DISC, "MEDIA PLAYER"),
                         (View::Console, egui_phosphor::regular::RADIO, "DJ CONSOLE"),
+                        (View::Mixer, egui_phosphor::regular::SLIDERS, "MIXER STRIPS"),
                         (View::Composer, egui_phosphor::regular::PIANO_KEYS, "COMPOSER"),
+                        (View::Library, egui_phosphor::regular::BOOKS, "TRACK LIBRARY"),
                         (View::Editor, egui_phosphor::regular::SCISSORS, "EDITOR"),
                         (View::Sampler, egui_phosphor::regular::MICROPHONE, "SAMPLER"),
                         (View::Breeder, egui_phosphor::regular::DNA, "DNA BREEDER"),
+                        (View::Visuals, egui_phosphor::regular::EYE, "NEURAL VISUALS"),
                         (View::Store, egui_phosphor::regular::SHOPPING_BAG, "SIDECAR STORE"),
                         (View::Broadcast, egui_phosphor::regular::BROADCAST, "BROADCAST"),
                     ];
 
                     let bottom_nav = [
+                        (View::Mastering, egui_phosphor::regular::EQUALIZER, "MASTERING EQ"),
                         (View::Topology, egui_phosphor::regular::SHARE_NETWORK, "TOPOLOGY"),
                         (View::Account, egui_phosphor::regular::USER, "ACCOUNT"),
                         (View::Settings, egui_phosphor::regular::GEAR, "SETTINGS"),
@@ -901,30 +1024,75 @@ impl eframe::App for InspectorApp {
         // 3. Bottom Bar (Status & Global Controls)
         self.render_bottom_bar(ctx, &telemetry);
 
+        // --- Render Detached Windows (Multi-Viewport System) ---
+        let detached_list: Vec<View> = self.detached_views.iter().copied().collect();
+        for detached_view in detached_list {
+            let view_name = view_to_string(detached_view);
+            let viewport_id = egui::ViewportId::from_hash_of(&view_name);
+            let viewport_builder = egui::ViewportBuilder::default()
+                .with_title(format!("nullherz Studio — {}", view_name))
+                .with_inner_size([1100.0, 750.0]);
+
+            let mut close_detached = false;
+            ctx.show_viewport_immediate(viewport_id, viewport_builder, |v_ctx, _class| {
+                if v_ctx.input(|i| i.viewport().close_requested()) {
+                    close_detached = true;
+                }
+                egui::CentralPanel::default().show(v_ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.heading(egui::RichText::new(&view_name).strong().color(self.theme.accent));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(format!("{} Re-attach to Main", egui_phosphor::regular::ARROWS_IN)).clicked() {
+                                close_detached = true;
+                            }
+                        });
+                    });
+                    ui.separator();
+                    self.render_view_content(detached_view, ui, &telemetry);
+                });
+            });
+
+            if close_detached {
+                self.detached_views.remove(&detached_view);
+            }
+        }
+
         // 4. Central Panel (Execution Plane)
         egui::CentralPanel::default().show(ctx, |ui| {
-             match self.active_view {
-                 View::Console => views::dj_studio::render(self, ui, &telemetry),
-                 View::Player => views::player::render(self, ui, &telemetry),
-                 View::Sampler => views::sampler::render(self, ui, &telemetry),
-                 View::Mixer => views::mixer::render(self, ui, &telemetry),
-                 View::Library => views::library::render(self, ui),
-                 View::Topology => views::topology::render(self, ui, &telemetry),
-                 View::Modulation => views::modulation::render(self, ui, &telemetry),
-                 View::Composer => views::composer::render(self, ui, &telemetry),
-                 View::Editor => views::editor::render(self, ui),
-                 View::Account => views::account::render(self, ui),
-                 View::Breeder => {
-                    let mut view = std::mem::replace(&mut self.breeding_view, views::breeder::BreederView::new());
-                    views::breeder::BreederView::show(ui, &mut view, &telemetry, self);
-                    self.breeding_view = view;
-                 }
-                 View::Mastering => views::mastering::render(self, ui, &telemetry),
-                 View::Broadcast => views::broadcast::render(self, ui),
-                 View::Settings => views::settings::render(self, ui),
-                 View::Store => views::store::render(self, ui),
-                 _ => { ui.label("View coming soon..."); }
-             }
+            ui.horizontal(|ui| {
+                ui.heading(egui::RichText::new(view_to_string(self.active_view)).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let is_detached = self.detached_views.contains(&self.active_view);
+                    let btn_label = if is_detached {
+                        format!("{} Re-attach Window", egui_phosphor::regular::ARROWS_IN)
+                    } else {
+                        format!("{} Detach Window", egui_phosphor::regular::ARROW_SQUARE_OUT)
+                    };
+                    if ui.button(btn_label).clicked() {
+                        if is_detached {
+                            self.detached_views.remove(&self.active_view);
+                        } else {
+                            self.detached_views.insert(self.active_view);
+                        }
+                    }
+                });
+            });
+            ui.separator();
+
+            if self.detached_views.contains(&self.active_view) {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(100.0);
+                    ui.label(egui::RichText::new(format!("{} View Detached", egui_phosphor::regular::ARROW_SQUARE_OUT)).size(20.0).color(self.theme.text_secondary));
+                    ui.label(format!("This view is open in an independent window (nullherz Studio — {}).", view_to_string(self.active_view)));
+                    ui.add_space(20.0);
+                    if ui.button("Re-attach to Main Window").clicked() {
+                        self.detached_views.remove(&self.active_view);
+                    }
+                });
+            } else {
+                let view = self.active_view;
+                self.render_view_content(view, ui, &telemetry);
+            }
         });
 
         // Continuous repaint at a bounded cadence. egui only redraws on input
@@ -1027,7 +1195,9 @@ fn view_to_string(view: View) -> String {
     match view {
         View::Player => "Player".to_string(),
         View::Console => "Console".to_string(),
+        View::Mixer => "Mixer".to_string(),
         View::Composer => "Composer".to_string(),
+        View::Library => "Library".to_string(),
         View::Editor => "Editor".to_string(),
         View::Sampler => "Sampler".to_string(),
         View::Breeder => "Breeder".to_string(),
@@ -1036,6 +1206,9 @@ fn view_to_string(view: View) -> String {
         View::Account => "Account".to_string(),
         View::Settings => "Settings".to_string(),
         View::Store => "Store".to_string(),
+        View::Mastering => "Mastering".to_string(),
+        View::Modulation => "Modulation".to_string(),
+        View::Visuals => "Visuals".to_string(),
         _ => "Console".to_string(),
     }
 }
@@ -1044,7 +1217,9 @@ fn string_to_view(s: &str) -> View {
     match s {
         "Player" => View::Player,
         "Console" => View::Console,
+        "Mixer" => View::Mixer,
         "Composer" => View::Composer,
+        "Library" => View::Library,
         "Editor" => View::Editor,
         "Sampler" => View::Sampler,
         "Breeder" => View::Breeder,
@@ -1053,6 +1228,9 @@ fn string_to_view(s: &str) -> View {
         "Account" => View::Account,
         "Settings" => View::Settings,
         "Store" => View::Store,
+        "Mastering" => View::Mastering,
+        "Modulation" => View::Modulation,
+        "Visuals" => View::Visuals,
         _ => View::Console,
     }
 }
@@ -1286,6 +1464,62 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn test_multi_window_detached_views() {
+        let (cmd_tx, _cmd_rx) = mpsc::channel::<Command>();
+        let raw_db = nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase");
+        let db_arc = Arc::new(parking_lot::Mutex::new(raw_db));
+
+        let mut app = InspectorApp {
+            graph: GraphJson { nodes: vec![], edges: vec![], node_assignments: Default::default() },
+            command_sender: cmd_tx,
+            last_telemetry: Arc::new(Mutex::new(None)),
+            active_view: View::Composer,
+            detached_views: std::collections::HashSet::new(),
+            mixer: Default::default(),
+            decks: Default::default(),
+            library: Default::default(),
+            store: Default::default(),
+            composer: Default::default(),
+            sampler: Default::default(),
+            editor: Default::default(),
+            broadcast: Default::default(),
+            settings: Default::default(),
+            viz: Default::default(),
+            topo: Default::default(),
+            library_db: SharedLibraryDb(db_arc),
+            active_right_tab: None,
+            breeding_view: views::breeder::BreederView::new(),
+            wgpu_renderer: None,
+            waveform_renderer: None,
+            deck_waveform_renderers: [None, None, None, None],
+            discovered_sidecars: vec![],
+            p2p_sync_success_toast: None,
+            export_passport_success_toast: None,
+            export_passport_error_toast: None,
+            theme: nullherz_ui_hal::Theme::default(),
+            last_update_time: 0.0,
+            _conductor_thread: None,
+        };
+
+        assert!(app.detached_views.is_empty());
+
+        // Detach Composer, Console and Mastering views
+        app.detached_views.insert(View::Composer);
+        app.detached_views.insert(View::Console);
+        app.detached_views.insert(View::Mastering);
+
+        assert_eq!(app.detached_views.len(), 3);
+        assert!(app.detached_views.contains(&View::Composer));
+        assert!(app.detached_views.contains(&View::Console));
+        assert!(app.detached_views.contains(&View::Mastering));
+
+        // Re-attach Composer view
+        app.detached_views.remove(&View::Composer);
+        assert_eq!(app.detached_views.len(), 2);
+        assert!(!app.detached_views.contains(&View::Composer));
     }
 
     #[test]

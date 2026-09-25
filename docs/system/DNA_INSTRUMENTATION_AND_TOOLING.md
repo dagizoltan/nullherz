@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-This document formalizes the architectural thesis for **DNA Instrumentation & Tooling** within Nullherz.
+This document formalizes the architectural thesis for **DNA Instrumentation & Tooling** within Nullherz, complementing the [Complete Musical DNA Architecture Specification](./MUSICAL_DNA_ARCHITECTURE_SPECIFICATION.md) and the [DNS & DNA Glossary](./DNS_DNA_GLOSSARY.md).
 
 > **Core Axiom:** DNA is a musical instrumentation domain, not an AI conversation interface.
 
@@ -502,3 +502,5 @@ To ensure clarity, system components are categorized into **Current Implemented 
 * **DNA Modular Processing Primitives**: Native graph nodes for `DnaDiff`, `DnaMask`, `DnaSnapshot`, `DnaRouter`, and `DnaFreeze`.
 * **DNA Scopes & Microscope View**: Dedicated egui visualization panels for multidimensional DNA comparison and difference heatmaps in `nullherz-inspector`.
 * **DNA Performance Mappings**: Hardware MIDI CC mappings for crossfader DNA transfer, scratch deformation, and phase morphing.
+* **Multi-Window UI System Architecture**: Unrestricted multi-viewport windowing (`egui` multi-viewport / `eframe` OS windowing) enabling musicians to detach and display any number of concurrent views (Composer, DJ Mixer, Master EQ, Scopes, Modular Rack) across multiple physical monitors without artificial window count limits.
+* **Live Input, Algorithmic & Neural Visuals Subsystem**: Dedicated visual synthesis engine and sidecar category (`nullherz-visuals`) tapping live analog inputs (mic, master, instruments, sound channels), camera feeds, touch inputs, MIDI triggers, and real-time `DnaSideband` metrics to render algorithmic shaders and neural network animations, attachable via the `visuals` category tag in the Sidecar Store.
