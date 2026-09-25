@@ -126,6 +126,8 @@ pub struct DeckState {
     /// `MixerManager::key_lock_decks`. False is RAW: tempo changes move pitch,
     /// turntable-style.
     pub deck_key_lock: [bool; 4],
+    /// Active sidecar insert FX attached to each deck channel.
+    pub deck_inserts: [Option<String>; 4],
 }
 
 impl Default for DeckState {
@@ -144,6 +146,7 @@ impl Default for DeckState {
             deck_sync: [false; 4],
             deck_key_sync: [false; 4],
             deck_key_lock: [false; 4],
+            deck_inserts: std::array::from_fn(|_| None),
         }
     }
 }

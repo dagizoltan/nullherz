@@ -109,7 +109,13 @@ fn render_strip_meta(
                 nullherz_traits::CoreCommand::SetMasterDeck(deck_id_label)));
         }
 
-        if ui.button(RichText::new("+ FX").size(theme.type_caption).strong())
+        let fx_label = if let Some(ref name) = app.decks.deck_inserts[i] {
+            format!("FX: {}", name)
+        } else {
+            "+ FX".to_string()
+        };
+
+        if ui.button(RichText::new(fx_label).size(theme.type_caption).strong())
             .on_hover_text("Open Sidecar Store to select insert FX for this deck")
             .clicked()
         {
