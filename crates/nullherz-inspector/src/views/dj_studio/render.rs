@@ -3,7 +3,7 @@ use crate::InspectorApp;
 use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
 
-use super::{mixer, dna, transport, performance, waveform};
+use super::{mixer, transport, performance, waveform};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     if app.decks.focused_deck >= 4 {
@@ -109,7 +109,13 @@ fn render_strip_meta(
                 nullherz_traits::CoreCommand::SetMasterDeck(deck_id_label)));
         }
 
-        if ui.button(RichText::new("+ FX").size(theme.type_caption).strong())
+        let fx_label = if let Some(ref name) = app.decks.deck_inserts[i] {
+            format!("FX: {}", name)
+        } else {
+            "+ FX".to_string()
+        };
+
+        if ui.button(RichText::new(fx_label).size(theme.type_caption).strong())
             .on_hover_text("Open Sidecar Store to select insert FX for this deck")
             .clicked()
         {
@@ -392,11 +398,11 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
 /// had no budget at all — sections were stacked and the overflow pushed into a
 /// scroll area, which is how the fader and transport ended up unreachable.
 pub(crate) const STRIP_META_H: f32 = 74.0;
-pub(crate) const STRIP_KNOBS_H: f32 = 88.0;
-pub(crate) const STRIP_TRANSPORT_H: f32 = 34.0;
-pub(crate) const STRIP_DRAWER_H: f32 = 26.0;
+pub(crate) const STRIP_KNOBS_H: f32 = 68.0;
+pub(crate) const STRIP_TRANSPORT_H: f32 = 56.0;
+pub(crate) const STRIP_PERF_H: f32 = 46.0;
 /// Separators and inter-section spacing.
-pub(crate) const STRIP_CHROME_H: f32 = 28.0;
+pub(crate) const STRIP_CHROME_H: f32 = 20.0;
 /// Below this the fader is too short to aim at, so the strip is allowed to be
 /// taller than its column rather than shipping an unusable control.
 pub(crate) const STRIP_FADER_MIN: f32 = 56.0;
@@ -407,7 +413,7 @@ pub(crate) const STRIP_FADER_MAX: f32 = 200.0;
 /// Everything the strip draws must fit inside the column it was allocated, so
 /// the fader takes what is left after the fixed sections rather than a constant.
 pub(crate) fn strip_fader_height(strip_h: f32) -> f32 {
-    let fixed = STRIP_META_H + STRIP_KNOBS_H + STRIP_TRANSPORT_H + STRIP_DRAWER_H + STRIP_CHROME_H;
+    let fixed = STRIP_META_H + STRIP_KNOBS_H + STRIP_TRANSPORT_H + STRIP_PERF_H + STRIP_CHROME_H;
     (strip_h - fixed).clamp(STRIP_FADER_MIN, STRIP_FADER_MAX)
 }
 
@@ -417,15 +423,11 @@ pub(crate) fn strip_fader_height(strip_h: f32) -> f32 {
 /// column" is an assertion rather than something you find out by looking.
 #[cfg(test)]
 pub(crate) fn strip_total_height(strip_h: f32) -> f32 {
-    STRIP_META_H + STRIP_KNOBS_H + STRIP_TRANSPORT_H + STRIP_DRAWER_H + STRIP_CHROME_H
+    STRIP_META_H + STRIP_KNOBS_H + STRIP_TRANSPORT_H + STRIP_PERF_H + STRIP_CHROME_H
         + strip_fader_height(strip_h)
 }
 
-/// One deck: identity, controls, transport, and a drawer for the rest.
-///
-/// The always-visible part is what you touch while mixing. Hot cues and the DNA
-/// panel move into a collapsed drawer — previously they were stacked inline,
-/// which is what pushed the fader and transport past the bottom of the window.
+/// One deck: identity, controls, transport, and performance pads.
 fn render_channel_strip(
     app: &mut InspectorApp,
     ui: &mut Ui,
@@ -459,15 +461,7 @@ fn render_channel_strip(
                 transport::render_deck_transport(app, ui, i);
                 ui.add_space(theme.space_xs);
 
-                egui::CollapsingHeader::new(
-                    RichText::new("PADS · DNA").size(theme.type_caption).color(theme.text_secondary))
-                    .id_source(format!("deck_drawer_{i}"))
-                    .default_open(false)
-                    .show(ui, |ui| {
-                        performance::render_deck_performance(app, ui, i, telemetry);
-                        ui.add_space(theme.space_xs);
-                        dna::render_deck_dna_panel(app, ui, i);
-                    });
+                performance::render_deck_performance(app, ui, i, telemetry);
             });
         });
 }
@@ -608,7 +602,7 @@ mod layout_tests {
         // where the fader hits its minimum the strip is allowed to exceed the
         // column — a 20 px fader is not a control — but that must be a
         // deliberate floor, not silent overflow, so assert where it starts.
-        let fixed = STRIP_META_H + STRIP_KNOBS_H + STRIP_TRANSPORT_H + STRIP_DRAWER_H + STRIP_CHROME_H;
+        let fixed = STRIP_META_H + STRIP_KNOBS_H + STRIP_TRANSPORT_H + STRIP_PERF_H + STRIP_CHROME_H;
         let floor = fixed + STRIP_FADER_MIN;
         for h in [300.0f32, 400.0, 500.0, 650.0, 800.0, 1000.0, 1400.0] {
             let used = strip_total_height(h);

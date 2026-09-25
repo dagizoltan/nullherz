@@ -226,7 +226,11 @@ fn render_sidecar_card(
                                 .color(deck_color),
                         ).on_hover_text(format!("Hot-load {} onto Deck {}", descriptor.name, deck_char)).clicked() {
                             let deck_str = format!("deck_{}_insert", deck_char.to_ascii_lowercase());
-                            let node_idx = app.get_node_id(&deck_str).unwrap_or(i as u32 * 4 + 2);
+                            let node_idx = app.get_node_id(&deck_str)
+                                .or_else(|| app.get_node_id(&format!("deck_{}_fx1", deck_char.to_ascii_lowercase())))
+                                .unwrap_or(i as u32 * 4 + 2);
+
+                            app.decks.deck_inserts[i] = Some(descriptor.name.clone());
 
                             let p_type_id = match descriptor.id.as_str() {
                                 "neural-saturation" => Some(nullherz_traits::ProcessorTypeId::NEURAL_SATURATOR),

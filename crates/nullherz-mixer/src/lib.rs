@@ -257,6 +257,9 @@ impl MixerManager {
         self.node_names.insert(format!("deck_{}_dna_slot", id_lower), nodes.dna_slot_id);
         for (i, fx) in nodes.fx_slot_ids.iter().enumerate() {
             self.node_names.insert(format!("deck_{}_fx{}", id_lower, i + 1), *fx);
+            if i == 0 {
+                self.node_names.insert(format!("deck_{}_insert", id_lower), *fx);
+            }
         }
         commands
     }

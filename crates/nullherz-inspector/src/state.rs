@@ -6,6 +6,7 @@
 use crate::{SettingsTab, View};
 
 /// 4-channel console: faders, EQ, personality morphs, mastering chain, macros.
+#[allow(dead_code)]
 pub struct MixerState {
     pub channel_faders: [f32; 4],
     /// Pitch-fader position per deck, as a RATE multiplier. 1.0 is the track's
@@ -126,6 +127,8 @@ pub struct DeckState {
     /// `MixerManager::key_lock_decks`. False is RAW: tempo changes move pitch,
     /// turntable-style.
     pub deck_key_lock: [bool; 4],
+    /// Active sidecar insert FX attached to each deck channel.
+    pub deck_inserts: [Option<String>; 4],
 }
 
 impl Default for DeckState {
@@ -144,6 +147,7 @@ impl Default for DeckState {
             deck_sync: [false; 4],
             deck_key_sync: [false; 4],
             deck_key_lock: [false; 4],
+            deck_inserts: std::array::from_fn(|_| None),
         }
     }
 }
