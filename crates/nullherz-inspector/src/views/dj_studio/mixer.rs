@@ -2,33 +2,17 @@ use egui::{Ui, Color32, RichText};
 use crate::InspectorApp;
 use nullherz_ui_hal::widgets;
 
-/// Dial diameter in the channel strip. Six of these plus a fader and a meter
-/// have to coexist in one column, so it is smaller than the 36 px default.
+/// Dial diameter in the channel strip.
 const KNOB: f32 = 30.0;
 
-/// Channel strip controls: a 3x2 rotary grid over a vertical volume fader,
+/// Channel strip controls: a 2x2 rotary grid over a vertical volume & pitch fader,
 /// with the level meter alongside.
 ///
-/// Six rotaries, every one of them wired to something the engine actually
-/// applies:
-///
-/// | dial | engine target                      |
-/// |------|------------------------------------|
-/// | HI   | isolator param 2                   |
-/// | MID  | isolator param 1                   |
-/// | LOW  | isolator param 0                   |
-/// | FLT  | filter param 0                     |
-/// | BAL  | stereo util param 0 (pan)          |
-/// | WID  | stereo util param 1 (width)        |
-///
-/// BAL and WID were already handled by the mixer orchestrator and simply had
-/// no control bound to them.
-///
-/// There is deliberately NO separate gain dial. A deck has exactly one gain
-/// node, which the volume fader drives; a second control writing the same
-/// parameter would fight the fader and make both of them lie about the level.
-/// A real trim stage needs a second gain node in the deck chain — see the
-/// note in the layout review.
+/// Standard DJ channel rotaries:
+/// - HI: Isolator High EQ
+/// - MID: Isolator Mid EQ
+/// - LOW: Isolator Low EQ
+/// - FLT: Biquad Color Filter (bipolar LPF / HPF)
 pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_color: Color32, fader_h: f32) {
     let deck_id = (b'A' + i as u8) as char;
     let theme = app.theme;
@@ -36,58 +20,47 @@ pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_col
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = theme.space_xs;
 
-        // --- level meter, full strip height, left of the controls -----------
-        // ONE meter, not two.
-        //
-        // This used to draw `render_vu_meter` twice with the SAME peak value,
-        // which looks like a stereo pair and is not one — both bars moved
-        // identically because both read `damped_peaks[i]`. A meter that implies
-        // a measurement it is not making is worse than a narrower honest one.
-        // True L/R needs the deck's two output buffer peaks separately.
+        // --- Level meter ---
         ui.vertical(|ui| {
             widgets::render_vu_meter(
                 ui,
                 app.viz.damped_peaks[i],
                 app.mixer.channel_peak_hold[i],
                 deck_color,
-                fader_h + KNOB * 2.0 + 24.0,
+                fader_h + KNOB * 2.0 + 12.0,
             );
         });
 
         ui.vertical(|ui| {
-            // --- 3 x 2 rotary grid ------------------------------------------
+            // --- 2 x 2 rotary grid (HI, MID / LOW, FLT) --------------------
             let mut eq_changed = false;
+            let mut filter_changed = false;
             let mut settled = false;
-            let mut other: Option<(nullherz_traits::DeckParamType, f32)> = None;
 
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = theme.space_xs;
-                for (label, idx) in [("HI", 2usize), ("MID", 1), ("LOW", 0)] {
-                    let val = match idx {
-                        2 => &mut app.mixer.channel_eq_high[i],
-                        1 => &mut app.mixer.channel_eq_mid[i],
-                        _ => &mut app.mixer.channel_eq_low[i],
-                    };
-                    let r = widgets::render_knob_sized(ui, val, 0.0..=2.0, label, deck_color, KNOB);
-                    if r.changed() { eq_changed = true; }
-                    if r.drag_stopped() || r.lost_focus() { settled = true; }
-                }
+
+                let r_hi = widgets::render_knob_sized(ui, &mut app.mixer.channel_eq_high[i], 0.0..=2.0, "HI", deck_color, KNOB);
+                if r_hi.changed() { eq_changed = true; }
+                if r_hi.drag_stopped() || r_hi.lost_focus() { settled = true; }
+
+                let r_mid = widgets::render_knob_sized(ui, &mut app.mixer.channel_eq_mid[i], 0.0..=2.0, "MID", deck_color, KNOB);
+                if r_mid.changed() { eq_changed = true; }
+                if r_mid.drag_stopped() || r_mid.lost_focus() { settled = true; }
             });
 
+            ui.add_space(2.0);
+
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = theme.space_xs;
 
-                let r = widgets::render_knob_sized(ui, &mut app.mixer.channel_filter[i], 0.0..=1.0, "FLT", deck_color, KNOB);
-                if r.changed() { other = Some((nullherz_traits::DeckParamType::Filter, app.mixer.channel_filter[i])); }
-                if r.drag_stopped() || r.lost_focus() { settled = true; }
+                let r_low = widgets::render_knob_sized(ui, &mut app.mixer.channel_eq_low[i], 0.0..=2.0, "LOW", deck_color, KNOB);
+                if r_low.changed() { eq_changed = true; }
+                if r_low.drag_stopped() || r_low.lost_focus() { settled = true; }
 
-                let r = widgets::render_knob_sized(ui, &mut app.mixer.channel_balance[i], 0.0..=1.0, "BAL", deck_color, KNOB);
-                if r.changed() { other = Some((nullherz_traits::DeckParamType::Pan, app.mixer.channel_balance[i])); }
-                if r.drag_stopped() || r.lost_focus() { settled = true; }
-
-                let r = widgets::render_knob_sized(ui, &mut app.mixer.channel_width[i], 0.0..=2.0, "WID", deck_color, KNOB);
-                if r.changed() { other = Some((nullherz_traits::DeckParamType::Width, app.mixer.channel_width[i])); }
-                if r.drag_stopped() || r.lost_focus() { settled = true; }
+                let r_flt = widgets::render_knob_sized(ui, &mut app.mixer.channel_filter[i], 0.0..=1.0, "FLT", deck_color, KNOB);
+                if r_flt.changed() { filter_changed = true; }
+                if r_flt.drag_stopped() || r_flt.lost_focus() { settled = true; }
             });
 
             if eq_changed {
@@ -95,25 +68,13 @@ pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_col
                 send_deck_param(app, deck_id, nullherz_traits::DeckParamType::EqMid, app.mixer.channel_eq_mid[i]);
                 send_deck_param(app, deck_id, nullherz_traits::DeckParamType::EqLow, app.mixer.channel_eq_low[i]);
             }
-            if let Some((param_type, val)) = other {
-                send_deck_param(app, deck_id, param_type, val);
+            if filter_changed {
+                send_deck_param(app, deck_id, nullherz_traits::DeckParamType::Filter, app.mixer.channel_filter[i]);
             }
 
             ui.add_space(theme.space_xs);
 
-            // --- volume and PITCH faders, side by side -----------------------
-            //
-            // Pitch belongs next to volume rather than buried in a panel: it is
-            // the control an operator rides continuously while beat matching, and
-            // on the hardware this console imitates it is the second-most-used
-            // thing on the deck after the platter.
-            //
-            // It drives the sampler's `playback_rate` — varispeed, so tempo and
-            // pitch move together exactly as a platter does, through the
-            // resampler that measures -132 dB with zero added latency. Leaving
-            // KEY LOCK off keeps the phase vocoder (-17.8 dB polyphonic, 21.3 ms)
-            // out of the signal path entirely, so this is the console's
-            // best-sounding way to change tempo.
+            // --- Volume and Pitch faders ---
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = theme.space_sm;
 
@@ -152,19 +113,12 @@ pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_col
                     }
                     if r_pitch.drag_stopped() || r_pitch.lost_focus() { settled = true; }
 
-                    // Double-click is the centre detent. A pitch fader that
-                    // cannot be returned to exactly 1.0 is a fader that leaves
-                    // the track permanently slightly off, because landing on the
-                    // centre by hand is luck.
                     if r_pitch.double_clicked() {
                         app.mixer.channel_pitch[i] = 1.0;
                         send_deck_param(app, deck_id, nullherz_traits::DeckParamType::Pitch, 1.0);
                         settled = true;
                     }
 
-                    // Signed percent, and the sign is the point: +/- tells the
-                    // operator which way they are pulling without reading the
-                    // handle position.
                     let pct = (app.mixer.channel_pitch[i] - 1.0) * 100.0;
                     ui.label(
                         RichText::new(format!("{pct:+.1}%"))
@@ -173,8 +127,6 @@ pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_col
                             .strong(),
                     );
 
-                    // Range cycles 8 -> 16 -> 50. Rescaling keeps the CURRENT
-                    // rate: switching range must not move the music.
                     let range_label = format!("±{:.0}", app.mixer.pitch_range_pct[i]);
                     if ui
                         .add(egui::Button::new(
@@ -190,7 +142,6 @@ pub fn render_deck_mixer(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_col
                             16 => 50.0,
                             _ => 8.0,
                         };
-                        // Clamp into the new travel, which only ever narrows.
                         let span = app.mixer.pitch_range_pct[i] / 100.0;
                         app.mixer.channel_pitch[i] = app.mixer.channel_pitch[i].clamp(1.0 - span, 1.0 + span);
                         send_deck_param(app, deck_id, nullherz_traits::DeckParamType::Pitch, app.mixer.channel_pitch[i]);

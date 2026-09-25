@@ -6,6 +6,7 @@
 use crate::{SettingsTab, View};
 
 /// 4-channel console: faders, EQ, personality morphs, mastering chain, macros.
+#[allow(dead_code)]
 pub struct MixerState {
     pub channel_faders: [f32; 4],
     /// Pitch-fader position per deck, as a RATE multiplier. 1.0 is the track's
