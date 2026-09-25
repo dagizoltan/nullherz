@@ -89,7 +89,9 @@ pub struct GraphJson {
 pub enum View {
     Player,
     Console,
+    Mixer,
     Composer,
+    Library,
     Editor,
     Sampler,
     Breeder,
@@ -98,12 +100,11 @@ pub enum View {
     Account,
     Settings,
     Store,
-    // Secondary/Legacy Views
-    Tools,
     Mastering,
     Modulation,
-    Mixer,
-    Library,
+    Visuals,
+    // Secondary/Legacy Views
+    Tools,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -225,11 +226,102 @@ impl InspectorApp {
                 self.breeding_view = view_state;
             }
             View::Mastering => views::mastering::render(self, ui, telemetry),
+            View::Visuals => self.render_visuals_view(ui, telemetry),
             View::Broadcast => views::broadcast::render(self, ui),
             View::Settings => views::settings::render(self, ui),
             View::Store => views::store::render(self, ui),
             _ => { ui.label("View coming soon..."); }
         }
+    }
+
+    pub fn render_visuals_view(&mut self, ui: &mut egui::Ui, _telemetry: &Option<Telemetry>) {
+        ui.horizontal(|ui| {
+            ui.heading(egui::RichText::new("NEURAL & ALGORITHMIC LIVE VISUAL SYNTHESIS").strong().color(self.theme.text_primary));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(format!("{} Spawn Detached Visual Window", egui_phosphor::regular::ARROW_SQUARE_OUT)).clicked() {
+                    self.detached_views.insert(View::Visuals);
+                }
+            });
+        });
+        ui.separator();
+        ui.add_space(self.theme.space_sm);
+
+        ui.label(egui::RichText::new("Tapping live telemetry, spectrums, 2D goniometer phase vectors, and 16D DNA latent manifolds for visual modulation.").size(self.theme.type_caption).color(self.theme.text_secondary));
+        ui.add_space(self.theme.space_md);
+
+        egui::ScrollArea::vertical().id_source("visuals_scroll").show(ui, |ui| {
+            ui.columns(2, |columns| {
+                // Column 1: Live Spectrum & Frequency Energy
+                columns[0].group(|ui| {
+                    ui.label(egui::RichText::new("FFT SPECTRUM & FREQUENCY ENERGY").strong().color(self.theme.accent));
+                    ui.add_space(8.0);
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 160.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 4.0, self.theme.bg_inset);
+
+                    let num_bars = 128;
+                    let bar_w = (rect.width() / num_bars as f32).max(1.0);
+                    for i in 0..num_bars {
+                        let amp = self.viz.damped_spectrum[i].clamp(0.0, 1.0);
+                        let bar_h = amp * rect.height();
+                        let bar_rect = egui::Rect::from_min_max(
+                            egui::pos2(rect.left() + i as f32 * bar_w, rect.bottom() - bar_h),
+                            egui::pos2(rect.left() + (i + 1) as f32 * bar_w - 1.0, rect.bottom()),
+                        );
+                        let color = self.theme.accent.linear_multiply(0.3 + 0.7 * amp);
+                        ui.painter().rect_filled(bar_rect, 1.0, color);
+                    }
+                });
+
+                // Column 2: Stereo Phase Goniometer & 16D Latent Manifold
+                columns[1].group(|ui| {
+                    ui.label(egui::RichText::new("STEREO PHASE GONIOMETER & DNA LATENT MANIFOLD").strong().color(self.theme.success));
+                    ui.add_space(8.0);
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 160.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 4.0, self.theme.bg_inset);
+
+                    let center = rect.center();
+                    let radius = (rect.height() * 0.4).min(rect.width() * 0.4);
+
+                    // Draw 16D Latent Ring Points
+                    for i in 0..16 {
+                        let angle = (i as f32 / 16.0) * std::f32::consts::TAU;
+                        let val = self.viz.damped_latent[i].clamp(-1.0, 1.0);
+                        let r = radius * (0.6 + 0.4 * val.abs());
+                        let pt = egui::pos2(center.x + angle.cos() * r, center.y + angle.sin() * r);
+                        ui.painter().circle_filled(pt, 3.5, if val >= 0.0 { self.theme.accent } else { self.theme.danger });
+                        ui.painter().line_segment([center, pt], egui::Stroke::new(1.0, self.theme.text_disabled.linear_multiply(0.3)));
+                    }
+                });
+            });
+
+            ui.add_space(16.0);
+
+            // Live Signal Taps & Attachments Panel
+            ui.group(|ui| {
+                ui.label(egui::RichText::new("LIVE INPUT SIGNAL TAPS & VISUAL PLUGINS").strong().color(self.theme.text_primary));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label("Live Input Source:");
+                    let sources = ["Master Mix Output", "Mic Input", "Deck A Channel", "Deck B Channel", "Deck C Channel", "Deck D Channel", "Camera Feed", "MIDI Trigger Bus"];
+                    let mut current_src = 0;
+                    egui::ComboBox::from_id_source("viz_input_src")
+                        .selected_text(sources[current_src])
+                        .show_ui(ui, |ui| {
+                            for (idx, src) in sources.iter().enumerate() {
+                                if ui.selectable_label(current_src == idx, *src).clicked() {
+                                    current_src = idx;
+                                }
+                            }
+                        });
+
+                    ui.add_space(20.0);
+                    if ui.button(format!("{} Browse Visual Sidecars in Store", egui_phosphor::regular::SHOPPING_BAG)).clicked() {
+                        self.active_view = View::Store;
+                        self.store.active_tag_filter = Some("real-time".to_string());
+                    }
+                });
+            });
+        });
     }
 
     pub fn get_node_id(&self, name: &str) -> Option<u32> {
@@ -398,15 +490,19 @@ impl InspectorApp {
                     let top_nav = [
                         (View::Player, egui_phosphor::regular::DISC, "MEDIA PLAYER"),
                         (View::Console, egui_phosphor::regular::RADIO, "DJ CONSOLE"),
+                        (View::Mixer, egui_phosphor::regular::SLIDERS, "MIXER STRIPS"),
                         (View::Composer, egui_phosphor::regular::PIANO_KEYS, "COMPOSER"),
+                        (View::Library, egui_phosphor::regular::BOOKS, "TRACK LIBRARY"),
                         (View::Editor, egui_phosphor::regular::SCISSORS, "EDITOR"),
                         (View::Sampler, egui_phosphor::regular::MICROPHONE, "SAMPLER"),
                         (View::Breeder, egui_phosphor::regular::DNA, "DNA BREEDER"),
+                        (View::Visuals, egui_phosphor::regular::EYE, "NEURAL VISUALS"),
                         (View::Store, egui_phosphor::regular::SHOPPING_BAG, "SIDECAR STORE"),
                         (View::Broadcast, egui_phosphor::regular::BROADCAST, "BROADCAST"),
                     ];
 
                     let bottom_nav = [
+                        (View::Mastering, egui_phosphor::regular::EQUALIZER, "MASTERING EQ"),
                         (View::Topology, egui_phosphor::regular::SHARE_NETWORK, "TOPOLOGY"),
                         (View::Account, egui_phosphor::regular::USER, "ACCOUNT"),
                         (View::Settings, egui_phosphor::regular::GEAR, "SETTINGS"),
@@ -1099,7 +1195,9 @@ fn view_to_string(view: View) -> String {
     match view {
         View::Player => "Player".to_string(),
         View::Console => "Console".to_string(),
+        View::Mixer => "Mixer".to_string(),
         View::Composer => "Composer".to_string(),
+        View::Library => "Library".to_string(),
         View::Editor => "Editor".to_string(),
         View::Sampler => "Sampler".to_string(),
         View::Breeder => "Breeder".to_string(),
@@ -1108,6 +1206,9 @@ fn view_to_string(view: View) -> String {
         View::Account => "Account".to_string(),
         View::Settings => "Settings".to_string(),
         View::Store => "Store".to_string(),
+        View::Mastering => "Mastering".to_string(),
+        View::Modulation => "Modulation".to_string(),
+        View::Visuals => "Visuals".to_string(),
         _ => "Console".to_string(),
     }
 }
@@ -1116,7 +1217,9 @@ fn string_to_view(s: &str) -> View {
     match s {
         "Player" => View::Player,
         "Console" => View::Console,
+        "Mixer" => View::Mixer,
         "Composer" => View::Composer,
+        "Library" => View::Library,
         "Editor" => View::Editor,
         "Sampler" => View::Sampler,
         "Breeder" => View::Breeder,
@@ -1125,6 +1228,9 @@ fn string_to_view(s: &str) -> View {
         "Account" => View::Account,
         "Settings" => View::Settings,
         "Store" => View::Store,
+        "Mastering" => View::Mastering,
+        "Modulation" => View::Modulation,
+        "Visuals" => View::Visuals,
         _ => View::Console,
     }
 }
