@@ -477,6 +477,12 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
                 let slot = app.composer.selected_composer_track.unwrap_or(0);
                 if slot < app.composer.track_sources.len() {
                     app.composer.track_sources[slot] = Some(track.id);
+                    let grid_deck = app.decks.focused_deck.min(3);
+                    if app.composer.sequencer_grid[grid_deck][slot].iter().all(|&v| v == 0.0) {
+                        for b in 0..16 {
+                            app.composer.sequencer_grid[grid_deck][slot][b] = 1.0;
+                        }
+                    }
                 }
                 app.active_view = crate::View::Composer;
             }

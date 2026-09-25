@@ -224,6 +224,37 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                                         ui.add_space(4.0);
 
+                                        // Sample Picker dropdown
+                                        let src_id = app.composer.track_sources[track_idx]
+                                            .or(app.decks.now_playing[track_idx % 4]);
+                                        let cached_track = src_id.and_then(|id| app.get_cached_track(id));
+                                        let sample_label = cached_track.as_ref()
+                                            .map(|t| format!("♪ {}", t.title))
+                                            .unwrap_or_else(|| "⊕ SAMPLE".to_string());
+
+                                        egui::ComboBox::from_id_source(format!("seq_src_{}", track_idx))
+                                            .width(80.0)
+                                            .selected_text(RichText::new(&sample_label).size(app.theme.type_caption).strong())
+                                            .show_ui(ui, |ui| {
+                                                if ui.selectable_label(src_id.is_none(), "(None)").clicked() {
+                                                    app.composer.track_sources[track_idx] = None;
+                                                }
+                                                for lib_track in &app.library.cached_library_raw {
+                                                    let is_sel = src_id == Some(lib_track.id);
+                                                    let label = format!("♪ {}", lib_track.title);
+                                                    if ui.selectable_label(is_sel, label).clicked() {
+                                                        app.composer.track_sources[track_idx] = Some(lib_track.id);
+                                                        if app.composer.sequencer_grid[grid_deck][track_idx].iter().all(|&v| v == 0.0) {
+                                                            for b in 0..16 {
+                                                                app.composer.sequencer_grid[grid_deck][track_idx][b] = 1.0;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            });
+
+                                        ui.add_space(2.0);
+
                                         if ui.button(RichText::new("+ SIDECAR").size(app.theme.type_caption).strong())
                                             .on_hover_text("Open Sidecar Store to select instruments or inserts")
                                             .clicked()
