@@ -607,6 +607,7 @@ mod tests {
             command_sender: cmd_tx,
             last_telemetry: std::sync::Arc::new(parking_lot::Mutex::new(None)),
             active_view: crate::View::Composer,
+            detached_views: std::collections::HashSet::new(),
             mixer: crate::state::MixerState {
                 channel_sync: [true; 4],
                 quantize_enabled: true,
