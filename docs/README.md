@@ -19,6 +19,7 @@ Core technical specifications and engineering principles.
 - [System Architecture Reference](./system/ARCHITECTURE.md) — **start here**: reverse-engineered crate map, data flow, protocols, on-disk state
 - [Pre-Implementation Design Gate (July 2026)](./system/PRE_IMPLEMENTATION_DESIGN_GATE_2026_07.md) — design decisions, measurements, defect inventory
 - [DNA Instrumentation & Tooling](./system/DNA_INSTRUMENTATION_AND_TOOLING.md) — DNA signal domain, multi-rate modulation, modular rack, scopes, diff, performance architecture, and non-conversational AI boundaries
+- [Advanced Musical Signal Graph & DNA Substrate](./system/ADVANCED_MUSICAL_SIGNAL_GRAPH_SPECIFICATION.md) — DNA buses, sends/returns, typed ports, impedance matching, attractors/repulsion, bounded feedback, conservation laws, multi-resolution clocks, and quality verification
 - [Extended DNA Risk & Capability Framework](./system/DNA_RISK_AND_CAPABILITY_FRAMEWORK.md) — engineering risk matrix, capability taxonomy, and transformation benchmark strategy
 - [AnaWaves Genetic Schema](./system/ANAWAVES_GENETIC_SCHEMA_RFC.md)
 - [Sidecar Protocol v2](./system/SIDECAR_PROTOCOL_V2.md)
