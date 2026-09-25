@@ -444,6 +444,8 @@ The software is explicitly designed to feel like:
 
 It is explicitly **not** a chatbot, a prompt generator, or an autonomous AI music service.
 
+For extended signal routing, buses, impedance matching, typed ports, attractors, feedback networks, and minimum-change optimization, refer to the [Advanced Musical Signal Graph Specification](./ADVANCED_MUSICAL_SIGNAL_GRAPH_SPECIFICATION.md).
+
 ---
 
 ## 15. Core Architectural Thesis
