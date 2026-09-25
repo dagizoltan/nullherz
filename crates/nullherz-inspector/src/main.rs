@@ -97,6 +97,7 @@ pub enum View {
     Topology,
     Account,
     Settings,
+    Store,
     // Secondary/Legacy Views
     Tools,
     Mastering,
@@ -374,6 +375,7 @@ impl InspectorApp {
                         (View::Editor, egui_phosphor::regular::SCISSORS, "EDITOR"),
                         (View::Sampler, egui_phosphor::regular::MICROPHONE, "SAMPLER"),
                         (View::Breeder, egui_phosphor::regular::DNA, "DNA BREEDER"),
+                        (View::Store, egui_phosphor::regular::SHOPPING_BAG, "SIDECAR STORE"),
                         (View::Broadcast, egui_phosphor::regular::BROADCAST, "BROADCAST"),
                     ];
 
@@ -920,6 +922,7 @@ impl eframe::App for InspectorApp {
                  View::Mastering => views::mastering::render(self, ui, &telemetry),
                  View::Broadcast => views::broadcast::render(self, ui),
                  View::Settings => views::settings::render(self, ui),
+                 View::Store => views::store::render(self, ui),
                  _ => { ui.label("View coming soon..."); }
              }
         });
@@ -1032,6 +1035,7 @@ fn view_to_string(view: View) -> String {
         View::Topology => "Topology".to_string(),
         View::Account => "Account".to_string(),
         View::Settings => "Settings".to_string(),
+        View::Store => "Store".to_string(),
         _ => "Console".to_string(),
     }
 }
@@ -1048,6 +1052,7 @@ fn string_to_view(s: &str) -> View {
         "Topology" => View::Topology,
         "Account" => View::Account,
         "Settings" => View::Settings,
+        "Store" => View::Store,
         _ => View::Console,
     }
 }
