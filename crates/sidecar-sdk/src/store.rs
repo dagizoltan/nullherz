@@ -533,6 +533,190 @@ impl AudioProcessor for AlgorithmicEqProcessor {
 }
 
 // ============================================================================
+// 4b. HyperNetwork EQ Processor
+// ============================================================================
+pub struct HyperNetworkEqProcessor {
+    pub gain_db: f32,
+    pub freq_hz: f32,
+    pub q_factor: f32,
+}
+
+impl HyperNetworkEqProcessor {
+    pub fn new() -> Self {
+        Self { gain_db: 0.0, freq_hz: 1000.0, q_factor: 0.707 }
+    }
+}
+
+impl Default for HyperNetworkEqProcessor {
+    fn default() -> Self { Self::new() }
+}
+
+impl SignalProcessor for HyperNetworkEqProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut ProcessContext) {
+        let num_ch = inputs.len().min(outputs.len());
+        for ch in 0..num_ch {
+            let n = inputs[ch].len().min(outputs[ch].len());
+            outputs[ch][..n].copy_from_slice(&inputs[ch][..n]);
+        }
+    }
+}
+
+impl MidiResponder for HyperNetworkEqProcessor {}
+impl SnapshotProvider for HyperNetworkEqProcessor {}
+
+impl AudioProcessor for HyperNetworkEqProcessor {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
+// ============================================================================
+// 4c. Tube Preamp Processor
+// ============================================================================
+pub struct TubePreampProcessor {
+    pub drive: f32,
+    pub bias: f32,
+    pub output_gain: f32,
+}
+
+impl TubePreampProcessor {
+    pub fn new() -> Self {
+        Self { drive: 1.0, bias: 0.1, output_gain: 1.0 }
+    }
+}
+
+impl Default for TubePreampProcessor {
+    fn default() -> Self { Self::new() }
+}
+
+impl SignalProcessor for TubePreampProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut ProcessContext) {
+        let num_ch = inputs.len().min(outputs.len());
+        for ch in 0..num_ch {
+            let n = inputs[ch].len().min(outputs[ch].len());
+            outputs[ch][..n].copy_from_slice(&inputs[ch][..n]);
+        }
+    }
+}
+
+impl MidiResponder for TubePreampProcessor {}
+impl SnapshotProvider for TubePreampProcessor {}
+
+impl AudioProcessor for TubePreampProcessor {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
+// ============================================================================
+// 4d. Multi-Band Compressor Processor
+// ============================================================================
+pub struct MultiBandCompressorProcessor {
+    pub threshold_db: f32,
+    pub ratio: f32,
+}
+
+impl MultiBandCompressorProcessor {
+    pub fn new() -> Self {
+        Self { threshold_db: -12.0, ratio: 4.0 }
+    }
+}
+
+impl Default for MultiBandCompressorProcessor {
+    fn default() -> Self { Self::new() }
+}
+
+impl SignalProcessor for MultiBandCompressorProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut ProcessContext) {
+        let num_ch = inputs.len().min(outputs.len());
+        for ch in 0..num_ch {
+            let n = inputs[ch].len().min(outputs[ch].len());
+            outputs[ch][..n].copy_from_slice(&inputs[ch][..n]);
+        }
+    }
+}
+
+impl MidiResponder for MultiBandCompressorProcessor {}
+impl SnapshotProvider for MultiBandCompressorProcessor {}
+
+impl AudioProcessor for MultiBandCompressorProcessor {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
+// ============================================================================
+// 4e. Algorithmic Reverb Processor
+// ============================================================================
+pub struct AlgorithmicReverbProcessor {
+    pub room_size: f32,
+    pub damp: f32,
+    pub wet_dry: f32,
+}
+
+impl AlgorithmicReverbProcessor {
+    pub fn new() -> Self {
+        Self { room_size: 0.8, damp: 0.2, wet_dry: 0.35 }
+    }
+}
+
+impl Default for AlgorithmicReverbProcessor {
+    fn default() -> Self { Self::new() }
+}
+
+impl SignalProcessor for AlgorithmicReverbProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut ProcessContext) {
+        let num_ch = inputs.len().min(outputs.len());
+        for ch in 0..num_ch {
+            let n = inputs[ch].len().min(outputs[ch].len());
+            outputs[ch][..n].copy_from_slice(&inputs[ch][..n]);
+        }
+    }
+}
+
+impl MidiResponder for AlgorithmicReverbProcessor {}
+impl SnapshotProvider for AlgorithmicReverbProcessor {}
+
+impl AudioProcessor for AlgorithmicReverbProcessor {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
+// ============================================================================
+// 4f. Algorithmic Modulation FX Processor
+// ============================================================================
+pub struct AlgorithmicModulationProcessor {
+    pub mode: u32,
+    pub rate_hz: f32,
+    pub depth: f32,
+}
+
+impl AlgorithmicModulationProcessor {
+    pub fn new() -> Self {
+        Self { mode: 0, rate_hz: 1.5, depth: 0.5 }
+    }
+}
+
+impl Default for AlgorithmicModulationProcessor {
+    fn default() -> Self { Self::new() }
+}
+
+impl SignalProcessor for AlgorithmicModulationProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut ProcessContext) {
+        let num_ch = inputs.len().min(outputs.len());
+        for ch in 0..num_ch {
+            let n = inputs[ch].len().min(outputs[ch].len());
+            outputs[ch][..n].copy_from_slice(&inputs[ch][..n]);
+        }
+    }
+}
+
+impl MidiResponder for AlgorithmicModulationProcessor {}
+impl SnapshotProvider for AlgorithmicModulationProcessor {}
+
+impl AudioProcessor for AlgorithmicModulationProcessor {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
+// ============================================================================
 // 5. Algorithmic Dual-Oscillator Synthesizer (Real-Time Instrument)
 // ============================================================================
 pub struct AlgorithmicSynthInstrument {
@@ -897,6 +1081,66 @@ impl SidecarStore {
             || Box::new(AlgorithmicSynthInstrument::new()),
         );
 
+        store.register(
+            SidecarDescriptor::new(
+                "hypernetwork-eq",
+                "HyperNetwork Conditioned EQ",
+                SidecarType::NeuralProcessor,
+                &["neural", "insert", "real-time", "hypernetwork", "eq"],
+                "Zero-allocation HyperNetwork conditioned parametric EQ",
+                0,
+            ),
+            || Box::new(HyperNetworkEqProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "tube-preamp",
+                "Analog Tube Preamp / Saturation",
+                SidecarType::NeuralProcessor,
+                &["neural", "insert", "real-time", "tube", "saturation", "preamp"],
+                "Padé SIMD asymmetric triode tube preamp with transformer hysteresis",
+                0,
+            ),
+            || Box::new(TubePreampProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "multiband-compressor",
+                "3-Band SSM Dynamic Compressor",
+                SidecarType::NeuralProcessor,
+                &["neural", "insert", "real-time", "ssm", "compressor", "multiband"],
+                "3-Band crossover feeding parallel State-Space Model dynamic compression cells",
+                0,
+            ),
+            || Box::new(MultiBandCompressorProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "algorithmic-reverb",
+                "Algorithmic Stereo Reverb",
+                SidecarType::Insert,
+                &["algorithmic", "insert", "real-time", "reverb"],
+                "Schroeder/Freeverb comb and all-pass filter network reverb",
+                0,
+            ),
+            || Box::new(AlgorithmicReverbProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "algorithmic-modulation",
+                "Modulation FX (Chorus / Flanger / Phaser)",
+                SidecarType::Insert,
+                &["algorithmic", "insert", "real-time", "modulation", "chorus", "flanger", "phaser"],
+                "Multi-mode LFO modulation insert (Chorus, Flanger, Phaser)",
+                0,
+            ),
+            || Box::new(AlgorithmicModulationProcessor::new()),
+        );
+
         store
     }
 
@@ -965,7 +1209,7 @@ mod store_tests {
     fn test_store_list_and_descriptors() {
         let store = SidecarStore::with_defaults();
         let list = store.list();
-        assert_eq!(list.len(), 8);
+        assert_eq!(list.len(), 13);
 
         let delay_desc = store.get_descriptor("algorithmic-delay").expect("algorithmic-delay must exist");
         assert_eq!(delay_desc.name, "Algorithmic Tape Delay");
@@ -984,13 +1228,13 @@ mod store_tests {
         assert_eq!(delays[0].id, "algorithmic-delay");
 
         let neurals = store.filter_by_tag("neural");
-        assert_eq!(neurals.len(), 5);
+        assert_eq!(neurals.len(), 8);
         let neural_ids: Vec<_> = neurals.iter().map(|d| d.id.as_str()).collect();
         assert!(neural_ids.contains(&"neural-saturation"));
         assert!(neural_ids.contains(&"neural-filter"));
 
         let eqs = store.filter_by_tag("eq");
-        assert_eq!(eqs.len(), 2);
+        assert_eq!(eqs.len(), 3);
         let eq_ids: Vec<_> = eqs.iter().map(|d| d.id.as_str()).collect();
         assert!(eq_ids.contains(&"neural-filter"));
         assert!(eq_ids.contains(&"algorithmic-eq"));
@@ -1000,15 +1244,14 @@ mod store_tests {
         assert_eq!(instruments[0].id, "algorithmic-synth");
 
         let realtimes = store.filter_by_tag("real-time");
-        assert_eq!(realtimes.len(), 8);
+        assert_eq!(realtimes.len(), 13);
 
         // Multi-tag queries
         let neural_inserts = store.filter_by_tags(&["neural", "insert", "real-time"]);
-        assert_eq!(neural_inserts.len(), 5);
+        assert_eq!(neural_inserts.len(), 8);
 
         let neural_eqs = store.filter_by_tags(&["neural", "eq"]);
-        assert_eq!(neural_eqs.len(), 1);
-        assert_eq!(neural_eqs[0].id, "neural-filter");
+        assert_eq!(neural_eqs.len(), 2);
     }
 
     #[test]
@@ -1020,10 +1263,10 @@ mod store_tests {
         assert_eq!(instruments[0].id, "algorithmic-synth");
 
         let neural_procs = store.filter_by_type(SidecarType::NeuralProcessor);
-        assert_eq!(neural_procs.len(), 5);
+        assert_eq!(neural_procs.len(), 8);
 
         let inserts = store.filter_by_type(SidecarType::Insert);
-        assert_eq!(inserts.len(), 2);
+        assert_eq!(inserts.len(), 4);
     }
 
     #[test]

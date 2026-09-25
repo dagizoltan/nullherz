@@ -21,6 +21,11 @@ use crate::neural_filter::*;
 use crate::neural_tcn::*;
 use crate::neural_ssm::*;
 use crate::neural_nam::*;
+use crate::hypernetwork_eq::*;
+use crate::tube_preamp::*;
+use crate::multiband_compressor::*;
+use crate::algorithmic_reverb::*;
+use crate::modulation_fx::*;
 
 /// Identity pass-through, used to hold an insert slot open.
 ///
@@ -348,4 +353,49 @@ impl ProcessorFactory for NeuralNamFactory {
     }
     fn name(&self) -> &'static str { "NeuralNam" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::NEURAL_NAM }
+}
+
+pub struct HyperNetworkEqFactory;
+impl ProcessorFactory for HyperNetworkEqFactory {
+    fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(HyperNetworkEqProcessor::new()))
+    }
+    fn name(&self) -> &'static str { "HyperNetworkEq" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::HYPERNETWORK_EQ }
+}
+
+pub struct TubePreampFactory;
+impl ProcessorFactory for TubePreampFactory {
+    fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(TubePreampProcessor::new()))
+    }
+    fn name(&self) -> &'static str { "TubePreamp" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::TUBE_PREAMP }
+}
+
+pub struct MultiBandCompressorFactory;
+impl ProcessorFactory for MultiBandCompressorFactory {
+    fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(MultiBandCompressorProcessor::new()))
+    }
+    fn name(&self) -> &'static str { "MultiBandCompressor" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::MULTIBAND_COMPRESSOR }
+}
+
+pub struct ReverbFactory;
+impl ProcessorFactory for ReverbFactory {
+    fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(AlgorithmicReverbProcessor::new()))
+    }
+    fn name(&self) -> &'static str { "Reverb" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::REVERB }
+}
+
+pub struct ModulationFxFactory;
+impl ProcessorFactory for ModulationFxFactory {
+    fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(AlgorithmicModulationProcessor::new()))
+    }
+    fn name(&self) -> &'static str { "ModulationFx" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::MODULATION_FX }
 }

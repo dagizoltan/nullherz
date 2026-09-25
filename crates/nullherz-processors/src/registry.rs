@@ -55,6 +55,11 @@ impl ProcessorRegistry {
         self.register_factory(Box::new(NeuralTcnFactory));
         self.register_factory(Box::new(NeuralSsmFactory));
         self.register_factory(Box::new(NeuralNamFactory));
+        self.register_factory(Box::new(HyperNetworkEqFactory));
+        self.register_factory(Box::new(TubePreampFactory));
+        self.register_factory(Box::new(MultiBandCompressorFactory));
+        self.register_factory(Box::new(ReverbFactory));
+        self.register_factory(Box::new(ModulationFxFactory));
     }
 
     pub fn register_factory(&mut self, factory: Box<dyn ProcessorFactory>) {

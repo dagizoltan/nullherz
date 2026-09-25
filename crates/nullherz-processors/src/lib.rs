@@ -28,6 +28,11 @@ pub mod neural_filter;
 pub mod neural_tcn;
 pub mod neural_ssm;
 pub mod neural_nam;
+pub mod hypernetwork_eq;
+pub mod tube_preamp;
+pub mod multiband_compressor;
+pub mod algorithmic_reverb;
+pub mod modulation_fx;
 #[cfg(test)]
 mod sampler_tests;
 #[cfg(test)]
@@ -60,6 +65,11 @@ pub use neural_filter::NeuralFilterProcessor;
 pub use neural_tcn::NeuralTcnProcessor;
 pub use neural_ssm::NeuralSsmCompressor;
 pub use neural_nam::NeuralNamProcessor;
+pub use hypernetwork_eq::HyperNetworkEqProcessor;
+pub use tube_preamp::TubePreampProcessor;
+pub use multiband_compressor::MultiBandCompressorProcessor;
+pub use algorithmic_reverb::AlgorithmicReverbProcessor;
+pub use modulation_fx::AlgorithmicModulationProcessor;
 pub use registry::ProcessorRegistry;
 
 #[cfg(test)]
