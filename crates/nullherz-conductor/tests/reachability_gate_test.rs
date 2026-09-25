@@ -66,6 +66,8 @@ fn known_unreachable() -> Vec<(&'static str, &'static str)> {
         ("NeuralSaturator", "available for FX chains; not in default master chain"),
         ("NeuralFilter", "available for FX chains; not in default master chain"),
         ("NeuralTcn", "available for FX chains; not in default master chain"),
+        ("NeuralSsm", "available for FX chains; not in default master chain"),
+        ("NeuralNam", "available for FX chains; not in default master chain"),
     ]
 }
 

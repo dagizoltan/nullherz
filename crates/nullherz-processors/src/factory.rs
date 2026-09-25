@@ -19,6 +19,8 @@ use crate::streaming_sampler::*;
 use crate::neural_saturator::*;
 use crate::neural_filter::*;
 use crate::neural_tcn::*;
+use crate::neural_ssm::*;
+use crate::neural_nam::*;
 
 /// Identity pass-through, used to hold an insert slot open.
 ///
@@ -328,4 +330,22 @@ impl ProcessorFactory for NeuralTcnFactory {
     }
     fn name(&self) -> &'static str { "NeuralTcn" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::NEURAL_TCN }
+}
+
+pub struct NeuralSsmFactory;
+impl ProcessorFactory for NeuralSsmFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(NeuralSsmCompressor::new(node_idx as u64)))
+    }
+    fn name(&self) -> &'static str { "NeuralSsm" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::NEURAL_SSM }
+}
+
+pub struct NeuralNamFactory;
+impl ProcessorFactory for NeuralNamFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(NeuralNamProcessor::new(node_idx as u64)))
+    }
+    fn name(&self) -> &'static str { "NeuralNam" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::NEURAL_NAM }
 }

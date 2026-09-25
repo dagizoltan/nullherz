@@ -225,20 +225,39 @@ fn render_sidecar_card(
                                 .size(theme.type_caption)
                                 .color(deck_color),
                         ).on_hover_text(format!("Hot-load {} onto Deck {}", descriptor.name, deck_char)).clicked() {
-                            let mut name_bytes = [0u8; 32];
-                            let b = descriptor.id.as_bytes();
-                            let len = b.len().min(32);
-                            name_bytes[..len].copy_from_slice(&b[..len]);
-
                             let deck_str = format!("deck_{}_insert", deck_char.to_ascii_lowercase());
                             let node_idx = app.get_node_id(&deck_str).unwrap_or(i as u32 * 4 + 2);
 
-                            let _ = app.command_sender.send(nullherz_traits::Command::Core(
-                                nullherz_traits::CoreCommand::HotLoadSidecar {
-                                    name: name_bytes,
-                                    node_idx,
-                                }
-                            ));
+                            let p_type_id = match descriptor.id.as_str() {
+                                "neural-saturation" => Some(nullherz_traits::ProcessorTypeId::NEURAL_SATURATOR),
+                                "neural-filter" => Some(nullherz_traits::ProcessorTypeId::NEURAL_FILTER),
+                                "neural-tcn" => Some(nullherz_traits::ProcessorTypeId::NEURAL_TCN),
+                                "neural-ssm" => Some(nullherz_traits::ProcessorTypeId::NEURAL_SSM),
+                                "neural-nam" => Some(nullherz_traits::ProcessorTypeId::NEURAL_NAM),
+                                "algorithmic-delay" => Some(nullherz_traits::ProcessorTypeId::DELAY),
+                                _ => None,
+                            };
+
+                            if let Some(type_id) = p_type_id {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Topology(
+                                    nullherz_traits::TopologyCommand::SwapProcessor {
+                                        node_idx,
+                                        processor_type_id: type_id,
+                                    }
+                                ));
+                            } else {
+                                let mut name_bytes = [0u8; 32];
+                                let b = descriptor.id.as_bytes();
+                                let len = b.len().min(32);
+                                name_bytes[..len].copy_from_slice(&b[..len]);
+
+                                let _ = app.command_sender.send(nullherz_traits::Command::Core(
+                                    nullherz_traits::CoreCommand::HotLoadSidecar {
+                                        name: name_bytes,
+                                        node_idx,
+                                    }
+                                ));
+                            }
                         }
                     }
                 }

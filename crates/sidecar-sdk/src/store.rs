@@ -129,6 +129,135 @@ impl AudioProcessor for NeuralSaturationProcessor {
 }
 
 // ============================================================================
+// 1b. Neural SSM Processor
+// ============================================================================
+pub struct NeuralSsmProcessor {
+    pub threshold_db: f32,
+    pub ratio: f32,
+    pub mix: f32,
+}
+
+impl NeuralSsmProcessor {
+    pub fn new() -> Self {
+        Self {
+            threshold_db: -12.0,
+            ratio: 4.0,
+            mix: 1.0,
+        }
+    }
+}
+
+impl Default for NeuralSsmProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SignalProcessor for NeuralSsmProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut ProcessContext) {
+        let num_ch = inputs.len().min(outputs.len());
+        for ch in 0..num_ch {
+            let n = inputs[ch].len().min(outputs[ch].len());
+            outputs[ch][..n].copy_from_slice(&inputs[ch][..n]);
+        }
+    }
+}
+
+impl MidiResponder for NeuralSsmProcessor {}
+impl SnapshotProvider for NeuralSsmProcessor {}
+
+impl AudioProcessor for NeuralSsmProcessor {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
+// ============================================================================
+// 1c. Neural NAM Processor
+// ============================================================================
+pub struct NeuralNamProcessor {
+    pub drive: f32,
+    pub output_gain: f32,
+    pub mix: f32,
+}
+
+impl NeuralNamProcessor {
+    pub fn new() -> Self {
+        Self {
+            drive: 2.0,
+            output_gain: 0.8,
+            mix: 1.0,
+        }
+    }
+}
+
+impl Default for NeuralNamProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SignalProcessor for NeuralNamProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut ProcessContext) {
+        let num_ch = inputs.len().min(outputs.len());
+        for ch in 0..num_ch {
+            let n = inputs[ch].len().min(outputs[ch].len());
+            outputs[ch][..n].copy_from_slice(&inputs[ch][..n]);
+        }
+    }
+}
+
+impl MidiResponder for NeuralNamProcessor {}
+impl SnapshotProvider for NeuralNamProcessor {}
+
+impl AudioProcessor for NeuralNamProcessor {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
+// ============================================================================
+// 1d. Neural TCN Processor
+// ============================================================================
+pub struct NeuralTcnProcessor {
+    pub drive: f32,
+    pub output_gain: f32,
+    pub mix: f32,
+}
+
+impl NeuralTcnProcessor {
+    pub fn new() -> Self {
+        Self {
+            drive: 1.5,
+            output_gain: 1.0,
+            mix: 1.0,
+        }
+    }
+}
+
+impl Default for NeuralTcnProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SignalProcessor for NeuralTcnProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut ProcessContext) {
+        let num_ch = inputs.len().min(outputs.len());
+        for ch in 0..num_ch {
+            let n = inputs[ch].len().min(outputs[ch].len());
+            outputs[ch][..n].copy_from_slice(&inputs[ch][..n]);
+        }
+    }
+}
+
+impl MidiResponder for NeuralTcnProcessor {}
+impl SnapshotProvider for NeuralTcnProcessor {}
+
+impl AudioProcessor for NeuralTcnProcessor {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
+// ============================================================================
 // 2. Neural Dynamic Filter Processor (Real-Time Neural Insert)
 // ============================================================================
 pub struct NeuralFilterProcessor {
@@ -686,6 +815,30 @@ impl SidecarStore {
 
         store.register(
             SidecarDescriptor::new(
+                "neural-ssm",
+                "Neural SSM Dynamic Compressor",
+                SidecarType::NeuralProcessor,
+                &["neural", "insert", "real-time", "ssm", "compressor"],
+                "Zero-allocation 24-state Diagonal State-Space Model for dynamic compression and tape hysteresis",
+                0,
+            ),
+            || Box::new(NeuralSsmProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "neural-nam",
+                "Neural Amp Modeler (NAM)",
+                SidecarType::NeuralProcessor,
+                &["neural", "insert", "real-time", "nam", "preamp"],
+                "Zero-allocation 10-layer wave-shaping network for analog tube preamp and guitar amp emulation",
+                0,
+            ),
+            || Box::new(NeuralNamProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
                 "neural-filter",
                 "Neural Dynamic Filter",
                 SidecarType::NeuralProcessor,
@@ -705,7 +858,7 @@ impl SidecarStore {
                 "Zero-allocation 4-layer dilated Temporal Convolutional Network with FloatX16 SIMD reduction",
                 0,
             ),
-            || Box::new(NeuralSaturationProcessor::new()),
+            || Box::new(NeuralTcnProcessor::new()),
         );
 
         store.register(
@@ -812,7 +965,7 @@ mod store_tests {
     fn test_store_list_and_descriptors() {
         let store = SidecarStore::with_defaults();
         let list = store.list();
-        assert_eq!(list.len(), 6);
+        assert_eq!(list.len(), 8);
 
         let delay_desc = store.get_descriptor("algorithmic-delay").expect("algorithmic-delay must exist");
         assert_eq!(delay_desc.name, "Algorithmic Tape Delay");
@@ -831,7 +984,7 @@ mod store_tests {
         assert_eq!(delays[0].id, "algorithmic-delay");
 
         let neurals = store.filter_by_tag("neural");
-        assert_eq!(neurals.len(), 3);
+        assert_eq!(neurals.len(), 5);
         let neural_ids: Vec<_> = neurals.iter().map(|d| d.id.as_str()).collect();
         assert!(neural_ids.contains(&"neural-saturation"));
         assert!(neural_ids.contains(&"neural-filter"));
@@ -847,11 +1000,11 @@ mod store_tests {
         assert_eq!(instruments[0].id, "algorithmic-synth");
 
         let realtimes = store.filter_by_tag("real-time");
-        assert_eq!(realtimes.len(), 6);
+        assert_eq!(realtimes.len(), 8);
 
         // Multi-tag queries
         let neural_inserts = store.filter_by_tags(&["neural", "insert", "real-time"]);
-        assert_eq!(neural_inserts.len(), 3);
+        assert_eq!(neural_inserts.len(), 5);
 
         let neural_eqs = store.filter_by_tags(&["neural", "eq"]);
         assert_eq!(neural_eqs.len(), 1);
@@ -867,7 +1020,7 @@ mod store_tests {
         assert_eq!(instruments[0].id, "algorithmic-synth");
 
         let neural_procs = store.filter_by_type(SidecarType::NeuralProcessor);
-        assert_eq!(neural_procs.len(), 3);
+        assert_eq!(neural_procs.len(), 5);
 
         let inserts = store.filter_by_type(SidecarType::Insert);
         assert_eq!(inserts.len(), 2);
