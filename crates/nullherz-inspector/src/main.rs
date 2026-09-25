@@ -467,25 +467,29 @@ impl InspectorApp {
                 .default_width(450.0)
                 .frame(right_panel_frame)
                 .show(ctx, |ui| {
-                    let tab_info = match tab {
-                        RightTab::Library => (egui_phosphor::regular::FOLDER_OPEN, "LIBRARY"),
-                        RightTab::Store => (egui_phosphor::regular::SHOPPING_BAG, "SIDECAR STORE"),
-                        RightTab::GeneticCloud => (egui_phosphor::regular::CLOUD, "GENETIC CLOUD"),
-                        RightTab::Notifications => (egui_phosphor::regular::BRAIN, "AI & INSIGHTS"),
-                        RightTab::Metrics => (egui_phosphor::regular::CHART_BAR, "METRICS"),
-                    };
-
                     egui::Frame::none()
                         .fill(self.theme.bg_surface)
                         .inner_margin(egui::Margin::symmetric(self.theme.space_md, self.theme.space_sm))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new(format!("{} {}", tab_info.0, tab_info.1))
-                                        .strong()
-                                        .color(self.theme.accent)
-                                        .size(self.theme.type_heading),
-                                );
+                                let tabs = [
+                                    (RightTab::Library, egui_phosphor::regular::FOLDER_OPEN, "LIBRARY"),
+                                    (RightTab::Store, egui_phosphor::regular::SHOPPING_BAG, "STORE"),
+                                    (RightTab::GeneticCloud, egui_phosphor::regular::CLOUD, "CLOUD"),
+                                    (RightTab::Notifications, egui_phosphor::regular::BRAIN, "AI"),
+                                    (RightTab::Metrics, egui_phosphor::regular::CHART_BAR, "METRICS"),
+                                ];
+
+                                for (t_val, icon, label) in tabs {
+                                    let is_sel = self.active_right_tab == Some(t_val);
+                                    let text = egui::RichText::new(format!("{} {}", icon, label))
+                                        .size(self.theme.type_caption)
+                                        .strong();
+                                    if ui.selectable_label(is_sel, text).clicked() {
+                                        self.active_right_tab = Some(t_val);
+                                    }
+                                }
+
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     if ui.button(egui_phosphor::regular::X).clicked() {
                                         self.active_right_tab = None;
