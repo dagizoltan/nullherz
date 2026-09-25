@@ -1,4 +1,4 @@
-use egui::{Ui, ScrollArea, Vec2, Sense, RichText, Stroke, Frame, Rounding, Margin};
+use egui::{Ui, ScrollArea, Vec2, Sense, RichText, Stroke, Frame, Rounding, Margin, Color32, Rect, Pos2};
 use crate::InspectorApp;
 use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
@@ -7,21 +7,57 @@ pub use nullherz_conductor::pattern_manager::DnaSequencer;
 
 /// Helper to determine step status from telemetry safely.
 /// Returns (is_playing, is_starting).
+#[allow(dead_code)]
 pub fn check_step_telemetry(
     _telemetry: &Option<Telemetry>,
     _track_idx: usize,
     _slot_idx: usize,
 ) -> (bool, bool) {
-    // Both are false because clip-slot based fields (active_clips and starting_clips_mask)
-    // are not step-sequencer compatible.
     (false, false)
 }
 
+/// Mini vector waveform envelope painter for audio clips.
+pub fn render_mini_waveform(
+    painter: &egui::Painter,
+    clip_rect: Rect,
+    peaks: &[f32],
+    color: Color32,
+) {
+    if clip_rect.width() <= 2.0 {
+        return;
+    }
+    let center_y = clip_rect.center().y;
+    let half_h = (clip_rect.height() * 0.42).max(2.0);
+    let width = clip_rect.width();
+
+    if peaks.is_empty() {
+        let num_bars = (width / 3.0) as usize;
+        for i in 0..num_bars {
+            let x = clip_rect.left() + (i as f32 / num_bars.max(1) as f32) * width + 1.5;
+            let amp = (0.3 + 0.6 * ((i as f32 * 0.7).sin().abs())).clamp(0.1, 0.95);
+            painter.line_segment(
+                [egui::pos2(x, center_y - amp * half_h), egui::pos2(x, center_y + amp * half_h)],
+                Stroke::new(1.2, color),
+            );
+        }
+        return;
+    }
+
+    let num_peaks = peaks.len();
+    let steps = (width / 2.5) as usize;
+    for px in 0..steps {
+        let x = clip_rect.left() + (px as f32 / steps.max(1) as f32) * width + 1.2;
+        let peak_idx = (px * num_peaks) / steps.max(1);
+        let amp = peaks.get(peak_idx).copied().unwrap_or(0.2).abs().clamp(0.05, 1.0);
+
+        painter.line_segment(
+            [egui::pos2(x, center_y - amp * half_h), egui::pos2(x, center_y + amp * half_h)],
+            Stroke::new(1.2, color),
+        );
+    }
+}
+
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
-    // The composer edits the FOCUSED deck's sequencer node, resolved by
-    // name. (It used to target "sequencer_node", which never existed — the
-    // unwrap_or(0) fallback sent every step/mute/solo command to node 0,
-    // deck A's SAMPLER. The composer has never actually driven a sequencer.)
     let Some(seq_node) = app.get_node_id(&format!(
         "deck_{}_sequencer",
         (b'a' + app.decks.focused_deck.min(3) as u8) as char
@@ -30,8 +66,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         return;
     };
     let grid_deck = app.decks.focused_deck.min(3);
+
     ui.horizontal(|ui| {
-        ui.heading(RichText::new("SESSION VIEW (COMPOSER)").strong().color(app.theme.text_primary));
+        ui.heading(RichText::new("COMPOSER ARRANGEMENT GRID").strong().color(app.theme.text_primary));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
              ui.label(egui::RichText::new("QUANTIZED: 1 BAR").color(app.theme.accent).size(app.theme.type_caption));
         });
@@ -94,7 +131,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     });
     ui.add_space(app.theme.space_sm);
 
-    // Continuous surface frame wrapping stationary headers + scrollable endless grid
+    // Continuous surface frame wrapping stationary headers + scrollable clip waveform grid
     Frame::none()
         .fill(app.theme.bg_dark)
         .stroke(app.theme.border_stroke)
@@ -103,12 +140,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         .show(ui, |ui| {
             let mut extend_grid = false;
             let steps_count = app.composer.sequencer_grid[grid_deck][0].len();
+            let slot_w = 28.0;
+            let slot_h = 24.0;
 
             ui.horizontal(|ui| {
                 // 1. LEFT SIDE: Stationary Track Headers column (100.0px width)
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    // Step number header space on the left to align with grid step numbers
                     ui.add_space(32.0);
 
                     for track_idx in 0..16 {
@@ -130,10 +168,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             .inner_margin(Margin::symmetric(app.theme.space_xs, 0.0))
                             .show(ui, |ui| {
                                 ui.set_width(90.0);
-                                ui.set_height(22.0);
+                                ui.set_height(slot_h);
                                 ui.horizontal(|ui| {
                                     ui.add_space(app.theme.space_xs);
-                                    // 8x8px color swatch/chip
                                     let (swatch_rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), Sense::hover());
                                     ui.painter().rect_filled(swatch_rect, Rounding::same(1.5), track_color);
                                     ui.add_space(app.theme.space_xs);
@@ -143,7 +180,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                         let rect = inner_resp.response.rect;
 
-                        // Make the header responsive to click to select/expand accordion
                         let response = ui.interact(rect, ui.make_persistent_id(format!("trk_hdr_{}", track_idx)), Sense::click());
                         if response.clicked() {
                             if is_selected {
@@ -166,14 +202,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     ui.set_height(80.0);
                                     ui.vertical_centered(|ui| {
                                         ui.horizontal(|ui| {
-                                            // Activator ON/OFF Mute
                                             let activator_color = if !is_muted { app.theme.warning } else { app.theme.bg_inset };
                                             if ui.add_sized([22.0, 18.0], egui::Button::new(RichText::new("ON").size(app.theme.type_caption).strong()).fill(activator_color)).clicked() {
                                                 app.composer.track_mutes[track_idx] = !is_muted;
                                                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackMute { node_idx: seq_node, track_idx: track_idx as u32, muted: app.composer.track_mutes[track_idx] }));
                                             }
 
-                                            // Solo Button
                                             let is_soloed = app.composer.track_solos[track_idx];
                                             let solo_color = if is_soloed { app.theme.track_colors[1] } else { app.theme.bg_inset };
                                             if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("S").size(app.theme.type_caption).strong()).fill(solo_color)).clicked() {
@@ -181,7 +215,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackSolo { node_idx: seq_node, track_idx: track_idx as u32, soloed: app.composer.track_solos[track_idx] }));
                                             }
 
-                                            // Stop Clip button (compact)
                                             let stop_btn = egui::Button::new(RichText::new("■").size(app.theme.type_caption).strong()).fill(app.theme.bg_inset);
                                             if ui.add_sized([18.0, 18.0], stop_btn).on_hover_text("Stop clip").clicked() {
                                                 app.composer.sequencer_grid[grid_deck][track_idx].fill(0.0);
@@ -191,7 +224,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                                         ui.add_space(4.0);
 
-                                        // Sidecar Store instrument trigger button
                                         if ui.button(RichText::new("+ SIDECAR").size(app.theme.type_caption).strong())
                                             .on_hover_text("Open Sidecar Store to select instruments or inserts")
                                             .clicked()
@@ -202,7 +234,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                                         ui.add_space(2.0);
 
-                                        // Sequencer routing target dropdown
                                         let current_target = app.composer.track_targets[track_idx].clone();
                                         let mut sorted_nodes = app.node_names();
                                         sorted_nodes.sort_by(|a, b| a.0.cmp(&b.0));
@@ -245,43 +276,62 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                 ui.add_space(6.0);
 
-                // 2. RIGHT SIDE: Scrollable Endless Step Grid
+                // 2. RIGHT SIDE: Timeline Header + Audio Clip Waveform Grid
                 ScrollArea::horizontal()
                     .id_source("composer_endless_grid_scroll_h")
                     .show(ui, |ui| {
+                        let mut grid_top_pos = Pos2::ZERO;
+                        let mut grid_bottom_pos = Pos2::ZERO;
+
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
-                            // Step Numbers header row (allocated exact height 22.0)
-                            ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+
+                            // Bar/Beat Timeline Header Row
+                            let header_resp = ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 26.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                 ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
                                 for slot_idx in 0..steps_count {
                                     if slot_idx > 0 && slot_idx % 4 == 0 {
                                         ui.add_space(4.0);
                                     }
-                                    let (rect, _) = ui.allocate_exact_size(Vec2::new(24.0, 22.0), Sense::hover());
+                                    let (rect, response) = ui.allocate_exact_size(Vec2::new(slot_w, 24.0), Sense::click());
+
+                                    if response.clicked() {
+                                        let bar = (slot_idx / 4) + 1;
+                                        let beat_pos = (bar - 1) as f64 * 4.0;
+                                        let _ = app.command_sender.send(Command::Performance(PerformanceCommand::JumpByBeats { node_idx: seq_node, beats: beat_pos as f32 }));
+                                    }
+
                                     if slot_idx % 4 == 0 {
-                                        let beat_num = (slot_idx / 4) + 1;
+                                        let bar_num = (slot_idx / 4) + 1;
+                                        ui.painter().rect_filled(rect, Rounding::same(2.0), app.theme.bg_surface);
                                         ui.painter().text(
                                             rect.center(),
                                             egui::Align2::CENTER_CENTER,
-                                            format!("{}", beat_num),
-                                            egui::FontId::new(app.theme.type_caption, egui::FontFamily::Monospace),
+                                            format!("BAR {}", bar_num),
+                                            egui::FontId::new(10.0, egui::FontFamily::Monospace),
                                             app.theme.accent,
                                         );
                                     } else {
-                                        let tick_rect = egui::Rect::from_center_size(rect.center(), Vec2::new(2.0, 2.0));
-                                        ui.painter().rect_filled(tick_rect, Rounding::same(1.0), app.theme.text_disabled.linear_multiply(0.3));
+                                        let tick_rect = egui::Rect::from_center_size(rect.center(), Vec2::new(2.0, 4.0));
+                                        ui.painter().rect_filled(tick_rect, Rounding::same(1.0), app.theme.text_disabled.linear_multiply(0.4));
                                     }
                                 }
                             });
 
-                            ui.add_space(10.0);
+                            grid_top_pos = header_resp.response.rect.left_bottom();
 
-                            // Render 16 horizontal step rows
+                            ui.add_space(6.0);
+
+                            // Render 16 horizontal track clip rows
                             for track_idx in 0..16 {
                                 let track_color = app.theme.track_colors[track_idx];
                                 let is_muted = app.composer.track_mutes[track_idx];
                                 let is_selected = app.composer.selected_composer_track == Some(track_idx);
+
+                                // Resolve track source sample / metadata
+                                let src_id = app.composer.track_sources[track_idx]
+                                    .or(app.decks.now_playing[track_idx % 4]);
+                                let cached_track = src_id.and_then(|id| app.get_cached_track(id));
 
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
@@ -291,45 +341,48 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             ui.add_space(4.0);
                                         }
 
-                                        let (rect, response) = ui.allocate_exact_size(Vec2::new(24.0, 22.0), Sense::click());
+                                        let (rect, response) = ui.allocate_exact_size(Vec2::new(slot_w, slot_h), Sense::click());
 
-                                        // Dynamic Grid Extension Check: if the last element is visible, mark extend_grid
                                         if slot_idx == steps_count - 1
                                             && ui.is_rect_visible(rect) && steps_count < 512 {
                                                 extend_grid = true;
                                             }
 
-                                        // Playback status
-                                        let (is_playing, is_starting) = check_step_telemetry(telemetry, track_idx, slot_idx);
-
                                         let velocity = app.composer.sequencer_grid[grid_deck][track_idx][slot_idx];
-                                        let mut color = if is_playing {
-                                            app.theme.success
-                                        } else if is_starting {
-                                            app.theme.warning
-                                        } else if velocity > 0.0 {
-                                            track_color.gamma_multiply(velocity.clamp(0.5, 1.0))
+
+                                        let mut bg_color = if velocity > 0.0 {
+                                            if is_muted {
+                                                app.theme.bg_inset
+                                            } else {
+                                                track_color.gamma_multiply(0.25)
+                                            }
                                         } else {
-                                            track_color.gamma_multiply(0.04)
+                                            track_color.gamma_multiply(0.03)
                                         };
 
                                         if slot_idx == app.composer.sequencer_active_step {
-                                            color = color.linear_multiply(1.4);
+                                            bg_color = bg_color.linear_multiply(1.3);
                                         }
 
-                                        // Render cell
-                                        ui.painter().rect_filled(rect, Rounding::same(2.0), color);
-                                        ui.painter().rect_stroke(rect, Rounding::same(2.0), app.theme.border_stroke);
+                                        ui.painter().rect_filled(rect, Rounding::same(2.0), bg_color);
+                                        let border_stroke = if velocity > 0.0 {
+                                            Stroke::new(1.0, track_color)
+                                        } else {
+                                            app.theme.border_stroke
+                                        };
+                                        ui.painter().rect_stroke(rect, Rounding::same(2.0), border_stroke);
 
-                                        if is_playing {
-                                            let tri_p1 = rect.left_center() + Vec2::new(4.0, -4.0);
-                                            let tri_p2 = rect.left_center() + Vec2::new(4.0, 4.0);
-                                            let tri_p3 = rect.left_center() + Vec2::new(9.0, 0.0);
-                                            ui.painter().add(egui::Shape::convex_polygon(vec![tri_p1, tri_p2, tri_p3], app.theme.text_primary, Stroke::NONE));
+                                        // Mini-waveform rendering inside active clip slots
+                                        if velocity > 0.0 {
+                                            let peaks_data = cached_track.as_ref()
+                                                .map(|t| t.metadata.peaks.as_slice())
+                                                .unwrap_or(&[]);
+                                            let wf_color = if is_muted { app.theme.text_disabled } else { track_color };
+                                            render_mini_waveform(ui.painter(), rect.shrink(1.0), peaks_data, wf_color);
                                         }
 
                                         if response.hovered() {
-                                            ui.painter().rect_stroke(rect, Rounding::same(2.0), Stroke::new(1.0_f32, app.theme.text_primary));
+                                            ui.painter().rect_stroke(rect, Rounding::same(2.0), Stroke::new(1.2_f32, app.theme.text_primary));
                                         }
 
                                         if response.clicked() {
@@ -346,7 +399,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     }
                                 });
 
-                                // Accordion expansion in the Right Scrollable side (must match heights and paddings perfectly)
+                                // Accordion expansion in the Right Scrollable side
                                 if is_selected {
                                     ui.add_space(4.0);
                                     Frame::none()
@@ -377,10 +430,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                         mutation_strength: val,
                                                     }));
 
-                                                    // The track's OWN sample, with the deck
-                                                    // as fallback. `% 4` meant tracks 4..16
-                                                    // aliased 0..3 and the composer could only
-                                                    // sequence what was already on a deck.
                                                     let src = app.composer.track_sources
                                                         .get(track_idx).copied().flatten()
                                                         .or(app.decks.now_playing[track_idx % 4]);
@@ -423,6 +472,23 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     ui.add_space(6.0);
                                 }
                             }
+
+                            grid_bottom_pos = ui.cursor().left_top();
+
+                            // Live Playhead Needle Drawing across the timeline
+                            let live_beat = telemetry.as_ref()
+                                .map(|t| t.beat_position as f32)
+                                .unwrap_or(app.composer.sequencer_active_step as f32);
+                            let playhead_step = live_beat.max(0.0).min(steps_count as f32);
+                            let bars_before = (playhead_step / 4.0).floor();
+                            let playhead_x = grid_top_pos.x + (playhead_step * slot_w) + (playhead_step * 2.0) + (bars_before * 4.0) + (slot_w * 0.5);
+
+                            if playhead_x >= grid_top_pos.x {
+                                ui.painter().line_segment(
+                                    [Pos2::new(playhead_x, grid_top_pos.y), Pos2::new(playhead_x, grid_bottom_pos.y)],
+                                    Stroke::new(2.5, app.theme.accent),
+                                );
+                            }
                         });
                     });
             });
@@ -444,7 +510,6 @@ mod tests {
     fn test_step_telemetry_check_high_slots() {
         let telemetry = Some(Telemetry::default());
 
-        // Test check_step_telemetry with slot_idx values up to 512
         for track_idx in 0..16 {
             for slot_idx in 0..512 {
                 let (is_playing, is_starting) = check_step_telemetry(&telemetry, track_idx, slot_idx);
@@ -456,7 +521,6 @@ mod tests {
 
     #[test]
     fn test_step_telemetry_none_safety() {
-        // Test with None telemetry
         let (is_playing, is_starting) = check_step_telemetry(&None, 0, 100);
         assert!(!is_playing);
         assert!(!is_starting);
@@ -474,8 +538,6 @@ mod tests {
             command_sender: cmd_tx,
             last_telemetry: std::sync::Arc::new(parking_lot::Mutex::new(None)),
             active_view: crate::View::Composer,
-            // Only the fields this test actually depends on; the rest come
-            // from Default so adding a mixer field does not break the test.
             mixer: crate::state::MixerState {
                 channel_sync: [true; 4],
                 quantize_enabled: true,
@@ -500,7 +562,6 @@ mod tests {
                 bg_library_loader: None,
                 library_needs_refresh: false,
                 smart_crate_builder_open: false,
-                // smart_crate_def: group default is fine for this test
                 selected_library_track: None,
                 ingestion_path: String::new(),
                 playlist_queue: std::collections::VecDeque::new(),
@@ -578,16 +639,13 @@ mod tests {
             _conductor_thread: None,
         };
 
-        // Assert initial states
         assert_eq!(app.composer.track_targets[0], "(default)");
         assert_eq!(app.composer.track_targets[15], "(default)");
 
-        // Verify node_names retrieval
         let mut names = app.node_names();
         names.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(names, vec![("sampler_node".to_string(), 100), ("sequencer_node".to_string(), 70)]);
 
-        // Update a track target
         app.composer.track_targets[3] = "sampler_node".to_string();
         assert_eq!(app.composer.track_targets[3], "sampler_node");
     }
