@@ -62,3 +62,39 @@ impl GeneticSequencer {
         commands
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nullherz_traits::RhythmicDNA;
+
+    #[test]
+    fn test_genetic_sequencer_evolve_pattern_step_count() {
+        let dna = RhythmicDNA::default();
+        let cmds = GeneticSequencer::evolve_pattern(&dna, 70, 0, 0.2);
+        // 4 bars * 64 steps = 256 steps
+        assert_eq!(cmds.len(), 256);
+    }
+
+    #[test]
+    fn test_genetic_sequencer_deterministic_reproducibility() {
+        let dna = RhythmicDNA::default();
+        let cmds1 = GeneticSequencer::evolve_pattern(&dna, 70, 0, 0.5);
+        let cmds2 = GeneticSequencer::evolve_pattern(&dna, 70, 0, 0.5);
+
+        for (c1, c2) in cmds1.iter().zip(cmds2.iter()) {
+            match (c1, c2) {
+                (
+                    Command::Performance(PerformanceCommand::SetSequencerStep { node_idx: n1, track: t1, step: s1, value: v1 }),
+                    Command::Performance(PerformanceCommand::SetSequencerStep { node_idx: n2, track: t2, step: s2, value: v2 }),
+                ) => {
+                    assert_eq!(n1, n2);
+                    assert_eq!(t1, t2);
+                    assert_eq!(s1, s2);
+                    assert!((v1 - v2).abs() < f32::EPSILON);
+                }
+                _ => panic!("Expected SetSequencerStep commands"),
+            }
+        }
+    }
+}

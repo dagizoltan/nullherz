@@ -21,10 +21,10 @@ This document lists the open technical debt, stubs, and prototype logic verified
   - *Location*: `crates/nullherz-conductor/src/ptp_engine.rs` — `PtpEngine::new`.
   - *Detail*: Node roles (master vs. slave) are hardcoded as configuration/constructor flags. There is no dynamic Best-Master-Clock algorithm (IEEE 1588 BMC) to automatically elect the highest-quality clock on the subnet.
 
-### 1.2 WASM Sidecar Zero-Copy SHM Mapping
+### 1.2 WASM Sidecar Zero-Copy SHM Mapping — RESOLVED
 - **Zero-Copy SHM Guest Mapping**:
-  - *Location*: `crates/fx-runtime/src/wasm_runtime.rs` (approx. line 64).
-  - *Detail*: Guest access to the shared-memory command ring currently triggers a memory copy (`memcpy`) across host/guest boundaries. True zero-copy pointer mapping directly into the guest WASM linear address space remains a Q3 objective.
+  - *Location*: `crates/fx-runtime/src/wasm_runtime.rs`.
+  - *Detail*: Fully implemented. Host functions in `wasm_runtime.rs` perform direct pointer mapping and slice operations into guest linear memory (`mem.data_mut(&mut caller)`), eliminating intermediate heap/stack allocations during SHM command and audio block serialization/deserialization.
 
 ### 1.3 Execution Plane & Real-Time Safety Gaps
 - **Spectral Domain Arbitrary Block Sizes**:
@@ -52,9 +52,9 @@ This document lists the open technical debt, stubs, and prototype logic verified
   - *Latent bug (only if wired)*: both feeder/decoder threads stop via `Arc::strong_count(&ring) <= 1`, but `StreamingManager::start_stream` also inserts an `Arc` clone into `self.streams` (line 31). While that entry lives, the count can never reach 1, so the per-stream threads would **not terminate when the consumer releases its ring** — they'd run (feeder sleep-spinning on a full ring) until `stop_stream()` clears the entire map. Fix when wiring it: track streams so the liveness check excludes the registry's own `Arc` (e.g. compare against a known baseline count, or add explicit per-stream teardown), and set the feeder thread's priority to match its "high-priority" comment (today it is a plain `thread::spawn` at default priority).
 
 ### 1.6 User Interface (UI) Placeholders
-- **Session Restoration Bypass**:
-  - *Location*: `crates/nullherz-inspector/src/views/settings/preferences.rs`.
-  - *Detail*: The session restoration checkbox is a non-functional preference, defaulting to a mock state.
+- **Session Restoration Integration — RESOLVED**:
+  - *Location*: `crates/nullherz-inspector/src/views/settings/preferences.rs` and `main.rs`.
+  - *Detail*: Fully integrated. When enabled (`restore_last_session = true`), startup state restoration automatically reloads `autosave.json` via `Conductor::load_project` and restores active preferences, views, shortcuts, and custom theme colors.
 - **Breeder Pipeline Telemetry**:
   - *Location*: `crates/nullherz-inspector/src/views/breeder.rs`.
   - *Detail*: The transfusion progress bar displays linear progress but lacks real-time sub-block DSP pipeline feedback metrics from the execution plane.

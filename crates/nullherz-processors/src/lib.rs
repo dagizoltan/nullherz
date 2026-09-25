@@ -23,6 +23,11 @@ pub mod modulation;
 pub mod sequencer;
 pub mod transfusion;
 pub mod fallback;
+pub mod neural_saturator;
+pub mod neural_filter;
+pub mod neural_tcn;
+pub mod neural_ssm;
+pub mod neural_nam;
 #[cfg(test)]
 mod sampler_tests;
 #[cfg(test)]
@@ -50,6 +55,11 @@ pub use modulation::ModulationProcessor;
 pub use sequencer::SequencerProcessor;
 pub use transfusion::*;
 pub use fallback::FallbackProcessor;
+pub use neural_saturator::NeuralSaturatorProcessor;
+pub use neural_filter::NeuralFilterProcessor;
+pub use neural_tcn::NeuralTcnProcessor;
+pub use neural_ssm::NeuralSsmCompressor;
+pub use neural_nam::NeuralNamProcessor;
 pub use registry::ProcessorRegistry;
 
 #[cfg(test)]

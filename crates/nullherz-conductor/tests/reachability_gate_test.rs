@@ -63,6 +63,11 @@ fn known_unreachable() -> Vec<(&'static str, &'static str)> {
           of latency to serve a latch that defaults OFF (roadmap 1.12)"),
         ("DnaMorph", "INSTALLED ON DEMAND into the deck's DNA slot, same mechanism \
           as KeySync; also still disengaged until real DNA is fed (Phase 6)"),
+        ("NeuralSaturator", "available for FX chains; not in default master chain"),
+        ("NeuralFilter", "available for FX chains; not in default master chain"),
+        ("NeuralTcn", "available for FX chains; not in default master chain"),
+        ("NeuralSsm", "available for FX chains; not in default master chain"),
+        ("NeuralNam", "available for FX chains; not in default master chain"),
     ]
 }
 

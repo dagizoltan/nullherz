@@ -98,6 +98,11 @@ impl ProcessorTypeId {
     pub const LIMITER: Self = Self(200);
     pub const STREAMING_SAMPLER: Self = Self(210);
     pub const MASTERING_EQ: Self = Self(220);
+    pub const NEURAL_SATURATOR: Self = Self(230);
+    pub const NEURAL_FILTER: Self = Self(231);
+    pub const NEURAL_TCN: Self = Self(232);
+    pub const NEURAL_SSM: Self = Self(233);
+    pub const NEURAL_NAM: Self = Self(234);
 }
 
 impl From<u32> for ProcessorTypeId {

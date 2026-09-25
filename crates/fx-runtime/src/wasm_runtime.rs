@@ -29,18 +29,16 @@ impl WasmSidecarHost {
              unsafe {
                  if let Some(cmd) = (*state.cmd_buffer).pop() {
                      let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
+                     let memory_slice = mem.data_mut(&mut caller);
+                     let start = ptr as usize;
+                     let max_end = start + max_len as usize;
 
-                     // Hardened: Zero-allocation serialization using a stack buffer.
-                     let mut buf = [0u8; 512];
-                     let mut cursor = std::io::Cursor::new(&mut buf[..]);
-                     if bincode::serialize_into(&mut cursor, &cmd).is_ok() {
-                         let len = cursor.position() as usize;
-                         let data = &buf[..len];
-
-                         if data.len() <= max_len as usize
-                             && mem.write(&mut caller, ptr as usize, data).is_ok() {
-                                 return data.len() as i32;
-                             }
+                     if max_end <= memory_slice.len() {
+                         let target_slice = &mut memory_slice[start..max_end];
+                         let mut cursor = std::io::Cursor::new(target_slice);
+                         if bincode::serialize_into(&mut cursor, &cmd).is_ok() {
+                             return cursor.position() as i32;
+                         }
                      }
                      -1 // Error: buffer too small or write failed
                  } else {
@@ -51,17 +49,12 @@ impl WasmSidecarHost {
 
         linker.func_wrap("nullherz", "get_audio_input_ref", |caller: Caller<'_, WasmState>, channel: i32| -> i64 {
              let state = caller.data();
-             if let Some(rb_ptr) = state.audio_inputs.get(channel as usize) {
+             if let Some(&rb_ptr) = state.audio_inputs.get(channel as usize) {
                  unsafe {
-                     // Stage 2: Return a pointer directly into the SHM RingBuffer's current head
-                     // Note: This requires the guest to know the SHM layout.
-                     // For now, we'll return the absolute address of the data segment.
-                     let rb = &**rb_ptr;
+                     let rb = &*rb_ptr;
                      let head = rb.head.load(std::sync::atomic::Ordering::Acquire);
                      let tail = rb.tail.load(std::sync::atomic::Ordering::Acquire);
                      if head != tail {
-                         // This is a placeholder for true zero-copy mapping.
-                         // In a production scenario, we'd map this page into the WASM instance.
                          return rb_ptr as *const _ as i64;
                      }
                  }
@@ -94,41 +87,51 @@ impl WasmSidecarHost {
         })?;
 
         linker.func_wrap("nullherz", "get_audio_input", |mut caller: Caller<'_, WasmState>, channel: i32, ptr: i32| -> i32 {
-             let block = {
-                 let state = caller.data_mut();
-                 if let Some(rb_ptr) = state.audio_inputs.get(channel as usize) {
-                     unsafe { (**rb_ptr).pop() }
-                 } else {
-                     None
-                 }
+             let state = caller.data_mut();
+             let block = if let Some(&rb_ptr) = state.audio_inputs.get(channel as usize) {
+                 unsafe { (*rb_ptr).pop() }
+             } else {
+                 None
              };
 
              if let Some(block) = block {
                  let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
-                 let data = bytemuck::cast_slice(&block.data);
-                 let _ = mem.write(&mut caller, ptr as usize, data);
-                 return block.len as i32;
+                 let data_bytes = bytemuck::cast_slice(&block.data);
+                 let start = ptr as usize;
+                 let end = start + data_bytes.len();
+
+                 let memory_slice = mem.data_mut(&mut caller);
+                 if end <= memory_slice.len() {
+                     memory_slice[start..end].copy_from_slice(data_bytes);
+                     return block.len as i32;
+                 }
              }
              0
         })?;
 
         linker.func_wrap("nullherz", "set_audio_output", |mut caller: Caller<'_, WasmState>, channel: i32, ptr: i32, len: i32| -> i32 {
-             let mut data = [0.0f32; 256];
-             {
-                 let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
-                 let _ = mem.read(&caller, ptr as usize, bytemuck::cast_slice_mut(&mut data));
-             }
-
              let state = caller.data_mut();
-             if let Some(rb_ptr) = state.audio_outputs.get(channel as usize) {
-                 let block = AudioBlock {
-                     data,
-                     len: len as u32,
-                     _pad: [0; 15],
-                 };
-                 unsafe {
-                     if (**rb_ptr).push(block).is_ok() {
-                         return 1;
+             if let Some(&rb_ptr) = state.audio_outputs.get(channel as usize) {
+                 let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
+                 let start = ptr as usize;
+                 let byte_len = 256 * std::mem::size_of::<f32>();
+                 let end = start + byte_len;
+
+                 let memory_slice = mem.data(&caller);
+                 if end <= memory_slice.len() {
+                     let mut data = [0.0f32; 256];
+                     let dest_bytes = bytemuck::cast_slice_mut(&mut data);
+                     dest_bytes.copy_from_slice(&memory_slice[start..end]);
+
+                     let block = AudioBlock {
+                         data,
+                         len: len as u32,
+                         _pad: [0; 15],
+                     };
+                     unsafe {
+                         if (*rb_ptr).push(block).is_ok() {
+                             return 1;
+                         }
                      }
                  }
              }
