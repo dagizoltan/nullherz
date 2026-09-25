@@ -44,11 +44,11 @@ This document describes *what is actually in the tree*, as opposed to the strate
 | `sidecar-sdk` | ~0.5k | Guest-side SDK: `SidecarHost` main-loop that connects SHM, implements Sidecar Protocol V2 framing, and drives a user-supplied `AudioProcessor`. |
 | `sidecar-macros` | ~0.1k | Attribute macros for declaring sidecar processors/params. |
 
-### 1.5 Intelligence / DNA Plane
+### 1.5 Intelligence / DNA Plane & Transformation Engine
 
 | Crate | LOC | Responsibility |
 | :--- | ---: | :--- |
-| `nullherz-dna` | ~1.8k | `SoundDNA` schema (16-D latent space, rhythmic/spatial profiles), ed25519-signed lineages (`SignedSoundDna`, `verify_signature`/`verify_lineage`), `LibraryDatabase` on `redb` with Smart-Crate trait filtering, `SampleRegistry` (atomic-swap, lock-free reader), `GeneticLibrary`, and `CloudPeerSync` — a TCP gossip overlay with Gossipsub-style mesh links (GRAFT/GOSSIP_PUB/GOSSIP_SIGNED) and mDNS-style discovery. |
+| `nullherz-dna` | ~1.8k | `SoundDNA` schema (16-D latent space, rhythmic/spatial profiles), ed25519-signed lineages (`SignedSoundDna`, `verify_signature`/`verify_lineage`), `LibraryDatabase` on `redb` with Smart-Crate trait filtering, `SampleRegistry` (atomic-swap, lock-free reader), `GeneticLibrary`, `CloudPeerSync` — a TCP gossip overlay with Gossipsub-style mesh links (GRAFT/GOSSIP_PUB/GOSSIP_SIGNED) and mDNS-style discovery, and the **Musical Transformation Engine** specification ([`MUSICAL_TRANSFORMATION_ENGINE_SPECIFICATION.md`](./MUSICAL_TRANSFORMATION_ENGINE_SPECIFICATION.md)) defining closed-loop DNS observation, DNA as semantic IR, DNA invariants, gravity fields, and Mode 1 (conventional waveform mixing), Mode 2 (audio-less characteristic transfer), and Mode 3 (hybrid mixing + DNA transformation). |
 
 ### 1.6 UI Plane
 

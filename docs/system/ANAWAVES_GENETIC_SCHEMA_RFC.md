@@ -29,5 +29,7 @@ fn transfuse(parent_a: SoundDNA, parent_b: SoundDNA, bias: f32) -> SoundDNA {
 }
 ```
 
-## 5. Metadata Integration
-This schema will be embedded into the `LibraryTrack` metadata in `nullherz-dna` and used by the `AnalysisWorker` to "tag" sounds as they are ingested or captured.
+## 5. Metadata Integration & Musical Transformation Engine Specification
+This schema is embedded into `SampleMetadata` in `nullherz-traits` and `LibraryTrack` in `nullherz-dna` and utilized by `AnalysisKernel` to tag audio on ingestion or capture.
+
+For the full specification on closed-loop DNS observation, DNA as a semantic intermediate representation (IR), DNA invariants (`InvariantMask`), gravity fields, multi-rate temporal execution, and the integration of Mode 1 (conventional waveform mixing), Mode 2 (audio-less characteristic transfer), and Mode 3 (hybrid mixing + DNA transformation), see [`MUSICAL_TRANSFORMATION_ENGINE_SPECIFICATION.md`](./MUSICAL_TRANSFORMATION_ENGINE_SPECIFICATION.md).
