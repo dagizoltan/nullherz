@@ -32,6 +32,7 @@ pub mod clip_orchestrator;
 pub mod bounce;
 pub mod mixer_orchestrator;
 pub mod genetic_sequencer;
+pub mod dataset_generator;
 
 pub use nullherz_dna::GeneticLibrary;
 pub use orchestrator::Conductor;

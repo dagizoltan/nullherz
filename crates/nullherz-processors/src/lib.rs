@@ -25,6 +25,7 @@ pub mod transfusion;
 pub mod fallback;
 pub mod neural_saturator;
 pub mod neural_filter;
+pub mod neural_tcn;
 #[cfg(test)]
 mod sampler_tests;
 #[cfg(test)]
@@ -54,6 +55,7 @@ pub use transfusion::*;
 pub use fallback::FallbackProcessor;
 pub use neural_saturator::NeuralSaturatorProcessor;
 pub use neural_filter::NeuralFilterProcessor;
+pub use neural_tcn::NeuralTcnProcessor;
 pub use registry::ProcessorRegistry;
 
 #[cfg(test)]

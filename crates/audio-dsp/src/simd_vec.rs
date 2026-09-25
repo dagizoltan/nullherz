@@ -93,6 +93,11 @@ impl FloatX16 {
         }
     }
 
+    pub fn reduce_sum(self) -> f32 {
+        let arr: [f32; 16] = self.into();
+        arr.iter().sum()
+    }
+
     pub fn splat(val: f32) -> Self {
         #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
         { Self { val: wide::f32x16::from(val) } }

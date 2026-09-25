@@ -65,6 +65,7 @@ fn known_unreachable() -> Vec<(&'static str, &'static str)> {
           as KeySync; also still disengaged until real DNA is fed (Phase 6)"),
         ("NeuralSaturator", "available for FX chains; not in default master chain"),
         ("NeuralFilter", "available for FX chains; not in default master chain"),
+        ("NeuralTcn", "available for FX chains; not in default master chain"),
     ]
 }
 

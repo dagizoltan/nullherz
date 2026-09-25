@@ -18,6 +18,7 @@ use crate::limiter::*;
 use crate::streaming_sampler::*;
 use crate::neural_saturator::*;
 use crate::neural_filter::*;
+use crate::neural_tcn::*;
 
 /// Identity pass-through, used to hold an insert slot open.
 ///
@@ -318,4 +319,13 @@ impl ProcessorFactory for NeuralFilterFactory {
     }
     fn name(&self) -> &'static str { "NeuralFilter" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::NEURAL_FILTER }
+}
+
+pub struct NeuralTcnFactory;
+impl ProcessorFactory for NeuralTcnFactory {
+    fn create_processor(&self, node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(NeuralTcnProcessor::new(node_idx as u64)))
+    }
+    fn name(&self) -> &'static str { "NeuralTcn" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::NEURAL_TCN }
 }

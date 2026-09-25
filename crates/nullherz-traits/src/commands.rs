@@ -100,6 +100,7 @@ impl ProcessorTypeId {
     pub const MASTERING_EQ: Self = Self(220);
     pub const NEURAL_SATURATOR: Self = Self(230);
     pub const NEURAL_FILTER: Self = Self(231);
+    pub const NEURAL_TCN: Self = Self(232);
 }
 
 impl From<u32> for ProcessorTypeId {
