@@ -15,6 +15,7 @@ struct AlsaLib {
     snd_pcm_hw_params_any: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> std::os::raw::c_int,
     snd_pcm_hw_params_set_access: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_hw_params_set_period_wakeup: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_uint) -> std::os::raw::c_int>,
+    snd_pcm_hw_params_set_wake_mode: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_uint) -> std::os::raw::c_int>,
     snd_pcm_hw_params_set_format: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_hw_params_set_channels: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_uint) -> std::os::raw::c_int,
     snd_pcm_hw_params_set_rate_near: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, *mut std::os::raw::c_uint, *mut std::os::raw::c_int) -> std::os::raw::c_int,
@@ -29,6 +30,7 @@ struct AlsaLib {
     // — never fail playback over a tuning knob.
     sw: Option<AlsaSwParams>,
     snd_pcm_writei: unsafe extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void, std::os::raw::c_ulong) -> isize,
+    snd_pcm_mmap_writei: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void, std::os::raw::c_ulong) -> isize>,
     snd_pcm_recover: unsafe extern "C" fn(*mut std::ffi::c_void, std::os::raw::c_int, std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_close: unsafe extern "C" fn(*mut std::ffi::c_void) -> std::os::raw::c_int,
     snd_pcm_prepare: unsafe extern "C" fn(*mut std::ffi::c_void) -> std::os::raw::c_int,
@@ -70,6 +72,8 @@ impl AlsaLib {
                 snd_pcm_hw_params_set_access: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, i32) -> i32>(load_sym(c"snd_pcm_hw_params_set_access").ok_or("sym failed")?),
                 snd_pcm_hw_params_set_period_wakeup: load_sym(c"snd_pcm_hw_params_set_period_wakeup")
                     .map(|s| std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, u32) -> i32>(s)),
+                snd_pcm_hw_params_set_wake_mode: load_sym(c"snd_pcm_hw_params_set_wake_mode")
+                    .map(|s| std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, u32) -> i32>(s)),
                 snd_pcm_hw_params_set_format: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, i32) -> i32>(load_sym(c"snd_pcm_hw_params_set_format").ok_or("sym failed")?),
                 snd_pcm_hw_params_set_channels: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, u32) -> i32>(load_sym(c"snd_pcm_hw_params_set_channels").ok_or("sym failed")?),
                 snd_pcm_hw_params_set_rate_near: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void, *mut u32, *mut i32) -> i32>(load_sym(c"snd_pcm_hw_params_set_rate_near").ok_or("sym failed")?),
@@ -91,6 +95,8 @@ impl AlsaLib {
                     })
                 })(),
                 snd_pcm_writei: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *const std::ffi::c_void, u64) -> isize>(load_sym(c"snd_pcm_writei").ok_or("sym failed")?),
+                snd_pcm_mmap_writei: load_sym(c"snd_pcm_mmap_writei")
+                    .map(|s| std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *const std::ffi::c_void, u64) -> isize>(s)),
                 snd_pcm_recover: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, i32, i32) -> i32>(load_sym(c"snd_pcm_recover").ok_or("sym failed")?),
                 snd_pcm_close: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void) -> i32>(load_sym(c"snd_pcm_close").ok_or("sym failed")?),
                 snd_pcm_prepare: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void) -> i32>(load_sym(c"snd_pcm_prepare").ok_or("sym failed")?),
@@ -185,17 +191,45 @@ impl AlsaBackend {
     /// or health checks — no blocking I/O on the RT path.
     pub fn xruns(&self) -> u64 { self.xruns.load(Ordering::Relaxed) }
 
+    /// Normalize ALSA device name to a D-Bus ReserveDevice1 object name (e.g., "Audio0")
+    pub fn dbus_device_name(device_name: &str) -> String {
+        let clean = device_id(device_name);
+        if clean.starts_with("Audio") {
+            clean.to_string()
+        } else if let Some(rest) = clean.strip_prefix("hw:") {
+            let card = rest.split(',').next().unwrap_or("0");
+            if let Some(card_num) = card.strip_prefix("CARD=") {
+                format!("Audio{}", card_num)
+            } else {
+                format!("Audio{}", card)
+            }
+        } else if let Some(rest) = clean.strip_prefix("plughw:") {
+            let card = rest.split(',').next().unwrap_or("0");
+            format!("Audio{}", card)
+        } else if clean == "default" {
+            "Audio0".to_string()
+        } else {
+            let digits: String = clean.chars().filter(|c| c.is_ascii_digit()).collect();
+            if digits.is_empty() {
+                "Audio0".to_string()
+            } else {
+                format!("Audio{}", digits)
+            }
+        }
+    }
+
     /// Request D-Bus audio device reservation (org.freedesktop.ReserveDevice1)
     pub fn reserve_dbus_device(device_name: &str) {
+        let target_dev = Self::dbus_device_name(device_name);
         let app_name = "nullherz";
         let priority = 20i32;
         let _ = std::process::Command::new("dbus-send")
             .args([
-                "--system",
+                "--session",
                 "--print-reply",
                 "--type=method_call",
-                &format!("--dest=org.freedesktop.ReserveDevice1.{}", device_name),
-                &format!("/org/freedesktop/ReserveDevice1/{}", device_name),
+                &format!("--dest=org.freedesktop.ReserveDevice1.{}", target_dev),
+                &format!("/org/freedesktop/ReserveDevice1/{}", target_dev),
                 "org.freedesktop.ReserveDevice1.RequestDevice",
             ])
             .arg(format!("string:{}", app_name))
@@ -244,7 +278,7 @@ impl AudioBackend for AlsaBackend {
         const SND_PCM_FORMAT_S32_LE: i32 = 10;
         const SND_PCM_FORMAT_FLOAT_LE: i32 = 14;
 
-        let (out_format, rate, period_size, negotiated_buffer);
+        let (out_format, rate, period_size, negotiated_buffer, is_mmap);
 
         unsafe {
             let mut hw_params: *mut std::ffi::c_void = std::ptr::null_mut();
@@ -259,23 +293,35 @@ impl AudioBackend for AlsaBackend {
             } else {
                 -1
             };
-            if access_res != 0 {
+            let is_mmap_local = access_res == 0;
+            is_mmap = is_mmap_local;
+            if !is_mmap_local {
                 (alsa.snd_pcm_hw_params_set_access)(pcm, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
             } else {
                 eprintln!("[ALSA] Direct Hardware MMAP mode enabled.");
             }
 
-            // Apply NO_PERIOD_WAKEUP (disable timer period wakeups for kernel bypass)
-            if let Some(set_wakeup) = alsa.snd_pcm_hw_params_set_period_wakeup {
-                let no_wakeup = matches!(
-                    std::env::var("NULLHERZ_NO_PERIOD_WAKEUP").as_deref(),
-                    Ok("1") | Ok("true") | Ok("yes")
-                );
-                if no_wakeup {
-                    let wakeup_val = 0u32; // 0 = disable period wakeup
-                    if set_wakeup(pcm, hw_params, wakeup_val) == 0 {
-                        eprintln!("[ALSA] NO_PERIOD_WAKEUP enabled — kernel period wakeups disabled.");
+            // Apply NO_PERIOD_WAKEUP / set_wake_mode (disable timer period wakeups for kernel bypass)
+            let no_wakeup = matches!(
+                std::env::var("NULLHERZ_NO_PERIOD_WAKEUP").as_deref(),
+                Ok("1") | Ok("true") | Ok("yes")
+            );
+            if no_wakeup {
+                let mut wakeup_set = false;
+                if let Some(set_wakeup) = alsa.snd_pcm_hw_params_set_period_wakeup {
+                    if set_wakeup(pcm, hw_params, 0) == 0 {
+                        wakeup_set = true;
                     }
+                }
+                if !wakeup_set {
+                    if let Some(set_wake_mode) = alsa.snd_pcm_hw_params_set_wake_mode {
+                        if set_wake_mode(pcm, hw_params, 0) == 0 {
+                            wakeup_set = true;
+                        }
+                    }
+                }
+                if wakeup_set {
+                    eprintln!("[ALSA] NO_PERIOD_WAKEUP / wake mode enabled — kernel period wakeups disabled.");
                 }
             }
 
@@ -495,6 +541,18 @@ impl AudioBackend for AlsaBackend {
             }
 
             unsafe {
+                let write_pcm = |alsa: &AlsaLib, pcm: *mut std::ffi::c_void, ptr: *const std::ffi::c_void, frames: u64| -> isize {
+                    if is_mmap {
+                        if let Some(mmap_write) = alsa.snd_pcm_mmap_writei {
+                            let res = mmap_write(pcm, ptr, frames);
+                            if res >= 0 {
+                                return res;
+                            }
+                        }
+                    }
+                    (alsa.snd_pcm_writei)(pcm, ptr, frames)
+                };
+
                 if let Some(ref engine_arc) = engine_arc_opt {
                      let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
                      (*engine_ptr).set_config(nullherz_traits::AudioConfig {
@@ -517,9 +575,9 @@ impl AudioBackend for AlsaBackend {
                 let prefill = |alsa: &AlsaLib, pcm: *mut std::ffi::c_void, silence_f32: &[f32], silence_s32: &[i32], silence_s16: &[i16], periods: u64| {
                     for _ in 0..periods.saturating_sub(1) {
                         match out_format {
-                            OutFormat::F32 => { (alsa.snd_pcm_writei)(pcm, silence_f32.as_ptr() as *const _, (silence_f32.len() / 2) as u64); }
-                            OutFormat::S32 => { (alsa.snd_pcm_writei)(pcm, silence_s32.as_ptr() as *const _, (silence_s32.len() / 2) as u64); }
-                            OutFormat::S16 => { (alsa.snd_pcm_writei)(pcm, silence_s16.as_ptr() as *const _, (silence_s16.len() / 2) as u64); }
+                            OutFormat::F32 => { write_pcm(alsa, pcm, silence_f32.as_ptr() as *const _, (silence_f32.len() / 2) as u64); }
+                            OutFormat::S32 => { write_pcm(alsa, pcm, silence_s32.as_ptr() as *const _, (silence_s32.len() / 2) as u64); }
+                            OutFormat::S16 => { write_pcm(alsa, pcm, silence_s16.as_ptr() as *const _, (silence_s16.len() / 2) as u64); }
                         }
                     }
                 };
@@ -560,7 +618,7 @@ impl AudioBackend for AlsaBackend {
                                 interleaved_f32[i*2] = outputs_raw[0][i];
                                 interleaved_f32[i*2+1] = outputs_raw[1][i];
                             }
-                            (alsa.snd_pcm_writei)(pcm, interleaved_f32.as_ptr() as *const _, actual_period as u64)
+                            write_pcm(&alsa, pcm, interleaved_f32.as_ptr() as *const _, actual_period as u64)
                         }
                         OutFormat::S32 => {
                             // Scale by 2^31-1 and ROUND. The f32 mantissa is 24
@@ -576,27 +634,20 @@ impl AudioBackend for AlsaBackend {
                                 interleaved_s32[i*2] = l.clamp(-2_147_483_648.0, 2_147_483_647.0) as i32;
                                 interleaved_s32[i*2+1] = r.clamp(-2_147_483_648.0, 2_147_483_647.0) as i32;
                             }
-                            (alsa.snd_pcm_writei)(pcm, interleaved_s32.as_ptr() as *const _, actual_period as u64)
+                            write_pcm(&alsa, pcm, interleaved_s32.as_ptr() as *const _, actual_period as u64)
                         }
                         OutFormat::S16 => {
                             // ROUND, not truncate. `as i16` rounds toward zero,
                             // which is up to a full LSB of signal-correlated
                             // error with a DC bias — audible as distortion on
                             // fades, which is where 16-bit is heard.
-                            //
-                            // Still undithered: at 16 bits quantisation error IS
-                            // correlated with the signal and TPDF dither is the
-                            // fix. Not added here because this arm should now be
-                            // unreachable on any device offering S32_LE, and a
-                            // dither generator on the RT path deserves its own
-                            // change rather than riding along with a format fix.
                             for i in 0..actual_period {
                                 let l = (outputs_raw[0][i] * 32767.0).round();
                                 let r = (outputs_raw[1][i] * 32767.0).round();
                                 interleaved_s16[i*2] = l.clamp(-32768.0, 32767.0) as i16;
                                 interleaved_s16[i*2+1] = r.clamp(-32768.0, 32767.0) as i16;
                             }
-                            (alsa.snd_pcm_writei)(pcm, interleaved_s16.as_ptr() as *const _, actual_period as u64)
+                            write_pcm(&alsa, pcm, interleaved_s16.as_ptr() as *const _, actual_period as u64)
                         }
                     };
 
