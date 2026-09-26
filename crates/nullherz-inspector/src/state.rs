@@ -532,8 +532,128 @@ pub enum ChannelKind {
     InstrumentSynth,
 }
 
+/// Biological Spiking Neural Network (RSNN) Engine for audio-driven abstract visual synthesis.
+/// Implements Izhikevich & LIF (Leaky Integrate-and-Fire) membrane potential dynamics,
+/// recurrent reservoir connections, and STDP (Spike-Timing-Dependent Plasticity) synaptic modulation.
+#[derive(Clone, Debug)]
+pub struct SpikingNeuronNetwork {
+    pub v: [f32; 32],             // Membrane potentials (mV)
+    pub u: [f32; 32],             // Recovery variables
+    pub spikes: [bool; 32],       // Spike triggers for current step
+    pub stdp_trace: [f32; 32],    // Synaptic eligibility / STDP activity traces
+    pub weights: [[f32; 32]; 32], // Recurrent synaptic weight matrix W[from][to]
+    pub motor_outputs: [f32; 8],  // Continuous neural motor activation values
+}
+
+impl SpikingNeuronNetwork {
+    pub fn new() -> Self {
+        let mut weights = [[0.0f32; 32]; 32];
+        for i in 0..32 {
+            for j in 0..32 {
+                if i != j {
+                    let phase = (i as f32 * 0.7 + j as f32 * 1.3).sin();
+                    weights[i][j] = phase * 0.25;
+                }
+            }
+        }
+        Self {
+            v: [-65.0; 32],
+            u: [-13.0; 32],
+            spikes: [false; 32],
+            stdp_trace: [0.0; 32],
+            weights,
+            motor_outputs: [0.0; 8],
+        }
+    }
+
+    pub fn step(&mut self, audio_inputs: &[f32], dt: f32, neural_temp: f32, feedback_coupling: f32) {
+        let a = 0.02f32;
+        let b = 0.2f32;
+        let c = -65.0f32;
+        let d = 8.0f32;
+
+        let dt_ms = (dt * 1000.0).clamp(1.0, 33.0);
+        let sub_steps = 2;
+        let h = dt_ms / sub_steps as f32;
+
+        for _sub in 0..sub_steps {
+            let mut currents = [0.0f32; 32];
+
+            for i in 0..32 {
+                let input_val = audio_inputs.get(i % audio_inputs.len().max(1)).copied().unwrap_or(0.0);
+                currents[i] += input_val * 15.0 * neural_temp;
+            }
+
+            for from in 0..32 {
+                if self.spikes[from] {
+                    for to in 0..32 {
+                        currents[to] += self.weights[from][to] * 20.0 * (1.0 + feedback_coupling);
+                    }
+                }
+            }
+
+            for i in 0..32 {
+                let v = self.v[i];
+                let u = self.u[i];
+                let i_ext = currents[i];
+
+                let dv = (0.04 * v * v + 5.0 * v + 140.0 - u + i_ext) * h;
+                let du = (a * (b * v - u)) * h;
+
+                let next_v = v + dv;
+                let next_u = u + du;
+
+                if next_v >= 30.0 {
+                    self.v[i] = c;
+                    self.u[i] = next_u + d;
+                    self.spikes[i] = true;
+                    self.stdp_trace[i] = (self.stdp_trace[i] + 1.0).min(3.0);
+                } else {
+                    self.v[i] = next_v.clamp(-90.0, 30.0);
+                    self.u[i] = next_u;
+                    self.spikes[i] = false;
+                    self.stdp_trace[i] *= 0.95;
+                }
+            }
+
+            for i in 0..32 {
+                if self.spikes[i] {
+                    for j in 0..32 {
+                        if i != j {
+                            let delta_w = 0.001 * (self.stdp_trace[j] - 0.2);
+                            self.weights[j][i] = (self.weights[j][i] + delta_w).clamp(-1.0, 1.0);
+                        }
+                    }
+                }
+            }
+        }
+
+        for m in 0..8 {
+            let mut pool_sum = 0.0f32;
+            for n in 0..4 {
+                let idx = m * 4 + n;
+                let norm_v = (self.v[idx] + 65.0) / 30.0;
+                let x2 = norm_v * norm_v;
+                let tanh_approx = (norm_v * (27.0 + x2) / (27.0 + 9.0 * x2)).clamp(-1.0, 1.0);
+                pool_sum += tanh_approx;
+            }
+            let target_motor = pool_sum / 4.0;
+            self.motor_outputs[m] += (target_motor - self.motor_outputs[m]) * 0.2;
+        }
+    }
+}
+
+impl Default for SpikingNeuronNetwork {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub enum VisualGenerator {
+    WinampNeuronTunnel,
+    WmpPlasmaFeedback,
+    ReactionDiffusionNN,
     BioluminescentFluidFlow,
     HarmonicArrangementLattice,
     AbstractQuantumSwarm,
@@ -544,6 +664,9 @@ pub enum VisualGenerator {
 impl VisualGenerator {
     pub fn name(&self) -> &'static str {
         match self {
+            Self::WinampNeuronTunnel => "Winamp Neuron Warp Tunnel",
+            Self::WmpPlasmaFeedback => "WMP Neural Plasma Oscillograph",
+            Self::ReactionDiffusionNN => "Neural Reaction Diffusion Lattice",
             Self::BioluminescentFluidFlow => "Bioluminescent Fluid Flow",
             Self::HarmonicArrangementLattice => "Harmonic Arrangement Lattice",
             Self::AbstractQuantumSwarm => "Abstract Quantum Swarm",
@@ -554,6 +677,9 @@ impl VisualGenerator {
 
     pub fn all() -> &'static [Self] {
         &[
+            Self::WinampNeuronTunnel,
+            Self::WmpPlasmaFeedback,
+            Self::ReactionDiffusionNN,
             Self::BioluminescentFluidFlow,
             Self::HarmonicArrangementLattice,
             Self::AbstractQuantumSwarm,
@@ -637,6 +763,8 @@ pub struct VisualChannel {
     pub param_mesh_resolution: f32,
     pub is_muted: bool,
     pub is_solo: bool,
+    /// Native Biological Spiking Neural Network state
+    pub neuron_net: SpikingNeuronNetwork,
 }
 
 impl VisualChannel {
@@ -675,6 +803,7 @@ impl VisualChannel {
             param_mesh_resolution: 0.6,
             is_muted: false,
             is_solo: false,
+            neuron_net: SpikingNeuronNetwork::new(),
         }
     }
 }
@@ -727,23 +856,23 @@ impl Default for VizState {
             damped_master_peaks: [0.0; 2],
             channels: vec![
                 VisualChannel::new(
-                    "VIZ 1 — FLUID FLOW",
-                    VisualGenerator::BioluminescentFluidFlow,
+                    "VIZ 1 — WINAMP TUNNEL",
+                    VisualGenerator::WinampNeuronTunnel,
                     vec![VisualInputSource::MasterMix, VisualInputSource::MidiTriggerBus],
                 ),
                 VisualChannel::new(
-                    "VIZ 2 — HARMONIC LATTICE",
-                    VisualGenerator::HarmonicArrangementLattice,
+                    "VIZ 2 — WMP PLASMA",
+                    VisualGenerator::WmpPlasmaFeedback,
                     vec![VisualInputSource::DeckA, VisualInputSource::DeckB],
                 ),
                 VisualChannel::new(
-                    "VIZ 3 — QUANTUM SWARM",
-                    VisualGenerator::AbstractQuantumSwarm,
+                    "VIZ 3 — REACTION DIFFUSION",
+                    VisualGenerator::ReactionDiffusionNN,
                     vec![VisualInputSource::DeckC, VisualInputSource::DeckD],
                 ),
                 VisualChannel::new(
-                    "VIZ 4 — MYCELIUM",
-                    VisualGenerator::NeuralFloralMycelium,
+                    "VIZ 4 — FLUID FLOW",
+                    VisualGenerator::BioluminescentFluidFlow,
                     vec![VisualInputSource::MicInput, VisualInputSource::MasterMix],
                 ),
             ],
