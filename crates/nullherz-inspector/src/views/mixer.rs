@@ -1,14 +1,13 @@
-use egui::{Ui, Frame, Margin, Rounding, Stroke, RichText, ScrollArea};
+use egui::{Ui, Frame, Margin, Rounding, Stroke, RichText, ScrollArea, Color32, Pos2, Vec2};
 use crate::InspectorApp;
+use crate::state::{ChannelInputSource, MasterOutput};
 use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
 
-/// Fixed strip width: every card is the same size regardless of window
-/// width. (The old layout used `vertical_centered` inside the horizontal
-/// row, which expands to the FULL remaining width — the first card
-/// ballooned and pushed the rest off the right edge.)
+/// Fixed strip width: every card is the same size regardless of window width.
 const STRIP_W: f32 = 140.0;
 const FADER_H: f32 = 150.0;
+const VERTICAL_WAVEFORM_H: f32 = 90.0;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     let theme = app.theme;
@@ -27,11 +26,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 .max_width(scroll_width)
                 .show(ui, |ui| {
                     ui.horizontal_top(|ui| {
-                        for i in 0..4 {
+                        let num_ch = app.mixer.num_channels.clamp(1, 16);
+                        for i in 0..num_ch {
                             render_channel_strip(app, ui, i, telemetry);
-                            if i < 3 {
-                                ui.add_space(theme.space_sm);
-                            }
+                            ui.add_space(theme.space_sm);
+                        }
+
+                        // Add "+" channel button if under max limit (16 channels)
+                        if num_ch < 16 {
+                            render_add_channel_button(app, ui);
                         }
                     });
                 });
@@ -44,15 +47,123 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     });
 }
 
+fn render_add_channel_button(app: &mut InspectorApp, ui: &mut Ui) {
+    let theme = app.theme;
+    Frame::none()
+        .fill(theme.bg_surface)
+        .rounding(Rounding::same(theme.radius_md))
+        .inner_margin(Margin::same(theme.space_md))
+        .stroke(Stroke::new(1.0_f32, theme.border))
+        .show(ui, |ui| {
+            ui.set_width(STRIP_W);
+            ui.vertical_centered(|ui| {
+                ui.add_space(180.0);
+                let btn = egui::Button::new(RichText::new("+").size(24.0).strong().color(theme.accent))
+                    .fill(theme.bg_inset)
+                    .min_size(Vec2::new(50.0, 50.0));
+                if ui.add(btn).on_hover_text("Add Channel Strip").clicked() {
+                    if app.mixer.num_channels < 16 {
+                        app.mixer.num_channels += 1;
+                    }
+                }
+                ui.add_space(4.0);
+                ui.label(RichText::new("ADD CHANNEL").size(9.0).strong().color(theme.text_secondary));
+            });
+        });
+}
+
+fn render_vertical_waveform(
+    ui: &mut Ui,
+    track: Option<&nullherz_dna::LibraryTrack>,
+    elapsed_samples: u64,
+    peak_level: f32,
+    deck_color: Color32,
+    theme: &nullherz_ui_hal::Theme,
+) {
+    let (rect, _response) = ui.allocate_exact_size(Vec2::new(STRIP_W - 24.0, VERTICAL_WAVEFORM_H), egui::Sense::hover());
+    let painter = ui.painter();
+
+    // Background inset
+    painter.rect_filled(rect, theme.radius_sm, theme.bg_inset);
+    painter.rect_stroke(rect, theme.radius_sm, Stroke::new(1.0, theme.border_stroke.color));
+
+    let center_x = rect.center().x;
+    let height = rect.height();
+
+    if let Some(t) = track {
+        let peaks = &t.metadata.peaks;
+        if !peaks.is_empty() {
+            let total_samples = t.metadata.total_samples.max(1) as f64;
+            let playhead_ratio = (elapsed_samples as f64 / total_samples).clamp(0.0, 1.0) as f32;
+            let num_peaks = peaks.len();
+            let playhead_idx = (playhead_ratio * num_peaks as f32) as usize;
+
+            // Render 30 vertical slices (moving top to bottom)
+            let slices = 30;
+            let window_span = 60; // 60 peaks total around playhead
+            let start_idx = playhead_idx.saturating_sub(window_span / 2);
+
+            for slice_i in 0..slices {
+                let y = rect.min.y + (slice_i as f32 / slices as f32) * height;
+                let peak_i = start_idx + (slice_i * window_span / slices);
+                let amp = peaks.get(peak_i).copied().unwrap_or(0.05).abs().clamp(0.02, 1.0);
+                let bar_w = amp * (rect.width() * 0.45);
+
+                let is_past = slice_i < slices / 2;
+                let color = if is_past {
+                    deck_color.linear_multiply(0.4)
+                } else {
+                    deck_color
+                };
+
+                painter.line_segment(
+                    [Pos2::new(center_x - bar_w, y), Pos2::new(center_x + bar_w, y)],
+                    Stroke::new(2.0, color),
+                );
+            }
+
+            // Draw center playhead line
+            let playhead_y = rect.min.y + height * 0.5;
+            painter.line_segment(
+                [Pos2::new(rect.min.x + 2.0, playhead_y), Pos2::new(rect.max.x - 2.0, playhead_y)],
+                Stroke::new(1.5, theme.accent),
+            );
+            return;
+        }
+    }
+
+    // Fallback: Real-time dynamic signal visualizer when no track loaded or live input active
+    let slices = 20;
+    for slice_i in 0..slices {
+        let y = rect.min.y + (slice_i as f32 / slices as f32) * height;
+        let factor = (slice_i as f32 * 0.3 + peak_level * 5.0).sin().abs();
+        let amp = (peak_level * factor).clamp(0.03, 0.95);
+        let bar_w = amp * (rect.width() * 0.45);
+
+        painter.line_segment(
+            [Pos2::new(center_x - bar_w, y), Pos2::new(center_x + bar_w, y)],
+            Stroke::new(2.0, deck_color.linear_multiply(0.6)),
+        );
+    }
+}
+
 fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>) {
     let theme = app.theme;
-    let deck_color = crate::InspectorApp::deck_color(&theme, i);
-    let deck = ['a', 'b', 'c', 'd'][i];
+    let deck_color = crate::InspectorApp::deck_color(&theme, i % 4);
+    let deck_char_letter = (b'a' + (i % 26) as u8) as char;
 
     // Resolve this channel's REAL node ids from the telemetry node map.
-    let gain_node = app.topo.node_map.get(&format!("deck_{}_gain", deck)).copied();
-    let iso_node = app.topo.node_map.get(&format!("deck_{}_isolator", deck)).copied();
-    let meter_node = iso_node.or_else(|| app.topo.node_map.get(&format!("deck_{}_sampler", deck)).copied());
+    let gain_node = app.topo.node_map.get(&format!("deck_{}_gain", deck_char_letter)).copied();
+    let iso_node = app.topo.node_map.get(&format!("deck_{}_isolator", deck_char_letter)).copied();
+    let meter_node = iso_node.or_else(|| app.topo.node_map.get(&format!("deck_{}_sampler", deck_char_letter)).copied());
+
+    let level_base = if let (Some(t), Some(node)) = (telemetry, meter_node) {
+        t.peak_levels.get(node as usize).copied().unwrap_or(0.0)
+    } else {
+        0.0
+    };
+
+    let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions.get(i).copied().unwrap_or(0)).unwrap_or(0);
 
     Frame::none()
         .fill(theme.bg_surface)
@@ -64,8 +175,27 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     ui.add_space((STRIP_W - 40.0).max(0.0) / 2.0);
-                    ui.label(RichText::new(format!("CH {}", (b'A' + i as u8) as char)).strong().size(theme.type_body).color(deck_color));
+                    ui.label(RichText::new(format!("CH {}", (b'A' + (i % 26) as u8) as char)).strong().size(theme.type_body).color(deck_color));
                 });
+                ui.add_space(theme.space_xs);
+
+                // Input Source Dropdown
+                ui.horizontal(|ui| {
+                    ui.add_space(2.0);
+                    let selected_source = app.mixer.channel_input_sources[i];
+                    egui::ComboBox::from_id_source(format!("ch_input_src_{}", i))
+                        .selected_text(RichText::new(selected_source.name()).size(9.0).strong().color(theme.text_primary))
+                        .width(STRIP_W - 20.0)
+                        .show_ui(ui, |ui| {
+                            for src in ChannelInputSource::all() {
+                                ui.selectable_value(&mut app.mixer.channel_input_sources[i], *src, src.name());
+                            }
+                        });
+                });
+                ui.add_space(theme.space_xs);
+
+                // Vertical Waveform Canvas
+                render_vertical_waveform(ui, app.decks.cached_tracks[i].as_ref(), elapsed_samples, level_base, deck_color, &theme);
                 ui.add_space(theme.space_xs);
 
                 // --- INSERTS RACK ---
@@ -178,7 +308,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                     let mut pitch_val = app.mixer.channel_pitch[i];
                                     if widgets::render_knob_sized(ui, &mut pitch_val, 0.5..=1.5, "", deck_color, 24.0).changed() {
                                         app.mixer.channel_pitch[i] = pitch_val;
-                                        let deck_char = (b'A' + i as u8) as char;
+                                        let deck_char = (b'A' + (i % 26) as u8) as char;
                                         let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam {
                                             deck_id: deck_char,
                                             param_type: nullherz_traits::DeckParamType::Pitch,
@@ -190,36 +320,39 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                         ui.add_space(4.0);
 
-                        // Attached FX and + FX button
-                        let mut remove_insert = false;
-                        if let Some(ref name) = app.decks.deck_inserts[i] {
-                            let name_clone = name.clone();
-                            Frame::none()
-                                .fill(theme.accent.linear_multiply(0.2))
-                                .rounding(Rounding::same(theme.radius_sm))
-                                .inner_margin(Margin::same(4.0))
-                                .stroke(Stroke::new(1.0, theme.accent))
-                                .show(ui, |ui| {
-                                    ui.set_width(STRIP_W - 20.0);
-                                    ui.horizontal(|ui| {
-                                        ui.label(RichText::new(format!("FX: {}", name_clone)).size(9.0).strong().color(theme.text_primary));
-                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            if ui.button(RichText::new("×").size(10.0).strong()).clicked() {
-                                                remove_insert = true;
-                                            }
+                        // Standardized container for FX slot to guarantee exact vertical alignment across channels
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(STRIP_W - 20.0, 22.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                let mut remove_insert = false;
+                                if let Some(ref name) = app.decks.deck_inserts[i] {
+                                    let name_clone = name.clone();
+                                    Frame::none()
+                                        .fill(theme.accent.linear_multiply(0.2))
+                                        .rounding(Rounding::same(theme.radius_sm))
+                                        .inner_margin(Margin::same(4.0))
+                                        .stroke(Stroke::new(1.0, theme.accent))
+                                        .show(ui, |ui| {
+                                            ui.set_width(STRIP_W - 20.0);
+                                            ui.horizontal(|ui| {
+                                                ui.label(RichText::new(format!("FX: {}", name_clone)).size(9.0).strong().color(theme.text_primary));
+                                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                    if ui.button(RichText::new("×").size(10.0).strong()).clicked() {
+                                                        remove_insert = true;
+                                                    }
+                                                });
+                                            });
                                         });
-                                    });
-                                });
-                            ui.add_space(2.0);
-                        }
-                        if remove_insert {
-                            app.decks.deck_inserts[i] = None;
-                        }
-
-                        if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
-                            app.active_right_tab = Some(crate::RightTab::Store);
-                            app.store.active_tag_filter = Some("insert".to_string());
-                        }
+                                } else if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
+                                    app.active_right_tab = Some(crate::RightTab::Store);
+                                    app.store.active_tag_filter = Some("insert".to_string());
+                                }
+                                if remove_insert {
+                                    app.decks.deck_inserts[i] = None;
+                                }
+                            },
+                        );
                     });
                 });
 
@@ -280,7 +413,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                     egui::vec2(STRIP_W - 2.0 * theme.space_md, 34.0),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
-                        let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[i]).unwrap_or(0);
+                        let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions.get(i).copied().unwrap_or(0)).unwrap_or(0);
                         if let Some(ref track) = app.decks.cached_tracks[i] {
                             let sample_rate = track.metadata.sample_rate.max(1) as f64;
                             let total_secs = track.metadata.total_samples as f64 / sample_rate;
@@ -293,7 +426,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                             if !track.artist.is_empty() {
                                 ui.label(RichText::new(&track.artist).size(9.0).color(theme.text_secondary));
                             } else {
-                                ui.label(RichText::new("").size(9.0));
+                                ui.label(RichText::new("—").size(9.0).color(theme.text_disabled));
                             }
                             let effective_bpm = track.metadata.bpm * app.mixer.channel_pitch[i];
                             ui.horizontal(|ui| {
@@ -303,8 +436,8 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                             });
                         } else {
                             ui.label(RichText::new("No Track Loaded").size(9.0).italics().color(theme.text_disabled));
-                            ui.label(RichText::new("").size(9.0));
-                            ui.label(RichText::new("").size(9.0));
+                            ui.label(RichText::new("—").size(9.0).color(theme.text_disabled));
+                            ui.label(RichText::new("--.- BPM  --:--").monospace().size(9.0).color(theme.text_disabled));
                         }
                     },
                 );
@@ -323,7 +456,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                         egui::Button::new(RichText::new(play_icon).size(12.0).strong()).fill(theme.bg_inset)
                     };
 
-                    let deck_char_upper = (b'A' + i as u8) as char;
+                    let deck_char_upper = (b'A' + (i % 26) as u8) as char;
                     if ui.add_sized([45.0, 22.0], play_btn).clicked() {
                         app.decks.deck_playing[i] = !is_playing;
                         if app.decks.deck_playing[i] {
@@ -334,14 +467,8 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                     }
 
                     if ui.add_sized([45.0, 22.0], egui::Button::new(RichText::new("CUE").size(10.0).strong()).fill(theme.bg_inset)).clicked() {
-                        let node_name = match i {
-                            0 => "deck_a_sampler",
-                            1 => "deck_b_sampler",
-                            2 => "deck_c_sampler",
-                            3 => "deck_d_sampler",
-                            _ => "",
-                        };
-                        if let Some(node_idx) = app.get_node_id(node_name) {
+                        let node_name = format!("deck_{}_sampler", (b'a' + (i % 26) as u8) as char);
+                        if let Some(node_idx) = app.get_node_id(&node_name) {
                             let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpToHotCue { node_idx, cue_idx: 0 }));
                         }
                     }
@@ -358,6 +485,8 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
     let sum_l = app.topo.node_map.get("master_sum_l").copied();
     let sum_r = app.topo.node_map.get("master_sum_r").copied();
 
+    let master_peak = app.viz.damped_master_peaks[0].max(app.viz.damped_master_peaks[1]);
+
     Frame::none()
         .fill(theme.bg_surface)
         .rounding(Rounding::same(theme.radius_md))
@@ -370,6 +499,25 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                     ui.add_space((STRIP_W - 52.0).max(0.0) / 2.0);
                     ui.label(RichText::new("MASTER").strong().size(theme.type_body).color(accent));
                 });
+                ui.add_space(theme.space_xs);
+
+                // Master Output Selector Dropdown
+                ui.horizontal(|ui| {
+                    ui.add_space(2.0);
+                    let selected_output = app.mixer.master_output_source;
+                    egui::ComboBox::from_id_source("master_output_src")
+                        .selected_text(RichText::new(selected_output.name()).size(9.0).strong().color(theme.text_primary))
+                        .width(STRIP_W - 20.0)
+                        .show_ui(ui, |ui| {
+                            for out in MasterOutput::all() {
+                                ui.selectable_value(&mut app.mixer.master_output_source, *out, out.name());
+                            }
+                        });
+                });
+                ui.add_space(theme.space_xs);
+
+                // Master Vertical Signal Visualizer
+                render_vertical_waveform(ui, None, 0, master_peak, accent, &theme);
                 ui.add_space(theme.space_xs);
 
                 // --- MASTER INSERTS RACK ---

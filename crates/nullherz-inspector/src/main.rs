@@ -1260,10 +1260,12 @@ impl eframe::App for InspectorApp {
             // whenever a strip gains a stage; the old `peak_levels[0..4]`
             // read deck A's first four strip nodes, so every deck's meter
             // mirrored deck A.
-            for (i, deck) in ['a', 'b', 'c', 'd'].iter().enumerate() {
+            let num_ch = self.mixer.num_channels.clamp(1, 16);
+            for i in 0..num_ch {
+                let deck_char = (b'a' + (i % 26) as u8) as char;
                 let node = self
-                    .topo.node_map.get(&format!("deck_{}_isolator", deck))
-                    .or_else(|| self.topo.node_map.get(&format!("deck_{}_sampler", deck)))
+                    .topo.node_map.get(&format!("deck_{}_isolator", deck_char))
+                    .or_else(|| self.topo.node_map.get(&format!("deck_{}_sampler", deck_char)))
                     .copied();
                 let target_peak = match node {
                     Some(n) if (n as usize) < t.peak_levels.len() => t.peak_levels[n as usize],

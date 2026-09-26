@@ -5,54 +5,106 @@
 
 use crate::{SettingsTab, View};
 
-/// 4-channel console: faders, EQ, personality morphs, mastering chain, macros.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ChannelInputSource {
+    Track,
+    AudiocardInput,
+    Instrument,
+}
+
+impl ChannelInputSource {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Track => "Track",
+            Self::AudiocardInput => "Audiocard Input",
+            Self::Instrument => "Instrument",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[Self::Track, Self::AudiocardInput, Self::Instrument]
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MasterOutput {
+    MainSpeakers,
+    Headphones,
+    SystemDefault,
+    Broadcast,
+}
+
+impl MasterOutput {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::MainSpeakers => "Main Speakers / Line 1-2",
+            Self::Headphones => "Headphones / Line 3-4",
+            Self::SystemDefault => "System Default Output",
+            Self::Broadcast => "Broadcast Stream Bus",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::MainSpeakers,
+            Self::Headphones,
+            Self::SystemDefault,
+            Self::Broadcast,
+        ]
+    }
+}
+
+/// Dynamic multi-channel console (1..16 channels, default 4): faders, EQ, personality morphs, mastering chain, macros.
 #[allow(dead_code)]
 pub struct MixerState {
-    pub channel_faders: [f32; 4],
+    pub num_channels: usize,
+    pub channel_input_sources: [ChannelInputSource; 16],
+    pub master_output_source: MasterOutput,
+    pub channel_faders: [f32; 16],
     /// Pitch-fader position per deck, as a RATE multiplier. 1.0 is the track's
     /// recorded speed.
     ///
     /// A rate, not a percentage, because that is what the sampler consumes and
     /// what `-12*log2(rate)` needs. Percent is a display unit.
-    pub channel_pitch: [f32; 4],
+    pub channel_pitch: [f32; 16],
     /// Fader travel per deck, in percent either side of centre: 8, 16 or 50.
     ///
     /// 8 is the default because it is the Technics range and the one beat-matching
     /// muscle memory is built on — the whole fader spans about a semitone and a
     /// half, so a hand movement maps to a tempo change you can actually place.
     /// 50 exists for creative work and is unusable for beat matching.
-    pub pitch_range_pct: [f32; 4],
-    pub channel_eq_high: [f32; 4],
-    pub channel_eq_mid: [f32; 4],
-    pub channel_eq_low: [f32; 4],
-    pub channel_filter: [f32; 4],
+    pub pitch_range_pct: [f32; 16],
+    pub channel_eq_high: [f32; 16],
+    pub channel_eq_mid: [f32; 16],
+    pub channel_eq_low: [f32; 16],
+    pub channel_filter: [f32; 16],
     /// Stereo position, 0.0 = hard left, 0.5 = centre, 1.0 = hard right.
     /// Drives DeckParamType::Pan, which the mixer orchestrator already routes
     /// to the deck's stereo-util node — it simply had no control bound to it.
-    pub channel_balance: [f32; 4],
+    pub channel_balance: [f32; 16],
     /// Whether DNA shaping is engaged on each deck.
     ///
     /// False by default: loading a track used to switch the deck's spectral
     /// resynthesis on by itself, costing roughly 10 dB of RMS on audio nobody
     /// asked to have processed.
-    pub channel_dna_enabled: [bool; 4],
+    pub channel_dna_enabled: [bool; 16],
     /// Stereo width, 1.0 = unmodified. Drives DeckParamType::Width, likewise
     /// already routed and previously unexposed.
-    pub channel_width: [f32; 4],
-    pub channel_personality_metallic: [f32; 4],
-    pub channel_personality_organic: [f32; 4],
-    pub channel_personality_warm: [f32; 4],
-    pub channel_personality_aggressive: [f32; 4],
+    pub channel_width: [f32; 16],
+    pub channel_personality_metallic: [f32; 16],
+    pub channel_personality_organic: [f32; 16],
+    pub channel_personality_warm: [f32; 16],
+    pub channel_personality_aggressive: [f32; 16],
     /// Deck tempo-sync (the sampler's quantize/BPM-lock). Engine default is
     /// ON, so the UI must boot showing ON.
-    pub channel_sync: [bool; 4],
+    pub channel_sync: [bool; 16],
     /// Slip mode per deck — its own state. (The player view used to reuse
     /// channel_sync for slip, so toggling slip flipped the console's S badge.)
-    pub channel_slip: [bool; 4],
+    pub channel_slip: [bool; 16],
     pub quantize_enabled: bool,
     pub master_gain: f32,
     pub crossfader_pos: f32,
-    pub channel_peak_hold: [f32; 4],
+    pub channel_peak_hold: [f32; 16],
     pub master_peak_hold: f32,
     pub _booth_peak_hold: f32,
     pub _rec_peak_hold: f32,
@@ -70,26 +122,29 @@ pub struct MixerState {
 impl Default for MixerState {
     fn default() -> Self {
         Self {
-            channel_faders: [1.0; 4],
-            channel_pitch: [1.0; 4],
-            pitch_range_pct: [8.0; 4],
-            channel_eq_high: [1.0; 4],
-            channel_eq_mid: [1.0; 4],
-            channel_eq_low: [1.0; 4],
-            channel_filter: [0.5; 4],
-            channel_balance: [0.5; 4],
-            channel_dna_enabled: [false; 4],
-            channel_width: [1.0; 4],
-            channel_personality_metallic: [0.0; 4],
-            channel_personality_organic: [0.0; 4],
-            channel_personality_warm: [0.0; 4],
-            channel_personality_aggressive: [0.0; 4],
-            channel_sync: [true; 4],
-            channel_slip: [false; 4],
+            num_channels: 4,
+            channel_input_sources: [ChannelInputSource::Track; 16],
+            master_output_source: MasterOutput::MainSpeakers,
+            channel_faders: [1.0; 16],
+            channel_pitch: [1.0; 16],
+            pitch_range_pct: [8.0; 16],
+            channel_eq_high: [1.0; 16],
+            channel_eq_mid: [1.0; 16],
+            channel_eq_low: [1.0; 16],
+            channel_filter: [0.5; 16],
+            channel_balance: [0.5; 16],
+            channel_dna_enabled: [false; 16],
+            channel_width: [1.0; 16],
+            channel_personality_metallic: [0.0; 16],
+            channel_personality_organic: [0.0; 16],
+            channel_personality_warm: [0.0; 16],
+            channel_personality_aggressive: [0.0; 16],
+            channel_sync: [true; 16],
+            channel_slip: [false; 16],
             quantize_enabled: true,
             master_gain: 1.0,
             crossfader_pos: 0.5,
-            channel_peak_hold: [0.0; 4],
+            channel_peak_hold: [0.0; 16],
             master_peak_hold: 0.0,
             _booth_peak_hold: 0.0,
             _rec_peak_hold: 0.0,
@@ -107,31 +162,31 @@ impl Default for MixerState {
 /// Deck transport: what's loaded, what's playing, which deck has focus.
 pub struct DeckState {
     pub master_deck: Option<usize>,
-    pub now_playing: [Option<u64>; 4],
+    pub now_playing: [Option<u64>; 16],
     /// Per-deck track cache: the console header and waveform used to hit
     /// redb PER FRAME per deck (hundreds of reads/sec at repaint cadence).
     /// Refreshed when the loaded id changes or the library reloads.
-    pub cached_tracks: [Option<nullherz_dna::LibraryTrack>; 4],
+    pub cached_tracks: [Option<nullherz_dna::LibraryTrack>; 16],
     pub global_bpm: f32,
     pub focused_deck: usize,
-    pub deck_playing: [bool; 4],
+    pub deck_playing: [bool; 16],
     pub global_playing: bool,
     /// Per-deck SYNC latch, mirroring `MixerManager::sync_decks`. **False is
     /// RAW and is the default** — the deck plays at the file's native tempo
     /// until the operator asks otherwise.
     #[allow(dead_code)]
-    pub deck_sync: [bool; 4],
+    pub deck_sync: [bool; 16],
     /// Per-deck KEY latch, mirroring `MixerManager::key_sync_decks`. False is
     /// RAW: no pitch shift.
     #[allow(dead_code)]
-    pub deck_key_sync: [bool; 4],
+    pub deck_key_sync: [bool; 16],
     /// Per-deck KEY LOCK (master tempo) latch, mirroring
     /// `MixerManager::key_lock_decks`. False is RAW: tempo changes move pitch,
     /// turntable-style.
     #[allow(dead_code)]
-    pub deck_key_lock: [bool; 4],
+    pub deck_key_lock: [bool; 16],
     /// Active sidecar insert FX attached to each deck channel.
-    pub deck_inserts: [Option<String>; 4],
+    pub deck_inserts: [Option<String>; 16],
 }
 
 impl Default for DeckState {
@@ -141,15 +196,15 @@ impl Default for DeckState {
             // No tracks are loaded at boot. (The old [Some(1), Some(2), ..]
             // pointed at the retired fixed demo ids — library ids are path
             // hashes now, so the console claimed tracks that don't exist.)
-            now_playing: [None; 4],
+            now_playing: [None; 16],
             cached_tracks: std::array::from_fn(|_| None),
             global_bpm: 128.0,
             focused_deck: 0,
-            deck_playing: [false; 4],
+            deck_playing: [false; 16],
             global_playing: false,
-            deck_sync: [false; 4],
-            deck_key_sync: [false; 4],
-            deck_key_lock: [false; 4],
+            deck_sync: [false; 16],
+            deck_key_sync: [false; 16],
+            deck_key_lock: [false; 16],
             deck_inserts: std::array::from_fn(|_| None),
         }
     }
@@ -555,15 +610,15 @@ pub struct VizState {
     pub damped_spectrum: [f32; 128],
     pub damped_goniometer: [f32; 128],
     pub damped_latent: [f32; 16],
-    pub damped_peaks: [f32; 4],
+    pub damped_peaks: [f32; 16],
     pub damped_master_peaks: [f32; 2],
     /// Previous telemetry deck positions — playing state is DERIVED
     /// (position advanced => playing) instead of kept as a local bool that
     /// drifts from engine truth.
-    pub last_deck_positions: [u64; 4],
+    pub last_deck_positions: [u64; 16],
     /// Consecutive NEW telemetry snapshots in which a deck's position did
     /// not advance. The playing flag only drops after a few still snapshots.
-    pub deck_still_snapshots: [u8; 4],
+    pub deck_still_snapshots: [u8; 16],
     /// sample_counter of the last telemetry snapshot processed for deck
     /// play-state. The UI repaints faster than telemetry refreshes; deriving
     /// per UI FRAME re-compared the SAME snapshot against itself, flapping
@@ -590,10 +645,10 @@ impl Default for VizState {
             damped_spectrum: [0.0; 128],
             damped_goniometer: [0.0; 128],
             damped_latent: [0.0; 16],
-            last_deck_positions: [0; 4],
-            deck_still_snapshots: [0; 4],
+            last_deck_positions: [0; 16],
+            deck_still_snapshots: [0; 16],
             last_playstate_counter: 0,
-            damped_peaks: [0.0; 4],
+            damped_peaks: [0.0; 16],
             damped_master_peaks: [0.0; 2],
             channels: vec![
                 VisualChannel::new(
@@ -682,11 +737,12 @@ pub const STILL_SNAPSHOTS_TO_STOP: u8 = 3;
 
 pub fn update_deck_playing(
     positions: &[u64; 4],
-    last_positions: &mut [u64; 4],
-    still_snapshots: &mut [u8; 4],
-    deck_playing: &mut [bool; 4],
+    last_positions: &mut [u64; 16],
+    still_snapshots: &mut [u8; 16],
+    deck_playing: &mut [bool; 16],
 ) {
-    for i in 0..4 {
+    let count = positions.len().min(last_positions.len()).min(still_snapshots.len()).min(deck_playing.len());
+    for i in 0..count {
         let pos = positions[i];
         if pos != 0 && pos != last_positions[i] {
             still_snapshots[i] = 0;
@@ -712,9 +768,9 @@ mod playstate_tests {
     /// positions always yield playing=true.
     #[test]
     fn advancing_position_is_always_playing() {
-        let mut last = [0u64; 4];
-        let mut still = [0u8; 4];
-        let mut playing = [false; 4];
+        let mut last = [0u64; 16];
+        let mut still = [0u8; 16];
+        let mut playing = [false; 16];
         for step in 1..=10u64 {
             update_deck_playing(&[step * 256, 0, 0, 0], &mut last, &mut still, &mut playing);
             assert!(playing[0], "moving deck must read as playing at step {}", step);
@@ -723,9 +779,9 @@ mod playstate_tests {
 
     #[test]
     fn stopped_deck_needs_consecutive_still_snapshots() {
-        let mut last = [0u64; 4];
-        let mut still = [0u8; 4];
-        let mut playing = [false; 4];
+        let mut last = [0u64; 16];
+        let mut still = [0u8; 16];
+        let mut playing = [false; 16];
         update_deck_playing(&[1_000, 0, 0, 0], &mut last, &mut still, &mut playing);
         assert!(playing[0]);
         // One or two still snapshots: still playing (slow-rate tolerance).
@@ -740,9 +796,9 @@ mod playstate_tests {
 
     #[test]
     fn brief_stall_recovers_immediately() {
-        let mut last = [0u64; 4];
-        let mut still = [0u8; 4];
-        let mut playing = [false; 4];
+        let mut last = [0u64; 16];
+        let mut still = [0u8; 16];
+        let mut playing = [false; 16];
         update_deck_playing(&[500, 0, 0, 0], &mut last, &mut still, &mut playing);
         update_deck_playing(&[500, 0, 0, 0], &mut last, &mut still, &mut playing);
         update_deck_playing(&[756, 0, 0, 0], &mut last, &mut still, &mut playing);
