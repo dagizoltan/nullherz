@@ -59,48 +59,6 @@ impl ModulationMatrix {
         // This method can be used for UI state persistence or telemetry.
     }
 
-    pub fn expand_analysis_measurement(&self, meas: &nullherz_traits::MeasurementBlock, beat_pos: f64) -> Vec<Command> {
-        let mut commands = Vec::new();
-
-        // 100: Spectral Centroid [0.0, 1.0] (0..20000 Hz)
-        let centroid_norm = (meas.spectral_centroid_hz / 20000.0).clamp(0.0, 1.0);
-        commands.extend(self.expand_macro(100, centroid_norm, beat_pos));
-
-        // 101: RMS Envelope [0.0, 1.0] (-96..0 dB)
-        let rms_avg = (meas.rms_db[0] + meas.rms_db[1]) * 0.5;
-        let rms_norm = ((rms_avg + 96.0) / 96.0).clamp(0.0, 1.0);
-        commands.extend(self.expand_macro(101, rms_norm, beat_pos));
-
-        // 103: Spectral Flux
-        let flux_norm = (meas.spectral_flux / 100.0).clamp(0.0, 1.0);
-        commands.extend(self.expand_macro(103, flux_norm, beat_pos));
-
-        // 105: Spectral Flatness
-        commands.extend(self.expand_macro(105, meas.spectral_flatness, beat_pos));
-
-        // 106: Zero Crossing Rate
-        commands.extend(self.expand_macro(106, meas.zero_crossing_rate, beat_pos));
-
-        // 107: Stereo Width
-        commands.extend(self.expand_macro(107, (meas.stereo_width * 0.5).clamp(0.0, 1.0), beat_pos));
-
-        commands
-    }
-
-    pub fn expand_perception_frame(&self, frame: &nullherz_traits::PerceptionFrame, beat_pos: f64) -> Vec<Command> {
-        let mut commands = Vec::new();
-
-        // 104: Perceptual Energy
-        commands.extend(self.expand_macro(104, frame.perceptual_energy, beat_pos));
-
-        // 102: Transient Onset (if confidence > 0.5)
-        if frame.pitch_confidence > 0.5 {
-            commands.extend(self.expand_macro(102, frame.brightness, beat_pos));
-        }
-
-        commands
-    }
-
     pub fn expand_macro(&self, macro_id: u32, value: f32, beat_pos: f64) -> Vec<Command> {
         let mut expanded = Vec::new();
         if let Some(mappings) = self.mappings.get(&macro_id) {

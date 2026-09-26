@@ -12,7 +12,6 @@ pub struct AnalysisKernel {
     tempo_estimator: MultiHypothesisTempoEstimator,
     grid_engine: BeatGridInferenceEngine,
     sample_rate: f32,
-    pub bus: Option<Arc<nullherz_processors::analysis::AnalysisBus>>,
 }
 
 impl AnalysisKernel {
@@ -26,17 +25,7 @@ impl AnalysisKernel {
             tempo_estimator: MultiHypothesisTempoEstimator::new(sample_rate),
             grid_engine: BeatGridInferenceEngine::new(sample_rate),
             sample_rate,
-            bus: None,
         }
-    }
-
-    pub fn with_bus(mut self, bus: Arc<nullherz_processors::analysis::AnalysisBus>) -> Self {
-        self.bus = Some(bus);
-        self
-    }
-
-    pub fn set_bus(&mut self, bus: Arc<nullherz_processors::analysis::AnalysisBus>) {
-        self.bus = Some(bus);
     }
 
     /// Point the kernel at the rate the buffer it is about to analyse was
@@ -111,97 +100,9 @@ impl AnalysisKernel {
         // 6. Detect Root Key
         metadata.root_key = self.detect_root_key(buffer);
 
-        // 7. Extract Perception & DNA Signature and push onto AnalysisBus
-        let perception = self.extract_perception_frame(buffer, 0, metadata.bpm);
-        let dna_sig = self.build_dna_signature(&metadata, &dna);
-
-        if let Some(ref bus) = self.bus {
-            bus.push_perception(perception);
-            bus.push_dna(dna_sig);
-        }
-
         (metadata, dna)
     }
 
-    /// Extract a single PerceptionFrame from a block of audio for real-time perception
-    pub fn extract_perception_frame(&mut self, buffer: &[f32], timestamp_ns: u64, current_bpm: f32) -> nullherz_traits::PerceptionFrame {
-        let mut frame = nullherz_traits::PerceptionFrame::default();
-        frame.timestamp_ns = timestamp_ns;
-        frame.bpm = if current_bpm > 0.0 { current_bpm } else { 120.0 };
-
-        if buffer.is_empty() { return frame; }
-
-        // 1. RMS / Perceptual Energy
-        let mut sum_sq = 0.0f32;
-        for &s in buffer {
-            sum_sq += s * s;
-        }
-        let rms = (sum_sq / buffer.len() as f32).sqrt();
-        frame.perceptual_energy = (rms * 2.0).min(1.0);
-
-        // 2. Fundamental Pitch Candidate & Brightness via STFT
-        if buffer.len() >= 512 {
-            self.re.fill(0.0);
-            self.im.fill(0.0);
-            let len = buffer.len().min(1024);
-            self.re[..len].copy_from_slice(&buffer[..len]);
-            self.fft.process(&mut self.re, &mut self.im);
-
-            let mut max_mag = 0.0f32;
-            let mut best_bin = 0;
-            let mut total_energy = 0.0f32;
-            let mut weighted_freq = 0.0f32;
-
-            for bin in 1..512 {
-                let mag = (self.re[bin] * self.re[bin] + self.im[bin] * self.im[bin]).sqrt();
-                let freq = (bin as f32 * self.sample_rate) / 1024.0;
-                total_energy += mag;
-                weighted_freq += freq * mag;
-
-                if mag > max_mag {
-                    max_mag = mag;
-                    best_bin = bin;
-                }
-            }
-
-            if total_energy > 0.0 {
-                let centroid = weighted_freq / total_energy;
-                frame.brightness = (centroid / (self.sample_rate * 0.5)).clamp(0.0, 1.0);
-                frame.pitch_candidate_hz = (best_bin as f32 * self.sample_rate) / 1024.0;
-                frame.pitch_confidence = (max_mag / total_energy).min(1.0);
-            }
-        }
-
-        // 3. Simple Stem Classification Inference
-        if frame.brightness < 0.15 && frame.perceptual_energy > 0.4 {
-            frame.detected_stem = nullherz_traits::StemClassification::Kick;
-        } else if frame.brightness > 0.4 && frame.perceptual_energy > 0.3 {
-            frame.detected_stem = nullherz_traits::StemClassification::Snare;
-        } else if frame.brightness > 0.6 {
-            frame.detected_stem = nullherz_traits::StemClassification::Hat;
-        } else {
-            frame.detected_stem = nullherz_traits::StemClassification::Unknown;
-        }
-
-        frame
-    }
-
-    /// Build a 128-byte TrackDnaSignature from metadata and SoundDNA
-    pub fn build_dna_signature(&self, metadata: &nullherz_traits::SampleMetadata, dna: &nullherz_traits::SoundDNA) -> nullherz_traits::TrackDnaSignature {
-        let mut sig = nullherz_traits::TrackDnaSignature::default();
-        sig.bpm = metadata.bpm;
-        sig.key_root = metadata.root_key.map(|k| k as u8).unwrap_or(0);
-        sig.key_mode = 0; // 0 = Minor/Major default
-        sig.dynamic_range_db = dna.artifacts.noise_floor_db.abs() * 0.5;
-        sig.band_energies = dna.feature_vector;
-        let mut micro_i8 = [0i8; 12];
-        for i in 0..12 {
-            micro_i8[i] = dna.rhythmic.micro_timing[i].clamp(-128, 127) as i8;
-        }
-        sig.micro_timing_offsets = micro_i8;
-        sig.latent_embedding = dna.spectral.latent_space;
-        sig
-    }
 
     fn calculate_peaks(&self, buffer: &[f32], target_width: usize) -> Vec<f32> {
         if buffer.is_empty() { return Vec::new(); }

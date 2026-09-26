@@ -1,51 +1,5 @@
 use crate::*;
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[archive(check_bytes)]
-#[repr(u32)]
-pub enum AnalysisModulationSource {
-    SpectralCentroid = 100,
-    RmsEnvelope = 101,
-    TransientOnset = 102,
-    SpectralFlux = 103,
-    PerceptualEnergy = 104,
-    SpectralFlatness = 105,
-    ZeroCrossingRate = 106,
-    StereoWidth = 107,
-}
-
-impl AnalysisModulationSource {
-    pub fn macro_id(&self) -> u32 {
-        *self as u32
-    }
-
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::SpectralCentroid => "Spectral Centroid",
-            Self::RmsEnvelope => "RMS Envelope",
-            Self::TransientOnset => "Transient Onset",
-            Self::SpectralFlux => "Spectral Flux",
-            Self::PerceptualEnergy => "Perceptual Energy",
-            Self::SpectralFlatness => "Spectral Flatness",
-            Self::ZeroCrossingRate => "Zero Crossing Rate",
-            Self::StereoWidth => "Stereo Width",
-        }
-    }
-
-    pub fn all() -> &'static [Self] {
-        &[
-            Self::SpectralCentroid,
-            Self::RmsEnvelope,
-            Self::TransientOnset,
-            Self::SpectralFlux,
-            Self::PerceptualEnergy,
-            Self::SpectralFlatness,
-            Self::ZeroCrossingRate,
-            Self::StereoWidth,
-        ]
-    }
-}
-
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]
 #[repr(u32)]

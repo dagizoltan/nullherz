@@ -59,7 +59,6 @@ impl Harness {
             settings: state::SettingsState::default(),
             viz: state::VizState::default(),
             topo: state::TopologyViewState::default(),
-            analyzer: state::AnalyzerViewState::default(),
             library_db: SharedLibraryDb(Arc::new(parking_lot::Mutex::new(db))),
             active_right_tab: None,
             breeding_view: crate::views::breeder::BreederView::new(),

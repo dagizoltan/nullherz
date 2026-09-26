@@ -68,42 +68,6 @@ mod tests {
     }
 
     #[test]
-    fn test_measurement_block_alignment_and_models() {
-        use std::mem::{align_of, size_of};
-        assert_eq!(align_of::<MeasurementBlock>(), 64);
-        assert!(size_of::<MeasurementBlock>() % 64 == 0);
-
-        let block = MeasurementBlock::default();
-        assert_eq!(block.phase_correlation, 1.0);
-        assert_eq!(block.stereo_width, 1.0);
-
-        let perception = PerceptionFrame::default();
-        assert_eq!(perception.bpm, 120.0);
-
-        let event = AnalysisEvent {
-            id: 1,
-            timestamp_sample: 44100,
-            event_type: AnalysisEventKind::Kick,
-            confidence: 0.95,
-            energy_db: -3.0,
-            min_freq_hz: 40.0,
-            max_freq_hz: 120.0,
-            duration_ms: 50.0,
-        };
-        assert_eq!(event.event_type, AnalysisEventKind::Kick);
-
-        let sig = TrackDnaSignature::default();
-        assert_eq!(sig.bpm, 120.0);
-
-        let selection = AnalysisSelection {
-            track_id: 42,
-            start_sample: 1000,
-            end_sample: 5000,
-        };
-        assert_eq!(selection.track_id, 42);
-    }
-
-    #[test]
     fn test_dna_transfusion_packing_roundtrip() {
         let latent = [1.0f32; 16];
         let micro_timing = [10i16; 12];
