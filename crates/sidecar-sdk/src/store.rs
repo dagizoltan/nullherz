@@ -1035,6 +1035,54 @@ impl SidecarStore {
 
         store.register(
             SidecarDescriptor::new(
+                "bioluminescent-fluid-flow",
+                "Bioluminescent Fluid Flow Surface",
+                SidecarType::NeuralProcessor,
+                &["visual", "neural", "real-time"],
+                "Organic bioluminescent fluid dynamics visual surface sidecar",
+                0,
+            ),
+            || Box::new(NeuralFilterProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "harmonic-arrangement-lattice",
+                "Harmonic Arrangement Lattice",
+                SidecarType::NeuralProcessor,
+                &["visual", "real-time"],
+                "Musical structure and harmonic chroma lattice visual sidecar for songwriters",
+                0,
+            ),
+            || Box::new(NeuralFilterProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "abstract-quantum-swarm",
+                "Abstract Quantum Swarm",
+                SidecarType::NeuralProcessor,
+                &["visual", "real-time"],
+                "Multi-spectral colorful quantum particle swarm visual sidecar",
+                0,
+            ),
+            || Box::new(NeuralFilterProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "neural-floral-mycelium",
+                "Neural Floral Mycelium",
+                SidecarType::NeuralProcessor,
+                &["visual", "neural", "real-time"],
+                "Organic growing floral mycelium tendril visual surface sidecar",
+                0,
+            ),
+            || Box::new(NeuralFilterProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
                 "neural-latent-manifold",
                 "Neural Latent Manifold Generator",
                 SidecarType::NeuralProcessor,
@@ -1281,7 +1329,7 @@ mod store_tests {
     fn test_store_list_and_descriptors() {
         let store = SidecarStore::with_defaults();
         let list = store.list();
-        assert_eq!(list.len(), 19);
+        assert_eq!(list.len(), 23);
 
         let delay_desc = store.get_descriptor("algorithmic-delay").expect("algorithmic-delay must exist");
         assert_eq!(delay_desc.name, "Algorithmic Tape Delay");
@@ -1300,7 +1348,7 @@ mod store_tests {
         assert_eq!(delays[0].id, "algorithmic-delay");
 
         let neurals = store.filter_by_tag("neural");
-        assert_eq!(neurals.len(), 11);
+        assert_eq!(neurals.len(), 13);
         let neural_ids: Vec<_> = neurals.iter().map(|d| d.id.as_str()).collect();
         assert!(neural_ids.contains(&"neural-visuals"));
         assert!(neural_ids.contains(&"neural-saturation"));
@@ -1316,10 +1364,10 @@ mod store_tests {
         assert_eq!(instruments.len(), 2);
 
         let realtimes = store.filter_by_tag("real-time");
-        assert_eq!(realtimes.len(), 19);
+        assert_eq!(realtimes.len(), 23);
 
         let visuals = store.filter_by_tag("visual");
-        assert_eq!(visuals.len(), 6);
+        assert_eq!(visuals.len(), 10);
 
         // Multi-tag queries
         let neural_inserts = store.filter_by_tags(&["neural", "insert", "real-time"]);
@@ -1338,7 +1386,7 @@ mod store_tests {
         assert_eq!(instruments[0].id, "algorithmic-synth");
 
         let neural_procs = store.filter_by_type(SidecarType::NeuralProcessor);
-        assert_eq!(neural_procs.len(), 14);
+        assert_eq!(neural_procs.len(), 18);
 
         let inserts = store.filter_by_type(SidecarType::Insert);
         assert_eq!(inserts.len(), 4);
