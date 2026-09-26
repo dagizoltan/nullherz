@@ -420,6 +420,7 @@ impl InspectorApp {
                 state::VisualGenerator::HyperAttractor => channel.engine_hyper_attractor.render(ui, rect, nervous, genome, telemetry, time as f32),
                 state::VisualGenerator::ReactionDiffusion => channel.engine_reaction_diffusion.render(ui, rect, nervous, genome, telemetry, time as f32),
                 state::VisualGenerator::NeuralRaymarcher => channel.engine_neural_raymarcher.render(ui, rect, nervous, genome, telemetry, time as f32),
+                state::VisualGenerator::NeuralNcaMesh => channel.engine_neural_nca_mesh.render(ui, rect, nervous, genome, telemetry, time as f32),
             }
 
         }
@@ -504,6 +505,17 @@ impl InspectorApp {
                                         .show_ui(ui, |ui| {
                                             for style_item in crate::views::visual_engines::radial_mandala::MandalaStyle::all() {
                                                 ui.selectable_value(&mut channel.engine_radial_mandala.style, *style_item, style_item.name());
+                                            }
+                                        });
+                                } else if channel.generator == state::VisualGenerator::NeuralNcaMesh {
+                                    ui.add_space(2.0);
+                                    egui::ComboBox::from_id_source(format!("nca_topology_combo_{}", c_idx))
+                                        .selected_text(channel.engine_neural_nca_mesh.topology.name())
+                                        .show_ui(ui, |ui| {
+                                            for topo_item in crate::views::visual_engines::neural_nca_mesh::NcaMeshTopology::all() {
+                                                if ui.selectable_value(&mut channel.engine_neural_nca_mesh.topology, *topo_item, topo_item.name()).clicked() {
+                                                    channel.engine_neural_nca_mesh.rebuild_mesh();
+                                                }
                                             }
                                         });
                                 }

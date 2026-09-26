@@ -1244,6 +1244,7 @@ pub enum VisualGenerator {
     HyperAttractor,
     ReactionDiffusion,
     NeuralRaymarcher,
+    NeuralNcaMesh,
 }
 
 impl VisualGenerator {
@@ -1255,6 +1256,7 @@ impl VisualGenerator {
             Self::HyperAttractor => "Neural Chaos Attractor (100k GPU Particles)",
             Self::ReactionDiffusion => "Turing Pattern Gray-Scott Morphogenesis",
             Self::NeuralRaymarcher => "Latent Signed Distance Field Raymarcher",
+            Self::NeuralNcaMesh => "3D Neural Cellular Automata Mesh Growth",
         }
     }
 
@@ -1266,6 +1268,7 @@ impl VisualGenerator {
             Self::HyperAttractor,
             Self::ReactionDiffusion,
             Self::NeuralRaymarcher,
+            Self::NeuralNcaMesh,
         ]
     }
 }
@@ -1363,6 +1366,7 @@ pub struct VisualChannel {
     pub engine_hyper_attractor: crate::views::visual_engines::hyper_attractor::HyperAttractorEngine,
     pub engine_reaction_diffusion: crate::views::visual_engines::reaction_diffusion::ReactionDiffusionEngine,
     pub engine_neural_raymarcher: crate::views::visual_engines::neural_raymarcher::NeuralRaymarcherEngine,
+    pub engine_neural_nca_mesh: crate::views::visual_engines::neural_nca_mesh::NeuralNcaMeshEngine,
 }
 
 impl VisualChannel {
@@ -1415,6 +1419,7 @@ impl VisualChannel {
             engine_hyper_attractor: crate::views::visual_engines::hyper_attractor::HyperAttractorEngine::new(),
             engine_reaction_diffusion: crate::views::visual_engines::reaction_diffusion::ReactionDiffusionEngine::new(),
             engine_neural_raymarcher: crate::views::visual_engines::neural_raymarcher::NeuralRaymarcherEngine::new(),
+            engine_neural_nca_mesh: crate::views::visual_engines::neural_nca_mesh::NeuralNcaMeshEngine::new(),
         }
     }
 }
