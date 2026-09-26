@@ -301,12 +301,13 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                         egui::Button::new(RichText::new(play_icon).size(12.0).strong()).fill(theme.bg_inset)
                     };
 
+                    let deck_char_upper = (b'A' + i as u8) as char;
                     if ui.add_sized([45.0, 22.0], play_btn).clicked() {
                         app.decks.deck_playing[i] = !is_playing;
                         if app.decks.deck_playing[i] {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id: deck }));
+                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id: deck_char_upper }));
                         } else {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::StopDeck { deck_id: deck }));
+                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::StopDeck { deck_id: deck_char_upper }));
                         }
                     }
 
