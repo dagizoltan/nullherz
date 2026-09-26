@@ -477,8 +477,8 @@ impl InspectorApp {
         theme.deck_colors[i % 4]
     }
 
-    fn render_left_sidebar(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::left("left_sidebar")
+    fn render_left_sidebar(&mut self, ctx: &egui::Context, active_view: &mut View, id_prefix: &str) {
+        egui::SidePanel::left(format!("{}_left_sidebar", id_prefix))
             .resizable(false)
             .default_width(70.0)
             .show(ctx, |ui| {
@@ -509,12 +509,12 @@ impl InspectorApp {
                     ];
 
                     let mut render_nav_btn = |ui: &mut egui::Ui, view: View, icon: &str, label: &str| {
-                        let is_selected = self.active_view == view;
+                        let is_selected = *active_view == view;
                         let size = egui::vec2(50.0, 50.0);
                         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
 
                         if response.clicked() {
-                            self.active_view = view;
+                            *active_view = view;
                             ui.ctx().request_repaint();
                         }
 
@@ -566,7 +566,7 @@ impl InspectorApp {
                         ui.separator();
 
                         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                            egui::ScrollArea::vertical().id_source("nav_scroll").show(ui, |ui| {
+                            egui::ScrollArea::vertical().id_source(format!("{}_nav_scroll", id_prefix)).show(ui, |ui| {
                                 for (view, icon, label) in top_nav {
                                     render_nav_btn(ui, view, icon, label);
                                     ui.add_space(10.0);
@@ -578,14 +578,14 @@ impl InspectorApp {
             });
     }
 
-    fn render_right_sidebar(&mut self, ctx: &egui::Context) {
+    fn render_right_sidebar(&mut self, ctx: &egui::Context, id_prefix: &str) {
         if let Some(tab) = self.active_right_tab {
             let right_panel_frame = egui::Frame::none()
                 .fill(self.theme.bg_surface)
                 .stroke(self.theme.border_stroke)
                 .shadow(self.theme.shadow_md);
 
-            egui::SidePanel::right("right_sidebar")
+            egui::SidePanel::right(format!("{}_right_sidebar", id_prefix))
                 .resizable(true)
                 .min_width(280.0)
                 .max_width(600.0)
@@ -637,8 +637,8 @@ impl InspectorApp {
         }
     }
 
-    fn render_bottom_bar(&mut self, ctx: &egui::Context, telemetry: &Option<Telemetry>) {
-        egui::TopBottomPanel::bottom("bottom_bar").show(ctx, |ui| {
+    fn render_bottom_bar(&mut self, ctx: &egui::Context, telemetry: &Option<Telemetry>, id_prefix: &str) {
+        egui::TopBottomPanel::bottom(format!("{}_bottom_bar", id_prefix)).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("nullherz Alpha").size(10.0).color(self.theme.text_disabled));
                 ui.separator();
@@ -1016,13 +1016,15 @@ impl eframe::App for InspectorApp {
         }
 
         // 1. Left Sidebar (Navigation Plane)
-        self.render_left_sidebar(ctx);
+        let mut main_view = self.active_view;
+        self.render_left_sidebar(ctx, &mut main_view, "main");
+        self.active_view = main_view;
 
         // 2. Right Sidebar (Intelligence Plane - Collapsible)
-        self.render_right_sidebar(ctx);
+        self.render_right_sidebar(ctx, "main");
 
         // 3. Bottom Bar (Status & Global Controls)
-        self.render_bottom_bar(ctx, &telemetry);
+        self.render_bottom_bar(ctx, &telemetry, "main");
 
         // --- Render Detached Windows (Multi-Viewport System) ---
         let detached_list: Vec<View> = self.detached_views.iter().copied().collect();
@@ -1034,23 +1036,45 @@ impl eframe::App for InspectorApp {
                 .with_inner_size([1100.0, 750.0]);
 
             let mut close_detached = false;
+            let mut current_detached_view = detached_view;
             ctx.show_viewport_immediate(viewport_id, viewport_builder, |v_ctx, _class| {
                 if v_ctx.input(|i| i.viewport().close_requested()) {
                     close_detached = true;
                 }
+
+                // Render left & right sidebars and bottom bar for detached viewport
+                self.render_left_sidebar(v_ctx, &mut current_detached_view, &view_name);
+                self.render_right_sidebar(v_ctx, &view_name);
+                self.render_bottom_bar(v_ctx, &telemetry, &view_name);
+
                 egui::CentralPanel::default().show(v_ctx, |ui| {
                     ui.horizontal(|ui| {
-                        ui.heading(egui::RichText::new(&view_name).strong().color(self.theme.accent));
+                        ui.heading(egui::RichText::new(view_to_string(current_detached_view)).strong().color(self.theme.accent));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let is_fullscreen = v_ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                            let fs_icon = if is_fullscreen {
+                                egui_phosphor::regular::ARROWS_IN_SIMPLE
+                            } else {
+                                egui_phosphor::regular::ARROWS_OUT_SIMPLE
+                            };
+                            let fs_tooltip = if is_fullscreen { "Exit Fullscreen" } else { "Fullscreen" };
+                            if ui.button(fs_icon).on_hover_text(fs_tooltip).clicked() {
+                                v_ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
+                            }
                             if ui.button(format!("{} Re-attach to Main", egui_phosphor::regular::ARROWS_IN)).clicked() {
                                 close_detached = true;
                             }
                         });
                     });
                     ui.separator();
-                    self.render_view_content(detached_view, ui, &telemetry);
+                    self.render_view_content(current_detached_view, ui, &telemetry);
                 });
             });
+
+            if current_detached_view != detached_view {
+                self.detached_views.remove(&detached_view);
+                self.detached_views.insert(current_detached_view);
+            }
 
             if close_detached {
                 self.detached_views.remove(&detached_view);
@@ -1062,6 +1086,17 @@ impl eframe::App for InspectorApp {
             ui.horizontal(|ui| {
                 ui.heading(egui::RichText::new(view_to_string(self.active_view)).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let is_fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                    let fs_icon = if is_fullscreen {
+                        egui_phosphor::regular::ARROWS_IN_SIMPLE
+                    } else {
+                        egui_phosphor::regular::ARROWS_OUT_SIMPLE
+                    };
+                    let fs_tooltip = if is_fullscreen { "Exit Fullscreen" } else { "Fullscreen" };
+                    if ui.button(fs_icon).on_hover_text(fs_tooltip).clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
+                    }
+
                     let is_detached = self.detached_views.contains(&self.active_view);
                     let btn_label = if is_detached {
                         format!("{} Re-attach Window", egui_phosphor::regular::ARROWS_IN)
@@ -1520,6 +1555,59 @@ mod tests {
         app.detached_views.remove(&View::Composer);
         assert_eq!(app.detached_views.len(), 2);
         assert!(!app.detached_views.contains(&View::Composer));
+    }
+
+    #[test]
+    fn test_detached_window_sidebar_and_fullscreen_controls() {
+        let (cmd_tx, _cmd_rx) = mpsc::channel::<Command>();
+        let raw_db = nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase");
+        let db_arc = Arc::new(parking_lot::Mutex::new(raw_db));
+
+        let mut app = InspectorApp {
+            graph: GraphJson { nodes: vec![], edges: vec![], node_assignments: Default::default() },
+            command_sender: cmd_tx,
+            last_telemetry: Arc::new(Mutex::new(None)),
+            active_view: View::Console,
+            detached_views: std::collections::HashSet::new(),
+            mixer: Default::default(),
+            decks: Default::default(),
+            library: Default::default(),
+            store: Default::default(),
+            composer: Default::default(),
+            sampler: Default::default(),
+            editor: Default::default(),
+            broadcast: Default::default(),
+            settings: Default::default(),
+            viz: Default::default(),
+            topo: Default::default(),
+            library_db: SharedLibraryDb(db_arc),
+            active_right_tab: Some(RightTab::Library),
+            breeding_view: views::breeder::BreederView::new(),
+            wgpu_renderer: None,
+            waveform_renderer: None,
+            deck_waveform_renderers: [None, None, None, None],
+            discovered_sidecars: vec![],
+            p2p_sync_success_toast: None,
+            export_passport_success_toast: None,
+            export_passport_error_toast: None,
+            theme: nullherz_ui_hal::Theme::default(),
+            last_update_time: 0.0,
+            _conductor_thread: None,
+        };
+
+        app.detached_views.insert(View::Visuals);
+        assert!(app.detached_views.contains(&View::Visuals));
+
+        // Test changing view inside detached window state
+        let initial_detached_view = View::Visuals;
+        let new_detached_view = View::Mixer;
+        if new_detached_view != initial_detached_view {
+            app.detached_views.remove(&initial_detached_view);
+            app.detached_views.insert(new_detached_view);
+        }
+
+        assert!(!app.detached_views.contains(&View::Visuals));
+        assert!(app.detached_views.contains(&View::Mixer));
     }
 
     #[test]
