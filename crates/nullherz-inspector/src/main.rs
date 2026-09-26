@@ -338,14 +338,13 @@ impl InspectorApp {
 
             match channel.generator {
                 state::VisualGenerator::ComplexNeuralMandala => {
-                    // High-Symmetry Complex Bio-Neural Spiking Mandala Engine
+                    // 1. High-Symmetry Complex Bio-Neural Spiking Mandala Engine
                     let max_radius = (rect.width().min(rect.height())) * 0.48;
-                    let symmetry_folds = 12;
+                    let symmetry_folds = channel.genome.symmetry_folds;
                     let num_rings = 8;
 
                     let global_rot = time as f32 * 0.4 * channel.param_speed + motor[0] * 1.5;
 
-                    // 1. Concentric Sacral Petal Rings
                     for r_idx in 0..num_rings {
                         let ring_frac = (r_idx + 1) as f32 / num_rings as f32;
                         let ring_radius = ring_frac * max_radius;
@@ -371,7 +370,6 @@ impl InspectorApp {
                                 let angle_offset = (p_frac - 0.5) * (std::f32::consts::TAU / symmetry_folds as f32) * 1.2;
                                 let current_angle = base_angle + angle_offset;
 
-                                // Organic Rose/Cardioid Petal Curve Equation
                                 let petal_radius = ring_radius + (p_frac * std::f32::consts::PI).sin() * petal_amp * spike_boost;
 
                                 let px = center.x + current_angle.cos() * petal_radius;
@@ -396,8 +394,8 @@ impl InspectorApp {
                         }
                     }
 
-                    // 2. Central Spiking Sacred Geometry Flower Nucleus
-                    let num_core_spokes = 24;
+                    // Sacred Geometry Spoke Nucleus
+                    let num_core_spokes = symmetry_folds * 2;
                     for s in 0..num_core_spokes {
                         let spoke_angle = (s as f32 / num_core_spokes as f32) * std::f32::consts::TAU - global_rot * 1.5;
                         let n_v = channel.neuron_net.v[s % 64];

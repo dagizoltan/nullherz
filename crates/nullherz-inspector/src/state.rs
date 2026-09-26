@@ -693,60 +693,119 @@ impl MutationEngine {
     }
 }
 
-/// Visual Organism Species Taxonomy
+#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FieldType {
+    CurlNoise,
+    ReactionDiffusion,
+    BoidsField,
+    ImplicitSurface,
+    RecursiveTransform,
+    VectorFlow,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TopologyType {
+    AdaptiveGraph,
+    Recursive,
+    FluidImplicit,
+    Emergent,
+    NeuralGuided,
+    ModularGraph,
+    SparseMinimal,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GeometryPrimitive {
+    Filaments,
+    Nodes,
+    Ribbons,
+    Shards,
+    Membranes,
+    Beams,
+    Points,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MotionBehavior {
+    CurlFlow,
+    Mechanical,
+    SubdivisionExpand,
+    BoidsHybrid,
+    RecurrentEvolution,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MaterialStyle {
+    TranslucentGlow,
+    HardSurface,
+    RefractiveFluid,
+    Crystalline,
+    MinimalVoid,
+}
+
+/// Composable Visual Organism Species Taxonomy
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum VisualOrganismSpecies {
-    Organic,
-    Fluid,
-    Crystal,
-    Cellular,
-    Tendril,
+    MycelialBloom,
+    FractureBloom,
+    FluidGeometry,
     GeometricSwarm,
-    SacredMandala,
+    NeuralGarden,
+    ImpossibleMachine,
+    VoidOrganism,
+    FractalPulse,
 }
 
 #[allow(dead_code)]
 impl VisualOrganismSpecies {
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Organic => "Bio-Organic Reaction Diffusion",
-            Self::Fluid => "Turbulent Bio-Fluid Vector Flow",
-            Self::Crystal => "Recursive Crystalline Sub-Division",
-            Self::Cellular => "Microscopic Voronoi Cellular Tissue",
-            Self::Tendril => "Filament Mycelium Tendrils",
-            Self::GeometricSwarm => "Emergent Geometric Swarm Lattice",
-            Self::SacredMandala => "Sacred Geometry Spiking Mandala",
+            Self::MycelialBloom => "Mycelial Bloom (Adaptive Branching Network)",
+            Self::FractureBloom => "Fracture Bloom (Recursive Crystalline Shards)",
+            Self::FluidGeometry => "Fluid Geometry (Implicit Liquid Surface)",
+            Self::GeometricSwarm => "Geometric Swarm (Boids Collective Lattice)",
+            Self::NeuralGarden => "Neural Garden (Recurrent Latent Evolution)",
+            Self::ImpossibleMachine => "Impossible Machine (Modular Architectural Beams)",
+            Self::VoidOrganism => "Void Organism (Minimal Dark-Space Geometry)",
+            Self::FractalPulse => "Fractal Pulse (Recursive Transform Geometry)",
         }
     }
 
     pub fn next_species(&self) -> Self {
         match self {
-            Self::Organic => Self::Fluid,
-            Self::Fluid => Self::Crystal,
-            Self::Crystal => Self::Cellular,
-            Self::Cellular => Self::Tendril,
-            Self::Tendril => Self::GeometricSwarm,
-            Self::GeometricSwarm => Self::SacredMandala,
-            Self::SacredMandala => Self::Organic,
+            Self::MycelialBloom => Self::FractureBloom,
+            Self::FractureBloom => Self::FluidGeometry,
+            Self::FluidGeometry => Self::GeometricSwarm,
+            Self::GeometricSwarm => Self::NeuralGarden,
+            Self::NeuralGarden => Self::ImpossibleMachine,
+            Self::ImpossibleMachine => Self::VoidOrganism,
+            Self::VoidOrganism => Self::FractalPulse,
+            Self::FractalPulse => Self::MycelialBloom,
         }
     }
 
     pub fn all() -> &'static [Self] {
         &[
-            Self::Organic,
-            Self::Fluid,
-            Self::Crystal,
-            Self::Cellular,
-            Self::Tendril,
+            Self::MycelialBloom,
+            Self::FractureBloom,
+            Self::FluidGeometry,
             Self::GeometricSwarm,
-            Self::SacredMandala,
+            Self::NeuralGarden,
+            Self::ImpossibleMachine,
+            Self::VoidOrganism,
+            Self::FractalPulse,
         ]
     }
 }
 
 impl Default for VisualOrganismSpecies {
     fn default() -> Self {
-        Self::Organic
+        Self::MycelialBloom
     }
 }
 
