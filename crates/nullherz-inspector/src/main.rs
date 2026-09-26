@@ -336,6 +336,75 @@ impl InspectorApp {
 
             let motor = channel.neuron_net.motor_outputs;
 
+            // Step Real-Time Offscreen Pixel Feedback & Warp Shader Engine
+            let zoom = 0.98 + (channel.nervous_system.low_band * 0.08) + channel.nervous_system.fast_transient_spike * 0.05;
+            let rot = (time as f32 * 0.2 * channel.param_speed).sin() * 0.02 + motor[1] * 0.04;
+            let warp_freq = 4.0 + motor[2] * 4.0;
+            let decay = (0.88 + channel.param_feedback * 0.10).clamp(0.70, 0.98);
+
+            channel.feedback_engine.step_feedback_warp(
+                zoom,
+                rot,
+                warp_freq,
+                decay,
+                time as f32,
+                &motor,
+            );
+
+            // Rasterize Spiking Neural Potentials & Audio Waveforms directly into Feedback Framebuffer
+            let fb_w = channel.feedback_engine.width as f32;
+            let fb_h = channel.feedback_engine.height as f32;
+            let fb_center_x = fb_w * 0.5;
+            let fb_center_y = fb_h * 0.5;
+
+            // Rasterize Lissajous Harmonic Curves into Feedback Buffer
+            let num_fb_pts = 48;
+            for i in 0..num_fb_pts - 1 {
+                let t1 = (i as f32 / num_fb_pts as f32) * std::f32::consts::TAU;
+                let t2 = ((i + 1) as f32 / num_fb_pts as f32) * std::f32::consts::TAU;
+
+                let r1 = (fb_h * 0.38) * (1.0 + (channel.neuron_net.v[i % 64] + 65.0) / 100.0);
+                let r2 = (fb_h * 0.38) * (1.0 + (channel.neuron_net.v[(i + 1) % 64] + 65.0) / 100.0);
+
+                let x0 = fb_center_x + (t1 * 3.0 + time as f32).sin() * r1;
+                let y0 = fb_center_y + (t1 * 2.0 + time as f32).cos() * r1;
+                let x1 = fb_center_x + (t2 * 3.0 + time as f32).sin() * r2;
+                let y1 = fb_center_y + (t2 * 2.0 + time as f32).cos() * r2;
+
+                let color = if channel.neuron_net.spikes[i % 64] {
+                    [255, 220, 80]
+                } else {
+                    [
+                        ((i * 12) % 255) as u8,
+                        ((255 - i * 8) % 255) as u8,
+                        220,
+                    ]
+                };
+
+                channel.feedback_engine.draw_line_additive(x0, y0, x1, y1, color);
+            }
+
+            // Convert Feedback Buffer into egui ColorImage and Paint to Window Canvas
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                [channel.feedback_engine.width, channel.feedback_engine.height],
+                channel.feedback_engine.front_buffer.as_flattened(),
+            );
+
+            let texture_handle = ui.ctx().load_texture(
+                format!("fb_tex_{}", target_idx),
+                color_image,
+                egui::TextureOptions::LINEAR,
+            );
+
+            ui.painter().image(
+                texture_handle.id(),
+                rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+
+            let _effective_species = channel.mutation.species;
+
             match channel.generator {
                 state::VisualGenerator::ComplexNeuralMandala => {
                     // 1. High-Symmetry Complex Bio-Neural Spiking Mandala Engine
