@@ -148,6 +148,32 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                         ui.add_space(4.0);
 
+                        // Insert Slot 3: Pitch / Speed
+                        Frame::none()
+                            .fill(theme.bg_inset)
+                            .rounding(Rounding::same(theme.radius_sm))
+                            .inner_margin(Margin::same(4.0))
+                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                            .show(ui, |ui| {
+                                ui.set_width(STRIP_W - 20.0);
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("3: PITCH").size(9.0).strong().color(theme.accent));
+                                    ui.add_space(4.0);
+                                    let mut pitch_val = app.mixer.channel_pitch[i];
+                                    if widgets::render_knob_sized(ui, &mut pitch_val, 0.5..=1.5, "", deck_color, 24.0).changed() {
+                                        app.mixer.channel_pitch[i] = pitch_val;
+                                        let deck_char = (b'A' + i as u8) as char;
+                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam {
+                                            deck_id: deck_char,
+                                            param_type: nullherz_traits::DeckParamType::Pitch,
+                                            value: pitch_val,
+                                        }));
+                                    }
+                                });
+                            });
+
+                        ui.add_space(4.0);
+
                         // Attached FX and + FX button
                         let mut remove_insert = false;
                         if let Some(ref name) = app.decks.deck_inserts[i] {
@@ -233,13 +259,15 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                 ui.separator();
                 ui.add_space(4.0);
 
-                // --- TRACK INFO ---
+                // --- TRACK INFO & BPM ---
                 if let Some(ref track) = app.decks.cached_tracks[i] {
                     ui.vertical_centered(|ui| {
                         ui.label(RichText::new(&track.title).size(10.0).strong().color(theme.text_primary));
                         if !track.artist.is_empty() {
                             ui.label(RichText::new(&track.artist).size(9.0).color(theme.text_secondary));
                         }
+                        let effective_bpm = track.facets().bpm * app.mixer.channel_pitch[i];
+                        ui.label(RichText::new(format!("{:.1} BPM", effective_bpm)).monospace().size(10.0).strong().color(deck_color));
                     });
                 } else {
                     ui.vertical_centered(|ui| {
