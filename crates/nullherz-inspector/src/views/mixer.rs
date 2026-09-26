@@ -7,7 +7,7 @@ use audio_core::Telemetry;
 /// Fixed strip width: every card is the same size regardless of window width.
 const STRIP_W: f32 = 140.0;
 const FADER_H: f32 = 150.0;
-const VERTICAL_WAVEFORM_H: f32 = 180.0;
+const VERTICAL_WAVEFORM_H: f32 = 225.0; // 25% extra height (180.0 * 1.25)
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     let theme = app.theme;
@@ -83,7 +83,7 @@ fn render_vertical_waveform(
     let (rect, _response) = ui.allocate_exact_size(Vec2::new(STRIP_W - 12.0, VERTICAL_WAVEFORM_H), egui::Sense::hover());
     let painter = ui.painter();
 
-    // Background inset
+    // Background inset matching DJ Studio Console waveform canvas
     painter.rect_filled(rect, theme.radius_sm, theme.bg_inset);
     painter.rect_stroke(rect, theme.radius_sm, Stroke::new(1.0, theme.border_stroke.color));
 
@@ -91,16 +91,83 @@ fn render_vertical_waveform(
     let height = rect.height();
 
     if let Some(t) = track {
+        let total_samples = t.metadata.total_samples.max(1) as f64;
+        let playhead_ratio = (elapsed_samples as f64 / total_samples).clamp(0.0, 1.0) as f32;
+
+        let band_wf = &t.metadata.band_waveform;
+        if !band_wf.is_empty() && !band_wf.low.levels.is_empty() {
+            // High-precision Multi-Band Frequency Waveform (Low = Red/Bass, Mid = Green, High = Blue)
+            let low_lvl = &band_wf.low.levels[0];
+            let mid_lvl = &band_wf.mid.levels[0];
+            let high_lvl = &band_wf.high.levels[0];
+
+            let num_windows = low_lvl.len();
+            let playhead_idx = (playhead_ratio * num_windows as f32) as usize;
+
+            let slices = 45; // Fine vertical resolution
+            let window_span = 90;
+            let start_idx = playhead_idx.saturating_sub(window_span / 2);
+
+            for slice_i in 0..slices {
+                let y = rect.min.y + (slice_i as f32 / slices as f32) * height;
+                let idx = start_idx + (slice_i * window_span / slices);
+
+                let low_val = low_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0);
+                let mid_val = mid_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0);
+                let high_val = high_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0);
+
+                let is_past = slice_i < slices / 2;
+                let alpha_mult = if is_past { 0.45 } else { 1.0 };
+
+                // Multi-band frequency color composition: Red = Bass, Green = Mid, Blue = High
+                let r = (low_val * 255.0 * alpha_mult) as u8;
+                let g = (mid_val * 220.0 * alpha_mult) as u8;
+                let b = (high_val * 255.0 * alpha_mult) as u8;
+                let col = Color32::from_rgb(r.max(30), g.max(30), b.max(60));
+
+                let total_amp = (low_val * 0.5 + mid_val * 0.35 + high_val * 0.15).clamp(0.02, 1.0);
+                let bar_w = total_amp * (rect.width() * 0.46);
+
+                painter.line_segment(
+                    [Pos2::new(center_x - bar_w, y), Pos2::new(center_x + bar_w, y)],
+                    Stroke::new(2.0, col),
+                );
+            }
+
+            // DJ Studio Beat Grid Ticks
+            if t.metadata.bpm > 20.0 {
+                let sr = t.metadata.sample_rate.max(1) as f64;
+                let spb = sr * 60.0 / t.metadata.bpm as f64;
+                let beat_span = (8.0 * sr) / spb; // 8 seconds window
+                let beats_visible = (beat_span as usize).clamp(4, 32);
+
+                for b in 0..beats_visible {
+                    let beat_y = rect.min.y + (b as f32 / beats_visible as f32) * height;
+                    let is_downbeat = b % 4 == 0;
+                    let line_alpha = if is_downbeat { 60 } else { 25 };
+                    painter.line_segment(
+                        [Pos2::new(rect.min.x + 2.0, beat_y), Pos2::new(rect.max.x - 2.0, beat_y)],
+                        Stroke::new(1.0, Color32::from_white_alpha(line_alpha)),
+                    );
+                }
+            }
+
+            // Draw center playhead line matching DJ Studio needle
+            let playhead_y = rect.min.y + height * 0.5;
+            painter.line_segment(
+                [Pos2::new(rect.min.x + 1.0, playhead_y), Pos2::new(rect.max.x - 1.0, playhead_y)],
+                Stroke::new(2.5, theme.accent),
+            );
+            return;
+        }
+
         let peaks = &t.metadata.peaks;
         if !peaks.is_empty() {
-            let total_samples = t.metadata.total_samples.max(1) as f64;
-            let playhead_ratio = (elapsed_samples as f64 / total_samples).clamp(0.0, 1.0) as f32;
             let num_peaks = peaks.len();
             let playhead_idx = (playhead_ratio * num_peaks as f32) as usize;
 
-            // Render 30 vertical slices (moving top to bottom)
-            let slices = 30;
-            let window_span = 60; // 60 peaks total around playhead
+            let slices = 40;
+            let window_span = 80;
             let start_idx = playhead_idx.saturating_sub(window_span / 2);
 
             for slice_i in 0..slices {
@@ -122,18 +189,17 @@ fn render_vertical_waveform(
                 );
             }
 
-            // Draw center playhead line
             let playhead_y = rect.min.y + height * 0.5;
             painter.line_segment(
-                [Pos2::new(rect.min.x + 2.0, playhead_y), Pos2::new(rect.max.x - 2.0, playhead_y)],
-                Stroke::new(1.5, theme.accent),
+                [Pos2::new(rect.min.x + 1.0, playhead_y), Pos2::new(rect.max.x - 1.0, playhead_y)],
+                Stroke::new(2.5, theme.accent),
             );
             return;
         }
     }
 
     // Fallback: Real-time dynamic signal visualizer when no track loaded or live input active
-    let slices = 20;
+    let slices = 25;
     for slice_i in 0..slices {
         let y = rect.min.y + (slice_i as f32 / slices as f32) * height;
         let factor = (slice_i as f32 * 0.3 + peak_level * 5.0).sin().abs();
@@ -178,7 +244,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
         theme.bg_surface
     };
 
-    let response = Frame::none()
+    Frame::none()
         .fill(fill_color)
         .rounding(Rounding::same(theme.radius_md))
         .inner_margin(Margin::same(theme.space_md))
@@ -186,10 +252,13 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
         .show(ui, |ui| {
             ui.set_width(STRIP_W);
             ui.vertical(|ui| {
-                ui.horizontal(|ui| {
+                let header_resp = ui.horizontal(|ui| {
                     ui.add_space((STRIP_W - 40.0).max(0.0) / 2.0);
                     ui.label(RichText::new(format!("CH {}", (b'A' + (i % 26) as u8) as char)).strong().size(theme.type_body).color(deck_color));
                 });
+                if header_resp.response.interact(egui::Sense::click()).clicked() {
+                    app.decks.focused_deck = i;
+                }
                 ui.add_space(theme.space_xs);
 
                 // Vertical Waveform Canvas
@@ -471,6 +540,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                     let deck_char_upper = (b'A' + (i % 26) as u8) as char;
                     if ui.add_sized([45.0, 22.0], play_btn).clicked() {
+                        app.decks.focused_deck = i;
                         app.decks.deck_playing[i] = !is_playing;
                         if app.decks.deck_playing[i] {
                             let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id: deck_char_upper }));
@@ -480,6 +550,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                     }
 
                     if ui.add_sized([45.0, 22.0], egui::Button::new(RichText::new("CUE").size(10.0).strong()).fill(theme.bg_inset)).clicked() {
+                        app.decks.focused_deck = i;
                         let node_name = format!("deck_{}_sampler", (b'a' + (i % 26) as u8) as char);
                         if let Some(node_idx) = app.get_node_id(&node_name) {
                             let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpToHotCue { node_idx, cue_idx: 0 }));
@@ -488,10 +559,6 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                 });
             });
         });
-
-    if response.response.interact(egui::Sense::click()).clicked() {
-        app.decks.focused_deck = i;
-    }
 }
 
 fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
