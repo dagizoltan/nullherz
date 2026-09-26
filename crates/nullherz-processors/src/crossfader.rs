@@ -3,6 +3,7 @@ use nullherz_traits::AudioProcessor;
 pub struct CrossfaderProcessor {
     pub id: u64,
     inner: audio_dsp::Crossfader,
+    pub dna_gravity: f32,
 }
 
 impl CrossfaderProcessor {
@@ -10,6 +11,7 @@ impl CrossfaderProcessor {
         Self {
             id,
             inner: audio_dsp::Crossfader::new(),
+            dna_gravity: 0.0,
         }
     }
 }
@@ -40,6 +42,11 @@ fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u
             self.inner.set_position(value);
         } else if param_id == 1 {
             self.inner.set_curve(value);
+        } else if param_id == 2 {
+            self.dna_gravity = value.clamp(0.0, 1.0);
+            // Adapt crossfader curve dynamically based on DNA gravity (0.0 = Equal-Power, 1.0 = Sharp Cut)
+            let adapted_curve = (value * 2.0).clamp(0.0, 1.0);
+            self.inner.set_curve(adapted_curve);
         }
     }
 fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
@@ -59,9 +66,13 @@ fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
         parameters[1].id = 1;
         parameters[1].name[..name1.len()].copy_from_slice(name1);
 
+        let name2 = b"DnaGravity";
+        parameters[2].id = 2;
+        parameters[2].name[..name2.len()].copy_from_slice(name2);
+
         Some(nullherz_traits::ProcessorMetadata {
             processor_id: self.id,
-            num_parameters: 2,
+            num_parameters: 3,
             parameters,
         })
     }

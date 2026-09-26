@@ -198,43 +198,71 @@ pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits:
     let v_fv_res = (v_fv_a * v_inv_bias_8) + (v_fv_b * v_bias_8);
     store_f32x8(&mut child.feature_vector, 0, v_fv_res);
 
-    // 1. Spectral Transfusion (Neural/Latent SIMD Optimized)
-    NeuralTransfuser::interpolate_latent(&mut child.spectral.latent_space, &dna_a.spectral.latent_space, &dna_b.spectral.latent_space, bias);
-
-    child.spectral.tilt = dna_a.spectral.tilt * inv_bias + dna_b.spectral.tilt * bias;
-
-    // 2. Rhythmic Transfusion
-    for i in 0..4 {
-        // Probabilistic bitmask merge
-        let mask_a = dna_a.rhythmic.onset_mask[i];
-        let mask_b = dna_b.rhythmic.onset_mask[i];
-        let mut child_mask = 0u64;
-        for bit in 0..64 {
-            let bit_a = (mask_a >> bit) & 1;
-            let bit_b = (mask_b >> bit) & 1;
-            let prob = if bit_a == 1 && bit_b == 1 { 1.0 }
-                      else if bit_a == 1 { inv_bias }
-                      else if bit_b == 1 { bias }
-                      else { 0.0 };
-
-            if (i as u32).wrapping_mul(bit as u32).wrapping_mul(1103515245).wrapping_add(12345) as f32 / 4294967295.0 < prob {
-                child_mask |= 1 << bit;
-            }
-        }
-        child.rhythmic.onset_mask[i] = child_mask;
+    // 1. Spectral Transfusion (Respect Invariant Stencil Mask)
+    if dna_a.invariant_mask.lock_spectral {
+        child.spectral = dna_a.spectral.clone();
+    } else if dna_b.invariant_mask.lock_spectral {
+        child.spectral = dna_b.spectral.clone();
+    } else {
+        NeuralTransfuser::interpolate_latent(&mut child.spectral.latent_space, &dna_a.spectral.latent_space, &dna_b.spectral.latent_space, bias);
+        child.spectral.tilt = dna_a.spectral.tilt * inv_bias + dna_b.spectral.tilt * bias;
     }
-    child.rhythmic.syncopation_index = dna_a.rhythmic.syncopation_index * inv_bias + dna_b.rhythmic.syncopation_index * bias;
-    for i in 0..12 {
-        child.rhythmic.micro_timing[i] = (dna_a.rhythmic.micro_timing[i] as f32 * inv_bias + dna_b.rhythmic.micro_timing[i] as f32 * bias) as i16;
+
+    // 2. Rhythmic Transfusion (Respect Invariant Stencil Mask)
+    if dna_a.invariant_mask.lock_rhythmic {
+        child.rhythmic = dna_a.rhythmic.clone();
+    } else if dna_b.invariant_mask.lock_rhythmic {
+        child.rhythmic = dna_b.rhythmic.clone();
+    } else {
+        for i in 0..4 {
+            let mask_a = dna_a.rhythmic.onset_mask[i];
+            let mask_b = dna_b.rhythmic.onset_mask[i];
+            let mut child_mask = 0u64;
+            for bit in 0..64 {
+                let bit_a = (mask_a >> bit) & 1;
+                let bit_b = (mask_b >> bit) & 1;
+                let prob = if bit_a == 1 && bit_b == 1 { 1.0 }
+                          else if bit_a == 1 { inv_bias }
+                          else if bit_b == 1 { bias }
+                          else { 0.0 };
+
+                if (i as u32).wrapping_mul(bit as u32).wrapping_mul(1103515245).wrapping_add(12345) as f32 / 4294967295.0 < prob {
+                    child_mask |= 1 << bit;
+                }
+            }
+            child.rhythmic.onset_mask[i] = child_mask;
+        }
+        child.rhythmic.syncopation_index = dna_a.rhythmic.syncopation_index * inv_bias + dna_b.rhythmic.syncopation_index * bias;
+        for i in 0..12 {
+            child.rhythmic.micro_timing[i] = (dna_a.rhythmic.micro_timing[i] as f32 * inv_bias + dna_b.rhythmic.micro_timing[i] as f32 * bias) as i16;
+        }
     }
 
     // 3. Artifact Transfusion
     child.artifacts.noise_floor_db = dna_a.artifacts.noise_floor_db * inv_bias + dna_b.artifacts.noise_floor_db * bias;
     child.artifacts.glitch_density = dna_a.artifacts.glitch_density * inv_bias + dna_b.artifacts.glitch_density * bias;
 
-    // 4. Spatial Transfusion
-    child.spatial.stereo_width = dna_a.spatial.stereo_width * inv_bias + dna_b.spatial.stereo_width * bias;
-    child.spatial.room_size = dna_a.spatial.room_size * inv_bias + dna_b.spatial.room_size * bias;
+    // 4. Spatial Transfusion (Respect Invariant Stencil Mask)
+    if dna_a.invariant_mask.lock_spatial {
+        child.spatial = dna_a.spatial.clone();
+    } else if dna_b.invariant_mask.lock_spatial {
+        child.spatial = dna_b.spatial.clone();
+    } else {
+        child.spatial.stereo_width = dna_a.spatial.stereo_width * inv_bias + dna_b.spatial.stereo_width * bias;
+        child.spatial.room_size = dna_a.spatial.room_size * inv_bias + dna_b.spatial.room_size * bias;
+    }
+
+    // 5. Perception Transfusion (Respect Invariant Stencil Mask)
+    if dna_a.invariant_mask.lock_perception {
+        child.perception = dna_a.perception.clone();
+    } else if dna_b.invariant_mask.lock_perception {
+        child.perception = dna_b.perception.clone();
+    } else {
+        child.perception.lufs_integrated = dna_a.perception.lufs_integrated * inv_bias + dna_b.perception.lufs_integrated * bias;
+        child.perception.crest_factor_db = dna_a.perception.crest_factor_db * inv_bias + dna_b.perception.crest_factor_db * bias;
+        child.perception.brightness = dna_a.perception.brightness * inv_bias + dna_b.perception.brightness * bias;
+        child.perception.perceptual_energy = dna_a.perception.perceptual_energy * inv_bias + dna_b.perception.perceptual_energy * bias;
+    }
 
     child
 }

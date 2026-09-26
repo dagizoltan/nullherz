@@ -129,6 +129,8 @@ pub struct SoundDNA {
     pub spatial: SpatialDNA,
     #[serde(default)]
     pub perception: AcousticPerceptionProfile,
+    #[serde(default)]
+    pub invariant_mask: InvariantMask,
 }
 
 impl Default for SoundDNA {
@@ -141,6 +143,7 @@ impl Default for SoundDNA {
             artifacts: ArtifactProfile::default(),
             spatial: SpatialDNA::default(),
             perception: AcousticPerceptionProfile::default(),
+            invariant_mask: InvariantMask::default(),
         }
     }
 }
@@ -382,6 +385,14 @@ impl Default for StemClassification {
     }
 }
 
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
+pub struct PerceptualTension {
+    pub tension_index: f32,
+    pub momentum_velocity: f32,
+    pub momentum_acceleration: f32,
+}
+
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]
 pub struct PerceptionFrame {
@@ -395,6 +406,9 @@ pub struct PerceptionFrame {
     pub detected_stem: StemClassification,
     pub brightness: f32,
     pub perceptual_energy: f32,
+    pub tension: PerceptualTension,
+    pub chroma_vector: [f32; 12],
+    pub harmonic_dissonance: f32,
 }
 
 impl Default for PerceptionFrame {
@@ -410,8 +424,20 @@ impl Default for PerceptionFrame {
             detected_stem: StemClassification::Unknown,
             brightness: 0.5,
             perceptual_energy: 0.0,
+            tension: PerceptualTension::default(),
+            chroma_vector: [0.0; 12],
+            harmonic_dissonance: 0.0,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
+pub struct InvariantMask {
+    pub lock_rhythmic: bool,
+    pub lock_spectral: bool,
+    pub lock_spatial: bool,
+    pub lock_perception: bool,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

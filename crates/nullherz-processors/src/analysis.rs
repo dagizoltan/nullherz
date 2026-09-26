@@ -101,6 +101,11 @@ struct PerceptionFrameSlot {
     detected_stem: AtomicU32,
     brightness: AtomicU32,
     perceptual_energy: AtomicU32,
+    tension_index: AtomicU32,
+    momentum_velocity: AtomicU32,
+    momentum_acceleration: AtomicU32,
+    chroma_vector: [AtomicU32; 12],
+    harmonic_dissonance: AtomicU32,
 }
 
 impl PerceptionFrameSlot {
@@ -119,6 +124,11 @@ impl PerceptionFrameSlot {
             detected_stem: AtomicU32::new(StemClassification::Unknown as u32),
             brightness: AtomicU32::new(0.5f32.to_bits()),
             perceptual_energy: AtomicU32::new(0),
+            tension_index: AtomicU32::new(0),
+            momentum_velocity: AtomicU32::new(0),
+            momentum_acceleration: AtomicU32::new(0),
+            chroma_vector: std::array::from_fn(|_| AtomicU32::new(0)),
+            harmonic_dissonance: AtomicU32::new(0),
         }
     }
 
@@ -136,9 +146,20 @@ impl PerceptionFrameSlot {
         self.detected_stem.store(frame.detected_stem as u32, Ordering::Relaxed);
         self.brightness.store(frame.brightness.to_bits(), Ordering::Relaxed);
         self.perceptual_energy.store(frame.perceptual_energy.to_bits(), Ordering::Relaxed);
+        self.tension_index.store(frame.tension.tension_index.to_bits(), Ordering::Relaxed);
+        self.momentum_velocity.store(frame.tension.momentum_velocity.to_bits(), Ordering::Relaxed);
+        self.momentum_acceleration.store(frame.tension.momentum_acceleration.to_bits(), Ordering::Relaxed);
+        for i in 0..12 {
+            self.chroma_vector[i].store(frame.chroma_vector[i].to_bits(), Ordering::Relaxed);
+        }
+        self.harmonic_dissonance.store(frame.harmonic_dissonance.to_bits(), Ordering::Relaxed);
     }
 
     fn load(&self) -> PerceptionFrame {
+        let mut chroma = [0.0f32; 12];
+        for i in 0..12 {
+            chroma[i] = f32::from_bits(self.chroma_vector[i].load(Ordering::Relaxed));
+        }
         PerceptionFrame {
             timestamp_ns: self.timestamp_ns.load(Ordering::Relaxed),
             musical_position: MusicalTime {
@@ -165,6 +186,13 @@ impl PerceptionFrameSlot {
             },
             brightness: f32::from_bits(self.brightness.load(Ordering::Relaxed)),
             perceptual_energy: f32::from_bits(self.perceptual_energy.load(Ordering::Relaxed)),
+            tension: nullherz_traits::PerceptualTension {
+                tension_index: f32::from_bits(self.tension_index.load(Ordering::Relaxed)),
+                momentum_velocity: f32::from_bits(self.momentum_velocity.load(Ordering::Relaxed)),
+                momentum_acceleration: f32::from_bits(self.momentum_acceleration.load(Ordering::Relaxed)),
+            },
+            chroma_vector: chroma,
+            harmonic_dissonance: f32::from_bits(self.harmonic_dissonance.load(Ordering::Relaxed)),
         }
     }
 }

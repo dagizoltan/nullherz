@@ -142,7 +142,7 @@ impl AnalysisKernel {
         let rms = (sum_sq / buffer.len() as f32).sqrt();
         frame.perceptual_energy = (rms * 2.0).min(1.0);
 
-        // 2. Fundamental Pitch Candidate & Brightness via STFT
+        // 2. Fundamental Pitch Candidate, Brightness, Chroma & Dissonance via STFT
         if buffer.len() >= 512 {
             self.re.fill(0.0);
             self.im.fill(0.0);
@@ -165,6 +165,12 @@ impl AnalysisKernel {
                     max_mag = mag;
                     best_bin = bin;
                 }
+
+                if freq >= 20.0 && freq <= 2000.0 {
+                    let semitone = 12.0 * (freq / 440.0).log2() + 69.0;
+                    let pitch_class = ((semitone.round() as i32 % 12) + 12) % 12;
+                    frame.chroma_vector[pitch_class as usize] += mag;
+                }
             }
 
             if total_energy > 0.0 {
@@ -172,8 +178,30 @@ impl AnalysisKernel {
                 frame.brightness = (centroid / (self.sample_rate * 0.5)).clamp(0.0, 1.0);
                 frame.pitch_candidate_hz = (best_bin as f32 * self.sample_rate) / 1024.0;
                 frame.pitch_confidence = (max_mag / total_energy).min(1.0);
+
+                let chroma_sum: f32 = frame.chroma_vector.iter().sum();
+                if chroma_sum > 0.0 {
+                    for val in frame.chroma_vector.iter_mut() {
+                        *val = (*val / chroma_sum).clamp(0.0, 1.0);
+                    }
+                }
+
+                // Dissonance = entropy of chroma distribution
+                let mut entropy = 0.0f32;
+                for &p in &frame.chroma_vector {
+                    if p > 1e-4 {
+                        entropy -= p * p.ln();
+                    }
+                }
+                frame.harmonic_dissonance = (entropy / 12.0_f32.ln()).clamp(0.0, 1.0);
             }
         }
+
+        // 3. Perceptual Tension Index & Momentum Velocity
+        let tension_val = (frame.brightness * 0.35 + frame.perceptual_energy * 0.35 + frame.harmonic_dissonance * 0.30).clamp(0.0, 1.0);
+        frame.tension.tension_index = tension_val;
+        frame.tension.momentum_velocity = frame.perceptual_energy * 0.1;
+        frame.tension.momentum_acceleration = frame.tension.momentum_velocity * 0.05;
 
         // 3. Simple Stem Classification Inference
         if frame.brightness < 0.15 && frame.perceptual_energy > 0.4 {

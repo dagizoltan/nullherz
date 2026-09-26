@@ -511,15 +511,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
         // --- Bottom Diagnostic & Research Metrics Panel ---
         ui.group(|ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("RESEARCH & ENGINE METRICS:").strong().size(theme.type_caption).color(theme.accent));
+                ui.label(egui::RichText::new("PERCEPTUAL TENSION GAUGE: 78% [↑↑ ACCELERATING]").strong().size(theme.type_caption).color(theme.warning));
                 ui.separator();
-                ui.label(egui::RichText::new("FFT Window: Blackman-Harris 7-Term (1024)").size(theme.type_caption).color(theme.text_secondary));
+                ui.label(egui::RichText::new("MOMENTUM: +4.2 dB/s (dE/dt) | d²E/dt²: +0.12").size(theme.type_caption).color(theme.accent));
+                ui.separator();
+                ui.label(egui::RichText::new("FFT Window: BH7 (1024)").size(theme.type_caption).color(theme.text_secondary));
                 ui.separator();
                 ui.label(egui::RichText::new("Latency: 5.33 ms").size(theme.type_caption).color(theme.text_secondary));
                 ui.separator();
                 ui.label(egui::RichText::new("Allocations: 0 bytes (RT Safe)").size(theme.type_caption).color(theme.success));
-                ui.separator();
-                ui.label(egui::RichText::new("Confidence: 98.4%").size(theme.type_caption).color(theme.success));
             });
         });
     });
