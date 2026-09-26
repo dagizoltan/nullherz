@@ -1,7 +1,8 @@
 //! Engine 1: radial_mandala (Hyper-Symmetric & Multi-Style Radial Mandala Engine)
 //! Maps spatial pixels to Polar Coordinates (r, theta).
 //! Generates multiple distinct radial mandala visual styles inspired by sacred geometry,
-//! neon matrix grids, celestial pulses, floral fractals, and hyper-symmetric CPPN motifs.
+//! neon matrix grids, celestial pulses, floral fractals, hyper-symmetric CPPN motifs,
+//! spectrum equalizer rings, wavy contour stars, nebula dust vortices, and solar flare coronas.
 
 use eframe::egui;
 use crate::state::{AudioNervousSystem, VisualGenome};
@@ -14,6 +15,10 @@ pub enum MandalaStyle {
     CelestialPulse,
     FloralFractal,
     HyperSymmetricCPPN,
+    RainbowEqualizerRing,
+    WavyContourStar,
+    NebulaDustVortex,
+    SolarFlareCorona,
 }
 
 impl MandalaStyle {
@@ -24,6 +29,10 @@ impl MandalaStyle {
             MandalaStyle::CelestialPulse,
             MandalaStyle::FloralFractal,
             MandalaStyle::HyperSymmetricCPPN,
+            MandalaStyle::RainbowEqualizerRing,
+            MandalaStyle::WavyContourStar,
+            MandalaStyle::NebulaDustVortex,
+            MandalaStyle::SolarFlareCorona,
         ]
     }
 
@@ -34,6 +43,10 @@ impl MandalaStyle {
             MandalaStyle::CelestialPulse => "Celestial Pulse (Corona & Solar Flares)",
             MandalaStyle::FloralFractal => "Floral Fractal (Blooming Petals)",
             MandalaStyle::HyperSymmetricCPPN => "Hyper-Symmetric CPPN (Log-Polar Tunnel)",
+            MandalaStyle::RainbowEqualizerRing => "Rainbow Equalizer Ring (Radial Spectrum)",
+            MandalaStyle::WavyContourStar => "Wavy Contour Star (Undulating Geometry)",
+            MandalaStyle::NebulaDustVortex => "Nebula Dust Vortex (Cosmic Particle Swirl)",
+            MandalaStyle::SolarFlareCorona => "Solar Flare Corona (Eclipse Spikes & Field)",
         }
     }
 }
@@ -110,6 +123,10 @@ impl NeuralVisualEngine for RadialMandalaEngine {
             MandalaStyle::CelestialPulse => self.render_celestial_pulse(ui, rect, nervous, time),
             MandalaStyle::FloralFractal => self.render_floral_fractal(ui, rect, nervous, time),
             MandalaStyle::HyperSymmetricCPPN => self.render_hyper_symmetric_cppn(ui, rect, nervous, time),
+            MandalaStyle::RainbowEqualizerRing => self.render_rainbow_equalizer_ring(ui, rect, nervous, time),
+            MandalaStyle::WavyContourStar => self.render_wavy_contour_star(ui, rect, nervous, time),
+            MandalaStyle::NebulaDustVortex => self.render_nebula_dust_vortex(ui, rect, nervous, time),
+            MandalaStyle::SolarFlareCorona => self.render_solar_flare_corona(ui, rect, nervous, time),
         }
     }
 }
@@ -363,6 +380,201 @@ impl RadialMandalaEngine {
                 );
             }
         }
+    }
+
+    /// Style 6 (from image.png): Circular Radial Equalizer Spectrum Ring with vibrant rainbow hue sweep.
+    fn render_rainbow_equalizer_ring(
+        &self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        nervous: &AudioNervousSystem,
+        time: f32,
+    ) {
+        let center = rect.center();
+        let max_r = (rect.width().min(rect.height())) * 0.38;
+        let inner_r = max_r * 0.70;
+        let num_bars = 90;
+
+        for i in 0..num_bars {
+            let frac = i as f32 / num_bars as f32;
+            let theta = frac * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2 + time * 0.05;
+
+            // Frequency response simulation along circular perimeter
+            let band_val = match (i * 3) / num_bars {
+                0 => nervous.low_band,
+                1 => nervous.mid_band,
+                _ => nervous.high_band,
+            };
+            let synth_bar = ((theta * 12.0 + time * 3.0).sin() * 0.5 + 0.5) * band_val + (theta * 3.0).cos().abs() * 0.3;
+            let bar_len = (inner_r * 0.08) + (max_r - inner_r) * synth_bar.clamp(0.05, 1.2) * (1.0 + nervous.rms_energy * 0.4);
+
+            let p_start = egui::pos2(center.x + theta.cos() * inner_r, center.y + theta.sin() * inner_r);
+            let p_end = egui::pos2(center.x + theta.cos() * (inner_r + bar_len), center.y + theta.sin() * (inner_r + bar_len));
+
+            // Rainbow gradient along circle (violet -> blue -> cyan -> green -> yellow -> red) matching reference image.png
+            let hue = (frac * 0.85 + 0.65 + self.color_palette_shift) % 1.0;
+            let color = hsva_to_color32(hue, 0.95, 1.0, 0.85 + nervous.onset_strength * 0.15);
+
+            ui.painter().line_segment([p_start, p_end], egui::Stroke::new(2.5, color));
+        }
+    }
+
+    /// Style 7 (from Screenshot From 2026-09-26 21-11-48.png): 8-pointed star mandala made of concentric undulating wave contours.
+    fn render_wavy_contour_star(
+        &self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        nervous: &AudioNervousSystem,
+        time: f32,
+    ) {
+        let center = rect.center();
+        let max_r = (rect.width().min(rect.height())) * 0.44;
+        let star_points = 8.0;
+        let contours = 16;
+
+        for c in 1..=contours {
+            let frac = c as f32 / contours as f32;
+            let base_radius = max_r * frac;
+
+            let num_pts = 120;
+            let mut pts = Vec::with_capacity(num_pts + 1);
+
+            for i in 0..=num_pts {
+                let theta = (i as f32 / num_pts as f32) * std::f32::consts::TAU;
+
+                // 8-star shape radial modulation + undulating wave harmonics
+                let star_mod = (theta * star_points).cos();
+                let wave_mod = (theta * star_points * 2.0 + time * 2.0).sin() * 0.08 * nervous.mid_band;
+                let r = base_radius * (0.65 + 0.35 * star_mod + wave_mod) * (1.0 + nervous.low_band * 0.08);
+
+                pts.push(egui::pos2(center.x + theta.cos() * r, center.y + theta.sin() * r));
+            }
+
+            // Crisp monochrome white outline matching reference style
+            let alpha = 0.5 + 0.5 * frac + nervous.rms_energy * 0.2;
+            let color = egui::Color32::from_rgba_unmultiplied(240, 245, 255, (alpha * 255.0) as u8);
+
+            for i in 0..pts.len() - 1 {
+                ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(1.2, color));
+            }
+        }
+
+        // Intersecting outer rounded bounding arcs
+        let outer_r = max_r * 0.95;
+        for i in 0..4 {
+            let theta = (i as f32 / 4.0) * std::f32::consts::TAU + std::f32::consts::FRAC_PI_4;
+            let arc_center = egui::pos2(center.x + theta.cos() * (outer_r * 0.3), center.y + theta.sin() * (outer_r * 0.3));
+            ui.painter().circle_stroke(
+                arc_center,
+                outer_r * 0.7,
+                egui::Stroke::new(0.8, egui::Color32::from_rgba_unmultiplied(200, 220, 255, 100)),
+            );
+        }
+    }
+
+    /// Style 8 (from Screenshot From 2026-09-26 21-12-07.png): Cosmic dusty particle vortex with organic swirling tendrils.
+    fn render_nebula_dust_vortex(
+        &self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        nervous: &AudioNervousSystem,
+        time: f32,
+    ) {
+        let center = rect.center();
+        let max_r = (rect.width().min(rect.height())) * 0.48;
+
+        // Swirling spiral particle dust tendrils
+        let num_tendrils = 12;
+        let particles_per_tendril = 35;
+
+        for t_i in 0..num_tendrils {
+            let tendril_phase = (t_i as f32 / num_tendrils as f32) * std::f32::consts::TAU;
+
+            for p_i in 0..particles_per_tendril {
+                let frac = p_i as f32 / particles_per_tendril as f32;
+                let radius = max_r * frac.powf(0.8) * (1.0 + nervous.low_band * 0.15);
+
+                let theta = tendril_phase + frac * std::f32::consts::TAU * 1.5 + time * 0.3;
+                let wobble = (theta * 5.0 + time * 2.0).sin() * 8.0 * nervous.mid_band;
+
+                let pos = egui::pos2(
+                    center.x + theta.cos() * (radius + wobble),
+                    center.y + theta.sin() * (radius + wobble),
+                );
+
+                // Deep dusty rose/magenta palette matching reference 21-12-07
+                let hue = (0.92 + frac * 0.12 + self.color_palette_shift) % 1.0;
+                let alpha = (1.0 - frac * 0.7) * (0.3 + nervous.rms_energy * 0.5);
+                let color = hsva_to_color32(hue, 0.75, 0.85, alpha);
+
+                let pt_size = (1.0 + (1.0 - frac) * 2.5 + nervous.high_band * 2.0).max(0.5);
+                ui.painter().circle_filled(pos, pt_size, color);
+            }
+        }
+    }
+
+    /// Style 9 (from Screenshot From 2026-09-26 21-12-28.png): High-density solar flare eclipse corona with stark white core and starfield.
+    fn render_solar_flare_corona(
+        &self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        nervous: &AudioNervousSystem,
+        time: f32,
+    ) {
+        let center = rect.center();
+        let max_r = (rect.width().min(rect.height())) * 0.45;
+
+        // Outer background star dust particles
+        let star_count = 32;
+        for s in 0..star_count {
+            let s_frac = s as f32 / star_count as f32;
+            let star_r = max_r * (0.6 + 0.4 * ((s_frac * 17.0).fract()));
+            let star_theta = s_frac * std::f32::consts::TAU + (s_frac * 3.0).sin() * 0.5;
+            let star_p = egui::pos2(center.x + star_theta.cos() * star_r, center.y + star_theta.sin() * star_r);
+            let twinkle = ((s_frac * 20.0 + time * 4.0).sin() * 0.5 + 0.5) * 0.8;
+            ui.painter().circle_filled(
+                star_p,
+                1.2 + twinkle * 1.5,
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, (twinkle * 220.0) as u8),
+            );
+        }
+
+        // Dense radiating flare spikes matching reference 21-12-28
+        let spike_count = 140;
+        let inner_disc_r = max_r * 0.32;
+
+        for i in 0..spike_count {
+            let frac = i as f32 / spike_count as f32;
+            let theta = frac * std::f32::consts::TAU;
+
+            // Variable length spike spikes with 4 major corner cardinal jets
+            let cardinal_boost = ((theta * 2.0).cos().abs().powf(8.0)) * 1.8;
+            let noise_length = ((i as f32 * 13.37 + time * 2.0).sin() * 0.5 + 0.5).powf(1.5);
+
+            let spike_len = (inner_disc_r * 0.15)
+                + (max_r - inner_disc_r) * (0.2 + 0.3 * noise_length + cardinal_boost) * (1.0 + nervous.high_band * 0.5);
+
+            let p1 = egui::pos2(center.x + theta.cos() * inner_disc_r, center.y + theta.sin() * inner_disc_r);
+            let p2 = egui::pos2(center.x + theta.cos() * (inner_disc_r + spike_len), center.y + theta.sin() * (inner_disc_r + spike_len));
+
+            let stroke_w = if cardinal_boost > 1.0 { 1.8 } else { 1.0 };
+            ui.painter().line_segment(
+                [p1, p2],
+                egui::Stroke::new(stroke_w, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 220)),
+            );
+        }
+
+        // Stark solid white central eclipse disc
+        ui.painter().circle_filled(
+            center,
+            inner_disc_r,
+            egui::Color32::WHITE,
+        );
+        ui.painter().circle_stroke(
+            center,
+            inner_disc_r,
+            egui::Stroke::new(2.5, egui::Color32::from_rgb(220, 225, 235)),
+        );
     }
 }
 
