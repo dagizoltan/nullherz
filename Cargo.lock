@@ -3425,6 +3425,7 @@ version = "0.1.0"
 dependencies = [
  "audio-core",
  "audio-dsp",
+ "bytemuck",
  "directories-next",
  "eframe",
  "egui",

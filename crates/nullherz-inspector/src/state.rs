@@ -1103,6 +1103,7 @@ impl Default for PixelFeedbackEngine {
 }
 
 /// Procedural Texture and Organic Image Processing Buffer Engine for image-based neural visuals
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct ImageTextureEngine {
     pub width: usize,
@@ -1112,6 +1113,7 @@ pub struct ImageTextureEngine {
     pub displacement_map: Vec<(f32, f32)>, // Vector flow displacement field
 }
 
+#[allow(dead_code)]
 impl ImageTextureEngine {
     pub fn new(width: usize, height: usize) -> Self {
         let mut pixels = vec![[0u8; 4]; width * height];
@@ -1167,49 +1169,34 @@ impl Default for ImageTextureEngine {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum VisualGenerator {
-    ComplexNeuralMandala,
-    ImageNeuronDeform,
-    OrganicBitmapFeedback,
-    WinampNeuronTunnel,
-    WmpPlasmaFeedback,
-    ReactionDiffusionNN,
-    BioluminescentFluidFlow,
-    HarmonicArrangementLattice,
-    AbstractQuantumSwarm,
-    NeuralFloralMycelium,
-    FftSpectrumMesh,
+    RadialMandala,
+    LiquidSurface,
+    SpectralLandscape,
+    HyperAttractor,
+    ReactionDiffusion,
+    NeuralRaymarcher,
 }
 
 impl VisualGenerator {
     pub fn name(&self) -> &'static str {
         match self {
-            Self::ComplexNeuralMandala => "Complex Neural Spiking Mandala",
-            Self::ImageNeuronDeform => "Image Bio-Neuron Deformation",
-            Self::OrganicBitmapFeedback => "Organic Bitmap Liquid Feedback",
-            Self::WinampNeuronTunnel => "Winamp Neuron Warp Tunnel",
-            Self::WmpPlasmaFeedback => "WMP Neural Plasma Oscillograph",
-            Self::ReactionDiffusionNN => "Neural Reaction Diffusion Lattice",
-            Self::BioluminescentFluidFlow => "Bioluminescent Fluid Flow",
-            Self::HarmonicArrangementLattice => "Harmonic Arrangement Lattice",
-            Self::AbstractQuantumSwarm => "Abstract Quantum Swarm",
-            Self::NeuralFloralMycelium => "Neural Floral Mycelium",
-            Self::FftSpectrumMesh => "3D FFT Spectrum Mesh",
+            Self::RadialMandala => "Hyper-Symmetric CPPN Mandala (Radial)",
+            Self::LiquidSurface => "Two-Pass Latent Domain Fluid Warper",
+            Self::SpectralLandscape => "3D Instanced Voxel Waterfall Terrain",
+            Self::HyperAttractor => "Neural Chaos Attractor (100k GPU Particles)",
+            Self::ReactionDiffusion => "Turing Pattern Gray-Scott Morphogenesis",
+            Self::NeuralRaymarcher => "Latent Signed Distance Field Raymarcher",
         }
     }
 
     pub fn all() -> &'static [Self] {
         &[
-            Self::ComplexNeuralMandala,
-            Self::ImageNeuronDeform,
-            Self::OrganicBitmapFeedback,
-            Self::WinampNeuronTunnel,
-            Self::WmpPlasmaFeedback,
-            Self::ReactionDiffusionNN,
-            Self::BioluminescentFluidFlow,
-            Self::HarmonicArrangementLattice,
-            Self::AbstractQuantumSwarm,
-            Self::NeuralFloralMycelium,
-            Self::FftSpectrumMesh,
+            Self::RadialMandala,
+            Self::LiquidSurface,
+            Self::SpectralLandscape,
+            Self::HyperAttractor,
+            Self::ReactionDiffusion,
+            Self::NeuralRaymarcher,
         ]
     }
 }
@@ -1300,6 +1287,13 @@ pub struct VisualChannel {
     pub mapper: NeuralLatentMapper,
     pub memory: VisualMemory,
     pub mutation: MutationEngine,
+    /// Core 6 Visual Engines
+    pub engine_radial_mandala: crate::views::visual_engines::radial_mandala::RadialMandalaEngine,
+    pub engine_liquid_surface: crate::views::visual_engines::liquid_surface::LiquidSurfaceEngine,
+    pub engine_spectral_landscape: crate::views::visual_engines::spectral_landscape::SpectralLandscapeEngine,
+    pub engine_hyper_attractor: crate::views::visual_engines::hyper_attractor::HyperAttractorEngine,
+    pub engine_reaction_diffusion: crate::views::visual_engines::reaction_diffusion::ReactionDiffusionEngine,
+    pub engine_neural_raymarcher: crate::views::visual_engines::neural_raymarcher::NeuralRaymarcherEngine,
 }
 
 impl VisualChannel {
@@ -1346,6 +1340,12 @@ impl VisualChannel {
             mapper: NeuralLatentMapper::new(),
             memory: VisualMemory::default(),
             mutation: MutationEngine::default(),
+            engine_radial_mandala: crate::views::visual_engines::radial_mandala::RadialMandalaEngine::new(),
+            engine_liquid_surface: crate::views::visual_engines::liquid_surface::LiquidSurfaceEngine::new(),
+            engine_spectral_landscape: crate::views::visual_engines::spectral_landscape::SpectralLandscapeEngine::new(),
+            engine_hyper_attractor: crate::views::visual_engines::hyper_attractor::HyperAttractorEngine::new(),
+            engine_reaction_diffusion: crate::views::visual_engines::reaction_diffusion::ReactionDiffusionEngine::new(),
+            engine_neural_raymarcher: crate::views::visual_engines::neural_raymarcher::NeuralRaymarcherEngine::new(),
         }
     }
 }
@@ -1398,23 +1398,23 @@ impl Default for VizState {
             damped_master_peaks: [0.0; 2],
             channels: vec![
                 VisualChannel::new(
-                    "VIZ 1 — NEURAL MANDALA",
-                    VisualGenerator::ComplexNeuralMandala,
+                    "VIZ 1 — RADIAL MANDALA",
+                    VisualGenerator::RadialMandala,
                     vec![VisualInputSource::MasterMix, VisualInputSource::MidiTriggerBus],
                 ),
                 VisualChannel::new(
-                    "VIZ 2 — IMAGE DEFORM",
-                    VisualGenerator::ImageNeuronDeform,
+                    "VIZ 2 — LIQUID SURFACE",
+                    VisualGenerator::LiquidSurface,
                     vec![VisualInputSource::DeckA, VisualInputSource::DeckB],
                 ),
                 VisualChannel::new(
-                    "VIZ 3 — BITMAP FEEDBACK",
-                    VisualGenerator::OrganicBitmapFeedback,
+                    "VIZ 3 — SPECTRAL LANDSCAPE",
+                    VisualGenerator::SpectralLandscape,
                     vec![VisualInputSource::DeckC, VisualInputSource::DeckD],
                 ),
                 VisualChannel::new(
-                    "VIZ 4 — WINAMP TUNNEL",
-                    VisualGenerator::WinampNeuronTunnel,
+                    "VIZ 4 — HYPER ATTRACTOR",
+                    VisualGenerator::HyperAttractor,
                     vec![VisualInputSource::MicInput, VisualInputSource::MasterMix],
                 ),
             ],
