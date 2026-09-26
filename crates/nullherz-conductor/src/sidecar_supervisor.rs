@@ -201,6 +201,26 @@ impl SidecarSupervisor {
         });
     }
 
+    /// Pre-spawns a hot-standby shadow process instance for instant failover (<1.3 ms)
+    pub fn spawn_hot_standby(
+        &mut self,
+        name: &str,
+        binary_path: &str,
+        node_idx: u32,
+        num_channels: usize,
+    ) -> Result<(), String> {
+        let standby_id = format!("{}_standby", name);
+        let processor = self.manager.spawn_sidecar(
+            &standby_id,
+            binary_path,
+            node_idx,
+            num_channels,
+            fx_runtime::FailurePolicy::AutoRestart,
+        )?;
+        self.register_hot_standby(node_idx, name, Some(processor));
+        Ok(())
+    }
+
     /// UDP beacon listener: discovers sidecars announcing themselves.
     ///
     /// The socket is a `tokio::net::UdpSocket` and the receive is awaited. It
