@@ -620,8 +620,73 @@ impl Default for SpikingNeuronNetwork {
     }
 }
 
+/// Procedural Texture and Organic Image Processing Buffer Engine for image-based neural visuals
+#[derive(Clone, Debug)]
+pub struct ImageTextureEngine {
+    pub width: usize,
+    pub height: usize,
+    pub pixels: Vec<[u8; 4]>, // RGBA pixels
+    #[allow(dead_code)]
+    pub displacement_map: Vec<(f32, f32)>, // Vector flow displacement field
+}
+
+impl ImageTextureEngine {
+    pub fn new(width: usize, height: usize) -> Self {
+        let mut pixels = vec![[0u8; 4]; width * height];
+        let mut displacement_map = vec![(0.0f32, 0.0f32); width * height];
+
+        // Generate procedural organic cellular/bio-fluid base texture
+        for y in 0..height {
+            let ny = y as f32 / height as f32;
+            for x in 0..width {
+                let nx = x as f32 / width as f32;
+                let idx = y * width + x;
+
+                // Multi-scale procedural Simplex/Worley noise pattern
+                let fx = nx * 8.0;
+                let fy = ny * 8.0;
+                let v1 = (fx.sin() * fy.cos() + (fx * 1.5).cos() * (fy * 1.5).sin() + (nx * 12.0).sin()) * 0.33 + 0.5;
+                let v2 = (((nx - 0.5).powi(2) + (ny - 0.5).powi(2)).sqrt() * 6.28).cos() * 0.5 + 0.5;
+
+                let r = ((v1 * 180.0 + v2 * 75.0) as u8).saturating_add(20);
+                let g = ((v2 * 150.0 + (1.0 - v1) * 80.0) as u8).saturating_add(30);
+                let b = (((1.0 - v2) * 220.0 + v1 * 35.0) as u8).saturating_add(30);
+
+                pixels[idx] = [r, g, b, 255];
+                displacement_map[idx] = ((fx * 0.5).sin() * 0.02, (fy * 0.5).cos() * 0.02);
+            }
+        }
+
+        Self {
+            width,
+            height,
+            pixels,
+            displacement_map,
+        }
+    }
+
+    /// Sample procedural/image texture at normalized coordinates (u, v) in range [0, 1]
+    pub fn sample(&self, u: f32, v: f32) -> [u8; 4] {
+        let u_clamped = u.rem_euclid(1.0);
+        let v_clamped = v.rem_euclid(1.0);
+
+        let x = ((u_clamped * self.width as f32) as usize).min(self.width - 1);
+        let y = ((v_clamped * self.height as f32) as usize).min(self.height - 1);
+
+        self.pixels[y * self.width + x]
+    }
+}
+
+impl Default for ImageTextureEngine {
+    fn default() -> Self {
+        Self::new(64, 64)
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub enum VisualGenerator {
+    ImageNeuronDeform,
+    OrganicBitmapFeedback,
     WinampNeuronTunnel,
     WmpPlasmaFeedback,
     ReactionDiffusionNN,
@@ -635,6 +700,8 @@ pub enum VisualGenerator {
 impl VisualGenerator {
     pub fn name(&self) -> &'static str {
         match self {
+            Self::ImageNeuronDeform => "Image Bio-Neuron Deformation",
+            Self::OrganicBitmapFeedback => "Organic Bitmap Liquid Feedback",
             Self::WinampNeuronTunnel => "Winamp Neuron Warp Tunnel",
             Self::WmpPlasmaFeedback => "WMP Neural Plasma Oscillograph",
             Self::ReactionDiffusionNN => "Neural Reaction Diffusion Lattice",
@@ -648,6 +715,8 @@ impl VisualGenerator {
 
     pub fn all() -> &'static [Self] {
         &[
+            Self::ImageNeuronDeform,
+            Self::OrganicBitmapFeedback,
             Self::WinampNeuronTunnel,
             Self::WmpPlasmaFeedback,
             Self::ReactionDiffusionNN,
@@ -736,6 +805,8 @@ pub struct VisualChannel {
     pub is_solo: bool,
     /// Native Biological Spiking Neural Network state
     pub neuron_net: SpikingNeuronNetwork,
+    /// Procedural Texture & Organic Image Memory Buffer
+    pub image_engine: ImageTextureEngine,
 }
 
 impl VisualChannel {
@@ -775,6 +846,7 @@ impl VisualChannel {
             is_muted: false,
             is_solo: false,
             neuron_net: SpikingNeuronNetwork::new(),
+            image_engine: ImageTextureEngine::new(64, 64),
         }
     }
 }
@@ -827,23 +899,23 @@ impl Default for VizState {
             damped_master_peaks: [0.0; 2],
             channels: vec![
                 VisualChannel::new(
-                    "VIZ 1 — WINAMP TUNNEL",
-                    VisualGenerator::WinampNeuronTunnel,
+                    "VIZ 1 — IMAGE NEURON DEFORM",
+                    VisualGenerator::ImageNeuronDeform,
                     vec![VisualInputSource::MasterMix, VisualInputSource::MidiTriggerBus],
                 ),
                 VisualChannel::new(
-                    "VIZ 2 — WMP PLASMA",
-                    VisualGenerator::WmpPlasmaFeedback,
+                    "VIZ 2 — BITMAP FEEDBACK",
+                    VisualGenerator::OrganicBitmapFeedback,
                     vec![VisualInputSource::DeckA, VisualInputSource::DeckB],
                 ),
                 VisualChannel::new(
-                    "VIZ 3 — REACTION DIFFUSION",
-                    VisualGenerator::ReactionDiffusionNN,
+                    "VIZ 3 — WINAMP TUNNEL",
+                    VisualGenerator::WinampNeuronTunnel,
                     vec![VisualInputSource::DeckC, VisualInputSource::DeckD],
                 ),
                 VisualChannel::new(
-                    "VIZ 4 — FLUID FLOW",
-                    VisualGenerator::BioluminescentFluidFlow,
+                    "VIZ 4 — WMP PLASMA",
+                    VisualGenerator::WmpPlasmaFeedback,
                     vec![VisualInputSource::MicInput, VisualInputSource::MasterMix],
                 ),
             ],
