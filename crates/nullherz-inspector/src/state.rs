@@ -532,37 +532,48 @@ pub enum ChannelKind {
     InstrumentSynth,
 }
 
-/// Biological Spiking Neural Network (RSNN) Engine for audio-driven abstract visual synthesis.
-/// Implements Izhikevich & LIF (Leaky Integrate-and-Fire) membrane potential dynamics,
-/// recurrent reservoir connections, and STDP (Spike-Timing-Dependent Plasticity) synaptic modulation.
+/// Biological 64-Neuron Multi-Layer Cortical Reservoir Engine for audio-driven organic visual synthesis.
+/// Features Izhikevich/LIF membrane potentials, neurotransmitter release kinetics ($s_i$),
+/// short-term synaptic plasticity (depression/facilitation), 2D spatial axonal grid topology,
+/// and 16 continuous motor output channels driving complex organic visual oscillations.
 #[derive(Clone, Debug)]
 pub struct SpikingNeuronNetwork {
-    pub v: [f32; 32],             // Membrane potentials (mV)
-    pub u: [f32; 32],             // Recovery variables
-    pub spikes: [bool; 32],       // Spike triggers for current step
-    pub stdp_trace: [f32; 32],    // Synaptic eligibility / STDP activity traces
-    pub weights: [[f32; 32]; 32], // Recurrent synaptic weight matrix W[from][to]
-    pub motor_outputs: [f32; 8],  // Continuous neural motor activation values
+    pub v: [f32; 64],             // Membrane potentials (mV)
+    pub u: [f32; 64],             // Recovery variables
+    pub s: [f32; 64],             // Synaptic neurotransmitter conductance/release
+    pub spikes: [bool; 64],       // Spike triggers for current frame
+    pub stdp_trace: [f32; 64],    // STDP activity traces
+    pub weights: [[f32; 64]; 64], // 64x64 Recurrent synaptic weight matrix
+    pub motor_outputs: [f32; 16], // 16 Continuous neural motor activation values
+    pub axonal_wave_field: [f32; 64], // 2D 8x8 spatial wave propagation grid
 }
 
 impl SpikingNeuronNetwork {
     pub fn new() -> Self {
-        let mut weights = [[0.0f32; 32]; 32];
-        for i in 0..32 {
-            for j in 0..32 {
+        let mut weights = [[0.0f32; 64]; 64];
+        for i in 0..64 {
+            let row_i = i / 8;
+            let col_i = i % 8;
+            for j in 0..64 {
                 if i != j {
-                    let phase = (i as f32 * 0.7 + j as f32 * 1.3).sin();
-                    weights[i][j] = phase * 0.25;
+                    let row_j = j / 8;
+                    let col_j = j % 8;
+                    let dist_sq = ((row_i as f32 - row_j as f32).powi(2) + (col_i as f32 - col_j as f32).powi(2)).max(0.5);
+                    let spatial_decay = (-dist_sq * 0.25).exp();
+                    let periodic_factor = (i as f32 * 0.4 + j as f32 * 0.9).sin();
+                    weights[i][j] = periodic_factor * spatial_decay * 0.4;
                 }
             }
         }
         Self {
-            v: [-65.0; 32],
-            u: [-13.0; 32],
-            spikes: [false; 32],
-            stdp_trace: [0.0; 32],
+            v: [-65.0; 64],
+            u: [-13.0; 64],
+            s: [0.0; 64],
+            spikes: [false; 64],
+            stdp_trace: [0.0; 64],
             weights,
-            motor_outputs: [0.0; 8],
+            motor_outputs: [0.0; 16],
+            axonal_wave_field: [0.0; 64],
         }
     }
 
@@ -577,22 +588,45 @@ impl SpikingNeuronNetwork {
         let h = dt_ms / sub_steps as f32;
 
         for _sub in 0..sub_steps {
-            let mut currents = [0.0f32; 32];
+            let mut currents = [0.0f32; 64];
 
-            for i in 0..32 {
+            // 1. Audio External Driving Currents
+            for i in 0..64 {
                 let input_val = audio_inputs.get(i % audio_inputs.len().max(1)).copied().unwrap_or(0.0);
-                currents[i] += input_val * 15.0 * neural_temp;
+                // Excitatory / Inhibitory neuron distribution (80% excitatory, 20% inhibitory)
+                let cell_type_scale = if i % 5 == 0 { -0.8 } else { 1.2 };
+                currents[i] += input_val * 18.0 * neural_temp * cell_type_scale;
             }
 
-            for from in 0..32 {
-                if self.spikes[from] {
-                    for to in 0..32 {
-                        currents[to] += self.weights[from][to] * 20.0 * (1.0 + feedback_coupling);
+            // 2. Recurrent Synaptic & Axonal Wave Transmission
+            for from in 0..64 {
+                let transmitter = self.s[from];
+                if transmitter > 0.01 {
+                    for to in 0..64 {
+                        currents[to] += transmitter * self.weights[from][to] * 25.0 * (1.0 + feedback_coupling);
                     }
                 }
             }
 
-            for i in 0..32 {
+            // 3. 2D Spatial Axonal Grid Diffusion & Potential Updating
+            let mut new_wave = self.axonal_wave_field;
+            for r in 0..8 {
+                for c in 0..8 {
+                    let idx = r * 8 + c;
+                    let neighbor_sum =
+                        self.axonal_wave_field[((r + 1) % 8) * 8 + c] +
+                        self.axonal_wave_field[((r + 7) % 8) * 8 + c] +
+                        self.axonal_wave_field[r * 8 + (c + 1) % 8] +
+                        self.axonal_wave_field[r * 8 + (c + 7) % 8];
+                    let laplacian = neighbor_sum - 4.0 * self.axonal_wave_field[idx];
+                    new_wave[idx] += laplacian * 0.15;
+                    currents[idx] += new_wave[idx] * 2.0;
+                }
+            }
+            self.axonal_wave_field = new_wave;
+
+            // 4. Integrate LIF / Izhikevich Equations
+            for i in 0..64 {
                 let v = self.v[i];
                 let u = self.u[i];
                 let i_ext = currents[i];
@@ -606,29 +640,35 @@ impl SpikingNeuronNetwork {
                 if next_v >= 30.0 {
                     self.v[i] = c;
                     self.u[i] = next_u + d;
+                    self.s[i] = (self.s[i] + 1.0).min(3.0);
                     self.spikes[i] = true;
-                    self.stdp_trace[i] = (self.stdp_trace[i] + 1.0).min(3.0);
+                    self.stdp_trace[i] = (self.stdp_trace[i] + 1.0).min(4.0);
+                    self.axonal_wave_field[i] += 1.5;
                 } else {
                     self.v[i] = next_v.clamp(-90.0, 30.0);
                     self.u[i] = next_u;
+                    self.s[i] *= 0.85;
                     self.spikes[i] = false;
-                    self.stdp_trace[i] *= 0.95;
+                    self.stdp_trace[i] *= 0.94;
+                    self.axonal_wave_field[i] *= 0.92;
                 }
             }
 
-            for i in 0..32 {
+            // 5. STDP Synaptic Adaptation
+            for i in 0..64 {
                 if self.spikes[i] {
-                    for j in 0..32 {
+                    for j in 0..64 {
                         if i != j {
-                            let delta_w = 0.001 * (self.stdp_trace[j] - 0.2);
-                            self.weights[j][i] = (self.weights[j][i] + delta_w).clamp(-1.0, 1.0);
+                            let delta_w = 0.0012 * (self.stdp_trace[j] - 0.25);
+                            self.weights[j][i] = (self.weights[j][i] + delta_w).clamp(-1.2, 1.2);
                         }
                     }
                 }
             }
         }
 
-        for m in 0..8 {
+        // Pool 64 neurons into 16 smooth motor outputs using SIMD Padé approximation
+        for m in 0..16 {
             let mut pool_sum = 0.0f32;
             for n in 0..4 {
                 let idx = m * 4 + n;
@@ -638,7 +678,7 @@ impl SpikingNeuronNetwork {
                 pool_sum += tanh_approx;
             }
             let target_motor = pool_sum / 4.0;
-            self.motor_outputs[m] += (target_motor - self.motor_outputs[m]) * 0.2;
+            self.motor_outputs[m] += (target_motor - self.motor_outputs[m]) * 0.25;
         }
     }
 }
