@@ -178,7 +178,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
         theme.bg_surface
     };
 
-    let response = Frame::none()
+    Frame::none()
         .fill(fill_color)
         .rounding(Rounding::same(theme.radius_md))
         .inner_margin(Margin::same(theme.space_md))
@@ -186,10 +186,13 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
         .show(ui, |ui| {
             ui.set_width(STRIP_W);
             ui.vertical(|ui| {
-                ui.horizontal(|ui| {
+                let header_resp = ui.horizontal(|ui| {
                     ui.add_space((STRIP_W - 40.0).max(0.0) / 2.0);
                     ui.label(RichText::new(format!("CH {}", (b'A' + (i % 26) as u8) as char)).strong().size(theme.type_body).color(deck_color));
                 });
+                if header_resp.response.interact(egui::Sense::click()).clicked() {
+                    app.decks.focused_deck = i;
+                }
                 ui.add_space(theme.space_xs);
 
                 // Vertical Waveform Canvas
@@ -471,6 +474,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                     let deck_char_upper = (b'A' + (i % 26) as u8) as char;
                     if ui.add_sized([45.0, 22.0], play_btn).clicked() {
+                        app.decks.focused_deck = i;
                         app.decks.deck_playing[i] = !is_playing;
                         if app.decks.deck_playing[i] {
                             let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id: deck_char_upper }));
@@ -480,6 +484,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                     }
 
                     if ui.add_sized([45.0, 22.0], egui::Button::new(RichText::new("CUE").size(10.0).strong()).fill(theme.bg_inset)).clicked() {
+                        app.decks.focused_deck = i;
                         let node_name = format!("deck_{}_sampler", (b'a' + (i % 26) as u8) as char);
                         if let Some(node_idx) = app.get_node_id(&node_name) {
                             let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpToHotCue { node_idx, cue_idx: 0 }));
@@ -488,10 +493,6 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                 });
             });
         });
-
-    if response.response.interact(egui::Sense::click()).clicked() {
-        app.decks.focused_deck = i;
-    }
 }
 
 fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
