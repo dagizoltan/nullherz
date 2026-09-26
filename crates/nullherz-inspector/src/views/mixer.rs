@@ -13,23 +13,33 @@ const FADER_H: f32 = 150.0;
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     let theme = app.theme;
     ui.heading(RichText::new("System Mixer").size(theme.type_heading));
-    ui.add_space(theme.space_md);
 
-    let avail_width = ui.available_width();
-    let channels_width = 4.0 * STRIP_W + 3.0 * theme.space_sm;
-    let master_space = (avail_width - channels_width - STRIP_W).max(theme.space_md);
+    // Align channel list and master to the bottom of the mixer page so space is above the racks
+    ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+        ui.add_space(theme.space_md);
 
-    // Horizontal scroll instead of silent overflow on narrow windows.
-    ScrollArea::horizontal().id_source("sys_mixer_scroll").show(ui, |ui| {
         ui.horizontal_top(|ui| {
-            for i in 0..4 {
-                render_channel_strip(app, ui, i, telemetry);
-                if i < 3 {
-                    ui.add_space(theme.space_sm);
-                }
-            }
-            ui.add_space(master_space);
-            render_master_strip(app, ui, telemetry);
+            let scroll_width = (ui.available_width() - STRIP_W - theme.space_md).max(100.0);
+
+            // Channel strips inside horizontal ScrollArea (only channels scroll)
+            ScrollArea::horizontal()
+                .id_source("sys_mixer_scroll")
+                .max_width(scroll_width)
+                .show(ui, |ui| {
+                    ui.horizontal_top(|ui| {
+                        for i in 0..4 {
+                            render_channel_strip(app, ui, i, telemetry);
+                            if i < 3 {
+                                ui.add_space(theme.space_sm);
+                            }
+                        }
+                    });
+                });
+
+            // Master channel stays outside ScrollArea, always pinned to the far right
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                render_master_strip(app, ui, telemetry);
+            });
         });
     });
 }
@@ -267,7 +277,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                 // --- COMPACT DECK CONTROLS & TRACK INFO ---
                 ui.allocate_ui_with_layout(
-                    egui::vec2(STRIP_W - 2.0 * theme.space_md, 32.0),
+                    egui::vec2(STRIP_W - 2.0 * theme.space_md, 34.0),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[i]).unwrap_or(0);
@@ -282,6 +292,8 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                             ui.label(RichText::new(&track.title).size(10.0).strong().color(theme.text_primary));
                             if !track.artist.is_empty() {
                                 ui.label(RichText::new(&track.artist).size(9.0).color(theme.text_secondary));
+                            } else {
+                                ui.label(RichText::new("").size(9.0));
                             }
                             let effective_bpm = track.metadata.bpm * app.mixer.channel_pitch[i];
                             ui.horizontal(|ui| {
@@ -290,8 +302,9 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                 ui.label(RichText::new(format!("-{:02}:{:02}", rem_m, rem_s)).monospace().size(9.0).color(theme.text_secondary));
                             });
                         } else {
-                            ui.add_space(8.0);
                             ui.label(RichText::new("No Track Loaded").size(9.0).italics().color(theme.text_disabled));
+                            ui.label(RichText::new("").size(9.0));
+                            ui.label(RichText::new("").size(9.0));
                         }
                     },
                 );
@@ -537,10 +550,13 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
 
                 // Empty Track Info Area to keep master strip height & controls aligned with channels
                 ui.allocate_ui_with_layout(
-                    egui::vec2(STRIP_W - 2.0 * theme.space_md, 32.0),
+                    egui::vec2(STRIP_W - 2.0 * theme.space_md, 34.0),
                     egui::Layout::top_down(egui::Align::Center),
-                    |_ui| {
-                        // Empty space for title, bpm, remaining time alignment
+                    |ui| {
+                        // Empty space matching exactly 3 lines (title, artist/placeholder, bpm/remaining)
+                        ui.label(RichText::new("").size(10.0));
+                        ui.label(RichText::new("").size(9.0));
+                        ui.label(RichText::new("").size(9.0));
                     },
                 );
 
