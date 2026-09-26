@@ -148,12 +148,33 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                         ui.add_space(4.0);
 
-                        // Attached FX or + FX button
-                        let attached_fx = app.decks.deck_inserts[i].as_deref();
-                        let fx_label = attached_fx.map(|name| format!("FX: {}", name)).unwrap_or_else(|| "+ FX".to_string());
-                        let fx_btn_color = if attached_fx.is_some() { theme.accent } else { theme.bg_inset };
+                        // Attached FX and + FX button
+                        let mut remove_insert = false;
+                        if let Some(ref name) = app.decks.deck_inserts[i] {
+                            let name_clone = name.clone();
+                            Frame::none()
+                                .fill(theme.accent.linear_multiply(0.2))
+                                .rounding(Rounding::same(theme.radius_sm))
+                                .inner_margin(Margin::same(4.0))
+                                .stroke(Stroke::new(1.0, theme.accent))
+                                .show(ui, |ui| {
+                                    ui.set_width(STRIP_W - 20.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new(format!("FX: {}", name_clone)).size(9.0).strong().color(theme.text_primary));
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            if ui.button(RichText::new("×").size(10.0).strong()).clicked() {
+                                                remove_insert = true;
+                                            }
+                                        });
+                                    });
+                                });
+                            ui.add_space(2.0);
+                        }
+                        if remove_insert {
+                            app.decks.deck_inserts[i] = None;
+                        }
 
-                        if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new(fx_label).size(9.0).strong()).fill(fx_btn_color)).clicked() {
+                        if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
                             app.active_right_tab = Some(crate::RightTab::Store);
                             app.store.active_tag_filter = Some("insert".to_string());
                         }
@@ -207,6 +228,24 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                             .color(theme.text_secondary),
                     );
                 });
+
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                // --- TRACK INFO ---
+                if let Some(ref track) = app.decks.cached_tracks[i] {
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new(&track.title).size(10.0).strong().color(theme.text_primary));
+                        if !track.artist.is_empty() {
+                            ui.label(RichText::new(&track.artist).size(9.0).color(theme.text_secondary));
+                        }
+                    });
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new("No Track Loaded").size(9.0).italics().color(theme.text_disabled));
+                    });
+                }
             });
         });
 }
@@ -231,6 +270,22 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                     ui.add_space((STRIP_W - 52.0).max(0.0) / 2.0);
                     ui.label(RichText::new("MASTER").strong().size(theme.type_body).color(accent));
                 });
+                ui.add_space(theme.space_xs);
+
+                // --- MASTER INSERTS RACK ---
+                ui.group(|ui| {
+                    ui.set_width(STRIP_W - 12.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new("MASTER INSERTS").size(theme.type_caption).strong().color(theme.text_secondary));
+                        ui.add_space(2.0);
+
+                        ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked().then(|| {
+                            app.active_right_tab = Some(crate::RightTab::Store);
+                            app.store.active_tag_filter = Some("insert".to_string());
+                        });
+                    });
+                });
+
                 ui.add_space(theme.space_sm);
 
                 ui.horizontal(|ui| {
