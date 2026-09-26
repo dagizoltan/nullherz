@@ -914,9 +914,10 @@ impl eframe::App for InspectorApp {
         self.handle_autosave(current_time);
 
         let is_focused = ctx.input(|i| i.focused);
+        let has_detached = !self.detached_views.is_empty();
 
-        // Background Throttling: Skip telemetry processing if unfocused and updated recently (<100ms)
-        let should_process = is_focused || (current_time - self.last_update_time) > 0.1;
+        // Background Throttling: Skip telemetry processing if unfocused (and no detached windows open) and updated recently (<100ms)
+        let should_process = is_focused || has_detached || (current_time - self.last_update_time) > 0.1;
 
         let telemetry = if should_process {
             self.last_update_time = current_time;
@@ -1042,6 +1043,8 @@ impl eframe::App for InspectorApp {
                     close_detached = true;
                 }
 
+                let v_focused = v_ctx.input(|i| i.focused);
+
                 // Render left & right sidebars and bottom bar for detached viewport
                 self.render_left_sidebar(v_ctx, &mut current_detached_view, &view_name);
                 self.render_right_sidebar(v_ctx, &view_name);
@@ -1069,6 +1072,14 @@ impl eframe::App for InspectorApp {
                     ui.separator();
                     self.render_view_content(current_detached_view, ui, &telemetry);
                 });
+
+                // Continuous repaint for detached viewport at bounded cadence
+                let v_cadence = if v_focused || is_focused {
+                    std::time::Duration::from_millis(33)
+                } else {
+                    std::time::Duration::from_millis(200)
+                };
+                v_ctx.request_repaint_after(v_cadence);
             });
 
             if current_detached_view != detached_view {
