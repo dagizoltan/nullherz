@@ -1,3 +1,4 @@
+#![allow(unexpected_cfgs)]
 use ipc_layer::{RingBuffer, MpscRingBuffer, AudioBlock};
 
 #[test]
