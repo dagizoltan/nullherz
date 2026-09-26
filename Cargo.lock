@@ -3194,6 +3194,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "neural-visuals"
+version = "0.1.0"
+dependencies = [
+ "audio-core",
+ "nullherz-traits",
+ "sidecar-sdk",
+]
+
+[[package]]
 name = "nix"
 version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
