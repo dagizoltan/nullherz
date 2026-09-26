@@ -1035,7 +1035,144 @@ impl Default for SpikingNeuronNetwork {
     }
 }
 
+/// Real-Time Offscreen Pixel Feedback & Warp Shader Engine for Milkdrop / WMP style liquid visuals.
+/// Performs per-pixel coordinate transformation, decay, chromatic aberration, and additive geometry rasterization.
+#[derive(Clone)]
+pub struct PixelFeedbackEngine {
+    pub width: usize,
+    pub height: usize,
+    pub back_buffer: Vec<[u8; 4]>,  // Current frame RGBA pixels
+    pub front_buffer: Vec<[u8; 4]>, // Previous frame RGBA pixels for feedback
+}
+
+impl std::fmt::Debug for PixelFeedbackEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PixelFeedbackEngine")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish()
+    }
+}
+
+impl PixelFeedbackEngine {
+    pub fn new(width: usize, height: usize) -> Self {
+        let size = width * height;
+        Self {
+            width,
+            height,
+            back_buffer: vec![[10, 12, 18, 255]; size],
+            front_buffer: vec![[10, 12, 18, 255]; size],
+        }
+    }
+
+    /// Sample front buffer with bilinear interpolation at normalized coordinates (u, v) in range [0, 1]
+    pub fn sample_front_bilinear(&self, u: f32, v: f32) -> [u8; 4] {
+        let u_c = u.rem_euclid(1.0);
+        let v_c = v.rem_euclid(1.0);
+
+        let fx = u_c * (self.width - 1) as f32;
+        let fy = v_c * (self.height - 1) as f32;
+
+        let x0 = fx as usize;
+        let y0 = fy as usize;
+        let x1 = (x0 + 1).min(self.width - 1);
+        let y1 = (y0 + 1).min(self.height - 1);
+
+        let dx = fx - x0 as f32;
+        let dy = fy - y0 as f32;
+
+        let p00 = self.front_buffer[y0 * self.width + x0];
+        let p10 = self.front_buffer[y0 * self.width + x1];
+        let p01 = self.front_buffer[y1 * self.width + x0];
+        let p11 = self.front_buffer[y1 * self.width + x1];
+
+        let mut result = [0u8; 4];
+        for c in 0..3 {
+            let top = p00[c] as f32 * (1.0 - dx) + p10[c] as f32 * dx;
+            let bot = p01[c] as f32 * (1.0 - dx) + p11[c] as f32 * dx;
+            result[c] = (top * (1.0 - dy) + bot * dy) as u8;
+        }
+        result[3] = 255;
+        result
+    }
+
+    /// Step Milkdrop-style pixel feedback warp equation across the buffer
+    pub fn step_feedback_warp(
+        &mut self,
+        zoom: f32,
+        rot: f32,
+        warp_freq: f32,
+        decay: f32,
+        time: f32,
+        motor: &[f32; 16],
+    ) {
+        let half_w = self.width as f32 * 0.5;
+        let half_h = self.height as f32 * 0.5;
+
+        for y in 0..self.height {
+            let ny = (y as f32 - half_h) / half_h;
+            for x in 0..self.width {
+                let nx = (x as f32 - half_w) / half_w;
+
+                let r = (nx * nx + ny * ny).sqrt();
+                let theta = ny.atan2(nx);
+
+                // Per-pixel warp coordinates
+                let warped_r = r * zoom + (theta * warp_freq + time * 2.0).sin() * 0.02 * motor[0];
+                let warped_theta = theta + rot + (r * 3.0 + time).cos() * 0.03 * motor[1];
+
+                let u = (warped_r * warped_theta.cos() + 1.0) * 0.5;
+                let v = (warped_r * warped_theta.sin() + 1.0) * 0.5;
+
+                // Sample previous frame with chromatic aberration offset
+                let pix_r = self.sample_front_bilinear(u + 0.003 * motor[2], v)[0];
+                let pix_g = self.sample_front_bilinear(u, v)[1];
+                let pix_b = self.sample_front_bilinear(u - 0.003 * motor[2], v)[2];
+
+                let idx = y * self.width + x;
+                self.back_buffer[idx] = [
+                    (pix_r as f32 * decay) as u8,
+                    (pix_g as f32 * decay) as u8,
+                    (pix_b as f32 * decay) as u8,
+                    255,
+                ];
+            }
+        }
+
+        // Swap buffers
+        self.front_buffer.copy_from_slice(&self.back_buffer);
+    }
+
+    /// Additive line segment rasterizer with glow
+    pub fn draw_line_additive(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, color: [u8; 3]) {
+        let steps = ((x1 - x0).hypot(y1 - y0) as usize).max(1);
+        for s in 0..=steps {
+            let t = s as f32 / steps as f32;
+            let px = (x0 + (x1 - x0) * t) as i32;
+            let py = (y0 + (y1 - y0) * t) as i32;
+
+            if px >= 0 && px < self.width as i32 && py >= 0 && py < self.height as i32 {
+                let idx = py as usize * self.width + px as usize;
+                let current = self.back_buffer[idx];
+                self.back_buffer[idx] = [
+                    current[0].saturating_add(color[0]),
+                    current[1].saturating_add(color[1]),
+                    current[2].saturating_add(color[2]),
+                    255,
+                ];
+            }
+        }
+    }
+}
+
+impl Default for PixelFeedbackEngine {
+    fn default() -> Self {
+        Self::new(160, 100)
+    }
+}
+
 /// Procedural Texture and Organic Image Processing Buffer Engine for image-based neural visuals
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct ImageTextureEngine {
     pub width: usize,
@@ -1045,6 +1182,7 @@ pub struct ImageTextureEngine {
     pub displacement_map: Vec<(f32, f32)>, // Vector flow displacement field
 }
 
+#[allow(dead_code)]
 impl ImageTextureEngine {
     pub fn new(width: usize, height: usize) -> Self {
         let mut pixels = vec![[0u8; 4]; width * height];
@@ -1100,49 +1238,34 @@ impl Default for ImageTextureEngine {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum VisualGenerator {
-    ComplexNeuralMandala,
-    ImageNeuronDeform,
-    OrganicBitmapFeedback,
-    WinampNeuronTunnel,
-    WmpPlasmaFeedback,
-    ReactionDiffusionNN,
-    BioluminescentFluidFlow,
-    HarmonicArrangementLattice,
-    AbstractQuantumSwarm,
-    NeuralFloralMycelium,
-    FftSpectrumMesh,
+    RadialMandala,
+    LiquidSurface,
+    SpectralLandscape,
+    HyperAttractor,
+    ReactionDiffusion,
+    NeuralRaymarcher,
 }
 
 impl VisualGenerator {
     pub fn name(&self) -> &'static str {
         match self {
-            Self::ComplexNeuralMandala => "Complex Neural Spiking Mandala",
-            Self::ImageNeuronDeform => "Image Bio-Neuron Deformation",
-            Self::OrganicBitmapFeedback => "Organic Bitmap Liquid Feedback",
-            Self::WinampNeuronTunnel => "Winamp Neuron Warp Tunnel",
-            Self::WmpPlasmaFeedback => "WMP Neural Plasma Oscillograph",
-            Self::ReactionDiffusionNN => "Neural Reaction Diffusion Lattice",
-            Self::BioluminescentFluidFlow => "Bioluminescent Fluid Flow",
-            Self::HarmonicArrangementLattice => "Harmonic Arrangement Lattice",
-            Self::AbstractQuantumSwarm => "Abstract Quantum Swarm",
-            Self::NeuralFloralMycelium => "Neural Floral Mycelium",
-            Self::FftSpectrumMesh => "3D FFT Spectrum Mesh",
+            Self::RadialMandala => "Hyper-Symmetric CPPN Mandala (Radial)",
+            Self::LiquidSurface => "Two-Pass Latent Domain Fluid Warper",
+            Self::SpectralLandscape => "3D Instanced Voxel Waterfall Terrain",
+            Self::HyperAttractor => "Neural Chaos Attractor (100k GPU Particles)",
+            Self::ReactionDiffusion => "Turing Pattern Gray-Scott Morphogenesis",
+            Self::NeuralRaymarcher => "Latent Signed Distance Field Raymarcher",
         }
     }
 
     pub fn all() -> &'static [Self] {
         &[
-            Self::ComplexNeuralMandala,
-            Self::ImageNeuronDeform,
-            Self::OrganicBitmapFeedback,
-            Self::WinampNeuronTunnel,
-            Self::WmpPlasmaFeedback,
-            Self::ReactionDiffusionNN,
-            Self::BioluminescentFluidFlow,
-            Self::HarmonicArrangementLattice,
-            Self::AbstractQuantumSwarm,
-            Self::NeuralFloralMycelium,
-            Self::FftSpectrumMesh,
+            Self::RadialMandala,
+            Self::LiquidSurface,
+            Self::SpectralLandscape,
+            Self::HyperAttractor,
+            Self::ReactionDiffusion,
+            Self::NeuralRaymarcher,
         ]
     }
 }
@@ -1225,12 +1348,21 @@ pub struct VisualChannel {
     pub neuron_net: SpikingNeuronNetwork,
     /// Procedural Texture & Organic Image Memory Buffer
     pub image_engine: ImageTextureEngine,
+    /// Real-time offscreen pixel feedback & warp engine
+    pub feedback_engine: PixelFeedbackEngine,
     /// Multidimensional Audio Nervous System & Genome Organism components
     pub nervous_system: AudioNervousSystem,
     pub genome: VisualGenome,
     pub mapper: NeuralLatentMapper,
     pub memory: VisualMemory,
     pub mutation: MutationEngine,
+    /// Core 6 Visual Engines
+    pub engine_radial_mandala: crate::views::visual_engines::radial_mandala::RadialMandalaEngine,
+    pub engine_liquid_surface: crate::views::visual_engines::liquid_surface::LiquidSurfaceEngine,
+    pub engine_spectral_landscape: crate::views::visual_engines::spectral_landscape::SpectralLandscapeEngine,
+    pub engine_hyper_attractor: crate::views::visual_engines::hyper_attractor::HyperAttractorEngine,
+    pub engine_reaction_diffusion: crate::views::visual_engines::reaction_diffusion::ReactionDiffusionEngine,
+    pub engine_neural_raymarcher: crate::views::visual_engines::neural_raymarcher::NeuralRaymarcherEngine,
 }
 
 impl VisualChannel {
@@ -1271,11 +1403,18 @@ impl VisualChannel {
             is_solo: false,
             neuron_net: SpikingNeuronNetwork::new(),
             image_engine: ImageTextureEngine::new(64, 64),
+            feedback_engine: PixelFeedbackEngine::new(160, 100),
             nervous_system: AudioNervousSystem::default(),
             genome: VisualGenome::default(),
             mapper: NeuralLatentMapper::new(),
             memory: VisualMemory::default(),
             mutation: MutationEngine::default(),
+            engine_radial_mandala: crate::views::visual_engines::radial_mandala::RadialMandalaEngine::new(),
+            engine_liquid_surface: crate::views::visual_engines::liquid_surface::LiquidSurfaceEngine::new(),
+            engine_spectral_landscape: crate::views::visual_engines::spectral_landscape::SpectralLandscapeEngine::new(),
+            engine_hyper_attractor: crate::views::visual_engines::hyper_attractor::HyperAttractorEngine::new(),
+            engine_reaction_diffusion: crate::views::visual_engines::reaction_diffusion::ReactionDiffusionEngine::new(),
+            engine_neural_raymarcher: crate::views::visual_engines::neural_raymarcher::NeuralRaymarcherEngine::new(),
         }
     }
 }
@@ -1328,23 +1467,23 @@ impl Default for VizState {
             damped_master_peaks: [0.0; 2],
             channels: vec![
                 VisualChannel::new(
-                    "VIZ 1 — NEURAL MANDALA",
-                    VisualGenerator::ComplexNeuralMandala,
+                    "VIZ 1 — RADIAL MANDALA",
+                    VisualGenerator::RadialMandala,
                     vec![VisualInputSource::MasterMix, VisualInputSource::MidiTriggerBus],
                 ),
                 VisualChannel::new(
-                    "VIZ 2 — IMAGE DEFORM",
-                    VisualGenerator::ImageNeuronDeform,
+                    "VIZ 2 — LIQUID SURFACE",
+                    VisualGenerator::LiquidSurface,
                     vec![VisualInputSource::DeckA, VisualInputSource::DeckB],
                 ),
                 VisualChannel::new(
-                    "VIZ 3 — BITMAP FEEDBACK",
-                    VisualGenerator::OrganicBitmapFeedback,
+                    "VIZ 3 — SPECTRAL LANDSCAPE",
+                    VisualGenerator::SpectralLandscape,
                     vec![VisualInputSource::DeckC, VisualInputSource::DeckD],
                 ),
                 VisualChannel::new(
-                    "VIZ 4 — WINAMP TUNNEL",
-                    VisualGenerator::WinampNeuronTunnel,
+                    "VIZ 4 — HYPER ATTRACTOR",
+                    VisualGenerator::HyperAttractor,
                     vec![VisualInputSource::MicInput, VisualInputSource::MasterMix],
                 ),
             ],

@@ -238,7 +238,7 @@ impl InspectorApp {
     }
 
     pub fn render_detached_interactive_surface(&mut self, channel_idx: usize, _ctx: &egui::Context, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
-        let theme = self.theme.clone();
+        let _theme = self.theme.clone();
         let target_idx = channel_idx.min(self.viz.channels.len().saturating_sub(1));
 
         if let Some(channel) = self.viz.channels.get_mut(target_idx) {
@@ -250,7 +250,7 @@ impl InspectorApp {
             ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgb(10, 12, 18));
 
             let time = ui.input(|i| i.time) * channel.param_speed as f64;
-            let center = rect.center();
+            let _center = rect.center();
 
             // Interactive gesture handling on surface
             if response.dragged() {
@@ -264,7 +264,7 @@ impl InspectorApp {
 
             // Execute Pure Native Rust Zero-Allocation Neural Inference Layer
             // Padé SIMD Rational Activation: tanh_approx(x) = x * (27 + x^2) / (27 + 9*x^2)
-            let pade_tanh = |x: f32| -> f32 {
+            let _pade_tanh = |x: f32| -> f32 {
                 let x2 = x * x;
                 (x * (27.0 + x2) / (27.0 + 9.0 * x2)).clamp(-1.0, 1.0)
             };
@@ -339,538 +339,87 @@ impl InspectorApp {
 
             let motor = channel.neuron_net.motor_outputs;
 
+            // Step Real-Time Offscreen Pixel Feedback & Warp Shader Engine
+            let zoom = 0.98 + (channel.nervous_system.low_band * 0.08) + channel.nervous_system.fast_transient_spike * 0.05;
+            let rot = (time as f32 * 0.2 * channel.param_speed).sin() * 0.02 + motor[1] * 0.04;
+            let warp_freq = 4.0 + motor[2] * 4.0;
+            let decay = (0.88 + channel.param_feedback * 0.10).clamp(0.70, 0.98);
+
+            channel.feedback_engine.step_feedback_warp(
+                zoom,
+                rot,
+                warp_freq,
+                decay,
+                time as f32,
+                &motor,
+            );
+
+            // Rasterize Spiking Neural Potentials & Audio Waveforms directly into Feedback Framebuffer
+            let fb_w = channel.feedback_engine.width as f32;
+            let fb_h = channel.feedback_engine.height as f32;
+            let fb_center_x = fb_w * 0.5;
+            let fb_center_y = fb_h * 0.5;
+
+            // Rasterize Lissajous Harmonic Curves into Feedback Buffer
+            let num_fb_pts = 48;
+            for i in 0..num_fb_pts - 1 {
+                let t1 = (i as f32 / num_fb_pts as f32) * std::f32::consts::TAU;
+                let t2 = ((i + 1) as f32 / num_fb_pts as f32) * std::f32::consts::TAU;
+
+                let r1 = (fb_h * 0.38) * (1.0 + (channel.neuron_net.v[i % 64] + 65.0) / 100.0);
+                let r2 = (fb_h * 0.38) * (1.0 + (channel.neuron_net.v[(i + 1) % 64] + 65.0) / 100.0);
+
+                let x0 = fb_center_x + (t1 * 3.0 + time as f32).sin() * r1;
+                let y0 = fb_center_y + (t1 * 2.0 + time as f32).cos() * r1;
+                let x1 = fb_center_x + (t2 * 3.0 + time as f32).sin() * r2;
+                let y1 = fb_center_y + (t2 * 2.0 + time as f32).cos() * r2;
+
+                let color = if channel.neuron_net.spikes[i % 64] {
+                    [255, 220, 80]
+                } else {
+                    [
+                        ((i * 12) % 255) as u8,
+                        ((255 - i * 8) % 255) as u8,
+                        220,
+                    ]
+                };
+
+                channel.feedback_engine.draw_line_additive(x0, y0, x1, y1, color);
+            }
+
+            // Convert Feedback Buffer into egui ColorImage and Paint to Window Canvas
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                [channel.feedback_engine.width, channel.feedback_engine.height],
+                channel.feedback_engine.front_buffer.as_flattened(),
+            );
+
+            let texture_handle = ui.ctx().load_texture(
+                format!("fb_tex_{}", target_idx),
+                color_image,
+                egui::TextureOptions::LINEAR,
+            );
+
+            ui.painter().image(
+                texture_handle.id(),
+                rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+
+            let _effective_species = channel.mutation.species;
+
+            use views::visual_engines::NeuralVisualEngine;
+
+            let nervous = &channel.nervous_system;
+            let genome = &channel.genome;
+
             match channel.generator {
-                state::VisualGenerator::ComplexNeuralMandala => {
-                    // 1. High-Symmetry Complex Bio-Neural Spiking Mandala Engine
-                    let max_radius = (rect.width().min(rect.height())) * 0.48;
-                    let symmetry_folds = channel.genome.symmetry_folds;
-                    let num_rings = 8;
-
-                    let global_rot = time as f32 * 0.4 * channel.param_speed + motor[0] * 1.5;
-
-                    for r_idx in 0..num_rings {
-                        let ring_frac = (r_idx + 1) as f32 / num_rings as f32;
-                        let ring_radius = ring_frac * max_radius;
-
-                        let ring_rot = global_rot * if r_idx % 2 == 0 { 1.0 } else { -1.0 } + r_idx as f32 * 0.15;
-                        let points_per_petal = 20;
-
-                        for f in 0..symmetry_folds {
-                            let base_angle = (f as f32 / symmetry_folds as f32) * std::f32::consts::TAU + ring_rot;
-                            let idx = (f * 5 + r_idx * 3) % 64;
-
-                            let n_v = channel.neuron_net.v[idx];
-                            let stdp = channel.neuron_net.stdp_trace[idx];
-                            let wave = channel.neuron_net.axonal_wave_field[idx];
-                            let is_spike = channel.neuron_net.spikes[idx];
-
-                            let petal_amp = ring_radius * (0.2 + 0.3 * (n_v + 65.0) / 50.0 + wave * 0.2);
-                            let spike_boost = if is_spike { 1.4 } else { 1.0 };
-
-                            let mut petal_pts = Vec::with_capacity(points_per_petal + 1);
-                            for p in 0..=points_per_petal {
-                                let p_frac = p as f32 / points_per_petal as f32;
-                                let angle_offset = (p_frac - 0.5) * (std::f32::consts::TAU / symmetry_folds as f32) * 1.2;
-                                let current_angle = base_angle + angle_offset;
-
-                                let petal_radius = ring_radius + (p_frac * std::f32::consts::PI).sin() * petal_amp * spike_boost;
-
-                                let px = center.x + current_angle.cos() * petal_radius;
-                                let py = center.y + current_angle.sin() * petal_radius;
-                                petal_pts.push(egui::pos2(px, py));
-                            }
-
-                            let hue = (ring_frac * 0.8 + channel.param_color_shift + motor[r_idx % 16] * 0.4) % 1.0;
-                            let r_c = ((hue * 6.0 - 3.0).abs() - 1.0).clamp(0.0, 1.0);
-                            let g_c = (2.0 - (hue * 6.0 - 2.0).abs()).clamp(0.0, 1.0);
-                            let b_c = (2.0 - (hue * 6.0 - 4.0).abs()).clamp(0.0, 1.0);
-
-                            let petal_color = if is_spike {
-                                theme.warning
-                            } else {
-                                egui::Color32::from_rgb((r_c * 255.0) as u8, (g_c * 255.0) as u8, (b_c * 255.0) as u8)
-                            };
-
-                            for i in 0..petal_pts.len() - 1 {
-                                ui.painter().line_segment([petal_pts[i], petal_pts[i + 1]], egui::Stroke::new(1.8 + stdp * 1.2, petal_color.linear_multiply(0.4 + 0.6 * low_energy)));
-                            }
-                        }
-                    }
-
-                    // Sacred Geometry Spoke Nucleus
-                    let num_core_spokes = symmetry_folds * 2;
-                    for s in 0..num_core_spokes {
-                        let spoke_angle = (s as f32 / num_core_spokes as f32) * std::f32::consts::TAU - global_rot * 1.5;
-                        let n_v = channel.neuron_net.v[s % 64];
-
-                        let inner_r = max_radius * 0.08;
-                        let outer_r = inner_r + (n_v + 65.0) / 30.0 * max_radius * 0.25;
-
-                        let p1 = egui::pos2(center.x + spoke_angle.cos() * inner_r, center.y + spoke_angle.sin() * inner_r);
-                        let p2 = egui::pos2(center.x + spoke_angle.cos() * outer_r, center.y + spoke_angle.sin() * outer_r);
-
-                        ui.painter().line_segment([p1, p2], egui::Stroke::new(2.5, theme.accent));
-                        ui.painter().circle_filled(p2, 3.5 + mid_energy * 6.0, theme.warning);
-                    }
-                }
-
-                state::VisualGenerator::ImageNeuronDeform => {
-                    // Image Bio-Neuron Warp & Cellular Deformation Grid
-                    let cols = 32;
-                    let rows = 32;
-                    let cell_w = rect.width() / cols as f32;
-                    let cell_h = rect.height() / rows as f32;
-
-                    for r in 0..rows {
-                        let v_norm = r as f32 / rows as f32;
-                        for c in 0..cols {
-                            let u_norm = c as f32 / cols as f32;
-                            let idx = (r * cols + c) % 64;
-
-                            let n_v = channel.neuron_net.v[idx];
-                            let wave = channel.neuron_net.axonal_wave_field[idx];
-                            let motor_warp_x = motor[r % 16] * 0.15;
-                            let motor_warp_y = motor[c % 16] * 0.15;
-
-                            // Displace texture sampling coordinates via spiking neural potential wave vectors
-                            let du = u_norm + motor_warp_x + (n_v + 65.0) / 1000.0 + (time as f32 * 0.1 * channel.param_speed).sin() * 0.05;
-                            let dv = v_norm + motor_warp_y + wave * 0.02 + (time as f32 * 0.12 * channel.param_speed).cos() * 0.05;
-
-                            let sample_pixel = channel.image_engine.sample(du, dv);
-
-                            let cell_rect = egui::Rect::from_min_size(
-                                egui::pos2(rect.left() + c as f32 * cell_w, rect.top() + r as f32 * cell_h),
-                                egui::vec2(cell_w, cell_h),
-                            );
-
-                            let is_spike = channel.neuron_net.spikes[idx];
-                            let pixel_color = if is_spike {
-                                theme.warning
-                            } else {
-                                egui::Color32::from_rgb(
-                                    sample_pixel[0].saturating_add((motor[0] * 50.0) as u8),
-                                    sample_pixel[1].saturating_add((low_energy * 60.0) as u8),
-                                    sample_pixel[2].saturating_add((mid_energy * 80.0) as u8),
-                                )
-                            };
-
-                            ui.painter().rect_filled(cell_rect, 0.0, pixel_color);
-                        }
-                    }
-
-                    // Superimposed Spiking Neural Network Dendrite Synapse Lattice Overlay
-                    let num_synapses = 16;
-                    for i in 0..num_synapses {
-                        let stdp = channel.neuron_net.stdp_trace[i * 4];
-                        let n_v = channel.neuron_net.v[i * 4];
-
-                        let sx = center.x + ((i as f32 * 0.8 + time as f32 * 0.5).sin() * rect.width() * 0.4);
-                        let sy = center.y + ((i as f32 * 1.1 + time as f32 * 0.7).cos() * rect.height() * 0.4);
-
-                        let radius = 6.0 + (n_v + 65.0) * 0.25;
-                        ui.painter().circle_filled(egui::pos2(sx, sy), radius, theme.accent.linear_multiply(0.6 + 0.4 * stdp));
-                    }
-                }
-
-                state::VisualGenerator::OrganicBitmapFeedback => {
-                    // Liquid Bitmap Chromatic Aberration & Organic Ripple Feedback
-                    let cols = 28;
-                    let rows = 28;
-                    let cell_w = rect.width() / cols as f32;
-                    let cell_h = rect.height() / rows as f32;
-
-                    let shift_r = motor[0] * 0.08 * channel.param_neural_temp;
-                    let shift_g = motor[1] * 0.08 * channel.param_neural_temp;
-                    let shift_b = motor[2] * 0.08 * channel.param_neural_temp;
-
-                    for r in 0..rows {
-                        let v_norm = r as f32 / rows as f32;
-                        for c in 0..cols {
-                            let u_norm = c as f32 / cols as f32;
-                            let idx = (r * cols + c) % 64;
-
-                            let wave = channel.neuron_net.axonal_wave_field[idx];
-
-                            // Sample R, G, B with neural chromatic aberration offsets
-                            let pix_r = channel.image_engine.sample(u_norm + shift_r + wave * 0.01, v_norm + shift_r)[0];
-                            let pix_g = channel.image_engine.sample(u_norm + shift_g, v_norm + shift_g + wave * 0.01)[1];
-                            let pix_b = channel.image_engine.sample(u_norm - shift_b, v_norm - shift_b)[2];
-
-                            let cell_rect = egui::Rect::from_min_size(
-                                egui::pos2(rect.left() + c as f32 * cell_w, rect.top() + r as f32 * cell_h),
-                                egui::vec2(cell_w - 0.5, cell_h - 0.5),
-                            );
-
-                            let combined_color = egui::Color32::from_rgb(
-                                pix_r.saturating_add((high_energy * 50.0) as u8),
-                                pix_g.saturating_add((mid_energy * 60.0) as u8),
-                                pix_b.saturating_add((low_energy * 70.0) as u8),
-                            );
-
-                            ui.painter().rect_filled(cell_rect, 1.5, combined_color);
-                        }
-                    }
-
-                    // Superimposed Fluid Wave Ribbon
-                    let num_pts = 64;
-                    let mut pts = Vec::with_capacity(num_pts);
-                    for i in 0..num_pts {
-                        let norm_x = i as f32 / (num_pts - 1) as f32;
-                        let x = rect.left() + norm_x * rect.width();
-                        let spec = self.viz.damped_spectrum[i * 2 % 128];
-                        let y = center.y + pade_tanh(spec * 1.5 + motor[i % 16]) * rect.height() * 0.3;
-                        pts.push(egui::pos2(x, y));
-                    }
-                    for i in 0..pts.len() - 1 {
-                        ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(3.0, theme.accent));
-                    }
-                }
-
-                state::VisualGenerator::WinampNeuronTunnel => {
-                    // Winamp / Milkdrop Hyperdimensional Spiking Warp Tunnel & Lissajous Oscillograph
-                    let num_rings = 24;
-                    let warp_speed = (0.8 + motor[0] * 4.0) * channel.param_speed;
-                    let rot_speed = motor[1] * 2.5;
-                    let max_radius = (rect.width().min(rect.height())) * 0.52;
-
-                    // 1. Organic Perspective Tunnel Rings
-                    for r_idx in 0..num_rings {
-                        let depth = ((time as f32 * warp_speed * 0.4 + r_idx as f32 / num_rings as f32) % 1.0).fract();
-                        let radius = depth.powf(2.2) * max_radius;
-                        if radius < 1.5 { continue; }
-
-                        let num_points = 36;
-                        let ring_rot = time as f32 * rot_speed + depth * std::f32::consts::TAU * 0.5 + motor[2];
-                        let mut pts = Vec::with_capacity(num_points + 1);
-
-                        for p in 0..=num_points {
-                            let angle = (p as f32 / num_points as f32) * std::f32::consts::TAU + ring_rot;
-                            let idx = (p * 2 + r_idx) % 64;
-                            let n_v = channel.neuron_net.v[idx];
-                            let wave_val = channel.neuron_net.axonal_wave_field[idx];
-                            let is_spiking = channel.neuron_net.spikes[idx];
-
-                            let spike_offset = if is_spiking { 1.35 } else { 1.0 };
-                            let disp = radius * (1.0 + ((n_v + 65.0) / 80.0 + wave_val * 0.5) * 0.25 * spike_offset);
-
-                            let x = center.x + angle.cos() * disp;
-                            let y = center.y + angle.sin() * disp;
-                            pts.push(egui::pos2(x, y));
-                        }
-
-                        let hue = (depth * 1.2 + channel.param_color_shift + motor[3] * 0.6) % 1.0;
-                        let r = ((hue * 6.0 - 3.0).abs() - 1.0).clamp(0.0, 1.0);
-                        let g = (2.0 - (hue * 6.0 - 2.0).abs()).clamp(0.0, 1.0);
-                        let b = (2.0 - (hue * 6.0 - 4.0).abs()).clamp(0.0, 1.0);
-
-                        let stroke_color = egui::Color32::from_rgb(
-                            (r * 255.0) as u8,
-                            (g * 255.0) as u8,
-                            (b * 255.0) as u8,
-                        ).linear_multiply(depth.powf(0.8) * (0.3 + 0.7 * low_energy));
-
-                        for i in 0..pts.len() - 1 {
-                            ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(1.2 + depth * 3.5, stroke_color));
-                        }
-                    }
-
-                    // 2. Orbiting Electric Lissajous Oscillograph Tendrils
-                    let num_tendrils = 6;
-                    for t in 0..num_tendrils {
-                        let freq_x = 2.0 + motor[t * 2 % 16] * 3.0;
-                        let freq_y = 3.0 + motor[(t * 2 + 1) % 16] * 3.0;
-                        let phase = time as f32 * (1.0 + channel.param_speed) + t as f32 * 1.05;
-
-                        let num_sub_pts = 48;
-                        let mut tendril_pts = Vec::with_capacity(num_sub_pts);
-                        for s in 0..num_sub_pts {
-                            let frac = s as f32 / num_sub_pts as f32;
-                            let t_angle = phase + frac * std::f32::consts::TAU;
-
-                            let n_idx = (s + t * 8) % 64;
-                            let n_act = pade_tanh((channel.neuron_net.v[n_idx] + 65.0) / 25.0);
-
-                            let lx = (t_angle * freq_x).sin() * (max_radius * 0.85) * (1.0 + n_act * 0.2);
-                            let ly = (t_angle * freq_y).cos() * (max_radius * 0.85) * (1.0 + n_act * 0.2);
-
-                            tendril_pts.push(egui::pos2(center.x + lx, center.y + ly));
-                        }
-
-                        let tendril_color = egui::Color32::from_rgb(
-                            (180.0 + motor[t] * 75.0) as u8,
-                            (120.0 + motor[t + 2] * 130.0) as u8,
-                            255,
-                        );
-                        for i in 0..tendril_pts.len() - 1 {
-                            ui.painter().line_segment([tendril_pts[i], tendril_pts[i + 1]], egui::Stroke::new(2.0, tendril_color.linear_multiply(0.7)));
-                        }
-                    }
-                }
-
-                state::VisualGenerator::WmpPlasmaFeedback => {
-                    // Windows Media Player Dynamic Synaptic Plasma Field & Fluid Ribbons
-                    let cols = 24;
-                    let rows = 16;
-                    let cell_w = rect.width() / cols as f32;
-                    let cell_h = rect.height() / rows as f32;
-
-                    let t_val = time as f32 * channel.param_speed;
-
-                    // 1. Plasma Surface Matrix with STDP Synaptic Field Influence
-                    for r in 0..rows {
-                        for c in 0..cols {
-                            let idx = (r * cols + c) % 64;
-                            let n_v = channel.neuron_net.v[idx];
-                            let stdp = channel.neuron_net.stdp_trace[idx];
-                            let motor_bias = motor[r % 16];
-
-                            let v1 = (c as f32 * 0.25 + t_val * 1.4 + motor_bias).sin();
-                            let v2 = (r as f32 * 0.35 - t_val * 1.8 + (n_v + 65.0) * 0.025).cos();
-                            let v3 = ((c as f32 + r as f32) * 0.2 + stdp * 1.5).sin();
-
-                            let plasma_val = pade_tanh((v1 + v2 + v3 + low_energy * 2.2) * channel.param_neural_temp);
-
-                            let cell_rect = egui::Rect::from_min_size(
-                                egui::pos2(rect.left() + c as f32 * cell_w, rect.top() + r as f32 * cell_h),
-                                egui::vec2(cell_w - 0.8, cell_h - 0.8),
-                            );
-
-                            let hue = (plasma_val * 0.5 + 0.5 + channel.param_color_shift + motor_bias * 0.3) % 1.0;
-                            let plasma_color = egui::Color32::from_rgb(
-                                ((hue * 255.0) as u8).wrapping_add(30),
-                                (((1.0 - hue) * 220.0) as u8).wrapping_add(40),
-                                ((plasma_val.abs() * 255.0) as u8).wrapping_add(80),
-                            );
-
-                            ui.painter().rect_filled(cell_rect, 2.5, plasma_color.linear_multiply(0.25 + 0.75 * plasma_val.abs()));
-                        }
-                    }
-
-                    // 2. Synaptic Metaball Nodes Drifting across Canvas
-                    for i in 0..16 {
-                        let stdp = channel.neuron_net.stdp_trace[i * 4];
-                        let n_v = channel.neuron_net.v[i * 4];
-
-                        let norm_x = pade_tanh(((time * 0.8 + i as f64 * 0.7).sin() as f32) + motor[i % 16]) * 0.5 + 0.5;
-                        let norm_y = pade_tanh(((time * 1.1 + i as f64 * 0.9).cos() as f32) + motor[(i + 4) % 16]) * 0.5 + 0.5;
-
-                        let node_pos = egui::pos2(rect.left() + norm_x * rect.width(), rect.top() + norm_y * rect.height());
-                        let radius = 10.0 + (n_v + 65.0) * 0.3 + stdp * 8.0;
-
-                        ui.painter().circle_filled(node_pos, radius, theme.accent.linear_multiply(0.5 + 0.5 * stdp));
-                    }
-
-                    // 3. Fluid Oscillograph Ribbons
-                    let num_ribbon_pts = 80;
-                    let mut ribbon_top = Vec::with_capacity(num_ribbon_pts);
-                    let mut ribbon_bot = Vec::with_capacity(num_ribbon_pts);
-
-                    for i in 0..num_ribbon_pts {
-                        let norm_x = i as f32 / (num_ribbon_pts - 1) as f32;
-                        let x = rect.left() + norm_x * rect.width();
-
-                        let spec = self.viz.damped_spectrum[i * 128 / num_ribbon_pts];
-                        let idx = (i * 64 / num_ribbon_pts) % 64;
-                        let wave_y = pade_tanh(spec * 1.8 + (channel.neuron_net.v[idx] + 65.0) * 0.02) * (rect.height() * 0.32);
-
-                        ribbon_top.push(egui::pos2(x, center.y - wave_y));
-                        ribbon_bot.push(egui::pos2(x, center.y + wave_y));
-                    }
-
-                    for i in 0..num_ribbon_pts - 1 {
-                        ui.painter().line_segment([ribbon_top[i], ribbon_top[i + 1]], egui::Stroke::new(2.5, theme.accent));
-                        ui.painter().line_segment([ribbon_bot[i], ribbon_bot[i + 1]], egui::Stroke::new(2.5, theme.warning));
-                    }
-                }
-
-                state::VisualGenerator::ReactionDiffusionNN => {
-                    // Turing Reaction-Diffusion Morphing Lattice & Mitotic Blooming
-                    let cols = 16;
-                    let rows = 16;
-                    let cell_w = rect.width() / cols as f32;
-                    let cell_h = rect.height() / rows as f32;
-
-                    for r in 0..rows {
-                        for c in 0..cols {
-                            let idx = r * 16 + c;
-                            let n_v = channel.neuron_net.v[idx % 64];
-                            let stdp = channel.neuron_net.stdp_trace[idx % 64];
-                            let wave = channel.neuron_net.axonal_wave_field[idx % 64];
-
-                            let cell_center = egui::pos2(
-                                rect.left() + (c as f32 + 0.5) * cell_w,
-                                rect.top() + (r as f32 + 0.5) * cell_h,
-                            );
-
-                            let act = pade_tanh((n_v + 65.0) / 20.0 + stdp + wave * 0.4);
-                            let radius = (cell_w.min(cell_h) * 0.48) * (0.15 + 0.85 * act.abs());
-
-                            let is_spike = channel.neuron_net.spikes[idx % 64];
-                            let fill_color = if is_spike {
-                                theme.warning
-                            } else {
-                                egui::Color32::from_rgb(
-                                    ((act.abs() * 210.0) as u8).wrapping_add(40),
-                                    ((stdp * 90.0) as u8).wrapping_add(60),
-                                    230,
-                                )
-                            };
-
-                            ui.painter().circle_filled(cell_center, radius, fill_color.linear_multiply(0.5 + 0.5 * act.abs()));
-
-                            // Dendritic Connecting Tendrils to Neighboring Cells
-                            if c < cols - 1 && act > 0.25 {
-                                let right_center = egui::pos2(cell_center.x + cell_w, cell_center.y);
-                                ui.painter().line_segment([cell_center, right_center], egui::Stroke::new(1.8, fill_color.linear_multiply(0.4)));
-                            }
-                            if r < rows - 1 && act > 0.25 {
-                                let bottom_center = egui::pos2(cell_center.x, cell_center.y + cell_h);
-                                ui.painter().line_segment([cell_center, bottom_center], egui::Stroke::new(1.8, fill_color.linear_multiply(0.4)));
-                            }
-                        }
-                    }
-                }
-                state::VisualGenerator::BioluminescentFluidFlow => {
-                    let num_streams = 32;
-                    let radius_max = (rect.height() * 0.48).min(rect.width() * 0.48);
-
-                    for i in 0..num_streams {
-                        let base_angle = (i as f32 / num_streams as f32) * std::f32::consts::TAU;
-                        let flow_offset = (time as f32 * channel.param_speed * 1.5 + i as f32 * 0.2).sin() * 0.3;
-                        let angle = base_angle + flow_offset;
-
-                        let spec_val = self.viz.damped_spectrum[(i * 4) % 128];
-                        let fluid_r = radius_max * (0.2 + 0.8 * pade_tanh(spec_val * channel.param_neural_temp + low_energy));
-
-                        let pt = egui::pos2(center.x + angle.cos() * fluid_r, center.y + angle.sin() * fluid_r);
-
-                        // Organic Bioluminescent Gradient Color Interpolation
-                        let hue = ((i as f32 / num_streams as f32) + channel.param_color_shift) % 1.0;
-                        let r = (hue * 6.0 - 3.0).abs() - 1.0;
-                        let g = 2.0 - (hue * 6.0 - 2.0).abs();
-                        let b = 2.0 - (hue * 6.0 - 4.0).abs();
-                        let neon_color = egui::Color32::from_rgb(
-                            (r.clamp(0.0, 1.0) * 255.0) as u8,
-                            (g.clamp(0.0, 1.0) * 255.0) as u8,
-                            (b.clamp(0.0, 1.0) * 255.0) as u8,
-                        );
-
-                        ui.painter().circle_filled(pt, 6.0 + low_energy * 10.0, neon_color.linear_multiply(0.8));
-                        ui.painter().line_segment([center, pt], egui::Stroke::new(2.0, neon_color.linear_multiply(0.3 + 0.7 * mid_energy)));
-                    }
-                }
-
-                state::VisualGenerator::HarmonicArrangementLattice => {
-                    // Songwriter / Composer Musical Structure Lattice Canvas
-                    let cols = 16;
-                    let rows = 8;
-                    let cell_w = rect.width() / cols as f32;
-                    let cell_h = rect.height() / rows as f32;
-
-                    let bpm = telemetry.as_ref().map(|t| t.bpm as f32).unwrap_or(120.0);
-                    let beat_pos = telemetry.as_ref().map(|t| t.beat_position as f32).unwrap_or(0.0);
-
-                    for r in 0..rows {
-                        for c in 0..cols {
-                            let idx = (r * cols + c) % 128;
-                            let spec_val = self.viz.damped_spectrum[idx];
-                            let active_h = pade_tanh(spec_val * channel.param_neural_temp);
-
-                            let cell_rect = egui::Rect::from_min_size(
-                                egui::pos2(rect.left() + c as f32 * cell_w, rect.top() + r as f32 * cell_h),
-                                egui::vec2(cell_w - 2.0, cell_h - 2.0),
-                            );
-
-                            let is_beat_col = ((c as f32) - (beat_pos % 16.0)).abs() < 1.0;
-                            let base_color = if is_beat_col {
-                                theme.accent
-                            } else if (r + c) % 2 == 0 {
-                                egui::Color32::from_rgb(40, 60, 90)
-                            } else {
-                                egui::Color32::from_rgb(20, 30, 50)
-                            };
-
-                            ui.painter().rect_filled(cell_rect, 2.0, base_color.linear_multiply(0.2 + 0.8 * active_h.abs()));
-
-                            if active_h > 0.3 {
-                                ui.painter().circle_filled(cell_rect.center(), 3.0 + active_h * 5.0, theme.warning);
-                            }
-                        }
-                    }
-
-                    // Songwriter BPM & Harmonic Overlay Text
-                    ui.painter().text(
-                        rect.left_top() + egui::vec2(15.0, 15.0),
-                        egui::Align2::LEFT_TOP,
-                        format!("BPM: {:.1} | BEAT: {:.2} | HARMONIC CHROMA LATTICE", bpm, beat_pos),
-                        egui::FontId::new(12.0, egui::FontFamily::Monospace),
-                        theme.accent,
-                    );
-                }
-
-                state::VisualGenerator::AbstractQuantumSwarm => {
-                    let num_particles = (channel.param_particle_density * 180.0) as usize;
-                    for i in 0..num_particles {
-                        let phase = i as f64 * 0.15 + time * channel.param_speed as f64;
-                        let raw_x = (phase * 1.1).sin() as f32 + stereo_imbalance * 2.0;
-                        let raw_y = (phase * 1.7).cos() as f32 + high_energy * 2.0;
-
-                        let norm_x = pade_tanh(raw_x) * 0.5 + 0.5;
-                        let norm_y = pade_tanh(raw_y) * 0.5 + 0.5;
-
-                        let pt = egui::pos2(rect.left() + norm_x * rect.width(), rect.top() + norm_y * rect.height());
-
-                        // Colorful Quantum Swarm Color Palette
-                        let hue = ((i as f32 / num_particles as f32) + channel.param_color_shift) % 1.0;
-                        let particle_color = egui::Color32::from_rgb(
-                            ((hue * 255.0) as u8).wrapping_add(100),
-                            (((1.0 - hue) * 255.0) as u8).wrapping_add(50),
-                            ((hue * 180.0) as u8).wrapping_add(120),
-                        );
-
-                        ui.painter().circle_filled(pt, 2.5 + high_energy * 6.0, particle_color.linear_multiply(0.8));
-                    }
-                }
-
-                state::VisualGenerator::NeuralFloralMycelium => {
-                    let num_branches = 18;
-                    let radius_base = (rect.height() * 0.42).min(rect.width() * 0.42);
-
-                    for b in 0..num_branches {
-                        let angle = (b as f32 / num_branches as f32) * std::f32::consts::TAU;
-                        let latent_val = self.viz.damped_latent[b % 16];
-                        let growth = pade_tanh(latent_val * channel.param_neural_temp + low_energy);
-
-                        let branch_r = radius_base * (0.3 + 0.7 * growth.abs());
-                        let pt = egui::pos2(center.x + angle.cos() * branch_r, center.y + angle.sin() * branch_r);
-
-                        // Organic Mycelium Floral Tendrils
-                        let floral_color = egui::Color32::from_rgb(180, 80, 220).linear_multiply(0.6 + 0.4 * mid_energy);
-                        ui.painter().line_segment([center, pt], egui::Stroke::new(2.5, floral_color));
-                        ui.painter().circle_filled(pt, 4.0 + growth.abs() * 8.0, theme.accent);
-                    }
-                }
-
-                state::VisualGenerator::FftSpectrumMesh => {
-                    let num_bars = 128;
-                    let bar_w = (rect.width() / num_bars as f32).max(1.0);
-                    for i in 0..num_bars {
-                        let spec = self.viz.damped_spectrum[i];
-                        let activated = pade_tanh(spec * channel.gain_sensitivity * channel.param_neural_temp);
-                        let bar_h = activated.abs() * rect.height();
-                        let bar_rect = egui::Rect::from_min_max(
-                            egui::pos2(rect.left() + i as f32 * bar_w, rect.bottom() - bar_h),
-                            egui::pos2(rect.left() + (i + 1) as f32 * bar_w - 1.0, rect.bottom()),
-                        );
-                        let hue = (i as f32 / num_bars as f32 + channel.param_color_shift) % 1.0;
-                        let bar_color = egui::Color32::from_rgb(
-                            ((hue * 255.0) as u8).wrapping_add(80),
-                            (((1.0 - hue) * 200.0) as u8).wrapping_add(60),
-                            220,
-                        );
-                        ui.painter().rect_filled(bar_rect, 1.0, bar_color.linear_multiply(0.4 + 0.6 * activated));
-                    }
-                }
+                state::VisualGenerator::RadialMandala => channel.engine_radial_mandala.render(ui, rect, nervous, genome, telemetry, time as f32),
+                state::VisualGenerator::LiquidSurface => channel.engine_liquid_surface.render(ui, rect, nervous, genome, telemetry, time as f32),
+                state::VisualGenerator::SpectralLandscape => channel.engine_spectral_landscape.render(ui, rect, nervous, genome, telemetry, time as f32),
+                state::VisualGenerator::HyperAttractor => channel.engine_hyper_attractor.render(ui, rect, nervous, genome, telemetry, time as f32),
+                state::VisualGenerator::ReactionDiffusion => channel.engine_reaction_diffusion.render(ui, rect, nervous, genome, telemetry, time as f32),
+                state::VisualGenerator::NeuralRaymarcher => channel.engine_neural_raymarcher.render(ui, rect, nervous, genome, telemetry, time as f32),
             }
 
         }
@@ -887,7 +436,7 @@ impl InspectorApp {
                     let count = self.viz.channels.len() + 1;
                     self.viz.channels.push(state::VisualChannel::new(
                         &format!("VIZ {}", count),
-                        state::VisualGenerator::AbstractQuantumSwarm,
+                        state::VisualGenerator::RadialMandala,
                         vec![state::VisualInputSource::MasterMix],
                     ));
                 }
