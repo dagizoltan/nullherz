@@ -305,6 +305,118 @@ impl InspectorApp {
             let motor = channel.neuron_net.motor_outputs;
 
             match channel.generator {
+                state::VisualGenerator::ImageNeuronDeform => {
+                    // Image Bio-Neuron Warp & Cellular Deformation Grid
+                    let cols = 32;
+                    let rows = 32;
+                    let cell_w = rect.width() / cols as f32;
+                    let cell_h = rect.height() / rows as f32;
+
+                    for r in 0..rows {
+                        let v_norm = r as f32 / rows as f32;
+                        for c in 0..cols {
+                            let u_norm = c as f32 / cols as f32;
+                            let idx = (r * cols + c) % 64;
+
+                            let n_v = channel.neuron_net.v[idx];
+                            let wave = channel.neuron_net.axonal_wave_field[idx];
+                            let motor_warp_x = motor[r % 16] * 0.15;
+                            let motor_warp_y = motor[c % 16] * 0.15;
+
+                            // Displace texture sampling coordinates via spiking neural potential wave vectors
+                            let du = u_norm + motor_warp_x + (n_v + 65.0) / 1000.0 + (time as f32 * 0.1 * channel.param_speed).sin() * 0.05;
+                            let dv = v_norm + motor_warp_y + wave * 0.02 + (time as f32 * 0.12 * channel.param_speed).cos() * 0.05;
+
+                            let sample_pixel = channel.image_engine.sample(du, dv);
+
+                            let cell_rect = egui::Rect::from_min_size(
+                                egui::pos2(rect.left() + c as f32 * cell_w, rect.top() + r as f32 * cell_h),
+                                egui::vec2(cell_w, cell_h),
+                            );
+
+                            let is_spike = channel.neuron_net.spikes[idx];
+                            let pixel_color = if is_spike {
+                                theme.warning
+                            } else {
+                                egui::Color32::from_rgb(
+                                    sample_pixel[0].saturating_add((motor[0] * 50.0) as u8),
+                                    sample_pixel[1].saturating_add((low_energy * 60.0) as u8),
+                                    sample_pixel[2].saturating_add((mid_energy * 80.0) as u8),
+                                )
+                            };
+
+                            ui.painter().rect_filled(cell_rect, 0.0, pixel_color);
+                        }
+                    }
+
+                    // Superimposed Spiking Neural Network Dendrite Synapse Lattice Overlay
+                    let num_synapses = 16;
+                    for i in 0..num_synapses {
+                        let stdp = channel.neuron_net.stdp_trace[i * 4];
+                        let n_v = channel.neuron_net.v[i * 4];
+
+                        let sx = center.x + ((i as f32 * 0.8 + time as f32 * 0.5).sin() * rect.width() * 0.4);
+                        let sy = center.y + ((i as f32 * 1.1 + time as f32 * 0.7).cos() * rect.height() * 0.4);
+
+                        let radius = 6.0 + (n_v + 65.0) * 0.25;
+                        ui.painter().circle_filled(egui::pos2(sx, sy), radius, theme.accent.linear_multiply(0.6 + 0.4 * stdp));
+                    }
+                }
+
+                state::VisualGenerator::OrganicBitmapFeedback => {
+                    // Liquid Bitmap Chromatic Aberration & Organic Ripple Feedback
+                    let cols = 28;
+                    let rows = 28;
+                    let cell_w = rect.width() / cols as f32;
+                    let cell_h = rect.height() / rows as f32;
+
+                    let shift_r = motor[0] * 0.08 * channel.param_neural_temp;
+                    let shift_g = motor[1] * 0.08 * channel.param_neural_temp;
+                    let shift_b = motor[2] * 0.08 * channel.param_neural_temp;
+
+                    for r in 0..rows {
+                        let v_norm = r as f32 / rows as f32;
+                        for c in 0..cols {
+                            let u_norm = c as f32 / cols as f32;
+                            let idx = (r * cols + c) % 64;
+
+                            let wave = channel.neuron_net.axonal_wave_field[idx];
+
+                            // Sample R, G, B with neural chromatic aberration offsets
+                            let pix_r = channel.image_engine.sample(u_norm + shift_r + wave * 0.01, v_norm + shift_r)[0];
+                            let pix_g = channel.image_engine.sample(u_norm + shift_g, v_norm + shift_g + wave * 0.01)[1];
+                            let pix_b = channel.image_engine.sample(u_norm - shift_b, v_norm - shift_b)[2];
+
+                            let cell_rect = egui::Rect::from_min_size(
+                                egui::pos2(rect.left() + c as f32 * cell_w, rect.top() + r as f32 * cell_h),
+                                egui::vec2(cell_w - 0.5, cell_h - 0.5),
+                            );
+
+                            let combined_color = egui::Color32::from_rgb(
+                                pix_r.saturating_add((high_energy * 50.0) as u8),
+                                pix_g.saturating_add((mid_energy * 60.0) as u8),
+                                pix_b.saturating_add((low_energy * 70.0) as u8),
+                            );
+
+                            ui.painter().rect_filled(cell_rect, 1.5, combined_color);
+                        }
+                    }
+
+                    // Superimposed Fluid Wave Ribbon
+                    let num_pts = 64;
+                    let mut pts = Vec::with_capacity(num_pts);
+                    for i in 0..num_pts {
+                        let norm_x = i as f32 / (num_pts - 1) as f32;
+                        let x = rect.left() + norm_x * rect.width();
+                        let spec = self.viz.damped_spectrum[i * 2 % 128];
+                        let y = center.y + pade_tanh(spec * 1.5 + motor[i % 16]) * rect.height() * 0.3;
+                        pts.push(egui::pos2(x, y));
+                    }
+                    for i in 0..pts.len() - 1 {
+                        ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(3.0, theme.accent));
+                    }
+                }
+
                 state::VisualGenerator::WinampNeuronTunnel => {
                     // Winamp / Milkdrop Hyperdimensional Spiking Warp Tunnel & Lissajous Oscillograph
                     let num_rings = 24;
