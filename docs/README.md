@@ -22,6 +22,7 @@ Core technical specifications and engineering principles.
 - [DNS & DNA Glossary](./system/DNS_DNA_GLOSSARY.md) — terminology standard, core definitions, DNS vs DNA comparison matrix, and terminology rules
 - [DNA Instrumentation & Tooling](./system/DNA_INSTRUMENTATION_AND_TOOLING.md) — DNA signal domain, multi-rate modulation, modular rack, scopes, diff, performance architecture, and non-conversational AI boundaries
 - [Extended DNA Risk & Capability Framework](./system/DNA_RISK_AND_CAPABILITY_FRAMEWORK.md) — engineering risk matrix, capability taxonomy, and transformation benchmark strategy
+- [Sound Analysis & Perception System](./system/SOUND_ANALYSIS_PERCEPTION_SYSTEM_SPECIFICATION.md) — real-time audio perception architecture, multi-timescale resolutions, shared analysis bus, composable spectral field UI, and perceptual trajectories
 - [AnaWaves Genetic Schema](./system/ANAWAVES_GENETIC_SCHEMA_RFC.md)
 - [Sidecar Protocol v2](./system/SIDECAR_PROTOCOL_V2.md)
 - [SDK Developer Guide](./system/SDK_DEVELOPER_GUIDE.md)
