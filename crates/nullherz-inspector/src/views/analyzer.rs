@@ -4,7 +4,7 @@ use crate::InspectorApp;
 use crate::state::AbCompareSource;
 
 pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
-    let theme = app.theme.clone();
+    let theme = app.theme;
 
     ui.vertical(|ui| {
         // --- Header & Composable Layer Toggles ---
@@ -110,7 +110,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
         // 3. [RHYTHM] Layer: Beat Grid Markers
         if app.analyzer.layer_rhythm {
             let beat_pos = telemetry.as_ref().map(|t| t.beat_position as f32).unwrap_or(0.0);
-            let bpm = telemetry.as_ref().map(|t| t.bpm as f32).unwrap_or(120.0);
+            let bpm = telemetry.as_ref().map(|t| t.bpm).unwrap_or(120.0);
 
             let num_beats = 16;
             let beat_w = rect.width() / num_beats as f32;
