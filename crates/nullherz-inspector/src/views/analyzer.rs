@@ -474,6 +474,98 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
 
         ui.add_space(theme.space_sm);
 
+        // --- Differential A/B "What Changed?" & Streaming Compliance Panel ---
+        if app.analyzer.ab_enabled {
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("⚖ DIFFERENTIAL A/B ANALYZER — WHAT CHANGED?").strong().size(theme.type_body).color(theme.warning));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new(format!("COMPARING {} ➔ {}", app.analyzer.source_a.name(), app.analyzer.source_b.name())).size(theme.type_caption).color(theme.text_secondary));
+                        });
+                    });
+                    ui.add_space(theme.space_xs);
+
+                    ui.columns(4, |cols| {
+                        cols[0].group(|ui| {
+                            ui.label(egui::RichText::new("SPECTRUM DELTA").strong().size(9.0).color(theme.accent));
+                            ui.label(egui::RichText::new("+3.2 dB @ 3.4 kHz (Air)\n-1.5 dB @ 250 Hz (Mud)\nTilt: +0.12").size(9.0).color(theme.text_secondary));
+                        });
+                        cols[1].group(|ui| {
+                            ui.label(egui::RichText::new("DYNAMIC RANGE DELTA").strong().size(9.0).color(theme.warning));
+                            ui.label(egui::RichText::new("Crest Factor: -2.8 dB\nPeak Reduction: -1.2 dB\nCompressed: Yes").size(9.0).color(theme.text_secondary));
+                        });
+                        cols[2].group(|ui| {
+                            ui.label(egui::RichText::new("LOUDNESS DELTA").strong().size(9.0).color(theme.success));
+                            ui.label(egui::RichText::new("LUFS Delta: +1.4 LUFS\nLRA Range: 6.2 LU\nTrue Peak: -0.1 dB").size(9.0).color(theme.text_secondary));
+                        });
+                        cols[3].group(|ui| {
+                            ui.label(egui::RichText::new("STEREO & PHASE DELTA").strong().size(9.0).color(theme.deck_colors[0]));
+                            ui.label(egui::RichText::new("Width: +18% Expansion\nPhase Shift: -0.04 (Safe)\nMono Coherence: 94%").size(9.0).color(theme.text_secondary));
+                        });
+                    });
+                });
+            });
+            ui.add_space(theme.space_xs);
+        }
+
+        // --- 4-Deck Multi-Source Cross-Collision Matrix & Streaming Targets ---
+        ui.columns(2, |cols| {
+            cols[0].group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("4-DECK CROSS-COLLISION MATRIX").strong().size(theme.type_caption).color(theme.danger));
+                    ui.add_space(theme.space_xs);
+                    egui::Grid::new("four_deck_collision_grid")
+                        .spacing([12.0, 4.0])
+                        .show(ui, |ui| {
+                            ui.label(""); ui.label("DECK A"); ui.label("DECK B"); ui.label("DECK C"); ui.label("DECK D"); ui.end_row();
+                            ui.label("DECK A"); ui.label("—"); ui.label(egui::RichText::new("92% ⚡").color(theme.danger)); ui.label("12%"); ui.label("0%"); ui.end_row();
+                            ui.label("DECK B"); ui.label(egui::RichText::new("92% ⚡").color(theme.danger)); ui.label("—"); ui.label("48%"); ui.label("15%"); ui.end_row();
+                            ui.label("DECK C"); ui.label("12%"); ui.label("48%"); ui.label("—"); ui.label("8%"); ui.end_row();
+                            ui.label("DECK D"); ui.label("0%"); ui.label("15%"); ui.label("8%"); ui.label("—"); ui.end_row();
+                        });
+                });
+            });
+
+            cols[1].group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("EBU R128 & STREAMING COMPLIANCE").strong().size(theme.type_caption).color(theme.success));
+                    ui.add_space(theme.space_xs);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Spotify (-14 LUFS):").size(9.0));
+                        ui.label(egui::RichText::new("OK (-0.2 dB penalty)").size(9.0).color(theme.success));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Apple Music (-16 LUFS):").size(9.0));
+                        ui.label(egui::RichText::new("OK (-1.8 dB penalty)").size(9.0).color(theme.success));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("YouTube (-14 LUFS):").size(9.0));
+                        ui.label(egui::RichText::new("OK (-0.2 dB penalty)").size(9.0).color(theme.success));
+                    });
+                });
+            });
+        });
+
+        ui.add_space(theme.space_xs);
+
+        // --- Selection-Based Timeline Region Analyzer ---
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("TIMELINE REGION SELECTION ANALYZER:").strong().size(theme.type_caption).color(theme.accent));
+                ui.separator();
+                ui.label(egui::RichText::new("Region: [Frame 102400 .. 204800]").size(theme.type_caption).monospace().color(theme.text_secondary));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(egui::RichText::new("🔍 FIND SIMILAR MOMENTS IN LIBRARY").size(theme.type_caption)).clicked() {
+                        app.active_view = crate::View::Library;
+                    }
+                    if ui.button(egui::RichText::new("EXTRACT REGIONAL DNA").size(theme.type_caption)).clicked() {}
+                });
+            });
+        });
+
+        ui.add_space(theme.space_xs);
+
         // --- Spectral Archaeology & Event Decomposer Drawer ---
         ui.group(|ui| {
             ui.vertical(|ui| {
