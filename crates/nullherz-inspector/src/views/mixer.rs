@@ -15,14 +15,20 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     ui.heading(RichText::new("System Mixer").size(theme.type_heading));
     ui.add_space(theme.space_md);
 
+    let avail_width = ui.available_width();
+    let channels_width = 4.0 * STRIP_W + 3.0 * theme.space_sm;
+    let master_space = (avail_width - channels_width - STRIP_W).max(theme.space_md);
+
     // Horizontal scroll instead of silent overflow on narrow windows.
     ScrollArea::horizontal().id_source("sys_mixer_scroll").show(ui, |ui| {
         ui.horizontal_top(|ui| {
             for i in 0..4 {
                 render_channel_strip(app, ui, i, telemetry);
-                ui.add_space(theme.space_sm);
+                if i < 3 {
+                    ui.add_space(theme.space_sm);
+                }
             }
-            ui.add_space(theme.space_md);
+            ui.add_space(master_space);
             render_master_strip(app, ui, telemetry);
         });
     });
@@ -260,38 +266,41 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                 ui.add_space(4.0);
 
                 // --- COMPACT DECK CONTROLS & TRACK INFO ---
-                let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[i]).unwrap_or(0);
-                if let Some(ref track) = app.decks.cached_tracks[i] {
-                    let sample_rate = track.metadata.sample_rate.max(1) as f64;
-                    let total_secs = track.metadata.total_samples as f64 / sample_rate;
-                    let elapsed_secs = elapsed_samples as f64 / sample_rate;
-                    let remain_secs = (total_secs - elapsed_secs).max(0.0);
-                    let rem_m = (remain_secs / 60.0) as u32;
-                    let rem_s = (remain_secs % 60.0) as u32;
+                ui.allocate_ui_with_layout(
+                    egui::vec2(STRIP_W - 2.0 * theme.space_md, 32.0),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[i]).unwrap_or(0);
+                        if let Some(ref track) = app.decks.cached_tracks[i] {
+                            let sample_rate = track.metadata.sample_rate.max(1) as f64;
+                            let total_secs = track.metadata.total_samples as f64 / sample_rate;
+                            let elapsed_secs = elapsed_samples as f64 / sample_rate;
+                            let remain_secs = (total_secs - elapsed_secs).max(0.0);
+                            let rem_m = (remain_secs / 60.0) as u32;
+                            let rem_s = (remain_secs % 60.0) as u32;
 
-                    ui.vertical_centered(|ui| {
-                        ui.label(RichText::new(&track.title).size(10.0).strong().color(theme.text_primary));
-                        if !track.artist.is_empty() {
-                            ui.label(RichText::new(&track.artist).size(9.0).color(theme.text_secondary));
+                            ui.label(RichText::new(&track.title).size(10.0).strong().color(theme.text_primary));
+                            if !track.artist.is_empty() {
+                                ui.label(RichText::new(&track.artist).size(9.0).color(theme.text_secondary));
+                            }
+                            let effective_bpm = track.metadata.bpm * app.mixer.channel_pitch[i];
+                            ui.horizontal(|ui| {
+                                ui.add_space((STRIP_W - 2.0 * theme.space_md - 110.0).max(0.0) / 2.0);
+                                ui.label(RichText::new(format!("{:.1} BPM", effective_bpm)).monospace().size(9.0).strong().color(deck_color));
+                                ui.label(RichText::new(format!("-{:02}:{:02}", rem_m, rem_s)).monospace().size(9.0).color(theme.text_secondary));
+                            });
+                        } else {
+                            ui.add_space(8.0);
+                            ui.label(RichText::new("No Track Loaded").size(9.0).italics().color(theme.text_disabled));
                         }
-                        let effective_bpm = track.metadata.bpm * app.mixer.channel_pitch[i];
-                        ui.horizontal(|ui| {
-                            ui.add_space((STRIP_W - 110.0).max(0.0) / 2.0);
-                            ui.label(RichText::new(format!("{:.1} BPM", effective_bpm)).monospace().size(9.0).strong().color(deck_color));
-                            ui.label(RichText::new(format!("-{:02}:{:02}", rem_m, rem_s)).monospace().size(9.0).color(theme.text_secondary));
-                        });
-                    });
-                } else {
-                    ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("No Track Loaded").size(9.0).italics().color(theme.text_disabled));
-                    });
-                }
+                    },
+                );
 
                 ui.add_space(4.0);
 
                 // Transport Row: Single Play/Stop Toggle + CUE Button
                 ui.horizontal(|ui| {
-                    ui.add_space((STRIP_W - 100.0).max(0.0) / 2.0);
+                    ui.add_space((STRIP_W - 2.0 * theme.space_md - 96.0).max(0.0) / 2.0);
 
                     let is_playing = app.decks.deck_playing[i];
                     let play_icon = if is_playing { egui_phosphor::regular::PAUSE } else { egui_phosphor::regular::PLAY };
@@ -482,10 +491,10 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                     });
                 });
 
-                ui.add_space(theme.space_sm);
+                ui.add_space(theme.space_md);
 
+                // --- VOLUME FADER & STEREO VU METERS ---
                 ui.horizontal(|ui| {
-                    ui.add_space((STRIP_W - 24.0 - 20.0 - theme.space_sm).max(0.0) / 2.0);
                     let r_fader = widgets::render_fader(ui, &mut app.mixer.master_gain, 0.0..=1.2, accent, FADER_H, 30.0);
                     if r_fader.changed() {
                         for node in [sum_l, sum_r].into_iter().flatten() {
@@ -501,7 +510,8 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                         let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CheckpointParameterEdit));
                     }
 
-                    ui.add_space(theme.space_sm);
+                    ui.add_space(6.0);
+
                     // Stereo pair: damped master peaks are bound to
                     // master_sum_l/r in the update loop.
                     let _ = telemetry;
@@ -512,13 +522,50 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
 
                 ui.add_space(theme.space_xs);
                 ui.horizontal(|ui| {
-                    ui.add_space((STRIP_W - 34.0).max(0.0) / 2.0);
+                    ui.add_space((STRIP_W - 50.0).max(0.0) / 2.0);
                     ui.label(
                         RichText::new(format!("{:+.1} dB", 20.0 * app.mixer.master_gain.max(1e-3).log10()))
                             .monospace()
                             .size(theme.type_caption)
                             .color(theme.text_secondary),
                     );
+                });
+
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                // Empty Track Info Area to keep master strip height & controls aligned with channels
+                ui.allocate_ui_with_layout(
+                    egui::vec2(STRIP_W - 2.0 * theme.space_md, 32.0),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |_ui| {
+                        // Empty space for title, bpm, remaining time alignment
+                    },
+                );
+
+                ui.add_space(4.0);
+
+                // Global Play/Stop Transport Toggle
+                ui.horizontal(|ui| {
+                    ui.add_space((STRIP_W - 2.0 * theme.space_md - 96.0).max(0.0) / 2.0);
+
+                    let is_playing = app.decks.global_playing;
+                    let play_icon = if is_playing { egui_phosphor::regular::PAUSE } else { egui_phosphor::regular::PLAY };
+                    let play_btn = if is_playing {
+                        egui::Button::new(RichText::new(play_icon).size(12.0).strong()).fill(accent)
+                    } else {
+                        egui::Button::new(RichText::new(play_icon).size(12.0).strong()).fill(theme.bg_inset)
+                    };
+
+                    if ui.add_sized([96.0, 22.0], play_btn).clicked() {
+                        app.decks.global_playing = !is_playing;
+                        if app.decks.global_playing {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Play));
+                        } else {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop));
+                        }
+                    }
                 });
             });
         });
