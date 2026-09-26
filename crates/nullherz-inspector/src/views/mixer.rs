@@ -134,23 +134,7 @@ fn render_vertical_waveform(
                 );
             }
 
-            // DJ Studio Beat Grid Ticks (subtle transparency)
-            if t.metadata.bpm > 20.0 {
-                let sr = t.metadata.sample_rate.max(1) as f64;
-                let spb = sr * 60.0 / t.metadata.bpm as f64;
-                let beat_span = (8.0 * sr) / spb; // 8 seconds window
-                let beats_visible = (beat_span as usize).clamp(4, 32);
-
-                for b in 0..beats_visible {
-                    let beat_y = rect.min.y + (b as f32 / beats_visible as f32) * height;
-                    let is_downbeat = b % 4 == 0;
-                    let line_alpha = if is_downbeat { 18 } else { 8 };
-                    painter.line_segment(
-                        [Pos2::new(rect.min.x + 2.0, beat_y), Pos2::new(rect.max.x - 2.0, beat_y)],
-                        Stroke::new(1.0, Color32::from_white_alpha(line_alpha)),
-                    );
-                }
-            }
+            // Clean, non-disturbing waveform without harsh grid lines
 
             // Draw center playhead line matching DJ Studio needle
             let playhead_y = rect.min.y + height * 0.5;
