@@ -111,3 +111,21 @@ fn test_device_id_is_idempotent() {
         assert_eq!(device_id(&once), once, "device_id is not idempotent for {s:?}");
     }
 }
+
+#[test]
+fn test_dbus_device_name_normalization() {
+    assert_eq!(AlsaBackend::dbus_device_name("hw:0"), "Audio0");
+    assert_eq!(AlsaBackend::dbus_device_name("hw:1,0"), "Audio1");
+    assert_eq!(AlsaBackend::dbus_device_name("hw:CARD=PCH,DEV=0"), "AudioPCH");
+    assert_eq!(AlsaBackend::dbus_device_name("plughw:2,0"), "Audio2");
+    assert_eq!(AlsaBackend::dbus_device_name("default"), "Audio0");
+    assert_eq!(AlsaBackend::dbus_device_name("Audio1"), "Audio1");
+}
+
+#[test]
+fn test_alsa_backend_creation_and_defaults() {
+    let backend = AlsaBackend::new();
+    assert_eq!(backend.xruns(), 0);
+    assert_eq!(backend.buffer_frames(), None);
+    assert!(!backend.device().is_empty());
+}
