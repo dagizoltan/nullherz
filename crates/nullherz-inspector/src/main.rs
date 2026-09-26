@@ -497,6 +497,17 @@ impl InspectorApp {
                                         }
                                     });
 
+                                if channel.generator == state::VisualGenerator::RadialMandala {
+                                    ui.add_space(2.0);
+                                    egui::ComboBox::from_id_source(format!("mandala_style_combo_{}", c_idx))
+                                        .selected_text(channel.engine_radial_mandala.style.name())
+                                        .show_ui(ui, |ui| {
+                                            for style_item in crate::views::visual_engines::radial_mandala::MandalaStyle::all() {
+                                                ui.selectable_value(&mut channel.engine_radial_mandala.style, *style_item, style_item.name());
+                                            }
+                                        });
+                                }
+
                                 ui.add_space(4.0);
 
                                 // Attached Input Badges / Multi-selection
