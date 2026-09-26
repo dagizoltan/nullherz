@@ -354,8 +354,126 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                 ui.group(|ui| {
                     ui.set_width(STRIP_W - 12.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("MASTER INSERTS").size(theme.type_caption).strong().color(theme.text_secondary));
+                        ui.label(RichText::new("INSERTS RACK").size(theme.type_caption).strong().color(theme.text_secondary));
                         ui.add_space(2.0);
+
+                        // Master Insert Slot 1: 3-Band Mastering EQ (HI, MID, LOW)
+                        let master_eq_node = app.topo.node_map.get("master_eq").copied();
+                        Frame::none()
+                            .fill(theme.bg_inset)
+                            .rounding(Rounding::same(theme.radius_sm))
+                            .inner_margin(Margin::same(4.0))
+                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                            .show(ui, |ui| {
+                                ui.set_width(STRIP_W - 20.0);
+                                ui.vertical_centered(|ui| {
+                                    ui.label(RichText::new("1: 3-BAND EQ").size(9.0).strong().color(accent));
+                                    ui.add_space(2.0);
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 2.0;
+
+                                        // HI Knob
+                                        let mut hi = app.mixer.mastering_eq_high;
+                                        if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", accent, 26.0).changed() {
+                                            app.mixer.mastering_eq_high = hi;
+                                            if let Some(node_id) = master_eq_node {
+                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                    target_id: node_id as u64,
+                                                    param_id: 2,
+                                                    value: hi,
+                                                    ramp_duration_samples: 128,
+                                                }));
+                                            }
+                                        }
+
+                                        // MID Knob
+                                        let mut mid = app.mixer.mastering_eq_mid;
+                                        if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", accent, 26.0).changed() {
+                                            app.mixer.mastering_eq_mid = mid;
+                                            if let Some(node_id) = master_eq_node {
+                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                    target_id: node_id as u64,
+                                                    param_id: 1,
+                                                    value: mid,
+                                                    ramp_duration_samples: 128,
+                                                }));
+                                            }
+                                        }
+
+                                        // LOW Knob
+                                        let mut low = app.mixer.mastering_eq_low;
+                                        if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", accent, 26.0).changed() {
+                                            app.mixer.mastering_eq_low = low;
+                                            if let Some(node_id) = master_eq_node {
+                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                    target_id: node_id as u64,
+                                                    param_id: 0,
+                                                    value: low,
+                                                    ramp_duration_samples: 128,
+                                                }));
+                                            }
+                                        }
+                                    });
+                                });
+                            });
+
+                        ui.add_space(4.0);
+
+                        // Master Insert Slot 2: Trim / Master Gain
+                        Frame::none()
+                            .fill(theme.bg_inset)
+                            .rounding(Rounding::same(theme.radius_sm))
+                            .inner_margin(Margin::same(4.0))
+                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                            .show(ui, |ui| {
+                                ui.set_width(STRIP_W - 20.0);
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("2: TRIM").size(9.0).strong().color(theme.success));
+                                    ui.add_space(4.0);
+                                    let mut m_gain = app.mixer.master_gain;
+                                    if widgets::render_knob_sized(ui, &mut m_gain, 0.0..=2.0, "", accent, 24.0).changed() {
+                                        app.mixer.master_gain = m_gain;
+                                        for node in [sum_l, sum_r].into_iter().flatten() {
+                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                target_id: node as u64,
+                                                param_id: 0,
+                                                value: m_gain,
+                                                ramp_duration_samples: 128,
+                                            }));
+                                        }
+                                    }
+                                });
+                            });
+
+                        ui.add_space(4.0);
+
+                        // Master Insert Slot 3: Limiter / Dynamics
+                        let limiter_node = app.topo.node_map.get("master_limiter").copied();
+                        Frame::none()
+                            .fill(theme.bg_inset)
+                            .rounding(Rounding::same(theme.radius_sm))
+                            .inner_margin(Margin::same(4.0))
+                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                            .show(ui, |ui| {
+                                ui.set_width(STRIP_W - 20.0);
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("3: LIMIT").size(9.0).strong().color(accent));
+                                    ui.add_space(4.0);
+                                    let mut thresh = 1.0f32;
+                                    if widgets::render_knob_sized(ui, &mut thresh, 0.1..=1.0, "", accent, 24.0).changed() {
+                                        if let Some(lim_id) = limiter_node {
+                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                target_id: lim_id as u64,
+                                                param_id: 0,
+                                                value: thresh,
+                                                ramp_duration_samples: 128,
+                                            }));
+                                        }
+                                    }
+                                });
+                            });
+
+                        ui.add_space(4.0);
 
                         if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
                             app.active_right_tab = Some(crate::RightTab::Store);
