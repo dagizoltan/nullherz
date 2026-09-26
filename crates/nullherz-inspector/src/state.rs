@@ -474,6 +474,7 @@ pub struct AudioNervousSystem {
     pub high_band: f32,
     pub transient_density: f32,
     pub onset_strength: f32,
+    pub fast_transient_spike: f32, // Instantaneous zero-lag drum attack trigger
     pub bpm: f32,
     pub beat_phase: f32,
     pub sub_beat_phase: f32,
