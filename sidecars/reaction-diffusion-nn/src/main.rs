@@ -1,13 +1,60 @@
 use std::any::Any;
 use nullherz_traits::{AudioProcessor, SignalProcessor, ProcessContext, MidiResponder, SnapshotProvider};
 
+/// Spiking Neural Network Engine for Reaction-Diffusion Sidecar
+pub struct SpikingNeuronEngine {
+    pub v: [f32; 16],
+    pub u: [f32; 16],
+    pub spikes: [bool; 16],
+}
+
+impl SpikingNeuronEngine {
+    pub fn new() -> Self {
+        Self {
+            v: [-65.0; 16],
+            u: [-13.0; 16],
+            spikes: [false; 16],
+        }
+    }
+
+    pub fn step(&mut self, audio_input: f32, speed: f32) {
+        let a = 0.02f32;
+        let b = 0.2f32;
+        let c = -65.0f32;
+        let d = 8.0f32;
+
+        for i in 0..16 {
+            let current = audio_input * 15.0 * speed + (i as f32 * 0.4).sin() * 2.0;
+            let v = self.v[i];
+            let u = self.u[i];
+
+            let dv = 0.04 * v * v + 5.0 * v + 140.0 - u + current;
+            let du = a * (b * v - u);
+
+            let next_v = v + dv * 0.5;
+            let next_u = u + du * 0.5;
+
+            if next_v >= 30.0 {
+                self.v[i] = c;
+                self.u[i] = next_u + d;
+                self.spikes[i] = true;
+            } else {
+                self.v[i] = next_v.clamp(-90.0, 30.0);
+                self.u[i] = next_u;
+                self.spikes[i] = false;
+            }
+        }
+    }
+}
+
 pub struct ReactionDiffusionSidecar {
     pub speed: f32,
     pub feed_rate: f32,
+    pub spiking_engine: SpikingNeuronEngine,
 }
 
 impl ReactionDiffusionSidecar {
-    pub fn new() -> Self { Self { speed: 1.0, feed_rate: 0.5 } }
+    pub fn new() -> Self { Self { speed: 1.0, feed_rate: 0.5, spiking_engine: SpikingNeuronEngine::new() } }
 }
 
 impl Default for ReactionDiffusionSidecar {

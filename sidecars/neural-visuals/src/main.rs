@@ -7,11 +7,64 @@ use nullherz_traits::{
     AudioProcessor, SignalProcessor, ProcessContext, MidiResponder, SnapshotProvider,
 };
 
+/// 16-Neuron Spiking Neural Network Engine for Standalone Visual Sidecars
+pub struct SpikingNeuronEngine {
+    pub v: [f32; 16],
+    pub u: [f32; 16],
+    pub spikes: [bool; 16],
+    pub motor_output: f32,
+}
+
+impl SpikingNeuronEngine {
+    pub fn new() -> Self {
+        Self {
+            v: [-65.0; 16],
+            u: [-13.0; 16],
+            spikes: [false; 16],
+            motor_output: 0.0,
+        }
+    }
+
+    pub fn step(&mut self, audio_input: f32, neural_temp: f32) -> f32 {
+        let a = 0.02f32;
+        let b = 0.2f32;
+        let c = -65.0f32;
+        let d = 8.0f32;
+
+        let mut sum_v = 0.0f32;
+        for i in 0..16 {
+            let current = audio_input * 15.0 * neural_temp + (i as f32 * 0.5).sin() * 2.0;
+            let v = self.v[i];
+            let u = self.u[i];
+
+            let dv = 0.04 * v * v + 5.0 * v + 140.0 - u + current;
+            let du = a * (b * v - u);
+
+            let next_v = v + dv * 0.5;
+            let next_u = u + du * 0.5;
+
+            if next_v >= 30.0 {
+                self.v[i] = c;
+                self.u[i] = next_u + d;
+                self.spikes[i] = true;
+            } else {
+                self.v[i] = next_v.clamp(-90.0, 30.0);
+                self.u[i] = next_u;
+                self.spikes[i] = false;
+            }
+            sum_v += (self.v[i] + 65.0) / 30.0;
+        }
+        self.motor_output = sum_v / 16.0;
+        self.motor_output
+    }
+}
+
 pub struct NeuralVisualsSidecar {
     pub name: String,
     pub neural_temperature: f32,
     pub feedback_coupling: f32,
     pub gain_sensitivity: f32,
+    pub spiking_engine: SpikingNeuronEngine,
 }
 
 impl NeuralVisualsSidecar {
@@ -21,6 +74,7 @@ impl NeuralVisualsSidecar {
             neural_temperature: 1.0,
             feedback_coupling: 0.5,
             gain_sensitivity: 1.0,
+            spiking_engine: SpikingNeuronEngine::new(),
         }
     }
 
@@ -32,11 +86,13 @@ impl NeuralVisualsSidecar {
     }
 
     /// Execute forward pass neural synthesis transformation on an input audio sample pair
-    pub fn synthesize_frame(&self, l: f32, r: f32, time_secs: f32) -> (f32, f32) {
+    pub fn synthesize_frame(&mut self, l: f32, r: f32, time_secs: f32) -> (f32, f32) {
         let input_energy = ((l * l + r * r) * 0.5).sqrt() * self.gain_sensitivity;
         let phase_vector = l - r;
 
-        let h1 = Self::pade_tanh(input_energy * self.neural_temperature + (time_secs * 2.0).sin());
+        let spike_motor = self.spiking_engine.step(input_energy, self.neural_temperature);
+
+        let h1 = Self::pade_tanh(input_energy * self.neural_temperature + spike_motor + (time_secs * 2.0).sin());
         let h2 = Self::pade_tanh(h1 * (1.0 + self.feedback_coupling) + phase_vector);
 
         (h1, h2)
@@ -108,7 +164,7 @@ impl AudioProcessor for NeuralVisualsSidecar {
 
 fn main() {
     println!("Starting Standalone Neural Visual Surface Sidecar...");
-    let sidecar = NeuralVisualsSidecar::new();
+    let mut sidecar = NeuralVisualsSidecar::new();
 
     // Smoke test neural synthesis loop
     let (l, r) = sidecar.synthesize_frame(0.8, -0.4, 0.5);
