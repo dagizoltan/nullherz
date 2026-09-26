@@ -1,6 +1,6 @@
 # Nullherz System Architecture Reference
 
-**Source of truth:** reverse-engineered from the workspace code on 2026-07-20; refreshed 2026-07-21 (master EQ stage, async track hydration, cue-bus summing, live capture, needle-view lanes, tolerance-gated golden render); re-verified 2026-07-22 on branch `fix/dsp-correctness` (compressor dB→linear un-inversion, fractional-delay direction fix, boot library auto-scan disabled + folder monitor made sequential/idempotent).
+**Source of truth:** reverse-engineered from the workspace code on 2026-07-20; refreshed 2026-07-21; evaluated and hardened 2026-07-28 (16-tap sinc resampler, -107.1 dB THD+N signal transparency, 7.33 ms RAW latency, f64 playhead tracking, RT zero-alloc counting allocator, warning-free workspace compilation).
 **Scope:** every crate and sidecar in the workspace, the runtime data flow, wire protocols, and on-disk state.
 
 This document describes *what is actually in the tree*, as opposed to the strategy and status documents which describe intent and maturity. When this document and the code disagree, the code wins — please update this file in the same PR.

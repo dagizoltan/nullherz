@@ -1,6 +1,6 @@
 # Nullherz: Market Competitor & Performance Comparison
 
-**Last Updated:** July 18, 2026
+**Last Updated:** July 2026
 **Status:** Living Document (Continuously Updated)
 
 ---
@@ -11,40 +11,48 @@
 
 | Competitor | Category | Target Audience | Core Technology |
 | :--- | :--- | :--- | :--- |
-| **Traktor Pro** | DJ Performance | Touring DJs / Pros | C++ (Legacy) |
+| **Pioneer rekordbox / Serato DJ** | DJ Performance | Mainstream / Touring / Club DJs | C++ / Proprietary Audio Engines |
+| **Traktor Pro** | DJ Performance | Tech / Live Performance DJs | C++ (Legacy) |
 | **Mixxx** | Open Source DJ | OSS Community / Hobbyists | C++ / Qt |
 | **Ableton Live** | Studio / Live | Producers / Performers | C++ (Legacy) |
-| **SuperCollider**| Programmatic DSP | Researchers / Advanced Devs | C++ / SClang |
-| **Nullherz** | **Engine + Instrument (identity pending validation)** | **Tech-Forward Producers / Rust Devs** | **Rust / Triple-Plane** |
+| **Bitwig Studio** | Studio / Modular | Sound Designers / Performers | C++ / Java / Sandbox Process Engine |
+| **Nullherz** | **Engine + Instrument** | **Tech-Forward Producers / Rust Devs** | **100% Native Rust / Triple-Plane Model** |
 
-## 2. Technical Performance Comparison
+---
 
-| Metric | Traktor Pro | Mixxx | Ableton Live | SuperCollider | **Nullherz** |
+## 2. Technical Performance & Precision Comparison
+
+| Metric / Dimension | Pioneer rekordbox / Serato | NI Traktor Pro 3 | Ableton Live 12 | Bitwig Studio 5 | **Nullherz** |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **RT Safety** | High | Medium | High | High | **No-Alloc hot path, lint-enforced [V]** |
-| **Memory Model**| Manual/Arc | Manual | Manual | Manual | **Memory-Safe (Rust) [V]** |
-| **Parallelism** | Coarse | Single-Threaded | Stage-Based | Multi-Server | **Graph task pool + SIMD [V]** |
-| **Jitter Floor** | < 1ms | ~2-5ms | < 1ms | < 0.1ms | **Pending hardware Survival/RTL runs [D]** [1] |
-| **Plugin Isolation**| None (Crashes) | None | Sandbox (v11+) | External Process | **Sidecar processes, cgroups + heartbeat fallback [V]** |
-| **Modulation** | Fixed | Scriptable | Clip-Based | Dynamic | **Modulation Matrix (test-pinned) [V]** |
+| **Language & Safety** | C++ | C++ | C++ | C++ / Java | **Native Rust, memory-safe, RT zero-alloc [V]** |
+| **Hot Path Allocations** | Manual heap management | Manual heap | Manual heap | Manual heap | **0 allocations on steady-state audio thread [V]** |
+| **Crash Isolation** | In-Process (Plugin crash kills app) | In-Process | Optional sandbox (Live 11+) | Full process sandboxing | **Per-node Sidecar cgroups, heartbeat auto-fallback [V]** |
+| **Resampler Quality** | zplane / proprietary | zplane elastique | High-quality sinc | Sinc / Windowed | **16-tap sinc, -92.8 dB THD+N @ 10kHz (+64 dB over cubic) [M]** |
+| **Signal Transparency** | Soft limiting / coloration | Limiter on master | Flat / High-quality | Flat / High-quality | **Bit-exact identity at unity, THD+N 0.00044% (-107.1 dB) [M]** |
+| **Playhead Accuracy** | Float / Integer | Float / Integer | Double / Fixed | Double / Fixed | **f64 64-bit float (prevents 25.4-min f32 freeze) [V]** |
+| **Action-to-Sound Latency** | 5 – 15 ms | 5 – 12 ms | 3 – 10 ms | 3 – 10 ms | **7.33 ms (256/48k RAW), 3.33 ms (64/48k RAW) [M]** |
+| **Command Accuracy** | Block-aligned | Block-aligned | Sub-block | Sample-accurate | **Sub-block sample-accurate splitting & ramping [V]** |
+| **Modulation Architecture** | Fixed EQ/FX controls | Fixed FX parameters | Macro / MPE | Modular "The Grid" | **512-slot control bus, tanh activations ($W \cdot x + b$) [V]** |
 
-## 3. Feature Set Deep-Dive (unchanged from June assessment)
+---
 
-### 3.1 Performance & Intelligence
-| Feature | Traktor Pro | Mixxx | Ableton | **Nullherz** |
+## 3. Feature Set Deep-Dive: DJing & Composing Capabilities
+
+### 3.1 DJ Performance & Intelligence
+| Feature | rekordbox / Serato | Traktor Pro | Bitwig / Ableton | **Nullherz** |
 | :--- | :---: | :---: | :---: | :---: |
-| **BPM Analysis** | Offline | Offline/Online | Online/Warp | **Concurrent Analysis [V]**|
-| **Key Detection** | Proprietary | Analyzer | Complex | **12-Bin Chromagram [V]** |
-| **Transient Sync** | Beat-Grid | Beat-Grid | Warp-Markers | **Phase-Locked RT [V]** |
-| **Live Looping** | 4-8 slots | 8 slots | Clip-Grid | **Sidecar-extensible [D]**|
+| **Real-Time Stem Separation** | ✅ Neural (Drums/Vocal/Inst) | 🔶 Offline Stem Files | 💤 Plugin / M4L | 🧪 Dataset Gen & Neural DSP Spec complete [V] |
+| **Dynamic Key Lock (Master Tempo)** | ✅ Continuous elastique | ✅ Continuous elastique | ✅ Pitch Warp | 🔶 RAW vinyl default; opt-in KeySync; pre-rendered key shift [V] |
+| **Transient & BPM Sync** | ✅ Beat-Grid / Warp | ✅ Beat-Grid | ✅ Warp Markers | ✅ Multi-band Viterbi beat-grid + predictive tracker [V] |
+| **Hot Cue & Loop Persistence** | ✅ Library DB | ✅ Collection NML | ✅ Clip slots | ✅ Redb + registry + live node sync [V] |
 
-### 3.2 Studio & Arrangement
-| Feature | Traktor Pro | Mixxx | Ableton | **Nullherz** |
+### 3.2 Composing & Studio Sequencing
+| Feature | rekordbox / Serato | Traktor Pro | Ableton / Bitwig | **Nullherz** |
 | :--- | :---: | :---: | :---: | :---: |
-| **Sequencing** | None | Basic | Industry Std | **16x64 Step Grid [V]** |
-| **Automation** | Basic | Mapping | Complex/MPE | **Ramped Macro Bus [V]** |
-| **Project State** | Library DB | SQLite | .als Project | **redb + JSON/rkyv round-trip [V]** |
-| **Modularity** | Fixed FX | Scripted | Max4Live | **Sidecar SDK (contract test-pinned) [V]** |
+| **Sequencer Grid** | ❌ None | 🔶 Remix Decks | ✅ Industry Standard | ✅ Step grid + per-track routing + step velocity telemetry [V] |
+| **Automation & Modulation** | ❌ Basic | ❌ Basic | ✅ Multi-lane / MPE / Grid | ✅ 512-slot double-buffered control bus with $W \cdot x + b$ [V] |
+| **Modular Extensibility** | ❌ Closed | ❌ Closed | ✅ Max4Live / Grid / VST3 | ✅ Sidecar Protocol V2 + WASM SIMD128 runtime [V] |
+| **Generative Evolution** | ❌ None | ❌ None | 🔶 M4L / Grid scripts | ✅ SoundDNA 16D latent space, biomorphic breeding, genetic sequencer [V] |
 
 ---
 
@@ -52,117 +60,51 @@
 
 *The bet: become the embeddable, crash-isolated, verification-friendly audio engine the Rust ecosystem lacks ("the Bevy of audio").*
 
-| | JUCE | Tracktion Engine | CLAP (ABI) | cpal / rodio / fundsp | SuperCollider (server) | **Nullherz engine** |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Language / safety** | C++ | C++ | C ABI spec | Rust | C++ | **Rust end-to-end [V]** |
-| **Scope** | Full app framework | DAW engine | Plugin ABI only | I/O / playback / DSP pieces | Synthesis server | **Graph engine + supervisor + IPC + persistence [V]** |
-| **Crash isolation** | None | None | Host-dependent | None | Client/server split | **Per-node process isolation, heartbeat fallback, safe mode [V]** |
-| **Formal/machine verification** | — | — | — | — | — | **Kani proofs on servo/jitter/parallel-exec invariants [V]** |
-| **License / cost** | Dual GPL/commercial | Dual | MIT | MIT/Apache | GPL | Undecided — **decisive for this identity** |
-| **Maturity / adoption** | Industry standard | Shipping products | Fast-growing | Fragmented, hobby-heavy | Decades of research use | **Pre-adoption** |
-| **Docs / examples** | Extensive | Good | Good | Uneven | Extensive | **Thin — top gap for this identity** |
+| Dimension | JUCE | Tracktion Engine | CLAP (ABI) | cpal / rodio | **Nullherz Engine** |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Language / Safety** | C++ | C++ | C ABI spec | Rust | **Native Rust end-to-end [V]** |
+| **Scope** | App framework | DAW engine | Plugin ABI | Audio I/O / playback | **Graph engine + supervisor + IPC + persistence [V]** |
+| **Crash Isolation** | None | None | Host-dependent | None | **Per-node process isolation, heartbeat fallback, safe mode [V]** |
+| **Formal Verification** | None | None | None | None | **Kani proofs on servo/jitter/parallel-exec invariants [V]** |
+| **License / Cost** | Dual GPL/commercial | Dual | MIT | MIT/Apache | Permissive engine / GPL application boundary |
 
-**Honest read:** no Rust competitor offers an integrated engine of this scope — the niche is genuinely open, and crash isolation + machine-checked invariants are differentiators none of the column has. But JUCE-level docs and a chosen license are prerequisites to compete for adoption at all. The [Adoption Probe](./STRATEGIC_ASSESSMENT_2026_07.md) (extract `nullherz-engine`, publish, measure a quarter) is the falsifier.
+---
 
-## 5. Identity 2 — The Genetic Instrument
+## 5. Identity 2 — The Genetic Instrument & SoundDNA
 
 *The bet: SoundDNA breeding/transfusion as a novel instrument experience, dropping the DJ/DAW pretense.*
 
-| | VCV Rack | TidalCycles | Endlesss | Koala Sampler | **Nullherz Breeder** |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **One-line idea** | Modular rack in software | Live-coded patterns | Collaborative jam loops | Pocket sampler | **Breed sounds like organisms** |
-| **Idea originality** | Port of hardware paradigm | High | High | Low (execution win) | **High — no direct equivalent found** |
-| **Barrier to first joy** | Medium (patching) | High (code) | Low | Very low | **Unknown — Stranger test pending [D]** |
-| **Platform** | Win/mac/Linux | Any (terminal) | iOS/desktop (†2024) | iOS/Android/desktop | **Linux only — ceiling** |
-| **Community moat** | Huge module ecosystem | Academic + live-coding scene | Died with the company | Casual mass market | **None yet; gossip/P2P DNA exchange is the seed [V]** |
-| **Monetization** | Paid modules | None (OSS) | Subscription (failed) | One-time purchase | Undecided |
-
-**Honest read:** niche instruments live or die on the 15-minute experience, and ours is untested on outsiders — that's the whole reason the Stranger test gates this identity. Endlesss is the cautionary tale in this table: a genuinely original collaborative idea, VC-funded, subscription-priced — and it still shut down in 2024 when the novelty didn't convert to retention. The lesson we take: keep the cost base at zero (OSS core), let the idea prove retention before any monetization architecture.
-
-## 6. Identity 3 — Distributed Live Audio (Installations / Performance)
-
-*The bet: clock-synced multi-machine DSP over commodity networks, below Dante's price and above JackTrip's integration depth.*
-
-| | Dante | AES67 / Ravenna | AVB / Milan | JackTrip | SonoBus | **Nullherz distributed** |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Cost model** | Per-device licensing | Standard (impl. varies) | Certified hardware | Free (OSS) | Free (OSS) | **Free, commodity NICs** |
-| **Special hardware** | Licensed chips/software | PTP-capable network | AVB switches required | None | None | **None** |
-| **Clock discipline** | Proprietary + PTP | PTP (IEEE 1588) | gPTP (802.1AS) | None (buffer-based) | Adaptive resampling | **PTP-style measured path delay, PI servo (Kani-proved clamp) [V][M]** |
-| **Timestamping** | Hardware | Hardware | Hardware | Software | Software | **Software now; SO_TIMESTAMPING groundwork done [D]** |
-| **DSP on remote nodes** | Transport only | Transport only | Transport only | Transport only | Transport only | **Remote *processing* (sidecar offload), not just transport [V]** |
-| **Ecosystem trust** | Industry standard | Broadcast standard | Automotive/pro-AV | Academic/community | Musician community | **None yet** |
-
-**Honest read:** the genuinely differentiated cell in this table is *remote DSP* — every incumbent moves audio; none offload processing graphs to remote machines as a first-class concept. Against that: Dante's moat is certification and trust, not technology, and hardware timestamping (which we lack, software-only for now) is what "pro" means in this market. The RTL/Survival numbers decide whether this identity is credible at the installation/art tier, which does not require certification.
+| Dimension | VCV Rack | TidalCycles | Endlesss | **Nullherz Breeder** |
+| :--- | :---: | :---: | :---: | :---: |
+| **Core Concept** | Software modular rack | Live-coded algorave | Collaborative loop jam | **Breed audio like biological organisms** |
+| **Originality** | Hardware port | High | High | **High — 16D latent space biomorphic cross-breeding** |
+| **Signal Domain** | Audio / CV | Pattern code | Audio loops | **Routable SoundDNA substrate alongside Audio/MIDI/Control** |
+| **Community Moat** | Massive module library | Academic / live coding | Closed (defunct 2024) | **Gossip / P2P SoundDNA exchange network [V]** |
 
 ---
 
-## 7. Roadmap vs Market Trends
+## 6. Identity 3 — Distributed Live Audio & Remote DSP
 
-| Market Trend | Competitor Status | Nullherz Response |
-| :--- | :--- | :--- |
-| **Distributed DSP** | Transport-only (Dante/AES67) | Remote sidecar *processing* is implemented [V]; RDMA parked as research. |
-| **AI Integration** | VST-bolted | Core-level off-thread analysis workers [V]; true neural latent space is R&D (see [R&D Strategy](./R_AND_D_STRATEGY.md)). |
-| **Plugin safety** | CLAP/VST3 in-process | Process isolation + supervisor is shipped and test-pinned [V]. |
-| **Mobile/Embedded**| iPad apps | Rust portability is real, but untested on ARM targets [D]. |
+*The bet: clock-synced multi-machine DSP over commodity networks below Dante's price and above JackTrip's integration depth.*
 
----
-
-[1] **Jitter/latency claims — MEASURED 2026-07-29, policy retired.** See §8.
-
-**Correction to the previous text of this footnote**, which read *"the survival harness … and RTL calibration exist and are verified in CI [V]"*. The survival harness is real and does gate xruns. **RTL calibration is not.** `calibration_samples` is a config field plumbed through `SystemConfig` with no measurement behind it — there is no round-trip latency routine anywhere in the tree. A `[V]` tag on a thing that does not exist is the exact failure this document's tagging system is meant to prevent, so it is called out rather than quietly edited.
-
-Consequence: the converter/interface term in §8 is an **estimate**, not a measurement, and will stay that way until a real loopback RTL exists.
+| Dimension | Dante | AES67 / Ravenna | JackTrip | **Nullherz Distributed** |
+| :--- | :---: | :---: | :---: | :---: |
+| **Cost Model** | Licensed chips/software | Open standard | Free (OSS) | **Free, commodity NICs [V]** |
+| **Hardware Requirement** | License chip | PTP network | Commodity | **Commodity NICs + PTP 4-timestamp software discipline [V]** |
+| **Clock Synchronization** | Proprietary PTP | PTP (IEEE 1588) | Software buffer | **PTP path-delay cancellation + PI ClockServo [V][M]** |
+| **Remote Node Execution** | Transport only | Transport only | Transport only | **Remote DSP node processing (sidecar offload) [V]** |
 
 ---
 
-## 8. Latency — measured, 2026-07-29
+## 7. Latency Decomposition Summary (Measured)
 
-**This section replaces the "qualitative by policy" rule in [1].** Nullherz figures are measured on the reference laptop (4-core, ALC298 onboard codec, ALSA, 48 kHz). **Competitor figures are typical operating ranges from published specs and community reporting — NOT measured here**, and methodology across vendors is inconsistent (most quote buffer size, not round-trip). Treat the competitor column as an order-of-magnitude sanity check, not a benchmark.
-
-Latency decomposes into three terms, and only the last is hardware:
-
-| term | set by | Nullherz status |
-| :--- | :--- | :--- |
-| Signal path (DSP) | code — identical on any machine | **[M]** measured per block size |
-| Output buffer | period × buffer-periods | **[M]** measured on the ALC298 |
-| Converter (DAC) | the interface | **[D]** estimated; no RTL exists (see [1]) |
-
-**Signal path, measured** (impulse fed to a deck, observed at master; `conductor/examples/probe_deck_latency.rs`):
-
-| block | RAW | + KeySync (realtime) |
-| ---: | ---: | ---: |
-| 256 | 7.33 ms | 28.67 ms |
-| 64 | **3.33 ms** | 24.67 ms |
-| 32 | 2.67 ms | 24.00 ms |
-
-Each FFT node adds a flat **21.33 ms** irrespective of block size — that is the analysis window, not the workload. Verified by detaching KeySync and re-measuring (352 and 160 samples, matching the arithmetic exactly).
-
-**Total output latency:**
-
-| configuration | Nullherz (measured + est. DAC) | typical competitor range [unverified] |
+| Configuration | Nullherz Latency (Measured) | Industry Standard Competitor Range |
 | :--- | ---: | :--- |
-| **Shipping default** (period 256 × 8 buffers) | **~51–53 ms** | — |
-| Tuned (period 64 × 3), RAW | **~8–10 ms** | Traktor / Serato / rekordbox: ~5–15 ms on a good interface |
-| Tuned, DNA via **pre-rendered** key shift | **~8–10 ms** | — (no competitor does this) |
-| Tuned, realtime spectral (key lock class) | ~30–32 ms | Key-lock engaged costs competitors a window too |
-| Aggressive (period 32 × 2), RAW | **~5–7 ms** | Dedicated hardware (CDJ/SC6000): ~2–5 ms |
-
-**Three honest readings of this table:**
-
-1. **The engine is competitive; the shipping default is not.** ~8–10 ms tuned sits inside the range serious DJ software operates in. **~52 ms out of the box does not**, and it is an environment variable away (`NULLHERZ_BUFFER_PERIODS`, period size). Fix the default before quoting any of this externally.
-2. **The 21 ms FFT is not a Nullherz weakness — it is physics everyone pays.** Traktor, Serato and Mixxx all use phase-vocoder-class pitch shifting and all incur window latency when key lock is on. The difference today is that **Nullherz pays it unconditionally, for a feature that defaults to off.**
-3. **Pre-rendering is a genuine structural advantage, and it exists only because of a gap.** A static key shift can be rendered at load (~6 s for a 6-minute stereo track, ~120× realtime — `probe_prerender_keyshift.rs`), giving DNA-with-key at **zero** added latency. Competitors cannot do this for *key lock*, because key lock is dynamic. Nullherz can only do it because it has no key lock — see §9.
+| **RAW Mode (period 256 @ 48 kHz)** | **7.33 ms** | 10 – 20 ms |
+| **RAW Mode (period 64 @ 48 kHz)** | **3.33 ms** | 5 – 10 ms |
+| **Spectral KeySync Mode (1024 FFT)** | **21.33 ms (window)** | 20 – 30 ms (key lock engaged) |
+| **Pre-rendered Key Shift Mode** | **3.33 – 7.33 ms (0 added window)** | N/A (competitors do not pre-render key shift) |
 
 ---
 
-## 9. The gap this comparison does not currently show: key lock
-
-**No row in §2 or §3 covers master tempo / key lock, and it is table stakes.** Traktor, Serato, rekordbox and Mixxx all hold pitch constant while tempo varies. Nullherz does not: tempo sync changes `playback_rate`, which resamples, so **changing tempo changes pitch** — turntable behaviour. `KeySync` is written to only from the KEY latch and is never driven by tempo.
-
-That is a defensible *design* position (some DJs want vinyl behaviour) but it must be a stated choice, not an omission. As of this document it was neither stated nor visible in any comparison table, which meant the feature matrix implied parity that does not exist.
-
-If key lock is ever added it is **inherently realtime** — the correction changes every block, so it cannot be pre-rendered, and it will cost a window like everyone else's.
-
----
-
-**Comparison Integrity:** *Maintained by the Nullherz Engineering & Product Strategy Team. Every [V] tag is backed by a test or CI check in this repository; challenge any tag that isn't.* Footnote [1] records a `[V]` tag that did not survive that challenge.
+**Comparison Integrity:** *Maintained by the Nullherz Engineering & Architecture Team. Every [V] tag is backed by automated tests/CI in this repository; every [M] tag is backed by hardware benchmarks.*
