@@ -633,6 +633,7 @@ impl InspectorApp {
         self.topo.node_map.get(name).copied()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn node_names(&self) -> Vec<(String, u32)> {
         // NOTE: We don't try to filter this down to "instrument-only" nodes yet — there's no
         // processor-type metadata exposed to the UI to do that reliably right now.

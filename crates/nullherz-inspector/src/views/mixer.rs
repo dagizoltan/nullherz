@@ -7,7 +7,7 @@ use audio_core::Telemetry;
 /// Fixed strip width: every card is the same size regardless of window width.
 const STRIP_W: f32 = 140.0;
 const FADER_H: f32 = 150.0;
-const VERTICAL_WAVEFORM_H: f32 = 90.0;
+const VERTICAL_WAVEFORM_H: f32 = 180.0;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     let theme = app.theme;
@@ -80,7 +80,7 @@ fn render_vertical_waveform(
     deck_color: Color32,
     theme: &nullherz_ui_hal::Theme,
 ) {
-    let (rect, _response) = ui.allocate_exact_size(Vec2::new(STRIP_W - 24.0, VERTICAL_WAVEFORM_H), egui::Sense::hover());
+    let (rect, _response) = ui.allocate_exact_size(Vec2::new(STRIP_W - 12.0, VERTICAL_WAVEFORM_H), egui::Sense::hover());
     let painter = ui.painter();
 
     // Background inset
@@ -164,33 +164,31 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
     };
 
     let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions.get(i).copied().unwrap_or(0)).unwrap_or(0);
+    let is_focused = app.decks.focused_deck == i;
 
-    Frame::none()
-        .fill(theme.bg_surface)
+    let border_stroke = if is_focused {
+        Stroke::new(2.0, deck_color)
+    } else {
+        Stroke::new(1.0_f32, theme.border)
+    };
+
+    let fill_color = if is_focused {
+        theme.bg_surface.linear_multiply(1.2)
+    } else {
+        theme.bg_surface
+    };
+
+    let response = Frame::none()
+        .fill(fill_color)
         .rounding(Rounding::same(theme.radius_md))
         .inner_margin(Margin::same(theme.space_md))
-        .stroke(Stroke::new(1.0_f32, theme.border))
+        .stroke(border_stroke)
         .show(ui, |ui| {
             ui.set_width(STRIP_W);
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     ui.add_space((STRIP_W - 40.0).max(0.0) / 2.0);
                     ui.label(RichText::new(format!("CH {}", (b'A' + (i % 26) as u8) as char)).strong().size(theme.type_body).color(deck_color));
-                });
-                ui.add_space(theme.space_xs);
-
-                // Input Source Dropdown
-                ui.horizontal(|ui| {
-                    ui.add_space(2.0);
-                    let selected_source = app.mixer.channel_input_sources[i];
-                    egui::ComboBox::from_id_source(format!("ch_input_src_{}", i))
-                        .selected_text(RichText::new(selected_source.name()).size(9.0).strong().color(theme.text_primary))
-                        .width(STRIP_W - 20.0)
-                        .show_ui(ui, |ui| {
-                            for src in ChannelInputSource::all() {
-                                ui.selectable_value(&mut app.mixer.channel_input_sources[i], *src, src.name());
-                            }
-                        });
                 });
                 ui.add_space(theme.space_xs);
 
@@ -444,6 +442,21 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                 ui.add_space(4.0);
 
+                // Input Source Dropdown above transport buttons
+                ui.horizontal(|ui| {
+                    ui.add_space(2.0);
+                    let selected_source = app.mixer.channel_input_sources[i];
+                    egui::ComboBox::from_id_source(format!("ch_input_src_{}", i))
+                        .selected_text(RichText::new(selected_source.name()).size(9.0).strong().color(theme.text_primary))
+                        .width(STRIP_W - 20.0)
+                        .show_ui(ui, |ui| {
+                            for src in ChannelInputSource::all() {
+                                ui.selectable_value(&mut app.mixer.channel_input_sources[i], *src, src.name());
+                            }
+                        });
+                });
+                ui.add_space(4.0);
+
                 // Transport Row: Single Play/Stop Toggle + CUE Button
                 ui.horizontal(|ui| {
                     ui.add_space((STRIP_W - 2.0 * theme.space_md - 96.0).max(0.0) / 2.0);
@@ -475,6 +488,10 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                 });
             });
         });
+
+    if response.response.interact(egui::Sense::click()).clicked() {
+        app.decks.focused_deck = i;
+    }
 }
 
 fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {

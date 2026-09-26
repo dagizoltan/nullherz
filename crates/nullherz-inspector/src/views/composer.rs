@@ -69,6 +69,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
     ui.horizontal(|ui| {
         ui.heading(RichText::new("COMPOSER ARRANGEMENT GRID").strong().color(app.theme.text_primary));
+        ui.add_space(app.theme.space_md);
+        ui.label(RichText::new(format!("SYSTEM MIXER SYNC: {} ACTIVE CHANNELS", app.mixer.num_channels)).strong().size(app.theme.type_caption).color(app.theme.accent));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
              ui.label(egui::RichText::new("QUANTIZED: 1 BAR").color(app.theme.accent).size(app.theme.type_caption));
         });
@@ -166,17 +168,18 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         .show(ui, |ui| {
             let mut extend_grid = false;
             let steps_count = app.composer.sequencer_grid[grid_deck][0].len();
-            let slot_w = 28.0;
-            let slot_h = 24.0;
+            let slot_w = 40.0;
+            let slot_h = 72.0;
+            let num_active_channels = app.mixer.num_channels.clamp(1, 16);
 
             ui.horizontal(|ui| {
-                // 1. LEFT SIDE: Stationary Track Headers column (100.0px width)
+                // 1. LEFT SIDE: Stationary Track Headers column (160.0px width)
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     ui.add_space(32.0);
 
-                    for track_idx in 0..16 {
-                        let track_color = app.theme.track_colors[track_idx];
+                    for track_idx in 0..num_active_channels {
+                        let track_color = crate::InspectorApp::deck_color(&app.theme, track_idx % 4);
                         let is_muted = app.composer.track_mutes[track_idx];
                         let is_selected = app.composer.selected_composer_track == Some(track_idx);
 
@@ -191,146 +194,85 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         let inner_resp = Frame::none()
                             .fill(header_bg)
                             .rounding(Rounding::same(app.theme.radius_sm))
-                            .inner_margin(Margin::symmetric(app.theme.space_xs, 0.0))
+                            .stroke(Stroke::new(1.0, if is_selected { track_color } else { app.theme.border_stroke.color }))
+                            .inner_margin(Margin::same(app.theme.space_xs))
                             .show(ui, |ui| {
-                                ui.set_width(90.0);
+                                ui.set_width(150.0);
                                 ui.set_height(slot_h);
-                                ui.horizontal(|ui| {
-                                    ui.add_space(app.theme.space_xs);
-                                    let (swatch_rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), Sense::hover());
-                                    ui.painter().rect_filled(swatch_rect, Rounding::same(1.5), track_color);
-                                    ui.add_space(app.theme.space_xs);
-                                    let ch_kind_label = match &app.composer.channel_kinds[track_idx] {
-                                        crate::state::ChannelKind::StereoInput => "ST IN",
-                                        crate::state::ChannelKind::InstrumentSampler => "SMPL",
-                                        crate::state::ChannelKind::InstrumentSynth => "SYNTH",
-                                    };
-                                    ui.label(RichText::new(format!("CH {} [{}]", track_idx + 1, ch_kind_label)).strong().size(app.theme.type_body).color(app.theme.text_primary));
-                                });
-                            });
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        let (swatch_rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), Sense::hover());
+                                        ui.painter().rect_filled(swatch_rect, Rounding::same(1.5), track_color);
+                                        ui.add_space(2.0);
+                                        ui.label(RichText::new(format!("CH {}", (b'A' + (track_idx % 26) as u8) as char)).strong().size(app.theme.type_body).color(app.theme.text_primary));
 
-                        let rect = inner_resp.response.rect;
-
-                        let response = ui.interact(rect, ui.make_persistent_id(format!("trk_hdr_{}", track_idx)), Sense::click());
-                        if response.clicked() {
-                            if is_selected {
-                                app.composer.selected_composer_track = None;
-                            } else {
-                                app.composer.selected_composer_track = Some(track_idx);
-                            }
-                        }
-
-                        // Accordion expansion in the Left Stationary side
-                        if is_selected {
-                            ui.add_space(4.0);
-                            Frame::none()
-                                .fill(app.theme.bg_inset)
-                                .rounding(Rounding::same(app.theme.radius_sm))
-                                .stroke(app.theme.border_stroke)
-                                .inner_margin(Margin::same(4.0))
-                                .show(ui, |ui| {
-                                    ui.set_width(90.0);
-                                    ui.set_height(80.0);
-                                    ui.vertical_centered(|ui| {
-                                        ui.horizontal(|ui| {
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             let activator_color = if !is_muted { app.theme.warning } else { app.theme.bg_inset };
                                             if ui.add_sized([22.0, 18.0], egui::Button::new(RichText::new("ON").size(app.theme.type_caption).strong()).fill(activator_color)).clicked() {
                                                 app.composer.track_mutes[track_idx] = !is_muted;
                                                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackMute { node_idx: seq_node, track_idx: track_idx as u32, muted: app.composer.track_mutes[track_idx] }));
                                             }
+                                        });
+                                    });
 
-                                            let is_soloed = app.composer.track_solos[track_idx];
-                                            let solo_color = if is_soloed { app.theme.track_colors[1] } else { app.theme.bg_inset };
-                                            if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("S").size(app.theme.type_caption).strong()).fill(solo_color)).clicked() {
-                                                app.composer.track_solos[track_idx] = !is_soloed;
-                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackSolo { node_idx: seq_node, track_idx: track_idx as u32, soloed: app.composer.track_solos[track_idx] }));
+                                    ui.add_space(2.0);
+
+                                    // Sample Picker dropdown
+                                    let src_id = app.composer.track_sources[track_idx]
+                                        .or(app.decks.now_playing[track_idx]);
+                                    let cached_track = src_id.and_then(|id| app.get_cached_track(id));
+                                    let sample_label = cached_track.as_ref()
+                                        .map(|t| format!("♪ {}", t.title))
+                                        .unwrap_or_else(|| "⊕ SAMPLE".to_string());
+
+                                    egui::ComboBox::from_id_source(format!("seq_src_{}", track_idx))
+                                        .width(140.0)
+                                        .selected_text(RichText::new(&sample_label).size(app.theme.type_caption).strong())
+                                        .show_ui(ui, |ui| {
+                                            if ui.selectable_label(src_id.is_none(), "(None)").clicked() {
+                                                app.composer.track_sources[track_idx] = None;
                                             }
-
-                                            let stop_btn = egui::Button::new(RichText::new("■").size(app.theme.type_caption).strong()).fill(app.theme.bg_inset);
-                                            if ui.add_sized([18.0, 18.0], stop_btn).on_hover_text("Stop clip").clicked() {
-                                                app.composer.sequencer_grid[grid_deck][track_idx].fill(0.0);
-                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: seq_node, track_idx: track_idx as u32 }));
+                                            for lib_track in &app.library.cached_library_raw {
+                                                let is_sel = src_id == Some(lib_track.id);
+                                                let label = format!("♪ {}", lib_track.title);
+                                                if ui.selectable_label(is_sel, label).clicked() {
+                                                    app.composer.track_sources[track_idx] = Some(lib_track.id);
+                                                    app.decks.now_playing[track_idx] = Some(lib_track.id);
+                                                    app.decks.cached_tracks[track_idx] = Some(lib_track.clone());
+                                                }
                                             }
                                         });
 
-                                        ui.add_space(4.0);
+                                    ui.add_space(2.0);
 
-                                        // Sample Picker dropdown
-                                        let src_id = app.composer.track_sources[track_idx]
-                                            .or(app.decks.now_playing[track_idx % 4]);
-                                        let cached_track = src_id.and_then(|id| app.get_cached_track(id));
-                                        let sample_label = cached_track.as_ref()
-                                            .map(|t| format!("♪ {}", t.title))
-                                            .unwrap_or_else(|| "⊕ SAMPLE".to_string());
-
-                                        egui::ComboBox::from_id_source(format!("seq_src_{}", track_idx))
-                                            .width(80.0)
-                                            .selected_text(RichText::new(&sample_label).size(app.theme.type_caption).strong())
-                                            .show_ui(ui, |ui| {
-                                                if ui.selectable_label(src_id.is_none(), "(None)").clicked() {
-                                                    app.composer.track_sources[track_idx] = None;
-                                                }
-                                                for lib_track in &app.library.cached_library_raw {
-                                                    let is_sel = src_id == Some(lib_track.id);
-                                                    let label = format!("♪ {}", lib_track.title);
-                                                    if ui.selectable_label(is_sel, label).clicked() {
-                                                        app.composer.track_sources[track_idx] = Some(lib_track.id);
-                                                        if app.composer.sequencer_grid[grid_deck][track_idx].iter().all(|&v| v == 0.0) {
-                                                            for b in 0..16 {
-                                                                app.composer.sequencer_grid[grid_deck][track_idx][b] = 1.0;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            });
-
-                                        ui.add_space(2.0);
-
-                                        if ui.button(RichText::new("+ SIDECAR").size(app.theme.type_caption).strong())
-                                            .on_hover_text("Open Sidecar Store to select instruments or inserts")
-                                            .clicked()
-                                        {
-                                            app.active_right_tab = Some(crate::RightTab::Store);
-                                            app.store.active_tag_filter = Some("instrument".to_string());
-                                        }
-
-                                        ui.add_space(2.0);
-
-                                        let current_target = app.composer.track_targets[track_idx].clone();
-                                        let mut sorted_nodes = app.node_names();
-                                        sorted_nodes.sort_by(|a, b| a.0.cmp(&b.0));
-
-                                        let mut changed = false;
-                                        let mut selected_name = current_target.clone();
-                                        let mut selected_node_idx = 0u32;
-
-                                        egui::ComboBox::from_id_source(format!("seq_tgt_{}", track_idx))
-                                            .width(80.0)
-                                            .selected_text(&current_target)
-                                            .show_ui(ui, |ui| {
-                                                for (name, node_idx) in sorted_nodes {
-                                                    if ui.selectable_label(current_target == name, &name).clicked() {
-                                                        selected_name = name;
-                                                        selected_node_idx = node_idx;
-                                                        changed = true;
-                                                    }
-                                                }
-                                            });
-
-                                        if changed {
-                                            app.composer.track_targets[track_idx] = selected_name;
-                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                target_id: seq_node as u64,
-                                                param_id: 10 + track_idx as u32,
-                                                value: selected_node_idx as f32,
-                                                ramp_duration_samples: 0,
-                                            }));
+                                    // Synced Volume Fader
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new("VOL").size(8.0).color(app.theme.text_secondary));
+                                        let mut vol_val = app.mixer.channel_faders[track_idx];
+                                        if widgets::render_horizontal_fader(ui, &mut vol_val, 0.0..=1.2, track_color, 90.0, 10.0).changed() {
+                                            app.mixer.channel_faders[track_idx] = vol_val;
+                                            let deck_char = (b'a' + (track_idx % 26) as u8) as char;
+                                            if let Some(gain_id) = app.topo.node_map.get(&format!("deck_{}_gain", deck_char)).copied() {
+                                                let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
+                                                    target_id: gain_id as u64,
+                                                    param_id: 0,
+                                                    value: vol_val,
+                                                    ramp_duration_samples: 128,
+                                                }));
+                                            }
                                         }
                                     });
                                 });
+                            });
+
+                        let rect = inner_resp.response.rect;
+                        let response = ui.interact(rect, ui.make_persistent_id(format!("trk_hdr_{}", track_idx)), Sense::click());
+                        if response.clicked() {
+                            app.composer.selected_composer_track = Some(track_idx);
+                            app.decks.focused_deck = track_idx;
                         }
 
-                        if track_idx < 15 {
+                        if track_idx < num_active_channels - 1 {
                             ui.add_space(6.0);
                         }
                     }
@@ -384,15 +326,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                             ui.add_space(6.0);
 
-                            // Render 16 horizontal track clip rows
-                            for track_idx in 0..16 {
-                                let track_color = app.theme.track_colors[track_idx];
+                            // Render active channel rows in step grid
+                            for track_idx in 0..num_active_channels {
+                                let track_color = crate::InspectorApp::deck_color(&app.theme, track_idx % 4);
                                 let is_muted = app.composer.track_mutes[track_idx];
-                                let is_selected = app.composer.selected_composer_track == Some(track_idx);
 
                                 // Resolve track source sample / metadata
                                 let src_id = app.composer.track_sources[track_idx]
-                                    .or(app.decks.now_playing[track_idx % 4]);
+                                    .or(app.decks.now_playing[track_idx]);
                                 let cached_track = src_id.and_then(|id| app.get_cached_track(id));
 
                                 ui.horizontal(|ui| {
@@ -434,13 +375,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         };
                                         ui.painter().rect_stroke(rect, Rounding::same(2.0), border_stroke);
 
-                                        // Mini-waveform rendering inside active clip slots
+                                        // Accurately render mini audio waveforms inside active clip slots
                                         if velocity > 0.0 {
                                             let peaks_data = cached_track.as_ref()
                                                 .map(|t| t.metadata.peaks.as_slice())
                                                 .unwrap_or(&[]);
                                             let wf_color = if is_muted { app.theme.text_disabled } else { track_color };
-                                            render_mini_waveform(ui.painter(), rect.shrink(1.0), peaks_data, wf_color);
+                                            render_mini_waveform(ui.painter(), rect.shrink(2.0), peaks_data, wf_color);
                                         }
 
                                         if response.hovered() {
@@ -461,153 +402,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     }
                                 });
 
-                                // Accordion expansion in the Right Scrollable side
-                                if is_selected {
-                                    ui.add_space(4.0);
-                                    Frame::none()
-                                        .fill(app.theme.bg_inset)
-                                        .rounding(Rounding::same(app.theme.radius_sm))
-                                        .stroke(app.theme.border_stroke)
-                                        .inner_margin(Margin::same(4.0))
-                                        .show(ui, |ui| {
-                                            ui.set_height(80.0);
-                                            ui.horizontal(|ui| {
-                                                ui.label(RichText::new("VOL").size(app.theme.type_caption).color(app.theme.text_secondary));
-                                                let volume_color = if is_muted { app.theme.bg_inset } else { track_color };
-
-                                                // If track_idx maps to a mixer channel (0..3), sync with mixer.channel_faders
-                                                let mut vol_val = if track_idx < 4 {
-                                                    app.mixer.channel_faders[track_idx]
-                                                } else {
-                                                    app.composer.track_volumes[track_idx]
-                                                };
-
-                                                if widgets::render_horizontal_fader(ui, &mut vol_val, 0.0..=1.2, volume_color, 55.0, 10.0)
-                                                    .on_hover_text("VOLUME (synced with System Mixer channel)")
-                                                    .changed()
-                                                {
-                                                    if track_idx < 4 {
-                                                        app.mixer.channel_faders[track_idx] = vol_val;
-                                                        let deck_char = ['a', 'b', 'c', 'd'][track_idx];
-                                                        if let Some(gain_id) = app.topo.node_map.get(&format!("deck_{}_gain", deck_char)).copied() {
-                                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                                target_id: gain_id as u64,
-                                                                param_id: 0,
-                                                                value: vol_val,
-                                                                ramp_duration_samples: 128,
-                                                            }));
-                                                        }
-                                                    }
-                                                    app.composer.track_volumes[track_idx] = vol_val;
-                                                }
-
-                                                ui.add_space(app.theme.space_xs);
-
-                                                ui.label(RichText::new("PAN").size(app.theme.type_caption).color(app.theme.text_secondary));
-                                                let mut pan_val = if track_idx < 4 {
-                                                    app.mixer.channel_balance[track_idx] * 2.0 - 1.0
-                                                } else {
-                                                    app.composer.track_pans[track_idx]
-                                                };
-
-                                                if widgets::render_horizontal_fader(ui, &mut pan_val, -1.0..=1.0, app.theme.text_primary, 45.0, 10.0)
-                                                    .on_hover_text("PAN (-1.0 Left .. +1.0 Right, synced with Mixer balance)")
-                                                    .changed()
-                                                {
-                                                    if track_idx < 4 {
-                                                        app.mixer.channel_balance[track_idx] = (pan_val + 1.0) * 0.5;
-                                                        let deck_char_upper = (b'A' + track_idx as u8) as char;
-                                                        let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetDeckParam {
-                                                            deck_id: deck_char_upper,
-                                                            param_type: nullherz_traits::DeckParamType::Pan,
-                                                            value: (pan_val + 1.0) * 0.5,
-                                                        }));
-                                                    }
-                                                    app.composer.track_pans[track_idx] = pan_val;
-                                                }
-
-                                                ui.add_space(app.theme.space_xs);
-
-                                                ui.label(RichText::new("FLT").size(app.theme.type_caption).color(app.theme.text_secondary));
-                                                let mut filter_val = if track_idx < 4 {
-                                                    app.mixer.channel_filter[track_idx]
-                                                } else {
-                                                    app.composer.track_filters[track_idx]
-                                                };
-
-                                                if widgets::render_horizontal_fader(ui, &mut filter_val, 0.0..=1.0, app.theme.success, 45.0, 10.0)
-                                                    .on_hover_text("FILTER CUTOFF (synced with Mixer channel filter)")
-                                                    .changed()
-                                                {
-                                                    if track_idx < 4 {
-                                                        app.mixer.channel_filter[track_idx] = filter_val;
-                                                        let deck_char = ['a', 'b', 'c', 'd'][track_idx];
-                                                        if let Some(flt_id) = app.topo.node_map.get(&format!("deck_{}_filter", deck_char)).copied() {
-                                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                                target_id: flt_id as u64,
-                                                                param_id: 0,
-                                                                value: filter_val,
-                                                                ramp_duration_samples: 128,
-                                                            }));
-                                                        }
-                                                    }
-                                                    app.composer.track_filters[track_idx] = filter_val;
-                                                }
-
-                                                ui.add_space(app.theme.space_xs);
-
-                                                ui.label(RichText::new("EVOLVE").size(app.theme.type_caption).color(app.theme.text_secondary));
-                                                let mut val = app.composer.evolution_strengths[track_idx];
-                                                if widgets::render_horizontal_fader(ui, &mut val, 0.0..=1.0, app.theme.warning, 45.0, 10.0)
-                                                    .on_hover_text("GENE EVOLVE")
-                                                    .changed()
-                                                {
-                                                    app.composer.evolution_strengths[track_idx] = val;
-                                                    let _ = app.command_sender.send(Command::Performance(PerformanceCommand::EvolvePattern {
-                                                        node_idx: track_idx as u32,
-                                                        track_idx: 0,
-                                                        mutation_strength: val,
-                                                    }));
-
-                                                    let src = app.composer.track_sources
-                                                        .get(track_idx).copied().flatten()
-                                                        .or(app.decks.now_playing[track_idx % 4]);
-                                                    if let Some(track_id) = src {
-                                                        use nullherz_dna::GeneticLibrary;
-                                                        if let Some(mut track) = app.get_cached_track(track_id) {
-                                                            let mut updated_metadata = (*track.metadata).clone();
-                                                            for mask_idx in 0..4 {
-                                                                let original_mask = updated_metadata.dna.rhythmic.onset_mask[mask_idx];
-                                                                let mut mutated_mask = original_mask;
-                                                                for bit in 0..64 {
-                                                                    let seed = (track_id as u32).wrapping_mul(256).wrapping_add(mask_idx as u32 * 64 + bit as u32);
-                                                                    let rand_val = (seed.wrapping_mul(1103515245).wrapping_add(12345) as f32) / 4294967295.0;
-                                                                    if rand_val < val {
-                                                                        mutated_mask ^= 1 << bit;
-                                                                    }
-                                                                }
-                                                                updated_metadata.dna.rhythmic.onset_mask[mask_idx] = mutated_mask;
-                                                            }
-                                                            track.metadata = std::sync::Arc::new(updated_metadata);
-                                                            let _ = app.library_db.save_track(&track);
-                                                            app.library.library_needs_refresh = true;
-
-                                                            if app.breeding_view.parent_a_id.is_none() {
-                                                                app.breeding_view.parent_a_id = Some(track_id);
-                                                            } else if app.breeding_view.parent_b_id.is_none() || app.breeding_view.parent_b_id == app.breeding_view.parent_a_id {
-                                                                app.breeding_view.parent_b_id = Some(track_id);
-                                                            } else {
-                                                                app.breeding_view.parent_a_id = app.breeding_view.parent_b_id;
-                                                                app.breeding_view.parent_b_id = Some(track_id);
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            });
-                                        });
-                                }
-
-                                if track_idx < 15 {
+                                if track_idx < num_active_channels - 1 {
                                     ui.add_space(6.0);
                                 }
                             }
