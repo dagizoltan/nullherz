@@ -21,7 +21,6 @@ Core technical specifications and engineering principles.
 - [Complete Musical DNA Architecture](./system/MUSICAL_DNA_ARCHITECTURE_SPECIFICATION.md) — 80 architectural concepts covering representation, transformation, DNA physics, multiscale resolutions, compiler profiles, and performance macros
 - [DNS & DNA Glossary](./system/DNS_DNA_GLOSSARY.md) — terminology standard, core definitions, DNS vs DNA comparison matrix, and terminology rules
 - [DNA Instrumentation & Tooling](./system/DNA_INSTRUMENTATION_AND_TOOLING.md) — DNA signal domain, multi-rate modulation, modular rack, scopes, diff, performance architecture, and non-conversational AI boundaries
-- [Advanced Musical Signal Graph & DNA Substrate](./system/ADVANCED_MUSICAL_SIGNAL_GRAPH_SPECIFICATION.md) — DNA buses, sends/returns, typed ports, impedance matching, attractors/repulsion, bounded feedback, conservation laws, multi-resolution clocks, and quality verification
 - [Extended DNA Risk & Capability Framework](./system/DNA_RISK_AND_CAPABILITY_FRAMEWORK.md) — engineering risk matrix, capability taxonomy, and transformation benchmark strategy
 - [AnaWaves Genetic Schema](./system/ANAWAVES_GENETIC_SCHEMA_RFC.md)
 - [Sidecar Protocol v2](./system/SIDECAR_PROTOCOL_V2.md)
