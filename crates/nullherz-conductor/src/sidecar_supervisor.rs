@@ -452,7 +452,7 @@ impl SidecarSupervisor {
     }
 
     pub fn supervise(&mut self, topology_manager: &mut TopologyManager) -> Vec<TimestampedCommand> {
-        // 1. Identify stalled heartbeats and trigger SOFT FALLBACK or Hot-Standby Failover
+        // 1. Identify stalled heartbeats and trigger Hot-Standby Failover or SOFT FALLBACK
         let stalled_nodes = self.manager.list_stalled_nodes();
         for node_idx in stalled_nodes {
             if let Some(mut standby) = self.hot_standbys.remove(&node_idx) {
@@ -473,9 +473,23 @@ impl SidecarSupervisor {
             }
         }
 
-        // 2. Reap zombies and restore recovered processors
-        let new_processors = self.manager.reap_zombies();
-        for (node_idx, processor) in new_processors {
+        // 2. Supervise internal sidecar manager (detect process crashes or exits)
+        let (crashed_restarts, enter_safe_mode) = self.manager.supervise();
+        if enter_safe_mode {
+            eprintln!("CRITICAL: Sidecar supervisor entering Safe Mode due to sidecar failure policy.");
+        }
+
+        for (node_idx, processor) in crashed_restarts {
+            if let Some(mut standby) = self.hot_standbys.remove(&node_idx) {
+                if let Some(standby_proc) = standby.standby_processor.take() {
+                    eprintln!("WARNING: Sidecar process crashed for node {}. Instant failover to Hot-Standby Shadow ({})", node_idx, standby.sidecar_id);
+                    if let Some(ref mut prod) = topology_manager.topo_producer {
+                        let _ = prod.push(TopologyMutation::SwapProcessor { node_idx, processor: standby_proc });
+                        self.manager.mark_as_bypassed(node_idx);
+                    }
+                    continue;
+                }
+            }
             eprintln!("Recovered sidecar process for node {}. Re-inserting into audio graph...", node_idx);
             if let Some(ref mut prod) = topology_manager.topo_producer {
                 let _ = prod.push(TopologyMutation::SwapProcessor { node_idx, processor });
@@ -499,5 +513,38 @@ impl SidecarSupervisor {
             });
         }
         remote_cmds
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nullherz_processors::GainProcessor;
+
+    #[test]
+    fn test_hot_standby_registration_and_failover() {
+        let mut supervisor = SidecarSupervisor::new();
+        let mut topo_manager = TopologyManager::new();
+        let (prod, mut cons) = ipc_layer::RingBuffer::<TopologyMutation>::new(16).split();
+        topo_manager.topo_producer = Some(ipc_layer::NonRtProducer::new(prod));
+
+        let mock_standby = Box::new(GainProcessor::new(1, 1.0));
+        supervisor.register_hot_standby(42, "test_gain_standby", Some(mock_standby));
+
+        assert!(supervisor.hot_standbys.contains_key(&42));
+
+        if let Some(mut standby) = supervisor.hot_standbys.remove(&42) {
+            if let Some(proc) = standby.standby_processor.take() {
+                if let Some(ref mut p) = topo_manager.topo_producer {
+                    let _ = p.push(TopologyMutation::SwapProcessor { node_idx: 42, processor: proc });
+                }
+            }
+        }
+
+        let mutation = cons.pop().expect("Expected SwapProcessor mutation for hot standby failover");
+        match mutation {
+            TopologyMutation::SwapProcessor { node_idx, .. } => assert_eq!(node_idx, 42),
+            _ => panic!("Expected SwapProcessor mutation"),
+        }
     }
 }

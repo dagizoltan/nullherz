@@ -14,6 +14,7 @@ struct AlsaLib {
     snd_pcm_hw_params_malloc: unsafe extern "C" fn(*mut *mut std::ffi::c_void) -> std::os::raw::c_int,
     snd_pcm_hw_params_any: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> std::os::raw::c_int,
     snd_pcm_hw_params_set_access: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_int) -> std::os::raw::c_int,
+    snd_pcm_hw_params_set_period_wakeup: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_uint) -> std::os::raw::c_int>,
     snd_pcm_hw_params_set_format: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_hw_params_set_channels: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, std::os::raw::c_uint) -> std::os::raw::c_int,
     snd_pcm_hw_params_set_rate_near: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, *mut std::os::raw::c_uint, *mut std::os::raw::c_int) -> std::os::raw::c_int,
@@ -67,6 +68,8 @@ impl AlsaLib {
                 snd_pcm_hw_params_malloc: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut *mut std::ffi::c_void) -> i32>(load_sym(c"snd_pcm_hw_params_malloc").ok_or("sym failed")?),
                 snd_pcm_hw_params_any: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> i32>(load_sym(c"snd_pcm_hw_params_any").ok_or("sym failed")?),
                 snd_pcm_hw_params_set_access: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, i32) -> i32>(load_sym(c"snd_pcm_hw_params_set_access").ok_or("sym failed")?),
+                snd_pcm_hw_params_set_period_wakeup: load_sym(c"snd_pcm_hw_params_set_period_wakeup")
+                    .map(|s| std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, u32) -> i32>(s)),
                 snd_pcm_hw_params_set_format: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, i32) -> i32>(load_sym(c"snd_pcm_hw_params_set_format").ok_or("sym failed")?),
                 snd_pcm_hw_params_set_channels: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, u32) -> i32>(load_sym(c"snd_pcm_hw_params_set_channels").ok_or("sym failed")?),
                 snd_pcm_hw_params_set_rate_near: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_void, *mut u32, *mut i32) -> i32>(load_sym(c"snd_pcm_hw_params_set_rate_near").ok_or("sym failed")?),
@@ -181,6 +184,24 @@ impl AlsaBackend {
     /// lock-free from the audio thread. Read it from any thread for metering
     /// or health checks — no blocking I/O on the RT path.
     pub fn xruns(&self) -> u64 { self.xruns.load(Ordering::Relaxed) }
+
+    /// Request D-Bus audio device reservation (org.freedesktop.ReserveDevice1)
+    pub fn reserve_dbus_device(device_name: &str) {
+        let app_name = "nullherz";
+        let priority = 20i32;
+        let _ = std::process::Command::new("dbus-send")
+            .args([
+                "--system",
+                "--print-reply",
+                "--type=method_call",
+                &format!("--dest=org.freedesktop.ReserveDevice1.{}", device_name),
+                &format!("/org/freedesktop/ReserveDevice1/{}", device_name),
+                "org.freedesktop.ReserveDevice1.RequestDevice",
+            ])
+            .arg(format!("string:{}", app_name))
+            .arg(format!("int32:{}", priority))
+            .output();
+    }
 }
 impl AudioBackend for AlsaBackend {
     fn start(&mut self, engine_handle: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>, requested_period_size: u64) -> Result<(), String> {
@@ -200,6 +221,11 @@ impl AudioBackend for AlsaBackend {
         let name = std::ffi::CString::new(self.device.as_str())
             .map_err(|_| format!("ALSA device name contains a NUL byte: {:?}", self.device))?;
 
+        // Reserve D-Bus device if requested to prevent desktop sound server interference
+        if matches!(std::env::var("NULLHERZ_RESERVE_DEVICE").as_deref(), Ok("1") | Ok("true") | Ok("yes")) {
+            Self::reserve_dbus_device(&self.device);
+        }
+
         let open_ret = unsafe { (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) };
         if open_ret != 0 {
             // Name the device that failed. "error code -2" against an unnamed
@@ -212,6 +238,7 @@ impl AudioBackend for AlsaBackend {
         }
         eprintln!("[ALSA] snd_pcm_open SUCCESS on '{}'", self.device);
 
+        const SND_PCM_ACCESS_MMAP_INTERLEAVED: i32 = 0;
         const SND_PCM_ACCESS_RW_INTERLEAVED: i32 = 3;
         const SND_PCM_FORMAT_S16_LE: i32 = 2;
         const SND_PCM_FORMAT_S32_LE: i32 = 10;
@@ -223,7 +250,34 @@ impl AudioBackend for AlsaBackend {
             let mut hw_params: *mut std::ffi::c_void = std::ptr::null_mut();
             (alsa.snd_pcm_hw_params_malloc)(&mut hw_params);
             (alsa.snd_pcm_hw_params_any)(pcm, hw_params);
-            (alsa.snd_pcm_hw_params_set_access)(pcm, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
+            let mmap_req = matches!(
+                std::env::var("NULLHERZ_ALSA_MMAP").as_deref(),
+                Ok("1") | Ok("true") | Ok("yes")
+            );
+            let access_res = if mmap_req {
+                (alsa.snd_pcm_hw_params_set_access)(pcm, hw_params, SND_PCM_ACCESS_MMAP_INTERLEAVED)
+            } else {
+                -1
+            };
+            if access_res != 0 {
+                (alsa.snd_pcm_hw_params_set_access)(pcm, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
+            } else {
+                eprintln!("[ALSA] Direct Hardware MMAP mode enabled.");
+            }
+
+            // Apply NO_PERIOD_WAKEUP (disable timer period wakeups for kernel bypass)
+            if let Some(set_wakeup) = alsa.snd_pcm_hw_params_set_period_wakeup {
+                let no_wakeup = matches!(
+                    std::env::var("NULLHERZ_NO_PERIOD_WAKEUP").as_deref(),
+                    Ok("1") | Ok("true") | Ok("yes")
+                );
+                if no_wakeup {
+                    let wakeup_val = 0u32; // 0 = disable period wakeup
+                    if set_wakeup(pcm, hw_params, wakeup_val) == 0 {
+                        eprintln!("[ALSA] NO_PERIOD_WAKEUP enabled — kernel period wakeups disabled.");
+                    }
+                }
+            }
 
             // Best first. S32_LE sits between float and S16 and was MISSING —
             // the chain measures -148 dB THD+N and this handed it to a 16-bit
@@ -583,6 +637,7 @@ impl AudioBackend for AlsaBackend {
     fn xruns(&self) -> Option<u64> {
         Some(self.xruns.load(Ordering::Relaxed))
     }
+
 
     fn buffer_frames(&self) -> Option<u32> {
         match self.buffer_frames.load(Ordering::Relaxed) {
