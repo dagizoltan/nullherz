@@ -148,15 +148,63 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                         ui.add_space(4.0);
 
-                        // Attached FX or + FX button
-                        let attached_fx = app.decks.deck_inserts[i].as_deref();
-                        let fx_label = attached_fx.map(|name| format!("FX: {}", name)).unwrap_or_else(|| "+ FX".to_string());
-                        let fx_btn_color = if attached_fx.is_some() { theme.accent } else { theme.bg_inset };
+                        // --- Custom Attached Insert Chain ---
+                        let mut remove_idx = None;
+                        let chain_len = app.decks.deck_insert_chains[i].len();
 
-                        if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new(fx_label).size(9.0).strong()).fill(fx_btn_color)).clicked() {
-                            app.active_right_tab = Some(crate::RightTab::Store);
-                            app.store.active_tag_filter = Some("insert".to_string());
+                        // Sync single deck_inserts into chain if present
+                        if let Some(ref fx_name) = app.decks.deck_inserts[i] {
+                            if !app.decks.deck_insert_chains[i].contains(fx_name) {
+                                app.decks.deck_insert_chains[i].push(fx_name.clone());
+                            }
                         }
+
+                        for (chain_idx, insert_name) in app.decks.deck_insert_chains[i].iter().enumerate() {
+                            let slot_num = chain_idx + 3;
+                            Frame::none()
+                                .fill(theme.bg_inset)
+                                .rounding(Rounding::same(theme.radius_sm))
+                                .inner_margin(Margin::same(4.0))
+                                .stroke(Stroke::new(1.0, theme.accent.gamma_multiply(0.5)))
+                                .show(ui, |ui| {
+                                    ui.set_width(STRIP_W - 20.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new(format!("{}: {}", slot_num, insert_name)).size(9.0).strong().color(theme.accent));
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            if ui.button(RichText::new("x").size(9.0).strong().color(theme.danger)).clicked() {
+                                                remove_idx = Some(chain_idx);
+                                            }
+                                        });
+                                    });
+                                });
+                            ui.add_space(3.0);
+                        }
+
+                        if let Some(r_idx) = remove_idx {
+                            if r_idx < app.decks.deck_insert_chains[i].len() {
+                                app.decks.deck_insert_chains[i].remove(r_idx);
+                                if app.decks.deck_insert_chains[i].is_empty() {
+                                    app.decks.deck_inserts[i] = None;
+                                } else {
+                                    app.decks.deck_inserts[i] = app.decks.deck_insert_chains[i].last().cloned();
+                                }
+                            }
+                        }
+
+                        // --- ALWAYS DISPLAY AN EMPTY INSERT SLOT ---
+                        let empty_slot_num = chain_len + 3;
+                        Frame::none()
+                            .fill(theme.bg_canvas)
+                            .rounding(Rounding::same(theme.radius_sm))
+                            .inner_margin(Margin::same(4.0))
+                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                            .show(ui, |ui| {
+                                ui.set_width(STRIP_W - 20.0);
+                                if ui.add_sized([STRIP_W - 28.0, 18.0], egui::Button::new(RichText::new(format!("{}: + EMPTY SLOT", empty_slot_num)).size(9.0).strong().color(theme.text_secondary)).fill(theme.bg_canvas)).clicked() {
+                                    app.active_right_tab = Some(crate::RightTab::Store);
+                                    app.store.active_tag_filter = Some("insert".to_string());
+                                }
+                            });
                     });
                 });
 

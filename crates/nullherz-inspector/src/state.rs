@@ -129,6 +129,8 @@ pub struct DeckState {
     pub deck_key_lock: [bool; 4],
     /// Active sidecar insert FX attached to each deck channel.
     pub deck_inserts: [Option<String>; 4],
+    /// Multiple insert chain attached per deck channel.
+    pub deck_insert_chains: [Vec<String>; 4],
 }
 
 impl Default for DeckState {
@@ -148,6 +150,7 @@ impl Default for DeckState {
             deck_key_sync: [false; 4],
             deck_key_lock: [false; 4],
             deck_inserts: std::array::from_fn(|_| None),
+            deck_insert_chains: std::array::from_fn(|_| vec![]),
         }
     }
 }
