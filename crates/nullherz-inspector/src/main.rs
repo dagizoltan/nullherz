@@ -282,7 +282,37 @@ impl InspectorApp {
             let mid_energy = self.viz.damped_spectrum[16..64].iter().sum::<f32>() / 48.0 * channel.gain_sensitivity;
             let high_energy = self.viz.damped_spectrum[64..128].iter().sum::<f32>() / 64.0 * channel.gain_sensitivity;
 
-            // Prepare Audio Feature Inputs for 64-Neuron Biological Spiking Network (64-D Vector)
+            // 1. Populate Multidimensional Audio Nervous System
+            channel.nervous_system.rms_energy = low_energy * 0.5 + mid_energy * 0.3 + high_energy * 0.2;
+            channel.nervous_system.spectral_centroid = (mid_energy * 1000.0 + high_energy * 4000.0) / (low_energy + mid_energy + high_energy + 0.001);
+            channel.nervous_system.spectral_flux = (high_energy - low_energy).abs();
+            channel.nervous_system.low_band = low_energy;
+            channel.nervous_system.mid_band = mid_energy;
+            channel.nervous_system.high_band = high_energy;
+            channel.nervous_system.transient_density = (high_energy * 2.0).clamp(0.0, 1.0);
+            channel.nervous_system.onset_strength = (low_energy * 2.5).clamp(0.0, 1.0);
+            channel.nervous_system.bpm = telemetry.as_ref().map(|t| t.bpm as f32).unwrap_or(120.0);
+            channel.nervous_system.beat_phase = telemetry.as_ref().map(|t| t.beat_position as f32 % 1.0).unwrap_or(0.0);
+            channel.nervous_system.sub_beat_phase = (channel.nervous_system.beat_phase * 4.0).fract();
+            for i in 0..12 {
+                channel.nervous_system.pitch_chroma[i] = self.viz.damped_spectrum[i * 10 % 128];
+            }
+            channel.nervous_system.harmonicity = (mid_energy / (high_energy + 0.001)).clamp(0.0, 1.0);
+            channel.nervous_system.noisiness = (high_energy / (low_energy + 0.001)).clamp(0.0, 1.0);
+            channel.nervous_system.stereo_width = (channel.stereo_width * (1.0 + stereo_imbalance.abs())).clamp(0.0, 2.0);
+            channel.nervous_system.stereo_asymmetry = stereo_imbalance;
+            channel.nervous_system.long_term_envelope = self.viz.damped_peaks.iter().sum::<f32>() / 16.0;
+            channel.nervous_system.short_term_envelope = _input_energy;
+            channel.nervous_system.spectral_entropy = (low_energy * mid_energy * high_energy).powf(0.33);
+            channel.nervous_system.zero_crossing_rate = high_energy * 0.8;
+
+            // 2. Map Nervous System through Neural Latent Mapper to Visual Genome & Memory
+            let current_time = ui.input(|i| i.time);
+            channel.mapper.map(&channel.nervous_system, &mut channel.genome);
+            channel.memory.push_snapshot(channel.nervous_system.rms_energy, channel.nervous_system.spectral_centroid, current_time);
+            channel.mutation.handle_event(&channel.nervous_system, &channel.memory);
+
+            // 3. Prepare Audio Feature Inputs for 64-Neuron Biological Spiking Network (64-D Vector)
             let mut audio_inputs = [0.0f32; 64];
             for i in 0..32 {
                 audio_inputs[i] = self.viz.damped_spectrum[i * 4 % 128] * channel.gain_sensitivity;
@@ -305,6 +335,82 @@ impl InspectorApp {
             let motor = channel.neuron_net.motor_outputs;
 
             match channel.generator {
+                state::VisualGenerator::ComplexNeuralMandala => {
+                    // High-Symmetry Complex Bio-Neural Spiking Mandala Engine
+                    let max_radius = (rect.width().min(rect.height())) * 0.48;
+                    let symmetry_folds = 12;
+                    let num_rings = 8;
+
+                    let global_rot = time as f32 * 0.4 * channel.param_speed + motor[0] * 1.5;
+
+                    // 1. Concentric Sacral Petal Rings
+                    for r_idx in 0..num_rings {
+                        let ring_frac = (r_idx + 1) as f32 / num_rings as f32;
+                        let ring_radius = ring_frac * max_radius;
+
+                        let ring_rot = global_rot * if r_idx % 2 == 0 { 1.0 } else { -1.0 } + r_idx as f32 * 0.15;
+                        let points_per_petal = 20;
+
+                        for f in 0..symmetry_folds {
+                            let base_angle = (f as f32 / symmetry_folds as f32) * std::f32::consts::TAU + ring_rot;
+                            let idx = (f * 5 + r_idx * 3) % 64;
+
+                            let n_v = channel.neuron_net.v[idx];
+                            let stdp = channel.neuron_net.stdp_trace[idx];
+                            let wave = channel.neuron_net.axonal_wave_field[idx];
+                            let is_spike = channel.neuron_net.spikes[idx];
+
+                            let petal_amp = ring_radius * (0.2 + 0.3 * (n_v + 65.0) / 50.0 + wave * 0.2);
+                            let spike_boost = if is_spike { 1.4 } else { 1.0 };
+
+                            let mut petal_pts = Vec::with_capacity(points_per_petal + 1);
+                            for p in 0..=points_per_petal {
+                                let p_frac = p as f32 / points_per_petal as f32;
+                                let angle_offset = (p_frac - 0.5) * (std::f32::consts::TAU / symmetry_folds as f32) * 1.2;
+                                let current_angle = base_angle + angle_offset;
+
+                                // Organic Rose/Cardioid Petal Curve Equation
+                                let petal_radius = ring_radius + (p_frac * std::f32::consts::PI).sin() * petal_amp * spike_boost;
+
+                                let px = center.x + current_angle.cos() * petal_radius;
+                                let py = center.y + current_angle.sin() * petal_radius;
+                                petal_pts.push(egui::pos2(px, py));
+                            }
+
+                            let hue = (ring_frac * 0.8 + channel.param_color_shift + motor[r_idx % 16] * 0.4) % 1.0;
+                            let r_c = ((hue * 6.0 - 3.0).abs() - 1.0).clamp(0.0, 1.0);
+                            let g_c = (2.0 - (hue * 6.0 - 2.0).abs()).clamp(0.0, 1.0);
+                            let b_c = (2.0 - (hue * 6.0 - 4.0).abs()).clamp(0.0, 1.0);
+
+                            let petal_color = if is_spike {
+                                theme.warning
+                            } else {
+                                egui::Color32::from_rgb((r_c * 255.0) as u8, (g_c * 255.0) as u8, (b_c * 255.0) as u8)
+                            };
+
+                            for i in 0..petal_pts.len() - 1 {
+                                ui.painter().line_segment([petal_pts[i], petal_pts[i + 1]], egui::Stroke::new(1.8 + stdp * 1.2, petal_color.linear_multiply(0.4 + 0.6 * low_energy)));
+                            }
+                        }
+                    }
+
+                    // 2. Central Spiking Sacred Geometry Flower Nucleus
+                    let num_core_spokes = 24;
+                    for s in 0..num_core_spokes {
+                        let spoke_angle = (s as f32 / num_core_spokes as f32) * std::f32::consts::TAU - global_rot * 1.5;
+                        let n_v = channel.neuron_net.v[s % 64];
+
+                        let inner_r = max_radius * 0.08;
+                        let outer_r = inner_r + (n_v + 65.0) / 30.0 * max_radius * 0.25;
+
+                        let p1 = egui::pos2(center.x + spoke_angle.cos() * inner_r, center.y + spoke_angle.sin() * inner_r);
+                        let p2 = egui::pos2(center.x + spoke_angle.cos() * outer_r, center.y + spoke_angle.sin() * outer_r);
+
+                        ui.painter().line_segment([p1, p2], egui::Stroke::new(2.5, theme.accent));
+                        ui.painter().circle_filled(p2, 3.5 + mid_energy * 6.0, theme.warning);
+                    }
+                }
+
                 state::VisualGenerator::ImageNeuronDeform => {
                     // Image Bio-Neuron Warp & Cellular Deformation Grid
                     let cols = 32;

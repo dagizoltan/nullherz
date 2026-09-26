@@ -532,6 +532,292 @@ pub enum ChannelKind {
     InstrumentSynth,
 }
 
+/// Multidimensional Audio Nervous System feature field extracted from telemetry
+#[derive(Clone, Debug, Default)]
+pub struct AudioNervousSystem {
+    pub rms_energy: f32,
+    pub spectral_centroid: f32,
+    pub spectral_flux: f32,
+    pub low_band: f32,
+    pub mid_band: f32,
+    pub high_band: f32,
+    pub transient_density: f32,
+    pub onset_strength: f32,
+    pub bpm: f32,
+    pub beat_phase: f32,
+    pub sub_beat_phase: f32,
+    pub pitch_chroma: [f32; 12],
+    pub harmonicity: f32,
+    pub noisiness: f32,
+    pub stereo_width: f32,
+    pub stereo_asymmetry: f32,
+    pub long_term_envelope: f32,
+    pub short_term_envelope: f32,
+    pub spectral_entropy: f32,
+    pub zero_crossing_rate: f32,
+}
+
+/// Visual Genome governing the generative visual organism's mathematical personality
+#[derive(Clone, Debug)]
+pub struct VisualGenome {
+    pub topology_complexity: f32,
+    pub symmetry_folds: usize,
+    pub branching_factor: f32,
+    pub turbulence_scale: f32,
+    pub particle_cohesion: f32,
+    pub particle_separation: f32,
+    pub fracture_rate: f32,
+    pub feedback_persistence: f32,
+    pub color_field_shift: f32,
+    #[allow(dead_code)]
+    pub mutation_inertia: f32,
+    pub growth_rate: f32,
+    #[allow(dead_code)]
+    pub erosion_factor: f32,
+    pub roughness: f32,
+    pub emission_glow: f32,
+    pub genes: [f32; 32], // 32 continuous gene parameters
+}
+
+impl Default for VisualGenome {
+    fn default() -> Self {
+        Self {
+            topology_complexity: 1.0,
+            symmetry_folds: 8,
+            branching_factor: 1.0,
+            turbulence_scale: 0.5,
+            particle_cohesion: 0.8,
+            particle_separation: 0.2,
+            fracture_rate: 0.1,
+            feedback_persistence: 0.85,
+            color_field_shift: 0.5,
+            mutation_inertia: 0.9,
+            growth_rate: 1.0,
+            erosion_factor: 0.05,
+            roughness: 0.3,
+            emission_glow: 0.7,
+            genes: [0.5; 32],
+        }
+    }
+}
+
+/// Non-linear neural mapper translating audio nervous system into visual genome parameters
+#[derive(Clone, Debug)]
+pub struct NeuralLatentMapper {
+    pub weights_in: [[f32; 32]; 32],
+    pub weights_out: [[f32; 32]; 32],
+    pub latent_neurons: [f32; 32],
+}
+
+impl NeuralLatentMapper {
+    pub fn new() -> Self {
+        let mut weights_in = [[0.0f32; 32]; 32];
+        let mut weights_out = [[0.0f32; 32]; 32];
+        for i in 0..32 {
+            for j in 0..32 {
+                weights_in[i][j] = ((i as f32 * 0.3 + j as f32 * 0.7).sin() * 0.5).clamp(-1.0, 1.0);
+                weights_out[i][j] = ((i as f32 * 1.1 + j as f32 * 0.4).cos() * 0.5).clamp(-1.0, 1.0);
+            }
+        }
+        Self {
+            weights_in,
+            weights_out,
+            latent_neurons: [0.0; 32],
+        }
+    }
+
+    pub fn map(&mut self, nervous: &AudioNervousSystem, genome: &mut VisualGenome) {
+        let mut audio_vec = [0.0f32; 32];
+        audio_vec[0] = nervous.rms_energy;
+        audio_vec[1] = nervous.spectral_centroid;
+        audio_vec[2] = nervous.spectral_flux;
+        audio_vec[3] = nervous.low_band;
+        audio_vec[4] = nervous.mid_band;
+        audio_vec[5] = nervous.high_band;
+        audio_vec[6] = nervous.transient_density;
+        audio_vec[7] = nervous.onset_strength;
+        audio_vec[8] = nervous.beat_phase;
+        audio_vec[9] = nervous.sub_beat_phase;
+        audio_vec[10] = nervous.harmonicity;
+        audio_vec[11] = nervous.noisiness;
+        audio_vec[12] = nervous.stereo_width;
+        audio_vec[13] = nervous.stereo_asymmetry;
+        audio_vec[14] = nervous.spectral_entropy;
+        audio_vec[15] = nervous.zero_crossing_rate;
+        for i in 0..12 {
+            audio_vec[16 + i] = nervous.pitch_chroma[i];
+        }
+
+        // Layer 1: Forward dense pass to latent neurons
+        for i in 0..32 {
+            let mut sum = 0.0f32;
+            for j in 0..32 {
+                sum += audio_vec[j] * self.weights_in[j][i];
+            }
+            let x2 = sum * sum;
+            self.latent_neurons[i] = (sum * (27.0 + x2) / (27.0 + 9.0 * x2)).clamp(-1.0, 1.0);
+        }
+
+        // Layer 2: Output pass to continuous visual genes
+        for i in 0..32 {
+            let mut sum = 0.0f32;
+            for j in 0..32 {
+                sum += self.latent_neurons[j] * self.weights_out[j][i];
+            }
+            let x2 = sum * sum;
+            let target_gene = (sum * (27.0 + x2) / (27.0 + 9.0 * x2)).clamp(-1.0, 1.0) * 0.5 + 0.5;
+            genome.genes[i] += (target_gene - genome.genes[i]) * 0.15;
+        }
+
+        // Map genes to structured visual parameters
+        genome.topology_complexity = 0.5 + genome.genes[0] * 2.5;
+        genome.symmetry_folds = match (genome.genes[1] * 6.0) as usize {
+            0 => 2,
+            1 => 4,
+            2 => 6,
+            3 => 8,
+            4 => 12,
+            _ => 16,
+        };
+        genome.branching_factor = 0.2 + genome.genes[2] * 2.0;
+        genome.turbulence_scale = genome.genes[3] * 1.5;
+        genome.particle_cohesion = genome.genes[4];
+        genome.particle_separation = genome.genes[5];
+        genome.fracture_rate = genome.genes[6];
+        genome.feedback_persistence = 0.5 + genome.genes[7] * 0.48;
+        genome.color_field_shift = genome.genes[8];
+        genome.growth_rate = 0.1 + genome.genes[9] * 2.0;
+        genome.roughness = genome.genes[10];
+        genome.emission_glow = genome.genes[11];
+    }
+}
+
+impl Default for NeuralLatentMapper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Historical visual memory tracking trajectory state across time
+#[derive(Clone, Debug)]
+pub struct VisualMemory {
+    pub energy_history: [f32; 64],
+    pub centroid_history: [f32; 64],
+    pub topological_accumulator: f32,
+    #[allow(dead_code)]
+    pub historical_symmetry_center: (f32, f32),
+    pub mutation_events_count: u32,
+    pub last_mutation_time: f64,
+}
+
+impl Default for VisualMemory {
+    fn default() -> Self {
+        Self {
+            energy_history: [0.0; 64],
+            centroid_history: [0.0; 64],
+            topological_accumulator: 0.0,
+            historical_symmetry_center: (0.0, 0.0),
+            mutation_events_count: 0,
+            last_mutation_time: 0.0,
+        }
+    }
+}
+
+impl VisualMemory {
+    pub fn push_snapshot(&mut self, energy: f32, centroid: f32, time: f64) {
+        for i in (1..64).rev() {
+            self.energy_history[i] = self.energy_history[i - 1];
+            self.centroid_history[i] = self.centroid_history[i - 1];
+        }
+        self.energy_history[0] = energy;
+        self.centroid_history[0] = centroid;
+        self.topological_accumulator = (self.topological_accumulator + energy * 0.01).rem_euclid(100.0);
+
+        if energy > 0.8 && (time - self.last_mutation_time) > 0.5 {
+            self.mutation_events_count = self.mutation_events_count.wrapping_add(1);
+            self.last_mutation_time = time;
+        }
+    }
+}
+
+/// Event-driven structural mutation engine
+#[derive(Clone, Debug, Default)]
+pub struct MutationEngine {
+    pub species: VisualOrganismSpecies,
+    pub mutation_intensity: f32,
+}
+
+impl MutationEngine {
+    pub fn handle_event(&mut self, nervous: &AudioNervousSystem, memory: &VisualMemory) {
+        // Structural mutation on major phrase transition / high onset
+        if nervous.onset_strength > 0.85 && nervous.transient_density > 0.6 {
+            self.mutation_intensity = 1.0;
+            if memory.mutation_events_count % 4 == 0 {
+                self.species = self.species.next_species();
+            }
+        } else {
+            self.mutation_intensity *= 0.92;
+        }
+    }
+}
+
+/// Visual Organism Species Taxonomy
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum VisualOrganismSpecies {
+    Organic,
+    Fluid,
+    Crystal,
+    Cellular,
+    Tendril,
+    GeometricSwarm,
+    SacredMandala,
+}
+
+#[allow(dead_code)]
+impl VisualOrganismSpecies {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Organic => "Bio-Organic Reaction Diffusion",
+            Self::Fluid => "Turbulent Bio-Fluid Vector Flow",
+            Self::Crystal => "Recursive Crystalline Sub-Division",
+            Self::Cellular => "Microscopic Voronoi Cellular Tissue",
+            Self::Tendril => "Filament Mycelium Tendrils",
+            Self::GeometricSwarm => "Emergent Geometric Swarm Lattice",
+            Self::SacredMandala => "Sacred Geometry Spiking Mandala",
+        }
+    }
+
+    pub fn next_species(&self) -> Self {
+        match self {
+            Self::Organic => Self::Fluid,
+            Self::Fluid => Self::Crystal,
+            Self::Crystal => Self::Cellular,
+            Self::Cellular => Self::Tendril,
+            Self::Tendril => Self::GeometricSwarm,
+            Self::GeometricSwarm => Self::SacredMandala,
+            Self::SacredMandala => Self::Organic,
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::Organic,
+            Self::Fluid,
+            Self::Crystal,
+            Self::Cellular,
+            Self::Tendril,
+            Self::GeometricSwarm,
+            Self::SacredMandala,
+        ]
+    }
+}
+
+impl Default for VisualOrganismSpecies {
+    fn default() -> Self {
+        Self::Organic
+    }
+}
+
 /// Biological 64-Neuron Multi-Layer Cortical Reservoir Engine for audio-driven organic visual synthesis.
 /// Features Izhikevich/LIF membrane potentials, neurotransmitter release kinetics ($s_i$),
 /// short-term synaptic plasticity (depression/facilitation), 2D spatial axonal grid topology,
@@ -754,6 +1040,7 @@ impl Default for ImageTextureEngine {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum VisualGenerator {
+    ComplexNeuralMandala,
     ImageNeuronDeform,
     OrganicBitmapFeedback,
     WinampNeuronTunnel,
@@ -769,6 +1056,7 @@ pub enum VisualGenerator {
 impl VisualGenerator {
     pub fn name(&self) -> &'static str {
         match self {
+            Self::ComplexNeuralMandala => "Complex Neural Spiking Mandala",
             Self::ImageNeuronDeform => "Image Bio-Neuron Deformation",
             Self::OrganicBitmapFeedback => "Organic Bitmap Liquid Feedback",
             Self::WinampNeuronTunnel => "Winamp Neuron Warp Tunnel",
@@ -784,6 +1072,7 @@ impl VisualGenerator {
 
     pub fn all() -> &'static [Self] {
         &[
+            Self::ComplexNeuralMandala,
             Self::ImageNeuronDeform,
             Self::OrganicBitmapFeedback,
             Self::WinampNeuronTunnel,
@@ -876,6 +1165,12 @@ pub struct VisualChannel {
     pub neuron_net: SpikingNeuronNetwork,
     /// Procedural Texture & Organic Image Memory Buffer
     pub image_engine: ImageTextureEngine,
+    /// Multidimensional Audio Nervous System & Genome Organism components
+    pub nervous_system: AudioNervousSystem,
+    pub genome: VisualGenome,
+    pub mapper: NeuralLatentMapper,
+    pub memory: VisualMemory,
+    pub mutation: MutationEngine,
 }
 
 impl VisualChannel {
@@ -916,6 +1211,11 @@ impl VisualChannel {
             is_solo: false,
             neuron_net: SpikingNeuronNetwork::new(),
             image_engine: ImageTextureEngine::new(64, 64),
+            nervous_system: AudioNervousSystem::default(),
+            genome: VisualGenome::default(),
+            mapper: NeuralLatentMapper::new(),
+            memory: VisualMemory::default(),
+            mutation: MutationEngine::default(),
         }
     }
 }
@@ -968,23 +1268,23 @@ impl Default for VizState {
             damped_master_peaks: [0.0; 2],
             channels: vec![
                 VisualChannel::new(
-                    "VIZ 1 — IMAGE NEURON DEFORM",
-                    VisualGenerator::ImageNeuronDeform,
+                    "VIZ 1 — NEURAL MANDALA",
+                    VisualGenerator::ComplexNeuralMandala,
                     vec![VisualInputSource::MasterMix, VisualInputSource::MidiTriggerBus],
                 ),
                 VisualChannel::new(
-                    "VIZ 2 — BITMAP FEEDBACK",
-                    VisualGenerator::OrganicBitmapFeedback,
+                    "VIZ 2 — IMAGE DEFORM",
+                    VisualGenerator::ImageNeuronDeform,
                     vec![VisualInputSource::DeckA, VisualInputSource::DeckB],
                 ),
                 VisualChannel::new(
-                    "VIZ 3 — WINAMP TUNNEL",
-                    VisualGenerator::WinampNeuronTunnel,
+                    "VIZ 3 — BITMAP FEEDBACK",
+                    VisualGenerator::OrganicBitmapFeedback,
                     vec![VisualInputSource::DeckC, VisualInputSource::DeckD],
                 ),
                 VisualChannel::new(
-                    "VIZ 4 — WMP PLASMA",
-                    VisualGenerator::WmpPlasmaFeedback,
+                    "VIZ 4 — WINAMP TUNNEL",
+                    VisualGenerator::WinampNeuronTunnel,
                     vec![VisualInputSource::MicInput, VisualInputSource::MasterMix],
                 ),
             ],
