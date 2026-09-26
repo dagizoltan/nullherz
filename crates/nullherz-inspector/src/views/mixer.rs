@@ -120,7 +120,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                         ui.add_space(4.0);
 
-                        // Insert Slot 2: Gain / Trim
+                        // Insert Slot 2: Trim / Gain Knob
                         Frame::none()
                             .fill(theme.bg_inset)
                             .rounding(Rounding::same(theme.radius_sm))
@@ -129,7 +129,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                             .show(ui, |ui| {
                                 ui.set_width(STRIP_W - 20.0);
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new("2: GAIN").size(9.0).strong().color(theme.success));
+                                    ui.label(RichText::new("2: TRIM").size(9.0).strong().color(theme.success));
                                     ui.add_space(4.0);
                                     let mut gain_val = app.mixer.channel_faders[i];
                                     if widgets::render_knob_sized(ui, &mut gain_val, 0.0..=2.0, "", deck_color, 24.0).changed() {
