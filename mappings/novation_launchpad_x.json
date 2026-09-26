@@ -1,5 +1,5 @@
 {
-  "name": "Novation Launchpad X",
+  "name": "Novation Launchpad X Complete",
   "controls": [
     {
       "cc_number": 91,
@@ -27,67 +27,113 @@
     },
     {
       "cc_number": 95,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 0 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 96,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 1 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 97,
+      "target": { "NamedParam": { "node_name": "deck_a_isolator", "param_id": 2 } },
+      "min_val": 0.0,
+      "max_val": 1.0
+    },
+    {
+      "cc_number": 98,
       "target": { "NamedParam": { "node_name": "master_crossfader", "param_id": 0 } },
       "min_val": 0.0,
       "max_val": 1.0
     }
   ],
   "triggers": [
-    {
-      "note_number": 81,
-      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "A" } } } }
-    },
-    {
-      "note_number": 71,
-      "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "A" } } } }
-    },
-    {
-      "note_number": 61,
-      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "B" } } } }
-    },
-    {
-      "note_number": 51,
-      "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "B" } } } }
-    },
-    {
-      "note_number": 41,
-      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "C" } } } }
-    },
-    {
-      "note_number": 31,
-      "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "C" } } } }
-    },
-    {
-      "note_number": 21,
-      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "D" } } } }
-    },
-    {
-      "note_number": 11,
-      "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "D" } } } }
-    },
-    {
-      "note_number": 82,
-      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "A" } } } }
-    },
-    {
-      "note_number": 83,
-      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "B" } } } }
-    },
-    {
-      "note_number": 84,
-      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "C" } } } }
-    },
-    {
-      "note_number": 85,
-      "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "D" } } } }
-    },
-    {
-      "note_number": 19,
-      "target": { "Command": { "Core": "Play" } }
-    },
-    {
-      "note_number": 29,
-      "target": { "Command": { "Core": "Pause" } }
-    }
+    { "note_number": 81, "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "A" } } } } },
+    { "note_number": 82, "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "A" } } } } },
+    { "note_number": 83, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 0, "cue_idx": 0 } } } } },
+    { "note_number": 84, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 0, "cue_idx": 1 } } } } },
+
+    { "note_number": 85, "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "B" } } } } },
+    { "note_number": 86, "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "B" } } } } },
+    { "note_number": 87, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 1, "cue_idx": 0 } } } } },
+    { "note_number": 88, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 1, "cue_idx": 1 } } } } },
+
+    { "note_number": 71, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 0, "cue_idx": 2 } } } } },
+    { "note_number": 72, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 0, "cue_idx": 3 } } } } },
+    { "note_number": 73, "target": { "Command": { "Performance": { "TriggerSlice": { "node_idx": 0, "slice_idx": 0 } } } } },
+    { "note_number": 74, "target": { "Command": { "Performance": { "TriggerSlice": { "node_idx": 0, "slice_idx": 1 } } } } },
+
+    { "note_number": 75, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 1, "cue_idx": 2 } } } } },
+    { "note_number": 76, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 1, "cue_idx": 3 } } } } },
+    { "note_number": 77, "target": { "Command": { "Performance": { "TriggerSlice": { "node_idx": 1, "slice_idx": 0 } } } } },
+    { "note_number": 78, "target": { "Command": { "Performance": { "TriggerSlice": { "node_idx": 1, "slice_idx": 1 } } } } },
+
+    { "note_number": 61, "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "C" } } } } },
+    { "note_number": 62, "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "C" } } } } },
+    { "note_number": 63, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 2, "cue_idx": 0 } } } } },
+    { "note_number": 64, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 2, "cue_idx": 1 } } } } },
+
+    { "note_number": 65, "target": { "Command": { "Performance": { "PlayDeck": { "deck_id": "D" } } } } },
+    { "note_number": 66, "target": { "Command": { "Performance": { "StopDeck": { "deck_id": "D" } } } } },
+    { "note_number": 67, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 3, "cue_idx": 0 } } } } },
+    { "note_number": 68, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 3, "cue_idx": 1 } } } } },
+
+    { "note_number": 51, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 2, "cue_idx": 2 } } } } },
+    { "note_number": 52, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 2, "cue_idx": 3 } } } } },
+    { "note_number": 53, "target": { "Command": { "Performance": { "TriggerSlice": { "node_idx": 2, "slice_idx": 0 } } } } },
+    { "note_number": 54, "target": { "Command": { "Performance": { "TriggerSlice": { "node_idx": 2, "slice_idx": 1 } } } } },
+
+    { "note_number": 55, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 3, "cue_idx": 2 } } } } },
+    { "note_number": 56, "target": { "Command": { "Performance": { "JumpToHotCue": { "node_idx": 3, "cue_idx": 3 } } } } },
+    { "note_number": 57, "target": { "Command": { "Performance": { "TriggerSlice": { "node_idx": 3, "slice_idx": 0 } } } } },
+    { "note_number": 58, "target": { "Command": { "Performance": { "TriggerSlice": { "node_idx": 3, "slice_idx": 1 } } } } },
+
+    { "note_number": 41, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 0, "step": 0, "value": 1.0 } } } } },
+    { "note_number": 42, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 0, "step": 1, "value": 1.0 } } } } },
+    { "note_number": 43, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 0, "step": 2, "value": 1.0 } } } } },
+    { "note_number": 44, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 0, "step": 3, "value": 1.0 } } } } },
+    { "note_number": 45, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 0, "step": 4, "value": 1.0 } } } } },
+    { "note_number": 46, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 0, "step": 5, "value": 1.0 } } } } },
+    { "note_number": 47, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 0, "step": 6, "value": 1.0 } } } } },
+    { "note_number": 48, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 0, "step": 7, "value": 1.0 } } } } },
+
+    { "note_number": 31, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 1, "step": 0, "value": 1.0 } } } } },
+    { "note_number": 32, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 1, "step": 1, "value": 1.0 } } } } },
+    { "note_number": 33, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 1, "step": 2, "value": 1.0 } } } } },
+    { "note_number": 34, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 1, "step": 3, "value": 1.0 } } } } },
+    { "note_number": 35, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 1, "step": 4, "value": 1.0 } } } } },
+    { "note_number": 36, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 1, "step": 5, "value": 1.0 } } } } },
+    { "note_number": 37, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 1, "step": 6, "value": 1.0 } } } } },
+    { "note_number": 38, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 1, "step": 7, "value": 1.0 } } } } },
+
+    { "note_number": 21, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 2, "step": 0, "value": 1.0 } } } } },
+    { "note_number": 22, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 2, "step": 1, "value": 1.0 } } } } },
+    { "note_number": 23, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 2, "step": 2, "value": 1.0 } } } } },
+    { "note_number": 24, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 2, "step": 3, "value": 1.0 } } } } },
+    { "note_number": 25, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 2, "step": 4, "value": 1.0 } } } } },
+    { "note_number": 26, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 2, "step": 5, "value": 1.0 } } } } },
+    { "note_number": 27, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 2, "step": 6, "value": 1.0 } } } } },
+    { "note_number": 28, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 2, "step": 7, "value": 1.0 } } } } },
+
+    { "note_number": 11, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 3, "step": 0, "value": 1.0 } } } } },
+    { "note_number": 12, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 3, "step": 1, "value": 1.0 } } } } },
+    { "note_number": 13, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 3, "step": 2, "value": 1.0 } } } } },
+    { "note_number": 14, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 3, "step": 3, "value": 1.0 } } } } },
+    { "note_number": 15, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 3, "step": 4, "value": 1.0 } } } } },
+    { "note_number": 16, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 3, "step": 5, "value": 1.0 } } } } },
+    { "note_number": 17, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 3, "step": 6, "value": 1.0 } } } } },
+    { "note_number": 18, "target": { "Command": { "Performance": { "SetSequencerStep": { "node_idx": 10, "track": 3, "step": 7, "value": 1.0 } } } } },
+
+    { "note_number": 89, "target": { "Command": { "Core": "Play" } } },
+    { "note_number": 79, "target": { "Command": { "Core": "Pause" } } },
+    { "note_number": 69, "target": { "Command": { "Performance": { "SetDeckSync": { "deck_id": "A", "enabled": true } } } } },
+    { "note_number": 59, "target": { "Command": { "Performance": { "SetDeckSync": { "deck_id": "B", "enabled": true } } } } },
+    { "note_number": 49, "target": { "Command": { "Performance": { "SetDeckSync": { "deck_id": "C", "enabled": true } } } } },
+    { "note_number": 39, "target": { "Command": { "Performance": { "SetDeckSync": { "deck_id": "D", "enabled": true } } } } },
+    { "note_number": 29, "target": { "Command": { "Core": "Undo" } } },
+    { "note_number": 19, "target": { "Command": { "Core": "Redo" } } }
   ]
 }
