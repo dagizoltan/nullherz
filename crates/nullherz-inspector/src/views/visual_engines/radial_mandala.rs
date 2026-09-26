@@ -19,6 +19,10 @@ pub enum MandalaStyle {
     WavyContourStar,
     NebulaDustVortex,
     SolarFlareCorona,
+    ConcentricRadarSonar,
+    NeonOscilloscopeRing,
+    SmoothContourWaveGlow,
+    PixelEqualizerSymmetry,
 }
 
 impl MandalaStyle {
@@ -33,6 +37,10 @@ impl MandalaStyle {
             MandalaStyle::WavyContourStar,
             MandalaStyle::NebulaDustVortex,
             MandalaStyle::SolarFlareCorona,
+            MandalaStyle::ConcentricRadarSonar,
+            MandalaStyle::NeonOscilloscopeRing,
+            MandalaStyle::SmoothContourWaveGlow,
+            MandalaStyle::PixelEqualizerSymmetry,
         ]
     }
 
@@ -47,6 +55,10 @@ impl MandalaStyle {
             MandalaStyle::WavyContourStar => "Wavy Contour Star (Undulating Geometry)",
             MandalaStyle::NebulaDustVortex => "Nebula Dust Vortex (Cosmic Particle Swirl)",
             MandalaStyle::SolarFlareCorona => "Solar Flare Corona (Eclipse Spikes & Field)",
+            MandalaStyle::ConcentricRadarSonar => "Concentric Radar Sonar (Pulse Rings & Ticks)",
+            MandalaStyle::NeonOscilloscopeRing => "Neon Oscilloscope Ring (Lissajous Vector Wave)",
+            MandalaStyle::SmoothContourWaveGlow => "Smooth Contour Wave Glow (Undulating Spectrum)",
+            MandalaStyle::PixelEqualizerSymmetry => "Pixel Equalizer Symmetry (Block Spectrum Matrix)",
         }
     }
 }
@@ -127,6 +139,10 @@ impl NeuralVisualEngine for RadialMandalaEngine {
             MandalaStyle::WavyContourStar => self.render_wavy_contour_star(ui, rect, nervous, time),
             MandalaStyle::NebulaDustVortex => self.render_nebula_dust_vortex(ui, rect, nervous, time),
             MandalaStyle::SolarFlareCorona => self.render_solar_flare_corona(ui, rect, nervous, time),
+            MandalaStyle::ConcentricRadarSonar => self.render_concentric_radar_sonar(ui, rect, nervous, time),
+            MandalaStyle::NeonOscilloscopeRing => self.render_neon_oscilloscope_ring(ui, rect, nervous, time),
+            MandalaStyle::SmoothContourWaveGlow => self.render_smooth_contour_wave_glow(ui, rect, nervous, time),
+            MandalaStyle::PixelEqualizerSymmetry => self.render_pixel_equalizer_symmetry(ui, rect, nervous, time),
         }
     }
 }
@@ -575,6 +591,254 @@ impl RadialMandalaEngine {
             inner_disc_r,
             egui::Stroke::new(2.5, egui::Color32::from_rgb(220, 225, 235)),
         );
+    }
+
+    /// Style 10 (from 21-25-35.png & 21-25-45.png): Concentric circular radar sonar grid with perimeter tick marks and dynamic spectrum spikes.
+    fn render_concentric_radar_sonar(
+        &self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        nervous: &AudioNervousSystem,
+        time: f32,
+    ) {
+        let center = rect.center();
+        let max_r = (rect.width().min(rect.height())) * 0.44;
+
+        // Concentric radar rings with fine ticks
+        let ring_count = 6;
+        for r_i in 1..=ring_count {
+            let frac = r_i as f32 / ring_count as f32;
+            let radius = max_r * frac * (1.0 + nervous.low_band * 0.05);
+
+            let stroke_w = if r_i == ring_count { 2.0 } else { 1.0 };
+            let alpha = 0.3 + 0.4 * frac;
+            let ring_color = egui::Color32::from_rgba_unmultiplied(0, 220, 255, (alpha * 255.0) as u8);
+
+            ui.painter().circle_stroke(center, radius, egui::Stroke::new(stroke_w, ring_color));
+
+            // Tick marks along the ring perimeter
+            let ticks = 36;
+            for t in 0..ticks {
+                let theta = (t as f32 / ticks as f32) * std::f32::consts::TAU;
+                let tick_len = if t % 3 == 0 { 6.0 } else { 3.0 };
+
+                let p1 = egui::pos2(center.x + theta.cos() * (radius - tick_len), center.y + theta.sin() * (radius - tick_len));
+                let p2 = egui::pos2(center.x + theta.cos() * (radius + tick_len), center.y + theta.sin() * (radius + tick_len));
+
+                ui.painter().line_segment([p1, p2], egui::Stroke::new(1.0, ring_color.linear_multiply(0.7)));
+            }
+        }
+
+        // Dynamic audio-reactive radial spectrum spikes
+        let num_spikes = 72;
+        let inner_r = max_r * 0.35;
+
+        for i in 0..num_spikes {
+            let frac = i as f32 / num_spikes as f32;
+            let theta = frac * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2 + time * 0.1;
+
+            let band_energy = match (i * 3) / num_spikes {
+                0 => nervous.low_band,
+                1 => nervous.mid_band,
+                _ => nervous.high_band,
+            };
+
+            let wave_mod = ((theta * 8.0 + time * 3.0).sin() * 0.5 + 0.5) * band_energy;
+            let spike_h = (max_r - inner_r) * wave_mod * (1.0 + nervous.rms_energy * 0.5);
+
+            let p1 = egui::pos2(center.x + theta.cos() * inner_r, center.y + theta.sin() * inner_r);
+            let p2 = egui::pos2(center.x + theta.cos() * (inner_r + spike_h), center.y + theta.sin() * (inner_r + spike_h));
+
+            let hue = (0.55 + frac * 0.25 + self.color_palette_shift) % 1.0; // Cyan to Deep Blue/Purple
+            let color = hsva_to_color32(hue, 0.9, 1.0, 0.8 + nervous.onset_strength * 0.2);
+
+            ui.painter().line_segment([p1, p2], egui::Stroke::new(2.0, color));
+        }
+
+        // Central glowing radar core disc
+        let core_r = inner_r * (0.8 + nervous.low_band * 0.2);
+        ui.painter().circle_filled(
+            center,
+            core_r,
+            egui::Color32::from_rgba_unmultiplied(10, 20, 50, 220),
+        );
+        ui.painter().circle_stroke(
+            center,
+            core_r,
+            egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 230, 255)),
+        );
+    }
+
+    /// Style 11 (from 21-26-23.png, 21-26-32.png, 21-26-41.png): Neon Oscilloscope Vector Lissajous Ring.
+    fn render_neon_oscilloscope_ring(
+        &self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        nervous: &AudioNervousSystem,
+        time: f32,
+    ) {
+        let center = rect.center();
+        let max_r = (rect.width().min(rect.height())) * 0.42;
+
+        let num_loops = 5;
+        let pts_per_loop = 180;
+
+        for l in 0..num_loops {
+            let l_frac = l as f32 / num_loops as f32;
+            let phase_shift = time * (0.5 + l_frac * 0.3) + l_frac * std::f32::consts::TAU;
+
+            let mut pts = Vec::with_capacity(pts_per_loop + 1);
+
+            for p in 0..=pts_per_loop {
+                let theta = (p as f32 / pts_per_loop as f32) * std::f32::consts::TAU;
+
+                // Lissajous frequency harmonics mapped to polar radius
+                let freq_a = 3.0 + l as f32;
+                let freq_b = 4.0 + l as f32;
+
+                let osc_a = (theta * freq_a + phase_shift).sin() * nervous.mid_band;
+                let osc_b = (theta * freq_b - phase_shift * 1.2).cos() * nervous.high_band;
+
+                let radius = max_r * (0.5 + 0.3 * l_frac + 0.2 * (osc_a + osc_b)) * (1.0 + nervous.low_band * 0.15);
+
+                let x = center.x + theta.cos() * radius;
+                let y = center.y + theta.sin() * radius;
+                pts.push(egui::pos2(x, y));
+            }
+
+            // Vibrant glowing neon gradient matching 21-26-23/32/41 (electric cyan, neon pink, orange gold)
+            let hue = (0.8 + l_frac * 0.3 + time * 0.05 + self.color_palette_shift) % 1.0;
+            let color = hsva_to_color32(hue, 0.95, 1.0, 0.75 + nervous.rms_energy * 0.25);
+
+            for i in 0..pts.len() - 1 {
+                ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(2.2 - l_frac * 0.8, color));
+            }
+        }
+    }
+
+    /// Style 12 (from 21-27-25.png & 21-27-43.png): Smooth contour wave glow forming undulating star/bloom geometry.
+    fn render_smooth_contour_wave_glow(
+        &self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        nervous: &AudioNervousSystem,
+        time: f32,
+    ) {
+        let center = rect.center();
+        let max_r = (rect.width().min(rect.height())) * 0.46;
+
+        let num_contours = 32;
+        let pts_per_contour = 120;
+        let center_disc_r = max_r * 0.32;
+
+        for c in (0..num_contours).rev() {
+            let c_frac = c as f32 / num_contours as f32;
+            let base_r = center_disc_r + (max_r - center_disc_r) * c_frac;
+
+            let mut pts = Vec::with_capacity(pts_per_contour + 1);
+
+            for p in 0..=pts_per_contour {
+                let theta = (p as f32 / pts_per_contour as f32) * std::f32::consts::TAU;
+
+                // Smooth multi-petal undulating wave contour
+                let petal_wave = (theta * 6.0).cos();
+                let secondary_wave = (theta * 12.0 + time * 2.0).sin() * nervous.high_band * 0.5;
+
+                let mod_r = base_r * (1.0 + 0.18 * petal_wave * (1.0 + nervous.mid_band) + 0.05 * secondary_wave);
+
+                pts.push(egui::pos2(center.x + theta.cos() * mod_r, center.y + theta.sin() * mod_r));
+            }
+
+            // Gradient shift from deep purple/pink inner to electric blue/cyan outer
+            let hue = (0.85 - c_frac * 0.3 + self.color_palette_shift) % 1.0;
+            let alpha = 0.4 + 0.5 * (1.0 - c_frac) + nervous.rms_energy * 0.2;
+            let color = hsva_to_color32(hue, 0.9, 0.95, alpha);
+
+            for i in 0..pts.len() - 1 {
+                ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(1.4, color));
+            }
+        }
+
+        // Inner dark central disc with text boundary ring matching reference 21-27-43
+        ui.painter().circle_filled(
+            center,
+            center_disc_r,
+            egui::Color32::from_rgb(10, 12, 20),
+        );
+        ui.painter().circle_stroke(
+            center,
+            center_disc_r,
+            egui::Stroke::new(2.5, egui::Color32::from_rgb(0, 200, 255)),
+        );
+        ui.painter().circle_stroke(
+            center,
+            center_disc_r * 0.92,
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 0, 200)),
+        );
+    }
+
+    /// Style 13 (from 21-27-54.png): Dynamic pixel block spectrum matrix.
+    fn render_pixel_equalizer_symmetry(
+        &self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        nervous: &AudioNervousSystem,
+        time: f32,
+    ) {
+        let center = rect.center();
+        let max_w = rect.width() * 0.85;
+        let num_columns = 64;
+        let col_w = max_w / num_columns as f32;
+        let block_h = 6.0;
+        let gap = 2.0;
+
+        let max_blocks = 24;
+
+        for col in 0..num_columns {
+            let col_frac = col as f32 / num_columns as f32;
+            let dist_from_center = (col_frac - 0.5).abs() * 2.0; // 0.0 at center, 1.0 at edges
+
+            let band_energy = match (col * 3) / num_columns {
+                0 => nervous.low_band,
+                1 => nervous.mid_band,
+                _ => nervous.high_band,
+            };
+
+            // Mirror symmetry audio waveform response
+            let synth_h = ((col_frac * 16.0 + time * 3.0).sin() * 0.5 + 0.5) * band_energy + (1.0 - dist_from_center) * 0.4;
+            let active_blocks = ((synth_h.clamp(0.05, 1.0) * max_blocks as f32) as usize).min(max_blocks);
+
+            let x_pos = rect.min.x + (rect.width() - max_w) * 0.5 + col as f32 * col_w;
+
+            for b in 0..active_blocks {
+                let y_offset = b as f32 * (block_h + gap);
+
+                // Symmetric top and bottom extension from central horizontal axis
+                let top_y = center.y - y_offset - block_h;
+                let bot_y = center.y + y_offset;
+
+                let block_rect_top = egui::Rect::from_min_size(egui::pos2(x_pos, top_y), egui::vec2(col_w - gap, block_h));
+                let block_rect_bot = egui::Rect::from_min_size(egui::pos2(x_pos, bot_y), egui::vec2(col_w - gap, block_h));
+
+                // Color gradient from central blue/purple to outer orange/red matching reference 21-27-54
+                let hue = (0.65 - col_frac * 0.5 + self.color_palette_shift) % 1.0;
+                let color = hsva_to_color32(hue, 0.9, 1.0, 0.85);
+
+                ui.painter().rect_filled(block_rect_top, 1.0, color);
+                ui.painter().rect_filled(block_rect_bot, 1.0, color);
+            }
+
+            // Floating peak particles above active block columns
+            if active_blocks > 0 && (col % 2 == 0) {
+                let peak_offset = (active_blocks as f32 + 2.0 + (col as f32 * 0.5 + time * 4.0).sin().abs() * 3.0) * (block_h + gap);
+                let p_top = egui::pos2(x_pos + col_w * 0.5, center.y - peak_offset);
+                let p_bot = egui::pos2(x_pos + col_w * 0.5, center.y + peak_offset);
+
+                let particle_color = egui::Color32::from_rgb(255, 100, 220);
+                ui.painter().circle_filled(p_top, col_w * 0.35, particle_color);
+                ui.painter().circle_filled(p_bot, col_w * 0.35, particle_color);
+            }
+        }
     }
 }
 
