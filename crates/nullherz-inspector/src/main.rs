@@ -236,90 +236,235 @@ impl InspectorApp {
 
     pub fn render_visuals_view(&mut self, ui: &mut egui::Ui, _telemetry: &Option<Telemetry>) {
         ui.horizontal(|ui| {
-            ui.heading(egui::RichText::new("NEURAL & ALGORITHMIC LIVE VISUAL SYNTHESIS").strong().color(self.theme.text_primary));
+            ui.heading(egui::RichText::new("NEURAL & ALGORITHMIC VISUAL MIXER").strong().color(self.theme.text_primary));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(format!("{} Spawn Detached Visual Window", egui_phosphor::regular::ARROW_SQUARE_OUT)).clicked() {
+                if ui.button(format!("{} Detach Visual Mixer Window", egui_phosphor::regular::ARROW_SQUARE_OUT)).clicked() {
                     self.detached_views.insert(View::Visuals);
+                }
+                if ui.button(format!("{} + Add Visual Channel", egui_phosphor::regular::PLUS)).clicked() {
+                    let count = self.viz.channels.len() + 1;
+                    self.viz.channels.push(state::VisualChannel::new(
+                        &format!("VIZ {} — SWARM", count),
+                        state::VisualGenerator::ShaderParticleSwarm,
+                        vec![state::VisualInputSource::MasterMix],
+                    ));
                 }
             });
         });
         ui.separator();
+        ui.add_space(self.theme.space_xs);
+
+        ui.label(
+            egui::RichText::new("Attach multiple audio/MIDI channels to neural & algorithmic visual generators. Standardized insert racks, multi-window detachables, and parametric controls.")
+                .size(self.theme.type_caption)
+                .color(self.theme.text_secondary),
+        );
         ui.add_space(self.theme.space_sm);
 
-        ui.label(egui::RichText::new("Tapping live telemetry, spectrums, 2D goniometer phase vectors, and 16D DNA latent manifolds for visual modulation.").size(self.theme.type_caption).color(self.theme.text_secondary));
-        ui.add_space(self.theme.space_md);
+        let theme = self.theme.clone();
 
-        egui::ScrollArea::vertical().id_source("visuals_scroll").show(ui, |ui| {
-            ui.columns(2, |columns| {
-                // Column 1: Live Spectrum & Frequency Energy
-                columns[0].group(|ui| {
-                    ui.label(egui::RichText::new("FFT SPECTRUM & FREQUENCY ENERGY").strong().color(self.theme.accent));
-                    ui.add_space(8.0);
-                    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 160.0), egui::Sense::hover());
-                    ui.painter().rect_filled(rect, 4.0, self.theme.bg_inset);
+        egui::ScrollArea::vertical().id_source("visual_mixer_scroll").show(ui, |ui| {
+            // Visual Channel Strips Grid
+            ui.horizontal(|ui| {
+                let num_channels = self.viz.channels.len();
+                let mut channel_to_remove = None;
 
-                    let num_bars = 128;
-                    let bar_w = (rect.width() / num_bars as f32).max(1.0);
-                    for i in 0..num_bars {
-                        let amp = self.viz.damped_spectrum[i].clamp(0.0, 1.0);
-                        let bar_h = amp * rect.height();
-                        let bar_rect = egui::Rect::from_min_max(
-                            egui::pos2(rect.left() + i as f32 * bar_w, rect.bottom() - bar_h),
-                            egui::pos2(rect.left() + (i + 1) as f32 * bar_w - 1.0, rect.bottom()),
-                        );
-                        let color = self.theme.accent.linear_multiply(0.3 + 0.7 * amp);
-                        ui.painter().rect_filled(bar_rect, 1.0, color);
-                    }
-                });
+                for c_idx in 0..num_channels {
+                    let is_selected = self.viz.selected_channel_idx == c_idx;
+                    let channel = &mut self.viz.channels[c_idx];
 
-                // Column 2: Stereo Phase Goniometer & 16D Latent Manifold
-                columns[1].group(|ui| {
-                    ui.label(egui::RichText::new("STEREO PHASE GONIOMETER & DNA LATENT MANIFOLD").strong().color(self.theme.success));
-                    ui.add_space(8.0);
-                    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 160.0), egui::Sense::hover());
-                    ui.painter().rect_filled(rect, 4.0, self.theme.bg_inset);
+                    ui.group(|ui| {
+                        ui.set_min_width(280.0);
+                        ui.set_max_width(320.0);
 
-                    let center = rect.center();
-                    let radius = (rect.height() * 0.4).min(rect.width() * 0.4);
-
-                    // Draw 16D Latent Ring Points
-                    for i in 0..16 {
-                        let angle = (i as f32 / 16.0) * std::f32::consts::TAU;
-                        let val = self.viz.damped_latent[i].clamp(-1.0, 1.0);
-                        let r = radius * (0.6 + 0.4 * val.abs());
-                        let pt = egui::pos2(center.x + angle.cos() * r, center.y + angle.sin() * r);
-                        ui.painter().circle_filled(pt, 3.5, if val >= 0.0 { self.theme.accent } else { self.theme.danger });
-                        ui.painter().line_segment([center, pt], egui::Stroke::new(1.0, self.theme.text_disabled.linear_multiply(0.3)));
-                    }
-                });
-            });
-
-            ui.add_space(16.0);
-
-            // Live Signal Taps & Attachments Panel
-            ui.group(|ui| {
-                ui.label(egui::RichText::new("LIVE INPUT SIGNAL TAPS & VISUAL PLUGINS").strong().color(self.theme.text_primary));
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.label("Live Input Source:");
-                    let sources = ["Master Mix Output", "Mic Input", "Deck A Channel", "Deck B Channel", "Deck C Channel", "Deck D Channel", "Camera Feed", "MIDI Trigger Bus"];
-                    let mut current_src = 0;
-                    egui::ComboBox::from_id_source("viz_input_src")
-                        .selected_text(sources[current_src])
-                        .show_ui(ui, |ui| {
-                            for (idx, src) in sources.iter().enumerate() {
-                                if ui.selectable_label(current_src == idx, *src).clicked() {
-                                    current_src = idx;
+                        // Header / Selector
+                        ui.horizontal(|ui| {
+                            let title = egui::RichText::new(&channel.name).strong().color(if is_selected { theme.accent } else { theme.text_primary });
+                            if ui.button(title).clicked() {
+                                self.viz.selected_channel_idx = c_idx;
+                            }
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if num_channels > 1 && ui.button(egui_phosphor::regular::X).on_hover_text("Remove Channel").clicked() {
+                                    channel_to_remove = Some(c_idx);
                                 }
+                                if ui.button(egui_phosphor::regular::ARROW_SQUARE_OUT).on_hover_text("Detach Channel Window").clicked() {
+                                    self.detached_views.insert(View::Visuals);
+                                }
+                            });
+                        });
+                        ui.separator();
+
+                        // Generator Selection
+                        ui.horizontal(|ui| {
+                            ui.label("Generator:");
+                            egui::ComboBox::from_id_source(format!("gen_combo_{}", c_idx))
+                                .selected_text(channel.generator.name())
+                                .show_ui(ui, |ui| {
+                                    for generator_item in state::VisualGenerator::all() {
+                                        ui.selectable_value(&mut channel.generator, generator_item.clone(), generator_item.name());
+                                    }
+                                });
+                        });
+
+                        ui.add_space(4.0);
+
+                        // Attached Multi-Inputs
+                        ui.group(|ui| {
+                            ui.label(egui::RichText::new("ATTACHED INPUT CHANNELS").strong().size(theme.type_caption).color(theme.accent));
+                            ui.horizontal_wrapped(|ui| {
+                                for src in state::VisualInputSource::all() {
+                                    let is_attached = channel.attached_inputs.contains(src);
+                                    let mut check_state = is_attached;
+                                    if ui.checkbox(&mut check_state, src.name()).changed() {
+                                        if check_state && !is_attached {
+                                            channel.attached_inputs.push(src.clone());
+                                        } else if !check_state {
+                                            channel.attached_inputs.retain(|s| s != src);
+                                        }
+                                    }
+                                }
+                            });
+                        });
+
+                        ui.add_space(4.0);
+
+                        // Visual Preview Box & Mini Controls
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 120.0), egui::Sense::hover());
+                        ui.painter().rect_filled(rect, 4.0, theme.bg_inset);
+
+                        // Render Live Neural / Algorithmic Visual Preview
+                        match channel.generator {
+                            state::VisualGenerator::NeuralLatentManifold => {
+                                let center = rect.center();
+                                let radius = (rect.height() * 0.4).min(rect.width() * 0.4);
+                                for i in 0..16 {
+                                    let angle = (i as f32 / 16.0) * std::f32::consts::TAU;
+                                    let val = self.viz.damped_latent[i].clamp(-1.0, 1.0);
+                                    let r = radius * (0.5 + 0.5 * val.abs() * channel.gain_sensitivity);
+                                    let pt = egui::pos2(center.x + angle.cos() * r, center.y + angle.sin() * r);
+                                    ui.painter().circle_filled(pt, 3.0, if val >= 0.0 { theme.accent } else { theme.danger });
+                                    ui.painter().line_segment([center, pt], egui::Stroke::new(1.0, theme.text_disabled.linear_multiply(0.2)));
+                                }
+                            }
+                            state::VisualGenerator::PhaseGoniometer2D => {
+                                let num_pts = 64;
+                                for i in 0..num_pts {
+                                    let val = self.viz.damped_goniometer[i] * channel.gain_sensitivity;
+                                    let x = rect.left() + (i as f32 / num_pts as f32) * rect.width();
+                                    let y = rect.center().y - val * (rect.height() * 0.4);
+                                    ui.painter().circle_filled(egui::pos2(x, y), 2.0, theme.success);
+                                }
+                            }
+                            state::VisualGenerator::FftSpectrumMesh => {
+                                let num_bars = 64;
+                                let bar_w = (rect.width() / num_bars as f32).max(1.0);
+                                for i in 0..num_bars {
+                                    let amp = (self.viz.damped_spectrum[i] * channel.gain_sensitivity).clamp(0.0, 1.0);
+                                    let bar_h = amp * rect.height();
+                                    let bar_rect = egui::Rect::from_min_max(
+                                        egui::pos2(rect.left() + i as f32 * bar_w, rect.bottom() - bar_h),
+                                        egui::pos2(rect.left() + (i + 1) as f32 * bar_w - 1.0, rect.bottom()),
+                                    );
+                                    ui.painter().rect_filled(bar_rect, 1.0, theme.accent.linear_multiply(0.4 + 0.6 * amp));
+                                }
+                            }
+                            state::VisualGenerator::ReactionDiffusionNN => {
+                                let center = rect.center();
+                                let time = ui.input(|i| i.time) * channel.param_speed as f64;
+                                for i in 0..12 {
+                                    let r = (i as f32 * 8.0 + (time * 20.0) as f32) % (rect.height() * 0.45);
+                                    ui.painter().circle_stroke(
+                                        center,
+                                        r,
+                                        egui::Stroke::new(1.5, theme.accent.linear_multiply(1.0 - r / (rect.height() * 0.45))),
+                                    );
+                                }
+                            }
+                            state::VisualGenerator::ShaderParticleSwarm => {
+                                let time = ui.input(|i| i.time) * channel.param_speed as f64;
+                                let count = (channel.param_particle_density * 40.0) as usize;
+                                for i in 0..count {
+                                    let phase = i as f64 * 0.3 + time;
+                                    let x = rect.left() + ((phase.sin() * 0.5 + 0.5) as f32) * rect.width();
+                                    let y = rect.top() + (((phase * 1.3).cos() * 0.5 + 0.5) as f32) * rect.height();
+                                    ui.painter().circle_filled(egui::pos2(x, y), 2.5, theme.success);
+                                }
+                            }
+                        }
+
+                        ui.add_space(4.0);
+
+                        // Insert Rack Items Section
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("VISUAL INSERT RACK").strong().size(theme.type_caption).color(theme.text_secondary));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.button("+ FX").clicked() {
+                                        channel.inserts.push(state::VisualRackItem {
+                                            id: "fx-item".to_string(),
+                                            name: "Neural Glitch Modulator".to_string(),
+                                            enabled: true,
+                                            mix: 0.5,
+                                        });
+                                    }
+                                });
+                            });
+                            for item in &mut channel.inserts {
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut item.enabled, "");
+                                    ui.label(&item.name);
+                                    ui.add(egui::Slider::new(&mut item.mix, 0.0..=1.0).show_value(false));
+                                });
                             }
                         });
 
-                    ui.add_space(20.0);
-                    if ui.button(format!("{} Browse Visual Sidecars in Store", egui_phosphor::regular::SHOPPING_BAG)).clicked() {
-                        self.active_view = View::Store;
-                        self.store.active_tag_filter = Some("real-time".to_string());
-                    }
-                });
+                        ui.add_space(4.0);
+
+                        // Standardized Parametric Controls
+                        ui.group(|ui| {
+                            ui.label(egui::RichText::new("PARAMETRIC CONTROLS").strong().size(theme.type_caption).color(theme.text_primary));
+                            egui::Grid::new(format!("params_grid_{}", c_idx)).num_columns(2).show(ui, |ui| {
+                                ui.label("Speed:");
+                                ui.add(egui::Slider::new(&mut channel.param_speed, 0.1..=4.0));
+                                ui.end_row();
+
+                                ui.label("Neural Temp:");
+                                ui.add(egui::Slider::new(&mut channel.param_neural_temp, 0.0..=2.0));
+                                ui.end_row();
+
+                                ui.label("Feedback:");
+                                ui.add(egui::Slider::new(&mut channel.param_feedback, 0.0..=1.0));
+                                ui.end_row();
+
+                                ui.label("Color Shift:");
+                                ui.add(egui::Slider::new(&mut channel.param_color_shift, 0.0..=1.0));
+                                ui.end_row();
+
+                                ui.label("Density / Res:");
+                                ui.add(egui::Slider::new(&mut channel.param_particle_density, 0.1..=1.0));
+                                ui.end_row();
+                            });
+                        });
+
+                        ui.add_space(4.0);
+
+                        // MIDI Learn & Channel Controls
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.toggle_value(&mut channel.midi_learn_active, format!("{} MIDI Learn", egui_phosphor::regular::PIANO_KEYS));
+                                ui.add_space(10.0);
+                                ui.label(format!("Ch: {} | CC: {}", channel.midi_channel, channel.midi_cc_param));
+                            });
+                        });
+                    });
+
+                    ui.add_space(10.0);
+                }
+
+                if let Some(idx) = channel_to_remove {
+                    self.viz.channels.remove(idx);
+                    self.viz.selected_channel_idx = self.viz.selected_channel_idx.saturating_sub(1);
+                }
             });
         });
     }

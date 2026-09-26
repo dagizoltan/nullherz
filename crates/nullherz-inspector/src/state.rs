@@ -398,7 +398,154 @@ impl Default for SettingsState {
     }
 }
 
-/// Damped visualizer buffers (spectrum, goniometer, latent space, meters).
+#[derive(Clone, PartialEq, Debug)]
+pub enum VisualGenerator {
+    NeuralLatentManifold,
+    PhaseGoniometer2D,
+    FftSpectrumMesh,
+    ReactionDiffusionNN,
+    ShaderParticleSwarm,
+}
+
+impl VisualGenerator {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::NeuralLatentManifold => "Neural Latent Manifold",
+            Self::PhaseGoniometer2D => "2D Phase Goniometer",
+            Self::FftSpectrumMesh => "FFT Spectrum Mesh",
+            Self::ReactionDiffusionNN => "Reaction Diffusion Neural Net",
+            Self::ShaderParticleSwarm => "Shader Particle Swarm",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::NeuralLatentManifold,
+            Self::PhaseGoniometer2D,
+            Self::FftSpectrumMesh,
+            Self::ReactionDiffusionNN,
+            Self::ShaderParticleSwarm,
+        ]
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum VisualInputSource {
+    DeckA,
+    DeckB,
+    DeckC,
+    DeckD,
+    MicInput,
+    MasterMix,
+    MidiTriggerBus,
+}
+
+impl VisualInputSource {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::DeckA => "Deck A Channel",
+            Self::DeckB => "Deck B Channel",
+            Self::DeckC => "Deck C Channel",
+            Self::DeckD => "Deck D Channel",
+            Self::MicInput => "Mic Input",
+            Self::MasterMix => "Master Mix Output",
+            Self::MidiTriggerBus => "MIDI Trigger Bus",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::MasterMix,
+            Self::DeckA,
+            Self::DeckB,
+            Self::DeckC,
+            Self::DeckD,
+            Self::MicInput,
+            Self::MidiTriggerBus,
+        ]
+    }
+}
+
+/// Standardized rack item for visual channel strips
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct VisualRackItem {
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    pub mix: f32,
+}
+
+/// A visual mixer channel strip with multi-input attachments, MIDI control,
+/// insert rack, stereo reactivity, and standardized parametric controls.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct VisualChannel {
+    pub name: String,
+    pub generator: VisualGenerator,
+    /// Attached input sources (allows multiple channels attached to one visual)
+    pub attached_inputs: Vec<VisualInputSource>,
+    pub output_target: String,
+    pub gain_sensitivity: f32,
+    pub reactivity_smoothing: f32,
+    pub stereo_width: f32,
+    pub midi_channel: u8,
+    pub midi_cc_param: u8,
+    pub midi_note_trigger: u8,
+    pub midi_learn_active: bool,
+    pub inserts: Vec<VisualRackItem>,
+    // Standardized parametric controls
+    pub param_speed: f32,
+    pub param_neural_temp: f32,
+    pub param_feedback: f32,
+    pub param_color_shift: f32,
+    pub param_particle_density: f32,
+    pub param_mesh_resolution: f32,
+    pub is_muted: bool,
+    pub is_solo: bool,
+}
+
+impl VisualChannel {
+    pub fn new(name: &str, generator: VisualGenerator, inputs: Vec<VisualInputSource>) -> Self {
+        Self {
+            name: name.to_string(),
+            generator,
+            attached_inputs: inputs,
+            output_target: "Detached Window / Main Viewport".to_string(),
+            gain_sensitivity: 1.0,
+            reactivity_smoothing: 0.8,
+            stereo_width: 1.0,
+            midi_channel: 1,
+            midi_cc_param: 16,
+            midi_note_trigger: 60,
+            midi_learn_active: false,
+            inserts: vec![
+                VisualRackItem {
+                    id: "neural-saturator-v".to_string(),
+                    name: "Neural Color Saturator".to_string(),
+                    enabled: true,
+                    mix: 0.8,
+                },
+                VisualRackItem {
+                    id: "bloom-filter".to_string(),
+                    name: "Anamorphic Bloom Filter".to_string(),
+                    enabled: true,
+                    mix: 0.5,
+                },
+            ],
+            param_speed: 1.0,
+            param_neural_temp: 0.7,
+            param_feedback: 0.3,
+            param_color_shift: 0.5,
+            param_particle_density: 0.8,
+            param_mesh_resolution: 0.6,
+            is_muted: false,
+            is_solo: false,
+        }
+    }
+}
+
+/// Damped visualizer buffers and Visual Mixer channels.
 pub struct VizState {
     pub visualizer_damping: f32,
     pub damped_spectrum: [f32; 128],
@@ -420,6 +567,14 @@ pub struct VizState {
     /// play/stop TOGGLE into a coin flip (a click in a false frame sent
     /// PlayDeck instead of StopDeck: "stop doesn't stop").
     pub last_playstate_counter: u64,
+
+    /// Visual Mixer Channel Strips
+    pub channels: Vec<VisualChannel>,
+    pub selected_channel_idx: usize,
+    #[allow(dead_code)]
+    pub master_visual_gain: f32,
+    #[allow(dead_code)]
+    pub master_visual_brightness: f32,
 }
 
 impl Default for VizState {
@@ -434,6 +589,31 @@ impl Default for VizState {
             last_playstate_counter: 0,
             damped_peaks: [0.0; 4],
             damped_master_peaks: [0.0; 2],
+            channels: vec![
+                VisualChannel::new(
+                    "VIZ 1 — NEURAL LATENT",
+                    VisualGenerator::NeuralLatentManifold,
+                    vec![VisualInputSource::MasterMix, VisualInputSource::MidiTriggerBus],
+                ),
+                VisualChannel::new(
+                    "VIZ 2 — STEREO GONIOMETER",
+                    VisualGenerator::PhaseGoniometer2D,
+                    vec![VisualInputSource::DeckA, VisualInputSource::DeckB],
+                ),
+                VisualChannel::new(
+                    "VIZ 3 — SPECTRUM MESH",
+                    VisualGenerator::FftSpectrumMesh,
+                    vec![VisualInputSource::DeckC, VisualInputSource::DeckD],
+                ),
+                VisualChannel::new(
+                    "VIZ 4 — REACTION DIFFUSION",
+                    VisualGenerator::ReactionDiffusionNN,
+                    vec![VisualInputSource::MicInput, VisualInputSource::MasterMix],
+                ),
+            ],
+            selected_channel_idx: 0,
+            master_visual_gain: 1.0,
+            master_visual_brightness: 1.0,
         }
     }
 }

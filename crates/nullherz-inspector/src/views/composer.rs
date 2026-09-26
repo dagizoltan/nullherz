@@ -675,17 +675,7 @@ mod tests {
                 shortcuts_enabled: false,
                 ..Default::default()
             },
-            viz: crate::state::VizState {
-                visualizer_damping: 0.1,
-                damped_spectrum: [0.0; 128],
-                damped_goniometer: [0.0; 128],
-                damped_latent: [0.0; 16],
-                damped_peaks: [0.0; 4],
-                damped_master_peaks: [0.0; 2],
-                last_deck_positions: [0; 4],
-                deck_still_snapshots: [0; 4],
-                last_playstate_counter: 0,
-            },
+            viz: crate::state::VizState::default(),
             topo: crate::state::TopologyViewState {
                 active_connection_source: None,
                 active_node_drag: None,
