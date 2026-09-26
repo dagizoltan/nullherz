@@ -306,8 +306,9 @@ impl BreederView {
             && let (Some(track_a), Some(track_b)) = (app.get_cached_track(id_a), app.get_cached_track(id_b)) {
 
                 // Dynamically resolve target personality inheritance node ID from topology map
-                let target_node = app.get_node_id("personality_inheritance")
-                    .or_else(|| app.get_node_id("master_personality"))
+                let target_node = app.topo.node_map.get("personality_inheritance")
+                    .or_else(|| app.topo.node_map.get("master_personality"))
+                    .copied()
                     .unwrap_or(0);
 
                 // 1. Spectral Transfusion
