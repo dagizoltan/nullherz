@@ -119,13 +119,16 @@ pub struct DeckState {
     /// Per-deck SYNC latch, mirroring `MixerManager::sync_decks`. **False is
     /// RAW and is the default** — the deck plays at the file's native tempo
     /// until the operator asks otherwise.
+    #[allow(dead_code)]
     pub deck_sync: [bool; 4],
     /// Per-deck KEY latch, mirroring `MixerManager::key_sync_decks`. False is
     /// RAW: no pitch shift.
+    #[allow(dead_code)]
     pub deck_key_sync: [bool; 4],
     /// Per-deck KEY LOCK (master tempo) latch, mirroring
     /// `MixerManager::key_lock_decks`. False is RAW: tempo changes move pitch,
     /// turntable-style.
+    #[allow(dead_code)]
     pub deck_key_lock: [bool; 4],
     /// Active sidecar insert FX attached to each deck channel.
     pub deck_inserts: [Option<String>; 4],
