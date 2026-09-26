@@ -448,13 +448,19 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
             .spacing([theme.space_md, 2.0])
             .show(ui, |ui| {
                 let d = &track.metadata.dna;
-                for (label, val, color) in [
-                    ("Spectral tilt", (d.spectral.tilt + 1.0) / 2.0, theme.deck_colors[1]),
-                    ("Syncopation", d.rhythmic.syncopation_index, theme.success),
-                    ("Glitch density", d.artifacts.glitch_density, theme.deck_colors[2]),
+                for (label, val, text, color) in [
+                    ("Loudness (LUFS)", ((d.perception.lufs_integrated + 24.0) / 24.0).clamp(0.0, 1.0), format!("{:.1} LUFS", d.perception.lufs_integrated), theme.accent),
+                    ("Crest Factor", (d.perception.crest_factor_db / 12.0).clamp(0.0, 1.0), format!("{:.1} dB", d.perception.crest_factor_db), theme.warning),
+                    ("Brightness", d.perception.brightness, format!("{:.0}%", d.perception.brightness * 100.0), theme.deck_colors[0]),
+                    ("Perceptual Energy", d.perception.perceptual_energy, format!("{:.0}%", d.perception.perceptual_energy * 100.0), theme.success),
+                    ("Spectral Flatness", d.perception.spectral_flatness, format!("{:.2}", d.perception.spectral_flatness), theme.deck_colors[2]),
+                    ("Syncopation", d.rhythmic.syncopation_index, format!("{:.0}%", d.rhythmic.syncopation_index * 100.0), theme.deck_colors[1]),
                 ] {
                     ui.label(RichText::new(label).size(theme.type_caption));
-                    ui.add(egui::ProgressBar::new(val.clamp(0.0, 1.0)).desired_height(8.0).fill(color));
+                    ui.horizontal(|ui| {
+                        ui.add(egui::ProgressBar::new(val.clamp(0.0, 1.0)).desired_height(8.0).fill(color));
+                        ui.label(RichText::new(text).monospace().size(theme.type_caption).color(theme.text_secondary));
+                    });
                     ui.end_row();
                 }
             });
