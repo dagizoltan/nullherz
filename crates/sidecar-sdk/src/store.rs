@@ -1035,6 +1035,66 @@ impl SidecarStore {
 
         store.register(
             SidecarDescriptor::new(
+                "neural-latent-manifold",
+                "Neural Latent Manifold Generator",
+                SidecarType::NeuralProcessor,
+                &["visual", "neural", "insert", "real-time"],
+                "Zero-allocation neural network latent manifold visual generator",
+                0,
+            ),
+            || Box::new(NeuralFilterProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "phase-goniometer-2d",
+                "2D Phase Goniometer Surface",
+                SidecarType::NeuralProcessor,
+                &["visual", "real-time", "insert"],
+                "Real-time 2D phase goniometer stereo visual surface sidecar",
+                0,
+            ),
+            || Box::new(NeuralFilterProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "fft-spectrum-mesh",
+                "FFT Spectrum Mesh Generator",
+                SidecarType::NeuralProcessor,
+                &["visual", "real-time", "insert"],
+                "Real-time FFT frequency spectrum 3D mesh visual sidecar",
+                0,
+            ),
+            || Box::new(NeuralFilterProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "reaction-diffusion-nn",
+                "Reaction Diffusion Neural Network",
+                SidecarType::NeuralProcessor,
+                &["visual", "neural", "real-time"],
+                "Neural network reaction diffusion pattern synthesis visual sidecar",
+                0,
+            ),
+            || Box::new(NeuralFilterProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "shader-particle-swarm",
+                "Shader Particle Swarm Generator",
+                SidecarType::NeuralProcessor,
+                &["visual", "real-time"],
+                "Audio-reactive particle swarm shader visual generator sidecar",
+                0,
+            ),
+            || Box::new(NeuralFilterProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
                 "neural-visuals",
                 "Neural Interactive Visual Surface",
                 SidecarType::NeuralProcessor,
@@ -1221,7 +1281,7 @@ mod store_tests {
     fn test_store_list_and_descriptors() {
         let store = SidecarStore::with_defaults();
         let list = store.list();
-        assert_eq!(list.len(), 14);
+        assert_eq!(list.len(), 19);
 
         let delay_desc = store.get_descriptor("algorithmic-delay").expect("algorithmic-delay must exist");
         assert_eq!(delay_desc.name, "Algorithmic Tape Delay");
@@ -1240,7 +1300,7 @@ mod store_tests {
         assert_eq!(delays[0].id, "algorithmic-delay");
 
         let neurals = store.filter_by_tag("neural");
-        assert_eq!(neurals.len(), 9);
+        assert_eq!(neurals.len(), 11);
         let neural_ids: Vec<_> = neurals.iter().map(|d| d.id.as_str()).collect();
         assert!(neural_ids.contains(&"neural-visuals"));
         assert!(neural_ids.contains(&"neural-saturation"));
@@ -1256,15 +1316,14 @@ mod store_tests {
         assert_eq!(instruments.len(), 2);
 
         let realtimes = store.filter_by_tag("real-time");
-        assert_eq!(realtimes.len(), 14);
+        assert_eq!(realtimes.len(), 19);
 
         let visuals = store.filter_by_tag("visual");
-        assert_eq!(visuals.len(), 1);
-        assert_eq!(visuals[0].id, "neural-visuals");
+        assert_eq!(visuals.len(), 6);
 
         // Multi-tag queries
         let neural_inserts = store.filter_by_tags(&["neural", "insert", "real-time"]);
-        assert_eq!(neural_inserts.len(), 9);
+        assert_eq!(neural_inserts.len(), 10);
 
         let neural_eqs = store.filter_by_tags(&["neural", "eq"]);
         assert_eq!(neural_eqs.len(), 2);
@@ -1279,7 +1338,7 @@ mod store_tests {
         assert_eq!(instruments[0].id, "algorithmic-synth");
 
         let neural_procs = store.filter_by_type(SidecarType::NeuralProcessor);
-        assert_eq!(neural_procs.len(), 9);
+        assert_eq!(neural_procs.len(), 14);
 
         let inserts = store.filter_by_type(SidecarType::Insert);
         assert_eq!(inserts.len(), 4);
