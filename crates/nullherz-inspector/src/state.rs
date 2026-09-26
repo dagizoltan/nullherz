@@ -291,14 +291,20 @@ pub struct ComposerState {
     pub selected_composer_track: Option<usize>,
     pub sequencer_active_step: usize,
     pub track_mutes: [bool; 16],
+    #[allow(dead_code)]
     pub track_solos: [bool; 16],
+    #[allow(dead_code)]
     pub track_volumes: [f32; 16],
+    #[allow(dead_code)]
     pub track_pans: [f32; 16],
+    #[allow(dead_code)]
     pub track_filters: [f32; 16],
     pub track_targets: [String; 16],
+    #[allow(dead_code)]
     pub channel_kinds: [ChannelKind; 16],
     pub record_automation: bool,
     pub _automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>,
+    #[allow(dead_code)]
     pub evolution_strengths: [f32; 16],
     pub auto_pollinate_enabled: bool,
 }
