@@ -325,7 +325,21 @@ will not see each other's data. Shared-memory names must be unique per process."
                 libc::close(fd);
                 return Err(IpcError::FtruncateFailed(std::io::Error::last_os_error().to_string()));
             }
-            let ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd, 0);
+            // Try mapping with MAP_HUGETLB if available on Linux, falling back to standard MAP_SHARED
+            #[cfg(target_os = "linux")]
+            let mut flags = libc::MAP_SHARED;
+            #[cfg(target_os = "linux")]
+            if size >= 2 * 1024 * 1024 && std::env::var("NULLHERZ_HUGEPAGES").as_deref() == Ok("1") {
+                flags |= libc::MAP_HUGETLB;
+            }
+            #[cfg(not(target_os = "linux"))]
+            let flags = libc::MAP_SHARED;
+
+            let mut ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, flags, fd, 0);
+            if ptr == libc::MAP_FAILED && (flags & libc::MAP_SHARED) != 0 {
+                // Fallback to standard MAP_SHARED if MAP_HUGETLB allocation failed
+                ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd, 0);
+            }
             libc::close(fd);
             if ptr == libc::MAP_FAILED { return Err(IpcError::MmapFailed(std::io::Error::last_os_error().to_string())); }
             let shm = Self { ptr: ptr as *mut u8, size, name: name.to_string(), owner: true };

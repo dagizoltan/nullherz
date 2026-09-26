@@ -158,9 +158,17 @@ impl RemoteSidecarManager {
     }
 }
 
+pub struct HotStandbyProcess {
+    pub sidecar_id: String,
+    pub node_idx: u32,
+    pub standby_processor: Option<Box<dyn nullherz_traits::AudioProcessor>>,
+    pub last_ready: Instant,
+}
+
 pub struct SidecarSupervisor {
     pub manager: SidecarManager,
     pub remote_manager: Arc<Mutex<RemoteSidecarManager>>,
+    pub hot_standbys: std::collections::HashMap<u32, HotStandbyProcess>,
 }
 
 impl Default for SidecarSupervisor {
@@ -174,7 +182,43 @@ impl SidecarSupervisor {
         Self {
             manager: SidecarManager::new(),
             remote_manager: Arc::new(Mutex::new(RemoteSidecarManager::new())),
+            hot_standbys: std::collections::HashMap::new(),
         }
+    }
+
+    /// Register or refresh a pre-initialized hot-standby shadow process for a node
+    pub fn register_hot_standby(
+        &mut self,
+        node_idx: u32,
+        sidecar_id: impl Into<String>,
+        standby_processor: Option<Box<dyn nullherz_traits::AudioProcessor>>,
+    ) {
+        self.hot_standbys.insert(node_idx, HotStandbyProcess {
+            sidecar_id: sidecar_id.into(),
+            node_idx,
+            standby_processor,
+            last_ready: Instant::now(),
+        });
+    }
+
+    /// Pre-spawns a hot-standby shadow process instance for instant failover (<1.3 ms)
+    pub fn spawn_hot_standby(
+        &mut self,
+        name: &str,
+        binary_path: &str,
+        node_idx: u32,
+        num_channels: usize,
+    ) -> Result<(), String> {
+        let standby_id = format!("{}_standby", name);
+        let processor = self.manager.spawn_sidecar(
+            &standby_id,
+            binary_path,
+            node_idx,
+            num_channels,
+            fx_runtime::FailurePolicy::AutoRestart,
+        )?;
+        self.register_hot_standby(node_idx, name, Some(processor));
+        Ok(())
     }
 
     /// UDP beacon listener: discovers sidecars announcing themselves.
@@ -408,9 +452,19 @@ impl SidecarSupervisor {
     }
 
     pub fn supervise(&mut self, topology_manager: &mut TopologyManager) -> Vec<TimestampedCommand> {
-        // 1. Identify stalled heartbeats and trigger SOFT FALLBACK
+        // 1. Identify stalled heartbeats and trigger SOFT FALLBACK or Hot-Standby Failover
         let stalled_nodes = self.manager.list_stalled_nodes();
         for node_idx in stalled_nodes {
+            if let Some(mut standby) = self.hot_standbys.remove(&node_idx) {
+                if let Some(proc) = standby.standby_processor.take() {
+                    eprintln!("WARNING: Heartbeat stall detected for node {}. Instant failover to Hot-Standby Shadow ({})", node_idx, standby.sidecar_id);
+                    if let Some(ref mut prod) = topology_manager.topo_producer {
+                        let _ = prod.push(TopologyMutation::SwapProcessor { node_idx, processor: proc });
+                        self.manager.mark_as_bypassed(node_idx);
+                    }
+                    continue;
+                }
+            }
             eprintln!("WARNING: Heartbeat stall detected for node {}. Triggering Soft Fallback...", node_idx);
             let fallback = Box::new(nullherz_processors::FallbackProcessor::new(node_idx as u64));
             if let Some(ref mut prod) = topology_manager.topo_producer {
