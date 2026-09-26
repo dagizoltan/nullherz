@@ -171,10 +171,18 @@ pub fn calculate_similarity(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_
         1.0 // Both empty vectors are "similar"
     };
 
-    let rhythmic_sim = 1.0 - (dna_a.rhythmic.syncopation_index - dna_b.rhythmic.syncopation_index).abs();
+    let rhythmic_sim = (1.0 - (dna_a.rhythmic.syncopation_index - dna_b.rhythmic.syncopation_index).abs()).clamp(0.0, 1.0);
+
+    // 3. Acoustic Perception Trajectory Similarity
+    let lufs_sim = (1.0 - ((dna_a.perception.lufs_integrated - dna_b.perception.lufs_integrated).abs() / 24.0)).clamp(0.0, 1.0);
+    let brightness_sim = (1.0 - (dna_a.perception.brightness - dna_b.perception.brightness).abs()).clamp(0.0, 1.0);
+    let energy_sim = (1.0 - (dna_a.perception.perceptual_energy - dna_b.perception.perceptual_energy).abs()).clamp(0.0, 1.0);
+    let crest_sim = (1.0 - ((dna_a.perception.crest_factor_db - dna_b.perception.crest_factor_db).abs() / 12.0)).clamp(0.0, 1.0);
+
+    let perception_sim = (lufs_sim + brightness_sim + energy_sim + crest_sim) * 0.25;
 
     // Weighted final score
-    (spectral_sim * 0.5) + (feature_sim * 0.3) + (rhythmic_sim * 0.2)
+    (spectral_sim * 0.40) + (feature_sim * 0.25) + (rhythmic_sim * 0.15) + (perception_sim * 0.20)
 }
 
 pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits::SoundDNA, bias: f32) -> nullherz_traits::SoundDNA {

@@ -575,6 +575,31 @@ fn process(&mut self, inputs: &[&[f32]], _outputs: &mut [&mut [f32]], context: &
             self.latent_space[i].store(latent.to_bits(), Ordering::Relaxed);
         }
 
+        // Anomaly Detection: Inter-sample Clipping, Sub-bass Phase Inversion, Silence
+        if peak_l > 1.0 || peak_r > 1.0 {
+            self.bus.push_event(AnalysisEvent {
+                id: sample_pos,
+                timestamp_sample: sample_pos,
+                event_type: AnalysisEventKind::Anomaly,
+                confidence: 0.99,
+                energy_db: meas.peak_db[0].max(meas.peak_db[1]),
+                min_freq_hz: 20.0,
+                max_freq_hz: 20000.0,
+                duration_ms: (len as f32 / sample_rate) * 1000.0,
+            });
+        } else if meas.phase_correlation < -0.5 {
+            self.bus.push_event(AnalysisEvent {
+                id: sample_pos,
+                timestamp_sample: sample_pos,
+                event_type: AnalysisEventKind::Anomaly,
+                confidence: 0.95,
+                energy_db: meas.rms_db[0].max(meas.rms_db[1]),
+                min_freq_hz: 20.0,
+                max_freq_hz: 250.0,
+                duration_ms: (len as f32 / sample_rate) * 1000.0,
+            });
+        }
+
         // Push measurement block into AnalysisBus lock-free (&self)
         self.bus.push_measurement(meas);
     }
