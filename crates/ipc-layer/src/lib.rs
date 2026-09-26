@@ -325,18 +325,39 @@ will not see each other's data. Shared-memory names must be unique per process."
                 libc::close(fd);
                 return Err(IpcError::FtruncateFailed(std::io::Error::last_os_error().to_string()));
             }
-            // Try mapping with MAP_HUGETLB if available on Linux, falling back to standard MAP_SHARED
+            // Try mapping with MAP_HUGETLB if available on Linux, supporting 2 MB and 1 GB HugePages
             #[cfg(target_os = "linux")]
             let mut flags = libc::MAP_SHARED;
             #[cfg(target_os = "linux")]
-            if size >= 2 * 1024 * 1024 && std::env::var("NULLHERZ_HUGEPAGES").as_deref() == Ok("1") {
-                flags |= libc::MAP_HUGETLB;
+            {
+                let hugepages_enabled = matches!(
+                    std::env::var("NULLHERZ_HUGEPAGES").as_deref(),
+                    Ok("1") | Ok("true") | Ok("yes")
+                );
+                let hugepages_1gb = matches!(
+                    std::env::var("NULLHERZ_HUGEPAGES_1GB").as_deref(),
+                    Ok("1") | Ok("true") | Ok("yes")
+                );
+                let hugepages_2mb = matches!(
+                    std::env::var("NULLHERZ_HUGEPAGES_2MB").as_deref(),
+                    Ok("1") | Ok("true") | Ok("yes")
+                );
+
+                // MAP_HUGE_1GB = 30 << 26, MAP_HUGE_2MB = 21 << 26
+                const MAP_HUGE_2MB: libc::c_int = 21 << 26;
+                const MAP_HUGE_1GB: libc::c_int = 30 << 26;
+
+                if (hugepages_enabled || hugepages_1gb) && size >= 1024 * 1024 * 1024 {
+                    flags |= libc::MAP_HUGETLB | MAP_HUGE_1GB;
+                } else if (hugepages_enabled || hugepages_2mb) && size >= 2 * 1024 * 1024 {
+                    flags |= libc::MAP_HUGETLB | MAP_HUGE_2MB;
+                }
             }
             #[cfg(not(target_os = "linux"))]
             let flags = libc::MAP_SHARED;
 
             let mut ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, flags, fd, 0);
-            if ptr == libc::MAP_FAILED && (flags & libc::MAP_SHARED) != 0 {
+            if ptr == libc::MAP_FAILED && (flags & libc::MAP_HUGETLB) != 0 {
                 // Fallback to standard MAP_SHARED if MAP_HUGETLB allocation failed
                 ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd, 0);
             }
@@ -1759,6 +1780,22 @@ mod ring_buffer_tests {
             h.join().unwrap();
         }
         assert_eq!(buf.pop(), None, "exactly N*P items, no duplicates");
+    }
+
+    #[test]
+    fn test_hugepages_shared_memory_fallback() {
+        unsafe {
+            std::env::set_var("NULLHERZ_HUGEPAGES", "1");
+        }
+        let name = format!("/nullherz_hugepages_test_{}", std::process::id());
+        let shm = SharedMemory::create(&name, 2 * 1024 * 1024);
+        unsafe {
+            std::env::remove_var("NULLHERZ_HUGEPAGES");
+        }
+
+        assert!(shm.is_ok(), "SharedMemory creation with HugePages / fallback must succeed");
+        let shm = shm.unwrap();
+        assert_eq!(shm.size(), 2 * 1024 * 1024);
     }
 
     #[test]
