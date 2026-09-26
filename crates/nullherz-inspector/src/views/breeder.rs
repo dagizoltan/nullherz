@@ -6,9 +6,10 @@ pub struct BreederView {
     pub parent_b_id: Option<u64>,
     pub transfusion_bias_x: f32, // Spectral Bias
     pub transfusion_bias_y: f32, // Rhythmic Bias
-    pub target_node_idx: u32,
     pub selecting_parent: Option<usize>, // 0 for A, 1 for B
     pub preview_dna: [f32; 16],
+    #[allow(dead_code)]
+    pub target_genre_centroid: Option<String>,
     pub _smoothed_goniometer: [f32; 128],
 }
 
@@ -19,9 +20,9 @@ impl BreederView {
             parent_b_id: None,
             transfusion_bias_x: 0.5,
             transfusion_bias_y: 0.5,
-            target_node_idx: 150, // PersonalityInheritanceProcessor default ID
             selecting_parent: None,
             preview_dna: [0.0; 16],
+            target_genre_centroid: None,
             _smoothed_goniometer: [0.0; 128],
         }
     }
@@ -304,6 +305,11 @@ impl BreederView {
         if let (Some(id_a), Some(id_b)) = (self.parent_a_id, self.parent_b_id)
             && let (Some(track_a), Some(track_b)) = (app.get_cached_track(id_a), app.get_cached_track(id_b)) {
 
+                // Dynamically resolve target personality inheritance node ID from topology map
+                let target_node = app.get_node_id("personality_inheritance")
+                    .or_else(|| app.get_node_id("master_personality"))
+                    .unwrap_or(0);
+
                 // 1. Spectral Transfusion
                 let mut latent = [0.0f32; 16];
                 nullherz_dna::NeuralTransfuser::interpolate_latent(&mut latent, &track_a.metadata.dna.spectral.latent_space, &track_b.metadata.dna.spectral.latent_space, self.transfusion_bias_x);
@@ -326,7 +332,7 @@ impl BreederView {
 
                 // Hardened: Utilizing type-safe builder to eliminate unsafe byte-packing
                 let cmd = Command::Dna(DnaCommand::pack_transfusion(
-                    self.target_node_idx as u64,
+                    target_node as u64,
                     &latent,
                     &micro_timing,
                     &onset_mask
