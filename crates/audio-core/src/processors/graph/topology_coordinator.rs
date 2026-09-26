@@ -366,6 +366,7 @@ impl TopologyCoordinator {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_types, clippy::disallowed_methods)]
 mod out_of_range_tests {
     use super::*;
     use crate::processors::TopologyMutation;
