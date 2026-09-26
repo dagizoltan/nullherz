@@ -17,6 +17,7 @@ members = [
     "sidecars/distributed-sidecar",
     "sidecars/neural-saturation",
     "sidecars/neural-filter",
+    "sidecars/neural-visuals",
     "sidecars/algorithmic-delay",
     "sidecars/algorithmic-eq",
     "sidecars/algorithmic-synth",
