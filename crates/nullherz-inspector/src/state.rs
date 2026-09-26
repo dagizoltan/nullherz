@@ -685,6 +685,7 @@ impl Default for ImageTextureEngine {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum VisualGenerator {
+    ComplexNeuralMandala,
     ImageNeuronDeform,
     OrganicBitmapFeedback,
     WinampNeuronTunnel,
@@ -700,6 +701,7 @@ pub enum VisualGenerator {
 impl VisualGenerator {
     pub fn name(&self) -> &'static str {
         match self {
+            Self::ComplexNeuralMandala => "Complex Neural Spiking Mandala",
             Self::ImageNeuronDeform => "Image Bio-Neuron Deformation",
             Self::OrganicBitmapFeedback => "Organic Bitmap Liquid Feedback",
             Self::WinampNeuronTunnel => "Winamp Neuron Warp Tunnel",
@@ -715,6 +717,7 @@ impl VisualGenerator {
 
     pub fn all() -> &'static [Self] {
         &[
+            Self::ComplexNeuralMandala,
             Self::ImageNeuronDeform,
             Self::OrganicBitmapFeedback,
             Self::WinampNeuronTunnel,
@@ -899,23 +902,23 @@ impl Default for VizState {
             damped_master_peaks: [0.0; 2],
             channels: vec![
                 VisualChannel::new(
-                    "VIZ 1 — IMAGE NEURON DEFORM",
-                    VisualGenerator::ImageNeuronDeform,
+                    "VIZ 1 — NEURAL MANDALA",
+                    VisualGenerator::ComplexNeuralMandala,
                     vec![VisualInputSource::MasterMix, VisualInputSource::MidiTriggerBus],
                 ),
                 VisualChannel::new(
-                    "VIZ 2 — BITMAP FEEDBACK",
-                    VisualGenerator::OrganicBitmapFeedback,
+                    "VIZ 2 — IMAGE DEFORM",
+                    VisualGenerator::ImageNeuronDeform,
                     vec![VisualInputSource::DeckA, VisualInputSource::DeckB],
                 ),
                 VisualChannel::new(
-                    "VIZ 3 — WINAMP TUNNEL",
-                    VisualGenerator::WinampNeuronTunnel,
+                    "VIZ 3 — BITMAP FEEDBACK",
+                    VisualGenerator::OrganicBitmapFeedback,
                     vec![VisualInputSource::DeckC, VisualInputSource::DeckD],
                 ),
                 VisualChannel::new(
-                    "VIZ 4 — WMP PLASMA",
-                    VisualGenerator::WmpPlasmaFeedback,
+                    "VIZ 4 — WINAMP TUNNEL",
+                    VisualGenerator::WinampNeuronTunnel,
                     vec![VisualInputSource::MicInput, VisualInputSource::MasterMix],
                 ),
             ],

@@ -302,6 +302,82 @@ impl InspectorApp {
             let motor = channel.neuron_net.motor_outputs;
 
             match channel.generator {
+                state::VisualGenerator::ComplexNeuralMandala => {
+                    // High-Symmetry Complex Bio-Neural Spiking Mandala Engine
+                    let max_radius = (rect.width().min(rect.height())) * 0.48;
+                    let symmetry_folds = 12;
+                    let num_rings = 8;
+
+                    let global_rot = time as f32 * 0.4 * channel.param_speed + motor[0] * 1.5;
+
+                    // 1. Concentric Sacral Petal Rings
+                    for r_idx in 0..num_rings {
+                        let ring_frac = (r_idx + 1) as f32 / num_rings as f32;
+                        let ring_radius = ring_frac * max_radius;
+
+                        let ring_rot = global_rot * if r_idx % 2 == 0 { 1.0 } else { -1.0 } + r_idx as f32 * 0.15;
+                        let points_per_petal = 20;
+
+                        for f in 0..symmetry_folds {
+                            let base_angle = (f as f32 / symmetry_folds as f32) * std::f32::consts::TAU + ring_rot;
+                            let idx = (f * 5 + r_idx * 3) % 64;
+
+                            let n_v = channel.neuron_net.v[idx];
+                            let stdp = channel.neuron_net.stdp_trace[idx];
+                            let wave = channel.neuron_net.axonal_wave_field[idx];
+                            let is_spike = channel.neuron_net.spikes[idx];
+
+                            let petal_amp = ring_radius * (0.2 + 0.3 * (n_v + 65.0) / 50.0 + wave * 0.2);
+                            let spike_boost = if is_spike { 1.4 } else { 1.0 };
+
+                            let mut petal_pts = Vec::with_capacity(points_per_petal + 1);
+                            for p in 0..=points_per_petal {
+                                let p_frac = p as f32 / points_per_petal as f32;
+                                let angle_offset = (p_frac - 0.5) * (std::f32::consts::TAU / symmetry_folds as f32) * 1.2;
+                                let current_angle = base_angle + angle_offset;
+
+                                // Organic Rose/Cardioid Petal Curve Equation
+                                let petal_radius = ring_radius + (p_frac * std::f32::consts::PI).sin() * petal_amp * spike_boost;
+
+                                let px = center.x + current_angle.cos() * petal_radius;
+                                let py = center.y + current_angle.sin() * petal_radius;
+                                petal_pts.push(egui::pos2(px, py));
+                            }
+
+                            let hue = (ring_frac * 0.8 + channel.param_color_shift + motor[r_idx % 16] * 0.4) % 1.0;
+                            let r_c = ((hue * 6.0 - 3.0).abs() - 1.0).clamp(0.0, 1.0);
+                            let g_c = (2.0 - (hue * 6.0 - 2.0).abs()).clamp(0.0, 1.0);
+                            let b_c = (2.0 - (hue * 6.0 - 4.0).abs()).clamp(0.0, 1.0);
+
+                            let petal_color = if is_spike {
+                                theme.warning
+                            } else {
+                                egui::Color32::from_rgb((r_c * 255.0) as u8, (g_c * 255.0) as u8, (b_c * 255.0) as u8)
+                            };
+
+                            for i in 0..petal_pts.len() - 1 {
+                                ui.painter().line_segment([petal_pts[i], petal_pts[i + 1]], egui::Stroke::new(1.8 + stdp * 1.2, petal_color.linear_multiply(0.4 + 0.6 * low_energy)));
+                            }
+                        }
+                    }
+
+                    // 2. Central Spiking Sacred Geometry Flower Nucleus
+                    let num_core_spokes = 24;
+                    for s in 0..num_core_spokes {
+                        let spoke_angle = (s as f32 / num_core_spokes as f32) * std::f32::consts::TAU - global_rot * 1.5;
+                        let n_v = channel.neuron_net.v[s % 64];
+
+                        let inner_r = max_radius * 0.08;
+                        let outer_r = inner_r + (n_v + 65.0) / 30.0 * max_radius * 0.25;
+
+                        let p1 = egui::pos2(center.x + spoke_angle.cos() * inner_r, center.y + spoke_angle.sin() * inner_r);
+                        let p2 = egui::pos2(center.x + spoke_angle.cos() * outer_r, center.y + spoke_angle.sin() * outer_r);
+
+                        ui.painter().line_segment([p1, p2], egui::Stroke::new(2.5, theme.accent));
+                        ui.painter().circle_filled(p2, 3.5 + mid_energy * 6.0, theme.warning);
+                    }
+                }
+
                 state::VisualGenerator::ImageNeuronDeform => {
                     // Image Bio-Neuron Warp & Cellular Deformation Grid
                     let cols = 32;
