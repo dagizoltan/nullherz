@@ -259,21 +259,70 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                 ui.separator();
                 ui.add_space(4.0);
 
-                // --- TRACK INFO & BPM ---
+                // --- COMPACT DECK CONTROLS & TRACK INFO ---
+                let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions[i]).unwrap_or(0);
                 if let Some(ref track) = app.decks.cached_tracks[i] {
+                    let sample_rate = track.metadata.sample_rate.max(1) as f64;
+                    let total_secs = track.metadata.total_samples as f64 / sample_rate;
+                    let elapsed_secs = elapsed_samples as f64 / sample_rate;
+                    let remain_secs = (total_secs - elapsed_secs).max(0.0);
+                    let rem_m = (remain_secs / 60.0) as u32;
+                    let rem_s = (remain_secs % 60.0) as u32;
+
                     ui.vertical_centered(|ui| {
                         ui.label(RichText::new(&track.title).size(10.0).strong().color(theme.text_primary));
                         if !track.artist.is_empty() {
                             ui.label(RichText::new(&track.artist).size(9.0).color(theme.text_secondary));
                         }
                         let effective_bpm = track.facets().bpm * app.mixer.channel_pitch[i];
-                        ui.label(RichText::new(format!("{:.1} BPM", effective_bpm)).monospace().size(10.0).strong().color(deck_color));
+                        ui.horizontal(|ui| {
+                            ui.add_space((STRIP_W - 110.0).max(0.0) / 2.0);
+                            ui.label(RichText::new(format!("{:.1} BPM", effective_bpm)).monospace().size(9.0).strong().color(deck_color));
+                            ui.label(RichText::new(format!("-{:02}:{:02}", rem_m, rem_s)).monospace().size(9.0).color(theme.text_secondary));
+                        });
                     });
                 } else {
                     ui.vertical_centered(|ui| {
                         ui.label(RichText::new("No Track Loaded").size(9.0).italics().color(theme.text_disabled));
                     });
                 }
+
+                ui.add_space(4.0);
+
+                // Transport Row: Single Play/Stop Toggle + CUE Button
+                ui.horizontal(|ui| {
+                    ui.add_space((STRIP_W - 100.0).max(0.0) / 2.0);
+
+                    let is_playing = app.decks.deck_playing[i];
+                    let play_icon = if is_playing { egui_phosphor::regular::PAUSE } else { egui_phosphor::regular::PLAY };
+                    let play_btn = if is_playing {
+                        egui::Button::new(RichText::new(play_icon).size(12.0).strong()).fill(theme.accent)
+                    } else {
+                        egui::Button::new(RichText::new(play_icon).size(12.0).strong()).fill(theme.bg_inset)
+                    };
+
+                    if ui.add_sized([45.0, 22.0], play_btn).clicked() {
+                        app.decks.deck_playing[i] = !is_playing;
+                        if app.decks.deck_playing[i] {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id: deck }));
+                        } else {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::StopDeck { deck_id: deck }));
+                        }
+                    }
+
+                    if ui.add_sized([45.0, 22.0], egui::Button::new(RichText::new("CUE").size(10.0).strong()).fill(theme.bg_inset)).clicked() {
+                        let node_name = match i {
+                            0 => "deck_a_sampler",
+                            1 => "deck_b_sampler",
+                            2 => "deck_c_sampler",
+                            3 => "deck_d_sampler",
+                            _ => "",
+                        };
+                        if let Some(node_idx) = app.get_node_id(node_name) {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpByBeats { node_idx, beats: 0.0 }));
+                        }
+                    }
+                });
             });
         });
 }
