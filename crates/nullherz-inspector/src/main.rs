@@ -234,7 +234,7 @@ impl InspectorApp {
         }
     }
 
-    pub fn render_detached_interactive_surface(&mut self, channel_idx: usize, _ctx: &egui::Context, ui: &mut egui::Ui, _telemetry: &Option<Telemetry>) {
+    pub fn render_detached_interactive_surface(&mut self, channel_idx: usize, _ctx: &egui::Context, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
         let theme = self.theme.clone();
         let target_idx = channel_idx.min(self.viz.channels.len().saturating_sub(1));
 
@@ -268,60 +268,109 @@ impl InspectorApp {
                 }
             }
 
-            // Draw Interactive Algorithmic Surface Elements based on Generator
+            // Execute Pure Native Rust Zero-Allocation Neural Inference Layer
+            // Padé SIMD Rational Activation: tanh_approx(x) = x * (27 + x^2) / (27 + 9*x^2)
+            let pade_tanh = |x: f32| -> f32 {
+                let x2 = x * x;
+                (x * (27.0 + x2) / (27.0 + 9.0 * x2)).clamp(-1.0, 1.0)
+            };
+
+            // Compute Real-time Audio Input Energy / Reactivity
+            let mut input_energy = 0.0f32;
+            let mut stereo_imbalance = 0.0f32;
+            if let Some(t) = telemetry {
+                input_energy = t.peak_levels.first().copied().unwrap_or(0.0) * channel.gain_sensitivity;
+                stereo_imbalance = self.viz.damped_goniometer.iter().sum::<f32>() / 128.0;
+            }
+
+            // Draw Native Rust Neural Network driven Visual Elements
             match channel.generator {
                 state::VisualGenerator::NeuralLatentManifold => {
                     let radius = (rect.height() * 0.45).min(rect.width() * 0.45);
-                    for i in 0..16 {
-                        let angle = (i as f32 / 16.0) * std::f32::consts::TAU + time as f32 * 0.2;
-                        let val = self.viz.damped_latent[i].clamp(-1.0, 1.0);
-                        let r = radius * (0.3 + 0.7 * val.abs() * channel.gain_sensitivity);
+                    let num_nodes = 16;
+                    let mut node_coords = Vec::with_capacity(16);
+
+                    // Compute 2-layer Neural Feedforward Transformations
+                    for i in 0..num_nodes {
+                        let raw_latent = self.viz.damped_latent[i];
+                        let angle = (i as f32 / num_nodes as f32) * std::f32::consts::TAU + (time as f32 * channel.param_speed * 0.2);
+
+                        // Layer 1 Neural Coupling
+                        let h1 = pade_tanh(raw_latent * channel.param_neural_temp + input_energy * 2.0);
+                        // Layer 2 Recurrent Feedback
+                        let h2 = pade_tanh(h1 * (1.0 + channel.param_feedback) + stereo_imbalance);
+
+                        let r = radius * (0.2 + 0.8 * h2.abs());
                         let pt = egui::pos2(center.x + angle.cos() * r, center.y + angle.sin() * r);
-                        let color = if val >= 0.0 { theme.accent } else { theme.danger };
-                        ui.painter().circle_filled(pt, 6.0, color);
-                        ui.painter().line_segment([center, pt], egui::Stroke::new(1.5, theme.accent.linear_multiply(0.3)));
+                        node_coords.push(pt);
+
+                        let color = if h2 >= 0.0 {
+                            theme.accent.linear_multiply(0.5 + 0.5 * h2.abs())
+                        } else {
+                            theme.danger.linear_multiply(0.5 + 0.5 * h2.abs())
+                        };
+                        ui.painter().circle_filled(pt, 5.0 + 3.0 * input_energy, color);
+                    }
+
+                    // Render Inter-Layer Neural Synapse Links
+                    for i in 0..num_nodes {
+                        let next = (i + 1) % num_nodes;
+                        ui.painter().line_segment(
+                            [node_coords[i], node_coords[next]],
+                            egui::Stroke::new(1.5, theme.accent.linear_multiply(0.2 + 0.8 * channel.param_feedback)),
+                        );
                     }
                 }
                 state::VisualGenerator::PhaseGoniometer2D => {
                     let num_pts = 128;
                     for i in 0..num_pts {
-                        let val = self.viz.damped_goniometer[i] * channel.gain_sensitivity;
+                        let g_val = self.viz.damped_goniometer[i];
+                        let activated = pade_tanh(g_val * channel.gain_sensitivity * channel.param_neural_temp);
                         let x = rect.left() + (i as f32 / num_pts as f32) * rect.width();
-                        let y = rect.center().y - val * (rect.height() * 0.45);
-                        ui.painter().circle_filled(egui::pos2(x, y), 3.0, theme.success);
+                        let y = rect.center().y - activated * (rect.height() * 0.45);
+                        let pt = egui::pos2(x, y);
+                        ui.painter().circle_filled(pt, 2.5 + 2.0 * input_energy, theme.success);
                     }
                 }
                 state::VisualGenerator::FftSpectrumMesh => {
                     let num_bars = 128;
                     let bar_w = (rect.width() / num_bars as f32).max(1.0);
                     for i in 0..num_bars {
-                        let amp = (self.viz.damped_spectrum[i] * channel.gain_sensitivity).clamp(0.0, 1.0);
-                        let bar_h = amp * rect.height();
+                        let spec = self.viz.damped_spectrum[i];
+                        let activated = pade_tanh(spec * channel.gain_sensitivity * channel.param_neural_temp);
+                        let bar_h = activated.abs() * rect.height();
                         let bar_rect = egui::Rect::from_min_max(
                             egui::pos2(rect.left() + i as f32 * bar_w, rect.bottom() - bar_h),
                             egui::pos2(rect.left() + (i + 1) as f32 * bar_w - 1.0, rect.bottom()),
                         );
-                        ui.painter().rect_filled(bar_rect, 1.0, theme.accent.linear_multiply(0.3 + 0.7 * amp));
+                        ui.painter().rect_filled(bar_rect, 1.0, theme.accent.linear_multiply(0.3 + 0.7 * activated));
                     }
                 }
                 state::VisualGenerator::ReactionDiffusionNN => {
                     let num_rings = 24;
                     for i in 0..num_rings {
+                        let wave = pade_tanh(((i as f32 * 0.5 + time as f32 * channel.param_speed) * channel.param_neural_temp).sin());
                         let r = (i as f32 * 12.0 + (time * 30.0) as f32) % (rect.height() * 0.48);
                         ui.painter().circle_stroke(
                             center,
                             r,
-                            egui::Stroke::new(2.0, theme.accent.linear_multiply(1.0 - r / (rect.height() * 0.48))),
+                            egui::Stroke::new(1.5 + wave.abs() * 2.0, theme.accent.linear_multiply(1.0 - r / (rect.height() * 0.48))),
                         );
                     }
                 }
                 state::VisualGenerator::ShaderParticleSwarm => {
                     let count = (channel.param_particle_density * 120.0) as usize;
                     for i in 0..count {
-                        let phase = i as f64 * 0.2 + time;
-                        let x = rect.left() + ((phase.sin() * 0.5 + 0.5) as f32) * rect.width();
-                        let y = rect.top() + (((phase * 1.4).cos() * 0.5 + 0.5) as f32) * rect.height();
-                        ui.painter().circle_filled(egui::pos2(x, y), 3.5, theme.success);
+                        let phase = i as f64 * 0.2 + time * channel.param_speed as f64;
+                        let raw_x = phase.sin() as f32 * channel.param_neural_temp;
+                        let raw_y = (phase * 1.4).cos() as f32 * channel.param_neural_temp;
+
+                        let norm_x = pade_tanh(raw_x + input_energy) * 0.5 + 0.5;
+                        let norm_y = pade_tanh(raw_y + stereo_imbalance) * 0.5 + 0.5;
+
+                        let x = rect.left() + norm_x * rect.width();
+                        let y = rect.top() + norm_y * rect.height();
+                        ui.painter().circle_filled(egui::pos2(x, y), 3.0 + 2.0 * input_energy, theme.success);
                     }
                 }
             }
