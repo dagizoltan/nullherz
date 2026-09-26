@@ -549,6 +549,7 @@ mod tests {
                 node_map: [("sequencer_node".to_string(), 70), ("sampler_node".to_string(), 100)]
                     .into_iter().collect(),
             },
+            analyzer: Default::default(),
             library_db: library_db_wrapper,
             active_right_tab: None,
             breeding_view: crate::views::breeder::BreederView::new(),

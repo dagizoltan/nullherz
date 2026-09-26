@@ -16,3 +16,4 @@ pub mod breeder;
 pub mod editor;
 pub mod store;
 pub mod account;
+pub mod analyzer;
