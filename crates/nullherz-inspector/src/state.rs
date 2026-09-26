@@ -404,31 +404,31 @@ pub enum ChannelKind {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum VisualGenerator {
-    NeuralLatentManifold,
-    PhaseGoniometer2D,
+    BioluminescentFluidFlow,
+    HarmonicArrangementLattice,
+    AbstractQuantumSwarm,
+    NeuralFloralMycelium,
     FftSpectrumMesh,
-    ReactionDiffusionNN,
-    ShaderParticleSwarm,
 }
 
 impl VisualGenerator {
     pub fn name(&self) -> &'static str {
         match self {
-            Self::NeuralLatentManifold => "Neural Latent Manifold",
-            Self::PhaseGoniometer2D => "2D Phase Goniometer",
-            Self::FftSpectrumMesh => "FFT Spectrum Mesh",
-            Self::ReactionDiffusionNN => "Reaction Diffusion Neural Net",
-            Self::ShaderParticleSwarm => "Shader Particle Swarm",
+            Self::BioluminescentFluidFlow => "Bioluminescent Fluid Flow",
+            Self::HarmonicArrangementLattice => "Harmonic Arrangement Lattice",
+            Self::AbstractQuantumSwarm => "Abstract Quantum Swarm",
+            Self::NeuralFloralMycelium => "Neural Floral Mycelium",
+            Self::FftSpectrumMesh => "3D FFT Spectrum Mesh",
         }
     }
 
     pub fn all() -> &'static [Self] {
         &[
-            Self::NeuralLatentManifold,
-            Self::PhaseGoniometer2D,
+            Self::BioluminescentFluidFlow,
+            Self::HarmonicArrangementLattice,
+            Self::AbstractQuantumSwarm,
+            Self::NeuralFloralMycelium,
             Self::FftSpectrumMesh,
-            Self::ReactionDiffusionNN,
-            Self::ShaderParticleSwarm,
         ]
     }
 }
@@ -597,23 +597,23 @@ impl Default for VizState {
             damped_master_peaks: [0.0; 2],
             channels: vec![
                 VisualChannel::new(
-                    "VIZ 1 — NEURAL LATENT",
-                    VisualGenerator::NeuralLatentManifold,
+                    "VIZ 1 — FLUID FLOW",
+                    VisualGenerator::BioluminescentFluidFlow,
                     vec![VisualInputSource::MasterMix, VisualInputSource::MidiTriggerBus],
                 ),
                 VisualChannel::new(
-                    "VIZ 2 — STEREO GONIOMETER",
-                    VisualGenerator::PhaseGoniometer2D,
+                    "VIZ 2 — HARMONIC LATTICE",
+                    VisualGenerator::HarmonicArrangementLattice,
                     vec![VisualInputSource::DeckA, VisualInputSource::DeckB],
                 ),
                 VisualChannel::new(
-                    "VIZ 3 — SPECTRUM MESH",
-                    VisualGenerator::FftSpectrumMesh,
+                    "VIZ 3 — QUANTUM SWARM",
+                    VisualGenerator::AbstractQuantumSwarm,
                     vec![VisualInputSource::DeckC, VisualInputSource::DeckD],
                 ),
                 VisualChannel::new(
-                    "VIZ 4 — REACTION DIFFUSION",
-                    VisualGenerator::ReactionDiffusionNN,
+                    "VIZ 4 — MYCELIUM",
+                    VisualGenerator::NeuralFloralMycelium,
                     vec![VisualInputSource::MicInput, VisualInputSource::MasterMix],
                 ),
             ],

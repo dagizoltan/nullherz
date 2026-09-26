@@ -239,31 +239,22 @@ impl InspectorApp {
         let target_idx = channel_idx.min(self.viz.channels.len().saturating_sub(1));
 
         if let Some(channel) = self.viz.channels.get_mut(target_idx) {
-            ui.horizontal(|ui| {
-                ui.heading(egui::RichText::new(format!("SURFACE — {}", channel.name)).strong().color(theme.accent));
-                ui.add_space(20.0);
-                ui.label(egui::RichText::new(format!("Generator: {}", channel.generator.name())).size(theme.type_caption).color(theme.text_secondary));
-            });
-            ui.separator();
-            ui.add_space(8.0);
+            // Fill 100% of available window area without displaying name or parametric control bars
+            let available_size = ui.available_size();
+            let (rect, response) = ui.allocate_exact_size(available_size.max(egui::vec2(200.0, 200.0)), egui::Sense::drag());
 
-            // Interactive Neural / Algorithmic Visual Surface Render Area
-            let available_size = ui.available_size() - egui::vec2(0.0, 160.0);
-            let (rect, response) = ui.allocate_exact_size(available_size.max(egui::vec2(300.0, 300.0)), egui::Sense::drag());
+            // Pure Dark Surface Canvas
+            ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgb(10, 12, 18));
 
-            // Background Fill
-            ui.painter().rect_filled(rect, theme.radius_md, theme.bg_inset);
-
-            // Respond dynamically to music telemetry (amplitude, frequency, stereo imbalance, DNA latent)
             let time = ui.input(|i| i.time) * channel.param_speed as f64;
             let center = rect.center();
 
-            // Handle user mouse drag on interactive surface to modulate Neural Temperature & Color Shift
+            // Interactive gesture handling on surface
             if response.dragged() {
                 if let Some(pos) = response.interact_pointer_pos() {
                     let norm_x = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                     let norm_y = ((pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
-                    channel.param_neural_temp = norm_x * 2.0;
+                    channel.param_neural_temp = norm_x * 2.5;
                     channel.param_color_shift = norm_y;
                 }
             }
@@ -276,62 +267,140 @@ impl InspectorApp {
             };
 
             // Compute Real-time Audio Input Energy / Reactivity
-            let mut input_energy = 0.0f32;
+            let mut _input_energy = 0.0f32;
             let mut stereo_imbalance = 0.0f32;
             if let Some(t) = telemetry {
-                input_energy = t.peak_levels.first().copied().unwrap_or(0.0) * channel.gain_sensitivity;
+                _input_energy = t.peak_levels.first().copied().unwrap_or(0.0) * channel.gain_sensitivity;
                 stereo_imbalance = self.viz.damped_goniometer.iter().sum::<f32>() / 128.0;
             }
 
-            // Draw Native Rust Neural Network driven Visual Elements
+            // Compute Low/Mid/High Audio Bands Energy
+            let low_energy = self.viz.damped_spectrum[0..16].iter().sum::<f32>() / 16.0 * channel.gain_sensitivity;
+            let mid_energy = self.viz.damped_spectrum[16..64].iter().sum::<f32>() / 48.0 * channel.gain_sensitivity;
+            let high_energy = self.viz.damped_spectrum[64..128].iter().sum::<f32>() / 64.0 * channel.gain_sensitivity;
+
             match channel.generator {
-                state::VisualGenerator::NeuralLatentManifold => {
-                    let radius = (rect.height() * 0.45).min(rect.width() * 0.45);
-                    let num_nodes = 16;
-                    let mut node_coords = Vec::with_capacity(16);
+                state::VisualGenerator::BioluminescentFluidFlow => {
+                    let num_streams = 32;
+                    let radius_max = (rect.height() * 0.48).min(rect.width() * 0.48);
 
-                    // Compute 2-layer Neural Feedforward Transformations
-                    for i in 0..num_nodes {
-                        let raw_latent = self.viz.damped_latent[i];
-                        let angle = (i as f32 / num_nodes as f32) * std::f32::consts::TAU + (time as f32 * channel.param_speed * 0.2);
+                    for i in 0..num_streams {
+                        let base_angle = (i as f32 / num_streams as f32) * std::f32::consts::TAU;
+                        let flow_offset = (time as f32 * channel.param_speed * 1.5 + i as f32 * 0.2).sin() * 0.3;
+                        let angle = base_angle + flow_offset;
 
-                        // Layer 1 Neural Coupling
-                        let h1 = pade_tanh(raw_latent * channel.param_neural_temp + input_energy * 2.0);
-                        // Layer 2 Recurrent Feedback
-                        let h2 = pade_tanh(h1 * (1.0 + channel.param_feedback) + stereo_imbalance);
+                        let spec_val = self.viz.damped_spectrum[(i * 4) % 128];
+                        let fluid_r = radius_max * (0.2 + 0.8 * pade_tanh(spec_val * channel.param_neural_temp + low_energy));
 
-                        let r = radius * (0.2 + 0.8 * h2.abs());
-                        let pt = egui::pos2(center.x + angle.cos() * r, center.y + angle.sin() * r);
-                        node_coords.push(pt);
+                        let pt = egui::pos2(center.x + angle.cos() * fluid_r, center.y + angle.sin() * fluid_r);
 
-                        let color = if h2 >= 0.0 {
-                            theme.accent.linear_multiply(0.5 + 0.5 * h2.abs())
-                        } else {
-                            theme.danger.linear_multiply(0.5 + 0.5 * h2.abs())
-                        };
-                        ui.painter().circle_filled(pt, 5.0 + 3.0 * input_energy, color);
-                    }
-
-                    // Render Inter-Layer Neural Synapse Links
-                    for i in 0..num_nodes {
-                        let next = (i + 1) % num_nodes;
-                        ui.painter().line_segment(
-                            [node_coords[i], node_coords[next]],
-                            egui::Stroke::new(1.5, theme.accent.linear_multiply(0.2 + 0.8 * channel.param_feedback)),
+                        // Organic Bioluminescent Gradient Color Interpolation
+                        let hue = ((i as f32 / num_streams as f32) + channel.param_color_shift) % 1.0;
+                        let r = (hue * 6.0 - 3.0).abs() - 1.0;
+                        let g = 2.0 - (hue * 6.0 - 2.0).abs();
+                        let b = 2.0 - (hue * 6.0 - 4.0).abs();
+                        let neon_color = egui::Color32::from_rgb(
+                            (r.clamp(0.0, 1.0) * 255.0) as u8,
+                            (g.clamp(0.0, 1.0) * 255.0) as u8,
+                            (b.clamp(0.0, 1.0) * 255.0) as u8,
                         );
+
+                        ui.painter().circle_filled(pt, 6.0 + low_energy * 10.0, neon_color.linear_multiply(0.8));
+                        ui.painter().line_segment([center, pt], egui::Stroke::new(2.0, neon_color.linear_multiply(0.3 + 0.7 * mid_energy)));
                     }
                 }
-                state::VisualGenerator::PhaseGoniometer2D => {
-                    let num_pts = 128;
-                    for i in 0..num_pts {
-                        let g_val = self.viz.damped_goniometer[i];
-                        let activated = pade_tanh(g_val * channel.gain_sensitivity * channel.param_neural_temp);
-                        let x = rect.left() + (i as f32 / num_pts as f32) * rect.width();
-                        let y = rect.center().y - activated * (rect.height() * 0.45);
-                        let pt = egui::pos2(x, y);
-                        ui.painter().circle_filled(pt, 2.5 + 2.0 * input_energy, theme.success);
+
+                state::VisualGenerator::HarmonicArrangementLattice => {
+                    // Songwriter / Composer Musical Structure Lattice Canvas
+                    let cols = 16;
+                    let rows = 8;
+                    let cell_w = rect.width() / cols as f32;
+                    let cell_h = rect.height() / rows as f32;
+
+                    let bpm = telemetry.as_ref().map(|t| t.bpm as f32).unwrap_or(120.0);
+                    let beat_pos = telemetry.as_ref().map(|t| t.beat_position as f32).unwrap_or(0.0);
+
+                    for r in 0..rows {
+                        for c in 0..cols {
+                            let idx = (r * cols + c) % 128;
+                            let spec_val = self.viz.damped_spectrum[idx];
+                            let active_h = pade_tanh(spec_val * channel.param_neural_temp);
+
+                            let cell_rect = egui::Rect::from_min_size(
+                                egui::pos2(rect.left() + c as f32 * cell_w, rect.top() + r as f32 * cell_h),
+                                egui::vec2(cell_w - 2.0, cell_h - 2.0),
+                            );
+
+                            let is_beat_col = ((c as f32) - (beat_pos % 16.0)).abs() < 1.0;
+                            let base_color = if is_beat_col {
+                                theme.accent
+                            } else if (r + c) % 2 == 0 {
+                                egui::Color32::from_rgb(40, 60, 90)
+                            } else {
+                                egui::Color32::from_rgb(20, 30, 50)
+                            };
+
+                            ui.painter().rect_filled(cell_rect, 2.0, base_color.linear_multiply(0.2 + 0.8 * active_h.abs()));
+
+                            if active_h > 0.3 {
+                                ui.painter().circle_filled(cell_rect.center(), 3.0 + active_h * 5.0, theme.warning);
+                            }
+                        }
+                    }
+
+                    // Songwriter BPM & Harmonic Overlay Text
+                    ui.painter().text(
+                        rect.left_top() + egui::vec2(15.0, 15.0),
+                        egui::Align2::LEFT_TOP,
+                        format!("BPM: {:.1} | BEAT: {:.2} | HARMONIC CHROMA LATTICE", bpm, beat_pos),
+                        egui::FontId::new(12.0, egui::FontFamily::Monospace),
+                        theme.accent,
+                    );
+                }
+
+                state::VisualGenerator::AbstractQuantumSwarm => {
+                    let num_particles = (channel.param_particle_density * 180.0) as usize;
+                    for i in 0..num_particles {
+                        let phase = i as f64 * 0.15 + time * channel.param_speed as f64;
+                        let raw_x = (phase * 1.1).sin() as f32 + stereo_imbalance * 2.0;
+                        let raw_y = (phase * 1.7).cos() as f32 + high_energy * 2.0;
+
+                        let norm_x = pade_tanh(raw_x) * 0.5 + 0.5;
+                        let norm_y = pade_tanh(raw_y) * 0.5 + 0.5;
+
+                        let pt = egui::pos2(rect.left() + norm_x * rect.width(), rect.top() + norm_y * rect.height());
+
+                        // Colorful Quantum Swarm Color Palette
+                        let hue = ((i as f32 / num_particles as f32) + channel.param_color_shift) % 1.0;
+                        let particle_color = egui::Color32::from_rgb(
+                            ((hue * 255.0) as u8).wrapping_add(100),
+                            (((1.0 - hue) * 255.0) as u8).wrapping_add(50),
+                            ((hue * 180.0) as u8).wrapping_add(120),
+                        );
+
+                        ui.painter().circle_filled(pt, 2.5 + high_energy * 6.0, particle_color.linear_multiply(0.8));
                     }
                 }
+
+                state::VisualGenerator::NeuralFloralMycelium => {
+                    let num_branches = 18;
+                    let radius_base = (rect.height() * 0.42).min(rect.width() * 0.42);
+
+                    for b in 0..num_branches {
+                        let angle = (b as f32 / num_branches as f32) * std::f32::consts::TAU;
+                        let latent_val = self.viz.damped_latent[b % 16];
+                        let growth = pade_tanh(latent_val * channel.param_neural_temp + low_energy);
+
+                        let branch_r = radius_base * (0.3 + 0.7 * growth.abs());
+                        let pt = egui::pos2(center.x + angle.cos() * branch_r, center.y + angle.sin() * branch_r);
+
+                        // Organic Mycelium Floral Tendrils
+                        let floral_color = egui::Color32::from_rgb(180, 80, 220).linear_multiply(0.6 + 0.4 * mid_energy);
+                        ui.painter().line_segment([center, pt], egui::Stroke::new(2.5, floral_color));
+                        ui.painter().circle_filled(pt, 4.0 + growth.abs() * 8.0, theme.accent);
+                    }
+                }
+
                 state::VisualGenerator::FftSpectrumMesh => {
                     let num_bars = 128;
                     let bar_w = (rect.width() / num_bars as f32).max(1.0);
@@ -343,58 +412,17 @@ impl InspectorApp {
                             egui::pos2(rect.left() + i as f32 * bar_w, rect.bottom() - bar_h),
                             egui::pos2(rect.left() + (i + 1) as f32 * bar_w - 1.0, rect.bottom()),
                         );
-                        ui.painter().rect_filled(bar_rect, 1.0, theme.accent.linear_multiply(0.3 + 0.7 * activated));
-                    }
-                }
-                state::VisualGenerator::ReactionDiffusionNN => {
-                    let num_rings = 24;
-                    for i in 0..num_rings {
-                        let wave = pade_tanh(((i as f32 * 0.5 + time as f32 * channel.param_speed) * channel.param_neural_temp).sin());
-                        let r = (i as f32 * 12.0 + (time * 30.0) as f32) % (rect.height() * 0.48);
-                        ui.painter().circle_stroke(
-                            center,
-                            r,
-                            egui::Stroke::new(1.5 + wave.abs() * 2.0, theme.accent.linear_multiply(1.0 - r / (rect.height() * 0.48))),
+                        let hue = (i as f32 / num_bars as f32 + channel.param_color_shift) % 1.0;
+                        let bar_color = egui::Color32::from_rgb(
+                            ((hue * 255.0) as u8).wrapping_add(80),
+                            (((1.0 - hue) * 200.0) as u8).wrapping_add(60),
+                            220,
                         );
-                    }
-                }
-                state::VisualGenerator::ShaderParticleSwarm => {
-                    let count = (channel.param_particle_density * 120.0) as usize;
-                    for i in 0..count {
-                        let phase = i as f64 * 0.2 + time * channel.param_speed as f64;
-                        let raw_x = phase.sin() as f32 * channel.param_neural_temp;
-                        let raw_y = (phase * 1.4).cos() as f32 * channel.param_neural_temp;
-
-                        let norm_x = pade_tanh(raw_x + input_energy) * 0.5 + 0.5;
-                        let norm_y = pade_tanh(raw_y + stereo_imbalance) * 0.5 + 0.5;
-
-                        let x = rect.left() + norm_x * rect.width();
-                        let y = rect.top() + norm_y * rect.height();
-                        ui.painter().circle_filled(egui::pos2(x, y), 3.0 + 2.0 * input_energy, theme.success);
+                        ui.painter().rect_filled(bar_rect, 1.0, bar_color.linear_multiply(0.4 + 0.6 * activated));
                     }
                 }
             }
 
-            ui.add_space(8.0);
-
-            // Parametric Controls Bar at the bottom of the detached surface window
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("PARAMETRIC CONTROLS:").strong().color(theme.accent));
-                    ui.add_space(10.0);
-                    ui.label("Speed:");
-                    ui.add(egui::Slider::new(&mut channel.param_speed, 0.1..=4.0));
-                    ui.add_space(10.0);
-                    ui.label("Neural Temp:");
-                    ui.add(egui::Slider::new(&mut channel.param_neural_temp, 0.0..=2.0));
-                    ui.add_space(10.0);
-                    ui.label("Feedback:");
-                    ui.add(egui::Slider::new(&mut channel.param_feedback, 0.0..=1.0));
-                    ui.add_space(10.0);
-                    ui.label("Sensitivity:");
-                    ui.add(egui::Slider::new(&mut channel.gain_sensitivity, 0.0..=2.0));
-                });
-            });
         }
     }
 
@@ -409,7 +437,7 @@ impl InspectorApp {
                     let count = self.viz.channels.len() + 1;
                     self.viz.channels.push(state::VisualChannel::new(
                         &format!("VIZ {}", count),
-                        state::VisualGenerator::ShaderParticleSwarm,
+                        state::VisualGenerator::AbstractQuantumSwarm,
                         vec![state::VisualInputSource::MasterMix],
                     ));
                 }
