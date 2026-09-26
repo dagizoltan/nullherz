@@ -325,7 +325,7 @@ mod raw_mode_tests {
         // the deck's spectral resynthesis by itself.
         let h = Harness::new();
         assert_eq!(
-            h.app.mixer.channel_dna_enabled, [false; 4],
+            h.app.mixer.channel_dna_enabled, [false; 16],
             "a deck starts with DNA shaping engaged"
         );
     }
@@ -337,7 +337,7 @@ mod raw_mode_tests {
         h.load_deck(1, 2, "b", 48_000);
         h.frame(vec![], None);
         assert_eq!(
-            h.app.mixer.channel_dna_enabled, [false; 4],
+            h.app.mixer.channel_dna_enabled, [false; 16],
             "loading tracks engaged DNA shaping"
         );
     }

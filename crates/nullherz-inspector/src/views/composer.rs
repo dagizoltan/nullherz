@@ -679,17 +679,17 @@ mod tests {
             active_view: crate::View::Composer,
             detached_views: std::collections::HashSet::new(),
             mixer: crate::state::MixerState {
-                channel_sync: [true; 4],
+                channel_sync: [true; 16],
                 quantize_enabled: true,
                 ..Default::default()
             },
             decks: crate::state::DeckState {
                 master_deck: None,
-                now_playing: [None; 4],
+                now_playing: [None; 16],
                 cached_tracks: std::array::from_fn(|_| None),
                 global_bpm: 120.0,
                 focused_deck: 0,
-                deck_playing: [false; 4],
+                deck_playing: [false; 16],
                 global_playing: false,
                 ..Default::default()
             },
