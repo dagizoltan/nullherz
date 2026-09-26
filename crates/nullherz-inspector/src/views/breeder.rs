@@ -1,14 +1,39 @@
 use egui::{Ui, Vec2, Stroke, Sense, RichText, Frame, Margin};
 use nullherz_traits::{Command, DnaCommand};
 
+#[derive(Clone, PartialEq, Debug)]
+pub enum BreedingMode {
+    Crossover,
+    Masked,
+    Harmonic,
+    ChaoticLogistic,
+}
+
+impl BreedingMode {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Crossover => "Domain Crossover (SLERP)",
+            Self::Masked => "Invariant Masked",
+            Self::Harmonic => "Harmonic Alignment",
+            Self::ChaoticLogistic => "Chaotic Logistic Map",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[Self::Crossover, Self::Masked, Self::Harmonic, Self::ChaoticLogistic]
+    }
+}
+
 pub struct BreederView {
     pub parent_a_id: Option<u64>,
     pub parent_b_id: Option<u64>,
+    pub parent_c_id: Option<u64>,
+    pub parent_d_id: Option<u64>,
+    pub breeding_mode: BreedingMode,
     pub transfusion_bias_x: f32, // Spectral Bias
     pub transfusion_bias_y: f32, // Rhythmic Bias
-    pub selecting_parent: Option<usize>, // 0 for A, 1 for B
+    pub selecting_parent: Option<usize>, // 0..=3
     pub preview_dna: [f32; 16],
-    #[allow(dead_code)]
     pub target_genre_centroid: Option<String>,
     pub _smoothed_goniometer: [f32; 128],
 }
@@ -18,6 +43,9 @@ impl BreederView {
         Self {
             parent_a_id: None,
             parent_b_id: None,
+            parent_c_id: None,
+            parent_d_id: None,
+            breeding_mode: BreedingMode::Crossover,
             transfusion_bias_x: 0.5,
             transfusion_bias_y: 0.5,
             selecting_parent: None,
@@ -77,10 +105,12 @@ impl BreederView {
 
                             let label = format!("{} - {}", track.title, track.artist);
                             if ui.selectable_label(false, RichText::new(label).size(theme.type_body)).clicked() {
-                                if parent_idx == 0 {
-                                    state.parent_a_id = Some(track.id);
-                                } else {
-                                    state.parent_b_id = Some(track.id);
+                                match parent_idx {
+                                    0 => state.parent_a_id = Some(track.id),
+                                    1 => state.parent_b_id = Some(track.id),
+                                    2 => state.parent_c_id = Some(track.id),
+                                    3 => state.parent_d_id = Some(track.id),
+                                    _ => {}
                                 }
                                 app.library.library_needs_refresh = true;
                                 state.selecting_parent = None;
@@ -91,32 +121,82 @@ impl BreederView {
             });
         }
 
+        // Breeding Mode & Centroid Selection Row
         ui.horizontal(|ui| {
-            // Parent A Selection
-            ui.vertical(|ui| {
-                ui.label(RichText::new("Parent A").size(theme.type_caption).color(theme.text_secondary));
-                let label = state.parent_a_id.and_then(|id| app.get_cached_track(id))
-                    .map(|t| t.title).unwrap_or_else(|| "Select Sample".to_string());
+            ui.label(RichText::new("BREEDING MODE:").strong().size(theme.type_caption).color(theme.text_secondary));
+            egui::ComboBox::from_id_source("breeding_mode_combo")
+                .selected_text(state.breeding_mode.name())
+                .show_ui(ui, |ui| {
+                    for mode in BreedingMode::all() {
+                        ui.selectable_value(&mut state.breeding_mode, mode.clone(), mode.name());
+                    }
+                });
 
-                if ui.button(RichText::new(label).size(theme.type_body)).clicked() {
-                    state.selecting_parent = Some(0);
+            ui.add_space(20.0);
+            ui.label(RichText::new("TARGET CENTROID:").strong().size(theme.type_caption).color(theme.text_secondary));
+            let centroids = ["(None)", "Techno / Hardgroove", "Ambient / Drone", "Drum & Bass", "House / Minimal"];
+            let selected_centroid_str = state.target_genre_centroid.as_deref().unwrap_or("(None)").to_string();
+            egui::ComboBox::from_id_source("genre_centroid_combo")
+                .selected_text(&selected_centroid_str)
+                .show_ui(ui, |ui| {
+                    for centroid in centroids {
+                        let is_sel = selected_centroid_str == centroid;
+                        if ui.selectable_label(is_sel, centroid).clicked() {
+                            state.target_genre_centroid = if centroid == "(None)" { None } else { Some(centroid.to_string()) };
+                        }
+                    }
+                });
+        });
+
+        ui.add_space(theme.space_sm);
+
+        // Multi-Donor Parent Selection Row (A, B, C, D) with Waveform Previews
+        ui.horizontal(|ui| {
+            let parent_ids = [state.parent_a_id, state.parent_b_id, state.parent_c_id, state.parent_d_id];
+            let labels = ["DONOR A (Carrier)", "DONOR B (Modulator)", "DONOR C (Texture)", "DONOR D (Groove)"];
+
+            for p_idx in 0..4 {
+                ui.group(|ui| {
+                    ui.set_width(180.0);
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(labels[p_idx]).size(theme.type_caption).strong().color(theme.accent));
+                        let track_opt = parent_ids[p_idx].and_then(|id| app.get_cached_track(id));
+                        let p_label = track_opt.as_ref()
+                            .map(|t| t.title.clone())
+                            .unwrap_or_else(|| "Select Donor".to_string());
+
+                        if ui.button(RichText::new(p_label).size(theme.type_body)).clicked() {
+                            state.selecting_parent = Some(p_idx);
+                        }
+
+                        // Donor Waveform Display Box
+                        let (wf_rect, _) = ui.allocate_exact_size(Vec2::new(170.0, 50.0), Sense::hover());
+                        ui.painter().rect_filled(wf_rect, theme.radius_sm, theme.bg_inset);
+                        if let Some(ref track) = track_opt {
+                            crate::views::composer::render_mini_waveform(
+                                ui.painter(),
+                                wf_rect.shrink(2.0),
+                                &track.metadata.peaks,
+                                theme.track_colors[p_idx],
+                            );
+                        } else {
+                            ui.painter().text(
+                                wf_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "NO DONOR",
+                                egui::FontId::new(9.0, egui::FontFamily::Monospace),
+                                theme.text_disabled,
+                            );
+                        }
+                    });
+                });
+
+                if p_idx < 3 {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("×").size(theme.type_heading).strong().color(theme.accent));
+                    ui.add_space(4.0);
                 }
-            });
-
-            ui.add_space(theme.space_lg);
-            ui.label(RichText::new("X").size(theme.type_heading).strong().color(theme.accent));
-            ui.add_space(theme.space_lg);
-
-            // Parent B Selection
-            ui.vertical(|ui| {
-                ui.label(RichText::new("Parent B").size(theme.type_caption).color(theme.text_secondary));
-                let label = state.parent_b_id.and_then(|id| app.get_cached_track(id))
-                    .map(|t| t.title).unwrap_or_else(|| "Select Sample".to_string());
-
-                if ui.button(RichText::new(label).size(theme.type_body)).clicked() {
-                    state.selecting_parent = Some(1);
-                }
-            });
+            }
         });
 
         ui.add_space(theme.space_lg);
@@ -155,37 +235,70 @@ impl BreederView {
 
             ui.add_space(theme.space_md);
 
-            // Interpolated DNA Preview (Genetic Blueprint)
+            // Interpolated DNA Preview & Expected Offspring Result Waveform
             ui.vertical(|ui| {
-                ui.label(RichText::new("Genetic Blueprint (Latent Space Preview)").size(theme.type_body));
-                let (preview_rect, _) = ui.allocate_at_least(Vec2::new(300.0, 150.0), Sense::hover());
+                ui.label(RichText::new("Expected Offspring Result & Genetic Blueprint").size(theme.type_body));
+
+                // Result Waveform Box
+                let (res_wf_rect, _) = ui.allocate_exact_size(Vec2::new(300.0, 65.0), Sense::hover());
+                ui.painter().rect_filled(res_wf_rect, theme.radius_md, theme.bg_inset);
+                ui.painter().rect_stroke(res_wf_rect, theme.radius_md, Stroke::new(1.5, theme.success));
+
+                let track_a_opt = state.parent_a_id.and_then(|id| app.get_cached_track(id));
+                let track_b_opt = state.parent_b_id.and_then(|id| app.get_cached_track(id));
+
+                if let (Some(ta), Some(tb)) = (&track_a_opt, &track_b_opt) {
+                    let mut blended_peaks = Vec::with_capacity(ta.metadata.peaks.len().max(tb.metadata.peaks.len()));
+                    let max_len = ta.metadata.peaks.len().max(tb.metadata.peaks.len());
+                    for i in 0..max_len {
+                        let pa = ta.metadata.peaks.get(i).copied().unwrap_or(0.0);
+                        let pb = tb.metadata.peaks.get(i).copied().unwrap_or(0.0);
+                        let blend = pa * (1.0 - state.transfusion_bias_x) + pb * state.transfusion_bias_x;
+                        blended_peaks.push(blend);
+                    }
+                    crate::views::composer::render_mini_waveform(
+                        ui.painter(),
+                        res_wf_rect.shrink(3.0),
+                        &blended_peaks,
+                        theme.success,
+                    );
+                } else {
+                    ui.painter().text(
+                        res_wf_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "EXPECTED OFFSPRING RESULT WAVEFORM",
+                        egui::FontId::new(9.0, egui::FontFamily::Monospace),
+                        theme.text_secondary,
+                    );
+                }
+
+                ui.add_space(6.0);
+
+                let (preview_rect, _) = ui.allocate_exact_size(Vec2::new(300.0, 150.0), Sense::hover());
                 ui.painter().rect_filled(preview_rect, theme.radius_md, theme.bg_inset);
                 ui.painter().rect_stroke(preview_rect, theme.radius_md, theme.border_stroke);
 
-                if let (Some(id_a), Some(id_b)) = (state.parent_a_id, state.parent_b_id) {
-                    if let (Some(track_a), Some(track_b)) = (app.get_cached_track(id_a), app.get_cached_track(id_b)) {
-                        nullherz_dna::NeuralTransfuser::interpolate_latent(&mut state.preview_dna, &track_a.metadata.dna.spectral.latent_space, &track_b.metadata.dna.spectral.latent_space, state.transfusion_bias_x);
+                if let (Some(track_a), Some(track_b)) = (&track_a_opt, &track_b_opt) {
+                    nullherz_dna::NeuralTransfuser::interpolate_latent(&mut state.preview_dna, &track_a.metadata.dna.spectral.latent_space, &track_b.metadata.dna.spectral.latent_space, state.transfusion_bias_x);
 
-                        let bin_width = preview_rect.width() / 16.0;
-                        let spacing = 2.0;
-                        for i in 0..16 {
-                            let val = state.preview_dna[i];
-                            let h = val.abs().clamp(0.01, 1.0) * (preview_rect.height() / 2.0);
-                            let x = preview_rect.left() + i as f32 * bin_width;
+                    let bin_width = preview_rect.width() / 16.0;
+                    let spacing = 2.0;
+                    for i in 0..16 {
+                        let val = state.preview_dna[i];
+                        let h = val.abs().clamp(0.01, 1.0) * (preview_rect.height() / 2.0);
+                        let x = preview_rect.left() + i as f32 * bin_width;
 
-                            // Draw Bipolar Bar Chart (Stage 6 Latent Space is often centered)
-                            let center_y = preview_rect.center().y;
-                            let r = if val >= 0.0 {
-                                egui::Rect::from_min_max(egui::pos2(x + spacing, center_y - h), egui::pos2(x + bin_width - spacing, center_y))
-                            } else {
-                                egui::Rect::from_min_max(egui::pos2(x + spacing, center_y), egui::pos2(x + bin_width - spacing, center_y + h))
-                            };
+                        let center_y = preview_rect.center().y;
+                        let r = if val >= 0.0 {
+                            egui::Rect::from_min_max(egui::pos2(x + spacing, center_y - h), egui::pos2(x + bin_width - spacing, center_y))
+                        } else {
+                            egui::Rect::from_min_max(egui::pos2(x + spacing, center_y), egui::pos2(x + bin_width - spacing, center_y + h))
+                        };
 
-                            let color = if i < 8 { theme.track_colors[4] } else { theme.track_colors[2] };
-                            ui.painter().rect_filled(r, 1.0, color.gamma_multiply(0.8));
-                        }
-                        ui.painter().hline(preview_rect.x_range(), preview_rect.center().y, Stroke::new(1.0_f32, theme.border));
+                        let color = if i < 8 { theme.track_colors[4] } else { theme.track_colors[2] };
+                        ui.painter().rect_filled(r, 1.0, color.gamma_multiply(0.8));
                     }
+                    ui.painter().hline(preview_rect.x_range(), preview_rect.center().y, Stroke::new(1.0_f32, theme.border));
                 } else {
                     ui.painter().text(preview_rect.center(), egui::Align2::CENTER_CENTER, "SELECT PARENTS TO VIEW GENETIC BLUEPRINT", egui::FontId::new(theme.type_caption, egui::FontFamily::Monospace), theme.text_secondary);
                 }
