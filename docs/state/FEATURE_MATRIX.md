@@ -115,7 +115,7 @@
 
 | Backend | Status | Description |
 | :--- | :---: | :--- |
-| **ALSA** | ✅ | Default direct hardware backend; configurable period and buffer sizes. |
+| **ALSA** | ✅ | Default direct hardware backend; configurable period and buffer sizes, direct hardware MMAP mode (`NULLHERZ_ALSA_MMAP`), `NO_PERIOD_WAKEUP` kernel bypass (`NULLHERZ_NO_PERIOD_WAKEUP`), and D-Bus device reservation (`org.freedesktop.ReserveDevice1`). |
 | **PipeWire** | ✅ | PipeWire graph integration with native ALSA/JACK interop. |
 | **JACK** | ✅ | Professional pro-audio server integration. |
 | **Threaded** | ✅ | Software-clocked fallback backend for desktop/headless execution. |
