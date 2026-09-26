@@ -103,6 +103,7 @@ pub enum View {
     Mastering,
     Modulation,
     Visuals,
+    Analyzer,
     // Secondary/Legacy Views
     Tools,
 }
@@ -155,6 +156,7 @@ pub struct InspectorApp {
     pub(crate) settings: state::SettingsState,
     pub(crate) viz: state::VizState,
     pub(crate) topo: state::TopologyViewState,
+    pub(crate) analyzer: state::AnalyzerViewState,
     pub(crate) library_db: SharedLibraryDb,
     pub(crate) active_right_tab: Option<RightTab>,
     pub(crate) breeding_view: views::breeder::BreederView,
@@ -227,6 +229,7 @@ impl InspectorApp {
             }
             View::Mastering => views::mastering::render(self, ui, telemetry),
             View::Visuals => self.render_visuals_view(ui, telemetry),
+            View::Analyzer => views::analyzer::render(self, ui, telemetry),
             View::Broadcast => views::broadcast::render(self, ui),
             View::Settings => views::settings::render(self, ui),
             View::Store => views::store::render(self, ui),
@@ -722,6 +725,7 @@ impl InspectorApp {
             settings: Default::default(),
             viz: Default::default(),
             topo: Default::default(),
+            analyzer: Default::default(),
             library_db: library_db_wrapper,
             active_right_tab: Some(RightTab::Library),
             breeding_view: views::breeder::BreederView::new(),
@@ -803,6 +807,7 @@ impl InspectorApp {
                         (View::Sampler, egui_phosphor::regular::MICROPHONE, "SAMPLER"),
                         (View::Breeder, egui_phosphor::regular::DNA, "DNA BREEDER"),
                         (View::Visuals, egui_phosphor::regular::EYE, "NEURAL VISUALS"),
+                        (View::Analyzer, egui_phosphor::regular::ACTIVITY, "ANALYZER & PERCEPTION"),
                         (View::Store, egui_phosphor::regular::SHOPPING_BAG, "SIDECAR STORE"),
                         (View::Broadcast, egui_phosphor::regular::BROADCAST, "BROADCAST"),
                     ];
@@ -1615,6 +1620,7 @@ fn view_to_string(view: View) -> String {
         View::Mastering => "Mastering".to_string(),
         View::Modulation => "Modulation".to_string(),
         View::Visuals => "Visuals".to_string(),
+        View::Analyzer => "Analyzer".to_string(),
         _ => "Console".to_string(),
     }
 }
@@ -1637,6 +1643,7 @@ fn string_to_view(s: &str) -> View {
         "Mastering" => View::Mastering,
         "Modulation" => View::Modulation,
         "Visuals" => View::Visuals,
+        "Analyzer" => View::Analyzer,
         _ => View::Console,
     }
 }
@@ -1895,6 +1902,7 @@ mod tests {
             settings: Default::default(),
             viz: Default::default(),
             topo: Default::default(),
+            analyzer: Default::default(),
             library_db: SharedLibraryDb(db_arc),
             active_right_tab: None,
             breeding_view: views::breeder::BreederView::new(),
@@ -1951,6 +1959,7 @@ mod tests {
             settings: Default::default(),
             viz: Default::default(),
             topo: Default::default(),
+            analyzer: Default::default(),
             library_db: SharedLibraryDb(db_arc),
             active_right_tab: Some(RightTab::Library),
             breeding_view: views::breeder::BreederView::new(),
