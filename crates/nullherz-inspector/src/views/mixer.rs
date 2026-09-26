@@ -274,7 +274,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                         if !track.artist.is_empty() {
                             ui.label(RichText::new(&track.artist).size(9.0).color(theme.text_secondary));
                         }
-                        let effective_bpm = track.facets().bpm * app.mixer.channel_pitch[i];
+                        let effective_bpm = track.metadata.bpm * app.mixer.channel_pitch[i];
                         ui.horizontal(|ui| {
                             ui.add_space((STRIP_W - 110.0).max(0.0) / 2.0);
                             ui.label(RichText::new(format!("{:.1} BPM", effective_bpm)).monospace().size(9.0).strong().color(deck_color));
@@ -320,7 +320,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                             _ => "",
                         };
                         if let Some(node_idx) = app.get_node_id(node_name) {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpByBeats { node_idx, beats: 0.0 }));
+                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpToHotCue { node_idx, cue_idx: 0 }));
                         }
                     }
                 });
@@ -357,10 +357,10 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                         ui.label(RichText::new("MASTER INSERTS").size(theme.type_caption).strong().color(theme.text_secondary));
                         ui.add_space(2.0);
 
-                        ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked().then(|| {
+                        if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
                             app.active_right_tab = Some(crate::RightTab::Store);
                             app.store.active_tag_filter = Some("insert".to_string());
-                        });
+                        }
                     });
                 });
 
