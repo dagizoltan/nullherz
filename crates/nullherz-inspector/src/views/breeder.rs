@@ -1,14 +1,39 @@
 use egui::{Ui, Vec2, Stroke, Sense, RichText, Frame, Margin};
 use nullherz_traits::{Command, DnaCommand};
 
+#[derive(Clone, PartialEq, Debug)]
+pub enum BreedingMode {
+    Crossover,
+    Masked,
+    Harmonic,
+    ChaoticLogistic,
+}
+
+impl BreedingMode {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Crossover => "Domain Crossover (SLERP)",
+            Self::Masked => "Invariant Masked",
+            Self::Harmonic => "Harmonic Alignment",
+            Self::ChaoticLogistic => "Chaotic Logistic Map",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[Self::Crossover, Self::Masked, Self::Harmonic, Self::ChaoticLogistic]
+    }
+}
+
 pub struct BreederView {
     pub parent_a_id: Option<u64>,
     pub parent_b_id: Option<u64>,
+    pub parent_c_id: Option<u64>,
+    pub parent_d_id: Option<u64>,
+    pub breeding_mode: BreedingMode,
     pub transfusion_bias_x: f32, // Spectral Bias
     pub transfusion_bias_y: f32, // Rhythmic Bias
-    pub selecting_parent: Option<usize>, // 0 for A, 1 for B
+    pub selecting_parent: Option<usize>, // 0..=3
     pub preview_dna: [f32; 16],
-    #[allow(dead_code)]
     pub target_genre_centroid: Option<String>,
     pub _smoothed_goniometer: [f32; 128],
 }
@@ -18,6 +43,9 @@ impl BreederView {
         Self {
             parent_a_id: None,
             parent_b_id: None,
+            parent_c_id: None,
+            parent_d_id: None,
+            breeding_mode: BreedingMode::Crossover,
             transfusion_bias_x: 0.5,
             transfusion_bias_y: 0.5,
             selecting_parent: None,
@@ -77,10 +105,12 @@ impl BreederView {
 
                             let label = format!("{} - {}", track.title, track.artist);
                             if ui.selectable_label(false, RichText::new(label).size(theme.type_body)).clicked() {
-                                if parent_idx == 0 {
-                                    state.parent_a_id = Some(track.id);
-                                } else {
-                                    state.parent_b_id = Some(track.id);
+                                match parent_idx {
+                                    0 => state.parent_a_id = Some(track.id),
+                                    1 => state.parent_b_id = Some(track.id),
+                                    2 => state.parent_c_id = Some(track.id),
+                                    3 => state.parent_d_id = Some(track.id),
+                                    _ => {}
                                 }
                                 app.library.library_needs_refresh = true;
                                 state.selecting_parent = None;
@@ -91,32 +121,59 @@ impl BreederView {
             });
         }
 
+        // Breeding Mode & Centroid Selection Row
         ui.horizontal(|ui| {
-            // Parent A Selection
-            ui.vertical(|ui| {
-                ui.label(RichText::new("Parent A").size(theme.type_caption).color(theme.text_secondary));
-                let label = state.parent_a_id.and_then(|id| app.get_cached_track(id))
-                    .map(|t| t.title).unwrap_or_else(|| "Select Sample".to_string());
+            ui.label(RichText::new("BREEDING MODE:").strong().size(theme.type_caption).color(theme.text_secondary));
+            egui::ComboBox::from_id_source("breeding_mode_combo")
+                .selected_text(state.breeding_mode.name())
+                .show_ui(ui, |ui| {
+                    for mode in BreedingMode::all() {
+                        ui.selectable_value(&mut state.breeding_mode, mode.clone(), mode.name());
+                    }
+                });
 
-                if ui.button(RichText::new(label).size(theme.type_body)).clicked() {
-                    state.selecting_parent = Some(0);
+            ui.add_space(20.0);
+            ui.label(RichText::new("TARGET CENTROID:").strong().size(theme.type_caption).color(theme.text_secondary));
+            let centroids = ["(None)", "Techno / Hardgroove", "Ambient / Drone", "Drum & Bass", "House / Minimal"];
+            let selected_centroid_str = state.target_genre_centroid.as_deref().unwrap_or("(None)").to_string();
+            egui::ComboBox::from_id_source("genre_centroid_combo")
+                .selected_text(&selected_centroid_str)
+                .show_ui(ui, |ui| {
+                    for centroid in centroids {
+                        let is_sel = selected_centroid_str == centroid;
+                        if ui.selectable_label(is_sel, centroid).clicked() {
+                            state.target_genre_centroid = if centroid == "(None)" { None } else { Some(centroid.to_string()) };
+                        }
+                    }
+                });
+        });
+
+        ui.add_space(theme.space_sm);
+
+        // Multi-Donor Parent Selection Row (A, B, C, D)
+        ui.horizontal(|ui| {
+            let parent_ids = [state.parent_a_id, state.parent_b_id, state.parent_c_id, state.parent_d_id];
+            let labels = ["DONOR A", "DONOR B", "DONOR C", "DONOR D"];
+
+            for p_idx in 0..4 {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(labels[p_idx]).size(theme.type_caption).color(theme.text_secondary));
+                    let p_label = parent_ids[p_idx]
+                        .and_then(|id| app.get_cached_track(id))
+                        .map(|t| t.title)
+                        .unwrap_or_else(|| "Select Donor".to_string());
+
+                    if ui.button(RichText::new(p_label).size(theme.type_body)).clicked() {
+                        state.selecting_parent = Some(p_idx);
+                    }
+                });
+
+                if p_idx < 3 {
+                    ui.add_space(theme.space_md);
+                    ui.label(RichText::new("×").size(theme.type_heading).strong().color(theme.accent));
+                    ui.add_space(theme.space_md);
                 }
-            });
-
-            ui.add_space(theme.space_lg);
-            ui.label(RichText::new("X").size(theme.type_heading).strong().color(theme.accent));
-            ui.add_space(theme.space_lg);
-
-            // Parent B Selection
-            ui.vertical(|ui| {
-                ui.label(RichText::new("Parent B").size(theme.type_caption).color(theme.text_secondary));
-                let label = state.parent_b_id.and_then(|id| app.get_cached_track(id))
-                    .map(|t| t.title).unwrap_or_else(|| "Select Sample".to_string());
-
-                if ui.button(RichText::new(label).size(theme.type_body)).clicked() {
-                    state.selecting_parent = Some(1);
-                }
-            });
+            }
         });
 
         ui.add_space(theme.space_lg);
