@@ -229,15 +229,9 @@ impl Default for LibraryState {
 /// Step-sequencer / song-builder grid state.
 pub struct ComposerState {
     /// Sample assigned to each sequencer track, independent of the decks.
-    ///
-    /// Sequencer tracks used to resolve their audio through
-    /// `decks.now_playing[track_idx % 4]`, so the composer could only sequence
-    /// whatever was on a deck and tracks 4..16 aliased tracks 0..3. This is
-    /// what lets the composer load samples of its own.
     pub track_sources: [Option<u64>; 16],
     /// Step grids PER DECK: the composer edits the focused deck's
-    /// sequencer, so each deck needs its own grid — one shared grid showed
-    /// deck A's steps no matter which deck you were editing.
+    /// sequencer, so each deck needs its own grid.
     pub sequencer_grid: [[Vec<f32>; 16]; 4],
     pub selected_composer_track: Option<usize>,
     pub sequencer_active_step: usize,
@@ -247,6 +241,7 @@ pub struct ComposerState {
     pub track_pans: [f32; 16],
     pub track_filters: [f32; 16],
     pub track_targets: [String; 16],
+    pub channel_kinds: [ChannelKind; 16],
     pub record_automation: bool,
     pub _automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>,
     pub evolution_strengths: [f32; 16],
@@ -266,6 +261,7 @@ impl Default for ComposerState {
             track_pans: [0.0; 16],
             track_filters: [0.5; 16],
             track_targets: std::array::from_fn(|_| "(default)".to_string()),
+            channel_kinds: std::array::from_fn(|i| if i < 4 { ChannelKind::StereoInput } else { ChannelKind::InstrumentSampler }),
             record_automation: false,
             _automation_data: std::collections::HashMap::new(),
             evolution_strengths: [0.0; 16],
@@ -396,6 +392,14 @@ impl Default for SettingsState {
             recent_midi_events: std::collections::VecDeque::with_capacity(30),
         }
     }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+#[allow(dead_code)]
+pub enum ChannelKind {
+    StereoInput,
+    InstrumentSampler,
+    InstrumentSynth,
 }
 
 #[derive(Clone, PartialEq, Debug)]

@@ -200,7 +200,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     let (swatch_rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), Sense::hover());
                                     ui.painter().rect_filled(swatch_rect, Rounding::same(1.5), track_color);
                                     ui.add_space(app.theme.space_xs);
-                                    ui.label(RichText::new(format!("TRK {}", track_idx + 1)).strong().size(app.theme.type_body).color(app.theme.text_primary));
+                                    let ch_kind_label = match &app.composer.channel_kinds[track_idx] {
+                                        crate::state::ChannelKind::StereoInput => "ST IN",
+                                        crate::state::ChannelKind::InstrumentSampler => "SMPL",
+                                        crate::state::ChannelKind::InstrumentSynth => "SYNTH",
+                                    };
+                                    ui.label(RichText::new(format!("CH {} [{}]", track_idx + 1, ch_kind_label)).strong().size(app.theme.type_body).color(app.theme.text_primary));
                                 });
                             });
 
@@ -469,20 +474,85 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             ui.horizontal(|ui| {
                                                 ui.label(RichText::new("VOL").size(app.theme.type_caption).color(app.theme.text_secondary));
                                                 let volume_color = if is_muted { app.theme.bg_inset } else { track_color };
-                                                widgets::render_horizontal_fader(ui, &mut app.composer.track_volumes[track_idx], 0.0..=1.0, volume_color, 55.0, 10.0)
-                                                    .on_hover_text("VOLUME");
+
+                                                // If track_idx maps to a mixer channel (0..3), sync with mixer.channel_faders
+                                                let mut vol_val = if track_idx < 4 {
+                                                    app.mixer.channel_faders[track_idx]
+                                                } else {
+                                                    app.composer.track_volumes[track_idx]
+                                                };
+
+                                                if widgets::render_horizontal_fader(ui, &mut vol_val, 0.0..=1.2, volume_color, 55.0, 10.0)
+                                                    .on_hover_text("VOLUME (synced with System Mixer channel)")
+                                                    .changed()
+                                                {
+                                                    if track_idx < 4 {
+                                                        app.mixer.channel_faders[track_idx] = vol_val;
+                                                        let deck_char = ['a', 'b', 'c', 'd'][track_idx];
+                                                        if let Some(gain_id) = app.topo.node_map.get(&format!("deck_{}_gain", deck_char)).copied() {
+                                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
+                                                                target_id: gain_id as u64,
+                                                                param_id: 0,
+                                                                value: vol_val,
+                                                                ramp_duration_samples: 128,
+                                                            }));
+                                                        }
+                                                    }
+                                                    app.composer.track_volumes[track_idx] = vol_val;
+                                                }
 
                                                 ui.add_space(app.theme.space_xs);
 
                                                 ui.label(RichText::new("PAN").size(app.theme.type_caption).color(app.theme.text_secondary));
-                                                widgets::render_horizontal_fader(ui, &mut app.composer.track_pans[track_idx], -1.0..=1.0, app.theme.text_primary, 45.0, 10.0)
-                                                    .on_hover_text("PAN (-1.0 Left .. +1.0 Right)");
+                                                let mut pan_val = if track_idx < 4 {
+                                                    app.mixer.channel_balance[track_idx] * 2.0 - 1.0
+                                                } else {
+                                                    app.composer.track_pans[track_idx]
+                                                };
+
+                                                if widgets::render_horizontal_fader(ui, &mut pan_val, -1.0..=1.0, app.theme.text_primary, 45.0, 10.0)
+                                                    .on_hover_text("PAN (-1.0 Left .. +1.0 Right, synced with Mixer balance)")
+                                                    .changed()
+                                                {
+                                                    if track_idx < 4 {
+                                                        app.mixer.channel_balance[track_idx] = (pan_val + 1.0) * 0.5;
+                                                        let deck_char_upper = (b'A' + track_idx as u8) as char;
+                                                        let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetDeckParam {
+                                                            deck_id: deck_char_upper,
+                                                            param_type: nullherz_traits::DeckParamType::Pan,
+                                                            value: (pan_val + 1.0) * 0.5,
+                                                        }));
+                                                    }
+                                                    app.composer.track_pans[track_idx] = pan_val;
+                                                }
 
                                                 ui.add_space(app.theme.space_xs);
 
                                                 ui.label(RichText::new("FLT").size(app.theme.type_caption).color(app.theme.text_secondary));
-                                                widgets::render_horizontal_fader(ui, &mut app.composer.track_filters[track_idx], 0.0..=1.0, app.theme.success, 45.0, 10.0)
-                                                    .on_hover_text("FILTER CUTOFF");
+                                                let mut filter_val = if track_idx < 4 {
+                                                    app.mixer.channel_filter[track_idx]
+                                                } else {
+                                                    app.composer.track_filters[track_idx]
+                                                };
+
+                                                if widgets::render_horizontal_fader(ui, &mut filter_val, 0.0..=1.0, app.theme.success, 45.0, 10.0)
+                                                    .on_hover_text("FILTER CUTOFF (synced with Mixer channel filter)")
+                                                    .changed()
+                                                {
+                                                    if track_idx < 4 {
+                                                        app.mixer.channel_filter[track_idx] = filter_val;
+                                                        let deck_char = ['a', 'b', 'c', 'd'][track_idx];
+                                                        if let Some(flt_id) = app.topo.node_map.get(&format!("deck_{}_filter", deck_char)).copied() {
+                                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
+                                                                target_id: flt_id as u64,
+                                                                param_id: 0,
+                                                                value: filter_val,
+                                                                ramp_duration_samples: 128,
+                                                            }));
+                                                        }
+                                                    }
+                                                    app.composer.track_filters[track_idx] = filter_val;
+                                                }
 
                                                 ui.add_space(app.theme.space_xs);
 
