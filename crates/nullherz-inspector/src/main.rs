@@ -234,11 +234,11 @@ impl InspectorApp {
         }
     }
 
-    pub fn render_detached_interactive_surface(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui, _telemetry: &Option<Telemetry>) {
+    pub fn render_detached_interactive_surface(&mut self, channel_idx: usize, _ctx: &egui::Context, ui: &mut egui::Ui, _telemetry: &Option<Telemetry>) {
         let theme = self.theme.clone();
-        let selected_idx = self.viz.selected_channel_idx.min(self.viz.channels.len().saturating_sub(1));
+        let target_idx = channel_idx.min(self.viz.channels.len().saturating_sub(1));
 
-        if let Some(channel) = self.viz.channels.get_mut(selected_idx) {
+        if let Some(channel) = self.viz.channels.get_mut(target_idx) {
             ui.horizontal(|ui| {
                 ui.heading(egui::RichText::new(format!("SURFACE — {}", channel.name)).strong().color(theme.accent));
                 ui.add_space(20.0);
@@ -356,9 +356,6 @@ impl InspectorApp {
         ui.horizontal(|ui| {
             ui.heading(egui::RichText::new("VISUAL MIXER").strong().color(self.theme.text_primary));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(format!("{} Detach Mixer Window", egui_phosphor::regular::ARROW_SQUARE_OUT)).clicked() {
-                    self.detached_views.insert(View::Visuals);
-                }
                 if ui.button(format!("{} + Add Visual Channel", egui_phosphor::regular::PLUS)).clicked() {
                     let count = self.viz.channels.len() + 1;
                     self.viz.channels.push(state::VisualChannel::new(
@@ -538,7 +535,8 @@ impl InspectorApp {
 
                                 // Detach Surface Window Button
                                 if ui.add_sized([VIZ_STRIP_W - 12.0, 22.0], egui::Button::new(egui::RichText::new(format!("{} Detach Surface", egui_phosphor::regular::ARROW_SQUARE_OUT)).size(9.0).strong()).fill(theme.bg_inset)).clicked() {
-                                    self.detached_views.insert(View::Visuals);
+                                    self.viz.selected_channel_idx = c_idx;
+                                    self.viz.detached_channel = Some(c_idx);
                                 }
                             });
                         });
@@ -1144,7 +1142,7 @@ impl eframe::App for InspectorApp {
         self.handle_autosave(current_time);
 
         let is_focused = ctx.input(|i| i.focused);
-        let has_detached = !self.detached_views.is_empty();
+        let has_detached = !self.detached_views.is_empty() || self.viz.detached_channel.is_some();
 
         // Background Throttling: Skip telemetry processing if unfocused (and no detached windows open) and updated recently (<100ms)
         let should_process = is_focused || has_detached || (current_time - self.last_update_time) > 0.1;
@@ -1257,7 +1255,59 @@ impl eframe::App for InspectorApp {
         // 3. Bottom Bar (Status & Global Controls)
         self.render_bottom_bar(ctx, &telemetry, "main");
 
-        // --- Render Detached Windows (Multi-Viewport System) ---
+        // --- Render Single Detached Visual Surface Window ---
+        if let Some(c_idx) = self.viz.detached_channel {
+            let channel_name = self.viz.channels.get(c_idx).map(|c| c.name.clone()).unwrap_or_else(|| "VISUAL SURFACE".to_string());
+            let viewport_id = egui::ViewportId::from_hash_of(&format!("visual_surface_{}", c_idx));
+            let viewport_builder = egui::ViewportBuilder::default()
+                .with_title(format!("nullherz Visual Surface — {}", channel_name))
+                .with_inner_size([1280.0, 800.0]);
+
+            let mut close_visual_window = false;
+            ctx.show_viewport_immediate(viewport_id, viewport_builder, |v_ctx, _class| {
+                if v_ctx.input(|i| i.viewport().close_requested()) {
+                    close_visual_window = true;
+                }
+
+                let v_focused = v_ctx.input(|i| i.focused);
+
+                egui::CentralPanel::default().show(v_ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.heading(egui::RichText::new(format!("FULLSCREEN SURFACE — {}", channel_name)).strong().color(self.theme.accent));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let is_fullscreen = v_ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                            let fs_icon = if is_fullscreen {
+                                egui_phosphor::regular::ARROWS_IN_SIMPLE
+                            } else {
+                                egui_phosphor::regular::ARROWS_OUT_SIMPLE
+                            };
+                            let fs_tooltip = if is_fullscreen { "Exit Fullscreen" } else { "Toggle Fullscreen" };
+                            if ui.button(fs_icon).on_hover_text(fs_tooltip).clicked() {
+                                v_ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
+                            }
+                            if ui.button(format!("{} Close Window", egui_phosphor::regular::X)).clicked() {
+                                close_visual_window = true;
+                            }
+                        });
+                    });
+                    ui.separator();
+                    self.render_detached_interactive_surface(c_idx, v_ctx, ui, &telemetry);
+                });
+
+                let v_cadence = if v_focused || is_focused {
+                    std::time::Duration::from_millis(33)
+                } else {
+                    std::time::Duration::from_millis(200)
+                };
+                v_ctx.request_repaint_after(v_cadence);
+            });
+
+            if close_visual_window {
+                self.viz.detached_channel = None;
+            }
+        }
+
+        // --- Render Detached Windows (Multi-Viewport System for Views) ---
         let detached_list: Vec<View> = self.detached_views.iter().copied().collect();
         for detached_view in detached_list {
             let view_name = view_to_string(detached_view);
@@ -1300,12 +1350,7 @@ impl eframe::App for InspectorApp {
                         });
                     });
                     ui.separator();
-                    if current_detached_view == View::Visuals {
-                        // Render Native Rust Neural & Algorithmic Interactive Surface inside detached viewport
-                        self.render_detached_interactive_surface(v_ctx, ui, &telemetry);
-                    } else {
-                        self.render_view_content(current_detached_view, ui, &telemetry);
-                    }
+                    self.render_view_content(current_detached_view, ui, &telemetry);
                 });
 
                 // Continuous repaint for detached viewport at bounded cadence

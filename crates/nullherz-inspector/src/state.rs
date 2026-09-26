@@ -575,6 +575,8 @@ pub struct VizState {
     /// Visual Mixer Channel Strips
     pub channels: Vec<VisualChannel>,
     pub selected_channel_idx: usize,
+    /// Specific channel detached into a dedicated visual surface window
+    pub detached_channel: Option<usize>,
     #[allow(dead_code)]
     pub master_visual_gain: f32,
     #[allow(dead_code)]
@@ -616,6 +618,7 @@ impl Default for VizState {
                 ),
             ],
             selected_channel_idx: 0,
+            detached_channel: None,
             master_visual_gain: 1.0,
             master_visual_brightness: 1.0,
         }
