@@ -22,7 +22,6 @@ pub enum MandalaStyle {
     ConcentricRadarSonar,
     NeonOscilloscopeRing,
     SmoothContourWaveGlow,
-    PixelEqualizerSymmetry,
 }
 
 impl MandalaStyle {
@@ -40,7 +39,6 @@ impl MandalaStyle {
             MandalaStyle::ConcentricRadarSonar,
             MandalaStyle::NeonOscilloscopeRing,
             MandalaStyle::SmoothContourWaveGlow,
-            MandalaStyle::PixelEqualizerSymmetry,
         ]
     }
 
@@ -58,7 +56,6 @@ impl MandalaStyle {
             MandalaStyle::ConcentricRadarSonar => "Concentric Radar Sonar (Pulse Rings & Ticks)",
             MandalaStyle::NeonOscilloscopeRing => "Neon Oscilloscope Ring (Lissajous Vector Wave)",
             MandalaStyle::SmoothContourWaveGlow => "Smooth Contour Wave Glow (Undulating Spectrum)",
-            MandalaStyle::PixelEqualizerSymmetry => "Pixel Equalizer Symmetry (Block Spectrum Matrix)",
         }
     }
 }
@@ -142,7 +139,6 @@ impl NeuralVisualEngine for RadialMandalaEngine {
             MandalaStyle::ConcentricRadarSonar => self.render_concentric_radar_sonar(ui, rect, nervous, time),
             MandalaStyle::NeonOscilloscopeRing => self.render_neon_oscilloscope_ring(ui, rect, nervous, time),
             MandalaStyle::SmoothContourWaveGlow => self.render_smooth_contour_wave_glow(ui, rect, nervous, time),
-            MandalaStyle::PixelEqualizerSymmetry => self.render_pixel_equalizer_symmetry(ui, rect, nervous, time),
         }
     }
 }
@@ -775,70 +771,6 @@ impl RadialMandalaEngine {
             center_disc_r * 0.92,
             egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 0, 200)),
         );
-    }
-
-    /// Style 13 (from 21-27-54.png): Dynamic pixel block spectrum matrix.
-    fn render_pixel_equalizer_symmetry(
-        &self,
-        ui: &mut egui::Ui,
-        rect: egui::Rect,
-        nervous: &AudioNervousSystem,
-        time: f32,
-    ) {
-        let center = rect.center();
-        let max_w = rect.width() * 0.85;
-        let num_columns = 64;
-        let col_w = max_w / num_columns as f32;
-        let block_h = 6.0;
-        let gap = 2.0;
-
-        let max_blocks = 24;
-
-        for col in 0..num_columns {
-            let col_frac = col as f32 / num_columns as f32;
-            let dist_from_center = (col_frac - 0.5).abs() * 2.0; // 0.0 at center, 1.0 at edges
-
-            let band_energy = match (col * 3) / num_columns {
-                0 => nervous.low_band,
-                1 => nervous.mid_band,
-                _ => nervous.high_band,
-            };
-
-            // Mirror symmetry audio waveform response
-            let synth_h = ((col_frac * 16.0 + time * 3.0).sin() * 0.5 + 0.5) * band_energy + (1.0 - dist_from_center) * 0.4;
-            let active_blocks = ((synth_h.clamp(0.05, 1.0) * max_blocks as f32) as usize).min(max_blocks);
-
-            let x_pos = rect.min.x + (rect.width() - max_w) * 0.5 + col as f32 * col_w;
-
-            for b in 0..active_blocks {
-                let y_offset = b as f32 * (block_h + gap);
-
-                // Symmetric top and bottom extension from central horizontal axis
-                let top_y = center.y - y_offset - block_h;
-                let bot_y = center.y + y_offset;
-
-                let block_rect_top = egui::Rect::from_min_size(egui::pos2(x_pos, top_y), egui::vec2(col_w - gap, block_h));
-                let block_rect_bot = egui::Rect::from_min_size(egui::pos2(x_pos, bot_y), egui::vec2(col_w - gap, block_h));
-
-                // Color gradient from central blue/purple to outer orange/red matching reference 21-27-54
-                let hue = (0.65 - col_frac * 0.5 + self.color_palette_shift) % 1.0;
-                let color = hsva_to_color32(hue, 0.9, 1.0, 0.85);
-
-                ui.painter().rect_filled(block_rect_top, 1.0, color);
-                ui.painter().rect_filled(block_rect_bot, 1.0, color);
-            }
-
-            // Floating peak particles above active block columns
-            if active_blocks > 0 && (col % 2 == 0) {
-                let peak_offset = (active_blocks as f32 + 2.0 + (col as f32 * 0.5 + time * 4.0).sin().abs() * 3.0) * (block_h + gap);
-                let p_top = egui::pos2(x_pos + col_w * 0.5, center.y - peak_offset);
-                let p_bot = egui::pos2(x_pos + col_w * 0.5, center.y + peak_offset);
-
-                let particle_color = egui::Color32::from_rgb(255, 100, 220);
-                ui.painter().circle_filled(p_top, col_w * 0.35, particle_color);
-                ui.painter().circle_filled(p_bot, col_w * 0.35, particle_color);
-            }
-        }
     }
 }
 
