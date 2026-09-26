@@ -282,6 +282,10 @@ impl InspectorApp {
             let mid_energy = self.viz.damped_spectrum[16..64].iter().sum::<f32>() / 48.0 * channel.gain_sensitivity;
             let high_energy = self.viz.damped_spectrum[64..128].iter().sum::<f32>() / 64.0 * channel.gain_sensitivity;
 
+            // Calculate Instantaneous Zero-Lag Transient Spike Attack
+            let un_damped_peak = telemetry.as_ref().and_then(|t| t.peak_levels.first().copied()).unwrap_or(0.0) * channel.gain_sensitivity;
+            let fast_attack = (un_damped_peak - channel.nervous_system.short_term_envelope).max(0.0) * 3.0;
+
             // 1. Populate Multidimensional Audio Nervous System
             channel.nervous_system.rms_energy = low_energy * 0.5 + mid_energy * 0.3 + high_energy * 0.2;
             channel.nervous_system.spectral_centroid = (mid_energy * 1000.0 + high_energy * 4000.0) / (low_energy + mid_energy + high_energy + 0.001);
@@ -289,8 +293,9 @@ impl InspectorApp {
             channel.nervous_system.low_band = low_energy;
             channel.nervous_system.mid_band = mid_energy;
             channel.nervous_system.high_band = high_energy;
-            channel.nervous_system.transient_density = (high_energy * 2.0).clamp(0.0, 1.0);
-            channel.nervous_system.onset_strength = (low_energy * 2.5).clamp(0.0, 1.0);
+            channel.nervous_system.transient_density = (high_energy * 2.5 + fast_attack).clamp(0.0, 1.0);
+            channel.nervous_system.onset_strength = (low_energy * 3.0 + fast_attack * 2.0).clamp(0.0, 1.0);
+            channel.nervous_system.fast_transient_spike = fast_attack.clamp(0.0, 2.0);
             channel.nervous_system.bpm = telemetry.as_ref().map(|t| t.bpm as f32).unwrap_or(120.0);
             channel.nervous_system.beat_phase = telemetry.as_ref().map(|t| t.beat_position as f32 % 1.0).unwrap_or(0.0);
             channel.nervous_system.sub_beat_phase = (channel.nervous_system.beat_phase * 4.0).fract();
@@ -302,7 +307,7 @@ impl InspectorApp {
             channel.nervous_system.stereo_width = (channel.stereo_width * (1.0 + stereo_imbalance.abs())).clamp(0.0, 2.0);
             channel.nervous_system.stereo_asymmetry = stereo_imbalance;
             channel.nervous_system.long_term_envelope = self.viz.damped_peaks.iter().sum::<f32>() / 16.0;
-            channel.nervous_system.short_term_envelope = _input_energy;
+            channel.nervous_system.short_term_envelope = un_damped_peak;
             channel.nervous_system.spectral_entropy = (low_energy * mid_energy * high_energy).powf(0.33);
             channel.nervous_system.zero_crossing_rate = high_energy * 0.8;
 
@@ -336,14 +341,13 @@ impl InspectorApp {
 
             match channel.generator {
                 state::VisualGenerator::ComplexNeuralMandala => {
-                    // High-Symmetry Complex Bio-Neural Spiking Mandala Engine
+                    // 1. High-Symmetry Complex Bio-Neural Spiking Mandala Engine
                     let max_radius = (rect.width().min(rect.height())) * 0.48;
-                    let symmetry_folds = 12;
+                    let symmetry_folds = channel.genome.symmetry_folds;
                     let num_rings = 8;
 
                     let global_rot = time as f32 * 0.4 * channel.param_speed + motor[0] * 1.5;
 
-                    // 1. Concentric Sacral Petal Rings
                     for r_idx in 0..num_rings {
                         let ring_frac = (r_idx + 1) as f32 / num_rings as f32;
                         let ring_radius = ring_frac * max_radius;
@@ -369,7 +373,6 @@ impl InspectorApp {
                                 let angle_offset = (p_frac - 0.5) * (std::f32::consts::TAU / symmetry_folds as f32) * 1.2;
                                 let current_angle = base_angle + angle_offset;
 
-                                // Organic Rose/Cardioid Petal Curve Equation
                                 let petal_radius = ring_radius + (p_frac * std::f32::consts::PI).sin() * petal_amp * spike_boost;
 
                                 let px = center.x + current_angle.cos() * petal_radius;
@@ -394,8 +397,8 @@ impl InspectorApp {
                         }
                     }
 
-                    // 2. Central Spiking Sacred Geometry Flower Nucleus
-                    let num_core_spokes = 24;
+                    // Sacred Geometry Spoke Nucleus
+                    let num_core_spokes = symmetry_folds * 2;
                     for s in 0..num_core_spokes {
                         let spoke_angle = (s as f32 / num_core_spokes as f32) * std::f32::consts::TAU - global_rot * 1.5;
                         let n_v = channel.neuron_net.v[s % 64];
