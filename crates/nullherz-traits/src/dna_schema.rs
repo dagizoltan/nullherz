@@ -27,6 +27,32 @@ impl Default for SpectralPersonality {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]
+pub struct AcousticPerceptionProfile {
+    pub lufs_integrated: f32,
+    pub crest_factor_db: f32,
+    pub spectral_flatness: f32,
+    pub zero_crossing_rate: f32,
+    pub phase_correlation: f32,
+    pub brightness: f32,
+    pub perceptual_energy: f32,
+}
+
+impl Default for AcousticPerceptionProfile {
+    fn default() -> Self {
+        Self {
+            lufs_integrated: -14.0,
+            crest_factor_db: 6.0,
+            spectral_flatness: 0.1,
+            zero_crossing_rate: 0.05,
+            phase_correlation: 1.0,
+            brightness: 0.5,
+            perceptual_energy: 0.5,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub struct RhythmicDNA {
     /// 64-step bitmask indicating significant transient density over 4 bars
     pub onset_mask: [u64; 4],
@@ -101,17 +127,23 @@ pub struct SoundDNA {
     pub rhythmic: RhythmicDNA,
     pub artifacts: ArtifactProfile,
     pub spatial: SpatialDNA,
+    #[serde(default)]
+    pub perception: AcousticPerceptionProfile,
+    #[serde(default)]
+    pub invariant_mask: InvariantMask,
 }
 
 impl Default for SoundDNA {
     fn default() -> Self {
         Self {
-            schema_version: 6,
+            schema_version: 7,
             feature_vector: [0.0; 8],
             spectral: SpectralPersonality::default(),
             rhythmic: RhythmicDNA::default(),
             artifacts: ArtifactProfile::default(),
             spatial: SpatialDNA::default(),
+            perception: AcousticPerceptionProfile::default(),
+            invariant_mask: InvariantMask::default(),
         }
     }
 }
@@ -353,6 +385,14 @@ impl Default for StemClassification {
     }
 }
 
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
+pub struct PerceptualTension {
+    pub tension_index: f32,
+    pub momentum_velocity: f32,
+    pub momentum_acceleration: f32,
+}
+
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]
 pub struct PerceptionFrame {
@@ -366,6 +406,9 @@ pub struct PerceptionFrame {
     pub detected_stem: StemClassification,
     pub brightness: f32,
     pub perceptual_energy: f32,
+    pub tension: PerceptualTension,
+    pub chroma_vector: [f32; 12],
+    pub harmonic_dissonance: f32,
 }
 
 impl Default for PerceptionFrame {
@@ -381,8 +424,20 @@ impl Default for PerceptionFrame {
             detected_stem: StemClassification::Unknown,
             brightness: 0.5,
             perceptual_energy: 0.0,
+            tension: PerceptualTension::default(),
+            chroma_vector: [0.0; 12],
+            harmonic_dissonance: 0.0,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
+pub struct InvariantMask {
+    pub lock_rhythmic: bool,
+    pub lock_spectral: bool,
+    pub lock_spatial: bool,
+    pub lock_perception: bool,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

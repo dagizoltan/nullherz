@@ -111,7 +111,10 @@ impl AnalysisKernel {
         // 6. Detect Root Key
         metadata.root_key = self.detect_root_key(buffer);
 
-        // 7. Extract Perception & DNA Signature and push onto AnalysisBus
+        // 7. DNA Acoustic Perception Profile (Full-Track Pre-Analysis)
+        self.analyze_perception(buffer, &mut dna);
+
+        // 8. Extract Perception Frame & DNA Signature and push onto AnalysisBus
         let perception = self.extract_perception_frame(buffer, 0, metadata.bpm);
         let dna_sig = self.build_dna_signature(&metadata, &dna);
 
@@ -139,7 +142,7 @@ impl AnalysisKernel {
         let rms = (sum_sq / buffer.len() as f32).sqrt();
         frame.perceptual_energy = (rms * 2.0).min(1.0);
 
-        // 2. Fundamental Pitch Candidate & Brightness via STFT
+        // 2. Fundamental Pitch Candidate, Brightness, Chroma & Dissonance via STFT
         if buffer.len() >= 512 {
             self.re.fill(0.0);
             self.im.fill(0.0);
@@ -162,6 +165,12 @@ impl AnalysisKernel {
                     max_mag = mag;
                     best_bin = bin;
                 }
+
+                if freq >= 20.0 && freq <= 2000.0 {
+                    let semitone = 12.0 * (freq / 440.0).log2() + 69.0;
+                    let pitch_class = ((semitone.round() as i32 % 12) + 12) % 12;
+                    frame.chroma_vector[pitch_class as usize] += mag;
+                }
             }
 
             if total_energy > 0.0 {
@@ -169,8 +178,30 @@ impl AnalysisKernel {
                 frame.brightness = (centroid / (self.sample_rate * 0.5)).clamp(0.0, 1.0);
                 frame.pitch_candidate_hz = (best_bin as f32 * self.sample_rate) / 1024.0;
                 frame.pitch_confidence = (max_mag / total_energy).min(1.0);
+
+                let chroma_sum: f32 = frame.chroma_vector.iter().sum();
+                if chroma_sum > 0.0 {
+                    for val in frame.chroma_vector.iter_mut() {
+                        *val = (*val / chroma_sum).clamp(0.0, 1.0);
+                    }
+                }
+
+                // Dissonance = entropy of chroma distribution
+                let mut entropy = 0.0f32;
+                for &p in &frame.chroma_vector {
+                    if p > 1e-4 {
+                        entropy -= p * p.ln();
+                    }
+                }
+                frame.harmonic_dissonance = (entropy / 12.0_f32.ln()).clamp(0.0, 1.0);
             }
         }
+
+        // 3. Perceptual Tension Index & Momentum Velocity
+        let tension_val = (frame.brightness * 0.35 + frame.perceptual_energy * 0.35 + frame.harmonic_dissonance * 0.30).clamp(0.0, 1.0);
+        frame.tension.tension_index = tension_val;
+        frame.tension.momentum_velocity = frame.perceptual_energy * 0.1;
+        frame.tension.momentum_acceleration = frame.tension.momentum_velocity * 0.05;
 
         // 3. Simple Stem Classification Inference
         if frame.brightness < 0.15 && frame.perceptual_energy > 0.4 {
@@ -495,6 +526,64 @@ impl AnalysisKernel {
                 dna.rhythmic.micro_timing[i] = avg.clamp(-128.0, 127.0) as i16;
             }
         }
+    }
+
+    fn analyze_perception(&mut self, buffer: &[f32], dna: &mut nullherz_traits::SoundDNA) {
+        if buffer.is_empty() { return; }
+
+        let mut sum_sq = 0.0f32;
+        let mut peak_val = 0.0f32;
+        let mut zero_crossings = 0;
+
+        for (i, &s) in buffer.iter().enumerate() {
+            let abs_s = s.abs();
+            sum_sq += s * s;
+            if abs_s > peak_val { peak_val = abs_s; }
+            if i > 0 && ((s >= 0.0 && buffer[i - 1] < 0.0) || (s < 0.0 && buffer[i - 1] >= 0.0)) {
+                zero_crossings += 1;
+            }
+        }
+
+        let rms = (sum_sq / buffer.len() as f32).sqrt().max(1e-5);
+        let lufs = 20.0 * rms.log10();
+        let crest_factor = 20.0 * (peak_val / rms).max(1.0).log10();
+        let zcr = zero_crossings as f32 / buffer.len() as f32;
+
+        dna.perception.lufs_integrated = lufs;
+        dna.perception.crest_factor_db = crest_factor;
+        dna.perception.zero_crossing_rate = zcr;
+        dna.perception.phase_correlation = 1.0;
+
+        if buffer.len() >= 512 {
+            self.re.fill(0.0);
+            self.im.fill(0.0);
+            let len = buffer.len().min(1024);
+            self.re[..len].copy_from_slice(&buffer[..len]);
+            self.fft.process(&mut self.re, &mut self.im);
+
+            let mut total_energy = 0.0f32;
+            let mut weighted_freq = 0.0f32;
+            let mut log_sum = 0.0f32;
+
+            for bin in 0..512 {
+                let mag = (self.re[bin] * self.re[bin] + self.im[bin] * self.im[bin]).sqrt();
+                let freq = (bin as f32 * self.sample_rate) / 1024.0;
+                total_energy += mag;
+                weighted_freq += freq * mag;
+                log_sum += (mag + 1e-6).ln();
+            }
+
+            if total_energy > 0.0 {
+                let centroid = weighted_freq / total_energy;
+                dna.perception.brightness = (centroid / (self.sample_rate * 0.5)).clamp(0.0, 1.0);
+
+                let geom_mean = (log_sum / 512.0).exp();
+                let arith_mean = total_energy / 512.0;
+                dna.perception.spectral_flatness = (geom_mean / arith_mean.max(1e-6)).clamp(0.0, 1.0);
+            }
+        }
+
+        dna.perception.perceptual_energy = (rms * 2.0).min(1.0);
     }
 
     fn analyze_spatial(&self, buffer: &[f32], transients: &[u64], dna: &mut nullherz_traits::SoundDNA) {

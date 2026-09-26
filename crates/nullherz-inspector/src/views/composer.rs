@@ -212,6 +212,17 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                 app.composer.track_mutes[track_idx] = !is_muted;
                                                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackMute { node_idx: seq_node, track_idx: track_idx as u32, muted: app.composer.track_mutes[track_idx] }));
                                             }
+
+                                            // Apply Track Humanization Groove Button
+                                            let src_id = app.composer.track_sources[track_idx].or(app.decks.now_playing[track_idx]);
+                                            if let Some(lib_track) = src_id.and_then(|id| app.get_cached_track(id)) {
+                                                if ui.add_sized([40.0, 18.0], egui::Button::new(RichText::new("GROOVE").size(7.0).strong()).fill(app.theme.accent.linear_multiply(0.2))).on_hover_text("Apply pre-analyzed track micro-timing groove template").clicked() {
+                                                    let cmds = DnaSequencer::apply_groove(&lib_track.metadata.dna.rhythmic, seq_node, track_idx as u32);
+                                                    for cmd in cmds {
+                                                        let _ = app.command_sender.send(cmd);
+                                                    }
+                                                }
+                                            }
                                         });
                                     });
 
