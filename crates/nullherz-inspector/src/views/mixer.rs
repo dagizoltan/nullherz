@@ -134,7 +134,7 @@ fn render_vertical_waveform(
                 );
             }
 
-            // DJ Studio Beat Grid Ticks
+            // DJ Studio Beat Grid Ticks (subtle transparency)
             if t.metadata.bpm > 20.0 {
                 let sr = t.metadata.sample_rate.max(1) as f64;
                 let spb = sr * 60.0 / t.metadata.bpm as f64;
@@ -144,7 +144,7 @@ fn render_vertical_waveform(
                 for b in 0..beats_visible {
                     let beat_y = rect.min.y + (b as f32 / beats_visible as f32) * height;
                     let is_downbeat = b % 4 == 0;
-                    let line_alpha = if is_downbeat { 60 } else { 25 };
+                    let line_alpha = if is_downbeat { 18 } else { 8 };
                     painter.line_segment(
                         [Pos2::new(rect.min.x + 2.0, beat_y), Pos2::new(rect.max.x - 2.0, beat_y)],
                         Stroke::new(1.0, Color32::from_white_alpha(line_alpha)),
@@ -570,6 +570,9 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
     let sum_r = app.topo.node_map.get("master_sum_r").copied();
 
     let master_peak = app.viz.damped_master_peaks[0].max(app.viz.damped_master_peaks[1]);
+    let master_deck_idx = app.decks.master_deck.unwrap_or(app.decks.focused_deck);
+    let master_track = app.decks.cached_tracks[master_deck_idx].as_ref();
+    let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions.get(master_deck_idx).copied().unwrap_or(0)).unwrap_or(0);
 
     Frame::none()
         .fill(theme.bg_surface)
@@ -600,8 +603,8 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                 });
                 ui.add_space(theme.space_xs);
 
-                // Master Vertical Signal Visualizer
-                render_vertical_waveform(ui, None, 0, master_peak, accent, &theme);
+                // Master Vertical Signal Visualizer matching active master track waveform
+                render_vertical_waveform(ui, master_track, elapsed_samples, master_peak, accent, &theme);
                 ui.add_space(theme.space_xs);
 
                 // --- MASTER INSERTS RACK ---
