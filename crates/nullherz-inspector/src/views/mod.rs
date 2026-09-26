@@ -17,3 +17,4 @@ pub mod editor;
 pub mod store;
 pub mod account;
 pub mod visual_engines;
+pub mod analyzer;
