@@ -147,6 +147,288 @@ pub fn apply_visual_insert_chain(
     engine.front_buffer.copy_from_slice(&engine.back_buffer);
 }
 
+/// Blend source RGBA pixel onto destination RGBA pixel using VisualBlendMode & opacity
+pub fn blend_pixel(src: [u8; 4], dst: [u8; 4], mode: state::VisualBlendMode, opacity: f32) -> [u8; 4] {
+    let op = opacity.clamp(0.0, 1.0);
+    if op <= 0.001 {
+        return dst;
+    }
+
+    let src_alpha = (src[3] as f32 / 255.0) * op;
+    let sr = src[0] as f32 / 255.0;
+    let sg = src[1] as f32 / 255.0;
+    let sb = src[2] as f32 / 255.0;
+
+    let dr = dst[0] as f32 / 255.0;
+    let dg = dst[1] as f32 / 255.0;
+    let db = dst[2] as f32 / 255.0;
+
+    let (out_r, out_g, out_b) = match mode {
+        state::VisualBlendMode::Normal => (
+            sr * src_alpha + dr * (1.0 - src_alpha),
+            sg * src_alpha + dg * (1.0 - src_alpha),
+            sb * src_alpha + db * (1.0 - src_alpha),
+        ),
+        state::VisualBlendMode::Additive => (
+            (dr + sr * op).min(1.0),
+            (dg + sg * op).min(1.0),
+            (db + sb * op).min(1.0),
+        ),
+        state::VisualBlendMode::Screen => (
+            1.0 - (1.0 - dr) * (1.0 - sr * op),
+            1.0 - (1.0 - dg) * (1.0 - sg * op),
+            1.0 - (1.0 - db) * (1.0 - sb * op),
+        ),
+        state::VisualBlendMode::Multiply => {
+            let mr = dr * (sr * op + (1.0 - op));
+            let mg = dg * (sg * op + (1.0 - op));
+            let mb = db * (sb * op + (1.0 - op));
+            (mr, mg, mb)
+        }
+        state::VisualBlendMode::Maximum => (
+            dr.max(sr * op),
+            dg.max(sg * op),
+            db.max(sb * op),
+        ),
+        state::VisualBlendMode::Overlay => {
+            let overlay_ch = |d: f32, s: f32| -> f32 {
+                let blended = if d < 0.5 {
+                    2.0 * d * s
+                } else {
+                    1.0 - 2.0 * (1.0 - d) * (1.0 - s)
+                };
+                d * (1.0 - op) + blended * op
+            };
+            (overlay_ch(dr, sr), overlay_ch(dg, sg), overlay_ch(db, sb))
+        }
+    };
+
+    [
+        (out_r.clamp(0.0, 1.0) * 255.0) as u8,
+        (out_g.clamp(0.0, 1.0) * 255.0) as u8,
+        (out_b.clamp(0.0, 1.0) * 255.0) as u8,
+        255,
+    ]
+}
+
+/// Composite a single visual channel framebuffer onto a target screen engine buffer at a given cell rectangle
+pub fn composite_channel_onto_screen(
+    target_engine: &mut state::PixelFeedbackEngine,
+    channel: &state::VisualChannel,
+    cell_rect: (usize, usize, usize, usize),
+) {
+    let (offset_x, offset_y, cell_w, cell_h) = cell_rect;
+    if cell_w == 0 || cell_h == 0 {
+        return;
+    }
+
+    let src_engine = &channel.feedback_engine;
+    let src_w = src_engine.width;
+    let src_h = src_engine.height;
+    if src_w == 0 || src_h == 0 {
+        return;
+    }
+
+    let tgt_w = target_engine.width;
+    let tgt_h = target_engine.height;
+
+    for cy in 0..cell_h {
+        let ty = offset_y + cy;
+        if ty >= tgt_h {
+            break;
+        }
+        let sy = (cy * src_h) / cell_h;
+
+        for cx in 0..cell_w {
+            let tx = offset_x + cx;
+            if tx >= tgt_w {
+                break;
+            }
+            let sx = (cx * src_w) / cell_w;
+
+            let src_idx = sy * src_w + sx;
+            let tgt_idx = ty * tgt_w + tx;
+
+            let src_pixel = src_engine.back_buffer[src_idx];
+            let tgt_pixel = target_engine.back_buffer[tgt_idx];
+
+            target_engine.back_buffer[tgt_idx] = blend_pixel(
+                src_pixel,
+                tgt_pixel,
+                channel.blend_mode,
+                channel.opacity,
+            );
+        }
+    }
+}
+
+/// Render a composite Target Screen containing all assigned visual channels
+pub fn render_composite_target_screen(
+    app: &mut InspectorApp,
+    target_screen_id: &str,
+    ui: &mut egui::Ui,
+    _telemetry: &Option<Telemetry>,
+) {
+    let screen_opt = app.viz.target_screens.iter().find(|s| s.id == target_screen_id).cloned();
+    let Some(screen) = screen_opt else { return; };
+
+    let available_size = ui.available_size();
+    let (rect, _response) = ui.allocate_exact_size(available_size.max(egui::vec2(200.0, 200.0)), egui::Sense::hover());
+
+    ui.painter().rect_filled(
+        rect,
+        0.0,
+        egui::Color32::from_rgba_unmultiplied(
+            screen.clear_color[0],
+            screen.clear_color[1],
+            screen.clear_color[2],
+            screen.clear_color[3],
+        ),
+    );
+
+    // Collect matching active/unmuted channels assigned to this target screen
+    let mut matching_indices: Vec<usize> = app.viz.channels.iter().enumerate()
+        .filter(|(_, c)| c.target_screen_id == target_screen_id && !c.is_muted)
+        .map(|(idx, _)| idx)
+        .collect();
+
+    // Sort by layer_z_index ascending
+    matching_indices.sort_by_key(|&idx| app.viz.channels[idx].layer_z_index);
+
+    if matching_indices.is_empty() {
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            format!("Target Screen [{}] — No Visual Channels Routed", screen.name),
+            egui::FontId::proportional(14.0),
+            egui::Color32::from_rgb(120, 130, 150),
+        );
+        return;
+    }
+
+    // Prepare composite target framebuffer
+    let target_w = 320usize;
+    let target_h = 200usize;
+    let mut target_engine = state::PixelFeedbackEngine::new(target_w, target_h);
+
+    // Initialize with screen clear color
+    for pixel in target_engine.back_buffer.iter_mut() {
+        *pixel = screen.clear_color;
+    }
+
+    // Step each channel and composite into target_engine
+    let time = ui.input(|i| i.time);
+    let frame_dt = ui.input(|i| i.stable_dt).clamp(0.001, 0.050);
+
+    let num_matching = matching_indices.len();
+
+    for (layer_slot, &c_idx) in matching_indices.iter().enumerate() {
+        let channel = &mut app.viz.channels[c_idx];
+
+        // Step audio inputs & nervous system for this channel
+        let mut audio_inputs = [0.0f32; 64];
+        let low_energy = app.viz.damped_spectrum[0..16].iter().sum::<f32>() / 16.0 * channel.gain_sensitivity;
+        let mid_energy = app.viz.damped_spectrum[16..64].iter().sum::<f32>() / 48.0 * channel.gain_sensitivity;
+        let high_energy = app.viz.damped_spectrum[64..128].iter().sum::<f32>() / 64.0 * channel.gain_sensitivity;
+
+        for i in 0..32 {
+            audio_inputs[i] = app.viz.damped_spectrum[i * 4 % 128] * channel.gain_sensitivity;
+        }
+        for i in 0..16 {
+            audio_inputs[32 + i] = app.viz.damped_goniometer[i * 8 % 128] * channel.gain_sensitivity;
+        }
+        for i in 0..12 {
+            audio_inputs[48 + i] = app.viz.damped_latent[i % 16];
+        }
+        audio_inputs[60] = low_energy;
+        audio_inputs[61] = mid_energy;
+        audio_inputs[62] = high_energy;
+
+        channel.nervous_system.rms_energy = low_energy * 0.5 + mid_energy * 0.3 + high_energy * 0.2;
+        channel.nervous_system.low_band = low_energy;
+        channel.nervous_system.mid_band = mid_energy;
+        channel.nervous_system.high_band = high_energy;
+        channel.mapper.map(&channel.nervous_system, &mut channel.genome);
+
+        channel.neuron_net.step(&audio_inputs, frame_dt, channel.param_neural_temp, channel.param_feedback);
+        let motor = channel.neuron_net.motor_outputs;
+
+        let zoom = 0.98 + low_energy * 0.08;
+        let rot = (time * channel.param_speed as f64 * 0.2).sin() as f32 * 0.02 + motor[1] * 0.04;
+        let warp_freq = 4.0 + motor[2] * 4.0;
+        let decay = (0.88 + channel.param_feedback * 0.10).clamp(0.70, 0.98);
+
+        channel.feedback_engine.step_feedback_warp(
+            zoom,
+            rot,
+            warp_freq,
+            decay,
+            time as f32,
+            &motor,
+        );
+
+        apply_visual_insert_chain(
+            &mut channel.feedback_engine,
+            &channel.visual_inserts,
+            channel.param_color_shift,
+            time as f32,
+        );
+
+        // Determine viewport cell rectangle based on CompositingLayoutMode
+        let cell_rect = match screen.layout_mode {
+            state::CompositingLayoutMode::LayeredComposite => (0, 0, target_w, target_h),
+            state::CompositingLayoutMode::Grid2x2 => {
+                let cell_w = target_w / 2;
+                let cell_h = target_h / 2;
+                match layer_slot {
+                    0 => (0, 0, cell_w, cell_h),
+                    1 => (cell_w, 0, cell_w, cell_h),
+                    2 => (0, cell_h, cell_w, cell_h),
+                    _ => (cell_w, cell_h, cell_w, cell_h),
+                }
+            }
+            state::CompositingLayoutMode::SideBySide => {
+                let cell_w = target_w / num_matching.max(1);
+                let x = (layer_slot * cell_w).min(target_w.saturating_sub(cell_w));
+                (x, 0, cell_w, target_h)
+            }
+            state::CompositingLayoutMode::PictureInPicture => {
+                if layer_slot == 0 {
+                    (0, 0, target_w, target_h)
+                } else {
+                    let rx = (channel.viewport_rect[0].clamp(0.0, 1.0) * target_w as f32) as usize;
+                    let ry = (channel.viewport_rect[1].clamp(0.0, 1.0) * target_h as f32) as usize;
+                    let rw = (channel.viewport_rect[2].clamp(0.1, 1.0) * target_w as f32) as usize;
+                    let rh = (channel.viewport_rect[3].clamp(0.1, 1.0) * target_h as f32) as usize;
+                    (rx.min(target_w - 1), ry.min(target_h - 1), rw.min(target_w - rx), rh.min(target_h - ry))
+                }
+            }
+        };
+
+        composite_channel_onto_screen(&mut target_engine, channel, cell_rect);
+    }
+
+    target_engine.front_buffer.copy_from_slice(&target_engine.back_buffer);
+
+    let color_image = egui::ColorImage::from_rgba_unmultiplied(
+        [target_engine.width, target_engine.height],
+        target_engine.front_buffer.as_flattened(),
+    );
+
+    let texture_handle = ui.ctx().load_texture(
+        format!("composite_target_screen_{}", target_screen_id),
+        color_image,
+        egui::TextureOptions::LINEAR,
+    );
+
+    ui.painter().image(
+        texture_handle.id(),
+        rect,
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        egui::Color32::WHITE,
+    );
+}
+
 /// Render detached interactive visual surface
 pub fn render_detached_interactive_surface(
     app: &mut InspectorApp,
@@ -331,7 +613,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
     const VIZ_FADER_H: f32 = 120.0;
 
     ui.horizontal(|ui| {
-        ui.heading(egui::RichText::new("VISUAL MIXER").strong().color(app.theme.text_primary));
+        ui.heading(egui::RichText::new("VISUAL MIXER & TARGET SCREENS").strong().color(app.theme.text_primary));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button(format!("{} + Add Visual Channel", egui_phosphor::regular::PLUS)).clicked() {
                 let count = app.viz.channels.len() + 1;
@@ -341,19 +623,116 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                     vec![state::VisualInputSource::MasterMix],
                 ));
             }
+            ui.add_space(8.0);
+            if ui.button(format!("{} + Add Target Screen", egui_phosphor::regular::DESKTOP_TOWER)).clicked() {
+                let count = app.viz.target_screens.len() + 1;
+                app.viz.target_screens.push(state::VisualTargetScreen::new(
+                    &format!("screen_{}", count),
+                    &format!("Target Display Screen {}", count),
+                    state::CompositingLayoutMode::LayeredComposite,
+                ));
+            }
         });
     });
     ui.separator();
     ui.add_space(app.theme.space_xs);
 
     ui.label(
-        egui::RichText::new("Visual Mixer matching system channel strip architecture. Attach stereo audio/MIDI input sources, load neural/algorithmic visual generators, adjust parametric controls, and detach surface windows.")
+        egui::RichText::new("Visual Mixer matching system channel strip architecture. Route song stems into visual channels, layer/blend multi-channel visuals into Target Display Screens, and detach target compositing windows.")
             .size(app.theme.type_caption)
             .color(app.theme.text_secondary),
     );
     ui.add_space(app.theme.space_sm);
 
     let theme = app.theme.clone();
+
+    // --- TARGET SCREENS MANAGEMENT & COMPOSITE PREVIEW MONITOR ---
+    egui::Frame::none()
+        .fill(theme.bg_surface)
+        .rounding(egui::Rounding::same(theme.radius_md))
+        .inner_margin(egui::Margin::same(theme.space_md))
+        .stroke(egui::Stroke::new(1.0, theme.border))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("TARGET SCREENS & COMPOSITOR").size(theme.type_body).strong().color(theme.accent));
+                ui.add_space(12.0);
+
+                let num_screens = app.viz.target_screens.len();
+                if app.viz.active_target_screen_idx >= num_screens {
+                    app.viz.active_target_screen_idx = num_screens.saturating_sub(1);
+                }
+
+                // Screen Selector Tabs
+                for s_idx in 0..num_screens {
+                    let is_sel = app.viz.active_target_screen_idx == s_idx;
+                    let screen = &app.viz.target_screens[s_idx];
+                    if ui.selectable_label(is_sel, egui::RichText::new(&screen.name).strong()).clicked() {
+                        app.viz.active_target_screen_idx = s_idx;
+                    }
+                }
+            });
+
+            ui.add_space(4.0);
+
+            if app.viz.active_target_screen_idx < app.viz.target_screens.len() {
+                let mut screen_to_remove = None;
+                let active_idx = app.viz.active_target_screen_idx;
+                let active_id = app.viz.target_screens[active_idx].id.clone();
+
+                ui.horizontal(|ui| {
+                    ui.label("Name:");
+                    ui.add_sized([160.0, 20.0], egui::TextEdit::singleline(&mut app.viz.target_screens[active_idx].name));
+
+                    ui.add_space(12.0);
+                    ui.label("Compositing Layout:");
+                    egui::ComboBox::from_id_source(format!("screen_layout_combo_{}", active_id))
+                        .selected_text(app.viz.target_screens[active_idx].layout_mode.name())
+                        .show_ui(ui, |ui| {
+                            for mode_item in state::CompositingLayoutMode::all() {
+                                ui.selectable_value(&mut app.viz.target_screens[active_idx].layout_mode, *mode_item, mode_item.name());
+                            }
+                        });
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let is_detached = app.viz.detached_target_screens.contains(&active_id);
+                        let detach_label = if is_detached {
+                            format!("{} Screen Detached", egui_phosphor::regular::ARROWS_IN_SIMPLE)
+                        } else {
+                            format!("{} Detach Screen Window", egui_phosphor::regular::ARROWS_OUT_SIMPLE)
+                        };
+
+                        if ui.button(detach_label).on_hover_text("Open Target Screen as Independent OS Window").clicked() {
+                            if is_detached {
+                                app.viz.detached_target_screens.remove(&active_id);
+                            } else {
+                                app.viz.detached_target_screens.insert(active_id.clone());
+                            }
+                        }
+
+                        if app.viz.target_screens.len() > 1 {
+                            if ui.button(egui_phosphor::regular::TRASH).on_hover_text("Delete Target Screen").clicked() {
+                                screen_to_remove = Some(active_idx);
+                            }
+                        }
+                    });
+                });
+
+                if let Some(rem_idx) = screen_to_remove {
+                    app.viz.target_screens.remove(rem_idx);
+                    app.viz.active_target_screen_idx = app.viz.active_target_screen_idx.saturating_sub(1);
+                } else {
+                    ui.add_space(6.0);
+
+                    // Target Screen Live Composite Preview Canvas
+                    ui.group(|ui| {
+                        ui.set_height(140.0);
+                        render_composite_target_screen(app, &active_id, ui, telemetry);
+                    });
+                }
+            }
+        });
+
+    ui.add_space(theme.space_md);
 
     egui::ScrollArea::horizontal().id_source("visual_mixer_scroll").show(ui, |ui| {
         ui.horizontal_top(|ui| {
@@ -430,6 +809,53 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                         }
                                     }
                                 });
+
+                            ui.add_space(4.0);
+
+                            // TARGET SCREEN ROUTING & COMPOSITING CONTROLS
+                            ui.group(|ui| {
+                                ui.set_width(VIZ_STRIP_W - 12.0);
+                                ui.vertical_centered(|ui| {
+                                    ui.label(egui::RichText::new("TARGET DISPLAY").size(9.0).strong().color(theme.accent));
+
+                                    // Target Screen Selector
+                                    let current_target_name = app.viz.target_screens.iter()
+                                        .find(|s| s.id == channel.target_screen_id)
+                                        .map(|s| s.name.as_str())
+                                        .unwrap_or("Main Composite");
+
+                                    egui::ComboBox::from_id_source(format!("target_screen_combo_{}", c_idx))
+                                        .selected_text(current_target_name)
+                                        .show_ui(ui, |ui| {
+                                            for target_screen in &app.viz.target_screens {
+                                                ui.selectable_value(&mut channel.target_screen_id, target_screen.id.clone(), &target_screen.name);
+                                            }
+                                        });
+
+                                    ui.add_space(2.0);
+
+                                    // Blend Mode Dropdown
+                                    ui.label(egui::RichText::new("BLEND MODE").size(8.5).strong().color(theme.text_secondary));
+                                    egui::ComboBox::from_id_source(format!("blend_mode_combo_{}", c_idx))
+                                        .selected_text(channel.blend_mode.name())
+                                        .show_ui(ui, |ui| {
+                                            for mode_item in state::VisualBlendMode::all() {
+                                                ui.selectable_value(&mut channel.blend_mode, *mode_item, mode_item.name());
+                                            }
+                                        });
+
+                                    ui.add_space(2.0);
+
+                                    // Opacity & Layer Z-Index
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 2.0;
+                                        ui.label(egui::RichText::new("OP").size(8.5).strong());
+                                        ui.add(egui::Slider::new(&mut channel.opacity, 0.0..=1.0).show_value(false));
+                                        ui.label(egui::RichText::new("Z:").size(8.5).strong());
+                                        ui.add(egui::DragValue::new(&mut channel.layer_z_index).clamp_range(-10..=10));
+                                    });
+                                });
+                            });
 
                             ui.add_space(4.0);
 
@@ -606,5 +1032,70 @@ mod tests {
         // Framebuffer pixels must be modified by post-processing inserts
         assert_ne!(engine.back_buffer, initial_pixels);
         assert_eq!(engine.front_buffer, engine.back_buffer);
+    }
+
+    #[test]
+    fn test_blend_pixel_modes() {
+        let src = [100, 150, 200, 255];
+        let dst = [50, 50, 50, 255];
+
+        // Additive
+        let add = blend_pixel(src, dst, state::VisualBlendMode::Additive, 1.0);
+        assert_eq!(add, [150, 200, 250, 255]);
+
+        // Maximum
+        let max = blend_pixel(src, dst, state::VisualBlendMode::Maximum, 1.0);
+        assert_eq!(max, [100, 150, 200, 255]);
+
+        // Normal (Alpha 1.0)
+        let norm = blend_pixel(src, dst, state::VisualBlendMode::Normal, 1.0);
+        assert_eq!(norm, [100, 150, 200, 255]);
+
+        // Zero opacity returns dst
+        let zero_op = blend_pixel(src, dst, state::VisualBlendMode::Additive, 0.0);
+        assert_eq!(zero_op, dst);
+    }
+
+    #[test]
+    fn test_composite_channel_onto_screen() {
+        let mut target_engine = state::PixelFeedbackEngine::new(32, 32);
+        for pixel in target_engine.back_buffer.iter_mut() {
+            *pixel = [0, 0, 0, 255];
+        }
+
+        let mut channel = state::VisualChannel::new(
+            "VIZ STEM 1",
+            state::VisualGenerator::RadialMandala,
+            vec![state::VisualInputSource::DeckA],
+        );
+        channel.blend_mode = state::VisualBlendMode::Additive;
+        channel.opacity = 1.0;
+        for pixel in channel.feedback_engine.back_buffer.iter_mut() {
+            *pixel = [50, 100, 150, 255];
+        }
+
+        // Composite onto full screen
+        composite_channel_onto_screen(&mut target_engine, &channel, (0, 0, 32, 32));
+
+        assert_eq!(target_engine.back_buffer[0], [50, 100, 150, 255]);
+        assert_eq!(target_engine.back_buffer[32 * 16 + 16], [50, 100, 150, 255]);
+    }
+
+    #[test]
+    fn test_target_screens_routing_and_detaching() {
+        let mut viz_state = state::VizState::default();
+        assert_eq!(viz_state.target_screens.len(), 2);
+
+        let screen3 = state::VisualTargetScreen::new("screen_3", "Projection Screen 3", state::CompositingLayoutMode::Grid2x2);
+        viz_state.target_screens.push(screen3);
+        assert_eq!(viz_state.target_screens.len(), 3);
+
+        // Assign channel 0 to screen_3
+        viz_state.channels[0].target_screen_id = "screen_3".to_string();
+        assert_eq!(viz_state.channels[0].target_screen_id, "screen_3");
+
+        // Detach screen_3
+        viz_state.detached_target_screens.insert("screen_3".to_string());
+        assert!(viz_state.detached_target_screens.contains("screen_3"));
     }
 }

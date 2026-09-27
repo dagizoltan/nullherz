@@ -1302,6 +1302,93 @@ impl VisualGenerator {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum VisualBlendMode {
+    Normal,
+    Additive,
+    Screen,
+    Multiply,
+    Maximum,
+    Overlay,
+}
+
+impl VisualBlendMode {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Normal => "Normal (Alpha Blend)",
+            Self::Additive => "Additive (Glow/Neon)",
+            Self::Screen => "Screen (Brighten)",
+            Self::Multiply => "Multiply (Darken/Texture)",
+            Self::Maximum => "Maximum (Peak Value)",
+            Self::Overlay => "Overlay (High Contrast)",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::Normal,
+            Self::Additive,
+            Self::Screen,
+            Self::Multiply,
+            Self::Maximum,
+            Self::Overlay,
+        ]
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CompositingLayoutMode {
+    LayeredComposite,
+    Grid2x2,
+    SideBySide,
+    PictureInPicture,
+}
+
+impl CompositingLayoutMode {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::LayeredComposite => "Layered Composite (Blended Stacking)",
+            Self::Grid2x2 => "2x2 Quad Grid",
+            Self::SideBySide => "Side-by-Side Split",
+            Self::PictureInPicture => "Picture-in-Picture (PIP)",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::LayeredComposite,
+            Self::Grid2x2,
+            Self::SideBySide,
+            Self::PictureInPicture,
+        ]
+    }
+}
+
+/// Dynamic Target Display Screen or Compositing Window
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct VisualTargetScreen {
+    pub id: String,
+    pub name: String,
+    pub layout_mode: CompositingLayoutMode,
+    pub clear_color: [u8; 4],
+    pub resolution: [u32; 2],
+    pub is_detached: bool,
+}
+
+impl VisualTargetScreen {
+    pub fn new(id: &str, name: &str, layout_mode: CompositingLayoutMode) -> Self {
+        Self {
+            id: id.to_string(),
+            name: name.to_string(),
+            layout_mode,
+            clear_color: [10, 12, 18, 255],
+            resolution: [1920, 1080],
+            is_detached: false,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub enum VisualInputSource {
     DeckA,
@@ -1358,7 +1445,11 @@ pub struct VisualChannel {
     pub generator: VisualGenerator,
     /// Attached input sources (allows multiple channels attached to one visual)
     pub attached_inputs: Vec<VisualInputSource>,
-    pub output_target: String,
+    pub target_screen_id: String,
+    pub blend_mode: VisualBlendMode,
+    pub opacity: f32,
+    pub layer_z_index: i32,
+    pub viewport_rect: [f32; 4], // [x, y, w, h] normalized in [0, 1]
     pub gain_sensitivity: f32,
     pub reactivity_smoothing: f32,
     pub stereo_width: f32,
@@ -1406,7 +1497,11 @@ impl VisualChannel {
             name: name.to_string(),
             generator,
             attached_inputs: inputs,
-            output_target: "Detached Window / Main Viewport".to_string(),
+            target_screen_id: "main_composite".to_string(),
+            blend_mode: VisualBlendMode::Additive,
+            opacity: 1.0,
+            layer_z_index: 0,
+            viewport_rect: [0.0, 0.0, 1.0, 1.0],
             gain_sensitivity: 1.0,
             reactivity_smoothing: 0.8,
             stereo_width: 1.0,
@@ -1491,6 +1586,10 @@ pub struct VizState {
     pub selected_channel_idx: usize,
     /// Specific channel detached into a dedicated visual surface window
     pub detached_channel: Option<usize>,
+    /// Target Display Screens / Compositing Windows
+    pub target_screens: Vec<VisualTargetScreen>,
+    pub active_target_screen_idx: usize,
+    pub detached_target_screens: std::collections::HashSet<String>,
     #[allow(dead_code)]
     pub master_visual_gain: f32,
     #[allow(dead_code)]
@@ -1534,6 +1633,12 @@ impl Default for VizState {
             ],
             selected_channel_idx: 0,
             detached_channel: None,
+            target_screens: vec![
+                VisualTargetScreen::new("main_composite", "Main Composite Window", CompositingLayoutMode::LayeredComposite),
+                VisualTargetScreen::new("stage_projector", "Stage Projector Screen 2", CompositingLayoutMode::Grid2x2),
+            ],
+            active_target_screen_idx: 0,
+            detached_target_screens: std::collections::HashSet::new(),
             master_visual_gain: 1.0,
             master_visual_brightness: 1.0,
         }
