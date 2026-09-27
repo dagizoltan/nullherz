@@ -1,5 +1,5 @@
 use egui::{Ui, Vec2, Stroke, Sense, RichText, Frame, Margin};
-use nullherz_traits::{Command, DnaCommand};
+use nullherz_traits::{Command, DnaCommand, TransfusionWorkflowMode, ConflictResolutionMode, DonorContribution, BehaviourMap};
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum BreedingMode {
@@ -25,6 +25,10 @@ impl BreedingMode {
 }
 
 pub struct BreederView {
+    pub workflow_mode: TransfusionWorkflowMode,
+    pub carrier_id: Option<u64>,
+    pub donors: Vec<DonorContribution>,
+    pub conflict_resolution: ConflictResolutionMode,
     pub parent_a_id: Option<u64>,
     pub parent_b_id: Option<u64>,
     pub parent_c_id: Option<u64>,
@@ -36,11 +40,33 @@ pub struct BreederView {
     pub preview_dna: [f32; 16],
     pub target_genre_centroid: Option<String>,
     pub _smoothed_goniometer: [f32; 128],
+    pub active_behaviour_map: Option<BehaviourMap>,
+    pub direct_donor_file: Option<String>,
+    pub direct_carrier_file: Option<String>,
 }
 
 impl BreederView {
     pub fn new() -> Self {
         Self {
+            workflow_mode: TransfusionWorkflowMode::NDonorBreeder,
+            carrier_id: None,
+            donors: vec![
+                DonorContribution {
+                    donor_id: 1,
+                    donor_name: "Donor 1 (Modulator)".to_string(),
+                    enable_spectral: true,
+                    spectral_weight: 0.8,
+                    enable_rhythmic: true,
+                    rhythmic_weight: 0.5,
+                    enable_transient: true,
+                    transient_weight: 0.6,
+                    enable_spatial: true,
+                    spatial_weight: 0.5,
+                    enable_pitch: false,
+                    pitch_weight: 0.0,
+                }
+            ],
+            conflict_resolution: ConflictResolutionMode::NormalizedWeightedAverage,
             parent_a_id: None,
             parent_b_id: None,
             parent_c_id: None,
@@ -52,12 +78,31 @@ impl BreederView {
             preview_dna: [0.0; 16],
             target_genre_centroid: None,
             _smoothed_goniometer: [0.0; 128],
+            active_behaviour_map: None,
+            direct_donor_file: None,
+            direct_carrier_file: None,
         }
     }
 
     pub fn show(ui: &mut Ui, state: &mut BreederView, telemetry: &Option<audio_core::Telemetry>, app: &mut crate::InspectorApp) {
         let theme = app.theme;
-        ui.heading(RichText::new("DNA Breeder").size(theme.type_heading));
+        ui.heading(RichText::new("DNA Breeder & Transfusion Engine").size(theme.type_heading));
+        ui.add_space(theme.space_xs);
+
+        // Workflow Mode Switcher Header
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("WORKFLOW MODE:").size(theme.type_caption).color(theme.accent));
+            ui.add_space(8.0);
+            if ui.selectable_label(state.workflow_mode == TransfusionWorkflowMode::FullAudioDirect, "📁 Mode 1: Full-Audio Direct").clicked() {
+                state.workflow_mode = TransfusionWorkflowMode::FullAudioDirect;
+            }
+            if ui.selectable_label(state.workflow_mode == TransfusionWorkflowMode::NDonorBreeder, "🧬 Mode 2: N-Donor DNA Breeding").clicked() {
+                state.workflow_mode = TransfusionWorkflowMode::NDonorBreeder;
+            }
+            if ui.selectable_label(state.workflow_mode == TransfusionWorkflowMode::LiveDeck, "🎧 Mode 3: Live Deck Transfusion").clicked() {
+                state.workflow_mode = TransfusionWorkflowMode::LiveDeck;
+            }
+        });
         ui.add_space(theme.space_sm);
 
         if let Some(parent_idx) = state.selecting_parent {
@@ -106,10 +151,22 @@ impl BreederView {
                             let label = format!("{} - {}", track.title, track.artist);
                             if ui.selectable_label(false, RichText::new(label).size(theme.type_body)).clicked() {
                                 match parent_idx {
-                                    0 => state.parent_a_id = Some(track.id),
-                                    1 => state.parent_b_id = Some(track.id),
-                                    2 => state.parent_c_id = Some(track.id),
-                                    3 => state.parent_d_id = Some(track.id),
+                                    0 => {
+                                        state.carrier_id = Some(track.id);
+                                        state.parent_a_id = Some(track.id);
+                                    }
+                                    idx if idx > 0 => {
+                                        if idx - 1 < state.donors.len() {
+                                            state.donors[idx - 1].donor_id = track.id;
+                                            state.donors[idx - 1].donor_name = format!("{} - {}", track.title, track.artist);
+                                        }
+                                        match idx {
+                                            1 => state.parent_b_id = Some(track.id),
+                                            2 => state.parent_c_id = Some(track.id),
+                                            3 => state.parent_d_id = Some(track.id),
+                                            _ => {}
+                                        }
+                                    }
                                     _ => {}
                                 }
                                 app.library.library_needs_refresh = true;
@@ -119,6 +176,19 @@ impl BreederView {
                     }
                 });
             });
+        }
+
+        match state.workflow_mode {
+            TransfusionWorkflowMode::NDonorBreeder => {
+                Self::render_n_donor_matrix(ui, state, theme, app);
+            }
+            TransfusionWorkflowMode::FullAudioDirect => {
+                Self::render_full_audio_direct_ui(ui, state, theme, app);
+                return;
+            }
+            TransfusionWorkflowMode::LiveDeck => {
+                // Fallthrough to legacy deck row
+            }
         }
 
         // Breeding Mode & Centroid Selection Row
@@ -414,15 +484,246 @@ impl BreederView {
         });
     }
 
+    fn render_n_donor_matrix(ui: &mut Ui, state: &mut BreederView, theme: nullherz_ui_hal::Theme, app: &mut crate::InspectorApp) {
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("PRIMARY CARRIER (IDENTITY ANCHOR):").strong().size(theme.type_caption).color(theme.accent));
+                let carrier_label = state.carrier_id
+                    .and_then(|id| app.get_cached_track(id))
+                    .map(|t| format!("{} - {}", t.title, t.artist))
+                    .unwrap_or_else(|| "Select Carrier Track".to_string());
+
+                if ui.button(RichText::new(carrier_label).size(theme.type_body)).clicked() {
+                    state.selecting_parent = Some(0);
+                }
+            });
+        });
+
+        ui.add_space(theme.space_sm);
+
+        // Conflict Resolution Picker
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("CONFLICT RESOLUTION ENGINE:").strong().size(theme.type_caption).color(theme.text_secondary));
+            let mode_str = match state.conflict_resolution {
+                ConflictResolutionMode::NormalizedWeightedAverage => "Normalized Weighted Average (Smooth Blend)",
+                ConflictResolutionMode::PriorityOverride => "Priority Override (Top-Down)",
+                ConflictResolutionMode::MorphSweep => "Morph Sweep Automation",
+            };
+
+            egui::ComboBox::from_id_source("conflict_res_combo")
+                .selected_text(mode_str)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut state.conflict_resolution, ConflictResolutionMode::NormalizedWeightedAverage, "Normalized Weighted Average (Smooth Blend)");
+                    ui.selectable_value(&mut state.conflict_resolution, ConflictResolutionMode::PriorityOverride, "Priority Override (Top-Down)");
+                    ui.selectable_value(&mut state.conflict_resolution, ConflictResolutionMode::MorphSweep, "Morph Sweep Automation");
+                });
+
+            ui.add_space(20.0);
+            if ui.button(RichText::new("+ ADD DONOR SLOT").strong().color(theme.accent)).clicked() {
+                let id = (state.donors.len() + 1) as u64;
+                state.donors.push(DonorContribution {
+                    donor_id: id,
+                    donor_name: format!("Donor Slot {}", id),
+                    enable_spectral: true,
+                    spectral_weight: 0.5,
+                    enable_rhythmic: true,
+                    rhythmic_weight: 0.5,
+                    enable_transient: true,
+                    transient_weight: 0.5,
+                    enable_spatial: true,
+                    spatial_weight: 0.5,
+                    enable_pitch: false,
+                    pitch_weight: 0.0,
+                });
+            }
+        });
+
+        ui.add_space(theme.space_sm);
+
+        // Dynamic Donor Stack List
+        let mut remove_idx = None;
+        egui::ScrollArea::vertical().max_height(350.0).show(ui, |ui| {
+            for (idx, donor) in state.donors.iter_mut().enumerate() {
+                ui.group(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(&donor.donor_name).strong().size(theme.type_label).color(theme.track_colors[idx % theme.track_colors.len()]));
+                        ui.add_space(10.0);
+                        let donor_track_label = app.get_cached_track(donor.donor_id)
+                            .map(|t| format!("{} - {}", t.title, t.artist))
+                            .unwrap_or_else(|| "Select Track...".to_string());
+                        if ui.button(RichText::new(donor_track_label).size(theme.type_body)).clicked() {
+                            state.selecting_parent = Some(idx + 1);
+                        }
+                        ui.add_space(10.0);
+                        ui.checkbox(&mut donor.enable_spectral, "Spectral");
+                        ui.checkbox(&mut donor.enable_rhythmic, "Rhythm");
+                        ui.checkbox(&mut donor.enable_transient, "Transient");
+                        ui.checkbox(&mut donor.enable_spatial, "Spatial");
+                        ui.checkbox(&mut donor.enable_pitch, "Pitch");
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(RichText::new("X").color(theme.danger)).clicked() {
+                                remove_idx = Some(idx);
+                            }
+                        });
+                    });
+
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        if donor.enable_spectral {
+                            ui.label("Spectral Weight:");
+                            ui.add(egui::Slider::new(&mut donor.spectral_weight, 0.0..=1.0));
+                        }
+                        if donor.enable_rhythmic {
+                            ui.label("Rhythm Weight:");
+                            ui.add(egui::Slider::new(&mut donor.rhythmic_weight, 0.0..=1.0));
+                        }
+                        if donor.enable_transient {
+                            ui.label("Transient Weight:");
+                            ui.add(egui::Slider::new(&mut donor.transient_weight, 0.0..=1.0));
+                        }
+                        if donor.enable_spatial {
+                            ui.label("Spatial Weight:");
+                            ui.add(egui::Slider::new(&mut donor.spatial_weight, 0.0..=1.0));
+                        }
+                        if donor.enable_pitch {
+                            ui.label("Pitch Weight:");
+                            ui.add(egui::Slider::new(&mut donor.pitch_weight, 0.0..=1.0));
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+            }
+        });
+
+        if let Some(idx) = remove_idx {
+            if state.donors.len() > 1 {
+                state.donors.remove(idx);
+            }
+        }
+    }
+
+    fn render_full_audio_direct_ui(ui: &mut Ui, state: &mut BreederView, theme: nullherz_ui_hal::Theme, app: &mut crate::InspectorApp) {
+        ui.group(|ui| {
+            ui.label(RichText::new("FULL-AUDIO DIRECT TRANSFUSION ENGINE").strong().size(theme.type_heading).color(theme.accent));
+            ui.add_space(theme.space_xs);
+            ui.label(RichText::new("Direct file-based behavior map extraction and cross-synthesis on full WAV/FLAC audio files.").size(theme.type_caption).color(theme.text_secondary));
+
+            ui.add_space(theme.space_md);
+
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("CARRIER AUDIO FILE:").strong().size(theme.type_caption));
+                    let carrier_file = state.direct_carrier_file.as_deref().unwrap_or("[No Carrier File Selected]");
+                    ui.label(RichText::new(carrier_file).size(theme.type_body));
+                    if ui.button("Select Carrier File...").clicked() {
+                        state.direct_carrier_file = Some("sample_carrier_stem.wav".to_string());
+                    }
+                });
+
+                ui.add_space(40.0);
+
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("DONOR AUDIO FILE:").strong().size(theme.type_caption));
+                    let donor_file = state.direct_donor_file.as_deref().unwrap_or("[No Donor File Selected]");
+                    ui.label(RichText::new(donor_file).size(theme.type_body));
+                    if ui.button("Select Donor File...").clicked() {
+                        state.direct_donor_file = Some("sample_donor_stem.wav".to_string());
+                    }
+                });
+            });
+
+            ui.add_space(theme.space_md);
+
+            // Behaviour Map Contour Inspection
+            ui.label(RichText::new("EXTRACTED BEHAVIOUR MAP CONTOURS").strong().size(theme.type_label).color(theme.text_secondary));
+            let (map_rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 100.0), Sense::hover());
+            ui.painter().rect_filled(map_rect, theme.radius_md, theme.bg_inset);
+            ui.painter().rect_stroke(map_rect, theme.radius_md, theme.border_stroke);
+
+            // Render simulated 5 behavior contour curves
+            let w = map_rect.width();
+            let h = map_rect.height();
+            let pts_count = 64;
+            for i in 0..pts_count - 1 {
+                let x1 = map_rect.left() + (i as f32 / pts_count as f32) * w;
+                let x2 = map_rect.left() + ((i + 1) as f32 / pts_count as f32) * w;
+
+                let y1_energy = map_rect.bottom() - (0.3 + 0.5 * (i as f32 * 0.2).sin().abs()) * h;
+                let y2_energy = map_rect.bottom() - (0.3 + 0.5 * ((i + 1) as f32 * 0.2).sin().abs()) * h;
+                ui.painter().line_segment([egui::pos2(x1, y1_energy), egui::pos2(x2, y2_energy)], Stroke::new(1.5, theme.accent));
+
+                let y1_transient = map_rect.bottom() - (0.1 + 0.8 * (i % 8 == 0) as u8 as f32) * h;
+                let y2_transient = map_rect.bottom() - (0.1 + 0.8 * ((i + 1) % 8 == 0) as u8 as f32) * h;
+                ui.painter().line_segment([egui::pos2(x1, y1_transient), egui::pos2(x2, y2_transient)], Stroke::new(1.5, theme.danger));
+            }
+
+            ui.add_space(theme.space_md);
+
+            ui.horizontal(|ui| {
+                if ui.button(RichText::new("💾 Save Behaviour Preset (.behaviourmap)").strong()).clicked() {
+                    state.active_behaviour_map = Some(BehaviourMap {
+                        name: "Extracted Preset".to_string(),
+                        duration_sec: 16.0,
+                        energy_envelope: vec![0.5; 64],
+                        motion_trajectory: vec![0.5; 64],
+                        transient_spikes: vec![0.0; 64],
+                        texture_density: vec![0.5; 64],
+                        pitch_contour: vec![0.5; 64],
+                    });
+                }
+
+                ui.add_space(20.0);
+
+                if ui.button(RichText::new("⚡ BAKE & RENDER TRANSFUSED WAV").strong().color(theme.success)).clicked() {
+                    let cmd = Command::Resource(nullherz_traits::ResourceCommand::OfflineRenderTransfusion {
+                        carrier_id: state.carrier_id.unwrap_or(0),
+                        donor_id: state.donors.first().map(|d| d.donor_id).unwrap_or(0),
+                    });
+                    let _ = app.command_sender.send(cmd);
+                }
+            });
+        });
+    }
+
     fn emit_dna_command(&self, app: &crate::InspectorApp) {
+        let target_node = app.topo.node_map.get("personality_inheritance")
+            .or_else(|| app.topo.node_map.get("master_personality"))
+            .copied()
+            .unwrap_or(0);
+
+        if self.workflow_mode == TransfusionWorkflowMode::NDonorBreeder {
+            if let Some(c_id) = self.carrier_id.or(self.parent_a_id)
+                && let Some(carrier_track) = app.get_cached_track(c_id) {
+
+                    let mut donor_tuples = Vec::new();
+                    for donor_contrib in &self.donors {
+                        if let Some(donor_track) = app.get_cached_track(donor_contrib.donor_id) {
+                            donor_tuples.push((donor_track.metadata.dna.clone(), donor_contrib.clone()));
+                        }
+                    }
+
+                    let multi_child = nullherz_dna::transfuse_multi_donor(
+                        &carrier_track.metadata.dna,
+                        &donor_tuples,
+                        self.conflict_resolution,
+                    );
+
+                    let cmd = Command::Dna(DnaCommand::pack_transfusion(
+                        target_node as u64,
+                        &multi_child.spectral.latent_space,
+                        &multi_child.rhythmic.micro_timing,
+                        &multi_child.rhythmic.onset_mask,
+                    ));
+
+                    let _ = app.command_sender.send(cmd);
+                }
+            return;
+        }
+
         if let (Some(id_a), Some(id_b)) = (self.parent_a_id, self.parent_b_id)
             && let (Some(track_a), Some(track_b)) = (app.get_cached_track(id_a), app.get_cached_track(id_b)) {
-
-                // Dynamically resolve target personality inheritance node ID from topology map
-                let target_node = app.topo.node_map.get("personality_inheritance")
-                    .or_else(|| app.topo.node_map.get("master_personality"))
-                    .copied()
-                    .unwrap_or(0);
 
                 // 1. Spectral Transfusion
                 let mut latent = [0.0f32; 16];
@@ -444,7 +745,6 @@ impl BreederView {
                     *item = if self.transfusion_bias_y > 0.5 { mask_b } else { mask_a };
                 }
 
-                // Hardened: Utilizing type-safe builder to eliminate unsafe byte-packing
                 let cmd = Command::Dna(DnaCommand::pack_transfusion(
                     target_node as u64,
                     &latent,

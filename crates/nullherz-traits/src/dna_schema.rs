@@ -509,3 +509,83 @@ pub struct AnalysisSelection {
     pub start_sample: u64,
     pub end_sample: u64,
 }
+
+/// Operational workflow mode for the Transfusion Engine
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
+pub enum TransfusionWorkflowMode {
+    FullAudioDirect,
+    NDonorBreeder,
+    LiveDeck,
+}
+
+impl Default for TransfusionWorkflowMode {
+    fn default() -> Self {
+        Self::NDonorBreeder
+    }
+}
+
+/// Conflict resolution mode when multiple donors contribute to the same trait domain
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
+pub enum ConflictResolutionMode {
+    NormalizedWeightedAverage,
+    PriorityOverride,
+    MorphSweep,
+}
+
+impl Default for ConflictResolutionMode {
+    fn default() -> Self {
+        Self::NormalizedWeightedAverage
+    }
+}
+
+/// Dynamic donor contribution configuration and trait routing weights
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
+pub struct DonorContribution {
+    pub donor_id: u64,
+    pub donor_name: String,
+    pub enable_spectral: bool,
+    pub spectral_weight: f32,
+    pub enable_rhythmic: bool,
+    pub rhythmic_weight: f32,
+    pub enable_transient: bool,
+    pub transient_weight: f32,
+    pub enable_spatial: bool,
+    pub spatial_weight: f32,
+    pub enable_pitch: bool,
+    pub pitch_weight: f32,
+}
+
+impl Default for DonorContribution {
+    fn default() -> Self {
+        Self {
+            donor_id: 0,
+            donor_name: "Donor Track".to_string(),
+            enable_spectral: true,
+            spectral_weight: 0.5,
+            enable_rhythmic: true,
+            rhythmic_weight: 0.5,
+            enable_transient: true,
+            transient_weight: 0.5,
+            enable_spatial: true,
+            spatial_weight: 0.5,
+            enable_pitch: true,
+            pitch_weight: 0.5,
+        }
+    }
+}
+
+/// Full-audio Behaviour Map profile holding time-series behavioral curves
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
+pub struct BehaviourMap {
+    pub name: String,
+    pub duration_sec: f32,
+    pub energy_envelope: Vec<f32>,
+    pub motion_trajectory: Vec<f32>,
+    pub transient_spikes: Vec<f32>,
+    pub texture_density: Vec<f32>,
+    pub pitch_contour: Vec<f32>,
+}

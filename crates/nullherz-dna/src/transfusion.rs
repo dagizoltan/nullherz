@@ -267,6 +267,157 @@ pub fn transfuse_dna(dna_a: &nullherz_traits::SoundDNA, dna_b: &nullherz_traits:
     child
 }
 
+/// Dynamic N-Donor Transfusion Engine: Blends an arbitrary number of donor DNA structures
+/// into a carrier DNA based on selective trait routing weights and conflict resolution strategy.
+pub fn transfuse_multi_donor(
+    carrier: &nullherz_traits::SoundDNA,
+    donors: &[(nullherz_traits::SoundDNA, nullherz_traits::DonorContribution)],
+    conflict_mode: nullherz_traits::ConflictResolutionMode,
+) -> nullherz_traits::SoundDNA {
+    if donors.is_empty() {
+        return carrier.clone();
+    }
+
+    let mut result = carrier.clone();
+
+    match conflict_mode {
+        nullherz_traits::ConflictResolutionMode::NormalizedWeightedAverage => {
+            // 1. Spectral Latent Space Multi-Donor Blending
+            let mut total_spectral_w = 0.0f32;
+            let mut accum_latent = [0.0f32; 16];
+
+            for (dna, contrib) in donors {
+                if contrib.enable_spectral && contrib.spectral_weight > 0.0 {
+                    let w = contrib.spectral_weight;
+                    total_spectral_w += w;
+                    for i in 0..16 {
+                        accum_latent[i] += dna.spectral.latent_space[i] * w;
+                    }
+                }
+            }
+
+            if total_spectral_w > 0.0 && !carrier.invariant_mask.lock_spectral {
+                let inv_total = 1.0 / total_spectral_w;
+                let carrier_w = (1.0 - total_spectral_w.min(1.0)).max(0.0);
+                for i in 0..16 {
+                    let blended_donor = accum_latent[i] * inv_total;
+                    result.spectral.latent_space[i] = (carrier.spectral.latent_space[i] * carrier_w
+                        + blended_donor * (1.0 - carrier_w)).tanh();
+                }
+            }
+
+            // 2. Rhythmic Micro-Timing & Syncopation Multi-Donor Blending
+            let mut total_rhythmic_w = 0.0f32;
+            let mut accum_syncopation = 0.0f32;
+            let mut accum_micro = [0.0f32; 12];
+
+            for (dna, contrib) in donors {
+                if contrib.enable_rhythmic && contrib.rhythmic_weight > 0.0 {
+                    let w = contrib.rhythmic_weight;
+                    total_rhythmic_w += w;
+                    accum_syncopation += dna.rhythmic.syncopation_index * w;
+                    for i in 0..12 {
+                        accum_micro[i] += dna.rhythmic.micro_timing[i] as f32 * w;
+                    }
+                }
+            }
+
+            if total_rhythmic_w > 0.0 && !carrier.invariant_mask.lock_rhythmic {
+                let inv_total = 1.0 / total_rhythmic_w;
+                let carrier_w = (1.0 - total_rhythmic_w.min(1.0)).max(0.0);
+                result.rhythmic.syncopation_index = carrier.rhythmic.syncopation_index * carrier_w
+                    + (accum_syncopation * inv_total) * (1.0 - carrier_w);
+                for i in 0..12 {
+                    result.rhythmic.micro_timing[i] = (carrier.rhythmic.micro_timing[i] as f32 * carrier_w
+                        + (accum_micro[i] * inv_total) * (1.0 - carrier_w)) as i16;
+                }
+            }
+
+            // 3. Spatial Width Multi-Donor Blending
+            let mut total_spatial_w = 0.0f32;
+            let mut accum_width = 0.0f32;
+
+            for (dna, contrib) in donors {
+                if contrib.enable_spatial && contrib.spatial_weight > 0.0 {
+                    let w = contrib.spatial_weight;
+                    total_spatial_w += w;
+                    accum_width += dna.spatial.stereo_width * w;
+                }
+            }
+
+            if total_spatial_w > 0.0 && !carrier.invariant_mask.lock_spatial {
+                let inv_total = 1.0 / total_spatial_w;
+                let carrier_w = (1.0 - total_spatial_w.min(1.0)).max(0.0);
+                result.spatial.stereo_width = carrier.spatial.stereo_width * carrier_w
+                    + (accum_width * inv_total) * (1.0 - carrier_w);
+            }
+
+            // 4. Transient Attack & Crest Factor Blending
+            let mut total_transient_w = 0.0f32;
+            let mut accum_crest = 0.0f32;
+
+            for (dna, contrib) in donors {
+                if contrib.enable_transient && contrib.transient_weight > 0.0 {
+                    let w = contrib.transient_weight;
+                    total_transient_w += w;
+                    accum_crest += dna.perception.crest_factor_db * w;
+                }
+            }
+
+            if total_transient_w > 0.0 {
+                let inv_total = 1.0 / total_transient_w;
+                let carrier_w = (1.0 - total_transient_w.min(1.0)).max(0.0);
+                result.perception.crest_factor_db = result.perception.crest_factor_db * carrier_w
+                    + (accum_crest * inv_total) * (1.0 - carrier_w);
+            }
+
+            // 5. Pitch Contour & Formant Tilt Blending
+            let mut total_pitch_w = 0.0f32;
+            let mut accum_tilt = 0.0f32;
+
+            for (dna, contrib) in donors {
+                if contrib.enable_pitch && contrib.pitch_weight > 0.0 {
+                    let w = contrib.pitch_weight;
+                    total_pitch_w += w;
+                    accum_tilt += dna.spectral.tilt * w;
+                }
+            }
+
+            if total_pitch_w > 0.0 {
+                let inv_total = 1.0 / total_pitch_w;
+                let carrier_w = (1.0 - total_pitch_w.min(1.0)).max(0.0);
+                result.spectral.tilt = result.spectral.tilt * carrier_w
+                    + (accum_tilt * inv_total) * (1.0 - carrier_w);
+            }
+        }
+        nullherz_traits::ConflictResolutionMode::PriorityOverride
+        | nullherz_traits::ConflictResolutionMode::MorphSweep => {
+            // Apply donors sequentially per-domain trait routing weights
+            for (dna, contrib) in donors {
+                if contrib.enable_spectral && contrib.spectral_weight > 0.0 && !carrier.invariant_mask.lock_spectral {
+                    let cur_latent = result.spectral.latent_space;
+                    NeuralTransfuser::interpolate_latent(&mut result.spectral.latent_space, &cur_latent, &dna.spectral.latent_space, contrib.spectral_weight);
+                    result.spectral.tilt = result.spectral.tilt * (1.0 - contrib.spectral_weight) + dna.spectral.tilt * contrib.spectral_weight;
+                }
+                if contrib.enable_rhythmic && contrib.rhythmic_weight > 0.0 && !carrier.invariant_mask.lock_rhythmic {
+                    result.rhythmic.syncopation_index = result.rhythmic.syncopation_index * (1.0 - contrib.rhythmic_weight) + dna.rhythmic.syncopation_index * contrib.rhythmic_weight;
+                    for i in 0..12 {
+                        result.rhythmic.micro_timing[i] = (result.rhythmic.micro_timing[i] as f32 * (1.0 - contrib.rhythmic_weight) + dna.rhythmic.micro_timing[i] as f32 * contrib.rhythmic_weight) as i16;
+                    }
+                }
+                if contrib.enable_spatial && contrib.spatial_weight > 0.0 && !carrier.invariant_mask.lock_spatial {
+                    result.spatial.stereo_width = result.spatial.stereo_width * (1.0 - contrib.spatial_weight) + dna.spatial.stereo_width * contrib.spatial_weight;
+                }
+                if contrib.enable_transient && contrib.transient_weight > 0.0 {
+                    result.perception.crest_factor_db = result.perception.crest_factor_db * (1.0 - contrib.transient_weight) + dna.perception.crest_factor_db * contrib.transient_weight;
+                }
+            }
+        }
+    }
+
+    result
+}
+
 
 /// Chaotic Transfusion: Implements Layer 5 "Error Rehabilitation" theory.
 /// Uses a logistic map to create non-linear trait inheritance and digital mutations.

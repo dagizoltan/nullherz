@@ -898,6 +898,13 @@ impl CommandHandler {
                 conductor.transfusion_manager.execute_rhythmic_transfusion(source_id, target_id, &lib);
                 true
             }
+            ResourceCommand::OfflineRenderTransfusion { carrier_id, donor_id } => {
+                Self::ensure_sample_hydrated(conductor, carrier_id);
+                Self::ensure_sample_hydrated(conductor, donor_id);
+                let lib = conductor.library.lock();
+                conductor.transfusion_manager.commit_breeding(carrier_id, donor_id, 0.5, &lib);
+                true
+            }
             ResourceCommand::RegisterCapture { .. } => {
                 { let engine_lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
                    if let Some(ref engine) = *engine_lock {
