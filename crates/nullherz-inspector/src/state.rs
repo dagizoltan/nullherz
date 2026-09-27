@@ -278,6 +278,8 @@ pub struct DeckState {
     pub deck_key_lock: [bool; 16],
     /// Active sidecar insert FX attached to each deck channel.
     pub deck_inserts: [Option<String>; 16],
+    /// Parameter state values (up to 8 parameters) for active deck inserts.
+    pub deck_insert_params: [[f32; 8]; 16],
 }
 
 impl Default for DeckState {
@@ -297,6 +299,7 @@ impl Default for DeckState {
             deck_key_sync: [false; 16],
             deck_key_lock: [false; 16],
             deck_inserts: std::array::from_fn(|_| None),
+            deck_insert_params: [[0.5; 8]; 16],
         }
     }
 }
