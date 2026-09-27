@@ -55,6 +55,9 @@ This document lists the open technical debt, stubs, and prototype logic verified
 - **Session Restoration Integration — RESOLVED**:
   - *Location*: `crates/nullherz-inspector/src/views/settings/preferences.rs` and `main.rs`.
   - *Detail*: Fully integrated. When enabled (`restore_last_session = true`), startup state restoration automatically reloads `autosave.json` via `Conductor::load_project` and restores active preferences, views, shortcuts, and custom theme colors.
+- **TAU Constant Approximation Warning & Inspector Lints — RESOLVED**:
+  - *Location*: `crates/nullherz-inspector/src/state.rs`.
+  - *Detail*: Cleaned up float approximation of TAU constant in `ImageTextureEngine` with `std::f32::consts::TAU`. System workspace now compiles 100% warning-free under `RUSTFLAGS="-D warnings" cargo check --workspace --all-targets`.
 - **Breeder Pipeline Telemetry**:
   - *Location*: `crates/nullherz-inspector/src/views/breeder.rs`.
   - *Detail*: The transfusion progress bar displays linear progress but lacks real-time sub-block DSP pipeline feedback metrics from the execution plane.
