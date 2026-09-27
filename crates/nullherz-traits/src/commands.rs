@@ -108,6 +108,8 @@ impl ProcessorTypeId {
     pub const MULTIBAND_COMPRESSOR: Self = Self(237);
     pub const REVERB: Self = Self(238);
     pub const MODULATION_FX: Self = Self(239);
+    pub const TRANSIENT_SHAPER: Self = Self(240);
+    pub const TAPE_SATURATOR: Self = Self(241);
 }
 
 impl From<u32> for ProcessorTypeId {

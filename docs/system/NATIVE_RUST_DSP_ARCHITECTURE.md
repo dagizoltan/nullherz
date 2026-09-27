@@ -60,6 +60,41 @@ pub struct SidecarDescriptor {
 
 ---
 
+## Native Instruments & Insert FX Processor Catalog
+
+Nullherz categorizes its built-in processors and sidecars into real-time safe **Instruments**, **Neural DSP Inserts**, and **Algorithmic FX Inserts**:
+
+### 1. Instruments & Sound Generators
+- **`WavetableOscillator` / `WavetableProcessor`**: Dual-table 16-channel SIMD morphing wavetable oscillator with FM/PM phase modulation.
+- **`SamplerProcessor` / `SamplerVoice`**: Planar 64-bit `f64` playhead sampler with Kaiser-windowed 16-tap sinc resampler (-132 dB THD+N).
+- **`AlgorithmicSynthInstrument`**: Dual-oscillator MIDI synthesizer instrument.
+- **Planned: `PhysicalModelingSynth`**: Karplus-Strong string and acoustic waveguide modeling engine with SIMD fractional delay lines and lossy damping filters.
+- **Planned: `PolyWavetableSynth`**: 16-voice MPE polyphonic wavetable synthesizer with per-voice ZDF SVF filters and 2D morphing table space.
+
+### 2. Neural DSP Inserts
+- **`NeuralSaturatorProcessor`**: Padé SIMD rational approximant soft-clipping analog saturation modeling.
+- **`NeuralFilterProcessor`**: Hypernetwork-conditioned dynamic state-variable filter.
+- **`NeuralTcnProcessor`**: 4-layer dilated Temporal Convolutional Network with C=16 hidden channels.
+- **`NeuralSsmCompressor`**: 24-state Diagonal State-Space Model for dynamic compression and tape hysteresis.
+- **`NeuralNamProcessor`**: 10-layer wave-shaping network for analog tube preamp and guitar amp emulation.
+- **`HyperNetworkEqProcessor`**: Hypernetwork-conditioned parametric equalizer.
+- **`TubePreampProcessor`**: Asymmetric triode tube preamp model with transformer hysteresis.
+- **`MultiBandCompressorProcessor`**: 3-band crossover feeding parallel SSM dynamic compression cells.
+
+### 3. Algorithmic Insert FX
+- **`TransientShaperProcessor`**: Dual fast/slow envelope followers for independent attack (+12 dB boost/cut) and sustain tail length shaping with zero algorithmic latency.
+- **`TapeSaturatorProcessor`**: Magnetic tape saturation with head-gap high-frequency loss filtering and mechanical wow/flutter pitch modulation via fractional delay lines.
+- **`CompressorProcessor`**: Feed-forward envelope follower dynamic compressor with auto makeup gain.
+- **`LimiterProcessor`**: Brickwall peak limiter with look-ahead ring buffer containment.
+- **`DjIsolator` / `DjIsolatorStereo`**: 4th-order Linkwitz-Riley 3-band crossover kill EQ (24 dB/octave).
+- **`MasteringEq`**: 3-band mastering tone stage (RBJ low shelf, mid peak, high shelf).
+- **`AlgorithmicDelayProcessor`**: Low-latency tape delay with Hermite fractional interpolation.
+- **`AlgorithmicReverbProcessor`**: Schroeder/Freeverb comb and all-pass filter network reverb.
+- **`AlgorithmicModulationProcessor`**: Multi-mode LFO insert (Chorus, Flanger, Phaser).
+- **Planned: `ConvolutionReverbProcessor`**: Low-latency uniform-partitioned OLA FFT impulse response convolution for cabinet modeling and hall reverbs.
+
+---
+
 ## Sidecar Directory Structure
 
 Standalone executable sidecars live inside the `sidecars/` directory as dedicated workspace member crates:

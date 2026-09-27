@@ -26,6 +26,8 @@ use crate::tube_preamp::*;
 use crate::multiband_compressor::*;
 use crate::algorithmic_reverb::*;
 use crate::modulation_fx::*;
+use crate::transient_shaper::*;
+use crate::tape_saturator::*;
 
 /// Identity pass-through, used to hold an insert slot open.
 ///
@@ -398,4 +400,22 @@ impl ProcessorFactory for ModulationFxFactory {
     }
     fn name(&self) -> &'static str { "ModulationFx" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::MODULATION_FX }
+}
+
+pub struct TransientShaperFactoryWrapper;
+impl ProcessorFactory for TransientShaperFactoryWrapper {
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(TransientShaperProcessor::new(node_idx as u64, sample_rate)))
+    }
+    fn name(&self) -> &'static str { "TransientShaper" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::TRANSIENT_SHAPER }
+}
+
+pub struct TapeSaturatorFactoryWrapper;
+impl ProcessorFactory for TapeSaturatorFactoryWrapper {
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(TapeSaturatorProcessor::new(node_idx as u64, sample_rate)))
+    }
+    fn name(&self) -> &'static str { "TapeSaturator" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::TAPE_SATURATOR }
 }

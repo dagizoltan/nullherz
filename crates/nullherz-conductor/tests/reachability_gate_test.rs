@@ -73,6 +73,8 @@ fn known_unreachable() -> Vec<(&'static str, &'static str)> {
         ("MultiBandCompressor", "available for FX chains; not in default master chain"),
         ("Reverb", "available for FX chains; not in default master chain"),
         ("ModulationFx", "available for FX chains; not in default master chain"),
+        ("TransientShaper", "available for FX chains; not in default master chain"),
+        ("TapeSaturator", "available for FX chains; not in default master chain"),
     ]
 }
 
