@@ -20,3 +20,4 @@ pub mod visual_engines;
 pub mod analyzer;
 pub mod organism_profile;
 pub mod organism_editor;
+pub mod visuals;

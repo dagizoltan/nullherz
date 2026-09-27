@@ -4747,6 +4747,7 @@ dependencies = [
  "ipc-layer",
  "nullherz-traits",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
