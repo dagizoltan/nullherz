@@ -64,12 +64,12 @@ impl RealtimePredictiveBeatTracker {
                 (self.state.last_beat_frame as f64 + samples_per_beat).round() as u64;
 
             // Recalculate pre-beat prediction if pre-beat model exists
-            if let Some(ref g) = self.grid {
-                if let Some(pre) = g.pre_beats.first() {
-                    let next_pre = self.state.next_predicted_beat_frame as i64 + pre.offset_frames;
-                    if next_pre >= 0 {
-                        self.state.next_predicted_pre_beat_frame = Some(next_pre as u64);
-                    }
+            if let Some(ref g) = self.grid
+                && let Some(pre) = g.pre_beats.first()
+            {
+                let next_pre = self.state.next_predicted_beat_frame as i64 + pre.offset_frames;
+                if next_pre >= 0 {
+                    self.state.next_predicted_pre_beat_frame = Some(next_pre as u64);
                 }
             }
         }
