@@ -445,6 +445,10 @@ pub enum ResourceCommand {
     ReAnalyze {
         sample_id: u64,
     },
+    OfflineRenderTransfusion {
+        carrier_id: u64,
+        donor_id: u64,
+    },
     AddSourceFromRegistry {
         granular_node_idx: u32,
         sample_id: u64,

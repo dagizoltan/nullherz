@@ -394,6 +394,61 @@ mod tests {
     }
 
     #[test]
+    fn test_multi_donor_transfusion() {
+        use nullherz_traits::{SoundDNA, DonorContribution, ConflictResolutionMode};
+        let mut carrier = SoundDNA::default();
+        carrier.spectral.latent_space[0] = 0.0;
+
+        let mut donor_1 = SoundDNA::default();
+        donor_1.spectral.latent_space[0] = 1.0;
+
+        let mut donor_2 = SoundDNA::default();
+        donor_2.spectral.latent_space[0] = 0.5;
+
+        let contrib_1 = DonorContribution {
+            donor_id: 1,
+            donor_name: "Donor 1".to_string(),
+            enable_spectral: true,
+            spectral_weight: 0.8,
+            enable_rhythmic: true,
+            rhythmic_weight: 0.5,
+            enable_transient: true,
+            transient_weight: 0.5,
+            enable_spatial: true,
+            spatial_weight: 0.5,
+            enable_pitch: false,
+            pitch_weight: 0.0,
+        };
+
+        let contrib_2 = DonorContribution {
+            donor_id: 2,
+            donor_name: "Donor 2".to_string(),
+            enable_spectral: true,
+            spectral_weight: 0.4,
+            enable_rhythmic: true,
+            rhythmic_weight: 0.5,
+            enable_transient: true,
+            transient_weight: 0.5,
+            enable_spatial: true,
+            spatial_weight: 0.5,
+            enable_pitch: false,
+            pitch_weight: 0.0,
+        };
+
+        let donors = vec![(donor_1, contrib_1), (donor_2, contrib_2)];
+
+        let result = transfuse_multi_donor(
+            &carrier,
+            &donors,
+            ConflictResolutionMode::NormalizedWeightedAverage,
+        );
+
+        // Latent space dimension 0 should be non-zero and bounded
+        assert!(result.spectral.latent_space[0] > 0.0);
+        assert!(result.spectral.latent_space[0] <= 1.0);
+    }
+
+    #[test]
     fn test_gossip_signature_enforcement_server() {
         use std::net::{TcpStream, TcpListener, SocketAddr};
         use std::io::{Write, Read, BufRead, BufReader};
