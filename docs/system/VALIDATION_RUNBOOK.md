@@ -39,6 +39,9 @@ order:
    hardware operation (< 3.0 ms round-trip), enable direct hardware MMAP mode,
    period wakeup bypass, and D-Bus device reservation via environment flags:
    `NULLHERZ_ALSA_MMAP=1 NULLHERZ_NO_PERIOD_WAKEUP=1 NULLHERZ_RESERVE_DEVICE=1`.
+   An automated baremetal system tuning script is available at `scripts/baremetal_core_isolate.sh`
+   (`sudo ./scripts/baremetal_core_isolate.sh --apply` to configure governor, HugePages, and RT limits;
+   `./scripts/baremetal_core_isolate.sh --status` to inspect current system state).
 5. **OS-level check** if still silent: `aplay /usr/share/sounds/alsa/Front_Center.wav`
    and `pactl get-sink-mute @DEFAULT_SINK@`.
 
