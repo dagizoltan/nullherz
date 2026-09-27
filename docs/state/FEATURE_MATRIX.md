@@ -66,6 +66,7 @@
 | **OLA Time-Stretch** | ✅ | Overlap-add `time_stretch` kernel with corrected ratio semantics (`audio-dsp/util.rs`). |
 | **Transient Detection** | ✅ | Spectral-flux + RMS onset/transient detectors powering editor chop and analysis. |
 | **Parallel Graph Execution** | ✅ | Static stage assignment `TaskPool` with cost-gated threshold calibration. |
+| **no_std Embedded Runtime** | ✅ | `#![no_std]` compilation support for `audio-dsp` (`--no-default-features`), enabling execution on embedded ARM/FPGA baremetal hardware. |
 
 ---
 
