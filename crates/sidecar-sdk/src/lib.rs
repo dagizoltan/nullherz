@@ -1,9 +1,13 @@
 pub mod store;
+pub mod package;
 pub use store::{
     SidecarStore, SidecarDescriptor, SidecarType, SidecarChain,
     NeuralSaturationProcessor, NeuralFilterProcessor, NeuralSsmProcessor,
     NeuralNamProcessor, NeuralTcnProcessor,
     AlgorithmicDelayProcessor, AlgorithmicEqProcessor, AlgorithmicSynthInstrument,
+};
+pub use package::{
+    SidecarPackageManifest, SidecarBundle, SidecarPackageManager, InstalledPackageInfo,
 };
 
 use ipc_layer::{ShmRingBuffer, AudioBlock, ShmSignal, EventFd};

@@ -1338,6 +1338,7 @@ pub struct VisualChannel {
     pub midi_note_trigger: u8,
     pub midi_learn_active: bool,
     pub inserts: Vec<VisualRackItem>,
+    pub visual_inserts: Vec<String>,
     // Standardized parametric controls
     pub param_speed: f32,
     pub param_neural_temp: f32,
@@ -1397,6 +1398,10 @@ impl VisualChannel {
                     enabled: true,
                     mix: 0.5,
                 },
+            ],
+            visual_inserts: vec![
+                "phase-goniometer-2d".to_string(),
+                "fft-spectrum-mesh".to_string(),
             ],
             param_speed: 1.0,
             param_neural_temp: 0.7,
