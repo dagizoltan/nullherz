@@ -129,3 +129,11 @@ fn test_alsa_backend_creation_and_defaults() {
     assert_eq!(backend.buffer_frames(), None);
     assert!(!backend.device().is_empty());
 }
+
+#[test]
+fn test_alsa_backend_custom_device_selection() {
+    let mut backend = AlsaBackend::new();
+    backend.set_device("hw:0,0");
+    assert_eq!(backend.device(), "hw:0,0");
+    assert_eq!(AlsaBackend::dbus_device_name(backend.device()), "Audio0");
+}

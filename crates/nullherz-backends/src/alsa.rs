@@ -31,6 +31,8 @@ struct AlsaLib {
     sw: Option<AlsaSwParams>,
     snd_pcm_writei: unsafe extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void, std::os::raw::c_ulong) -> isize,
     snd_pcm_mmap_writei: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void, std::os::raw::c_ulong) -> isize>,
+    _snd_pcm_mmap_begin: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *mut *const std::ffi::c_void, *mut std::os::raw::c_ulong, *mut std::os::raw::c_ulong) -> std::os::raw::c_int>,
+    _snd_pcm_mmap_commit: Option<unsafe extern "C" fn(*mut std::ffi::c_void, std::os::raw::c_ulong, std::os::raw::c_ulong) -> isize>,
     snd_pcm_recover: unsafe extern "C" fn(*mut std::ffi::c_void, std::os::raw::c_int, std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_close: unsafe extern "C" fn(*mut std::ffi::c_void) -> std::os::raw::c_int,
     snd_pcm_prepare: unsafe extern "C" fn(*mut std::ffi::c_void) -> std::os::raw::c_int,
@@ -97,6 +99,10 @@ impl AlsaLib {
                 snd_pcm_writei: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *const std::ffi::c_void, u64) -> isize>(load_sym(c"snd_pcm_writei").ok_or("sym failed")?),
                 snd_pcm_mmap_writei: load_sym(c"snd_pcm_mmap_writei")
                     .map(|s| std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *const std::ffi::c_void, u64) -> isize>(s)),
+                _snd_pcm_mmap_begin: load_sym(c"snd_pcm_mmap_begin")
+                    .map(|s| std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, *mut *const std::ffi::c_void, *mut u64, *mut u64) -> i32>(s)),
+                _snd_pcm_mmap_commit: load_sym(c"snd_pcm_mmap_commit")
+                    .map(|s| std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, u64, u64) -> isize>(s)),
                 snd_pcm_recover: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void, i32, i32) -> i32>(load_sym(c"snd_pcm_recover").ok_or("sym failed")?),
                 snd_pcm_close: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void) -> i32>(load_sym(c"snd_pcm_close").ok_or("sym failed")?),
                 snd_pcm_prepare: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut libc::c_void) -> i32>(load_sym(c"snd_pcm_prepare").ok_or("sym failed")?),
@@ -392,7 +398,11 @@ impl AudioBackend for AlsaBackend {
             //
             // `NULLHERZ_BUFFER_PERIODS` still overrides either way.
             let rt = ipc_layer::realtime_available();
-            let default_periods: u64 = if rt { 3 } else { 8 };
+            let default_periods: u64 = if rt {
+                if is_mmap || no_wakeup { 2 } else { 3 }
+            } else {
+                8
+            };
             let buffer_periods: u64 = std::env::var("NULLHERZ_BUFFER_PERIODS")
                 .ok().and_then(|v| v.parse().ok()).filter(|&v| (2..=32).contains(&v))
                 .unwrap_or(default_periods);
@@ -459,7 +469,10 @@ impl AudioBackend for AlsaBackend {
                 let mut sw_params: *mut std::ffi::c_void = std::ptr::null_mut();
                 if (sw.malloc)(&mut sw_params) == 0 && !sw_params.is_null() {
                     if (sw.current)(pcm, sw_params) == 0 {
-                        let _ = (sw.set_start_threshold)(pcm, sw_params, buffer_size);
+                        // Start playback immediately when the first period is written (or 1 frame),
+                        // rather than waiting for the entire multi-period buffer to fill.
+                        let start_thresh = if is_mmap || no_wakeup { period_size } else { buffer_size };
+                        let _ = (sw.set_start_threshold)(pcm, sw_params, start_thresh);
                         let _ = (sw.set_stop_threshold)(pcm, sw_params, buffer_size);
                         let _ = (sw.set_avail_min)(pcm, sw_params, period_size);
                         let rc = (sw.apply)(pcm, sw_params);
