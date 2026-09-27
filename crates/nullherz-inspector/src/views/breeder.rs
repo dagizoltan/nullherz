@@ -223,7 +223,7 @@ impl BreederView {
         // Multi-Donor Parent Selection Row (A, B, C, D) with Waveform Previews
         ui.horizontal(|ui| {
             let parent_ids = [state.parent_a_id, state.parent_b_id, state.parent_c_id, state.parent_d_id];
-            let labels = ["DONOR A (Carrier)", "DONOR B (Modulator)", "DONOR C (Texture)", "DONOR D (Groove)"];
+            let labels = ["PRIMARY CARRIER", "DONOR SLOT 1", "DONOR SLOT 2", "DONOR SLOT 3"];
 
             for p_idx in 0..4 {
                 ui.group(|ui| {
