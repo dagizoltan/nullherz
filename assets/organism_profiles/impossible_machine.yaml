@@ -1,0 +1,55 @@
+id: impossible-machine
+name: "Impossible Machine"
+family: architectural
+description: >
+  Modular architectural beams, rings and lattices reconfiguring mechanically in event-driven sync.
+
+audio:
+  low_energy: mass
+  mid_energy: articulation
+  high_energy: mechanical_detail
+  transient_strength: assembly_event
+  spectral_centroid: reconfiguration
+  beat_phase: mechanism_cycle
+  stereo_width: spatial_spread
+
+genome:
+  branching: 0.50
+  cohesion: 0.85
+  symmetry: 0.64
+  mutation: 0.61
+  persistence: 0.80
+  turbulence: 0.15
+  rigidity: 0.95
+  viscosity: 0.05
+
+behavior:
+  topology: modular
+  growth: assembly-event
+  decay: quantized
+  mutation: transient-driven
+  memory: high
+
+geometry:
+  primitives: [beams, rings, planes, lattices]
+  dimensionality: 3d
+  thickness: quantized
+  smoothing: hard-edge
+
+motion:
+  flow: mechanical
+  inertia: 0.90
+  turbulence: 0.10
+  collective_motion: 0.95
+
+field:
+  field_type: architectural-grid
+  dimensions: 3
+  divergence: 0.0
+
+render:
+  trails: false
+  feedback: subtle
+  depth: high
+  bloom: none
+  wireframe: true

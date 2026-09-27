@@ -1359,6 +1359,7 @@ pub struct VisualChannel {
     pub mapper: NeuralLatentMapper,
     pub memory: VisualMemory,
     pub mutation: MutationEngine,
+    pub organism_profile: crate::views::organism_profile::OrganismProfile,
     /// Core 6 Visual Engines
     pub engine_radial_mandala: crate::views::visual_engines::radial_mandala::RadialMandalaEngine,
     pub engine_liquid_surface: crate::views::visual_engines::liquid_surface::LiquidSurfaceEngine,
@@ -1413,6 +1414,7 @@ impl VisualChannel {
             mapper: NeuralLatentMapper::new(),
             memory: VisualMemory::default(),
             mutation: MutationEngine::default(),
+            organism_profile: crate::views::organism_profile::OrganismProfile::mycelial_bloom(),
             engine_radial_mandala: crate::views::visual_engines::radial_mandala::RadialMandalaEngine::new(),
             engine_liquid_surface: crate::views::visual_engines::liquid_surface::LiquidSurfaceEngine::new(),
             engine_spectral_landscape: crate::views::visual_engines::spectral_landscape::SpectralLandscapeEngine::new(),

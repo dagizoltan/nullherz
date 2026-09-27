@@ -1,0 +1,56 @@
+id: mycelial-bloom
+name: "Mycelial Bloom"
+family: organic
+description: >
+  A branching living network that grows, reconnects and occasionally
+  abandons its own structures.
+
+audio:
+  low_energy: growth
+  mid_energy: branching
+  high_energy: filament_detail
+  transient_strength: rupture
+  spectral_centroid: filament_thickness
+  beat_phase: expansion_pulse
+  stereo_width: spatial_spread
+
+genome:
+  branching: 0.72
+  cohesion: 0.81
+  symmetry: 0.18
+  mutation: 0.46
+  persistence: 0.91
+  turbulence: 0.37
+  rigidity: 0.20
+  viscosity: 0.60
+
+behavior:
+  topology: adaptive-graph
+  growth: vector-field
+  decay: slow
+  mutation: transient-triggered
+  memory: strong
+
+geometry:
+  primitives: [filaments, nodes, ribbons]
+  dimensionality: 3d
+  thickness: adaptive
+  smoothing: organic
+
+motion:
+  flow: curl-field
+  inertia: 0.85
+  turbulence: 0.40
+  collective_motion: 0.80
+
+field:
+  field_type: curl-noise
+  dimensions: 3
+  divergence: 0.05
+
+render:
+  trails: true
+  feedback: medium
+  depth: high
+  bloom: subtle
+  wireframe: false

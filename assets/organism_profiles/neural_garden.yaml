@@ -1,0 +1,55 @@
+id: neural-garden
+name: "Neural Garden"
+family: neural-organic
+description: >
+  Recurrent latent network dreaming up the behavior and growth of a procedural organic garden.
+
+audio:
+  low_energy: latent_drive
+  mid_energy: morphology
+  high_energy: growth_rate
+  transient_strength: mutation
+  spectral_centroid: curvature
+  beat_phase: rhythm
+  stereo_width: spatial_spread
+
+genome:
+  branching: 0.80
+  cohesion: 0.75
+  symmetry: 0.45
+  mutation: 0.65
+  persistence: 0.86
+  turbulence: 0.50
+  rigidity: 0.30
+  viscosity: 0.40
+
+behavior:
+  topology: neural-guided
+  growth: recurrent-evolution
+  decay: slow
+  mutation: phrase-triggered
+  memory: recurrent
+
+geometry:
+  primitives: [branches, leaves, membranes]
+  dimensionality: 3d
+  thickness: adaptive
+  smoothing: organic
+
+motion:
+  flow: recurrent-evolution
+  inertia: 0.86
+  turbulence: 0.45
+  collective_motion: 0.75
+
+field:
+  field_type: neural-latent
+  dimensions: 3
+  divergence: 0.08
+
+render:
+  trails: true
+  feedback: high
+  depth: high
+  bloom: subtle
+  wireframe: false
