@@ -137,3 +137,21 @@ fn test_alsa_backend_custom_device_selection() {
     assert_eq!(backend.device(), "hw:0,0");
     assert_eq!(AlsaBackend::dbus_device_name(backend.device()), "Audio0");
 }
+
+#[test]
+fn test_dbus_device_name_edge_cases() {
+    assert_eq!(AlsaBackend::dbus_device_name("hw:CARD=USB,DEV=0"), "AudioUSB");
+    assert_eq!(AlsaBackend::dbus_device_name("plughw:3"), "Audio3");
+    assert_eq!(AlsaBackend::dbus_device_name(""), "Audio0");
+    assert_eq!(AlsaBackend::dbus_device_name("sysdefault"), "Audio0");
+    assert_eq!(AlsaBackend::dbus_device_name("Audio5"), "Audio5");
+}
+
+#[test]
+fn test_alsa_backend_thread_safety_and_xrun_invariants() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<AlsaBackend>();
+
+    let backend = AlsaBackend::new();
+    assert_eq!(backend.xruns(), 0);
+}
