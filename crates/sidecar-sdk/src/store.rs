@@ -11,6 +11,12 @@ use nullherz_traits::{
 /// Category types for sidecar modules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SidecarType {
+    AudioInstrument,
+    AudioInsert,
+    VisualGenerator,
+    VisualInsert,
+
+    // Backward-compatibility variants
     Instrument,
     Insert,
     NeuralAnalyzer,
@@ -1068,7 +1074,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "neural-saturation",
                 "Neural Saturation / Preamp",
-                SidecarType::NeuralProcessor,
+                SidecarType::AudioInsert,
                 &["neural", "insert", "real-time", "saturation"],
                 "Padé SIMD neural analog saturation processor",
                 0,
@@ -1080,7 +1086,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "neural-ssm",
                 "Neural SSM Dynamic Compressor",
-                SidecarType::NeuralProcessor,
+                SidecarType::AudioInsert,
                 &["neural", "insert", "real-time", "ssm", "compressor"],
                 "Zero-allocation 24-state Diagonal State-Space Model for dynamic compression and tape hysteresis",
                 0,
@@ -1092,7 +1098,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "neural-nam",
                 "Neural Amp Modeler (NAM)",
-                SidecarType::NeuralProcessor,
+                SidecarType::AudioInsert,
                 &["neural", "insert", "real-time", "nam", "preamp"],
                 "Zero-allocation 10-layer wave-shaping network for analog tube preamp and guitar amp emulation",
                 0,
@@ -1104,7 +1110,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "neural-filter",
                 "Neural Dynamic Filter",
-                SidecarType::NeuralProcessor,
+                SidecarType::AudioInsert,
                 &["neural", "insert", "real-time", "filter", "eq"],
                 "Hypernetwork dynamic filter with SIMD non-linearities",
                 0,
@@ -1116,7 +1122,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "bioluminescent-fluid-flow",
                 "Bioluminescent Fluid Flow Surface",
-                SidecarType::NeuralProcessor,
+                SidecarType::VisualGenerator,
                 &["visual", "neural", "real-time"],
                 "Organic bioluminescent fluid dynamics visual surface sidecar",
                 0,
@@ -1128,7 +1134,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "harmonic-arrangement-lattice",
                 "Harmonic Arrangement Lattice",
-                SidecarType::NeuralProcessor,
+                SidecarType::VisualGenerator,
                 &["visual", "real-time"],
                 "Musical structure and harmonic chroma lattice visual sidecar for songwriters",
                 0,
@@ -1140,7 +1146,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "abstract-quantum-swarm",
                 "Abstract Quantum Swarm",
-                SidecarType::NeuralProcessor,
+                SidecarType::VisualGenerator,
                 &["visual", "real-time"],
                 "Multi-spectral colorful quantum particle swarm visual sidecar",
                 0,
@@ -1152,7 +1158,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "neural-floral-mycelium",
                 "Neural Floral Mycelium",
-                SidecarType::NeuralProcessor,
+                SidecarType::VisualGenerator,
                 &["visual", "neural", "real-time"],
                 "Organic growing floral mycelium tendril visual surface sidecar",
                 0,
@@ -1164,7 +1170,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "neural-latent-manifold",
                 "Neural Latent Manifold Generator",
-                SidecarType::NeuralProcessor,
+                SidecarType::VisualGenerator,
                 &["visual", "neural", "insert", "real-time"],
                 "Zero-allocation neural network latent manifold visual generator",
                 0,
@@ -1176,7 +1182,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "phase-goniometer-2d",
                 "2D Phase Goniometer Surface",
-                SidecarType::NeuralProcessor,
+                SidecarType::VisualInsert,
                 &["visual", "real-time", "insert"],
                 "Real-time 2D phase goniometer stereo visual surface sidecar",
                 0,
@@ -1188,7 +1194,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "fft-spectrum-mesh",
                 "FFT Spectrum Mesh Generator",
-                SidecarType::NeuralProcessor,
+                SidecarType::VisualGenerator,
                 &["visual", "real-time", "insert"],
                 "Real-time FFT frequency spectrum 3D mesh visual sidecar",
                 0,
@@ -1200,7 +1206,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "reaction-diffusion-nn",
                 "Reaction Diffusion Neural Network",
-                SidecarType::NeuralProcessor,
+                SidecarType::VisualGenerator,
                 &["visual", "neural", "real-time"],
                 "Neural network reaction diffusion pattern synthesis visual sidecar",
                 0,
@@ -1212,7 +1218,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "shader-particle-swarm",
                 "Shader Particle Swarm Generator",
-                SidecarType::NeuralProcessor,
+                SidecarType::VisualGenerator,
                 &["visual", "real-time"],
                 "Audio-reactive particle swarm shader visual generator sidecar",
                 0,
@@ -1224,7 +1230,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "neural-visuals",
                 "Neural Interactive Visual Surface",
-                SidecarType::NeuralProcessor,
+                SidecarType::VisualGenerator,
                 &["visual", "neural", "insert", "real-time", "instrument"],
                 "Audio & telemetry input driven neural visual surface sidecar",
                 0,
@@ -1236,7 +1242,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "neural-tcn",
                 "Neural Deep TCN Saturator",
-                SidecarType::NeuralProcessor,
+                SidecarType::AudioInsert,
                 &["neural", "insert", "real-time", "tcn", "saturation"],
                 "Zero-allocation 4-layer dilated Temporal Convolutional Network with FloatX16 SIMD reduction",
                 0,
@@ -1248,7 +1254,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "algorithmic-delay",
                 "Algorithmic Tape Delay",
-                SidecarType::Insert,
+                SidecarType::AudioInsert,
                 &["algorithmic", "insert", "real-time", "delay"],
                 "Low-latency delay line with Hermite fractional interpolation",
                 0,
@@ -1260,7 +1266,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "algorithmic-eq",
                 "State-Variable EQ / Filter",
-                SidecarType::Insert,
+                SidecarType::AudioInsert,
                 &["algorithmic", "insert", "real-time", "eq", "filter"],
                 "Multi-mode State-Variable Filter (LP, HP, BP, Notch)",
                 0,
@@ -1272,7 +1278,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "algorithmic-synth",
                 "Dual Oscillator Synthesizer",
-                SidecarType::Instrument,
+                SidecarType::AudioInstrument,
                 &["algorithmic", "instrument", "real-time"],
                 "Dual-oscillator MIDI synthesizer instrument",
                 0,
@@ -1284,7 +1290,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "hypernetwork-eq",
                 "HyperNetwork Conditioned EQ",
-                SidecarType::NeuralProcessor,
+                SidecarType::AudioInsert,
                 &["neural", "insert", "real-time", "hypernetwork", "eq"],
                 "Zero-allocation HyperNetwork conditioned parametric EQ",
                 0,
@@ -1296,7 +1302,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "tube-preamp",
                 "Analog Tube Preamp / Saturation",
-                SidecarType::NeuralProcessor,
+                SidecarType::AudioInsert,
                 &["neural", "insert", "real-time", "tube", "saturation", "preamp"],
                 "Padé SIMD asymmetric triode tube preamp with transformer hysteresis",
                 0,
@@ -1308,7 +1314,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "multiband-compressor",
                 "3-Band SSM Dynamic Compressor",
-                SidecarType::NeuralProcessor,
+                SidecarType::AudioInsert,
                 &["neural", "insert", "real-time", "ssm", "compressor", "multiband"],
                 "3-Band crossover feeding parallel State-Space Model dynamic compression cells",
                 0,
@@ -1320,7 +1326,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "transient-shaper",
                 "Dual-Envelope Transient Shaper",
-                SidecarType::Insert,
+                SidecarType::AudioInsert,
                 &["algorithmic", "insert", "real-time", "transient", "shaper"],
                 "Dual fast/slow envelope transient shaper for independent attack and sustain control",
                 0,
@@ -1332,7 +1338,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "tape-saturator",
                 "Analog Tape Saturator & Wow/Flutter",
-                SidecarType::Insert,
+                SidecarType::AudioInsert,
                 &["algorithmic", "insert", "real-time", "tape", "saturation", "wow", "flutter"],
                 "Padé SIMD magnetic tape saturator with head-gap filter and wow/flutter modulation",
                 0,
@@ -1344,7 +1350,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "algorithmic-reverb",
                 "Algorithmic Stereo Reverb",
-                SidecarType::Insert,
+                SidecarType::AudioInsert,
                 &["algorithmic", "insert", "real-time", "reverb"],
                 "Schroeder/Freeverb comb and all-pass filter network reverb",
                 0,
@@ -1356,7 +1362,7 @@ impl SidecarStore {
             SidecarDescriptor::new(
                 "algorithmic-modulation",
                 "Modulation FX (Chorus / Flanger / Phaser)",
-                SidecarType::Insert,
+                SidecarType::AudioInsert,
                 &["algorithmic", "insert", "real-time", "modulation", "chorus", "flanger", "phaser"],
                 "Multi-mode LFO modulation insert (Chorus, Flanger, Phaser)",
                 0,
@@ -1436,7 +1442,7 @@ mod store_tests {
 
         let delay_desc = store.get_descriptor("algorithmic-delay").expect("algorithmic-delay must exist");
         assert_eq!(delay_desc.name, "Algorithmic Tape Delay");
-        assert_eq!(delay_desc.sidecar_type, SidecarType::Insert);
+        assert_eq!(delay_desc.sidecar_type, SidecarType::AudioInsert);
         assert!(delay_desc.has_tag("delay"));
         assert!(delay_desc.has_tag("real-time"));
     }
@@ -1484,15 +1490,18 @@ mod store_tests {
     fn test_store_type_filtering() {
         let store = SidecarStore::with_defaults();
 
-        let instruments = store.filter_by_type(SidecarType::Instrument);
+        let instruments = store.filter_by_type(SidecarType::AudioInstrument);
         assert_eq!(instruments.len(), 1);
         assert_eq!(instruments[0].id, "algorithmic-synth");
 
-        let neural_procs = store.filter_by_type(SidecarType::NeuralProcessor);
-        assert_eq!(neural_procs.len(), 18);
+        let audio_inserts = store.filter_by_type(SidecarType::AudioInsert);
+        assert_eq!(audio_inserts.len(), 14);
 
-        let inserts = store.filter_by_type(SidecarType::Insert);
-        assert_eq!(inserts.len(), 4);
+        let viz_generators = store.filter_by_type(SidecarType::VisualGenerator);
+        assert_eq!(viz_generators.len(), 9);
+
+        let viz_inserts = store.filter_by_type(SidecarType::VisualInsert);
+        assert_eq!(viz_inserts.len(), 1);
     }
 
     #[test]

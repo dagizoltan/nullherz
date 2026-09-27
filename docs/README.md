@@ -24,6 +24,7 @@ Core technical specifications and engineering principles.
 - [Extended DNA Risk & Capability Framework](./system/DNA_RISK_AND_CAPABILITY_FRAMEWORK.md) — engineering risk matrix, capability taxonomy, and transformation benchmark strategy
 - [Sound Analysis & Perception System](./system/SOUND_ANALYSIS_PERCEPTION_SYSTEM_SPECIFICATION.md) — real-time audio perception architecture, multi-timescale resolutions, shared analysis bus, composable spectral field UI, and perceptual trajectories
 - [AnaWaves Genetic Schema](./system/ANAWAVES_GENETIC_SCHEMA_RFC.md)
+- [Unified Sidecar Ecosystem Specification](./system/SIDECAR_ECOSYSTEM_SPECIFICATION.md) — unified Sidecar primitive (Audio Instruments, Audio Inserts, Visual Generators, Visual Inserts), local Library vs Store Marketplace, and dual signal-chain pipeline
 - [Sidecar Protocol v2](./system/SIDECAR_PROTOCOL_V2.md)
 - [SDK Developer Guide](./system/SDK_DEVELOPER_GUIDE.md)
 - [Engineering Hardening Manifesto](./system/ENGINEERING_HARDENING_MANIFESTO.md)

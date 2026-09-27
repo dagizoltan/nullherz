@@ -49,12 +49,12 @@ fn render_filter_bar(app: &mut InspectorApp, ui: &mut Ui) {
 
         let tags = [
             ("ALL", None),
-            ("INSERT", Some("insert")),
-            ("INSTRUMENT", Some("instrument")),
+            ("AUDIO INSTRUMENT", Some("instrument")),
+            ("AUDIO INSERT", Some("insert")),
+            ("VISUAL GENERATOR", Some("visual")),
             ("NEURAL", Some("neural")),
             ("TCN", Some("tcn")),
             ("DELAY", Some("delay")),
-            ("VISUAL", Some("visual")),
             ("EQ", Some("eq")),
             ("REAL-TIME", Some("real-time")),
         ];
@@ -135,8 +135,10 @@ fn render_sidecar_card(
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let (type_label, type_color) = match descriptor.sidecar_type {
-                        SidecarType::Instrument => ("INSTRUMENT", theme.deck_colors[0]),
-                        SidecarType::Insert => ("INSERT", theme.accent),
+                        SidecarType::AudioInstrument | SidecarType::Instrument => ("AUDIO INSTRUMENT", theme.deck_colors[0]),
+                        SidecarType::AudioInsert | SidecarType::Insert => ("AUDIO INSERT", theme.accent),
+                        SidecarType::VisualGenerator => ("VISUAL GENERATOR", theme.warning),
+                        SidecarType::VisualInsert => ("VISUAL INSERT", theme.deck_colors[1]),
                         SidecarType::NeuralProcessor => ("NEURAL DSP", theme.deck_colors[2]),
                         SidecarType::NeuralAnalyzer => ("ANALYZER", theme.success),
                     };
@@ -209,13 +211,20 @@ fn render_sidecar_card(
 
             // Action Buttons
             ui.horizontal(|ui| {
-                if descriptor.sidecar_type == SidecarType::Instrument {
+                if descriptor.sidecar_type == SidecarType::AudioInstrument || descriptor.sidecar_type == SidecarType::Instrument {
                     let slot = app.composer.selected_composer_track.unwrap_or(0);
                     if ui.button(RichText::new(format!("→ LOAD TO TRACK {}", slot + 1)).size(theme.type_caption))
                         .on_hover_text("Assign this instrument sidecar to selected composer track")
                         .clicked()
                     {
                         app.composer.track_targets[slot] = descriptor.id.clone();
+                    }
+                } else if descriptor.sidecar_type == SidecarType::VisualGenerator || descriptor.sidecar_type == SidecarType::VisualInsert {
+                    if ui.button(RichText::new("→ LOAD TO VISUAL MIXER").size(theme.type_caption))
+                        .on_hover_text("Open in Visual Mixer surface")
+                        .clicked()
+                    {
+                        app.active_view = crate::View::Visuals;
                     }
                 } else {
                     ui.label(RichText::new("HOT-LOAD:").size(theme.type_caption).color(theme.text_disabled));
@@ -242,6 +251,8 @@ fn render_sidecar_card(
                                 "hypernetwork-eq" => Some(nullherz_traits::ProcessorTypeId::HYPERNETWORK_EQ),
                                 "tube-preamp" => Some(nullherz_traits::ProcessorTypeId::TUBE_PREAMP),
                                 "multiband-compressor" => Some(nullherz_traits::ProcessorTypeId::MULTIBAND_COMPRESSOR),
+                                "transient-shaper" => Some(nullherz_traits::ProcessorTypeId::TRANSIENT_SHAPER),
+                                "tape-saturator" => Some(nullherz_traits::ProcessorTypeId::TAPE_SATURATOR),
                                 "algorithmic-reverb" => Some(nullherz_traits::ProcessorTypeId::REVERB),
                                 "algorithmic-modulation" => Some(nullherz_traits::ProcessorTypeId::MODULATION_FX),
                                 "algorithmic-delay" => Some(nullherz_traits::ProcessorTypeId::DELAY),
