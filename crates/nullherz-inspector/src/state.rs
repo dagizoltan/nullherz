@@ -54,6 +54,7 @@ impl MasterOutput {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AbCompareSource {
     DeckA,
@@ -63,6 +64,7 @@ pub enum AbCompareSource {
     Master,
 }
 
+#[allow(dead_code)]
 impl AbCompareSource {
     pub fn name(&self) -> &'static str {
         match self {
@@ -79,7 +81,14 @@ impl AbCompareSource {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalyzerMode {
+    RealTime,
+    FullTrack,
+}
+
 pub struct AnalyzerViewState {
+    pub mode: AnalyzerMode,
     pub layer_raw: bool,
     pub layer_spectral: bool,
     pub layer_rhythm: bool,
@@ -93,7 +102,9 @@ pub struct AnalyzerViewState {
     pub layer_embedding: bool,
 
     pub ab_enabled: bool,
+    #[allow(dead_code)]
     pub source_a: AbCompareSource,
+    #[allow(dead_code)]
     pub source_b: AbCompareSource,
 
     pub show_waterfall: bool,
@@ -107,6 +118,7 @@ pub struct AnalyzerViewState {
 impl Default for AnalyzerViewState {
     fn default() -> Self {
         Self {
+            mode: AnalyzerMode::RealTime,
             layer_raw: true,
             layer_spectral: true,
             layer_rhythm: true,
