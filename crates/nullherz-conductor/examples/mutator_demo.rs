@@ -2,8 +2,12 @@ use nullherz_processors::MutatorProcessor;
 use nullherz_traits::{AudioProcessor, ProcessContext, SignalProcessor};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let input_path = "tracks/examples/track_a.wav";
-    let output_path = "tracks/mutator_demo_output.wav";
+    let input_path = if std::path::Path::new("tracks/examples/saw_test_signal.wav").exists() {
+        "tracks/examples/saw_test_signal.wav"
+    } else {
+        "tracks/examples/track_a.wav"
+    };
+    let output_path = "tracks/mutator_saw_demo_output.wav";
 
     println!("=== MUTATOR / TRINYÓ Sound Deformation Demo ===");
 
