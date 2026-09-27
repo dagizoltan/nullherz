@@ -372,38 +372,180 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                         ui.add_space(4.0);
 
                         // Standardized container for FX slot to guarantee exact vertical alignment across channels
-                        ui.allocate_ui_with_layout(
-                            Vec2::new(STRIP_W - 20.0, 22.0),
-                            egui::Layout::top_down(egui::Align::Center),
-                            |ui| {
-                                let mut remove_insert = false;
-                                if let Some(ref name) = app.decks.deck_inserts[i] {
-                                    let name_clone = name.clone();
-                                    Frame::none()
-                                        .fill(theme.accent.linear_multiply(0.2))
-                                        .rounding(Rounding::same(theme.radius_sm))
-                                        .inner_margin(Margin::same(4.0))
-                                        .stroke(Stroke::new(1.0, theme.accent))
-                                        .show(ui, |ui| {
-                                            ui.set_width(STRIP_W - 20.0);
-                                            ui.horizontal(|ui| {
-                                                ui.label(RichText::new(format!("FX: {}", name_clone)).size(9.0).strong().color(theme.text_primary));
-                                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                    if ui.button(RichText::new("×").size(10.0).strong()).clicked() {
-                                                        remove_insert = true;
+                        let insert_node = app.topo.node_map.get(&format!("deck_{}_insert", deck_char_letter))
+                            .or_else(|| app.topo.node_map.get(&format!("deck_{}_fx1", deck_char_letter)))
+                            .copied();
+
+                        let mut remove_insert = false;
+                        if let Some(ref name) = app.decks.deck_inserts[i] {
+                            let name_clone = name.clone();
+                            let is_mutator = name_clone.to_lowercase().contains("mutator");
+
+                            Frame::none()
+                                .fill(theme.accent.linear_multiply(0.15))
+                                .rounding(Rounding::same(theme.radius_sm))
+                                .inner_margin(Margin::same(4.0))
+                                .stroke(Stroke::new(1.0, theme.accent))
+                                .show(ui, |ui| {
+                                    ui.set_width(STRIP_W - 20.0);
+                                    ui.vertical(|ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(format!("FX: {}", name_clone)).size(9.0).strong().color(theme.text_primary));
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                if ui.button(RichText::new("×").size(10.0).strong()).clicked() {
+                                                    remove_insert = true;
+                                                }
+                                            });
+                                        });
+
+                                        ui.add_space(2.0);
+
+                                        if is_mutator {
+                                            // MUTATOR 6 Parallel Mutation Macro Knobs + Dry/Wet
+                                            ui.vertical_centered(|ui| {
+                                                ui.horizontal(|ui| {
+                                                    ui.spacing_mut().item_spacing.x = 2.0;
+
+                                                    // FLESH (Param 0)
+                                                    let mut flesh_val = app.decks.deck_insert_params[i][0];
+                                                    if widgets::render_knob_sized(ui, &mut flesh_val, 0.0..=1.0, "FLESH", deck_color, 22.0).changed() {
+                                                        app.decks.deck_insert_params[i][0] = flesh_val;
+                                                        if let Some(target_id) = insert_node {
+                                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                target_id: target_id as u64,
+                                                                param_id: 0,
+                                                                value: flesh_val,
+                                                                ramp_duration_samples: 128,
+                                                            }));
+                                                        }
+                                                    }
+
+                                                    // BONE (Param 1)
+                                                    let mut bone_val = app.decks.deck_insert_params[i][1];
+                                                    if widgets::render_knob_sized(ui, &mut bone_val, 0.0..=1.0, "BONE", deck_color, 22.0).changed() {
+                                                        app.decks.deck_insert_params[i][1] = bone_val;
+                                                        if let Some(target_id) = insert_node {
+                                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                target_id: target_id as u64,
+                                                                param_id: 1,
+                                                                value: bone_val,
+                                                                ramp_duration_samples: 128,
+                                                            }));
+                                                        }
+                                                    }
+
+                                                    // TEETH (Param 2)
+                                                    let mut teeth_val = app.decks.deck_insert_params[i][2];
+                                                    if widgets::render_knob_sized(ui, &mut teeth_val, 0.0..=1.0, "TEETH", deck_color, 22.0).changed() {
+                                                        app.decks.deck_insert_params[i][2] = teeth_val;
+                                                        if let Some(target_id) = insert_node {
+                                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                target_id: target_id as u64,
+                                                                param_id: 2,
+                                                                value: teeth_val,
+                                                                ramp_duration_samples: 128,
+                                                            }));
+                                                        }
+                                                    }
+                                                });
+
+                                                ui.add_space(2.0);
+
+                                                ui.horizontal(|ui| {
+                                                    ui.spacing_mut().item_spacing.x = 2.0;
+
+                                                    // PARASITE (Param 3)
+                                                    let mut para_val = app.decks.deck_insert_params[i][3];
+                                                    if widgets::render_knob_sized(ui, &mut para_val, 0.0..=1.0, "PARA", deck_color, 22.0).changed() {
+                                                        app.decks.deck_insert_params[i][3] = para_val;
+                                                        if let Some(target_id) = insert_node {
+                                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                target_id: target_id as u64,
+                                                                param_id: 3,
+                                                                value: para_val,
+                                                                ramp_duration_samples: 128,
+                                                            }));
+                                                        }
+                                                    }
+
+                                                    // ASYM (Param 4)
+                                                    let mut asym_val = app.decks.deck_insert_params[i][4];
+                                                    if widgets::render_knob_sized(ui, &mut asym_val, 0.0..=1.0, "ASYM", deck_color, 22.0).changed() {
+                                                        app.decks.deck_insert_params[i][4] = asym_val;
+                                                        if let Some(target_id) = insert_node {
+                                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                target_id: target_id as u64,
+                                                                param_id: 4,
+                                                                value: asym_val,
+                                                                ramp_duration_samples: 128,
+                                                            }));
+                                                        }
+                                                    }
+
+                                                    // ABOM (Param 5)
+                                                    let mut abom_val = app.decks.deck_insert_params[i][5];
+                                                    if widgets::render_knob_sized(ui, &mut abom_val, 0.0..=1.0, "ABOM", deck_color, 22.0).changed() {
+                                                        app.decks.deck_insert_params[i][5] = abom_val;
+                                                        if let Some(target_id) = insert_node {
+                                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                target_id: target_id as u64,
+                                                                param_id: 5,
+                                                                value: abom_val,
+                                                                ramp_duration_samples: 128,
+                                                            }));
+                                                        }
                                                     }
                                                 });
                                             });
-                                        });
-                                } else if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
-                                    app.active_right_tab = Some(crate::RightTab::Store);
-                                    app.store.active_tag_filter = Some("insert".to_string());
-                                }
-                                if remove_insert {
-                                    app.decks.deck_inserts[i] = None;
-                                }
-                            },
-                        );
+                                        } else {
+                                            // Generic Insert Controls (Drive / Mix)
+                                            ui.horizontal(|ui| {
+                                                ui.spacing_mut().item_spacing.x = 4.0;
+                                                let mut drive_val = app.decks.deck_insert_params[i][0];
+                                                if widgets::render_knob_sized(ui, &mut drive_val, 0.0..=5.0, "DRIVE", deck_color, 22.0).changed() {
+                                                    app.decks.deck_insert_params[i][0] = drive_val;
+                                                    if let Some(target_id) = insert_node {
+                                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                            target_id: target_id as u64,
+                                                            param_id: 0,
+                                                            value: drive_val,
+                                                            ramp_duration_samples: 128,
+                                                        }));
+                                                    }
+                                                }
+
+                                                let mut mix_val = app.decks.deck_insert_params[i][7];
+                                                if widgets::render_knob_sized(ui, &mut mix_val, 0.0..=1.0, "MIX", deck_color, 22.0).changed() {
+                                                    app.decks.deck_insert_params[i][7] = mix_val;
+                                                    if let Some(target_id) = insert_node {
+                                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                            target_id: target_id as u64,
+                                                            param_id: 7,
+                                                            value: mix_val,
+                                                            ramp_duration_samples: 128,
+                                                        }));
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    });
+                                });
+                        } else if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
+                            app.active_right_tab = Some(crate::RightTab::Store);
+                            app.store.active_tag_filter = Some("insert".to_string());
+                        }
+
+                        if remove_insert {
+                            app.decks.deck_inserts[i] = None;
+                            if let Some(target_id) = insert_node {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Topology(
+                                    nullherz_traits::TopologyCommand::SwapProcessor {
+                                        node_idx: target_id,
+                                        processor_type_id: nullherz_traits::ProcessorTypeId::BYPASS,
+                                    }
+                                ));
+                            }
+                        }
                     });
                 });
 

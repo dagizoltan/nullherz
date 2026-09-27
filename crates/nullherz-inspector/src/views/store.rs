@@ -253,6 +253,7 @@ fn render_sidecar_card(
                                 "multiband-compressor" => Some(nullherz_traits::ProcessorTypeId::MULTIBAND_COMPRESSOR),
                                 "transient-shaper" => Some(nullherz_traits::ProcessorTypeId::TRANSIENT_SHAPER),
                                 "tape-saturator" => Some(nullherz_traits::ProcessorTypeId::TAPE_SATURATOR),
+                                "mutator" => Some(nullherz_traits::ProcessorTypeId::MUTATOR),
                                 "algorithmic-reverb" => Some(nullherz_traits::ProcessorTypeId::REVERB),
                                 "algorithmic-modulation" => Some(nullherz_traits::ProcessorTypeId::MODULATION_FX),
                                 "algorithmic-delay" => Some(nullherz_traits::ProcessorTypeId::DELAY),
