@@ -1,0 +1,55 @@
+id: fluid-geometry
+name: "Fluid Geometry"
+family: field
+description: >
+  Geometry itself behaves like fluid, morphing continuously between smooth liquid blobs and flowing surfaces.
+
+audio:
+  low_energy: field_amplitude
+  mid_energy: pressure_wave
+  high_energy: surface_ripples
+  transient_strength: divergence_impulse
+  spectral_centroid: viscosity
+  beat_phase: pressure_wave
+  stereo_width: flow_divergence
+
+genome:
+  branching: 0.20
+  cohesion: 0.71
+  symmetry: 0.21
+  mutation: 0.35
+  persistence: 0.85
+  turbulence: 0.64
+  rigidity: 0.10
+  viscosity: 0.52
+
+behavior:
+  topology: fluid-implicit
+  growth: fluid-flow
+  decay: medium
+  mutation: continuous
+  memory: medium
+
+geometry:
+  primitives: [membranes, ribbons]
+  dimensionality: 3d
+  thickness: fluid
+  smoothing: ultra-smooth
+
+motion:
+  flow: curl-field
+  inertia: 0.70
+  turbulence: 0.65
+  collective_motion: 0.85
+
+field:
+  field_type: curl-noise
+  dimensions: 3
+  divergence: 0.12
+
+render:
+  trails: true
+  feedback: high
+  depth: high
+  bloom: medium
+  wireframe: false

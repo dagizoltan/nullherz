@@ -18,3 +18,5 @@ pub mod store;
 pub mod account;
 pub mod visual_engines;
 pub mod analyzer;
+pub mod organism_profile;
+pub mod organism_editor;

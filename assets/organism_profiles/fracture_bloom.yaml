@@ -1,0 +1,55 @@
+id: fracture-bloom
+name: "Fracture Bloom"
+family: crystalline
+description: >
+  A crystalline structure that grows until the music breaks it apart.
+
+audio:
+  low_energy: structural_scale
+  mid_energy: subdivision
+  high_energy: surface_detail
+  transient_strength: fracture
+  spectral_centroid: refraction
+  beat_phase: expansion_pulse
+  stereo_width: spatial_spread
+
+genome:
+  branching: 0.40
+  cohesion: 0.90
+  symmetry: 0.84
+  mutation: 0.54
+  persistence: 0.80
+  turbulence: 0.20
+  rigidity: 0.88
+  viscosity: 0.10
+
+behavior:
+  topology: recursive
+  growth: subdivision
+  decay: fast
+  mutation: transient-triggered
+  memory: medium
+
+geometry:
+  primitives: [shards, polyhedra, planes]
+  dimensionality: 3d
+  thickness: crystalline
+  smoothing: sharp
+
+motion:
+  flow: subdivision-expand
+  inertia: 0.60
+  turbulence: 0.20
+  collective_motion: 0.90
+
+field:
+  field_type: crystalline-grid
+  dimensions: 3
+  divergence: 0.0
+
+render:
+  trails: false
+  feedback: low
+  depth: high
+  bloom: sharp
+  wireframe: true

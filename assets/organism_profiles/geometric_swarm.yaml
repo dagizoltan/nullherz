@@ -1,0 +1,55 @@
+id: geometric-swarm
+name: "Geometric Swarm"
+family: emergent
+description: >
+  An emergent collective boids lattice forming dynamic spheres, spirals, and lattices based on audio alignment.
+
+audio:
+  low_energy: attraction
+  mid_energy: alignment
+  high_energy: separation
+  transient_strength: impulse
+  spectral_centroid: cluster_density
+  beat_phase: synchronization
+  stereo_width: dimensional_spread
+
+genome:
+  branching: 0.30
+  cohesion: 0.61
+  symmetry: 0.70
+  mutation: 0.51
+  persistence: 0.75
+  turbulence: 0.31
+  rigidity: 0.40
+  viscosity: 0.30
+
+behavior:
+  topology: emergent
+  growth: boids-flocking
+  decay: medium
+  mutation: beat-aware
+  memory: medium
+
+geometry:
+  primitives: [nodes, points, filaments]
+  dimensionality: 3d
+  thickness: instanced
+  smoothing: sharp
+
+motion:
+  flow: boids-hybrid
+  inertia: 0.83
+  turbulence: 0.31
+  collective_motion: 0.92
+
+field:
+  field_type: boids-field
+  dimensions: 3
+  divergence: 0.20
+
+render:
+  trails: true
+  feedback: medium
+  depth: high
+  bloom: medium
+  wireframe: false

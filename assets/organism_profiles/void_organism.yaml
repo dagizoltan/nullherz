@@ -1,0 +1,55 @@
+id: void-organism
+name: "Void Organism"
+family: minimal
+description: >
+  Sparse, elegant dark-space geometry with extreme depth and subtle, slow emergence.
+
+audio:
+  low_energy: presence
+  mid_energy: surface_detail
+  high_energy: faint_shimmer
+  transient_strength: emergence
+  spectral_centroid: surface_detail
+  beat_phase: subtle_pulse
+  stereo_width: depth_spread
+
+genome:
+  branching: 0.20
+  cohesion: 0.92
+  symmetry: 0.51
+  mutation: 0.18
+  persistence: 0.94
+  turbulence: 0.10
+  rigidity: 0.40
+  viscosity: 0.80
+
+behavior:
+  topology: sparse
+  growth: slow-emergence
+  decay: extremely-slow
+  mutation: rare
+  memory: very-high
+
+geometry:
+  primitives: [points, thin-curves, minimal-surfaces]
+  dimensionality: 3d
+  thickness: ultra-thin
+  smoothing: minimal
+
+motion:
+  flow: minimal-void
+  inertia: 0.98
+  turbulence: 0.05
+  collective_motion: 0.60
+
+field:
+  field_type: minimal-void
+  dimensions: 3
+  divergence: 0.01
+
+render:
+  trails: true
+  feedback: subtle
+  depth: extreme
+  bloom: minimal
+  wireframe: false

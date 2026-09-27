@@ -1,0 +1,55 @@
+id: fractal-pulse
+name: "Fractal Pulse"
+family: recursive
+description: >
+  Recursive transform geometry scaling and branching in mathematical self-similarity.
+
+audio:
+  low_energy: recursion_scale
+  mid_energy: branch_angle
+  high_energy: iteration_detail
+  transient_strength: recursion_reset
+  spectral_centroid: iteration_detail
+  beat_phase: pulse
+  stereo_width: spatial_spread
+
+genome:
+  branching: 0.83
+  cohesion: 0.70
+  symmetry: 0.76
+  mutation: 0.38
+  persistence: 0.82
+  turbulence: 0.42
+  rigidity: 0.60
+  viscosity: 0.30
+
+behavior:
+  topology: recursive
+  growth: recursive-transform
+  decay: medium
+  mutation: transient-driven
+  memory: medium
+
+geometry:
+  primitives: [curves, polygons, surfaces]
+  dimensionality: 3d
+  thickness: recursive
+  smoothing: mathematical
+
+motion:
+  flow: recursive-transform
+  inertia: 0.80
+  turbulence: 0.30
+  collective_motion: 0.85
+
+field:
+  field_type: recursive-transform
+  dimensions: 3
+  divergence: 0.05
+
+render:
+  trails: true
+  feedback: medium
+  depth: recursive
+  bloom: medium
+  wireframe: false

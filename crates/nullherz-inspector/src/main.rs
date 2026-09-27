@@ -520,6 +520,17 @@ impl InspectorApp {
                                         });
                                 }
 
+                                ui.add_space(2.0);
+                                egui::ComboBox::from_id_source(format!("organism_profile_combo_{}", c_idx))
+                                    .selected_text(&channel.organism_profile.name)
+                                    .show_ui(ui, |ui| {
+                                        for default_prof in crate::views::organism_profile::OrganismProfile::all_defaults() {
+                                            if ui.selectable_label(channel.organism_profile.id == default_prof.id, &default_prof.name).clicked() {
+                                                channel.organism_profile = default_prof;
+                                            }
+                                        }
+                                    });
+
                                 ui.add_space(4.0);
 
                                 // Attached Input Badges / Multi-selection
