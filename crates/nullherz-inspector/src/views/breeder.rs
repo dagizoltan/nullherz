@@ -179,18 +179,17 @@ impl BreederView {
         }
 
         match state.workflow_mode {
-            TransfusionWorkflowMode::NDonorBreeder => {
-                Self::render_n_donor_matrix(ui, state, theme, app);
+            TransfusionWorkflowMode::NDonorBreeder | TransfusionWorkflowMode::LiveDeck => {
+                Self::render_two_pane_breeder_ui(ui, state, theme, app, telemetry);
             }
             TransfusionWorkflowMode::FullAudioDirect => {
                 Self::render_full_audio_direct_ui(ui, state, theme, app);
-                return;
-            }
-            TransfusionWorkflowMode::LiveDeck => {
-                // Fallthrough to legacy deck row
             }
         }
+    }
 
+    #[allow(dead_code)]
+    fn render_legacy_deck_row(ui: &mut Ui, state: &mut BreederView, theme: nullherz_ui_hal::Theme, app: &mut crate::InspectorApp, telemetry: &Option<audio_core::Telemetry>) {
         // Breeding Mode & Centroid Selection Row
         ui.horizontal(|ui| {
             ui.label(RichText::new("BREEDING MODE:").strong().size(theme.type_caption).color(theme.text_secondary));
@@ -484,129 +483,270 @@ impl BreederView {
         });
     }
 
-    fn render_n_donor_matrix(ui: &mut Ui, state: &mut BreederView, theme: nullherz_ui_hal::Theme, app: &mut crate::InspectorApp) {
-        ui.group(|ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("PRIMARY CARRIER (IDENTITY ANCHOR):").strong().size(theme.type_caption).color(theme.accent));
-                let carrier_label = state.carrier_id
-                    .and_then(|id| app.get_cached_track(id))
-                    .map(|t| format!("{} - {}", t.title, t.artist))
-                    .unwrap_or_else(|| "Select Carrier Track".to_string());
+    fn render_two_pane_breeder_ui(
+        ui: &mut Ui,
+        state: &mut BreederView,
+        theme: nullherz_ui_hal::Theme,
+        app: &mut crate::InspectorApp,
+        telemetry: &Option<audio_core::Telemetry>,
+    ) {
+        ui.columns(2, |columns| {
+            // ==================== LEFT PANE: ASSEMBLY RACK ====================
+            columns[0].vertical(|ui| {
+                ui.label(RichText::new("DONOR ASSEMBLY RACK").strong().size(theme.type_heading).color(theme.accent));
+                ui.add_space(theme.space_xs);
 
-                if ui.button(RichText::new(carrier_label).size(theme.type_body)).clicked() {
-                    state.selecting_parent = Some(0);
-                }
-            });
-        });
-
-        ui.add_space(theme.space_sm);
-
-        // Conflict Resolution Picker
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("CONFLICT RESOLUTION ENGINE:").strong().size(theme.type_caption).color(theme.text_secondary));
-            let mode_str = match state.conflict_resolution {
-                ConflictResolutionMode::NormalizedWeightedAverage => "Normalized Weighted Average (Smooth Blend)",
-                ConflictResolutionMode::PriorityOverride => "Priority Override (Top-Down)",
-                ConflictResolutionMode::MorphSweep => "Morph Sweep Automation",
-            };
-
-            egui::ComboBox::from_id_source("conflict_res_combo")
-                .selected_text(mode_str)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut state.conflict_resolution, ConflictResolutionMode::NormalizedWeightedAverage, "Normalized Weighted Average (Smooth Blend)");
-                    ui.selectable_value(&mut state.conflict_resolution, ConflictResolutionMode::PriorityOverride, "Priority Override (Top-Down)");
-                    ui.selectable_value(&mut state.conflict_resolution, ConflictResolutionMode::MorphSweep, "Morph Sweep Automation");
-                });
-
-            ui.add_space(20.0);
-            if ui.button(RichText::new("+ ADD DONOR SLOT").strong().color(theme.accent)).clicked() {
-                let id = (state.donors.len() + 1) as u64;
-                state.donors.push(DonorContribution {
-                    donor_id: id,
-                    donor_name: format!("Donor Slot {}", id),
-                    enable_spectral: true,
-                    spectral_weight: 0.5,
-                    enable_rhythmic: true,
-                    rhythmic_weight: 0.5,
-                    enable_transient: true,
-                    transient_weight: 0.5,
-                    enable_spatial: true,
-                    spatial_weight: 0.5,
-                    enable_pitch: false,
-                    pitch_weight: 0.0,
-                });
-            }
-        });
-
-        ui.add_space(theme.space_sm);
-
-        // Dynamic Donor Stack List
-        let mut remove_idx = None;
-        egui::ScrollArea::vertical().max_height(350.0).show(ui, |ui| {
-            for (idx, donor) in state.donors.iter_mut().enumerate() {
-                ui.group(|ui| {
-                    ui.horizontal(|ui| {
-                        let slot_title = format!("DONOR SLOT {}", idx + 1);
-                        ui.label(RichText::new(&slot_title).strong().size(theme.type_label).color(theme.track_colors[idx % theme.track_colors.len()]));
-                        ui.add_space(10.0);
-                        let donor_track_label = app.get_cached_track(donor.donor_id)
-                            .map(|t| format!("{} - {}", t.title, t.artist))
-                            .unwrap_or_else(|| "Select Library Track...".to_string());
-                        if ui.button(RichText::new(donor_track_label).size(theme.type_body)).clicked() {
-                            state.selecting_parent = Some(idx + 1);
-                        }
-
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(RichText::new("X REMOVE").strong().color(theme.danger)).clicked() {
-                                remove_idx = Some(idx);
-                            }
+                // Carrier Identity Anchor Card
+                Frame::none()
+                    .fill(theme.bg_dark)
+                    .rounding(theme.radius_md)
+                    .stroke(Stroke::new(1.5, theme.accent))
+                    .inner_margin(Margin::same(theme.space_sm))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("🎯 CARRIER IDENTITY ANCHOR").strong().size(theme.type_caption).color(theme.accent));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let carrier_label = state.carrier_id
+                                    .and_then(|id| app.get_cached_track(id))
+                                    .map(|t| format!("{} - {}", t.title, t.artist))
+                                    .unwrap_or_else(|| "Select Carrier...".to_string());
+                                if ui.button(RichText::new(carrier_label).strong().size(theme.type_body)).clicked() {
+                                    state.selecting_parent = Some(0);
+                                }
+                            });
                         });
                     });
 
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("SELECT CARRIED CHARACTERISTICS:").size(theme.type_caption).strong().color(theme.text_secondary));
-                        ui.toggle_value(&mut donor.enable_spectral, "🎛️ Spectral Timbre");
-                        ui.toggle_value(&mut donor.enable_rhythmic, "🥁 Rhythmic Groove");
-                        ui.toggle_value(&mut donor.enable_transient, "⚡ Transient Attack");
-                        ui.toggle_value(&mut donor.enable_spatial, "🌌 Spatial Width");
-                        ui.toggle_value(&mut donor.enable_pitch, "💜 Pitch Contour");
-                    });
+                ui.add_space(theme.space_sm);
 
-                    ui.separator();
-
-                    ui.horizontal(|ui| {
-                        if donor.enable_spectral {
-                            ui.label(RichText::new("Spectral Timbre Carry:").size(theme.type_caption));
-                            ui.add(egui::Slider::new(&mut donor.spectral_weight, 0.0..=1.0).text(""));
-                        }
-                        if donor.enable_rhythmic {
-                            ui.label(RichText::new("Rhythmic Groove Carry:").size(theme.type_caption));
-                            ui.add(egui::Slider::new(&mut donor.rhythmic_weight, 0.0..=1.0).text(""));
-                        }
-                        if donor.enable_transient {
-                            ui.label(RichText::new("Transient Attack Carry:").size(theme.type_caption));
-                            ui.add(egui::Slider::new(&mut donor.transient_weight, 0.0..=1.0).text(""));
-                        }
-                        if donor.enable_spatial {
-                            ui.label(RichText::new("Spatial Width Carry:").size(theme.type_caption));
-                            ui.add(egui::Slider::new(&mut donor.spatial_weight, 0.0..=1.0).text(""));
-                        }
-                        if donor.enable_pitch {
-                            ui.label(RichText::new("Pitch Contour Carry:").size(theme.type_caption));
-                            ui.add(egui::Slider::new(&mut donor.pitch_weight, 0.0..=1.0).text(""));
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("DYNAMIC DONOR STACK").strong().size(theme.type_caption).color(theme.text_secondary));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(RichText::new("+ ADD DONOR SLOT").strong().color(theme.accent)).clicked() {
+                            let id = (state.donors.len() + 1) as u64;
+                            state.donors.push(DonorContribution {
+                                donor_id: id,
+                                donor_name: format!("Donor Slot {}", id),
+                                enable_spectral: true,
+                                spectral_weight: 0.5,
+                                enable_rhythmic: true,
+                                rhythmic_weight: 0.5,
+                                enable_transient: true,
+                                transient_weight: 0.5,
+                                enable_spatial: true,
+                                spatial_weight: 0.5,
+                                enable_pitch: false,
+                                pitch_weight: 0.0,
+                            });
                         }
                     });
                 });
-                ui.add_space(4.0);
-            }
-        });
 
-        if let Some(idx) = remove_idx {
-            if state.donors.len() > 1 {
-                state.donors.remove(idx);
-            }
-        }
+                ui.add_space(theme.space_xs);
+
+                // Stackable Donor Cards
+                let mut remove_idx = None;
+                egui::ScrollArea::vertical().max_height(450.0).show(ui, |ui| {
+                    for (idx, donor) in state.donors.iter_mut().enumerate() {
+                        Frame::none()
+                            .fill(theme.bg_inset)
+                            .rounding(theme.radius_md)
+                            .stroke(theme.border_stroke)
+                            .inner_margin(Margin::same(theme.space_sm))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let slot_title = format!("DONOR SLOT {}", idx + 1);
+                                    ui.label(RichText::new(&slot_title).strong().size(theme.type_label).color(theme.track_colors[idx % theme.track_colors.len()]));
+                                    ui.add_space(8.0);
+                                    let donor_track_label = app.get_cached_track(donor.donor_id)
+                                        .map(|t| format!("{} - {}", t.title, t.artist))
+                                        .unwrap_or_else(|| "Select Track...".to_string());
+                                    if ui.button(RichText::new(donor_track_label).size(theme.type_body)).clicked() {
+                                        state.selecting_parent = Some(idx + 1);
+                                    }
+
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if ui.button(RichText::new("X").color(theme.danger)).clicked() {
+                                            remove_idx = Some(idx);
+                                        }
+                                    });
+                                });
+
+                                ui.add_space(6.0);
+
+                                // Compact Trait Pills / Chips Row
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("TRAITS:").size(theme.type_caption).color(theme.text_secondary));
+                                    ui.toggle_value(&mut donor.enable_spectral, "🎛️ Timbre");
+                                    ui.toggle_value(&mut donor.enable_rhythmic, "🥁 Groove");
+                                    ui.toggle_value(&mut donor.enable_transient, "⚡ Attack");
+                                    ui.toggle_value(&mut donor.enable_spatial, "🌌 Width");
+                                    ui.toggle_value(&mut donor.enable_pitch, "💜 Pitch");
+                                });
+
+                                ui.separator();
+
+                                // Weight Sliders for Selected Traits
+                                ui.horizontal(|ui| {
+                                    if donor.enable_spectral {
+                                        ui.label(RichText::new("Timbre:").size(theme.type_caption));
+                                        ui.add(egui::Slider::new(&mut donor.spectral_weight, 0.0..=1.0).text(""));
+                                    }
+                                    if donor.enable_rhythmic {
+                                        ui.label(RichText::new("Groove:").size(theme.type_caption));
+                                        ui.add(egui::Slider::new(&mut donor.rhythmic_weight, 0.0..=1.0).text(""));
+                                    }
+                                    if donor.enable_transient {
+                                        ui.label(RichText::new("Attack:").size(theme.type_caption));
+                                        ui.add(egui::Slider::new(&mut donor.transient_weight, 0.0..=1.0).text(""));
+                                    }
+                                    if donor.enable_spatial {
+                                        ui.label(RichText::new("Width:").size(theme.type_caption));
+                                        ui.add(egui::Slider::new(&mut donor.spatial_weight, 0.0..=1.0).text(""));
+                                    }
+                                    if donor.enable_pitch {
+                                        ui.label(RichText::new("Pitch:").size(theme.type_caption));
+                                        ui.add(egui::Slider::new(&mut donor.pitch_weight, 0.0..=1.0).text(""));
+                                    }
+                                });
+                            });
+                        ui.add_space(theme.space_xs);
+                    }
+                });
+
+                if let Some(idx) = remove_idx {
+                    if state.donors.len() > 1 {
+                        state.donors.remove(idx);
+                    }
+                }
+            });
+
+            // ==================== RIGHT PANE: BLUEPRINT & ACTION ====================
+            columns[1].vertical(|ui| {
+                ui.label(RichText::new("OFFSPRING BLUEPRINT & ACTION").strong().size(theme.type_heading).color(theme.accent));
+                ui.add_space(theme.space_xs);
+
+                // Expected Offspring Waveform Preview
+                ui.label(RichText::new("🌊 EXPECTED OFFSPRING RESULT WAVEFORM").size(theme.type_caption).strong().color(theme.text_secondary));
+                let (res_wf_rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 70.0), Sense::hover());
+                ui.painter().rect_filled(res_wf_rect, theme.radius_md, theme.bg_inset);
+                ui.painter().rect_stroke(res_wf_rect, theme.radius_md, Stroke::new(1.5, theme.success));
+
+                let carrier_track_opt = state.carrier_id.or(state.parent_a_id).and_then(|id| app.get_cached_track(id));
+                let donor_track_opt = state.donors.first().and_then(|d| app.get_cached_track(d.donor_id));
+
+                if let (Some(ta), Some(tb)) = (&carrier_track_opt, &donor_track_opt) {
+                    let mut blended_peaks = Vec::with_capacity(ta.metadata.peaks.len().max(tb.metadata.peaks.len()));
+                    let max_len = ta.metadata.peaks.len().max(tb.metadata.peaks.len());
+                    for i in 0..max_len {
+                        let pa = ta.metadata.peaks.get(i).copied().unwrap_or(0.0);
+                        let pb = tb.metadata.peaks.get(i).copied().unwrap_or(0.0);
+                        let blend = pa * 0.5 + pb * 0.5;
+                        blended_peaks.push(blend);
+                    }
+                    crate::views::composer::render_mini_waveform(
+                        ui.painter(),
+                        res_wf_rect.shrink(3.0),
+                        &blended_peaks,
+                        theme.success,
+                    );
+                } else {
+                    ui.painter().text(
+                        res_wf_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "SELECT CARRIER AND DONORS TO PREVIEW RESULT",
+                        egui::FontId::new(9.0, egui::FontFamily::Monospace),
+                        theme.text_secondary,
+                    );
+                }
+
+                ui.add_space(theme.space_sm);
+
+                // 16-D Latent Genetic Blueprint
+                ui.label(RichText::new("📊 16-D LATENT GENETIC BLUEPRINT").size(theme.type_caption).strong().color(theme.text_secondary));
+                let (preview_rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 120.0), Sense::hover());
+                ui.painter().rect_filled(preview_rect, theme.radius_md, theme.bg_inset);
+                ui.painter().rect_stroke(preview_rect, theme.radius_md, theme.border_stroke);
+
+                if let (Some(track_a), Some(track_b)) = (&carrier_track_opt, &donor_track_opt) {
+                    nullherz_dna::NeuralTransfuser::interpolate_latent(&mut state.preview_dna, &track_a.metadata.dna.spectral.latent_space, &track_b.metadata.dna.spectral.latent_space, state.transfusion_bias_x);
+
+                    let bin_width = preview_rect.width() / 16.0;
+                    let spacing = 2.0;
+                    for i in 0..16 {
+                        let val = state.preview_dna[i];
+                        let h = val.abs().clamp(0.01, 1.0) * (preview_rect.height() / 2.0);
+                        let x = preview_rect.left() + i as f32 * bin_width;
+
+                        let center_y = preview_rect.center().y;
+                        let r = if val >= 0.0 {
+                            egui::Rect::from_min_max(egui::pos2(x + spacing, center_y - h), egui::pos2(x + bin_width - spacing, center_y))
+                        } else {
+                            egui::Rect::from_min_max(egui::pos2(x + spacing, center_y), egui::pos2(x + bin_width - spacing, center_y + h))
+                        };
+
+                        let color = if i < 8 { theme.track_colors[4] } else { theme.track_colors[2] };
+                        ui.painter().rect_filled(r, 1.0, color.gamma_multiply(0.8));
+                    }
+                    ui.painter().hline(preview_rect.x_range(), preview_rect.center().y, Stroke::new(1.0_f32, theme.border));
+                } else {
+                    ui.painter().text(preview_rect.center(), egui::Align2::CENTER_CENTER, "GENETIC BLUEPRINT PREVIEW", egui::FontId::new(theme.type_caption, egui::FontFamily::Monospace), theme.text_secondary);
+                }
+
+                ui.add_space(theme.space_sm);
+
+                // Real-time Evolution Monitor Spectrum Analyzer Widget
+                ui.add_space(theme.space_sm);
+                ui.label(RichText::new("REAL-TIME EVOLUTION SPECTRUM").size(theme.type_caption).strong().color(theme.text_secondary));
+                Frame::none()
+                    .fill(theme.bg_inset)
+                    .rounding(theme.radius_md)
+                    .stroke(theme.border_stroke)
+                    .inner_margin(Margin::same(theme.space_xs))
+                    .show(ui, |ui| {
+                        if telemetry.is_some() {
+                            nullherz_ui_hal::widgets::render_spectrum_analyzer(ui, &app.viz.damped_spectrum, theme.accent, 80.0);
+                        } else {
+                            ui.allocate_at_least(Vec2::new(ui.available_width(), 80.0), Sense::hover());
+                            ui.painter().text(ui.min_rect().center(), egui::Align2::CENTER_CENTER, "REAL-TIME MONITOR ACTIVE", egui::FontId::new(theme.type_caption, egui::FontFamily::Proportional), theme.text_secondary);
+                        }
+                    });
+
+                // Conflict Resolution Picker
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("CONFLICT RESOLUTION:").strong().size(theme.type_caption).color(theme.text_secondary));
+                    let mode_str = match state.conflict_resolution {
+                        ConflictResolutionMode::NormalizedWeightedAverage => "Normalized Weighted Average",
+                        ConflictResolutionMode::PriorityOverride => "Priority Override",
+                        ConflictResolutionMode::MorphSweep => "Morph Sweep",
+                    };
+
+                    egui::ComboBox::from_id_source("conflict_res_combo_split")
+                        .selected_text(mode_str)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut state.conflict_resolution, ConflictResolutionMode::NormalizedWeightedAverage, "Normalized Weighted Average");
+                            ui.selectable_value(&mut state.conflict_resolution, ConflictResolutionMode::PriorityOverride, "Priority Override");
+                            ui.selectable_value(&mut state.conflict_resolution, ConflictResolutionMode::MorphSweep, "Morph Sweep");
+                        });
+                });
+
+                ui.add_space(theme.space_md);
+
+                // Action Evolution Trigger
+                let has_carrier = state.carrier_id.or(state.parent_a_id).is_some();
+                ui.add_enabled_ui(has_carrier, |ui| {
+                    let btn = ui.button(
+                        RichText::new(format!("⚡ BAKE & EVOLVE PERMANENT TRACK {}", egui_phosphor::regular::DNA))
+                            .strong()
+                            .size(theme.type_heading)
+                            .color(theme.bg_dark)
+                    );
+                    if btn.clicked() {
+                        state.emit_dna_command(app);
+                    }
+                }).response.on_disabled_hover_text("Select Carrier track first");
+            });
+        });
     }
 
     fn render_full_audio_direct_ui(ui: &mut Ui, state: &mut BreederView, theme: nullherz_ui_hal::Theme, app: &mut crate::InspectorApp) {
