@@ -386,6 +386,7 @@ pub struct ComposerState {
     #[allow(dead_code)]
     pub evolution_strengths: [f32; 16],
     pub auto_pollinate_enabled: bool,
+    pub grid_zoom: f32,
 }
 
 impl Default for ComposerState {
@@ -406,6 +407,7 @@ impl Default for ComposerState {
             _automation_data: std::collections::HashMap::new(),
             evolution_strengths: [0.0; 16],
             auto_pollinate_enabled: false,
+            grid_zoom: 1.0,
         }
     }
 }

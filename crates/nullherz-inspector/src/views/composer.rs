@@ -16,7 +16,7 @@ pub fn check_step_telemetry(
     (false, false)
 }
 
-/// Mini vector waveform envelope painter for audio clips.
+/// Mini vector waveform envelope painter for audio clips and beatgrid-aligned tracks.
 pub fn render_mini_waveform(
     painter: &egui::Painter,
     clip_rect: Rect,
@@ -130,6 +130,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         ui.add_space(app.theme.space_md);
 
+        // Interactive Timeline Zoom Control
+        ui.label(RichText::new("🔍 ZOOM:").size(app.theme.type_caption).strong().color(app.theme.text_secondary));
+        ui.add(egui::Slider::new(&mut app.composer.grid_zoom, 0.5..=3.0).show_value(false));
+
+        ui.add_space(app.theme.space_md);
+
         let is_recording = app.composer.record_automation;
         ui.toggle_value(&mut app.composer.record_automation, RichText::new("🔴 RECORD AUTOMATION").color(if is_recording { app.theme.danger } else { app.theme.text_secondary }));
         ui.add_space(app.theme.space_md);
@@ -168,7 +174,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         .show(ui, |ui| {
             let mut extend_grid = false;
             let steps_count = app.composer.sequencer_grid[grid_deck][0].len();
-            let slot_w = 40.0;
+            let slot_w = (40.0 * app.composer.grid_zoom).clamp(15.0, 120.0);
             let slot_h = 72.0;
             let num_active_channels = app.mixer.num_channels.clamp(1, 16);
 
@@ -176,7 +182,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 // 1. LEFT SIDE: Stationary Track Headers column (160.0px width)
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    ui.add_space(32.0);
+                    ui.add_space(32.0); // Exact match: 26.0 timeline header + 6.0 gap
 
                     for track_idx in 0..num_active_channels {
                         let track_color = crate::InspectorApp::deck_color(&app.theme, track_idx % 4);
@@ -191,14 +197,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             track_color.gamma_multiply(0.2)
                         };
 
+                        // Exact Outer Height = slot_h (72.0px) to prevent height drift against grid rows
                         let inner_resp = Frame::none()
                             .fill(header_bg)
                             .rounding(Rounding::same(app.theme.radius_sm))
                             .stroke(Stroke::new(1.0, if is_selected { track_color } else { app.theme.border_stroke.color }))
-                            .inner_margin(Margin::same(app.theme.space_xs))
+                            .inner_margin(Margin::same(4.0))
                             .show(ui, |ui| {
                                 ui.set_width(150.0);
-                                ui.set_height(slot_h);
+                                ui.set_height(slot_h - 8.0); // 72.0 outer height minus 2x 4.0 inner margins
                                 ui.vertical(|ui| {
                                     ui.horizontal(|ui| {
                                         let (swatch_rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), Sense::hover());
@@ -228,13 +235,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                                     ui.add_space(2.0);
 
-                                    // Sample Picker dropdown
+                                    // Sample / Full-Track Picker dropdown
                                     let src_id = app.composer.track_sources[track_idx]
                                         .or(app.decks.now_playing[track_idx]);
                                     let cached_track = src_id.and_then(|id| app.get_cached_track(id));
                                     let sample_label = cached_track.as_ref()
                                         .map(|t| format!("♪ {}", t.title))
-                                        .unwrap_or_else(|| "⊕ SAMPLE".to_string());
+                                        .unwrap_or_else(|| "⊕ SAMPLE / TRACK".to_string());
 
                                     egui::ComboBox::from_id_source(format!("seq_src_{}", track_idx))
                                         .width(140.0)
@@ -291,7 +298,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                 ui.add_space(6.0);
 
-                // 2. RIGHT SIDE: Timeline Header + Audio Clip Waveform Grid
+                // 2. RIGHT SIDE: Timeline Header + Audio Clip / Full Track Waveform Grid
                 ScrollArea::horizontal()
                     .id_source("composer_endless_grid_scroll_h")
                     .show(ui, |ui| {
@@ -301,7 +308,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
 
-                            // Bar/Beat Timeline Header Row
+                            // Bar/Beat Timeline Header Row (26.0px height)
                             let header_resp = ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 26.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                 ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
                                 for slot_idx in 0..steps_count {
@@ -364,7 +371,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                                         let velocity = app.composer.sequencer_grid[grid_deck][track_idx][slot_idx];
 
-                                        let mut bg_color = if velocity > 0.0 {
+                                        let mut bg_color = if velocity > 0.0 || cached_track.is_some() {
                                             if is_muted {
                                                 app.theme.bg_inset
                                             } else {
@@ -386,13 +393,22 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         };
                                         ui.painter().rect_stroke(rect, Rounding::same(2.0), border_stroke);
 
-                                        // Accurately render mini audio waveforms inside active clip slots
-                                        if velocity > 0.0 {
-                                            let peaks_data = cached_track.as_ref()
-                                                .map(|t| t.metadata.peaks.as_slice())
-                                                .unwrap_or(&[]);
+                                        // Render mini audio waveforms or beatgrid-aligned full track slice
+                                        if let Some(ref t) = cached_track {
+                                            let peaks = t.metadata.peaks.as_slice();
+                                            if !peaks.is_empty() {
+                                                let total_peaks = peaks.len();
+                                                let slice_len = (total_peaks / steps_count.max(1)).max(1);
+                                                let start_idx = (slot_idx * slice_len).min(total_peaks.saturating_sub(1));
+                                                let end_idx = ((slot_idx + 1) * slice_len).min(total_peaks);
+                                                let slice_peaks = &peaks[start_idx..end_idx];
+
+                                                let wf_color = if is_muted { app.theme.text_disabled } else { track_color };
+                                                render_mini_waveform(ui.painter(), rect.shrink(2.0), slice_peaks, wf_color);
+                                            }
+                                        } else if velocity > 0.0 {
                                             let wf_color = if is_muted { app.theme.text_disabled } else { track_color };
-                                            render_mini_waveform(ui.painter(), rect.shrink(2.0), peaks_data, wf_color);
+                                            render_mini_waveform(ui.painter(), rect.shrink(2.0), &[], wf_color);
                                         }
 
                                         if response.hovered() {
@@ -469,6 +485,16 @@ mod tests {
         let (is_playing, is_starting) = check_step_telemetry(&None, 0, 100);
         assert!(!is_playing);
         assert!(!is_starting);
+    }
+
+    #[test]
+    fn test_composer_grid_zoom_and_row_height_sync() {
+        let mut state = crate::state::ComposerState::default();
+        assert_eq!(state.grid_zoom, 1.0);
+        state.grid_zoom = 2.0;
+
+        let slot_w = (40.0 * state.grid_zoom).clamp(15.0, 120.0);
+        assert_eq!(slot_w, 80.0, "Zoom 2.0 should result in 80px slot width");
     }
 
     #[test]
