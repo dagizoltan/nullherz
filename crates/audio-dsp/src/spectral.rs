@@ -1,3 +1,6 @@
+use alloc::vec::Vec;
+use alloc::vec;
+use num_traits::Float;
 use crate::util::AlignedBuffer;
 use crate::SimdFft;
 
@@ -79,18 +82,18 @@ impl SpectralPipeline {
         match shape {
             SpectralWindowShape::Hann => {
                 for i in 0..n {
-                    self.window[i] = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (n - 1) as f32).cos());
+                    self.window[i] = 0.5 * (1.0 - Float::cos(2.0 * core::f32::consts::PI * i as f32 / (n - 1) as f32));
                 }
             }
             SpectralWindowShape::Hamming => {
                 for i in 0..n {
-                    self.window[i] = 0.54 - 0.46 * (2.0 * std::f32::consts::PI * i as f32 / (n - 1) as f32).cos();
+                    self.window[i] = 0.54 - 0.46 * Float::cos(2.0 * core::f32::consts::PI * i as f32 / (n - 1) as f32);
                 }
             }
             SpectralWindowShape::Blackman => {
                 for i in 0..n {
-                    self.window[i] = 0.42 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / (n - 1) as f32).cos()
-                        + 0.08 * (4.0 * std::f32::consts::PI * i as f32 / (n - 1) as f32).cos();
+                    self.window[i] = 0.42 - 0.5 * Float::cos(2.0 * core::f32::consts::PI * i as f32 / (n - 1) as f32)
+                        + 0.08 * Float::cos(4.0 * core::f32::consts::PI * i as f32 / (n - 1) as f32);
                 }
             }
             SpectralWindowShape::Rectangular => {

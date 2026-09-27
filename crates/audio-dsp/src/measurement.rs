@@ -52,6 +52,9 @@
 //! constant. BH7's sidelobes are below -180 dB, so the exclusion NARROWS to
 //! +/-8 and the floor drops to -153.1 dB. See [`analyser_floor`].
 
+use alloc::vec::Vec;
+use alloc::vec;
+use num_traits::{Euclid, Float};
 
 /// 7-term Blackman-Harris cosine-sum coefficients (Nuttall/Rife-Vincent).
 ///
@@ -92,9 +95,9 @@ const FUND_BINS: usize = BH7.len() + 1;
 /// another. See the module docs for what happens when it is not.
 #[inline]
 pub fn tone_sample(i: usize, freq: f32, sample_rate: f32, amp: f32) -> f32 {
-    let phase = (i as f64 * freq as f64 * std::f64::consts::TAU / sample_rate as f64)
-        .rem_euclid(std::f64::consts::TAU);
-    (phase.sin() as f32) * amp
+    let raw_phase = i as f64 * freq as f64 * core::f64::consts::TAU / sample_rate as f64;
+    let phase = Euclid::rem_euclid(&raw_phase, &core::f64::consts::TAU);
+    (Float::sin(phase) as f32) * amp
 }
 
 /// `len` samples of [`tone_sample`], starting at sample `start`.
@@ -133,10 +136,10 @@ pub fn thd_n(x: &[f32], freq: f32, sample_rate: f32, fft_size: usize) -> f32 {
 /// the window's own coefficients must not be what quantises the result.
 #[inline]
 fn window(i: usize, n: usize) -> f64 {
-    let t = std::f64::consts::TAU * i as f64 / n as f64;
+    let t = core::f64::consts::TAU * i as f64 / n as f64;
     BH7.iter().enumerate()
         .map(|(k, c)| {
-            let term = c * (k as f64 * t).cos();
+            let term = c * Float::cos(k as f64 * t);
             if k % 2 == 1 { -term } else { term }
         })
         .sum()
@@ -208,10 +211,10 @@ fn fft_f64(re: &mut [f64], im: &mut [f64]) {
     let mut len = 2usize;
     while len <= n {
         let half = len / 2;
-        let ang = -std::f64::consts::TAU / len as f64;
+        let ang = -core::f64::consts::TAU / len as f64;
         for base in (0..n).step_by(len) {
             for k in 0..half {
-                let (w_im, w_re) = (ang * k as f64).sin_cos();
+                let (w_im, w_re) = (Float::sin(ang * k as f64), Float::cos(ang * k as f64));
                 let a = base + k;
                 let b = a + half;
                 let v_re = re[b] * w_re - im[b] * w_im;

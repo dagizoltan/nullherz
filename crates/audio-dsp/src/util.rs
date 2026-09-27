@@ -1,16 +1,20 @@
+use alloc::vec::Vec;
+use alloc::vec;
+use num_traits::Float;
+
 /// A simple 64-byte aligned buffer for SIMD operations to avoid Undefined Behavior.
 pub struct AlignedBuffer {
     pub(crate) ptr: *mut f32,
     pub(crate) size: usize,
-    pub(crate) layout: std::alloc::Layout,
+    pub(crate) layout: core::alloc::Layout,
 }
 
 impl AlignedBuffer {
     pub fn new(size: usize) -> Self {
-        let layout = std::alloc::Layout::from_size_align(size * std::mem::size_of::<f32>(), 64).unwrap();
+        let layout = core::alloc::Layout::from_size_align(size * core::mem::size_of::<f32>(), 64).unwrap();
         // SAFETY: AlignedBuffer ensures 64-byte alignment and zero-initialization.
-        let ptr = unsafe { std::alloc::alloc_zeroed(layout) as *mut f32 };
-        if ptr.is_null() { std::alloc::handle_alloc_error(layout); }
+        let ptr = unsafe { alloc::alloc::alloc_zeroed(layout) as *mut f32 };
+        if ptr.is_null() { alloc::alloc::handle_alloc_error(layout); }
         Self { ptr, size, layout }
     }
 }
@@ -19,25 +23,25 @@ impl AlignedBuffer {
 unsafe impl Send for AlignedBuffer {}
 unsafe impl Sync for AlignedBuffer {}
 
-impl std::ops::Deref for AlignedBuffer {
+impl core::ops::Deref for AlignedBuffer {
     type Target = [f32];
     fn deref(&self) -> &Self::Target {
         // SAFETY: ptr is valid for 'size' elements as guaranteed by new().
-        unsafe { std::slice::from_raw_parts(self.ptr, self.size) }
+        unsafe { core::slice::from_raw_parts(self.ptr, self.size) }
     }
 }
 
-impl std::ops::DerefMut for AlignedBuffer {
+impl core::ops::DerefMut for AlignedBuffer {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // SAFETY: ptr is valid and unique as AlignedBuffer owns the allocation.
-        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.size) }
+        unsafe { core::slice::from_raw_parts_mut(self.ptr, self.size) }
     }
 }
 
 impl Drop for AlignedBuffer {
     fn drop(&mut self) {
         // SAFETY: layout matches the one used in alloc_zeroed().
-        unsafe { std::alloc::dealloc(self.ptr as *mut u8, self.layout); }
+        unsafe { alloc::alloc::dealloc(self.ptr as *mut u8, self.layout); }
     }
 }
 
@@ -107,7 +111,7 @@ pub fn time_stretch(input: &[f32], ratio: f32) -> Vec<f32> {
     // Hann window
     let mut window = vec![0.0f32; grain_size];
     for i in 0..grain_size {
-        let v = (std::f32::consts::PI * i as f32 / (grain_size - 1) as f32).sin();
+        let v = Float::sin(core::f32::consts::PI * i as f32 / (grain_size - 1) as f32);
         window[i] = v * v;
     }
 
@@ -390,11 +394,11 @@ pub fn slerp_nd(v0: &[f32], v1: &[f32], t: f32, out: &mut [f32]) {
     let dot = dot.clamp(-1.0, 1.0);
 
     // 2. Calculate Angle between vectors
-    let theta_0 = dot.acos();
-    let sin_theta_0 = theta_0.sin();
+    let theta_0 = Float::acos(dot);
+    let sin_theta_0 = Float::sin(theta_0);
 
     // If angle is very small, use linear interpolation to avoid division by zero
-    if sin_theta_0.abs() < 1e-6 {
+    if Float::abs(sin_theta_0) < 1e-6 {
         for i in 0..n {
             out[i] = v0[i] + (v1[i] - v0[i]) * t;
         }
@@ -402,8 +406,8 @@ pub fn slerp_nd(v0: &[f32], v1: &[f32], t: f32, out: &mut [f32]) {
     }
 
     let theta_t = theta_0 * t;
-    let s0 = (theta_0 - theta_t).sin() / sin_theta_0;
-    let s1 = theta_t.sin() / sin_theta_0;
+    let s0 = Float::sin(theta_0 - theta_t) / sin_theta_0;
+    let s1 = Float::sin(theta_t) / sin_theta_0;
 
     for i in 0..n {
         out[i] = s0 * v0[i] + s1 * v1[i];
@@ -432,11 +436,11 @@ impl PolyphaseFilter {
             if x == 0.0 {
                 coefficients[i] = 1.0;
             } else {
-                let angle = std::f32::consts::PI * x * cutoff;
-                coefficients[i] = angle.sin() / angle;
+                let angle = core::f32::consts::PI * x * cutoff;
+                coefficients[i] = Float::sin(angle) / angle;
             }
             // Hamming window
-            let window = 0.54 - 0.46 * (2.0 * std::f32::consts::PI * i as f32 / (total_taps - 1) as f32).cos();
+            let window = 0.54 - 0.46 * Float::cos(2.0 * core::f32::consts::PI * i as f32 / (total_taps - 1) as f32);
             coefficients[i] *= window;
         }
 
