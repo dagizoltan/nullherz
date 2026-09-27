@@ -10,8 +10,7 @@ pub fn mulberry32_step(state: &mut u32) -> f32 {
     *state = state.wrapping_add(0x6D2B79F5);
     let mut t = (*state ^ (*state >> 15)).wrapping_mul(1 | *state);
     t = (t ^ (t >> 7)).wrapping_mul(61 | t) ^ t;
-    let res = (t ^ (t >> 14)) as f32 / 4294967296.0;
-    res
+    (t ^ (t >> 14)) as f32 / 4294967296.0
 }
 
 /// Fast, rational Padé approximant soft-clipper (saturates smoothly without transcendentals).
