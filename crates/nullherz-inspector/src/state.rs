@@ -151,6 +151,7 @@ pub struct MixerState {
     pub num_channels: usize,
     pub channel_input_sources: [ChannelInputSource; 16],
     pub master_output_source: MasterOutput,
+    pub waveform_styles: [nullherz_ui_hal::render::waveform_renderer::WaveformStyle; 16],
     pub channel_faders: [f32; 16],
     /// Pitch-fader position per deck, as a RATE multiplier. 1.0 is the track's
     /// recorded speed.
@@ -216,6 +217,7 @@ impl Default for MixerState {
             num_channels: 4,
             channel_input_sources: [ChannelInputSource::Track; 16],
             master_output_source: MasterOutput::MainSpeakers,
+            waveform_styles: [nullherz_ui_hal::render::waveform_renderer::WaveformStyle::MultiBand; 16],
             channel_faders: [1.0; 16],
             channel_pitch: [1.0; 16],
             pitch_range_pct: [8.0; 16],

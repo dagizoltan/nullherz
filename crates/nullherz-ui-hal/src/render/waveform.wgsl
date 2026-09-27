@@ -11,6 +11,8 @@ struct VertexOutput {
 struct Globals {
     scroll_offset: f32,
     zoom: f32,
+    is_vertical: u32,
+    waveform_style: u32,
     accent_color: vec4<f32>,
 };
 
@@ -23,14 +25,16 @@ fn vs_main(
 ) -> VertexOutput {
     var out: VertexOutput;
 
-    // Apply horizontal scroll and zoom.
-    // Shift coordinate system so it starts at -1 (left edge of clip space)
-    let x = (model.position.x - globals.scroll_offset) * globals.zoom - 1.0;
-    out.clip_position = vec4<f32>(x, model.position.y, 0.0, 1.0);
+    let pos_x = (model.position.x - globals.scroll_offset) * globals.zoom - 1.0;
+    if (globals.is_vertical != 0u) {
+        // Vertical orientation: amplitude on X (-1..1), time on Y (-1..1)
+        out.clip_position = vec4<f32>(model.position.y, pos_x, 0.0, 1.0);
+    } else {
+        // Horizontal orientation: time on X (-1..1), amplitude on Y (-1..1)
+        out.clip_position = vec4<f32>(pos_x, model.position.y, 0.0, 1.0);
+    }
 
-    // Per-vertex color: band tint for colored waveforms, accent for mono.
     out.color = model.color;
-
     return out;
 }
 

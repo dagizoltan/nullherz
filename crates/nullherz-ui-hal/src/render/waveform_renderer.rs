@@ -1,14 +1,46 @@
 use wgpu::util::DeviceExt;
+use std::sync::Arc;
+use parking_lot::Mutex;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WaveformStyle {
+    #[default]
+    MultiBand,      // Tri-Color Frequency Band (Bass = Amber/Red, Mid = Green, High = Cyan/Blue)
+    Mono,           // Solid Accent Silhouette
+    PhonLoudness,   // Perceptual Loudness (ISO 226 equal-loudness weighting)
+    SpectrumHeatmap,// Thermal Energy Heatmap (Red/Yellow peak -> Indigo/Blue low)
+    Outline,        // Vector Boundary Contour
+}
+
+impl WaveformStyle {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::MultiBand => "Multi-Band RGB",
+            Self::Mono => "Mono Silhouette",
+            Self::PhonLoudness => "Phon Loudness (ISO 226)",
+            Self::SpectrumHeatmap => "Spectral Heatmap",
+            Self::Outline => "Vector Outline",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::MultiBand,
+            Self::Mono,
+            Self::PhonLoudness,
+            Self::SpectrumHeatmap,
+            Self::Outline,
+        ]
+    }
+}
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct WaveformGlobals {
     scroll_offset: f32,
     zoom: f32,
-    // WGSL uniform layout: vec4<f32> is 16-byte aligned, so the shader-side
-    // struct is 32 bytes. Without this padding Rust packs 24 bytes and wgpu
-    // rejects the bind group at draw time ("bound with size 24, expects 32").
-    _pad: [f32; 2],
+    is_vertical: u32,
+    waveform_style: u32,
     accent_color: [f32; 4],
 }
 
@@ -33,9 +65,6 @@ pub struct WaveformRenderer {
     _max_peaks: usize,
 }
 
-use std::sync::Arc;
-use parking_lot::Mutex;
-
 pub struct WaveformCallback {
     pub renderer: Arc<Mutex<WaveformRenderer>>,
 }
@@ -52,7 +81,72 @@ pub fn ui_paint_waveform(ui: &mut egui::Ui, rect: egui::Rect, renderer: Arc<Mute
     ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, WaveformCallback { renderer }));
 }
 
+fn compute_sample_color(
+    style: WaveformStyle,
+    l: f32,
+    m: f32,
+    h: f32,
+    top: f32,
+    bot: f32,
+    accent_color: [f32; 4],
+    is_edge: bool,
+) -> [f32; 4] {
+    let sum = (l + m + h).max(1e-6);
+    let amp = top.max(-bot).clamp(0.0, 1.0);
+    let bright = 0.55 + 0.45 * amp.sqrt();
+
+    match style {
+        WaveformStyle::MultiBand => {
+            let mix = |k: usize| {
+                (l * WaveformRenderer::LOW_COLOR[k] + m * WaveformRenderer::MID_COLOR[k] + h * WaveformRenderer::HIGH_COLOR[k]) / sum * bright
+            };
+            [mix(0), mix(1), mix(2), 1.0]
+        }
+        WaveformStyle::Mono => {
+            let factor = 0.45 + 0.55 * bright;
+            [
+                accent_color[0] * factor,
+                accent_color[1] * factor,
+                accent_color[2] * factor,
+                accent_color[3],
+            ]
+        }
+        WaveformStyle::PhonLoudness => {
+            // ISO 226 perceptual loudness weighting: mids/highs carry higher perceptual loudness (phon) per unit energy
+            let phon_weight = ((m * 1.3 + h * 1.1 + l * 0.5) / sum).clamp(0.0, 1.0) * bright;
+            // Magenta/purple low phon -> Bright gold/yellow high phon
+            let r = 0.4 + 0.6 * phon_weight;
+            let g = 0.1 + 0.85 * phon_weight.powf(1.5);
+            let b = (0.7 * (1.0 - phon_weight)).clamp(0.0, 0.8);
+            [r, g, b, 1.0]
+        }
+        WaveformStyle::SpectrumHeatmap => {
+            // Thermal heatmap energy: low amp (indigo/blue) -> mid amp (yellow/green) -> high amp (red/orange)
+            let e = amp;
+            let r = (e * 1.8).clamp(0.1, 1.0);
+            let g = ((1.0 - (e - 0.5).abs() * 2.0) * 0.9).clamp(0.1, 0.9);
+            let b = ((1.0 - e * 1.5) * 0.9).clamp(0.1, 0.8);
+            [r, g, b, 1.0]
+        }
+        WaveformStyle::Outline => {
+            if is_edge {
+                // High contrast accent outline for top & bottom bounds
+                accent_color
+            } else {
+                // Semi-transparent interior fill
+                [accent_color[0], accent_color[1], accent_color[2], 0.25]
+            }
+        }
+    }
+}
+
 impl WaveformRenderer {
+    /// Frequency-band colors: low = warm amber, mid = green-teal,
+    /// high = icy white-blue. Tuned for dark backgrounds.
+    pub const LOW_COLOR: [f32; 3] = [0.98, 0.45, 0.16];
+    pub const MID_COLOR: [f32; 3] = [0.18, 0.85, 0.55];
+    pub const HIGH_COLOR: [f32; 3] = [0.75, 0.87, 1.0];
+
     pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat, max_peaks: usize) -> Self {
         let shader = device.create_shader_module(wgpu::include_wgsl!("waveform.wgsl"));
 
@@ -61,7 +155,8 @@ impl WaveformRenderer {
             contents: bytemuck::cast_slice(&[WaveformGlobals {
                 scroll_offset: 0.0,
                 zoom: 1.0,
-                _pad: [0.0; 2],
+                is_vertical: 0,
+                waveform_style: 0,
                 accent_color: [0.0, 1.0, 0.8, 1.0],
             }]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -162,18 +257,12 @@ impl WaveformRenderer {
     pub fn update_peaks(&mut self, queue: &wgpu::Queue, peaks: &[f32], color: [f32; 4]) {
         if peaks.is_empty() { return; }
 
-        // If the level is denser than the vertex buffer, DOWNSAMPLE across
-        // the whole track (max of each stride window). Truncating with
-        // `.take()` here used to display only the first max_peaks points
-        // stretched to full width — the waveform showed the track's opening
-        // seconds as if they were the whole file.
         let peak_count = peaks.len().min(self._max_peaks);
         let mut vertices = Vec::with_capacity(peak_count * 2);
         for i in 0..peak_count {
             let start = i * peaks.len() / peak_count;
             let end = (((i + 1) * peaks.len()) / peak_count).max(start + 1);
             let peak = peaks[start..end].iter().fold(0.0f32, |a, &v| a.max(v));
-            // Normalized X in range [0, 2] instead of [-1, 1] to allow easier zooming from start
             let x = (i as f32 / peak_count as f32) * 2.0;
             vertices.push(WaveformVertex { position: [x, peak], color });
             vertices.push(WaveformVertex { position: [x, -peak], color });
@@ -183,12 +272,7 @@ impl WaveformRenderer {
     }
 
     /// Upload only a WINDOW of the band waveform — `[start_ratio, end_ratio)`
-    /// of the track — remapped to the full x range. This is the needle-view
-    /// path: slicing beats shader zoom because the vertex budget then serves
-    /// the visible window alone (a whole-track upload capped at max_peaks
-    /// starves a deeply zoomed view no matter the LOD).
-    ///
-    /// Callers should set globals scroll=0, zoom=1.
+    /// of the track — remapped to the full x range.
     pub fn update_from_band_window(
         &mut self,
         queue: &wgpu::Queue,
@@ -196,10 +280,11 @@ impl WaveformRenderer {
         start_ratio: f32,
         end_ratio: f32,
         display_pixel_width: u32,
+        style: WaveformStyle,
+        accent_color: [f32; 4],
     ) {
         if band.is_empty() || end_ratio <= start_ratio { return; }
 
-        // Pick the finest level whose SLICE still fits the density target.
         let target = (display_pixel_width.max(1) as f32 * 2.0) as usize;
         let span = (end_ratio - start_ratio).clamp(1e-6, 1.0);
         let mut level_idx = 0;
@@ -218,9 +303,6 @@ impl WaveformRenderer {
         let n = low.len().min(mid.len()).min(high.len()).min(env_min.len()).min(env_max.len());
         if n == 0 { return; }
 
-        // Window bounds in series indices; ratios may run past the track on
-        // either side (playhead near an edge) — out-of-range points render
-        // as silence so the window keeps its geometry.
         let f_start = start_ratio * n as f32;
         let f_span = span * n as f32;
         let count = ((f_span as usize).max(2)).min(self._max_peaks);
@@ -238,15 +320,12 @@ impl WaveformRenderer {
             let (l, m, h) = (low[idx], mid[idx], high[idx]);
             let top = env_max[idx].clamp(-1.0, 1.0);
             let bot = env_min[idx].clamp(-1.0, 1.0);
-            let sum = (l + m + h).max(1e-6);
-            let amp = top.max(-bot).clamp(0.0, 1.0);
-            let bright = 0.55 + 0.45 * amp.sqrt();
-            let mix = |k: usize| {
-                (l * Self::LOW_COLOR[k] + m * Self::MID_COLOR[k] + h * Self::HIGH_COLOR[k]) / sum * bright
-            };
-            let color = [mix(0), mix(1), mix(2), 1.0];
-            vertices.push(WaveformVertex { position: [x, top], color });
-            vertices.push(WaveformVertex { position: [x, bot], color });
+
+            let top_col = compute_sample_color(style, l, m, h, top, bot, accent_color, true);
+            let bot_col = compute_sample_color(style, l, m, h, top, bot, accent_color, false);
+
+            vertices.push(WaveformVertex { position: [x, top], color: top_col });
+            vertices.push(WaveformVertex { position: [x, bot], color: bot_col });
         }
         self.num_vertices = vertices.len() as u32;
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
@@ -290,31 +369,19 @@ impl WaveformRenderer {
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
     }
 
-    /// Frequency-band colors: low = warm amber, mid = green-teal,
-    /// high = icy white-blue. Tuned for dark backgrounds.
-    const LOW_COLOR: [f32; 3] = [0.98, 0.45, 0.16];
-    const MID_COLOR: [f32; 3] = [0.18, 0.85, 0.55];
-    const HIGH_COLOR: [f32; 3] = [0.75, 0.87, 1.0];
-
-    /// Upload a frequency-colored waveform: asymmetric min/max envelope for
-    /// the SHAPE, per-point color mixed from the three band peaks. Falls
-    /// back to nothing (caller should use `update_from_mip_waveform`) when
-    /// the band data is empty.
     pub fn update_from_band_waveform(
         &mut self,
         queue: &wgpu::Queue,
         band: &nullherz_traits::BandWaveform,
         zoom: f32,
         display_pixel_width: u32,
+        style: WaveformStyle,
+        accent_color: [f32; 4],
     ) {
         if band.is_empty() { return; }
 
-        // LOD selection identical to the mono path, driven by the envelope.
         let mut level_idx = 0;
         if display_pixel_width > 0 {
-            // Zoom MULTIPLIES the density target: at zoom N only 1/N of the
-            // track is on screen, so the full-track series needs N times the
-            // per-pixel density for the visible window to hit ~2 peaks/px.
             let target_peaks = display_pixel_width as f32 * 2.0 * zoom.max(1.0);
             for (i, level) in band.env_max.levels.iter().enumerate() {
                 level_idx = i;
@@ -330,7 +397,6 @@ impl WaveformRenderer {
             get(&band.low), get(&band.mid), get(&band.high), get(&band.env_min), get(&band.env_max),
         ) else { return; };
 
-        // All series share lengths per level; min() guards a malformed row.
         let n = low.len().min(mid.len()).min(high.len()).min(env_min.len()).min(env_max.len());
         if n == 0 { return; }
         let peak_count = n.min(self._max_peaks);
@@ -346,37 +412,24 @@ impl WaveformRenderer {
             let top = env_max[start..end].iter().fold(f32::MIN, |a, &v| a.max(v)).clamp(-1.0, 1.0);
             let bot = env_min[start..end].iter().fold(f32::MAX, |a, &v| a.min(v)).clamp(-1.0, 1.0);
 
-            let sum = (l + m + h).max(1e-6);
-            let amp = top.max(-bot).clamp(0.0, 1.0);
-            // Quiet sections dim slightly so loud hits pop.
-            let bright = 0.55 + 0.45 * amp.sqrt();
-            let mix = |k: usize| {
-                (l * Self::LOW_COLOR[k] + m * Self::MID_COLOR[k] + h * Self::HIGH_COLOR[k]) / sum * bright
-            };
-            let color = [mix(0), mix(1), mix(2), 1.0];
+            let top_col = compute_sample_color(style, l, m, h, top, bot, accent_color, true);
+            let bot_col = compute_sample_color(style, l, m, h, top, bot, accent_color, false);
 
             let x = (i as f32 / peak_count as f32) * 2.0;
-            vertices.push(WaveformVertex { position: [x, top], color });
-            vertices.push(WaveformVertex { position: [x, bot], color });
+            vertices.push(WaveformVertex { position: [x, top], color: top_col });
+            vertices.push(WaveformVertex { position: [x, bot], color: bot_col });
         }
         self.num_vertices = vertices.len() as u32;
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
     }
 
     pub fn update_from_mip_waveform(&mut self, queue: &wgpu::Queue, mip_waveform: &nullherz_traits::MipWaveform, zoom: f32, display_pixel_width: u32, color: [f32; 4]) {
-        // Advanced LOD selection logic:
-        // We aim for approximately 2 peaks per display pixel for optimal visual density
-        // without overloading the GPU with redundant geometry.
-
         let mut level_idx = 0;
         if display_pixel_width > 0 && !mip_waveform.levels.is_empty() {
-            // See update_from_band_waveform: zoom multiplies the target.
             let target_peaks = display_pixel_width as f32 * 2.0 * zoom.max(1.0);
 
             for (i, level) in mip_waveform.levels.iter().enumerate() {
                 level_idx = i;
-                // Since levels are power-of-2 downsampled, we find the first level
-                // that has enough density to satisfy our target.
                 if level.len() as f32 <= target_peaks * 1.2 {
                     break;
                 }
@@ -389,11 +442,12 @@ impl WaveformRenderer {
         }
     }
 
-    pub fn update_globals(&mut self, queue: &wgpu::Queue, scroll: f32, zoom: f32, color: [f32; 4]) {
+    pub fn update_globals(&mut self, queue: &wgpu::Queue, scroll: f32, zoom: f32, is_vertical: bool, style: WaveformStyle, color: [f32; 4]) {
         let globals = WaveformGlobals {
             scroll_offset: scroll,
             zoom,
-            _pad: [0.0; 2],
+            is_vertical: if is_vertical { 1 } else { 0 },
+            waveform_style: style as u32,
             accent_color: color,
         };
         queue.write_buffer(&self.globals_buffer, 0, bytemuck::cast_slice(&[globals]));

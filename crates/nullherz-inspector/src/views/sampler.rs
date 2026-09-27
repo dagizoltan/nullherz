@@ -45,7 +45,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                  if let Some(t) = telemetry {
                      let scroll = (t.get_interpolated_beat_position() as f32 % 4.0) / 4.0 * 2.0;
                      let color = app.theme.accent.to_array().map(|v| v as f32 / 255.0);
-                     wf.update_globals(&_wgpu.queue, scroll, app.sampler.sampler_waveform_zoom, color);
+                     wf.update_globals(&_wgpu.queue, scroll, app.sampler.sampler_waveform_zoom, false, app.mixer.waveform_styles[0], color);
                  }
 
                  nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_mtx.clone());
