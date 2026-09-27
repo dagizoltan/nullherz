@@ -1449,6 +1449,9 @@ pub struct VizState {
     /// PlayDeck instead of StopDeck: "stop doesn't stop").
     pub last_playstate_counter: u64,
 
+    /// Interactive Organism & Mandala Profile Editor State
+    #[allow(dead_code)]
+    pub organism_editor: crate::views::organism_editor::OrganismEditorState,
     /// Visual Mixer Channel Strips
     pub channels: Vec<VisualChannel>,
     pub selected_channel_idx: usize,
@@ -1470,6 +1473,7 @@ impl Default for VizState {
             last_deck_positions: [0; 16],
             deck_still_snapshots: [0; 16],
             last_playstate_counter: 0,
+            organism_editor: crate::views::organism_editor::OrganismEditorState::default(),
             damped_peaks: [0.0; 16],
             damped_master_peaks: [0.0; 2],
             channels: vec![
