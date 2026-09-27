@@ -1199,7 +1199,7 @@ impl ImageTextureEngine {
                 let fx = nx * 8.0;
                 let fy = ny * 8.0;
                 let v1 = (fx.sin() * fy.cos() + (fx * 1.5).cos() * (fy * 1.5).sin() + (nx * 12.0).sin()) * 0.33 + 0.5;
-                let v2 = (((nx - 0.5).powi(2) + (ny - 0.5).powi(2)).sqrt() * 6.28).cos() * 0.5 + 0.5;
+                let v2 = (((nx - 0.5).powi(2) + (ny - 0.5).powi(2)).sqrt() * std::f32::consts::TAU).cos() * 0.5 + 0.5;
 
                 let r = ((v1 * 180.0 + v2 * 75.0) as u8).saturating_add(20);
                 let g = ((v2 * 150.0 + (1.0 - v1) * 80.0) as u8).saturating_add(30);
