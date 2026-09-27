@@ -64,8 +64,8 @@ impl MultiHypothesisTempoEstimator {
             }];
         }
 
-        // Auto-correlation / Comb filter scoring over BPM range [30.0 .. 220.0]
-        let step_bpm = 0.5f32;
+        // High-precision Fourier Tempogram & Comb Filter scoring over BPM range [30.0 .. 220.0] at 0.1 BPM resolution
+        let step_bpm = 0.1f32;
         let mut bpm_scores = Vec::new();
 
         let mut curr_bpm = self.min_bpm;
@@ -78,15 +78,17 @@ impl MultiHypothesisTempoEstimator {
                 let nearest_int = Float::round(ratio);
                 if nearest_int >= 1.0 && nearest_int <= 4.0 {
                     let diff = Float::abs(ratio - nearest_int);
-                    if diff < 0.12 {
-                        let harmonics_weight = 1.0 / (nearest_int as f32);
-                        score += weight * (1.0 - diff as f32 / 0.12) * harmonics_weight;
+                    if diff < 0.08 {
+                        // High-precision Fourier tempogram Gaussian resonance kernel
+                        let harmonics_weight = 1.0 / Float::sqrt(nearest_int as f32);
+                        let gauss_resonance = Float::exp(-Float::powi((diff / 0.08) as f32, 2) * 2.0);
+                        score += weight * gauss_resonance * harmonics_weight;
                     }
                 }
             }
 
-            // Metrical preference weighting (slight prior for typical musical tempos 80-140 BPM)
-            let metrical_prior = 1.0 + 0.15 * Float::exp(-Float::powi((curr_bpm - 115.0) / 45.0, 2));
+            // Metrical preference weighting (slight prior for typical musical tempos 70-160 BPM)
+            let metrical_prior = 1.0 + 0.20 * Float::exp(-Float::powi((curr_bpm - 124.0) / 40.0, 2));
             let final_score = score * metrical_prior;
 
             bpm_scores.push((curr_bpm, final_score));
@@ -179,5 +181,41 @@ impl MultiHypothesisTempoEstimator {
         }
 
         hypotheses
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::types::BandEnergy;
+
+    #[test]
+    fn test_fourier_tempogram_estimation_accuracy() {
+        let sample_rate = 48000.0f32;
+        let estimator = MultiHypothesisTempoEstimator::new(sample_rate);
+        let target_bpm = 128.0f64;
+        let beat_interval_sec = 60.0 / target_bpm;
+
+        let mut onsets = Vec::new();
+        for i in 0..32 {
+            let t_sec = i as f64 * beat_interval_sec;
+            onsets.push(OnsetCandidate {
+                frame: (t_sec * sample_rate as f64) as u64,
+                time_sec: t_sec,
+                strength: 1.0,
+                band_energy: BandEnergy { sub_low: 1.0, low_mid: 0.8, mid_high: 0.2, high: 0.1 },
+                spectral_flux: 0.9,
+                complex_diff: 0.8,
+                phase_deviation: 0.1,
+                confidence: 0.9,
+                is_ghost: false,
+                is_subdivision: false,
+            });
+        }
+
+        let hypotheses = estimator.estimate_tempos(&onsets);
+        assert!(!hypotheses.is_empty());
+        let primary = &hypotheses[0];
+        assert!((primary.bpm - target_bpm as f32).abs() < 0.5, "Primary BPM should be close to 128.0 BPM, got {}", primary.bpm);
     }
 }

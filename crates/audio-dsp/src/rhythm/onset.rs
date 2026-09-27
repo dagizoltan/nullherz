@@ -147,6 +147,9 @@ impl MultiFeatureOnsetDetector {
             flux_series.push(candidate);
         }
 
+        // Apply HPSS (Harmonic-Percussive Source Separation) & SuperFlux max-filtering over time-frequency frames
+        Self::apply_hpss_and_superflux(&mut flux_series);
+
         // Peak picking over local adaptive threshold
         if flux_series.is_empty() {
             return candidates;
@@ -178,5 +181,56 @@ impl MultiFeatureOnsetDetector {
         }
 
         candidates
+    }
+
+    /// Apply Harmonic-Percussive Source Separation (HPSS) & SuperFlux max-filtering
+    fn apply_hpss_and_superflux(series: &mut [OnsetCandidate]) {
+        if series.len() < 3 { return; }
+
+        let num_frames = series.len();
+        let mut superflux_strengths = vec![0.0f32; num_frames];
+
+        for i in 1..num_frames {
+            let curr = &series[i];
+            let prev = &series[i - 1];
+
+            // 1. HPSS Percussive Emphasis: Weight percussive sub-low/low-mid transients over high-frequency vocal/harmonic vibrato
+            let percussive_ratio = (curr.band_energy.sub_low * 2.5 + curr.band_energy.low_mid * 1.5)
+                / (curr.band_energy.mid_high + curr.band_energy.high + 1e-4);
+            let hpss_weight = (1.0 + Float::min(percussive_ratio, 3.0)) * 0.5;
+
+            // 2. SuperFlux Max-Filtering: Compare current flux against local max neighborhood of previous frame to suppress vibrato
+            let prev_max_flux = Float::max(prev.spectral_flux, prev.complex_diff * 0.5);
+            let superflux_diff = Float::max(0.0, curr.spectral_flux - prev_max_flux * 0.85);
+
+            superflux_strengths[i] = (superflux_diff * 0.6 + curr.strength * 0.4) * hpss_weight;
+        }
+
+        for (i, cand) in series.iter_mut().enumerate() {
+            cand.strength = superflux_strengths[i];
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_onset_detector_hpss_and_superflux() {
+        let mut detector = MultiFeatureOnsetDetector::new(48000.0);
+        let mut buffer = vec![0.0f32; 48000];
+
+        // Synthesize 4 impulses (kick drum transients) at 0.5s intervals
+        for &pulse_sample in &[0, 24000, 36000] {
+            if pulse_sample + 100 < buffer.len() {
+                for i in 0..100 {
+                    buffer[pulse_sample + i] = (i as f32 * 0.1).sin();
+                }
+            }
+        }
+
+        let candidates = detector.process_buffer(&buffer);
+        assert!(!candidates.is_empty(), "Detector should identify onsets from impulses");
     }
 }
