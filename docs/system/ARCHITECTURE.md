@@ -41,7 +41,7 @@ This document describes *what is actually in the tree*, as opposed to the strate
 | Crate | LOC | Responsibility |
 | :--- | ---: | :--- |
 | `fx-runtime` | ~0.7k | Sidecar process host: spawns subprocess plugins, wires SHM rings + eventfds, applies RT priority, moves children into a hierarchical `nullherz` cgroup with real RSS memory limits (SC-4), and hosts WASM guests via `wasmtime` (`wasm_runtime.rs`) with a fuel/epoch `resource_limiter`. |
-| `sidecar-sdk` | ~0.5k | Guest-side SDK: `SidecarHost` main-loop that connects SHM, implements Sidecar Protocol V2 framing, and drives a user-supplied `AudioProcessor`. |
+| `sidecar-sdk` | ~0.5k | Guest-side SDK: `SidecarHost` main-loop that connects SHM, implements Sidecar Protocol V2 framing, and drives a user-supplied `AudioProcessor`. Unified Sidecar primitive and store architecture detailed in [`SIDECAR_ECOSYSTEM_SPECIFICATION.md`](./SIDECAR_ECOSYSTEM_SPECIFICATION.md). |
 | `sidecar-macros` | ~0.1k | Attribute macros for declaring sidecar processors/params. |
 
 ### 1.5 Intelligence / DNA Plane & Transformation Engine

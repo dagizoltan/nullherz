@@ -34,7 +34,7 @@ fn render_crates_and_smart_crates_section(app: &mut InspectorApp, ui: &mut Ui) {
     );
     ui.add_space(theme.space_xs);
 
-    // Crates Wrapping Grid
+    // Asset Categories & Crates Wrapping Grid
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(theme.space_xs, theme.space_xs);
 
@@ -44,8 +44,28 @@ fn render_crates_and_smart_crates_section(app: &mut InspectorApp, ui: &mut Ui) {
             app.library.library_needs_refresh = true;
         }
 
+        let categories = [
+            ("TRACKS", "track"),
+            ("SAMPLES", "sample"),
+            ("SEQUENCES", "sequence"),
+            ("INSTRUMENTS", "instrument"),
+            ("AUDIO INSERTS", "insert"),
+            ("VISUALS", "visual"),
+        ];
+
+        for (label, tag) in categories {
+            let is_selected = app.library.active_crate.as_deref() == Some(tag);
+            if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::FOLDER_SIMPLE, label)).clicked() {
+                app.library.active_crate = Some(tag.to_string());
+                app.library.library_needs_refresh = true;
+            }
+        }
+
         let crates = &app.library.cached_crates;
         for crate_name in crates {
+            if ["track", "sample", "sequence", "instrument", "insert", "visual"].contains(&crate_name.as_str()) {
+                continue;
+            }
             let is_selected = app.library.active_crate.as_deref() == Some(crate_name.as_str());
             if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::TAG, crate_name)).clicked() {
                 app.library.active_crate = Some(crate_name.clone());

@@ -138,6 +138,10 @@ fn biquad_8ch_paths_agree() {
 fn baseline_instantiation_is_exercised() {
     let _guard = serialize();
     dispatch::prewarm();
+    if !dispatch::has_avx2_fma() {
+        eprintln!("skipped: no avx2+fma on this CPU");
+        return;
+    }
     let forced = dispatch::force_level(dispatch::LEVEL_BASELINE);
     assert_eq!(
         forced,
