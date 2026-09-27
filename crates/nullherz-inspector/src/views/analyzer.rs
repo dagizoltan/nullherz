@@ -4,6 +4,24 @@ use crate::InspectorApp;
 use crate::state::AbCompareSource;
 
 /// Convert a pitch root index (0..11) to musical key name and Camelot wheel code
+/// Calculate ISO 226 Equal-Loudness (Phon) attenuation factor (0.0..1.0) for a normalized frequency bin index (0..128)
+pub fn calculate_iso226_phon_factor(bin_idx: usize, phon_level: f32) -> f32 {
+    let freq_hz = 20.0 * (1000.0f32).powf(bin_idx as f32 / 128.0);
+    let ear_sensitivity = if freq_hz < 200.0 {
+        // Low frequency sub-bass roll-off according to Fletcher-Munson / ISO 226 curves
+        0.2 + 0.8 * (freq_hz / 200.0).powi(2)
+    } else if freq_hz >= 2000.0 && freq_hz <= 5000.0 {
+        // Ear canal resonance peak around 3-4 kHz
+        1.35
+    } else if freq_hz > 10000.0 {
+        // High frequency ear sensitivity roll-off
+        (1.0 - ((freq_hz - 10000.0) / 10000.0) * 0.4).max(0.2)
+    } else {
+        1.0
+    };
+    (ear_sensitivity * (phon_level / 80.0)).clamp(0.0, 1.5)
+}
+
 pub fn pitch_index_to_camelot(root_idx: usize, is_minor: bool) -> (&'static str, &'static str) {
     // Standard Camelot wheel mappings for minor (A) and major (B)
     match (root_idx % 12, is_minor) {
@@ -74,6 +92,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
             ui.toggle_value(&mut app.analyzer.show_waterfall, "[3D WATERFALL]");
             ui.toggle_value(&mut app.analyzer.show_camelot_wheel, "[CAMELOT WHEEL]");
             ui.toggle_value(&mut app.analyzer.layer_rhythm, "[RHYTHM]");
+            ui.toggle_value(&mut app.analyzer.layer_harmonic, "[ISO 226 PHON]");
             ui.toggle_value(&mut app.analyzer.layer_harmonic, "[HARMONIC]");
             ui.toggle_value(&mut app.analyzer.layer_transient, "[TRANSIENT]");
             ui.toggle_value(&mut app.analyzer.layer_stereo, "[STEREO]");
@@ -444,29 +463,28 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
             );
         }
 
-        // 6. [HARMONIC] Layer: Pitch $f_0$ track & overtones
+        // 6. [ISO 226 EQUAL-LOUDNESS PHON CONTOURS] Layer
         if app.analyzer.layer_harmonic {
-            let pitch_hz = 130.0 + (time.sin() as f32 * 20.0);
-            let y_pos = rect.bottom() - (pitch_hz / 1000.0 * rect.height()).clamp(20.0, rect.height() - 20.0);
-
-            ui.painter().line_segment(
-                [egui::pos2(rect.left(), y_pos), egui::pos2(rect.right(), y_pos)],
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 220, 180)),
-            );
-
-            for harmonic in 2..=4 {
-                let h_hz = pitch_hz * harmonic as f32;
-                let h_y = rect.bottom() - (h_hz / 1000.0 * rect.height()).clamp(10.0, rect.height() - 10.0);
-                ui.painter().line_segment(
-                    [egui::pos2(rect.left(), h_y), egui::pos2(rect.right(), h_y)],
-                    egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 180, 150).linear_multiply(0.5 / harmonic as f32)),
-                );
+            for phon in &[20.0f32, 40.0, 80.0] {
+                let mut phon_pts = Vec::with_capacity(num_bins);
+                for i in 0..num_bins {
+                    let factor = calculate_iso226_phon_factor(i, *phon);
+                    let x = rect.left() + (i as f32 + 0.5) * bin_w;
+                    let y = rect.bottom() - factor * rect.height() * 0.4;
+                    phon_pts.push(egui::pos2(x, y));
+                }
+                for i in 0..num_bins.saturating_sub(1) {
+                    ui.painter().line_segment(
+                        [phon_pts[i], phon_pts[i + 1]],
+                        egui::Stroke::new(1.2, egui::Color32::from_rgb(0, 220, 180).linear_multiply(*phon / 100.0)),
+                    );
+                }
             }
 
             ui.painter().text(
-                egui::pos2(rect.left() + 10.0, y_pos - 12.0),
-                egui::Align2::LEFT_BOTTOM,
-                format!("f₀ Fundamental: {:.1} Hz (C#2) + Overtones", pitch_hz),
+                egui::pos2(rect.left() + 10.0, rect.top() + 60.0),
+                egui::Align2::LEFT_TOP,
+                "ISO 226 EQUAL-LOUDNESS CONTOURS (20, 40, 80 PHON)",
                 egui::FontId::proportional(10.0),
                 egui::Color32::from_rgb(0, 220, 180),
             );
@@ -783,5 +801,14 @@ mod tests {
         assert!(!state.show_waterfall);
         assert!(state.waterfall_history.capacity() >= 64);
         assert!(state.lufs_history.capacity() >= 128);
+    }
+
+    #[test]
+    fn test_iso226_phon_curves() {
+        let sub_bass_factor = calculate_iso226_phon_factor(0, 80.0);
+        let ear_resonance_factor = calculate_iso226_phon_factor(93, 80.0);
+
+        assert!(sub_bass_factor < ear_resonance_factor, "Ear canal resonance bin should have higher sensitivity factor than sub-bass bin");
+        assert!(ear_resonance_factor > 1.0, "Resonance bin should exceed 1.0 factor");
     }
 }
