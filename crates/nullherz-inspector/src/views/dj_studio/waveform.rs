@@ -168,15 +168,16 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
     if let Some(wf_lock) = &app.deck_waveform_renderers[i] {
         let mut wf = wf_lock.lock();
         let color = deck_color.to_array().map(|v| v as f32 / 255.0);
+        let style = app.mixer.waveform_styles[i];
 
         if let Some(wgpu) = &app.wgpu_renderer {
             let wgpu = wgpu.lock();
-            wf.update_globals(&wgpu.queue, 0.0, 1.0, color);
+            wf.update_globals(&wgpu.queue, 0.0, 1.0, false, style, color);
             if t.metadata.band_waveform.is_empty() {
                 // Pre-band library rows: mono silhouette in the deck color.
                 wf.update_from_mip_window(&wgpu.queue, &t.metadata.mip_waveform, start_ratio, end_ratio, rect.width() as u32, color);
             } else {
-                wf.update_from_band_window(&wgpu.queue, &t.metadata.band_waveform, start_ratio, end_ratio, rect.width() as u32);
+                wf.update_from_band_window(&wgpu.queue, &t.metadata.band_waveform, start_ratio, end_ratio, rect.width() as u32, style, color);
             }
         }
 
@@ -311,4 +312,20 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
         egui::FontId::monospace(theme.type_caption),
         theme.text_primary,
     );
+
+    // Waveform Style Selector Overlay in top-right corner
+    let style_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.max.x - 130.0, rect.min.y + 3.0),
+        egui::vec2(124.0, 18.0),
+    );
+    ui.allocate_ui_at_rect(style_rect, |ui| {
+        egui::ComboBox::from_id_source(format!("deck_wf_style_cb_{}", i))
+            .selected_text(egui::RichText::new(app.mixer.waveform_styles[i].name()).size(9.0).strong().color(theme.text_primary))
+            .width(118.0)
+            .show_ui(ui, |ui| {
+                for st in nullherz_ui_hal::render::waveform_renderer::WaveformStyle::all() {
+                    ui.selectable_value(&mut app.mixer.waveform_styles[i], *st, st.name());
+                }
+            });
+    });
 }

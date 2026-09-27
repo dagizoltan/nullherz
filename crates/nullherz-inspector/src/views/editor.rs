@@ -52,8 +52,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
                 if let Some(wgpu) = &app.wgpu_renderer {
                     let wgpu = wgpu.lock();
-                    wf.update_globals(&wgpu.queue, scroll, zoom, color);
-                    wf.update_from_mip_waveform(&wgpu.queue, &track.metadata.mip_waveform, zoom, rect.width() as u32, app.theme.accent.to_array().map(|v| v as f32 / 255.0));
+                    let style = app.mixer.waveform_styles[0];
+                    wf.update_globals(&wgpu.queue, scroll, zoom, false, style, color);
+                    if track.metadata.band_waveform.is_empty() {
+                        wf.update_from_mip_waveform(&wgpu.queue, &track.metadata.mip_waveform, zoom, rect.width() as u32, app.theme.accent.to_array().map(|v| v as f32 / 255.0));
+                    } else {
+                        wf.update_from_band_waveform(&wgpu.queue, &track.metadata.band_waveform, zoom, rect.width() as u32, style, color);
+                    }
                 }
 
                 nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_lock.clone());
