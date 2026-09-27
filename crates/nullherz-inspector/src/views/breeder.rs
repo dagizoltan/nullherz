@@ -546,50 +546,55 @@ impl BreederView {
             for (idx, donor) in state.donors.iter_mut().enumerate() {
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(&donor.donor_name).strong().size(theme.type_label).color(theme.track_colors[idx % theme.track_colors.len()]));
+                        let slot_title = format!("DONOR SLOT {}", idx + 1);
+                        ui.label(RichText::new(&slot_title).strong().size(theme.type_label).color(theme.track_colors[idx % theme.track_colors.len()]));
                         ui.add_space(10.0);
                         let donor_track_label = app.get_cached_track(donor.donor_id)
                             .map(|t| format!("{} - {}", t.title, t.artist))
-                            .unwrap_or_else(|| "Select Track...".to_string());
+                            .unwrap_or_else(|| "Select Library Track...".to_string());
                         if ui.button(RichText::new(donor_track_label).size(theme.type_body)).clicked() {
                             state.selecting_parent = Some(idx + 1);
                         }
-                        ui.add_space(10.0);
-                        ui.checkbox(&mut donor.enable_spectral, "Spectral");
-                        ui.checkbox(&mut donor.enable_rhythmic, "Rhythm");
-                        ui.checkbox(&mut donor.enable_transient, "Transient");
-                        ui.checkbox(&mut donor.enable_spatial, "Spatial");
-                        ui.checkbox(&mut donor.enable_pitch, "Pitch");
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(RichText::new("X").color(theme.danger)).clicked() {
+                            if ui.button(RichText::new("X REMOVE").strong().color(theme.danger)).clicked() {
                                 remove_idx = Some(idx);
                             }
                         });
+                    });
+
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("SELECT CARRIED CHARACTERISTICS:").size(theme.type_caption).strong().color(theme.text_secondary));
+                        ui.toggle_value(&mut donor.enable_spectral, "🎛️ Spectral Timbre");
+                        ui.toggle_value(&mut donor.enable_rhythmic, "🥁 Rhythmic Groove");
+                        ui.toggle_value(&mut donor.enable_transient, "⚡ Transient Attack");
+                        ui.toggle_value(&mut donor.enable_spatial, "🌌 Spatial Width");
+                        ui.toggle_value(&mut donor.enable_pitch, "💜 Pitch Contour");
                     });
 
                     ui.separator();
 
                     ui.horizontal(|ui| {
                         if donor.enable_spectral {
-                            ui.label("Spectral Weight:");
-                            ui.add(egui::Slider::new(&mut donor.spectral_weight, 0.0..=1.0));
+                            ui.label(RichText::new("Spectral Timbre Carry:").size(theme.type_caption));
+                            ui.add(egui::Slider::new(&mut donor.spectral_weight, 0.0..=1.0).text(""));
                         }
                         if donor.enable_rhythmic {
-                            ui.label("Rhythm Weight:");
-                            ui.add(egui::Slider::new(&mut donor.rhythmic_weight, 0.0..=1.0));
+                            ui.label(RichText::new("Rhythmic Groove Carry:").size(theme.type_caption));
+                            ui.add(egui::Slider::new(&mut donor.rhythmic_weight, 0.0..=1.0).text(""));
                         }
                         if donor.enable_transient {
-                            ui.label("Transient Weight:");
-                            ui.add(egui::Slider::new(&mut donor.transient_weight, 0.0..=1.0));
+                            ui.label(RichText::new("Transient Attack Carry:").size(theme.type_caption));
+                            ui.add(egui::Slider::new(&mut donor.transient_weight, 0.0..=1.0).text(""));
                         }
                         if donor.enable_spatial {
-                            ui.label("Spatial Weight:");
-                            ui.add(egui::Slider::new(&mut donor.spatial_weight, 0.0..=1.0));
+                            ui.label(RichText::new("Spatial Width Carry:").size(theme.type_caption));
+                            ui.add(egui::Slider::new(&mut donor.spatial_weight, 0.0..=1.0).text(""));
                         }
                         if donor.enable_pitch {
-                            ui.label("Pitch Weight:");
-                            ui.add(egui::Slider::new(&mut donor.pitch_weight, 0.0..=1.0));
+                            ui.label(RichText::new("Pitch Contour Carry:").size(theme.type_caption));
+                            ui.add(egui::Slider::new(&mut donor.pitch_weight, 0.0..=1.0).text(""));
                         }
                     });
                 });
