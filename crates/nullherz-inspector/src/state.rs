@@ -96,6 +96,11 @@ pub struct AnalyzerViewState {
     pub source_a: AbCompareSource,
     pub source_b: AbCompareSource,
 
+    pub show_waterfall: bool,
+    pub show_camelot_wheel: bool,
+    pub waterfall_history: std::collections::VecDeque<[f32; 128]>,
+    pub lufs_history: std::collections::VecDeque<f32>,
+
     pub _selected_event_index: Option<usize>,
 }
 
@@ -117,6 +122,11 @@ impl Default for AnalyzerViewState {
             ab_enabled: false,
             source_a: AbCompareSource::DeckA,
             source_b: AbCompareSource::DeckB,
+
+            show_waterfall: false,
+            show_camelot_wheel: true,
+            waterfall_history: std::collections::VecDeque::with_capacity(64),
+            lufs_history: std::collections::VecDeque::with_capacity(128),
 
             _selected_event_index: None,
         }

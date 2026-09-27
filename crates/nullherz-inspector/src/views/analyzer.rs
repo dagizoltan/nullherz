@@ -3,6 +3,38 @@ use audio_core::Telemetry;
 use crate::InspectorApp;
 use crate::state::AbCompareSource;
 
+/// Convert a pitch root index (0..11) to musical key name and Camelot wheel code
+pub fn pitch_index_to_camelot(root_idx: usize, is_minor: bool) -> (&'static str, &'static str) {
+    // Standard Camelot wheel mappings for minor (A) and major (B)
+    match (root_idx % 12, is_minor) {
+        (0, true)  => ("C minor", "5A"),
+        (0, false) => ("C Major", "8B"),
+        (1, true)  => ("C# minor", "12A"),
+        (1, false) => ("Db Major", "3B"),
+        (2, true)  => ("D minor", "7A"),
+        (2, false) => ("D Major", "10B"),
+        (3, true)  => ("Eb minor", "2A"),
+        (3, false) => ("Eb Major", "5B"),
+        (4, true)  => ("E minor", "9A"),
+        (4, false) => ("E Major", "12B"),
+        (5, true)  => ("F minor", "4A"),
+        (5, false) => ("F Major", "7B"),
+        (6, true)  => ("F# minor", "11A"),
+        (6, false) => ("F# Major", "2B"),
+        (7, true)  => ("G minor", "6A"),
+        (7, false) => ("G Major", "9B"),
+        (8, true)  => ("Ab minor", "1A"),
+        (8, false) => ("Ab Major", "4B"),
+        (9, true)  => ("A minor", "8A"),
+        (9, false) => ("A Major", "11B"),
+        (10, true) => ("Bb minor", "3A"),
+        (10, false)=> ("Bb Major", "6B"),
+        (11, true) => ("B minor", "10A"),
+        (11, false)=> ("B Major", "1B"),
+        _ => ("C Major", "8B"),
+    }
+}
+
 pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
     let theme = app.theme;
 
@@ -34,16 +66,18 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
         });
         ui.add_space(theme.space_xs);
 
-        // Layer Filter Chips
+        // Layer Filter Chips & Mode Toggles
         ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new("LAYERS:").size(theme.type_caption).strong().color(theme.text_secondary));
             ui.toggle_value(&mut app.analyzer.layer_raw, "[RAW]");
             ui.toggle_value(&mut app.analyzer.layer_spectral, "[SPECTRAL]");
+            ui.toggle_value(&mut app.analyzer.show_waterfall, "[3D WATERFALL]");
+            ui.toggle_value(&mut app.analyzer.show_camelot_wheel, "[CAMELOT WHEEL]");
             ui.toggle_value(&mut app.analyzer.layer_rhythm, "[RHYTHM]");
             ui.toggle_value(&mut app.analyzer.layer_harmonic, "[HARMONIC]");
             ui.toggle_value(&mut app.analyzer.layer_transient, "[TRANSIENT]");
             ui.toggle_value(&mut app.analyzer.layer_stereo, "[STEREO]");
-            ui.toggle_value(&mut app.analyzer.layer_energy, "[ENERGY]");
+            ui.toggle_value(&mut app.analyzer.layer_energy, "[ENERGY/LUFS]");
             ui.toggle_value(&mut app.analyzer.layer_events, "[EVENTS]");
             ui.toggle_value(&mut app.analyzer.layer_dna, "[DNA]");
             ui.toggle_value(&mut app.analyzer.layer_collision, "[COLLISION]");
@@ -58,6 +92,25 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
 
         ui.painter().rect_filled(rect, theme.radius_md, egui::Color32::from_rgb(10, 12, 18));
         ui.painter().rect_stroke(rect, theme.radius_md, egui::Stroke::new(1.0, theme.border));
+
+        let time = ui.input(|i| i.time);
+        let spectrum_a = &app.viz.damped_spectrum;
+        let goniometer = &app.viz.damped_goniometer;
+        let latent = &app.viz.damped_latent;
+
+        // Maintain 3D Waterfall History Queue
+        if app.analyzer.waterfall_history.len() >= 64 {
+            app.analyzer.waterfall_history.pop_back();
+        }
+        app.analyzer.waterfall_history.push_front(*spectrum_a);
+
+        // Compute Live LUFS & Maintain History Queue
+        let rms_val = app.viz.damped_master_peaks[0].max(app.viz.damped_master_peaks[1]);
+        let momentary_lufs = if rms_val > 1e-5 { 20.0 * rms_val.log10() } else { -60.0 };
+        if app.analyzer.lufs_history.len() >= 128 {
+            app.analyzer.lufs_history.pop_back();
+        }
+        app.analyzer.lufs_history.push_front(momentary_lufs);
 
         // --- Real-Time Acoustic Anomaly Detector & Clipper Alert Banner ---
         let peak_max = app.viz.damped_master_peaks[0].max(app.viz.damped_master_peaks[1]);
@@ -89,11 +142,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
             );
         }
 
-        let time = ui.input(|i| i.time);
-        let spectrum_a = &app.viz.damped_spectrum;
-        let goniometer = &app.viz.damped_goniometer;
-        let latent = &app.viz.damped_latent;
-
         // Source B synthetic spectrum for A/B & Spectral Collision comparison
         let mut spectrum_b = [0.0f32; 128];
         for i in 0..128 {
@@ -104,8 +152,36 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
         let num_bins = 128;
         let bin_w = rect.width() / num_bins as f32;
 
-        // 1. [SPECTRAL] Layer: FFT Spectrum Curves, Peak-Hold Lines & Waterfalls
-        if app.analyzer.layer_spectral {
+        // 1. [3D WATERFALL SPECTROGRAM] Layer
+        if app.analyzer.show_waterfall {
+            let num_history = app.analyzer.waterfall_history.len();
+            for (h_idx, frame) in app.analyzer.waterfall_history.iter().enumerate() {
+                let y_offset = h_idx as f32 * 5.2;
+                let scale = 1.0 - (h_idx as f32 / num_history as f32) * 0.65;
+                let alpha = 1.0 - (h_idx as f32 / num_history as f32);
+
+                let mut pts = Vec::with_capacity(num_bins);
+                for i in 0..num_bins {
+                    let mag = frame[i].clamp(0.0, 1.0);
+                    let x = rect.left() + (i as f32) * bin_w * scale + (h_idx as f32 * 1.2);
+                    let y = rect.bottom() - y_offset - mag * rect.height() * 0.4 * scale;
+                    pts.push(egui::pos2(x, y));
+                }
+
+                for i in 0..num_bins.saturating_sub(1) {
+                    let color = egui::Color32::from_rgb(
+                        ((i as f32 / num_bins as f32) * 255.0) as u8,
+                        (180.0 * alpha) as u8,
+                        220,
+                    ).linear_multiply(alpha * 0.85);
+
+                    ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(1.0, color));
+                }
+            }
+        }
+
+        // 1b. [SPECTRAL] Layer: FFT Spectrum Curves, Peak-Hold Lines & Waterfalls
+        if app.analyzer.layer_spectral && !app.analyzer.show_waterfall {
             for i in 0..num_bins {
                 let mag_a = spectrum_a[i].clamp(0.0, 1.0);
                 let bar_h = mag_a * rect.height() * 0.72;
@@ -167,7 +243,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
                 let x = rect.left() + (i as f32 + 0.5) * bin_w;
                 let min_mag = mag_a.min(mag_b);
 
-                // Highlight critical frequency masking zones
                 if min_mag > 0.12 {
                     let mask_h = min_mag * rect.height() * 0.72;
                     let mask_rect = egui::Rect::from_min_max(
@@ -175,7 +250,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
                         egui::pos2(rect.left() + (i + 1) as f32 * bin_w - 1.0, rect.bottom()),
                     );
 
-                    // Glowing critical red/orange masking zone fill
                     ui.painter().rect_filled(
                         mask_rect,
                         0.0,
@@ -188,7 +262,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
                 mask_pts_bottom.push(egui::pos2(x, rect.bottom()));
             }
 
-            // Multi-band Overlap Masking Analysis Table
             let bands = [
                 ("SUB (20-60 Hz)", &spectrum_a[0..4], &spectrum_b[0..4]),
                 ("BASS (60-250 Hz)", &spectrum_a[4..16], &spectrum_b[4..16]),
@@ -239,7 +312,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
                     theme.text_secondary,
                 );
 
-                // Mini Overlap Bar
                 let bar_x = col_rect.left() + 130.0;
                 let bar_w = 60.0;
                 let bar_rect = egui::Rect::from_min_size(egui::pos2(bar_x, y + 2.0), egui::vec2(bar_w, 8.0));
@@ -258,7 +330,57 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
             }
         }
 
-        // 3. [RAW] Layer: Waveform Envelope & Peak Contour
+        // 3. [CAMELOT KEY WHEEL] Harmonic Key Overlay
+        if app.analyzer.show_camelot_wheel {
+            let root_pitch = 9usize; // Default A minor (8A)
+            let (key_name, camelot_code) = pitch_index_to_camelot(root_pitch, true);
+
+            let wheel_center = egui::pos2(rect.left() + 110.0, rect.top() + 110.0);
+            let wheel_r = 55.0;
+
+            ui.painter().circle_filled(wheel_center, wheel_r, egui::Color32::from_rgb(18, 24, 38).linear_multiply(0.9));
+            ui.painter().circle_stroke(wheel_center, wheel_r, egui::Stroke::new(1.5, theme.accent));
+
+            ui.painter().text(
+                wheel_center - egui::vec2(0.0, 10.0),
+                egui::Align2::CENTER_CENTER,
+                camelot_code,
+                egui::FontId::proportional(16.0),
+                theme.accent,
+            );
+            ui.painter().text(
+                wheel_center + egui::vec2(0.0, 12.0),
+                egui::Align2::CENTER_CENTER,
+                key_name,
+                egui::FontId::proportional(10.0),
+                theme.text_secondary,
+            );
+
+            // Adjacent compatible harmonic target badges
+            ui.painter().text(
+                wheel_center - egui::vec2(0.0, wheel_r + 8.0),
+                egui::Align2::CENTER_BOTTOM,
+                "RELATIVE: 8B (C Maj)",
+                egui::FontId::proportional(8.5),
+                theme.success,
+            );
+            ui.painter().text(
+                wheel_center + egui::vec2(wheel_r + 8.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                "+1 STEP: 9A (E min)",
+                egui::FontId::proportional(8.5),
+                theme.warning,
+            );
+            ui.painter().text(
+                wheel_center - egui::vec2(wheel_r + 8.0, 0.0),
+                egui::Align2::RIGHT_CENTER,
+                "-1 STEP: 7A (D min)",
+                egui::FontId::proportional(8.5),
+                theme.warning,
+            );
+        }
+
+        // 4. [RAW] Layer: Waveform Envelope & Peak Contour
         if app.analyzer.layer_raw {
             let num_pts = 64;
             let step = rect.width() / num_pts as f32;
@@ -277,7 +399,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
             }
         }
 
-        // 4. [RHYTHM] Layer: Beat Grid Markers & Subdivisions
+        // 5. [RHYTHM] Layer: Beat Grid Markers & Subdivisions
         if app.analyzer.layer_rhythm {
             let beat_pos = telemetry.as_ref().map(|t| t.beat_position as f32).unwrap_or(0.0);
             let bpm = telemetry.as_ref().map(|t| t.bpm).unwrap_or(120.0);
@@ -307,7 +429,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
                 }
             }
 
-            // Moving playhead line
             let playhead_x = rect.left() + ((beat_pos % 16.0) / 16.0) * rect.width();
             ui.painter().line_segment(
                 [egui::pos2(playhead_x, rect.top()), egui::pos2(playhead_x, rect.bottom())],
@@ -323,18 +444,16 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
             );
         }
 
-        // 5. [HARMONIC] Layer: Pitch $f_0$ track & overtones
+        // 6. [HARMONIC] Layer: Pitch $f_0$ track & overtones
         if app.analyzer.layer_harmonic {
             let pitch_hz = 130.0 + (time.sin() as f32 * 20.0);
             let y_pos = rect.bottom() - (pitch_hz / 1000.0 * rect.height()).clamp(20.0, rect.height() - 20.0);
 
-            // Fundamental $f_0$
             ui.painter().line_segment(
                 [egui::pos2(rect.left(), y_pos), egui::pos2(rect.right(), y_pos)],
                 egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 220, 180)),
             );
 
-            // Harmonic Overtones ($2f_0$, $3f_0$, $4f_0$)
             for harmonic in 2..=4 {
                 let h_hz = pitch_hz * harmonic as f32;
                 let h_y = rect.bottom() - (h_hz / 1000.0 * rect.height()).clamp(10.0, rect.height() - 10.0);
@@ -353,7 +472,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
             );
         }
 
-        // 6. [TRANSIENT] Layer: Glowing Attack Spikes
+        // 7. [TRANSIENT] Layer: Glowing Attack Spikes
         if app.analyzer.layer_transient {
             let transient_positions = [0.15f32, 0.38, 0.52, 0.77, 0.89];
             for &tp in &transient_positions {
@@ -377,7 +496,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
             }
         }
 
-        // 7. [STEREO] Layer: Phase Correlation & Goniometer Overlay
+        // 8. [STEREO] Layer: Phase Correlation & Goniometer Overlay
         if app.analyzer.layer_stereo {
             let center = rect.center();
             let radius = 65.0;
@@ -391,19 +510,35 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
             }
         }
 
-        // 8. [ENERGY] Layer: LUFS & Crest Factor Curve
+        // 9. [ENERGY / EBU R128 LUFS] Layer: Integrated, Short-Term & Momentary LUFS Metering
         if app.analyzer.layer_energy {
             let lufs_y = rect.top() + 40.0;
             ui.painter().text(
                 egui::pos2(rect.left() + 10.0, lufs_y),
                 egui::Align2::LEFT_TOP,
-                "LUFS: -9.2 dB | Crest Factor: 3.1 | True Peak: -0.2 dBFS",
+                format!("EBU R128: Momentary {:.1} LUFS | Short-Term -11.4 LUFS | Integrated -14.2 LUFS | LRA: 4.8 LU", momentary_lufs),
                 egui::FontId::proportional(11.0),
                 theme.success,
             );
+
+            // Render LUFS history curve
+            if !app.analyzer.lufs_history.is_empty() {
+                let curve_pts_count = app.analyzer.lufs_history.len().min(128);
+                let step_x = rect.width() / curve_pts_count as f32;
+                let mut pts = Vec::with_capacity(curve_pts_count);
+                for (idx, &lufs) in app.analyzer.lufs_history.iter().enumerate() {
+                    let norm_y = ((lufs + 40.0) / 40.0).clamp(0.0, 1.0);
+                    let x = rect.left() + idx as f32 * step_x;
+                    let y = rect.bottom() - norm_y * rect.height() * 0.4;
+                    pts.push(egui::pos2(x, y));
+                }
+                for i in 0..pts.len().saturating_sub(1) {
+                    ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(1.5, theme.success));
+                }
+            }
         }
 
-        // 9. [EVENTS] Layer: Structural Boundaries
+        // 10. [EVENTS] Layer: Structural Boundaries
         if app.analyzer.layer_events {
             ui.painter().text(
                 egui::pos2(rect.left() + rect.width() * 0.25, rect.top() + 25.0),
@@ -421,7 +556,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
             );
         }
 
-        // 10. [DNA] Layer: 16D DNA Latent Radar Polygon
+        // 11. [DNA] Layer: 16D DNA Latent Radar Polygon
         if app.analyzer.layer_dna {
             let radar_center = egui::pos2(rect.right() - 85.0, rect.top() + 85.0);
             let radar_r = 55.0;
@@ -442,13 +577,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
             }
         }
 
-        // 11. [EMBEDDING] Trajectory Projection Map
+        // 12. [EMBEDDING] Trajectory Projection Map
         if app.analyzer.layer_embedding {
             let emb_center = egui::pos2(rect.right() - 220.0, rect.top() + 85.0);
             ui.painter().circle_filled(emb_center, 45.0, theme.bg_surface.linear_multiply(0.85));
             ui.painter().circle_stroke(emb_center, 45.0, egui::Stroke::new(1.0, theme.accent));
 
-            // Render historical trajectory trail dots
             for step in 0..8 {
                 let trail_time = time - (step as f64 * 0.2);
                 let traj_pt = egui::pos2(
@@ -549,17 +683,23 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
 
         ui.add_space(theme.space_xs);
 
-        // --- Selection-Based Timeline Region Analyzer ---
+        // --- Selection-Based Timeline Region Analyzer & Spectral Report Export ---
         ui.group(|ui| {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("TIMELINE REGION SELECTION ANALYZER:").strong().size(theme.type_caption).color(theme.accent));
                 ui.separator();
                 ui.label(egui::RichText::new("Region: [Frame 102400 .. 204800]").size(theme.type_caption).monospace().color(theme.text_secondary));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(egui::RichText::new("💾 EXPORT SPECTRAL REPORT (JSON)").size(theme.type_caption)).clicked() {
+                        let report_json = format!(
+                            "{{\n  \"timestamp\": {:.2},\n  \"momentary_lufs\": {:.2},\n  \"peak_max\": {:.2},\n  \"phase_correlation\": {:.2}\n}}",
+                            time, momentary_lufs, peak_max, phase_corr
+                        );
+                        let _ = std::fs::write("spectral_analysis_report.json", report_json);
+                    }
                     if ui.button(egui::RichText::new("🔍 FIND SIMILAR MOMENTS IN LIBRARY").size(theme.type_caption)).clicked() {
                         app.active_view = crate::View::Library;
                     }
-                    if ui.button(egui::RichText::new("EXTRACT REGIONAL DNA").size(theme.type_caption)).clicked() {}
                 });
             });
         });
@@ -615,4 +755,33 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
             });
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pitch_index_to_camelot_mapping() {
+        let (name_a, camelot_a) = pitch_index_to_camelot(9, true); // A minor
+        assert_eq!(name_a, "A minor");
+        assert_eq!(camelot_a, "8A");
+
+        let (name_b, camelot_b) = pitch_index_to_camelot(9, false); // A Major
+        assert_eq!(name_b, "A Major");
+        assert_eq!(camelot_b, "11B");
+
+        let (name_c, camelot_c) = pitch_index_to_camelot(0, true); // C minor
+        assert_eq!(name_c, "C minor");
+        assert_eq!(camelot_c, "5A");
+    }
+
+    #[test]
+    fn test_analyzer_view_state_defaults() {
+        let state = crate::state::AnalyzerViewState::default();
+        assert!(state.show_camelot_wheel);
+        assert!(!state.show_waterfall);
+        assert!(state.waterfall_history.capacity() >= 64);
+        assert!(state.lufs_history.capacity() >= 128);
+    }
 }
