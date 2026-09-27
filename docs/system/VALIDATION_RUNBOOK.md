@@ -35,7 +35,13 @@ order:
    it or add an rtprio limits entry (`sudo usermod -aG pipewire $USER`
    piggybacks on the stock PipeWire rule). Buffer slack is 8 periods
    (~46 ms) by default, tunable via `NULLHERZ_BUFFER_PERIODS` (2–32; lower
-   = less latency, only safe with RT acquired).
+   = less latency, only safe with RT acquired). For baremetal ultra-low-latency
+   hardware operation (< 3.0 ms round-trip), enable direct hardware MMAP mode,
+   period wakeup bypass, and D-Bus device reservation via environment flags:
+   `NULLHERZ_ALSA_MMAP=1 NULLHERZ_NO_PERIOD_WAKEUP=1 NULLHERZ_RESERVE_DEVICE=1`.
+   An automated baremetal system tuning script is available at `scripts/baremetal_core_isolate.sh`
+   (`sudo ./scripts/baremetal_core_isolate.sh --apply` to configure governor, HugePages, and RT limits;
+   `./scripts/baremetal_core_isolate.sh --status` to inspect current system state).
 5. **OS-level check** if still silent: `aplay /usr/share/sounds/alsa/Front_Center.wav`
    and `pactl get-sink-mute @DEFAULT_SINK@`.
 
