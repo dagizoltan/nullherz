@@ -110,6 +110,7 @@ impl ProcessorTypeId {
     pub const MODULATION_FX: Self = Self(239);
     pub const TRANSIENT_SHAPER: Self = Self(240);
     pub const TAPE_SATURATOR: Self = Self(241);
+    pub const MUTATOR: Self = Self(242);
 }
 
 impl From<u32> for ProcessorTypeId {

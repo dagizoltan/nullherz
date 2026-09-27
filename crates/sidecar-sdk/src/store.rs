@@ -686,6 +686,77 @@ impl AudioProcessor for TransientShaperProcessor {
 }
 
 // ============================================================================
+// 4d4. Mutator Sidecar Processor
+// ============================================================================
+pub struct MutatorSidecarProcessor {
+    pub flesh: f32,
+    pub bone: f32,
+    pub teeth: f32,
+    pub parasite: f32,
+    pub asymmetry: f32,
+    pub abomination: f32,
+    pub dry_wet: f32,
+}
+
+impl MutatorSidecarProcessor {
+    pub fn new() -> Self {
+        Self {
+            flesh: 0.0,
+            bone: 0.0,
+            teeth: 0.0,
+            parasite: 0.0,
+            asymmetry: 0.0,
+            abomination: 0.0,
+            dry_wet: 0.5,
+        }
+    }
+}
+
+impl Default for MutatorSidecarProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SignalProcessor for MutatorSidecarProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut ProcessContext) {
+        let num_ch = inputs.len().min(outputs.len());
+        for ch in 0..num_ch {
+            let in_buf = inputs[ch];
+            let out_buf = &mut outputs[ch];
+            let n = in_buf.len().min(out_buf.len());
+            let mix = self.dry_wet;
+            for i in 0..n {
+                let sat = (in_buf[i] * (1.0 + self.teeth * 4.0)).tanh();
+                out_buf[i] = in_buf[i] * (1.0 - mix) + sat * mix;
+            }
+        }
+    }
+}
+
+impl MidiResponder for MutatorSidecarProcessor {}
+impl SnapshotProvider for MutatorSidecarProcessor {}
+
+impl AudioProcessor for MutatorSidecarProcessor {
+    fn apply_command(&mut self, command: &ProcessorCommand) {
+        if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { param_id, value, .. }) = command {
+            match param_id {
+                0 => self.flesh = *value,
+                1 => self.bone = *value,
+                2 => self.teeth = *value,
+                3 => self.parasite = *value,
+                4 => self.asymmetry = *value,
+                5 => self.abomination = *value,
+                7 => self.dry_wet = *value,
+                _ => {}
+            }
+        }
+    }
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
+// ============================================================================
 // 4d3. Tape Saturator Processor
 // ============================================================================
 pub struct TapeSaturatorProcessor {
@@ -1348,6 +1419,18 @@ impl SidecarStore {
 
         store.register(
             SidecarDescriptor::new(
+                "mutator",
+                "MUTATOR / TRINYÓ Sound Deformer",
+                SidecarType::AudioInsert,
+                &["insert", "neural", "distortion", "mutation", "real-time"],
+                "Identity-preserving sound deformation engine with FLESH, BONE, TEETH, and PARASITE parallel mutation branches",
+                0,
+            ),
+            || Box::new(MutatorSidecarProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
                 "algorithmic-reverb",
                 "Algorithmic Stereo Reverb",
                 SidecarType::AudioInsert,
@@ -1438,7 +1521,7 @@ mod store_tests {
     fn test_store_list_and_descriptors() {
         let store = SidecarStore::with_defaults();
         let list = store.list();
-        assert_eq!(list.len(), 25);
+        assert_eq!(list.len(), 26);
 
         let delay_desc = store.get_descriptor("algorithmic-delay").expect("algorithmic-delay must exist");
         assert_eq!(delay_desc.name, "Algorithmic Tape Delay");
@@ -1457,7 +1540,7 @@ mod store_tests {
         assert_eq!(delays[0].id, "algorithmic-delay");
 
         let neurals = store.filter_by_tag("neural");
-        assert_eq!(neurals.len(), 13);
+        assert_eq!(neurals.len(), 14);
         let neural_ids: Vec<_> = neurals.iter().map(|d| d.id.as_str()).collect();
         assert!(neural_ids.contains(&"neural-visuals"));
         assert!(neural_ids.contains(&"neural-saturation"));
@@ -1473,14 +1556,14 @@ mod store_tests {
         assert_eq!(instruments.len(), 2);
 
         let realtimes = store.filter_by_tag("real-time");
-        assert_eq!(realtimes.len(), 25);
+        assert_eq!(realtimes.len(), 26);
 
         let visuals = store.filter_by_tag("visual");
         assert_eq!(visuals.len(), 10);
 
         // Multi-tag queries
         let neural_inserts = store.filter_by_tags(&["neural", "insert", "real-time"]);
-        assert_eq!(neural_inserts.len(), 10);
+        assert_eq!(neural_inserts.len(), 11);
 
         let neural_eqs = store.filter_by_tags(&["neural", "eq"]);
         assert_eq!(neural_eqs.len(), 2);
@@ -1495,7 +1578,7 @@ mod store_tests {
         assert_eq!(instruments[0].id, "algorithmic-synth");
 
         let audio_inserts = store.filter_by_type(SidecarType::AudioInsert);
-        assert_eq!(audio_inserts.len(), 14);
+        assert_eq!(audio_inserts.len(), 15);
 
         let viz_generators = store.filter_by_type(SidecarType::VisualGenerator);
         assert_eq!(viz_generators.len(), 9);

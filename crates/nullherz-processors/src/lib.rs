@@ -35,6 +35,7 @@ pub mod algorithmic_reverb;
 pub mod modulation_fx;
 pub mod transient_shaper;
 pub mod tape_saturator;
+pub mod mutator;
 #[cfg(test)]
 mod sampler_tests;
 #[cfg(test)]
@@ -74,6 +75,7 @@ pub use algorithmic_reverb::AlgorithmicReverbProcessor;
 pub use modulation_fx::AlgorithmicModulationProcessor;
 pub use transient_shaper::TransientShaperProcessor;
 pub use tape_saturator::TapeSaturatorProcessor;
+pub use mutator::{MutatorProcessor, MutatorFactory};
 pub use registry::ProcessorRegistry;
 
 #[cfg(test)]
