@@ -28,6 +28,7 @@ use crate::algorithmic_reverb::*;
 use crate::modulation_fx::*;
 use crate::transient_shaper::*;
 use crate::tape_saturator::*;
+pub use crate::mutator::MutatorFactory;
 
 /// Identity pass-through, used to hold an insert slot open.
 ///
