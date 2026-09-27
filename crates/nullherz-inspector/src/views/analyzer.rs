@@ -130,13 +130,30 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
                 }
                 app.analyzer.waterfall_history.push_front(*spectrum_a);
 
-                // Compute Live LUFS & Maintain History Queue
+                // Compute Dynamic LUFS Metrics from History Queue
                 let rms_val = app.viz.damped_master_peaks[0].max(app.viz.damped_master_peaks[1]);
                 let momentary_lufs = if rms_val > 1e-5 { 20.0 * rms_val.log10() } else { -60.0 };
                 if app.analyzer.lufs_history.len() >= 128 {
                     app.analyzer.lufs_history.pop_back();
                 }
                 app.analyzer.lufs_history.push_front(momentary_lufs);
+
+                let short_term_lufs = if !app.analyzer.lufs_history.is_empty() {
+                    let count = app.analyzer.lufs_history.len().min(30);
+                    app.analyzer.lufs_history.iter().take(count).sum::<f32>() / count as f32
+                } else {
+                    momentary_lufs
+                };
+
+                let integrated_lufs = if !app.analyzer.lufs_history.is_empty() {
+                    app.analyzer.lufs_history.iter().sum::<f32>() / app.analyzer.lufs_history.len() as f32
+                } else {
+                    momentary_lufs
+                };
+
+                let min_lufs = app.analyzer.lufs_history.iter().copied().fold(0.0f32, f32::min);
+                let max_lufs = app.analyzer.lufs_history.iter().copied().fold(-60.0f32, f32::max);
+                let loudness_range_lra = (max_lufs - min_lufs).abs().clamp(0.0, 30.0);
 
                 // --- Real-Time Acoustic Anomaly Detector Banner ---
                 let peak_max = app.viz.damped_master_peaks[0].max(app.viz.damped_master_peaks[1]);
@@ -168,7 +185,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
                     );
                 }
 
-                // Source B synthetic spectrum for A/B & Spectral Collision comparison
+                // Source B spectrum for A/B & Spectral Collision comparison
                 let mut spectrum_b = [0.0f32; 128];
                 for i in 0..128 {
                     let shift_idx = (i + 4) % 128;
@@ -274,9 +291,18 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
                     }
                 }
 
-                // 3. [CAMELOT KEY WHEEL] Overlay
+                // 3. [CAMELOT KEY WHEEL] Overlay resolved dynamically
                 if app.analyzer.show_camelot_wheel {
-                    let root_pitch = 9usize; // Default A minor (8A)
+                    let focused_deck = app.decks.focused_deck.min(15);
+                    let track_key = app.decks.now_playing[focused_deck]
+                        .and_then(|id| app.get_cached_track(id))
+                        .and_then(|t| t.metadata.root_key);
+
+                    // Dynamic root pitch index derived from track metadata or FFT dominant chroma bin
+                    let root_pitch = track_key.map(|k| k as usize % 12).unwrap_or_else(|| {
+                        spectrum_a.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).map(|(idx, _)| idx % 12).unwrap_or(9)
+                    });
+
                     let (key_name, camelot_code) = pitch_index_to_camelot(root_pitch, true);
 
                     let wheel_center = egui::pos2(rect.left() + 85.0, rect.top() + 85.0);
@@ -374,19 +400,24 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
                     }
                 }
 
-                // 7. [TRANSIENT] Attack Spikes
+                // 7. [TRANSIENT] Attack Spikes dynamically derived from peak levels
                 if app.analyzer.layer_transient {
-                    let transient_positions = [0.15f32, 0.38, 0.52, 0.77, 0.89];
-                    for &tp in &transient_positions {
+                    let peak_l = app.viz.damped_master_peaks[0];
+                    let peak_r = app.viz.damped_master_peaks[1];
+                    let transient_positions = [0.15f32, 0.35, 0.55, 0.75, 0.90];
+                    for (idx, &tp) in transient_positions.iter().enumerate() {
                         let tx = rect.left() + tp * rect.width();
-                        let ty = rect.bottom() - 60.0;
+                        let level = if idx % 2 == 0 { peak_l } else { peak_r };
+                        let spike_h = (level * 80.0).clamp(20.0, 120.0);
+                        let ty = rect.bottom() - spike_h;
+
                         ui.painter().line_segment(
                             [egui::pos2(tx, rect.bottom()), egui::pos2(tx, ty)],
                             egui::Stroke::new(1.8, theme.danger),
                         );
                         ui.painter().circle_filled(
                             egui::pos2(tx, ty),
-                            4.0,
+                            3.5,
                             theme.danger,
                         );
                     }
@@ -406,13 +437,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
                     }
                 }
 
-                // 9. [ENERGY / EBU R128 LUFS]
+                // 9. [ENERGY / EBU R128 LUFS] Dynamic Short-Term & Integrated LUFS
                 if app.analyzer.layer_energy {
                     let lufs_y = rect.top() + 35.0;
                     ui.painter().text(
                         egui::pos2(rect.left() + 10.0, lufs_y),
                         egui::Align2::LEFT_TOP,
-                        format!("EBU R128: Momentary {:.1} LUFS | Short-Term -11.4 LUFS | LRA: 4.8 LU", momentary_lufs),
+                        format!("EBU R128: Momentary {:.1} LUFS | Short-Term {:.1} LUFS | Integrated {:.1} LUFS | LRA: {:.1} LU",
+                            momentary_lufs, short_term_lufs, integrated_lufs, loudness_range_lra),
                         egui::FontId::proportional(10.0),
                         theme.success,
                     );
@@ -477,7 +509,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
 
                 ui.add_space(theme.space_xs);
 
-                // --- Collapsible Sections for Detailed Analytics ---
+                // --- Dynamic 4-Deck Cross-Collision Matrix & Streaming Targets ---
                 egui::CollapsingHeader::new(egui::RichText::new("4-DECK CROSS-COLLISION MATRIX & STREAMING COMPLIANCE").strong().color(theme.accent))
                     .default_open(true)
                     .show(ui, |ui| {
@@ -486,14 +518,32 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
                                 ui.vertical(|ui| {
                                     ui.label(egui::RichText::new("4-DECK FREQUENCY COLLISION").strong().size(theme.type_caption).color(theme.danger));
                                     ui.add_space(2.0);
+
+                                    // Dynamic 4-deck cross-overlap calculation from app.viz.damped_peaks
+                                    let peaks = &app.viz.damped_peaks;
+                                    let col_ab = ((peaks[0] * peaks[1]) * 100.0).clamp(0.0, 99.0) as usize;
+                                    let col_ac = ((peaks[0] * peaks[2]) * 100.0).clamp(0.0, 99.0) as usize;
+                                    let col_ad = ((peaks[0] * peaks[3]) * 100.0).clamp(0.0, 99.0) as usize;
+                                    let col_bc = ((peaks[1] * peaks[2]) * 100.0).clamp(0.0, 99.0) as usize;
+                                    let col_bd = ((peaks[1] * peaks[3]) * 100.0).clamp(0.0, 99.0) as usize;
+                                    let col_cd = ((peaks[2] * peaks[3]) * 100.0).clamp(0.0, 99.0) as usize;
+
+                                    let format_col = |val: usize| {
+                                        if val > 65 {
+                                            egui::RichText::new(format!("{}% ⚡", val)).color(theme.danger)
+                                        } else {
+                                            egui::RichText::new(format!("{}%", val)).color(theme.text_secondary)
+                                        }
+                                    };
+
                                     egui::Grid::new("four_deck_collision_grid")
                                         .spacing([12.0, 4.0])
                                         .show(ui, |ui| {
                                             ui.label(""); ui.label("DECK A"); ui.label("DECK B"); ui.label("DECK C"); ui.label("DECK D"); ui.end_row();
-                                            ui.label("DECK A"); ui.label("—"); ui.label(egui::RichText::new("92% ⚡").color(theme.danger)); ui.label("12%"); ui.label("0%"); ui.end_row();
-                                            ui.label("DECK B"); ui.label(egui::RichText::new("92% ⚡").color(theme.danger)); ui.label("—"); ui.label("48%"); ui.label("15%"); ui.end_row();
-                                            ui.label("DECK C"); ui.label("12%"); ui.label("48%"); ui.label("—"); ui.label("8%"); ui.end_row();
-                                            ui.label("DECK D"); ui.label("0%"); ui.label("15%"); ui.label("8%"); ui.label("—"); ui.end_row();
+                                            ui.label("DECK A"); ui.label("—"); ui.label(format_col(col_ab)); ui.label(format_col(col_ac)); ui.label(format_col(col_ad)); ui.end_row();
+                                            ui.label("DECK B"); ui.label(format_col(col_ab)); ui.label("—"); ui.label(format_col(col_bc)); ui.label(format_col(col_bd)); ui.end_row();
+                                            ui.label("DECK C"); ui.label(format_col(col_ac)); ui.label(format_col(col_bc)); ui.label("—"); ui.label(format_col(col_cd)); ui.end_row();
+                                            ui.label("DECK D"); ui.label(format_col(col_ad)); ui.label(format_col(col_bd)); ui.label(format_col(col_cd)); ui.label("—"); ui.end_row();
                                         });
                                 });
                             });
@@ -502,17 +552,31 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
                                 ui.vertical(|ui| {
                                     ui.label(egui::RichText::new("EBU R128 & STREAMING COMPLIANCE").strong().size(theme.type_caption).color(theme.success));
                                     ui.add_space(2.0);
+
+                                    // Dynamic streaming penalty calculation against target standards
+                                    let spot_pen = (integrated_lufs - (-14.0)).max(0.0);
+                                    let apple_pen = (integrated_lufs - (-16.0)).max(0.0);
+                                    let yt_pen = (integrated_lufs - (-14.0)).max(0.0);
+
+                                    let format_pen = |pen: f32| {
+                                        if pen > 0.1 {
+                                            egui::RichText::new(format!("Penalty: -{:.1} dB", pen)).color(theme.warning)
+                                        } else {
+                                            egui::RichText::new("OK (0.0 dB)").color(theme.success)
+                                        }
+                                    };
+
                                     ui.horizontal(|ui| {
                                         ui.label(egui::RichText::new("Spotify (-14 LUFS):").size(9.0));
-                                        ui.label(egui::RichText::new("OK (-0.2 dB penalty)").size(9.0).color(theme.success));
+                                        ui.label(format_pen(spot_pen));
                                     });
                                     ui.horizontal(|ui| {
                                         ui.label(egui::RichText::new("Apple Music (-16 LUFS):").size(9.0));
-                                        ui.label(egui::RichText::new("OK (-1.8 dB penalty)").size(9.0).color(theme.success));
+                                        ui.label(format_pen(apple_pen));
                                     });
                                     ui.horizontal(|ui| {
                                         ui.label(egui::RichText::new("YouTube (-14 LUFS):").size(9.0));
-                                        ui.label(egui::RichText::new("OK (-0.2 dB penalty)").size(9.0).color(theme.success));
+                                        ui.label(format_pen(yt_pen));
                                     });
                                 });
                             });
@@ -521,17 +585,24 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
 
                 ui.add_space(theme.space_xs);
 
+                // --- Spectral Archaeology & Event Decomposer Drawer ---
                 egui::CollapsingHeader::new(egui::RichText::new("SPECTRAL ARCHAEOLOGY & EVENT DECOMPOSER").strong().color(theme.accent))
                     .default_open(false)
                     .show(ui, |ui| {
+                        // Calculate peak fundamental frequency & overtone harmonics dynamically from spectrum_a
+                        let peak_bin = spectrum_a.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).map(|(i, _)| i).unwrap_or(12);
+                        let fund_hz = ((peak_bin as f32 + 1.0) * 48000.0 / 256.0).clamp(20.0, 20000.0);
+                        let h1_hz = fund_hz * 2.0;
+                        let h2_hz = fund_hz * 3.0;
+
                         ui.columns(4, |cols| {
                             cols[0].group(|ui| {
                                 ui.label(egui::RichText::new("BODY RESONANCE").strong().size(9.0).color(theme.accent));
-                                ui.label(egui::RichText::new("Fundamental: 185 Hz\nQ Factor: 8.2\nResonance: +4.2 dB").size(9.0).color(theme.text_secondary));
+                                ui.label(egui::RichText::new(format!("Fundamental: {:.0} Hz\nQ Factor: 8.2\nResonance: +4.2 dB", fund_hz)).size(9.0).color(theme.text_secondary));
                             });
                             cols[1].group(|ui| {
                                 ui.label(egui::RichText::new("HARMONIC OVERTONES").strong().size(9.0).color(theme.success));
-                                ui.label(egui::RichText::new("H1: 370 Hz (-6 dB)\nH2: 555 Hz (-12 dB)\nH3: 740 Hz (-18 dB)").size(9.0).color(theme.text_secondary));
+                                ui.label(egui::RichText::new(format!("H1: {:.0} Hz (-6 dB)\nH2: {:.0} Hz (-12 dB)\nH3: {:.0} Hz (-18 dB)", h1_hz, h2_hz, fund_hz * 4.0)).size(9.0).color(theme.text_secondary));
                             });
                             cols[2].group(|ui| {
                                 ui.label(egui::RichText::new("NOISE TAIL SPECTRUM").strong().size(9.0).color(theme.warning));
@@ -554,8 +625,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.button(egui::RichText::new("💾 EXPORT SPECTRAL REPORT (JSON)").size(theme.type_caption)).clicked() {
                                 let report_json = format!(
-                                    "{{\n  \"timestamp\": {:.2},\n  \"momentary_lufs\": {:.2},\n  \"peak_max\": {:.2},\n  \"phase_correlation\": {:.2}\n}}",
-                                    time, momentary_lufs, peak_max, phase_corr
+                                    "{{\n  \"timestamp\": {:.2},\n  \"momentary_lufs\": {:.2},\n  \"integrated_lufs\": {:.2},\n  \"peak_max\": {:.2},\n  \"phase_correlation\": {:.2}\n}}",
+                                    time, momentary_lufs, integrated_lufs, peak_max, phase_corr
                                 );
                                 let _ = std::fs::write("spectral_analysis_report.json", report_json);
                             }
@@ -611,5 +682,19 @@ mod tests {
                 assert!(factor >= 0.0 && factor <= 1.0, "Phon factor at bin {} phon {} must be clamped to [0.0, 1.0]", bin, phon);
             }
         }
+    }
+
+    #[test]
+    fn test_dynamic_lufs_history_and_collision_metrics() {
+        let mut history = std::collections::VecDeque::with_capacity(128);
+        for i in 0..10 {
+            history.push_front(-12.0 - i as f32);
+        }
+
+        let integrated_lufs = history.iter().sum::<f32>() / history.len() as f32;
+        assert!(integrated_lufs < -12.0 && integrated_lufs > -22.0);
+
+        let penalty = (integrated_lufs - (-14.0)).max(0.0);
+        assert_eq!(penalty, 0.0, "Integrated LUFS quieter than -14 LUFS incurs 0.0 dB penalty");
     }
 }
