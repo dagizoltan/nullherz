@@ -1,3 +1,7 @@
+use alloc::vec::Vec;
+use alloc::sync::Arc;
+use num_traits::Float;
+
 pub trait Oscillator {
     fn next_sample(&mut self) -> f32;
     fn process_block(&mut self, output: &mut [f32]) {
@@ -21,7 +25,7 @@ impl SineOscillator {
     pub fn new(sample_rate: f32, frequency: f32) -> Self {
         let mut lut = [0.0f32; LUT_SIZE];
         for (i, val) in lut.iter_mut().enumerate() {
-            *val = ((i as f32 * 2.0 * std::f32::consts::PI) / LUT_SIZE as f32).sin();
+            *val = Float::sin((i as f32 * 2.0 * core::f32::consts::PI) / LUT_SIZE as f32);
         }
         Self {
             phase: 0.0,
@@ -65,7 +69,7 @@ impl WavetableOscillator {
     pub fn new(sample_rate: f32) -> Self {
         let mut table = [0.0f32; 2048];
         for (i, val) in table.iter_mut().enumerate() {
-            *val = ((i as f32 * 2.0 * std::f32::consts::PI) / 2048.0).sin();
+            *val = Float::sin((i as f32 * 2.0 * core::f32::consts::PI) / 2048.0);
         }
         Self {
             table,
@@ -364,7 +368,7 @@ pub enum InterpolationType {
 /// Shared ownership of the sample buffer is managed via Arc to prevent dangling pointers.
 #[derive(Debug, Clone)]
 pub struct SamplerVoice {
-    pub buffer: Option<std::sync::Arc<Vec<f32>>>,
+    pub buffer: Option<Arc<Vec<f32>>>,
     /// Position accumulators are f64, NOT f32.
     ///
     /// f32 holds integers exactly only to 2^24. Past 2^26 = 67,108,864 frames
@@ -453,7 +457,7 @@ impl SamplerVoice {
             window_lut: {
                 let mut lut = [0.0f32; 1024];
                 for i in 0..1024 {
-                    lut[i] = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / 1023.0).cos());
+                    lut[i] = 0.5 * (1.0 - Float::cos(2.0 * core::f32::consts::PI * i as f32 / 1023.0));
                 }
                 lut
             },
@@ -464,11 +468,11 @@ impl SamplerVoice {
         }
     }
 
-    pub fn trigger(&mut self, buffer: std::sync::Arc<Vec<f32>>, playback_rate: f32, velocity: f32) {
+    pub fn trigger(&mut self, buffer: Arc<Vec<f32>>, playback_rate: f32, velocity: f32) {
         self.trigger_at(buffer, playback_rate, velocity, 0.0, 0.0);
     }
 
-    pub fn trigger_at(&mut self, buffer: std::sync::Arc<Vec<f32>>, playback_rate: f32, velocity: f32, offset: f64, beat: f64) {
+    pub fn trigger_at(&mut self, buffer: Arc<Vec<f32>>, playback_rate: f32, velocity: f32, offset: f64, beat: f64) {
         self.buffer_frames = buffer.len();
         self.buffer_channels = 1;
         self.buffer = Some(buffer);
@@ -481,10 +485,10 @@ impl SamplerVoice {
     }
 
     /// RT-Safe variant that avoids atomic increment of the Arc if possible.
-    pub fn trigger_at_ref(&mut self, buffer: &std::sync::Arc<Vec<f32>>, playback_rate: f32, velocity: f32, offset: f64, beat: f64) {
+    pub fn trigger_at_ref(&mut self, buffer: &Arc<Vec<f32>>, playback_rate: f32, velocity: f32, offset: f64, beat: f64) {
         // Only clone if the buffer actually changed
         let needs_clone = match &self.buffer {
-            Some(existing) => !std::sync::Arc::ptr_eq(existing, buffer),
+            Some(existing) => !Arc::ptr_eq(existing, buffer),
             None => true,
         };
 

@@ -3,9 +3,14 @@ name = "audio-dsp"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["std"]
+std = ["serde/std", "wide/std"]
+
 [dependencies]
-wide = "0.7.30"
-serde = { version = "1.0", features = ["derive"] }
+wide = { version = "0.7.30", default-features = false }
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
 
 [dev-dependencies]
 proptest = "1.6"

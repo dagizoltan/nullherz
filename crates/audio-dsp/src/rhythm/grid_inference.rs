@@ -1,3 +1,7 @@
+use alloc::vec::Vec;
+use num_traits::Euclid;
+#[cfg(not(feature = "std"))]
+use num_traits::Float;
 use super::types::{
     BeatGrid, BeatMarker, GrooveProfile, OnsetCandidate, PreBeatInfo, RhythmConfidence,
     TempoHypothesis,
@@ -46,8 +50,8 @@ impl BeatGridInferenceEngine {
             let mut evidence = 0.0f32;
 
             for o in onsets {
-                let dist_from_grid = ((o.frame as f64 - phase_candidate).rem_euclid(samples_per_beat))
-                    .min(samples_per_beat - (o.frame as f64 - phase_candidate).rem_euclid(samples_per_beat));
+                let rem_candidate = Euclid::rem_euclid(&(o.frame as f64 - phase_candidate), &samples_per_beat);
+                let dist_from_grid = rem_candidate.min(samples_per_beat - rem_candidate);
                 let dist_norm = dist_from_grid / samples_per_beat;
 
                 if dist_norm < 0.08 {
@@ -162,16 +166,19 @@ impl BeatGridInferenceEngine {
         }
 
         // Clustering pre-beat offsets into 10ms histogram bins
-        let mut histogram: std::collections::HashMap<i32, (usize, f32)> = std::collections::HashMap::new();
+        let mut histogram: Vec<(i32, usize, f32)> = Vec::new();
         for &(diff_ms, strength, _) in &pre_beat_diffs {
             let bin = (diff_ms / 10.0).round() as i32 * 10;
-            let entry = histogram.entry(bin).or_insert((0, 0.0));
-            entry.0 += 1;
-            entry.1 += strength;
+            if let Some(entry) = histogram.iter_mut().find(|e| e.0 == bin) {
+                entry.1 += 1;
+                entry.2 += strength;
+            } else {
+                histogram.push((bin, 1, strength));
+            }
         }
 
         let mut pre_beats = Vec::new();
-        for (&bin_ms, &(count, total_strength)) in &histogram {
+        for &(bin_ms, count, total_strength) in &histogram {
             // Require repetition across bars (at least 20% of beats or 3 occurrences)
             if count >= 3 && (count as f32 / beats.len() as f32) > 0.15 {
                 let avg_strength = total_strength / count as f32;
@@ -202,7 +209,12 @@ impl BeatGridInferenceEngine {
         }
 
         let samples_per_16th = samples_per_beat / 4.0;
-        let mut buckets_ms: [Vec<f32>; 16] = Default::default();
+        let mut buckets_ms: [Vec<f32>; 16] = [
+            Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+            Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+            Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+            Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+        ];
         let mut offbeat_8th_offsets = Vec::new();
 
         for b in beats {

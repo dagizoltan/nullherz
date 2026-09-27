@@ -1,5 +1,7 @@
+use alloc::vec::Vec;
+use alloc::vec;
+use num_traits::Float;
 use super::types::{OnsetCandidate, TempoHypothesis};
-use std::collections::HashMap;
 
 pub struct MultiHypothesisTempoEstimator {
     min_bpm: f32,
@@ -63,7 +65,6 @@ impl MultiHypothesisTempoEstimator {
         }
 
         // Auto-correlation / Comb filter scoring over BPM range [30.0 .. 220.0]
-        let mut histogram: HashMap<u32, f32> = HashMap::new(); // key is BPM * 10
         let step_bpm = 0.5f32;
         let mut bpm_scores = Vec::new();
 
@@ -74,9 +75,9 @@ impl MultiHypothesisTempoEstimator {
 
             for &(ioi, weight) in &intervals_sec {
                 let ratio = ioi / period_sec;
-                let nearest_int = ratio.round();
+                let nearest_int = Float::round(ratio);
                 if nearest_int >= 1.0 && nearest_int <= 4.0 {
-                    let diff = (ratio - nearest_int).abs();
+                    let diff = Float::abs(ratio - nearest_int);
                     if diff < 0.12 {
                         let harmonics_weight = 1.0 / (nearest_int as f32);
                         score += weight * (1.0 - diff as f32 / 0.12) * harmonics_weight;
@@ -85,11 +86,10 @@ impl MultiHypothesisTempoEstimator {
             }
 
             // Metrical preference weighting (slight prior for typical musical tempos 80-140 BPM)
-            let metrical_prior = 1.0 + 0.15 * (-((curr_bpm - 115.0) / 45.0).powi(2)).exp();
+            let metrical_prior = 1.0 + 0.15 * Float::exp(-Float::powi((curr_bpm - 115.0) / 45.0, 2));
             let final_score = score * metrical_prior;
 
             bpm_scores.push((curr_bpm, final_score));
-            histogram.insert((curr_bpm * 10.0) as u32, final_score);
 
             curr_bpm += step_bpm;
         }

@@ -34,7 +34,7 @@ pub fn store_f32x4(data: &mut [f32], offset: usize, val: FloatX4) {
 #[inline(always)]
 pub unsafe fn load_f32x8_ptr(ptr: *const f32) -> FloatX8 {
     let mut arr = [0.0f32; 8];
-    unsafe { std::ptr::copy_nonoverlapping(ptr, arr.as_mut_ptr(), 8); }
+    unsafe { core::ptr::copy_nonoverlapping(ptr, arr.as_mut_ptr(), 8); }
     f32x8::new(arr)
 }
 
@@ -43,7 +43,7 @@ pub unsafe fn load_f32x8_ptr(ptr: *const f32) -> FloatX8 {
 #[inline(always)]
 pub unsafe fn store_f32x8_ptr(ptr: *mut f32, val: FloatX8) {
     let arr: [f32; 8] = val.into();
-    unsafe { std::ptr::copy_nonoverlapping(arr.as_ptr(), ptr, 8); }
+    unsafe { core::ptr::copy_nonoverlapping(arr.as_ptr(), ptr, 8); }
 }
 
 /// # Safety
@@ -51,7 +51,7 @@ pub unsafe fn store_f32x8_ptr(ptr: *mut f32, val: FloatX8) {
 #[inline(always)]
 pub unsafe fn load_f32x4_ptr(ptr: *const f32) -> FloatX4 {
     let mut arr = [0.0f32; 4];
-    unsafe { std::ptr::copy_nonoverlapping(ptr, arr.as_mut_ptr(), 4); }
+    unsafe { core::ptr::copy_nonoverlapping(ptr, arr.as_mut_ptr(), 4); }
     f32x4::new(arr)
 }
 
@@ -141,7 +141,7 @@ impl From<FloatX16> for [f32; 16] {
     }
 }
 
-impl std::ops::Add for FloatX16 {
+impl core::ops::Add for FloatX16 {
     type Output = Self;
     fn add(self, rhs: Self) -> Self {
         #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
@@ -161,7 +161,7 @@ impl std::ops::Add for FloatX16 {
     }
 }
 
-impl std::ops::Sub for FloatX16 {
+impl core::ops::Sub for FloatX16 {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self {
         #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
@@ -181,7 +181,7 @@ impl std::ops::Sub for FloatX16 {
     }
 }
 
-impl std::ops::Mul for FloatX16 {
+impl core::ops::Mul for FloatX16 {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self {
         #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
@@ -201,7 +201,7 @@ impl std::ops::Mul for FloatX16 {
     }
 }
 
-impl std::ops::Div for FloatX16 {
+impl core::ops::Div for FloatX16 {
     type Output = Self;
     fn div(self, rhs: Self) -> Self {
         #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
@@ -418,7 +418,7 @@ pub fn store_f32x16(data: &mut [f32], offset: usize, val: FloatX16) {
 #[inline(always)]
 pub unsafe fn load_f32x16_ptr(ptr: *const f32) -> FloatX16 {
     let mut arr = [0.0f32; 16];
-    unsafe { std::ptr::copy_nonoverlapping(ptr, arr.as_mut_ptr(), 16); }
+    unsafe { core::ptr::copy_nonoverlapping(ptr, arr.as_mut_ptr(), 16); }
     FloatX16::new(arr)
 }
 
@@ -427,7 +427,7 @@ pub unsafe fn load_f32x16_ptr(ptr: *const f32) -> FloatX16 {
 #[inline(always)]
 pub unsafe fn store_f32x16_ptr(ptr: *mut f32, val: FloatX16) {
     let arr: [f32; 16] = val.into();
-    unsafe { std::ptr::copy_nonoverlapping(arr.as_ptr(), ptr, 16); }
+    unsafe { core::ptr::copy_nonoverlapping(arr.as_ptr(), ptr, 16); }
 }
 
 #[cfg(test)]

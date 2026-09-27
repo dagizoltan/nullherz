@@ -1,3 +1,5 @@
+use num_traits::Float;
+
 pub trait Filter {
     fn process_sample(&mut self, input: f32) -> f32;
     fn reset(&mut self) {}
@@ -40,9 +42,9 @@ impl MoogLadder {
     }
 
     fn update_coeffs(&mut self) {
-        let wd = 2.0 * std::f32::consts::PI * self.cutoff;
+        let wd = 2.0 * core::f32::consts::PI * self.cutoff;
         let t = 1.0 / self.sample_rate;
-        let wa = (2.0 / t) * (wd * t / 2.0).tan();
+        let wa = (2.0 / t) * Float::tan(wd * t / 2.0);
         self.g = wa * t / 2.0;
         self.h = self.g / (1.0 + self.g);
     }
@@ -144,7 +146,7 @@ impl ZdfSvf {
     }
 
     fn update_coeffs(&mut self) {
-        let g = (std::f32::consts::PI * self.cutoff / self.sample_rate).tan();
+        let g = Float::tan(core::f32::consts::PI * self.cutoff / self.sample_rate);
         let k = 1.0 / self.resonance;
         self.g = g;
         self.k = k;
@@ -277,32 +279,32 @@ impl Default for BiquadCoefficients {
 
 impl BiquadCoefficients {
     pub fn linkwitz_riley_lp(freq: f32, sample_rate: f32) -> Self {
-        let omega = std::f32::consts::PI * freq / sample_rate;
-        let theta = omega.tan();
-        let k = theta.powi(2);
-        let delta = k + 2.0_f32.sqrt() * theta + 1.0;
+        let omega = core::f32::consts::PI * freq / sample_rate;
+        let theta = Float::tan(omega);
+        let k = Float::powi(theta, 2);
+        let delta = k + Float::sqrt(2.0_f32) * theta + 1.0;
 
         Self {
             b0: k / delta,
             b1: 2.0 * k / delta,
             b2: k / delta,
             a1: 2.0 * (k - 1.0) / delta,
-            a2: (k - 2.0_f32.sqrt() * theta + 1.0) / delta,
+            a2: (k - Float::sqrt(2.0_f32) * theta + 1.0) / delta,
         }
     }
 
     pub fn linkwitz_riley_hp(freq: f32, sample_rate: f32) -> Self {
-        let omega = std::f32::consts::PI * freq / sample_rate;
-        let theta = omega.tan();
-        let k = theta.powi(2);
-        let delta = k + 2.0_f32.sqrt() * theta + 1.0;
+        let omega = core::f32::consts::PI * freq / sample_rate;
+        let theta = Float::tan(omega);
+        let k = Float::powi(theta, 2);
+        let delta = k + Float::sqrt(2.0_f32) * theta + 1.0;
 
         Self {
             b0: 1.0 / delta,
             b1: -2.0 / delta,
             b2: 1.0 / delta,
             a1: 2.0 * (k - 1.0) / delta,
-            a2: (k - 2.0_f32.sqrt() * theta + 1.0) / delta,
+            a2: (k - Float::sqrt(2.0_f32) * theta + 1.0) / delta,
         }
     }
 
@@ -311,11 +313,11 @@ impl BiquadCoefficients {
     /// an untouched shelf is a true passthrough, not a numeric near-identity.
     pub fn low_shelf(freq: f32, gain: f32, sample_rate: f32) -> Self {
         if gain == 1.0 { return Self::default(); }
-        let a = gain.sqrt();
-        let omega = 2.0 * std::f32::consts::PI * freq / sample_rate;
-        let (sn, cs) = omega.sin_cos();
-        let alpha = sn / 2.0 * 2.0_f32.sqrt();
-        let two_ra = 2.0 * a.sqrt() * alpha;
+        let a = Float::sqrt(gain);
+        let omega = 2.0 * core::f32::consts::PI * freq / sample_rate;
+        let (sn, cs) = (Float::sin(omega), Float::cos(omega));
+        let alpha = sn / 2.0 * Float::sqrt(2.0_f32);
+        let two_ra = 2.0 * Float::sqrt(a) * alpha;
         let a0 = (a + 1.0) + (a - 1.0) * cs + two_ra;
         Self {
             b0: a * ((a + 1.0) - (a - 1.0) * cs + two_ra) / a0,
@@ -330,11 +332,11 @@ impl BiquadCoefficients {
     /// the bit-exact identity, as with `low_shelf`.
     pub fn high_shelf(freq: f32, gain: f32, sample_rate: f32) -> Self {
         if gain == 1.0 { return Self::default(); }
-        let a = gain.sqrt();
-        let omega = 2.0 * std::f32::consts::PI * freq / sample_rate;
-        let (sn, cs) = omega.sin_cos();
-        let alpha = sn / 2.0 * 2.0_f32.sqrt();
-        let two_ra = 2.0 * a.sqrt() * alpha;
+        let a = Float::sqrt(gain);
+        let omega = 2.0 * core::f32::consts::PI * freq / sample_rate;
+        let (sn, cs) = (Float::sin(omega), Float::cos(omega));
+        let alpha = sn / 2.0 * Float::sqrt(2.0_f32);
+        let two_ra = 2.0 * Float::sqrt(a) * alpha;
         let a0 = (a + 1.0) - (a - 1.0) * cs + two_ra;
         Self {
             b0: a * ((a + 1.0) + (a - 1.0) * cs + two_ra) / a0,
@@ -349,9 +351,9 @@ impl BiquadCoefficients {
     /// bit-exact identity, as with the shelves.
     pub fn peaking(freq: f32, q: f32, gain: f32, sample_rate: f32) -> Self {
         if gain == 1.0 { return Self::default(); }
-        let a = gain.sqrt();
-        let omega = 2.0 * std::f32::consts::PI * freq / sample_rate;
-        let (sn, cs) = omega.sin_cos();
+        let a = Float::sqrt(gain);
+        let omega = 2.0 * core::f32::consts::PI * freq / sample_rate;
+        let (sn, cs) = (Float::sin(omega), Float::cos(omega));
         let alpha = sn / (2.0 * q);
         let a0 = 1.0 + alpha / a;
         Self {
@@ -533,24 +535,24 @@ impl crate::DspKernel for SimdBiquad {
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) {
         let num_ch = inputs.len().min(outputs.len());
         if num_ch >= 16 {
-             let mut in_ptrs = [std::ptr::null(); 16];
-             let mut out_ptrs = [std::ptr::null_mut(); 16];
+             let mut in_ptrs = [core::ptr::null(); 16];
+             let mut out_ptrs = [core::ptr::null_mut(); 16];
              for i in 0..16 {
                  in_ptrs[i] = inputs[i].as_ptr();
                  out_ptrs[i] = outputs[i].as_mut_ptr();
              }
              self.process_16_channels(in_ptrs, out_ptrs, inputs[0].len());
         } else if num_ch >= 8 {
-            let mut in_ptrs = [std::ptr::null(); 8];
-            let mut out_ptrs = [std::ptr::null_mut(); 8];
+            let mut in_ptrs = [core::ptr::null(); 8];
+            let mut out_ptrs = [core::ptr::null_mut(); 8];
             for i in 0..8 {
                 in_ptrs[i] = inputs[i].as_ptr();
                 out_ptrs[i] = outputs[i].as_mut_ptr();
             }
             self.process_8_channels(in_ptrs, out_ptrs, inputs[0].len());
         } else if num_ch >= 4 {
-            let mut in_ptrs = [std::ptr::null(); 4];
-            let mut out_ptrs = [std::ptr::null_mut(); 4];
+            let mut in_ptrs = [core::ptr::null(); 4];
+            let mut out_ptrs = [core::ptr::null_mut(); 4];
             for i in 0..4 {
                 in_ptrs[i] = inputs[i].as_ptr();
                 out_ptrs[i] = outputs[i].as_mut_ptr();
@@ -1315,15 +1317,15 @@ impl EnvelopeFollower {
     pub fn new(sample_rate: f32, attack_ms: f32, release_ms: f32) -> Self {
         Self {
             sample_rate,
-            attack_coeff: (-1.0 / (sample_rate * attack_ms * 0.001)).exp(),
-            release_coeff: (-1.0 / (sample_rate * release_ms * 0.001)).exp(),
+            attack_coeff: Float::exp(-1.0 / (sample_rate * attack_ms * 0.001)),
+            release_coeff: Float::exp(-1.0 / (sample_rate * release_ms * 0.001)),
             envelope: 0.0,
         }
     }
 
     pub fn set_times(&mut self, attack_ms: f32, release_ms: f32) {
-        self.attack_coeff = (-1.0 / (self.sample_rate * attack_ms * 0.001)).exp();
-        self.release_coeff = (-1.0 / (self.sample_rate * release_ms * 0.001)).exp();
+        self.attack_coeff = Float::exp(-1.0 / (self.sample_rate * attack_ms * 0.001));
+        self.release_coeff = Float::exp(-1.0 / (self.sample_rate * release_ms * 0.001));
     }
 
     pub fn process_block(&mut self, input: &[f32], output: &mut [f32]) {
@@ -1362,9 +1364,9 @@ impl crate::DspKernel for EnvelopeFollower {
 
     fn set_parameter(&mut self, id: u32, value: f32, _ramp_samples: u32) {
         if id == 0 {
-            self.attack_coeff = (-1.0 / (self.sample_rate * value.max(0.1) * 0.001)).exp();
+            self.attack_coeff = Float::exp(-1.0 / (self.sample_rate * value.max(0.1) * 0.001));
         } else if id == 1 {
-            self.release_coeff = (-1.0 / (self.sample_rate * value.max(0.1) * 0.001)).exp();
+            self.release_coeff = Float::exp(-1.0 / (self.sample_rate * value.max(0.1) * 0.001));
         }
     }
 }

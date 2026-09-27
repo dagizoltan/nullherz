@@ -42,7 +42,7 @@
 //! `tests/dispatch_equivalence_test.rs` pins the difference to a tolerance
 //! rather than to bit-equality, and says why.
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use core::sync::atomic::{AtomicU8, Ordering};
 
 /// Not yet probed.
 const UNPROBED: u8 = 0;
@@ -55,17 +55,16 @@ static LEVEL: AtomicU8 = AtomicU8::new(UNPROBED);
 
 #[cfg(target_arch = "x86_64")]
 fn probe() -> u8 {
-    // If the build ALREADY targets these (someone set `-C target-cpu=native`),
-    // the baseline instantiation is itself AVX2 and the dispatch is a no-op —
-    // report the higher level anyway so the reporting is honest.
     if cfg!(all(target_feature = "avx2", target_feature = "fma")) {
         return LEVEL_AVX2_FMA;
     }
-    if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma") {
-        LEVEL_AVX2_FMA
-    } else {
-        LEVEL_BASELINE
+    #[cfg(feature = "std")]
+    {
+        if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma") {
+            return LEVEL_AVX2_FMA;
+        }
     }
+    LEVEL_BASELINE
 }
 
 #[cfg(not(target_arch = "x86_64"))]

@@ -1,4 +1,10 @@
+#![cfg_attr(not(feature = "std"), no_std)]
 #![deny(clippy::disallowed_methods, clippy::disallowed_types)]
+
+extern crate alloc;
+
+use alloc::vec::Vec;
+use num_traits::Float;
 pub mod filters;
 pub mod measurement;
 pub mod oscillators;
@@ -400,8 +406,8 @@ impl SimdFft {
         assert!(size.is_power_of_two(), "FFT size must be a power of two");
         let mut twiddles = Vec::with_capacity(size / 2);
         for i in 0..size / 2 {
-            let angle = -2.0 * std::f32::consts::PI * i as f32 / size as f32;
-            twiddles.push((angle.cos(), angle.sin()));
+            let angle = -2.0 * core::f32::consts::PI * i as f32 / size as f32;
+            twiddles.push((Float::cos(angle), Float::sin(angle)));
         }
         Self { size, twiddles }
     }

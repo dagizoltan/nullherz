@@ -93,6 +93,11 @@
 //! is worth 1.5x on the hottest node: a deck plays material once, a studio
 //! resamples the same material many times.
 
+use alloc::vec::Vec;
+use alloc::vec;
+use num_traits::Float;
+
+#[cfg(feature = "std")]
 use std::sync::OnceLock;
 
 /// Kernel support in source samples at stretch 1.0. Even by construction.
@@ -185,10 +190,10 @@ impl SincTable {
         let i0_beta = bessel_i0(BETA);
         for i in 0..n {
             let u = -half + (i as f64 - H_OFF as f64) / RES as f64;
-            let a = std::f64::consts::PI * FC * u;
-            let sinc = if a.abs() < 1e-12 { 1.0 } else { a.sin() / a };
+            let a = core::f64::consts::PI * FC * u;
+            let sinc = if Float::abs(a) < 1e-12 { 1.0 } else { Float::sin(a) / a };
             let r = (u / half).clamp(-1.0, 1.0);
-            let w = bessel_i0(BETA * (1.0 - r * r).max(0.0).sqrt()) / i0_beta;
+            let w = bessel_i0(BETA * Float::sqrt((1.0 - r * r).max(0.0))) / i0_beta;
             h.push((FC * sinc * w) as f32);
         }
 
@@ -418,17 +423,32 @@ impl SincTable {
     }
 }
 
+#[cfg(feature = "std")]
 static TABLE: OnceLock<SincTable> = OnceLock::new();
 
-/// The shared, read-only kernel table.
-///
-/// One table for every voice — it depends only on compile-time constants, so
-/// there is nothing per-voice to hold. On the audio path this is an acquire load
-/// and a branch; it never allocates, because [`prewarm`] has already run from
-/// `SamplerVoice::new()` (a topology-build path, not an RT one).
+#[cfg(feature = "std")]
 #[inline]
 pub fn table() -> &'static SincTable {
     TABLE.get_or_init(SincTable::build)
+}
+
+#[cfg(not(feature = "std"))]
+#[inline]
+pub fn table() -> &'static SincTable {
+    static mut INSTANCE: Option<SincTable> = None;
+    static STATE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+    unsafe {
+        if STATE.compare_exchange(0, 1, core::sync::atomic::Ordering::Acquire, core::sync::atomic::Ordering::Relaxed).is_ok() {
+            INSTANCE = Some(SincTable::build());
+            STATE.store(2, core::sync::atomic::Ordering::Release);
+        } else {
+            while STATE.load(core::sync::atomic::Ordering::Acquire) != 2 {
+                core::hint::spin_loop();
+            }
+        }
+        let ptr = core::ptr::addr_of!(INSTANCE);
+        (*ptr).as_ref().unwrap()
+    }
 }
 
 /// Build the table now, off the audio thread. Called from `SamplerVoice::new()`.

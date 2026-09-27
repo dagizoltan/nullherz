@@ -1,3 +1,6 @@
+use alloc::vec::Vec;
+use alloc::vec;
+use num_traits::Float;
 use super::types::{BandEnergy, OnsetCandidate};
 use crate::SimdFft;
 
@@ -45,7 +48,7 @@ impl MultiFeatureOnsetDetector {
         let mut im = vec![0.0f32; self.fft_size];
         let mut window = vec![0.0f32; self.fft_size];
         for i in 0..self.fft_size {
-            window[i] = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / self.fft_size as f32).cos());
+            window[i] = 0.5 * (1.0 - Float::cos(2.0 * core::f32::consts::PI * i as f32 / self.fft_size as f32));
         }
 
         let mut flux_series = Vec::new();
@@ -75,8 +78,8 @@ impl MultiFeatureOnsetDetector {
             let bin_hz = self.sample_rate / self.fft_size as f32;
 
             for k in 0..num_bins {
-                let mag = (re[k] * re[k] + im[k] * im[k]).sqrt();
-                let phase = im[k].atan2(re[k]);
+                let mag = Float::sqrt(re[k] * re[k] + im[k] * im[k]);
+                let phase = Float::atan2(im[k], re[k]);
                 mags[k] = mag;
                 phases[k] = phase;
 
@@ -88,14 +91,14 @@ impl MultiFeatureOnsetDetector {
 
                 // 2. Complex Spectral Difference
                 let expected_phase = 2.0 * self.prev_phases[k] - self.prev_prev_phases[k];
-                let target_re = self.prev_mags[k] * expected_phase.cos();
-                let target_im = self.prev_mags[k] * expected_phase.sin();
+                let target_re = self.prev_mags[k] * Float::cos(expected_phase);
+                let target_im = self.prev_mags[k] * Float::sin(expected_phase);
                 let c_diff_re = re[k] - target_re;
                 let c_diff_im = im[k] - target_im;
-                complex_diff += (c_diff_re * c_diff_re + c_diff_im * c_diff_im).sqrt();
+                complex_diff += Float::sqrt(c_diff_re * c_diff_re + c_diff_im * c_diff_im);
 
                 // 3. Phase deviation
-                let phase_diff = (phase - expected_phase).abs();
+                let phase_diff = Float::abs(phase - expected_phase);
                 phase_deviation += phase_diff;
 
                 // Band energy breakdown
@@ -112,7 +115,7 @@ impl MultiFeatureOnsetDetector {
             }
 
             // RMS Change
-            let rms = (chunk.iter().map(|&s| s * s).sum::<f32>() / self.fft_size as f32).sqrt();
+            let rms = Float::sqrt(chunk.iter().map(|&s| s * s).sum::<f32>() / self.fft_size as f32);
             let rms_diff = (rms - self.prev_rms).max(0.0);
 
             // Total composite strength
