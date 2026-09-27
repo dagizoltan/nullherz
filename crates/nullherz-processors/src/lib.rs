@@ -33,6 +33,8 @@ pub mod tube_preamp;
 pub mod multiband_compressor;
 pub mod algorithmic_reverb;
 pub mod modulation_fx;
+pub mod transient_shaper;
+pub mod tape_saturator;
 #[cfg(test)]
 mod sampler_tests;
 #[cfg(test)]
@@ -70,6 +72,8 @@ pub use tube_preamp::TubePreampProcessor;
 pub use multiband_compressor::MultiBandCompressorProcessor;
 pub use algorithmic_reverb::AlgorithmicReverbProcessor;
 pub use modulation_fx::AlgorithmicModulationProcessor;
+pub use transient_shaper::TransientShaperProcessor;
+pub use tape_saturator::TapeSaturatorProcessor;
 pub use registry::ProcessorRegistry;
 
 #[cfg(test)]

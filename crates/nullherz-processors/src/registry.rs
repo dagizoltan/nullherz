@@ -60,6 +60,8 @@ impl ProcessorRegistry {
         self.register_factory(Box::new(MultiBandCompressorFactory));
         self.register_factory(Box::new(ReverbFactory));
         self.register_factory(Box::new(ModulationFxFactory));
+        self.register_factory(Box::new(TransientShaperFactoryWrapper));
+        self.register_factory(Box::new(TapeSaturatorFactoryWrapper));
     }
 
     pub fn register_factory(&mut self, factory: Box<dyn ProcessorFactory>) {

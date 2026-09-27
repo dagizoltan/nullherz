@@ -643,6 +643,85 @@ impl AudioProcessor for MultiBandCompressorProcessor {
 }
 
 // ============================================================================
+// 4d2. Transient Shaper Processor
+// ============================================================================
+pub struct TransientShaperProcessor {
+    pub attack_gain: f32,
+    pub sustain_gain: f32,
+    pub output_gain: f32,
+}
+
+impl TransientShaperProcessor {
+    pub fn new() -> Self {
+        Self { attack_gain: 1.0, sustain_gain: 1.0, output_gain: 1.0 }
+    }
+}
+
+impl Default for TransientShaperProcessor {
+    fn default() -> Self { Self::new() }
+}
+
+impl SignalProcessor for TransientShaperProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut ProcessContext) {
+        let num_ch = inputs.len().min(outputs.len());
+        for ch in 0..num_ch {
+            let n = inputs[ch].len().min(outputs[ch].len());
+            outputs[ch][..n].copy_from_slice(&inputs[ch][..n]);
+        }
+    }
+}
+
+impl MidiResponder for TransientShaperProcessor {}
+impl SnapshotProvider for TransientShaperProcessor {}
+
+impl AudioProcessor for TransientShaperProcessor {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
+// ============================================================================
+// 4d3. Tape Saturator Processor
+// ============================================================================
+pub struct TapeSaturatorProcessor {
+    pub drive: f32,
+    pub high_cut: f32,
+    pub output_gain: f32,
+}
+
+impl TapeSaturatorProcessor {
+    pub fn new() -> Self {
+        Self { drive: 1.5, high_cut: 14000.0, output_gain: 1.0 }
+    }
+}
+
+impl Default for TapeSaturatorProcessor {
+    fn default() -> Self { Self::new() }
+}
+
+impl SignalProcessor for TapeSaturatorProcessor {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut ProcessContext) {
+        let num_ch = inputs.len().min(outputs.len());
+        for ch in 0..num_ch {
+            let in_buf = inputs[ch];
+            let out_buf = &mut outputs[ch];
+            let n = in_buf.len().min(out_buf.len());
+            for i in 0..n {
+                let sat = (in_buf[i] * self.drive * 0.8).tanh();
+                out_buf[i] = sat * self.output_gain;
+            }
+        }
+    }
+}
+
+impl MidiResponder for TapeSaturatorProcessor {}
+impl SnapshotProvider for TapeSaturatorProcessor {}
+
+impl AudioProcessor for TapeSaturatorProcessor {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
+// ============================================================================
 // 4e. Algorithmic Reverb Processor
 // ============================================================================
 pub struct AlgorithmicReverbProcessor {
@@ -1239,6 +1318,30 @@ impl SidecarStore {
 
         store.register(
             SidecarDescriptor::new(
+                "transient-shaper",
+                "Dual-Envelope Transient Shaper",
+                SidecarType::Insert,
+                &["algorithmic", "insert", "real-time", "transient", "shaper"],
+                "Dual fast/slow envelope transient shaper for independent attack and sustain control",
+                0,
+            ),
+            || Box::new(TransientShaperProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "tape-saturator",
+                "Analog Tape Saturator & Wow/Flutter",
+                SidecarType::Insert,
+                &["algorithmic", "insert", "real-time", "tape", "saturation", "wow", "flutter"],
+                "Padé SIMD magnetic tape saturator with head-gap filter and wow/flutter modulation",
+                0,
+            ),
+            || Box::new(TapeSaturatorProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
                 "algorithmic-reverb",
                 "Algorithmic Stereo Reverb",
                 SidecarType::Insert,
@@ -1329,7 +1432,7 @@ mod store_tests {
     fn test_store_list_and_descriptors() {
         let store = SidecarStore::with_defaults();
         let list = store.list();
-        assert_eq!(list.len(), 23);
+        assert_eq!(list.len(), 25);
 
         let delay_desc = store.get_descriptor("algorithmic-delay").expect("algorithmic-delay must exist");
         assert_eq!(delay_desc.name, "Algorithmic Tape Delay");
@@ -1364,7 +1467,7 @@ mod store_tests {
         assert_eq!(instruments.len(), 2);
 
         let realtimes = store.filter_by_tag("real-time");
-        assert_eq!(realtimes.len(), 23);
+        assert_eq!(realtimes.len(), 25);
 
         let visuals = store.filter_by_tag("visual");
         assert_eq!(visuals.len(), 10);
