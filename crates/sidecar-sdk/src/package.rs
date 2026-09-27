@@ -224,6 +224,15 @@ impl SidecarPackageManager {
         SidecarBundle::import_from_file(input_path)
     }
 
+    /// Helper to sanitize a filename against path traversal (CWE-22)
+    fn sanitize_filename(name: &str) -> Result<PathBuf, Error> {
+        let path = Path::new(name);
+        let safe_name = path
+            .file_name()
+            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "Invalid filename in bundle manifest"))?;
+        Ok(PathBuf::from(safe_name))
+    }
+
     /// 1-Click Install a `.sidecar` bundle into a target directory (e.g. `plugins/` or `sidecars/`)
     pub fn install_bundle(bundle: &SidecarBundle, target_dir: &Path) -> Result<InstalledPackageInfo, Error> {
         if !target_dir.exists() {
@@ -231,13 +240,15 @@ impl SidecarPackageManager {
         }
 
         // 1. Write Manifest JSON file
-        let manifest_path = target_dir.join(format!("{}.json", bundle.manifest.id));
+        let safe_id = Self::sanitize_filename(&bundle.manifest.id)?;
+        let manifest_path = target_dir.join(format!("{}.json", safe_id.to_string_lossy()));
         let manifest_json = serde_json::to_string_pretty(&bundle.manifest)
             .map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
         fs::write(&manifest_path, manifest_json)?;
 
         // 2. Write Binary Executable / WASM file
-        let binary_path = target_dir.join(&bundle.manifest.binary_filename);
+        let safe_bin_fname = Self::sanitize_filename(&bundle.manifest.binary_filename)?;
+        let binary_path = target_dir.join(safe_bin_fname);
         fs::write(&binary_path, &bundle.binary_bytes)?;
 
         // On Unix platforms, set executable permissions (rwxr-xr-x)
@@ -256,7 +267,8 @@ impl SidecarPackageManager {
                 .parameter_metadata_filename
                 .clone()
                 .unwrap_or_else(|| format!("{}_params.yaml", bundle.manifest.id));
-            let p_path = target_dir.join(fname);
+            let safe_fname = Self::sanitize_filename(&fname)?;
+            let p_path = target_dir.join(safe_fname);
             fs::write(&p_path, param_str)?;
             Some(p_path)
         } else {
@@ -270,7 +282,8 @@ impl SidecarPackageManager {
                 .thumbnail_filename
                 .clone()
                 .unwrap_or_else(|| format!("{}_thumb.png", bundle.manifest.id));
-            let t_path = target_dir.join(fname);
+            let safe_fname = Self::sanitize_filename(&fname)?;
+            let t_path = target_dir.join(safe_fname);
             fs::write(&t_path, thumb_bytes)?;
             Some(t_path)
         } else {
@@ -381,6 +394,24 @@ mod tests {
         }
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_path_traversal_sanitization() {
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let install_dir = std::env::temp_dir().join(format!("nullherz-pkg-path-test-{}", nonce));
+
+        let mut manifest = sample_manifest();
+        manifest.binary_filename = "../../evil_executable".to_string();
+
+        let bundle = SidecarBundle::new(manifest, b"echo evil".to_vec(), None, None);
+        let info = SidecarPackageManager::install_bundle(&bundle, &install_dir).unwrap();
+
+        assert_eq!(info.binary_path, install_dir.join("evil_executable"));
+        assert!(info.binary_path.exists());
+        assert!(!install_dir.join("../../evil_executable").exists());
+
+        let _ = fs::remove_dir_all(&install_dir);
     }
 
     #[test]

@@ -61,27 +61,28 @@ pub fn apply_visual_insert_chain(
                 }
             }
             "bloom-filter" => {
-                // Anamorphic Bloom Filter: High-pass thresholding & glow diffusion
-                let mut glow_buffer = vec![[0u8; 4]; w * h];
+                // Anamorphic Bloom Filter: High-pass thresholding & glow diffusion using zero-allocation front_buffer as scratch
                 let threshold = 140u8;
-                for i in 0..(w * h) {
+                for i in 0..(w * h).min(engine.front_buffer.len()) {
                     let pix = engine.back_buffer[i];
                     let brightness = (pix[0] as u32 + pix[1] as u32 + pix[2] as u32) / 3;
-                    if brightness > threshold as u32 {
-                        glow_buffer[i] = [
+                    engine.front_buffer[i] = if brightness > threshold as u32 {
+                        [
                             (pix[0] as f32 * 0.6) as u8,
                             (pix[1] as f32 * 0.6) as u8,
                             (pix[2] as f32 * 0.6) as u8,
                             255,
-                        ];
-                    }
+                        ]
+                    } else {
+                        [0, 0, 0, 255]
+                    };
                 }
                 // Additive 1D horizontal blur pass for anamorphic streak
                 for y in 0..h {
                     for x in 1..(w - 1) {
                         let idx = y * w + x;
-                        let left = glow_buffer[idx - 1];
-                        let right = glow_buffer[idx + 1];
+                        let left = engine.front_buffer[idx - 1];
+                        let right = engine.front_buffer[idx + 1];
                         let curr = &mut engine.back_buffer[idx];
                         curr[0] = curr[0].saturating_add((left[0] as u16 / 4 + right[0] as u16 / 4) as u8);
                         curr[1] = curr[1].saturating_add((left[1] as u16 / 4 + right[1] as u16 / 4) as u8);
