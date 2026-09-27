@@ -124,6 +124,88 @@
 
 ---
 
+## 8. Workspace DSP Processors, Sidecars & Visual Engines Catalog
+
+### 8.1 Native DSP Processors (`crates/nullherz-processors`)
+| Processor Name | Type ID | Category | Description |
+| :--- | :---: | :---: | :--- |
+| `Bypass` | 0 | Utility | Zero-latency passthrough wire node |
+| `Biquad` | 1 | Filter | Single-stage biquad filter (LPF, HPF, BPF, Notch) |
+| `Gain` | 2 | Utility | High-performance smoothed gain with 2x oversampled soft-clipping |
+| `Sampler` | 3 | Source | Multi-voice stereo sample playback engine with 64-bit playhead |
+| `Crossfader` | 4 | Mixer | SIMD-optimized DJ crossfader with continuous power curve blending |
+| `Summing` | 5 | Mixer | SIMD 16-to-1 bus mixing node |
+| `Spectral` | 6 | FX | FFT overlap-add spectral resynthesis and window shaping |
+| `Wavetable` | 7 | Source | Multi-oscillator wavetable synthesis engine |
+| `Modulation` | 8 | Control | LFO and envelope modulation generator |
+| `Sequencer` | 9 | Control | Step sequencer micro-timing controller |
+| `EnvelopeFollower` | 10 | Analysis | Peak/RMS amplitude envelope tracking |
+| `Granular` | 11 | Source/FX | Multi-grain buffer resynthesis engine |
+| `SpectralMorph` | 12 | FX | Dual-spectrum interpolation and morphing engine |
+| `Capture` | 13 | Utility | Real-time audio buffer capture and monitoring |
+| `DjIsolator` | 14 | Mixer | 3-band Linkwitz-Riley DJ frequency isolator |
+| `MasteringEq` | 15 | FX | Linear-phase 3-band tone stage |
+| `SimdBiquad` | 16 | Filter | AVX-512/NEON parallel multi-channel biquad bank |
+| `KeySync` | 17 | FX | Phase-vocoder pitch shifter with per-bin phase locking |
+| `PersonalityInheritance` | 18 | DNA | DNA trait inheritance and spectral resynthesis filter |
+| `DnaMorph` | 19 | DNA | Multidimensional DNA latent space interpolator |
+| `Limiter` | 20 | Dynamics | Lookahead peak limiter with brickwall ceiling protection |
+| `StreamingSampler` | 21 | Source | Double-buffered disk-to-SHM streaming sampler |
+| `Delay` | 22 | FX | Multi-tap delay line with fractional Hermite interpolation |
+| `NeuralSaturator` | 230 | Neural FX | Padé SIMD rational neural soft-clipping saturator |
+| `NeuralFilter` | 231 | Neural FX | State-variable hypernetwork dynamic filter |
+| `NeuralTcn` | 232 | Neural FX | 4-layer dilated Temporal Convolutional Network (TCN) |
+| `NeuralSsm` | 233 | Neural FX | 24-state Diagonal State-Space Model dynamic compressor |
+| `NeuralNam` | 234 | Neural FX | Wave-shaping network for tube preamp and amp modeling |
+| `HyperNetworkEq` | 235 | Neural FX | Hypernetwork-conditioned parametric equalizer |
+| `TubePreamp` | 236 | Neural FX | Triode tube preamp with transformer hysteresis |
+| `MultiBandCompressor` | 237 | Dynamics | 3-band State-Space Model dynamic compressor |
+| `Reverb` | 238 | FX | Schroeder/Freeverb comb and all-pass filter network |
+| `ModulationFx` | 239 | FX | Multi-mode LFO insert (Chorus, Flanger, Phaser) |
+| `Compressor` | 240 | Dynamics | Peak/RMS dynamic range compressor |
+| `StereoUtility` | 241 | Utility | Balance, width, and phase correlation utility |
+| `Analysis` | 250 | Analysis | Multi-timescale audio perception and feature extraction |
+
+### 8.2 Sidecar SDK Catalog (`crates/sidecar-sdk`)
+| Sidecar ID | Type | Tags | Description |
+| :--- | :---: | :--- | :--- |
+| `neural-saturation` | NeuralProcessor | `neural`, `insert`, `real-time`, `saturation` | Padé SIMD neural analog saturation processor |
+| `neural-ssm` | NeuralProcessor | `neural`, `insert`, `real-time`, `ssm`, `compressor` | 24-state State-Space Model for dynamic compression and hysteresis |
+| `neural-nam` | NeuralProcessor | `neural`, `insert`, `real-time`, `nam`, `preamp` | Wave-shaping network for analog tube preamp and guitar amp emulation |
+| `neural-filter` | NeuralProcessor | `neural`, `insert`, `real-time`, `filter`, `eq` | Hypernetwork dynamic filter with SIMD non-linearities |
+| `neural-tcn` | NeuralProcessor | `neural`, `insert`, `real-time`, `tcn`, `saturation` | 4-layer dilated TCN with FloatX16 SIMD reduction |
+| `hypernetwork-eq` | NeuralProcessor | `neural`, `insert`, `real-time`, `hypernetwork`, `eq` | HyperNetwork conditioned parametric EQ |
+| `tube-preamp` | NeuralProcessor | `neural`, `insert`, `real-time`, `tube`, `saturation`, `preamp` | Asymmetric triode tube preamp with transformer hysteresis |
+| `multiband-compressor` | NeuralProcessor | `neural`, `insert`, `real-time`, `ssm`, `compressor`, `multiband` | 3-Band crossover feeding parallel SSM compression cells |
+| `algorithmic-delay` | Insert | `algorithmic`, `insert`, `real-time`, `delay` | Low-latency delay line with Hermite fractional interpolation |
+| `algorithmic-eq` | Insert | `algorithmic`, `insert`, `real-time`, `eq`, `filter` | Multi-mode State-Variable Filter (LP, HP, BP, Notch) |
+| `algorithmic-reverb` | Insert | `algorithmic`, `insert`, `real-time`, `reverb` | Schroeder/Freeverb comb and all-pass filter network |
+| `algorithmic-modulation` | Insert | `algorithmic`, `insert`, `real-time`, `modulation`, `chorus` | Multi-mode LFO insert (Chorus, Flanger, Phaser) |
+| `algorithmic-synth` | Instrument | `algorithmic`, `instrument`, `real-time` | Dual-oscillator MIDI synthesizer instrument |
+| `neural-visuals` | NeuralProcessor | `visual`, `neural`, `insert`, `real-time`, `instrument` | Audio & telemetry input driven neural visual surface sidecar |
+| `bioluminescent-fluid-flow` | NeuralProcessor | `visual`, `neural`, `real-time` | Organic bioluminescent fluid dynamics visual surface |
+| `harmonic-arrangement-lattice` | NeuralProcessor | `visual`, `real-time` | Musical structure and harmonic chroma lattice visual sidecar |
+| `abstract-quantum-swarm` | NeuralProcessor | `visual`, `real-time` | Multi-spectral colorful quantum particle swarm visual sidecar |
+| `neural-floral-mycelium` | NeuralProcessor | `visual`, `neural`, `real-time` | Organic growing floral mycelium tendril visual surface |
+| `neural-latent-manifold` | NeuralProcessor | `visual`, `neural`, `insert`, `real-time` | Neural network latent manifold visual generator |
+| `phase-goniometer-2d` | NeuralProcessor | `visual`, `real-time`, `insert` | Real-time 2D phase goniometer stereo visual surface |
+| `fft-spectrum-mesh` | NeuralProcessor | `visual`, `real-time`, `insert` | Real-time FFT frequency spectrum 3D mesh visual sidecar |
+| `reaction-diffusion-nn` | NeuralProcessor | `visual`, `neural`, `real-time` | Neural network reaction diffusion pattern synthesis |
+| `shader-particle-swarm` | NeuralProcessor | `visual`, `real-time` | Audio-reactive particle swarm shader visual generator |
+
+### 8.3 Visual Engines & Organisms (`crates/nullherz-inspector`)
+| Generator | Engine | Taxonomy / Sub-Styles | Description |
+| :--- | :--- | :--- | :--- |
+| `RadialMandala` | `RadialMandalaEngine` | 12 Polar Styles (Sacred Geometry, Neon Matrix, Celestial Pulse...) | Hyper-symmetric CPPN mandala generator |
+| `LiquidSurface` | `LiquidSurfaceEngine` | Bio-Fluid & Cellular Warping | Two-pass latent domain fluid warper |
+| `SpectralLandscape` | `SpectralLandscapeEngine` | Voxel Terrain, Waterfall Contour, Linear Equalizer | 3D instanced voxel waterfall terrain |
+| `HyperAttractor` | `HyperAttractorEngine` | 100k GPU Particle Swarm | Neural chaos attractor particle generator |
+| `ReactionDiffusion` | `ReactionDiffusionEngine` | Turing Morphogenesis | Turing pattern Gray-Scott pattern simulator |
+| `NeuralRaymarcher` | `NeuralRaymarcherEngine` | Latent Signed Distance Fields (SDF) | Latent SDF raymarcher |
+| `NeuralNcaMesh` | `NeuralNcaMeshEngine` | SphereMesh, TorusGrid, Voxel, CrystallineSprout | 3D Neural Cellular Automata mesh growth |
+
+---
+
 **Legend:**
 - ✅ **Hardened**: Fully implemented, reachability-verified, RT-safe, and green in CI.
 - 🔶 **Active**: Functional implementation undergoing active refinement.
