@@ -506,15 +506,16 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                         ui.add_space(4.0);
 
-                        // 4. ADDED FX INSERT SLOT
-                        let insert_node = app.get_node_id(&format!("deck_{}_insert", deck_char_letter))
-                            .or_else(|| app.get_node_id(&format!("deck_{}_fx1", deck_char_letter)))
-                            .unwrap_or(i as u32 * 4 + 2);
+                        // 4. ADDED FX INSERT SLOTS (unlimited FX inserts)
+                        let mut fx_to_remove = None;
 
-                        let mut remove_insert = false;
-                        if let Some(ref name) = app.decks.deck_inserts[i] {
+                        for (fx_idx, name) in app.decks.deck_inserts[i].iter().enumerate() {
                             let name_clone = name.clone();
                             let is_mutator = name_clone.to_lowercase().contains("mutator");
+
+                            let insert_node = app.get_node_id(&format!("deck_{}_fx{}", deck_char_letter, fx_idx + 1))
+                                .or_else(|| app.get_node_id(&format!("deck_{}_insert", deck_char_letter)))
+                                .unwrap_or(i as u32 * 4 + 2);
 
                             Frame::none()
                                 .fill(theme.accent.linear_multiply(0.15))
@@ -532,12 +533,14 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                     .fill(theme.bg_inset)
                                                     .min_size(Vec2::new(16.0, 16.0));
                                                 if ui.add(close_btn).on_hover_text("Remove FX").clicked() {
-                                                    remove_insert = true;
+                                                    fx_to_remove = Some((fx_idx, insert_node));
                                                 }
                                             });
                                         });
 
                                         ui.add_space(2.0);
+
+                                        let params = app.decks.deck_insert_params[i].get(fx_idx).cloned().unwrap_or([0.5; 8]);
 
                                         if is_mutator {
                                             // MUTATOR 6 Parallel Mutation Macro Knobs
@@ -546,9 +549,9 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                     ui.spacing_mut().item_spacing.x = 2.0;
 
                                                     // FLESH (Param 0)
-                                                    let mut flesh_val = app.decks.deck_insert_params[i][0];
+                                                    let mut flesh_val = params[0];
                                                     if widgets::render_knob_sized(ui, &mut flesh_val, 0.0..=1.0, "FLESH", deck_color, 22.0).changed() {
-                                                        app.decks.deck_insert_params[i][0] = flesh_val;
+                                                        if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[0] = flesh_val; }
                                                         let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                                             target_id: insert_node as u64,
                                                             param_id: 0,
@@ -558,9 +561,9 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                     }
 
                                                     // BONE (Param 1)
-                                                    let mut bone_val = app.decks.deck_insert_params[i][1];
+                                                    let mut bone_val = params[1];
                                                     if widgets::render_knob_sized(ui, &mut bone_val, 0.0..=1.0, "BONE", deck_color, 22.0).changed() {
-                                                        app.decks.deck_insert_params[i][1] = bone_val;
+                                                        if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[1] = bone_val; }
                                                         let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                                             target_id: insert_node as u64,
                                                             param_id: 1,
@@ -570,9 +573,9 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                     }
 
                                                     // TEETH (Param 2)
-                                                    let mut teeth_val = app.decks.deck_insert_params[i][2];
+                                                    let mut teeth_val = params[2];
                                                     if widgets::render_knob_sized(ui, &mut teeth_val, 0.0..=1.0, "TEETH", deck_color, 22.0).changed() {
-                                                        app.decks.deck_insert_params[i][2] = teeth_val;
+                                                        if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[2] = teeth_val; }
                                                         let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                                             target_id: insert_node as u64,
                                                             param_id: 2,
@@ -588,9 +591,9 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                     ui.spacing_mut().item_spacing.x = 2.0;
 
                                                     // PARASITE (Param 3)
-                                                    let mut para_val = app.decks.deck_insert_params[i][3];
+                                                    let mut para_val = params[3];
                                                     if widgets::render_knob_sized(ui, &mut para_val, 0.0..=1.0, "PARA", deck_color, 22.0).changed() {
-                                                        app.decks.deck_insert_params[i][3] = para_val;
+                                                        if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[3] = para_val; }
                                                         let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                                             target_id: insert_node as u64,
                                                             param_id: 3,
@@ -600,9 +603,9 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                     }
 
                                                     // ASYM (Param 4)
-                                                    let mut asym_val = app.decks.deck_insert_params[i][4];
+                                                    let mut asym_val = params[4];
                                                     if widgets::render_knob_sized(ui, &mut asym_val, 0.0..=1.0, "ASYM", deck_color, 22.0).changed() {
-                                                        app.decks.deck_insert_params[i][4] = asym_val;
+                                                        if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[4] = asym_val; }
                                                         let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                                             target_id: insert_node as u64,
                                                             param_id: 4,
@@ -612,9 +615,9 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                     }
 
                                                     // ABOM (Param 5)
-                                                    let mut abom_val = app.decks.deck_insert_params[i][5];
+                                                    let mut abom_val = params[5];
                                                     if widgets::render_knob_sized(ui, &mut abom_val, 0.0..=1.0, "ABOM", deck_color, 22.0).changed() {
-                                                        app.decks.deck_insert_params[i][5] = abom_val;
+                                                        if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[5] = abom_val; }
                                                         let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                                             target_id: insert_node as u64,
                                                             param_id: 5,
@@ -628,9 +631,9 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                             // Generic Insert Controls (Drive / Mix)
                                             ui.horizontal(|ui| {
                                                 ui.spacing_mut().item_spacing.x = 4.0;
-                                                let mut drive_val = app.decks.deck_insert_params[i][0];
+                                                let mut drive_val = params[0];
                                                 if widgets::render_knob_sized(ui, &mut drive_val, 0.0..=5.0, "DRIVE", deck_color, 22.0).changed() {
-                                                    app.decks.deck_insert_params[i][0] = drive_val;
+                                                    if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[0] = drive_val; }
                                                     let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                                         target_id: insert_node as u64,
                                                         param_id: 0,
@@ -639,9 +642,9 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                     }));
                                                 }
 
-                                                let mut mix_val = app.decks.deck_insert_params[i][7];
+                                                let mut mix_val = params[7];
                                                 if widgets::render_knob_sized(ui, &mut mix_val, 0.0..=1.0, "MIX", deck_color, 22.0).changed() {
-                                                    app.decks.deck_insert_params[i][7] = mix_val;
+                                                    if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[7] = mix_val; }
                                                     let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                                         target_id: insert_node as u64,
                                                         param_id: 7,
@@ -651,24 +654,27 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                 }
                                             });
                                         }
-
-                                        ui.add_space(4.0);
-                                        if ui.add_sized([STRIP_W - 28.0, 18.0], egui::Button::new(RichText::new("✕ REMOVE FX").size(8.5).strong().color(theme.danger)).fill(theme.bg_inset)).clicked() {
-                                            remove_insert = true;
-                                        }
                                     });
                                 });
-                        } else if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
+
+                            ui.add_space(4.0);
+                        }
+
+                        if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
                             app.active_right_tab = Some(crate::RightTab::Store);
                             app.store.active_tag_filter = Some("insert".to_string());
                         }
 
-                        if remove_insert {
-                            app.decks.deck_inserts[i] = None;
-                            app.decks.deck_insert_params[i] = [0.5; 8];
+                        if let Some((remove_idx, target_node)) = fx_to_remove {
+                            if remove_idx < app.decks.deck_inserts[i].len() {
+                                app.decks.deck_inserts[i].remove(remove_idx);
+                            }
+                            if remove_idx < app.decks.deck_insert_params[i].len() {
+                                app.decks.deck_insert_params[i].remove(remove_idx);
+                            }
                             let _ = app.command_sender.send(nullherz_traits::Command::Topology(
                                 nullherz_traits::TopologyCommand::SwapProcessor {
-                                    node_idx: insert_node,
+                                    node_idx: target_node,
                                     processor_type_id: nullherz_traits::ProcessorTypeId::BYPASS,
                                 }
                             ));
