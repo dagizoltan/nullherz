@@ -1314,6 +1314,7 @@ impl VisualGenerator {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum VisualBlendMode {
     Normal,
@@ -1324,6 +1325,7 @@ pub enum VisualBlendMode {
     Overlay,
 }
 
+#[allow(dead_code)]
 impl VisualBlendMode {
     pub fn name(&self) -> &'static str {
         match self {
@@ -1348,6 +1350,7 @@ impl VisualBlendMode {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CompositingLayoutMode {
     LayeredComposite,
@@ -1356,6 +1359,7 @@ pub enum CompositingLayoutMode {
     PictureInPicture,
 }
 
+#[allow(dead_code)]
 impl CompositingLayoutMode {
     pub fn name(&self) -> &'static str {
         match self {
@@ -1376,6 +1380,7 @@ impl CompositingLayoutMode {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ScreenTransitionType {
     Crossfade,
@@ -1385,6 +1390,7 @@ pub enum ScreenTransitionType {
     ZoomExpand,
 }
 
+#[allow(dead_code)]
 impl ScreenTransitionType {
     pub fn name(&self) -> &'static str {
         match self {
@@ -1407,6 +1413,7 @@ impl ScreenTransitionType {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NetworkStreamProtocol {
     LocalViewport,
@@ -1416,6 +1423,7 @@ pub enum NetworkStreamProtocol {
     RTMPBroadcastBus,
 }
 
+#[allow(dead_code)]
 impl NetworkStreamProtocol {
     pub fn name(&self) -> &'static str {
         match self {
