@@ -2,6 +2,72 @@ use egui::{Color32, RichText, Ui, ScrollArea, Layout, Align, Stroke, Frame, Marg
 use crate::InspectorApp;
 use nullherz_dna::GeneticLibrary;
 
+#[derive(Clone, Debug)]
+pub struct AudioLocation {
+    pub label: String,
+    pub path: String,
+    pub is_external: bool,
+}
+
+pub fn detect_audio_locations() -> Vec<AudioLocation> {
+    let mut locations = vec![
+        AudioLocation { label: "Tracks Folder".to_string(), path: "library/tracks/".to_string(), is_external: false },
+        AudioLocation { label: "Samples Folder".to_string(), path: "library/samples/".to_string(), is_external: false },
+        AudioLocation { label: "Sequences Folder".to_string(), path: "library/sequences/".to_string(), is_external: false },
+    ];
+
+    if let Ok(user_music) = std::env::var("HOME") {
+        let music_dir = format!("{}/Music", user_music);
+        if std::path::Path::new(&music_dir).exists() {
+            locations.push(AudioLocation {
+                label: "User Music".to_string(),
+                path: music_dir,
+                is_external: false,
+            });
+        }
+    }
+
+    // Scan mount roots for pendrives / external drives (Linux / macOS / Unix)
+    let mount_roots = ["/media", "/run/media", "/mnt", "/Volumes"];
+    for root in &mount_roots {
+        let p = std::path::Path::new(root);
+        if p.exists() && p.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(p) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        // Check if user subdirectories exist under /media or /run/media
+                        if root.contains("media") {
+                            if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                                for sub in sub_entries.flatten() {
+                                    let sub_path = sub.path();
+                                    if sub_path.is_dir() {
+                                        let name = sub.file_name().to_string_lossy().to_string();
+                                        locations.push(AudioLocation {
+                                            label: format!("External Drive ({})", name),
+                                            path: sub_path.to_string_lossy().to_string(),
+                                            is_external: true,
+                                        });
+                                    }
+                                }
+                            }
+                        } else {
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            locations.push(AudioLocation {
+                                label: format!("External Drive ({})", name),
+                                path: path.to_string_lossy().to_string(),
+                                is_external: true,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    locations
+}
+
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
 
@@ -138,8 +204,41 @@ fn render_toolbar(app: &mut InspectorApp, ui: &mut Ui) {
     });
     ui.add_space(theme.space_xs);
 
-    // Row 2: Ingestion path text-field + SCAN button
+    // Row 2: Location selector + Ingestion path text-field + SCAN button
     ui.horizontal(|ui| {
+        let locations = detect_audio_locations();
+        let current_path = app.library.ingestion_path.clone();
+
+        let selected_label = locations
+            .iter()
+            .find(|loc| loc.path == current_path)
+            .map(|loc| loc.label.as_str())
+            .unwrap_or("Custom Path");
+
+        egui::ComboBox::from_id_source("lib_location_select")
+            .selected_text(RichText::new(format!("{} {}", egui_phosphor::regular::HARD_DRIVES, selected_label)).size(theme.type_caption).strong())
+            .width(160.0)
+            .show_ui(ui, |ui| {
+                for loc in &locations {
+                    let prefix = if loc.is_external { "💾 " } else { "📁 " };
+                    if ui.selectable_label(
+                        current_path == loc.path,
+                        RichText::new(format!("{}{}", prefix, loc.label)).size(theme.type_caption)
+                    ).clicked() {
+                        app.library.ingestion_path = loc.path.clone();
+                        let mut path_bytes = [0u8; 256];
+                        let bytes = loc.path.as_bytes();
+                        let len = bytes.len().min(256);
+                        path_bytes[..len].copy_from_slice(&bytes[..len]);
+                        let _ = app.command_sender.send(nullherz_traits::Command::Resource(
+                            nullherz_traits::ResourceCommand::ScanFolder { path: path_bytes }
+                        ));
+                        app.library.library_needs_refresh = true;
+                    }
+                }
+            });
+
+        ui.add_space(theme.space_xs);
         ui.text_edit_singleline(&mut app.library.ingestion_path);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if ui.button("SCAN").clicked() {
