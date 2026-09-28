@@ -241,6 +241,10 @@ impl InspectorApp {
         views::visuals::render_detached_interactive_surface(self, channel_idx, ctx, ui, telemetry);
     }
 
+    pub fn render_detached_target_screen(&mut self, screen_id: &str, _ctx: &egui::Context, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
+        views::visuals::render_composite_target_screen(self, screen_id, ui, telemetry);
+    }
+
     pub fn render_visuals_view(&mut self, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
         views::visuals::render_visuals_view(self, ui, telemetry);
     }
@@ -1074,7 +1078,7 @@ impl eframe::App for InspectorApp {
         self.handle_autosave(current_time);
 
         let is_focused = ctx.input(|i| i.focused);
-        let has_detached = !self.detached_views.is_empty() || self.viz.detached_channel.is_some();
+        let has_detached = !self.detached_views.is_empty() || self.viz.detached_channel.is_some() || !self.viz.detached_target_screens.is_empty();
 
         // Background Throttling: Skip telemetry processing if unfocused (and no detached windows open) and updated recently (<100ms)
         let should_process = is_focused || has_detached || (current_time - self.last_update_time) > 0.1;
@@ -1238,6 +1242,59 @@ impl eframe::App for InspectorApp {
 
             if close_visual_window {
                 self.viz.detached_channel = None;
+            }
+        }
+
+        // --- Render Detached Visual Target Screen Windows ---
+        let detached_screens: Vec<String> = self.viz.detached_target_screens.iter().cloned().collect();
+        for screen_id in detached_screens {
+            let screen_name = self.viz.target_screens.iter().find(|s| s.id == screen_id).map(|s| s.name.clone()).unwrap_or_else(|| "TARGET SCREEN".to_string());
+            let viewport_id = egui::ViewportId::from_hash_of(&format!("target_screen_{}", screen_id));
+            let viewport_builder = egui::ViewportBuilder::default()
+                .with_title(format!("nullherz Composite Screen — {}", screen_name))
+                .with_inner_size([1280.0, 800.0]);
+
+            let mut close_screen_window = false;
+            ctx.show_viewport_immediate(viewport_id, viewport_builder, |v_ctx, _class| {
+                if v_ctx.input(|i| i.viewport().close_requested()) {
+                    close_screen_window = true;
+                }
+
+                let v_focused = v_ctx.input(|i| i.focused);
+
+                egui::CentralPanel::default().show(v_ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.heading(egui::RichText::new(format!("COMPOSITE OUTPUT — {}", screen_name)).strong().color(self.theme.accent));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let is_fullscreen = v_ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                            let fs_icon = if is_fullscreen {
+                                egui_phosphor::regular::ARROWS_IN_SIMPLE
+                            } else {
+                                egui_phosphor::regular::ARROWS_OUT_SIMPLE
+                            };
+                            let fs_tooltip = if is_fullscreen { "Exit Fullscreen" } else { "Toggle Fullscreen" };
+                            if ui.button(fs_icon).on_hover_text(fs_tooltip).clicked() {
+                                v_ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
+                            }
+                            if ui.button(format!("{} Close Screen", egui_phosphor::regular::X)).clicked() {
+                                close_screen_window = true;
+                            }
+                        });
+                    });
+                    ui.separator();
+                    self.render_detached_target_screen(&screen_id, v_ctx, ui, &telemetry);
+                });
+
+                let v_cadence = if v_focused || is_focused {
+                    std::time::Duration::from_millis(33)
+                } else {
+                    std::time::Duration::from_millis(200)
+                };
+                v_ctx.request_repaint_after(v_cadence);
+            });
+
+            if close_screen_window {
+                self.viz.detached_target_screens.remove(&screen_id);
             }
         }
 
