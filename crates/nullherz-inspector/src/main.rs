@@ -167,6 +167,7 @@ pub struct InspectorApp {
     pub(crate) p2p_sync_success_toast: Option<f64>,
     pub(crate) export_passport_success_toast: Option<f64>,
     pub(crate) export_passport_error_toast: Option<(f64, String)>,
+    pub(crate) rt_warnings: Vec<String>,
     pub(crate) theme: nullherz_ui_hal::Theme,
     pub(crate) last_update_time: f64,
     pub(crate) _conductor_thread: Option<std::thread::JoinHandle<()>>,
@@ -612,6 +613,7 @@ impl InspectorApp {
             p2p_sync_success_toast: None,
             export_passport_success_toast: None,
             export_passport_error_toast: None,
+            rt_warnings: ipc_layer::realtime_environment_warnings(),
             theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
         };
@@ -1387,6 +1389,27 @@ impl eframe::App for InspectorApp {
 
         // 4. Central Panel (Execution Plane)
         egui::CentralPanel::default().show(ctx, |ui| {
+            if !self.rt_warnings.is_empty() {
+                egui::Frame::none()
+                    .fill(self.theme.danger.linear_multiply(0.12))
+                    .stroke(egui::Stroke::new(1.0, self.theme.danger))
+                    .rounding(egui::Rounding::same(self.theme.radius_sm))
+                    .inner_margin(egui::Margin::symmetric(self.theme.space_md, self.theme.space_xs))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(format!("{} REAL-TIME SCHEDULING WARNING", egui_phosphor::regular::WARNING)).strong().color(self.theme.danger));
+                            ui.label(egui::RichText::new(&self.rt_warnings[0]).size(self.theme.type_caption).color(self.theme.text_primary));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button(egui::RichText::new("Fix in Settings →").size(self.theme.type_caption).strong().color(self.theme.accent)).clicked() {
+                                    self.active_view = View::Settings;
+                                    self.settings.active_settings_tab = SettingsTab::Audio;
+                                }
+                            });
+                        });
+                    });
+                ui.add_space(self.theme.space_xs);
+            }
+
             ui.horizontal(|ui| {
                 ui.heading(egui::RichText::new(view_to_string(self.active_view)).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1839,6 +1862,7 @@ mod tests {
             p2p_sync_success_toast: None,
             export_passport_success_toast: None,
             export_passport_error_toast: None,
+            rt_warnings: vec![],
             theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
             _conductor_thread: None,
@@ -1896,6 +1920,7 @@ mod tests {
             p2p_sync_success_toast: None,
             export_passport_success_toast: None,
             export_passport_error_toast: None,
+            rt_warnings: vec![],
             theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
             _conductor_thread: None,

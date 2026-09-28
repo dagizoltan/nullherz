@@ -110,6 +110,86 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
         });
 
     ui.add_space(theme.space_md);
+    ui.strong("Real-Time System Environment & Process Permissions");
+    ui.add_space(theme.space_xs);
+    Frame::none()
+        .fill(theme.bg_surface)
+        .rounding(theme.radius_md)
+        .stroke(theme.border_stroke)
+        .inner_margin(theme.space_md)
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new("Verification of kernel thread scheduling, real-time priorities (RLIMIT_RTPRIO), and page memory locking (mlockall).")
+                    .color(theme.text_secondary)
+                    .size(theme.type_caption),
+            );
+            ui.add_space(theme.space_sm);
+
+            let sched_status = ipc_layer::audio_thread_sched().unwrap_or_else(ipc_layer::SchedStatus::current);
+            let rtprio = ipc_layer::rtprio_limit();
+            let governor = ipc_layer::cpu_governor().unwrap_or_else(|| "unknown".into());
+            let memlock = ipc_layer::memlock_limit();
+
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Audio Thread Policy:").strong());
+                let policy_color = if sched_status.is_realtime() { theme.success } else { theme.danger };
+                ui.label(RichText::new(format!("{}", sched_status)).strong().color(policy_color));
+            });
+
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("RLIMIT_RTPRIO Limit:").strong());
+                let rtprio_str = rtprio.map(|l| l.to_string()).unwrap_or_else(|| "unreadable".into());
+                let rtprio_color = if rtprio.unwrap_or(0) > 0 { theme.text_primary } else { theme.danger };
+                ui.label(RichText::new(rtprio_str).color(rtprio_color));
+
+                ui.add_space(theme.space_md);
+                ui.label(RichText::new("CPU Governor:").strong());
+                ui.label(RichText::new(governor));
+            });
+
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("RLIMIT_MEMLOCK Limit:").strong());
+                let memlock_str = match memlock {
+                    Some(u64::MAX) => "unlimited".to_string(),
+                    Some(b) => format!("{} KiB", b / 1024),
+                    None => "unreadable".to_string(),
+                };
+                ui.label(RichText::new(memlock_str));
+            });
+
+            ui.add_space(theme.space_sm);
+            let active_warnings = ipc_layer::realtime_environment_warnings();
+            if active_warnings.is_empty() {
+                ui.label(
+                    RichText::new("✔ Real-time environment is fully optimized. Zero preemption risks detected.")
+                        .color(theme.success)
+                        .strong(),
+                );
+            } else {
+                ui.label(RichText::new("Active Real-time Warnings:").strong().color(theme.danger));
+                for warning in &active_warnings {
+                    ui.label(RichText::new(format!("• {}", warning)).color(theme.text_primary).size(theme.type_caption));
+                }
+
+                ui.add_space(theme.space_xs);
+                ui.label(
+                    RichText::new("Recommended Fix: Add the following lines to /etc/security/limits.d/99-nullherz-realtime.conf and ensure your user is in the 'audio' group:")
+                        .color(theme.text_secondary)
+                        .size(theme.type_caption),
+                );
+                Frame::none()
+                    .fill(theme.bg_inset)
+                    .rounding(theme.radius_sm)
+                    .inner_margin(theme.space_xs)
+                    .show(ui, |ui| {
+                        ui.monospace("@audio - rtprio 95\n@audio - memlock unlimited");
+                    });
+            }
+        });
+
+    ui.add_space(theme.space_md);
     ui.strong("Soundcard Wiring Test");
     ui.add_space(theme.space_xs);
     Frame::none()
