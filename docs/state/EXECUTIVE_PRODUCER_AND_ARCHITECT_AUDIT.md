@@ -71,7 +71,7 @@ As producers and performers operating in live stadium, club DJ, and studio produ
   * Full-height scrolling stacked waveforms across 4 deck lanes provide superior beatgrid inspection.
   * Integration with 3-band isolators, roll/delay/reverb FX inserts, and KeySync controls.
 * **Identified Friction & UX Issues**:
-  1. **Visual Playhead Jitter**: While audio playheads use `f64` precision, egui UI repaints at 30 Hz can create visual micro-stutter on fast-moving playhead needles when telemetry updates lag frame updates.
+  1. **Visual Playhead Jitter**: While audio playheads use `f64` precision, egui UI repaints at 30 Hz can create visual micro-stutter on fast-moving playhead needles when telemetry updates lag frame updates. *(RESOLVED)*
   2. **Track Header Height Alignment**: Deck lane headers and stacked waveform channels must maintain strict pixel-perfect vertical alignment regardless of display scaling or font DPI settings.
   3. **Hot Cue Ergonomics**: Hot cue buttons (1–8) lack clear visual trigger states and instant tactile flash response during live QWERTY or MIDI triggering.
 
@@ -96,7 +96,7 @@ As producers and performers operating in live stadium, club DJ, and studio produ
   * Multi-channel Visual Mixer with `PixelFeedbackEngine` RGBA framebuffers, 64-neuron Spiking Neural Networks (SNN), and detached window surface rendering.
   * Deep customization via `OrganismProfile` presets and `OrganismEditorState`.
 * **Identified Friction & UX Issues**:
-  1. **Detached Window Frame Cadence**: Unfocused detached windows drop to 5 Hz repaint cadence (`200ms`), which causes visual stutter on secondary VJ displays when main window focus is lost. *Remedy*: Maintain 30 Hz or 60 Hz cadence when detached visual windows are open (`has_detached`).
+  1. **Detached Window Frame Cadence**: Unfocused detached windows drop to 5 Hz repaint cadence (`200ms`), which causes visual stutter on secondary VJ displays when main window focus is lost. *(RESOLVED)*
   2. **Organism Editor Complexity**: The 64-D genome weight editor requires preset macro groupings (e.g. "Symmetry", "Turbulence", "Reactivity") so live performers do not need to manipulate individual floats during a show.
 
 ---
@@ -114,7 +114,7 @@ As producers and performers operating in live stadium, club DJ, and studio produ
 ### 4.2 System Audio Driver & Backend Integration
 * **ALSA & PipeWire Handling**:
   * The ALSA backend in `crates/nullherz-backends/src/alsa.rs` implements direct hardware MMAP mode (`SND_PCM_ACCESS_MMAP_INTERLEAVED`), kernel bypass via `NO_PERIOD_WAKEUP`, and D-Bus device reservation (`org.freedesktop.ReserveDevice1`).
-  * *Bottleneck*: When defaulting to `"default"` ALSA device under PipeWire, PipeWire enforces a fixed 48 kHz graph rate and 1024-frame quantum. The engine must explicitly detect PipeWire vs. direct hardware (`hw:N,M`) and expose direct hardware reservation to guarantee true sub-5ms action-to-sound latency.
+  * *Bottleneck*: When defaulting to `"default"` ALSA device under PipeWire, PipeWire enforces a fixed 48 kHz graph rate and 1024-frame quantum. The engine must explicitly detect PipeWire vs. direct hardware (`hw:N,M`) and expose direct hardware reservation to guarantee true sub-5ms action-to-sound latency. *(RESOLVED VIA 1-CLICK EXCLUSIVE PERFORMANCE MODE)*
 
 ---
 
@@ -134,18 +134,39 @@ As producers and performers operating in live stadium, club DJ, and studio produ
 
 ## 6. Prioritized Action Matrix for Hardening Phase
 
-| Priority | Area | Issue / Task | Implementation Detail |
+| Priority | Area | Issue / Task | Status / Implementation Detail |
 | :--- | :--- | :--- | :--- |
+| **P0** | **UI/UX** | Visual Window Frame Rate Smoothing | **[COMPLETED]** Locked detached visual windows (`View::Visuals`) and main viewport rendering to 16 ms (**60 Hz**) repaint cadence when `has_detached` is active. |
+| **P1** | **UI/UX** | Playhead Interpolation & Smoothness | **[COMPLETED]** Implemented sub-frame linear playhead interpolation in `WaveformRenderer` and Deck displays using high-precision `dt` time deltas to eliminate visual micro-jitter. |
+| **P1** | **DSP / System** | Hardware ALSA Reservation UI | **[COMPLETED]** Created a 1-click "Exclusive Performance Mode" button in Settings -> Audio that acquires D-Bus `ReserveDevice1`, sets `NULLHERZ_ALSA_MMAP=1` & `NULLHERZ_NO_PERIOD_WAKEUP=1`, and switches to direct ALSA MMAP. |
 | **P0** | **Performance** | RT Priority & Core Pinning Verification | Enforce startup check for `RLIMIT_RTPRIO` / `audio` group permissions and display clear UI banner if running under `SCHED_OTHER`. |
-| **P0** | **UI/UX** | Visual Window Frame Rate Smoothing | Lock detached visual windows (`View::Visuals`) to 60 Hz repaint cadence regardless of main window focus when `has_detached` is active. |
-| **P1** | **UI/UX** | Playhead Interpolation & Smoothness | Apply sub-frame linear playhead interpolation in `WaveformRenderer` and Deck displays to eliminate visual jitter at 30 Hz / 60 Hz egui redraws. |
-| **P1** | **DSP / System** | Hardware ALSA Reservation UI | Provide a 1-click "Exclusive Performance Mode" button in Settings -> Audio that acquires D-Bus `ReserveDevice1` and opens direct `hw:N,M` MMAP PCM. |
 | **P2** | **UI/UX** | Organism Editor Macro Grouping | Group 64-D genome weights in `OrganismEditorState` into 4 high-level macro sliders (Morphology, Reactivity, Chaos, Symmetry) with expansion toggles. |
 | **P2** | **Systems** | Session Cache Memory Eviction | Implement automatic sample buffer unloading for unused library tracks when memory pressure exceeds 70% threshold. |
 
 ---
 
-## 7. Conclusion
+## 7. Recently Implemented Optimizations Log
+
+### 7.1 Detached Visual Window 60 Hz Frame Rate Smoothing (`crates/nullherz-inspector/src/main.rs`)
+* **Problem**: Unfocused detached windows dropped to a 5 Hz repaint cadence (`200ms`), causing severe visual stutter on secondary VJ displays when main window focus was lost.
+* **Solution**: Updated viewport update logic in `InspectorApp::update` to evaluate `has_detached` state and lock both the main context and detached viewports to a high-performance **16 ms (60 Hz)** repaint cadence (`Duration::from_millis(16)`), guaranteeing butter-smooth neural visual surface rendering across secondary screens.
+
+### 7.2 Sub-Frame Linear Playhead Interpolation (`crates/nullherz-inspector/src/views/dj_studio/waveform.rs`)
+* **Problem**: Telemetry updates arrive at discrete snapshot intervals (~16 ms – 50 ms), while egui repaints at up to 60 Hz. Reading raw `deck_positions` caused visual micro-jitter on fast-moving playhead needles.
+* **Solution**: Introduced linear playhead position extrapolation in `render_deck_waveform_zone`. When a deck is playing, `elapsed_samples` is interpolated using:
+  $$\text{elapsed}_{\text{interpolated}} = \text{raw\_elapsed} + \lfloor \Delta t \times \text{playback\_rate} \times \text{sample\_rate} \rfloor$$
+  where $\Delta t$ is the exact time delta since the last telemetry snapshot. This produces continuous, jitter-free needle scrolling across 60 Hz redraws.
+
+### 7.3 1-Click Hardware ALSA Exclusive Performance Mode (`crates/nullherz-inspector/src/views/settings/audio.rs` & `state.rs`)
+* **Problem**: Manual configuration of environment variables (`NULLHERZ_ALSA_MMAP`, `NULLHERZ_NO_PERIOD_WAKEUP`, `NULLHERZ_RESERVE_DEVICE`) and D-Bus device reservation required command-line flags, leaving PipeWire desktop sound server resampling active by default.
+* **Solution**: Added a dedicated "Hardware Low-Latency Optimization" card in Settings -> Audio with a 1-click **Exclusive Performance Mode** toggle. Clicking the button:
+  1. Dynamically acquires D-Bus `ReserveDevice1` on session bus for `hw:0,0`.
+  2. Sets environment variables `NULLHERZ_ALSA_MMAP=1`, `NULLHERZ_NO_PERIOD_WAKEUP=1`, `NULLHERZ_RESERVE_DEVICE=1`.
+  3. Sends `CoreCommand::SwitchBackend(AudioBackendType::Alsa)` to instantly re-initialize the ALSA driver with direct hardware MMAP and kernel period bypass.
+
+---
+
+## 8. Conclusion
 
 By enforcing an absolute feature freeze and dedicating our engineering focus to UI/UX ergonomics, tactile responsiveness, audio driver optimizations, and real-time preemption elimination, Nullherz will solidify its position as the ultimate native Rust workstation for music production, DJ performance, and generative neural visual synthesis.
 
