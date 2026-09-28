@@ -1086,48 +1086,6 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                     });
                 });
         });
-
-        ui.add_space(theme.space_md);
-
-    ui.add_space(theme.space_md);
-
-    // Target Screens / Compositor Section
-    egui::Frame::none()
-        .fill(theme.bg_surface)
-        .rounding(egui::Rounding::same(theme.radius_md))
-        .inner_margin(egui::Margin::same(theme.space_md))
-        .stroke(egui::Stroke::new(1.0, theme.border))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("TARGET SCREENS & COMPOSITOR").size(theme.type_body).strong().color(theme.accent));
-                ui.add_space(12.0);
-
-                let num_screens = app.viz.target_screens.len();
-                if app.viz.active_target_screen_idx >= num_screens {
-                    app.viz.active_target_screen_idx = num_screens.saturating_sub(1);
-                }
-
-                for s_idx in 0..num_screens {
-                    let is_sel = app.viz.active_target_screen_idx == s_idx;
-                    let screen = &app.viz.target_screens[s_idx];
-                    if ui.selectable_label(is_sel, egui::RichText::new(&screen.name).strong()).clicked() {
-                        app.viz.active_target_screen_idx = s_idx;
-                    }
-                }
-            });
-
-            ui.add_space(4.0);
-
-            if app.viz.active_target_screen_idx < app.viz.target_screens.len() {
-                let active_idx = app.viz.active_target_screen_idx;
-                let active_id = app.viz.target_screens[active_idx].id.clone();
-
-                ui.group(|ui| {
-                    ui.set_height(140.0);
-                    render_composite_target_screen(app, &active_id, ui, telemetry);
-                });
-            }
-        });
 }
 
 #[cfg(test)]
