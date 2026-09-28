@@ -100,7 +100,6 @@ pub enum View {
     Account,
     Settings,
     Store,
-    Mastering,
     Modulation,
     Visuals,
     Analyzer,
@@ -227,7 +226,6 @@ impl InspectorApp {
                 views::breeder::BreederView::show(ui, &mut view_state, telemetry, self);
                 self.breeding_view = view_state;
             }
-            View::Mastering => views::mastering::render(self, ui, telemetry),
             View::Visuals => self.render_visuals_view(ui, telemetry),
             View::Analyzer => views::analyzer::render(self, ui, telemetry),
             View::Broadcast => views::broadcast::render(self, ui),
@@ -666,7 +664,6 @@ impl InspectorApp {
                     ];
 
                     let bottom_nav = [
-                        (View::Mastering, egui_phosphor::regular::EQUALIZER, "MASTERING EQ"),
                         (View::Topology, egui_phosphor::regular::SHARE_NETWORK, "TOPOLOGY"),
                         (View::Account, egui_phosphor::regular::USER, "ACCOUNT"),
                         (View::Settings, egui_phosphor::regular::GEAR, "SETTINGS"),
@@ -1523,7 +1520,6 @@ fn view_to_string(view: View) -> String {
         View::Account => "Account".to_string(),
         View::Settings => "Settings".to_string(),
         View::Store => "Store".to_string(),
-        View::Mastering => "Mastering".to_string(),
         View::Modulation => "Modulation".to_string(),
         View::Visuals => "Visuals".to_string(),
         View::Analyzer => "Analyzer".to_string(),
@@ -1546,7 +1542,6 @@ fn string_to_view(s: &str) -> View {
         "Account" => View::Account,
         "Settings" => View::Settings,
         "Store" => View::Store,
-        "Mastering" => View::Mastering,
         "Modulation" => View::Modulation,
         "Visuals" => View::Visuals,
         "Analyzer" => View::Analyzer,
@@ -1826,15 +1821,15 @@ mod tests {
 
         assert!(app.detached_views.is_empty());
 
-        // Detach Composer, Console and Mastering views
+        // Detach Composer, Console and Topology views
         app.detached_views.insert(View::Composer);
         app.detached_views.insert(View::Console);
-        app.detached_views.insert(View::Mastering);
+        app.detached_views.insert(View::Topology);
 
         assert_eq!(app.detached_views.len(), 3);
         assert!(app.detached_views.contains(&View::Composer));
         assert!(app.detached_views.contains(&View::Console));
-        assert!(app.detached_views.contains(&View::Mastering));
+        assert!(app.detached_views.contains(&View::Topology));
 
         // Re-attach Composer view
         app.detached_views.remove(&View::Composer);
