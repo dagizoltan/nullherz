@@ -1364,6 +1364,95 @@ impl CompositingLayoutMode {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ScreenTransitionType {
+    Crossfade,
+    WipeHorizontal,
+    WipeVertical,
+    GlitchDissolve,
+    ZoomExpand,
+}
+
+impl ScreenTransitionType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Crossfade => "Alpha Crossfade",
+            Self::WipeHorizontal => "Horizontal Wipe",
+            Self::WipeVertical => "Vertical Wipe",
+            Self::GlitchDissolve => "Glitch Noise Dissolve",
+            Self::ZoomExpand => "Zoom Expansion Fade",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::Crossfade,
+            Self::WipeHorizontal,
+            Self::WipeVertical,
+            Self::GlitchDissolve,
+            Self::ZoomExpand,
+        ]
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum NetworkStreamProtocol {
+    LocalViewport,
+    NDIStreamBus,
+    SyphonSpoutIPC,
+    WebRTCPeer,
+    RTMPBroadcastBus,
+}
+
+impl NetworkStreamProtocol {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::LocalViewport => "Local OS Window / Monitor",
+            Self::NDIStreamBus => "NDI Video Stream Bus",
+            Self::SyphonSpoutIPC => "Syphon / Spout GPU SHM IPC",
+            Self::WebRTCPeer => "WebRTC Low-Latency P2P Peer",
+            Self::RTMPBroadcastBus => "RTMP Broadcast Stream",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::LocalViewport,
+            Self::NDIStreamBus,
+            Self::SyphonSpoutIPC,
+            Self::WebRTCPeer,
+            Self::RTMPBroadcastBus,
+        ]
+    }
+}
+
+/// Target Screen Transition & Scene Crossfading State
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct TargetScreenTransition {
+    pub from_screen_id: String,
+    pub to_screen_id: String,
+    pub transition_type: ScreenTransitionType,
+    pub duration_secs: f32,
+    pub progress: f32,
+    pub is_active: bool,
+    pub start_time: f64,
+}
+
+impl Default for TargetScreenTransition {
+    fn default() -> Self {
+        Self {
+            from_screen_id: "main_composite".to_string(),
+            to_screen_id: "stage_projector".to_string(),
+            transition_type: ScreenTransitionType::Crossfade,
+            duration_secs: 2.0,
+            progress: 1.0,
+            is_active: false,
+            start_time: 0.0,
+        }
+    }
+}
+
 /// Dynamic Target Display Screen or Compositing Window
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
@@ -1374,6 +1463,8 @@ pub struct VisualTargetScreen {
     pub clear_color: [u8; 4],
     pub resolution: [u32; 2],
     pub is_detached: bool,
+    pub network_protocol: NetworkStreamProtocol,
+    pub stream_endpoint: String,
 }
 
 impl VisualTargetScreen {
@@ -1385,6 +1476,8 @@ impl VisualTargetScreen {
             clear_color: [10, 12, 18, 255],
             resolution: [1920, 1080],
             is_detached: false,
+            network_protocol: NetworkStreamProtocol::LocalViewport,
+            stream_endpoint: format!("ndi://localhost/{}", id),
         }
     }
 }
@@ -1590,6 +1683,7 @@ pub struct VizState {
     pub target_screens: Vec<VisualTargetScreen>,
     pub active_target_screen_idx: usize,
     pub detached_target_screens: std::collections::HashSet<String>,
+    pub screen_transition: TargetScreenTransition,
     #[allow(dead_code)]
     pub master_visual_gain: f32,
     #[allow(dead_code)]
@@ -1639,6 +1733,7 @@ impl Default for VizState {
             ],
             active_target_screen_idx: 0,
             detached_target_screens: std::collections::HashSet::new(),
+            screen_transition: TargetScreenTransition::default(),
             master_visual_gain: 1.0,
             master_visual_brightness: 1.0,
         }

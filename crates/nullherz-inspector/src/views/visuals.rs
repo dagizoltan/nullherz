@@ -211,6 +211,56 @@ pub fn blend_pixel(src: [u8; 4], dst: [u8; 4], mode: state::VisualBlendMode, opa
     ]
 }
 
+/// Blend two target screen framebuffers according to a transition type and progress (0.0..=1.0)
+pub fn blend_transition_framebuffers(
+    from_engine: &state::PixelFeedbackEngine,
+    to_engine: &state::PixelFeedbackEngine,
+    output_engine: &mut state::PixelFeedbackEngine,
+    transition_type: state::ScreenTransitionType,
+    progress: f32,
+) {
+    let p = progress.clamp(0.0, 1.0);
+    let w = output_engine.width;
+    let h = output_engine.height;
+
+    for y in 0..h {
+        let y_ratio = y as f32 / h as f32;
+        for x in 0..w {
+            let x_ratio = x as f32 / w as f32;
+            let idx = y * w + x;
+
+            let pix_from = from_engine.back_buffer.get(idx).copied().unwrap_or([0, 0, 0, 255]);
+            let pix_to = to_engine.back_buffer.get(idx).copied().unwrap_or([0, 0, 0, 255]);
+
+            let out_pixel = match transition_type {
+                state::ScreenTransitionType::Crossfade => {
+                    let r = (pix_from[0] as f32 * (1.0 - p) + pix_to[0] as f32 * p) as u8;
+                    let g = (pix_from[1] as f32 * (1.0 - p) + pix_to[1] as f32 * p) as u8;
+                    let b = (pix_from[2] as f32 * (1.0 - p) + pix_to[2] as f32 * p) as u8;
+                    [r, g, b, 255]
+                }
+                state::ScreenTransitionType::WipeHorizontal => {
+                    if x_ratio < p { pix_to } else { pix_from }
+                }
+                state::ScreenTransitionType::WipeVertical => {
+                    if y_ratio < p { pix_to } else { pix_from }
+                }
+                state::ScreenTransitionType::GlitchDissolve => {
+                    let hash = ((x * 127 + y * 311) % 100) as f32 / 100.0;
+                    if hash < p { pix_to } else { pix_from }
+                }
+                state::ScreenTransitionType::ZoomExpand => {
+                    let center_dist = ((x_ratio - 0.5).hypot(y_ratio - 0.5) * 2.0).clamp(0.0, 1.0);
+                    if center_dist < p { pix_to } else { pix_from }
+                }
+            };
+
+            output_engine.back_buffer[idx] = out_pixel;
+        }
+    }
+    output_engine.front_buffer.copy_from_slice(&output_engine.back_buffer);
+}
+
 /// Composite a single visual channel framebuffer onto a target screen engine buffer at a given cell rectangle
 pub fn composite_channel_onto_screen(
     target_engine: &mut state::PixelFeedbackEngine,
@@ -273,7 +323,7 @@ pub fn render_composite_target_screen(
     let Some(screen) = screen_opt else { return; };
 
     let available_size = ui.available_size();
-    let (rect, _response) = ui.allocate_exact_size(available_size.max(egui::vec2(200.0, 200.0)), egui::Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(available_size.max(egui::vec2(200.0, 200.0)), egui::Sense::click_and_drag());
 
     ui.painter().rect_filled(
         rect,
@@ -408,6 +458,35 @@ pub fn render_composite_target_screen(
         composite_channel_onto_screen(&mut target_engine, channel, cell_rect);
     }
 
+    // Apply active Scene Crossfader transition if active for this target screen
+    if app.viz.screen_transition.is_active && app.viz.screen_transition.to_screen_id == target_screen_id {
+        let from_screen_id = app.viz.screen_transition.from_screen_id.clone();
+        let trans_type = app.viz.screen_transition.transition_type;
+        let trans_progress = app.viz.screen_transition.progress;
+
+        let mut from_engine = state::PixelFeedbackEngine::new(target_w, target_h);
+        for pixel in from_engine.back_buffer.iter_mut() {
+            *pixel = screen.clear_color;
+        }
+
+        // Composite from_screen channels
+        let mut from_indices: Vec<usize> = app.viz.channels.iter().enumerate()
+            .filter(|(_, c)| c.target_screen_id == from_screen_id && !c.is_muted)
+            .map(|(idx, _)| idx)
+            .collect();
+        from_indices.sort_by_key(|&idx| app.viz.channels[idx].layer_z_index);
+
+        for (_from_slot, &c_idx) in from_indices.iter().enumerate() {
+            let channel = &app.viz.channels[c_idx];
+            let cell_rect = (0, 0, target_w, target_h);
+            composite_channel_onto_screen(&mut from_engine, channel, cell_rect);
+        }
+
+        let mut blended_engine = state::PixelFeedbackEngine::new(target_w, target_h);
+        blend_transition_framebuffers(&from_engine, &target_engine, &mut blended_engine, trans_type, trans_progress);
+        target_engine = blended_engine;
+    }
+
     target_engine.front_buffer.copy_from_slice(&target_engine.back_buffer);
 
     let color_image = egui::ColorImage::from_rgba_unmultiplied(
@@ -427,6 +506,47 @@ pub fn render_composite_target_screen(
         egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
         egui::Color32::WHITE,
     );
+
+    // Interactive Drag-and-Drop Viewport Placement Handles for PictureInPicture Mode
+    if screen.layout_mode == state::CompositingLayoutMode::PictureInPicture && matching_indices.len() > 1 {
+        for (layer_slot, &c_idx) in matching_indices.iter().enumerate().skip(1) {
+            let channel = &mut app.viz.channels[c_idx];
+            let vx = channel.viewport_rect[0].clamp(0.0, 0.9);
+            let vy = channel.viewport_rect[1].clamp(0.0, 0.9);
+            let vw = channel.viewport_rect[2].clamp(0.1, 1.0);
+            let vh = channel.viewport_rect[3].clamp(0.1, 1.0);
+
+            let pip_min = rect.min + egui::vec2(vx * rect.width(), vy * rect.height());
+            let pip_max = pip_min + egui::vec2(vw * rect.width(), vh * rect.height());
+            let pip_rect = egui::Rect::from_min_max(pip_min, pip_max);
+
+            // Handle Pointer Drag on PIP Canvas Box
+            if response.dragged() {
+                if let Some(pos) = response.interact_pointer_pos() {
+                    let norm_x = ((pos.x - rect.left() - pip_rect.width() * 0.5) / rect.width()).clamp(0.0, 1.0 - vw);
+                    let norm_y = ((pos.y - rect.top() - pip_rect.height() * 0.5) / rect.height()).clamp(0.0, 1.0 - vh);
+                    channel.viewport_rect[0] = norm_x;
+                    channel.viewport_rect[1] = norm_y;
+                }
+            }
+
+            // Draw PIP interactive viewport bounding box with handle handles
+            let stroke_color = app.theme.deck_colors[(layer_slot - 1) % 4];
+            ui.painter().rect_stroke(pip_rect, 2.0, egui::Stroke::new(2.0, stroke_color));
+            ui.painter().rect_filled(
+                egui::Rect::from_center_size(pip_rect.right_bottom(), egui::vec2(8.0, 8.0)),
+                2.0,
+                stroke_color,
+            );
+            ui.painter().text(
+                pip_rect.left_top() + egui::vec2(4.0, 4.0),
+                egui::Align2::LEFT_TOP,
+                format!("PIP L{}: {}", layer_slot, channel.name),
+                egui::FontId::proportional(10.0),
+                stroke_color,
+            );
+        }
+    }
 }
 
 /// Render detached interactive visual surface
@@ -693,6 +813,28 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                             }
                         });
 
+                    ui.add_space(12.0);
+                    ui.label("Network Output:");
+                    egui::ComboBox::from_id_source(format!("screen_net_protocol_combo_{}", active_id))
+                        .selected_text(app.viz.target_screens[active_idx].network_protocol.name())
+                        .show_ui(ui, |ui| {
+                            for proto_item in state::NetworkStreamProtocol::all() {
+                                ui.selectable_value(&mut app.viz.target_screens[active_idx].network_protocol, *proto_item, proto_item.name());
+                            }
+                        });
+
+                    if app.viz.target_screens[active_idx].network_protocol != state::NetworkStreamProtocol::LocalViewport {
+                        ui.add_space(8.0);
+                        ui.label("Endpoint:");
+                        ui.add_sized([180.0, 20.0], egui::TextEdit::singleline(&mut app.viz.target_screens[active_idx].stream_endpoint));
+                        ui.label(
+                            egui::RichText::new("[● LIVE STREAM BUS]")
+                                .size(9.0)
+                                .strong()
+                                .color(theme.success),
+                        );
+                    }
+
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let is_detached = app.viz.detached_target_screens.contains(&active_id);
                         let detach_label = if is_detached {
@@ -721,6 +863,78 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                     app.viz.target_screens.remove(rem_idx);
                     app.viz.active_target_screen_idx = app.viz.active_target_screen_idx.saturating_sub(1);
                 } else {
+                    ui.add_space(6.0);
+
+                    // SCREEN TRANSITIONS & SCENE CROSSFADER PANEL
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("SCENE CROSSFADER:").size(9.0).strong().color(theme.accent));
+
+                        ui.label("From:");
+                        let from_name = app.viz.target_screens.iter()
+                            .find(|s| s.id == app.viz.screen_transition.from_screen_id)
+                            .map(|s| s.name.as_str())
+                            .unwrap_or("Screen A");
+                        egui::ComboBox::from_id_source("trans_from_screen")
+                            .selected_text(from_name)
+                            .show_ui(ui, |ui| {
+                                for target_screen in &app.viz.target_screens {
+                                    ui.selectable_value(&mut app.viz.screen_transition.from_screen_id, target_screen.id.clone(), &target_screen.name);
+                                }
+                            });
+
+                        ui.label("To:");
+                        let to_name = app.viz.target_screens.iter()
+                            .find(|s| s.id == app.viz.screen_transition.to_screen_id)
+                            .map(|s| s.name.as_str())
+                            .unwrap_or("Screen B");
+                        egui::ComboBox::from_id_source("trans_to_screen")
+                            .selected_text(to_name)
+                            .show_ui(ui, |ui| {
+                                for target_screen in &app.viz.target_screens {
+                                    ui.selectable_value(&mut app.viz.screen_transition.to_screen_id, target_screen.id.clone(), &target_screen.name);
+                                }
+                            });
+
+                        ui.label("Style:");
+                        egui::ComboBox::from_id_source("trans_style_combo")
+                            .selected_text(app.viz.screen_transition.transition_type.name())
+                            .show_ui(ui, |ui| {
+                                for style in state::ScreenTransitionType::all() {
+                                    ui.selectable_value(&mut app.viz.screen_transition.transition_type, *style, style.name());
+                                }
+                            });
+
+                        ui.label("Duration:");
+                        ui.add(egui::Slider::new(&mut app.viz.screen_transition.duration_secs, 0.2..=10.0).suffix("s"));
+
+                        let cur_time = ui.input(|i| i.time);
+                        if ui.button(egui::RichText::new("TAKE").strong().color(theme.accent)).on_hover_text("Trigger Auto Transition").clicked() {
+                            app.viz.screen_transition.start_time = cur_time;
+                            app.viz.screen_transition.progress = 0.0;
+                            app.viz.screen_transition.is_active = true;
+                        }
+
+                        if ui.button(egui::RichText::new("CUT").strong()).on_hover_text("Instant Cut Swap").clicked() {
+                            app.viz.screen_transition.progress = 1.0;
+                            app.viz.screen_transition.is_active = false;
+                        }
+                    });
+
+                    // Update Transition Progress
+                    if app.viz.screen_transition.is_active {
+                        let cur_time = ui.input(|i| i.time);
+                        let elapsed = (cur_time - app.viz.screen_transition.start_time) as f32;
+                        let duration = app.viz.screen_transition.duration_secs.max(0.1);
+                        let prog = (elapsed / duration).clamp(0.0, 1.0);
+                        app.viz.screen_transition.progress = prog;
+
+                        ui.add(egui::ProgressBar::new(prog).text(format!("Transitioning... {:.0}%", prog * 100.0)));
+
+                        if prog >= 1.0 {
+                            app.viz.screen_transition.is_active = false;
+                        }
+                    }
+
                     ui.add_space(6.0);
 
                     // Target Screen Live Composite Preview Canvas
@@ -1097,5 +1311,67 @@ mod tests {
         // Detach screen_3
         viz_state.detached_target_screens.insert("screen_3".to_string());
         assert!(viz_state.detached_target_screens.contains("screen_3"));
+    }
+
+    #[test]
+    fn test_pip_viewport_drag_bounds() {
+        let mut channel = state::VisualChannel::new(
+            "PIP TEST",
+            state::VisualGenerator::RadialMandala,
+            vec![state::VisualInputSource::DeckA],
+        );
+        // Default viewport_rect is [0.0, 0.0, 1.0, 1.0]
+        assert_eq!(channel.viewport_rect, [0.0, 0.0, 1.0, 1.0]);
+
+        // Drag to custom PIP location
+        channel.viewport_rect[0] = 0.6;
+        channel.viewport_rect[1] = 0.6;
+        channel.viewport_rect[2] = 0.35;
+        channel.viewport_rect[3] = 0.35;
+
+        let norm_x = channel.viewport_rect[0].clamp(0.0, 1.0 - channel.viewport_rect[2]);
+        let norm_y = channel.viewport_rect[1].clamp(0.0, 1.0 - channel.viewport_rect[3]);
+
+        assert!((norm_x - 0.60).abs() < 0.01);
+        assert!((norm_y - 0.60).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_screen_transition_interpolation() {
+        let mut from_engine = state::PixelFeedbackEngine::new(16, 16);
+        for pixel in from_engine.back_buffer.iter_mut() {
+            *pixel = [200, 0, 0, 255];
+        }
+
+        let mut to_engine = state::PixelFeedbackEngine::new(16, 16);
+        for pixel in to_engine.back_buffer.iter_mut() {
+            *pixel = [0, 200, 0, 255];
+        }
+
+        let mut out_engine = state::PixelFeedbackEngine::new(16, 16);
+
+        // At progress 0.0, output matches from_engine
+        blend_transition_framebuffers(&from_engine, &to_engine, &mut out_engine, state::ScreenTransitionType::Crossfade, 0.0);
+        assert_eq!(out_engine.back_buffer[0], [200, 0, 0, 255]);
+
+        // At progress 1.0, output matches to_engine
+        blend_transition_framebuffers(&from_engine, &to_engine, &mut out_engine, state::ScreenTransitionType::Crossfade, 1.0);
+        assert_eq!(out_engine.back_buffer[0], [0, 200, 0, 255]);
+
+        // At progress 0.5, crossfade yields 50/50 blend
+        blend_transition_framebuffers(&from_engine, &to_engine, &mut out_engine, state::ScreenTransitionType::Crossfade, 0.5);
+        assert_eq!(out_engine.back_buffer[0], [100, 100, 0, 255]);
+    }
+
+    #[test]
+    fn test_network_stream_protocol_selection() {
+        let mut screen = state::VisualTargetScreen::new("screen_ndi", "NDI Output Screen", state::CompositingLayoutMode::LayeredComposite);
+        assert_eq!(screen.network_protocol, state::NetworkStreamProtocol::LocalViewport);
+
+        screen.network_protocol = state::NetworkStreamProtocol::NDIStreamBus;
+        screen.stream_endpoint = "ndi://192.168.1.50/nullherz_ndi_out".to_string();
+
+        assert_eq!(screen.network_protocol, state::NetworkStreamProtocol::NDIStreamBus);
+        assert_eq!(screen.stream_endpoint, "ndi://192.168.1.50/nullherz_ndi_out");
     }
 }
