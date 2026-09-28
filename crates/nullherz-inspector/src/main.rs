@@ -1254,8 +1254,8 @@ impl eframe::App for InspectorApp {
                     self.render_detached_interactive_surface(c_idx, v_ctx, ui, &telemetry);
                 });
 
-                let v_cadence = if v_focused || is_focused {
-                    std::time::Duration::from_millis(33)
+                let v_cadence = if v_focused || is_focused || has_detached {
+                    std::time::Duration::from_millis(16)
                 } else {
                     std::time::Duration::from_millis(200)
                 };
@@ -1367,8 +1367,8 @@ impl eframe::App for InspectorApp {
                 });
 
                 // Continuous repaint for detached viewport at bounded cadence
-                let v_cadence = if v_focused || is_focused {
-                    std::time::Duration::from_millis(33)
+                let v_cadence = if v_focused || is_focused || has_detached {
+                    std::time::Duration::from_millis(16)
                 } else {
                     std::time::Duration::from_millis(200)
                 };
@@ -1439,8 +1439,8 @@ impl eframe::App for InspectorApp {
         // transport FREEZE whenever the mouse is still — which reads as
         // "the UI lags". 30 Hz focused is smooth for meters without burning
         // a core; 5 Hz keeps background windows alive but cheap.
-        let cadence = if is_focused {
-            std::time::Duration::from_millis(33)
+        let cadence = if is_focused || has_detached {
+            std::time::Duration::from_millis(16)
         } else {
             std::time::Duration::from_millis(200)
         };
