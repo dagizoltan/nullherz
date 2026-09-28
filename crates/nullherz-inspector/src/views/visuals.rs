@@ -1039,7 +1039,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
 
                                                 if ui.add_sized([VIZ_STRIP_W - 20.0, 18.0], egui::Button::new(egui::RichText::new("+ VISUAL FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
                                                     app.active_right_tab = Some(crate::RightTab::Store);
-                                                    app.store.active_tag_filter = Some("visual".to_string());
+                                                    app.store.active_category = Some(sidecar_sdk::AssetCategory::VisualInsert);
                                                 }
                                             });
                                         });

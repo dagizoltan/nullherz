@@ -1,19 +1,19 @@
 use egui::{RichText, Ui, ScrollArea, Layout, Align, Frame, Margin, Rounding};
 use crate::InspectorApp;
-use sidecar_sdk::SidecarType;
+use sidecar_sdk::{AssetCategory, SidecarType};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
 
     ui.vertical(|ui| {
-        // 1. Search + Tag Filter Chips Section
+        // 1. Search + Main Category Chips Section
         render_filter_bar(app, ui);
 
         ui.add_space(theme.space_sm);
         ui.separator();
         ui.add_space(theme.space_sm);
 
-        // 2. Sidecar Catalog List
+        // 2. Sidecar Catalog List Grouped or Filtered by Category
         render_catalog_list(app, ui);
     });
 }
@@ -35,9 +35,9 @@ fn render_filter_bar(app: &mut InspectorApp, ui: &mut Ui) {
 
     ui.add_space(theme.space_xs);
 
-    // Tag Filter Chips
+    // Main Category Selector Chips
     ui.label(
-        RichText::new("TAG FILTERS")
+        RichText::new("CATEGORIES")
             .size(theme.type_caption)
             .strong()
             .color(theme.text_secondary),
@@ -47,27 +47,23 @@ fn render_filter_bar(app: &mut InspectorApp, ui: &mut Ui) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(theme.space_xs, theme.space_xs);
 
-        let tags = [
-            ("ALL", None),
-            ("AUDIO INSTRUMENT", Some("instrument")),
-            ("AUDIO INSERT", Some("insert")),
-            ("VISUAL GENERATOR", Some("visual")),
-            ("NEURAL", Some("neural")),
-            ("TCN", Some("tcn")),
-            ("DELAY", Some("delay")),
-            ("EQ", Some("eq")),
-            ("REAL-TIME", Some("real-time")),
-        ];
+        let is_all = app.store.active_category.is_none();
+        if ui.selectable_label(is_all, format!("{} ALL", egui_phosphor::regular::PACKAGE)).clicked() {
+            app.store.active_category = None;
+        }
 
-        for (label, tag_opt) in tags {
-            let is_selected = match (&app.store.active_tag_filter, tag_opt) {
-                (None, None) => true,
-                (Some(a), Some(b)) => a.as_str().eq_ignore_ascii_case(b),
-                _ => false,
+        for category in AssetCategory::all() {
+            let is_selected = app.store.active_category == Some(*category);
+            let icon = match category {
+                AssetCategory::AudioFiles => egui_phosphor::regular::MUSIC_NOTES,
+                AssetCategory::AudioInsert => egui_phosphor::regular::SLIDERS_HORIZONTAL,
+                AssetCategory::VisualInsert => egui_phosphor::regular::EYE,
+                AssetCategory::AudioInstrument => egui_phosphor::regular::PIANO_KEYS,
+                AssetCategory::VisualInstrument => egui_phosphor::regular::APERTURE,
             };
 
-            if ui.selectable_label(is_selected, label).clicked() {
-                app.store.active_tag_filter = tag_opt.map(|s| s.to_string());
+            if ui.selectable_label(is_selected, format!("{} {}", icon, category.name().to_uppercase())).clicked() {
+                app.store.active_category = Some(*category);
             }
         }
     });
@@ -76,11 +72,11 @@ fn render_filter_bar(app: &mut InspectorApp, ui: &mut Ui) {
 fn render_catalog_list(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
 
-    let mut descriptors = if let Some(ref tag) = app.store.active_tag_filter {
-        app.store.store_catalog.filter_by_tag(tag)
-    } else {
-        app.store.store_catalog.list()
-    };
+    let mut descriptors = app.store.store_catalog.list();
+
+    if let Some(cat) = app.store.active_category {
+        descriptors.retain(|d| d.sidecar_type.category() == cat);
+    }
 
     if !app.store.search_query.trim().is_empty() {
         let q = app.store.search_query.to_lowercase();
@@ -88,6 +84,7 @@ fn render_catalog_list(app: &mut InspectorApp, ui: &mut Ui) {
             d.id.to_lowercase().contains(&q)
                 || d.name.to_lowercase().contains(&q)
                 || d.description.to_lowercase().contains(&q)
+                || d.tags.iter().any(|t| t.to_lowercase().contains(&q))
         });
     }
 
@@ -102,9 +99,46 @@ fn render_catalog_list(app: &mut InspectorApp, ui: &mut Ui) {
         .id_source("sidecar_store_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            for descriptor in descriptors {
-                render_sidecar_card(app, ui, &descriptor);
-                ui.add_space(theme.space_sm);
+            if app.store.active_category.is_some() {
+                for descriptor in descriptors {
+                    render_sidecar_card(app, ui, &descriptor);
+                    ui.add_space(theme.space_sm);
+                }
+            } else {
+                // Group by Category when "ALL" is selected
+                let categories = [
+                    AssetCategory::AudioInstrument,
+                    AssetCategory::AudioInsert,
+                    AssetCategory::VisualInstrument,
+                    AssetCategory::VisualInsert,
+                    AssetCategory::AudioFiles,
+                ];
+
+                for category in categories {
+                    let items_in_cat: Vec<_> = descriptors
+                        .iter()
+                        .filter(|d| d.sidecar_type.category() == category)
+                        .cloned()
+                        .collect();
+
+                    if items_in_cat.is_empty() {
+                        continue;
+                    }
+
+                    ui.add_space(theme.space_xs);
+                    ui.label(
+                        RichText::new(format!("━━━ {} ({}) ━━━", category.name().to_uppercase(), items_in_cat.len()))
+                            .size(theme.type_caption)
+                            .strong()
+                            .color(theme.accent),
+                    );
+                    ui.add_space(theme.space_xs);
+
+                    for descriptor in items_in_cat {
+                        render_sidecar_card(app, ui, &descriptor);
+                        ui.add_space(theme.space_sm);
+                    }
+                }
             }
         });
 }

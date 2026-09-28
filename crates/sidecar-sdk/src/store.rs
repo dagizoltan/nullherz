@@ -8,6 +8,38 @@ use nullherz_traits::{
     ProcessorCommand, MidiEvent,
 };
 
+/// Main categories across Store and Library.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AssetCategory {
+    AudioFiles,
+    AudioInsert,
+    VisualInsert,
+    AudioInstrument,
+    VisualInstrument,
+}
+
+impl AssetCategory {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::AudioFiles => "Audio Files",
+            Self::AudioInsert => "Audio Insert",
+            Self::VisualInsert => "Visual Insert",
+            Self::AudioInstrument => "Audio Instrument",
+            Self::VisualInstrument => "Visual Instrument",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::AudioFiles,
+            Self::AudioInsert,
+            Self::VisualInsert,
+            Self::AudioInstrument,
+            Self::VisualInstrument,
+        ]
+    }
+}
+
 /// Category types for sidecar modules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SidecarType {
@@ -21,6 +53,19 @@ pub enum SidecarType {
     Insert,
     NeuralAnalyzer,
     NeuralProcessor,
+}
+
+impl SidecarType {
+    pub fn category(&self) -> AssetCategory {
+        match self {
+            Self::AudioInstrument | Self::Instrument => AssetCategory::AudioInstrument,
+            Self::AudioInsert | Self::Insert | Self::NeuralProcessor | Self::NeuralAnalyzer => {
+                AssetCategory::AudioInsert
+            }
+            Self::VisualGenerator => AssetCategory::VisualInstrument,
+            Self::VisualInsert => AssetCategory::VisualInsert,
+        }
+    }
 }
 
 /// Metadata descriptor for a sidecar module.
@@ -1488,6 +1533,10 @@ impl SidecarStore {
         self.list().into_iter().filter(|d| d.sidecar_type == sidecar_type).collect()
     }
 
+    pub fn filter_by_category(&self, category: AssetCategory) -> Vec<SidecarDescriptor> {
+        self.list().into_iter().filter(|d| d.sidecar_type.category() == category).collect()
+    }
+
     pub fn create_processor(&self, id: &str) -> Option<Box<dyn AudioProcessor>> {
         self.factories.get(id).map(|factory| factory())
     }
@@ -1585,6 +1634,27 @@ mod store_tests {
 
         let viz_inserts = store.filter_by_type(SidecarType::VisualInsert);
         assert_eq!(viz_inserts.len(), 1);
+    }
+
+    #[test]
+    fn test_store_category_filtering() {
+        let store = SidecarStore::with_defaults();
+
+        let audio_inst = store.filter_by_category(AssetCategory::AudioInstrument);
+        assert_eq!(audio_inst.len(), 1);
+        assert_eq!(audio_inst[0].id, "algorithmic-synth");
+
+        let audio_inserts = store.filter_by_category(AssetCategory::AudioInsert);
+        assert_eq!(audio_inserts.len(), 15);
+
+        let visual_inst = store.filter_by_category(AssetCategory::VisualInstrument);
+        assert_eq!(visual_inst.len(), 9);
+
+        let visual_inserts = store.filter_by_category(AssetCategory::VisualInsert);
+        assert_eq!(visual_inserts.len(), 1);
+
+        let audio_files = store.filter_by_category(AssetCategory::AudioFiles);
+        assert_eq!(audio_files.len(), 0);
     }
 
     #[test]

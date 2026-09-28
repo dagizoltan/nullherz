@@ -765,7 +765,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                         if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
                             app.active_right_tab = Some(crate::RightTab::Store);
-                            app.store.active_tag_filter = Some("insert".to_string());
+                            app.store.active_category = Some(sidecar_sdk::AssetCategory::AudioInsert);
                         }
 
                         if let Some(idx) = fx_to_move_up {
@@ -1120,7 +1120,7 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
 
                         if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
                             app.active_right_tab = Some(crate::RightTab::Store);
-                            app.store.active_tag_filter = Some("insert".to_string());
+                            app.store.active_category = Some(sidecar_sdk::AssetCategory::AudioInsert);
                         }
                     });
                 });

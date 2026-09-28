@@ -404,7 +404,7 @@ impl InspectorApp {
 
                                         if ui.add_sized([VIZ_STRIP_W - 20.0, 18.0], egui::Button::new(egui::RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
                                             self.active_right_tab = Some(crate::RightTab::Store);
-                                            self.store.active_tag_filter = Some("visual".to_string());
+                                            self.store.active_category = Some(sidecar_sdk::AssetCategory::VisualInsert);
                                         }
                                     });
                                 });
