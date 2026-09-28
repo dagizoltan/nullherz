@@ -100,7 +100,17 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             render_metric_group(ui, "DSP EXECUTION PLANE", frame_width, &theme, |ui| {
                 if let Some(t) = &telemetry {
                     let load = dsp_load(t) * 100.0;
-                    ui.label(format!("Engine Load: {:.1}%", load));
+                    let load_color = if load >= 90.0 { theme.danger } else if load >= 70.0 { theme.warning } else { theme.accent };
+
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Engine Load:").small().strong().color(theme.text_primary));
+                        ui.add(egui::ProgressBar::new((load / 100.0).clamp(0.0, 1.0))
+                            .desired_width(140.0)
+                            .fill(load_color)
+                            .text(RichText::new(format!("{:.1}%", load)).small().strong()));
+                    });
+
+                    ui.add_space(2.0);
                     ui.label(
                         RichText::new(format!(
                             "{:.0} Hz · {} frames · {:.2} ms budget",
@@ -109,22 +119,28 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         .small()
                         .color(theme.text_secondary),
                     );
-                    // Distinguish "the backend counted none" from "nobody
-                    // counted". This read a never-incremented engine atomic and
-                    // showed a confident 0 while the device was underrunning.
-                    if t.xruns_reported {
-                        let c = if t.xrun_count == 0 { theme.text_primary } else { theme.danger };
-                        ui.label(RichText::new(format!("X-RUNS: {}", t.xrun_count)).color(c));
-                    } else {
-                        ui.label(
-                            RichText::new("X-RUNS: not reported by this backend")
-                                .color(theme.text_secondary),
-                        );
-                    }
-                    ui.label(format!("Resource Leaks: {}", t.resource_leaks));
+
+                    ui.add_space(2.0);
+                    ui.horizontal(|ui| {
+                        if t.xruns_reported {
+                            let c = if t.xrun_count == 0 { theme.success } else { theme.danger };
+                            ui.label(RichText::new(format!("X-RUNS: {}", t.xrun_count)).small().strong().color(c));
+                        } else {
+                            ui.label(
+                                RichText::new("X-RUNS: N/A")
+                                    .small()
+                                    .color(theme.text_disabled),
+                            );
+                        }
+                        ui.add_space(theme.space_sm);
+                        ui.label(RichText::new(format!("Leaks: {}", t.resource_leaks)).small().color(theme.text_secondary));
+                    });
 
                     let pressure_norm = (t.last_xrun_magnitude_ns as f32 / 1_000_000.0).clamp(0.0, 5.0) / 5.0;
-                    ui.add(egui::ProgressBar::new(pressure_norm).fill(theme.accent).text("PRESSURE"));
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Pressure:").small().color(theme.text_secondary));
+                        ui.add(egui::ProgressBar::new(pressure_norm).desired_width(120.0).fill(theme.warning));
+                    });
 
                     ui.add_space(theme.space_xs);
 
@@ -204,7 +220,18 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 ui.painter().rect_filled(rect, theme.radius_md, theme.bg_dark.linear_multiply(0.8));
 
                 let center = rect.center();
-                let scale = 60.0;
+                let scale = 55.0;
+
+                // Draw polar crosshair axes
+                ui.painter().line_segment(
+                    [egui::pos2(center.x - scale, center.y), egui::pos2(center.x + scale, center.y)],
+                    Stroke::new(1.0, theme.border),
+                );
+                ui.painter().line_segment(
+                    [egui::pos2(center.x, center.y - scale), egui::pos2(center.x, center.y + scale)],
+                    Stroke::new(1.0, theme.border),
+                );
+                ui.painter().circle_stroke(center, scale, Stroke::new(1.0, theme.border));
 
                 // Project 16D latent space to 2D using a simple fixed projection
                 let mut x = 0.0;
@@ -217,10 +244,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
                 let pos = center + egui::vec2(x * scale, y * scale);
                 ui.painter().circle_filled(pos, 6.0, theme.accent);
-                ui.painter().circle_stroke(pos, 8.0, Stroke::new(1.0_f32, theme.text_primary));
+                ui.painter().circle_stroke(pos, 8.0, Stroke::new(1.5, theme.text_primary));
 
                 ui.add_space(theme.space_xs);
-                ui.label(RichText::new("TIMBRAL TRAJECTORY").small().color(theme.text_secondary));
+                ui.label(RichText::new("TIMBRAL TRAJECTORY (16D LANDSCAPE)").small().color(theme.text_secondary));
             });
 
             ui.add_space(theme.space_sm);
