@@ -393,271 +393,306 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                         ui.label(RichText::new("CHANNEL STRIP").size(theme.type_caption).strong().color(theme.text_secondary));
                         ui.add_space(2.0);
 
-                        // 1. TRIM / GAIN Knob
-                        Frame::none()
-                            .fill(theme.bg_inset)
-                            .rounding(Rounding::same(theme.radius_sm))
-                            .inner_margin(Margin::same(4.0))
-                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
-                            .show(ui, |ui| {
-                                ui.set_width(STRIP_W - 20.0);
-                                ui.vertical_centered(|ui| {
-                                    let mut gain_val = app.mixer.channel_gain[i];
-                                    if widgets::render_knob_sized(ui, &mut gain_val, 0.0..=2.0, "GAIN", deck_color, 28.0).changed() {
-                                        app.mixer.channel_gain[i] = gain_val;
-                                        if let Some(gain_id) = gain_node {
-                                            let net_gain = gain_val * app.mixer.channel_faders[i];
-                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                target_id: gain_id as u64,
-                                                param_id: 0,
-                                                value: net_gain,
-                                                ramp_duration_samples: 128,
-                                            }));
-                                        }
-                                    }
-                                });
-                            });
-
-                        ui.add_space(4.0);
-
-                        // 2. 3-BAND EQ (HIGH, MID, LOW vertically aligned)
-                        Frame::none()
-                            .fill(theme.bg_inset)
-                            .rounding(Rounding::same(theme.radius_sm))
-                            .inner_margin(Margin::same(4.0))
-                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
-                            .show(ui, |ui| {
-                                ui.set_width(STRIP_W - 20.0);
-                                ui.vertical_centered(|ui| {
-                                    ui.label(RichText::new("3-BAND EQ").size(9.0).strong().color(theme.accent));
-                                    ui.add_space(2.0);
-
-                                    // HIGH Knob
-                                    let mut hi = app.mixer.channel_eq_high[i];
-                                    if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HIGH", deck_color, 26.0).changed() {
-                                        app.mixer.channel_eq_high[i] = hi;
-                                        if let Some(node_id) = iso_node {
-                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                target_id: node_id as u64,
-                                                param_id: 2, // HI param
-                                                value: hi,
-                                                ramp_duration_samples: 128,
-                                            }));
-                                        }
-                                    }
-
-                                    ui.add_space(2.0);
-
-                                    // MID Knob
-                                    let mut mid = app.mixer.channel_eq_mid[i];
-                                    if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", deck_color, 26.0).changed() {
-                                        app.mixer.channel_eq_mid[i] = mid;
-                                        if let Some(node_id) = iso_node {
-                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                target_id: node_id as u64,
-                                                param_id: 1, // MID param
-                                                value: mid,
-                                                ramp_duration_samples: 128,
-                                            }));
-                                        }
-                                    }
-
-                                    ui.add_space(2.0);
-
-                                    // LOW Knob
-                                    let mut low = app.mixer.channel_eq_low[i];
-                                    if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", deck_color, 26.0).changed() {
-                                        app.mixer.channel_eq_low[i] = low;
-                                        if let Some(node_id) = iso_node {
-                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                target_id: node_id as u64,
-                                                param_id: 0, // LOW param
-                                                value: low,
-                                                ramp_duration_samples: 128,
-                                            }));
-                                        }
-                                    }
-                                });
-                            });
-
-                        ui.add_space(4.0);
-
-                        // 3. PITCH / SPEED
-                        Frame::none()
-                            .fill(theme.bg_inset)
-                            .rounding(Rounding::same(theme.radius_sm))
-                            .inner_margin(Margin::same(4.0))
-                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
-                            .show(ui, |ui| {
-                                ui.set_width(STRIP_W - 20.0);
-                                ui.vertical_centered(|ui| {
-                                    let mut pitch_val = app.mixer.channel_pitch[i];
-                                    if widgets::render_knob_sized(ui, &mut pitch_val, 0.5..=1.5, "PITCH", deck_color, 26.0).changed() {
-                                        app.mixer.channel_pitch[i] = pitch_val;
-                                        let deck_char = (b'A' + (i % 26) as u8) as char;
-                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam {
-                                            deck_id: deck_char,
-                                            param_type: nullherz_traits::DeckParamType::Pitch,
-                                            value: pitch_val,
-                                        }));
-                                    }
-                                });
-                            });
-
-                        ui.add_space(4.0);
-
-                        // 4. ADDED FX INSERT SLOTS (unlimited FX inserts)
                         let mut fx_to_remove = None;
 
                         for (fx_idx, name) in app.decks.deck_inserts[i].iter().enumerate() {
-                            let name_clone = name.clone();
-                            let is_mutator = name_clone.to_lowercase().contains("mutator");
-
-                            let insert_node = app.get_node_id(&format!("deck_{}_fx{}", deck_char_letter, fx_idx + 1))
-                                .or_else(|| app.get_node_id(&format!("deck_{}_insert", deck_char_letter)))
-                                .unwrap_or(i as u32 * 4 + 2);
-
-                            Frame::none()
-                                .fill(theme.accent.linear_multiply(0.15))
-                                .rounding(Rounding::same(theme.radius_sm))
-                                .inner_margin(Margin::same(4.0))
-                                .stroke(Stroke::new(1.0, theme.accent))
-                                .show(ui, |ui| {
-                                    ui.set_width(STRIP_W - 20.0);
-                                    ui.vertical(|ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.set_width(ui.available_width());
-                                            ui.label(RichText::new(format!("FX: {}", name_clone)).size(9.0).strong().color(theme.text_primary));
-                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                let close_btn = egui::Button::new(RichText::new("×").size(11.0).strong().color(theme.danger))
-                                                    .fill(theme.bg_inset)
-                                                    .min_size(Vec2::new(16.0, 16.0));
-                                                if ui.add(close_btn).on_hover_text("Remove FX").clicked() {
-                                                    fx_to_remove = Some((fx_idx, insert_node));
-                                                }
+                            let name_str = name.as_str();
+                            match name_str {
+                                "TRIM / GAIN" => {
+                                    Frame::none()
+                                        .fill(theme.bg_inset)
+                                        .rounding(Rounding::same(theme.radius_sm))
+                                        .inner_margin(Margin::same(4.0))
+                                        .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                        .show(ui, |ui| {
+                                            ui.set_width(STRIP_W - 20.0);
+                                            ui.vertical(|ui| {
+                                                ui.horizontal(|ui| {
+                                                    ui.set_width(ui.available_width());
+                                                    ui.label(RichText::new("TRIM / GAIN").size(9.0).strong().color(deck_color));
+                                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                        let close_btn = egui::Button::new(RichText::new("×").size(11.0).strong().color(theme.danger))
+                                                            .fill(theme.bg_inset)
+                                                            .min_size(Vec2::new(16.0, 16.0));
+                                                        if ui.add(close_btn).on_hover_text("Remove FX").clicked() {
+                                                            fx_to_remove = Some(fx_idx);
+                                                        }
+                                                    });
+                                                });
+                                                ui.add_space(2.0);
+                                                ui.vertical_centered(|ui| {
+                                                    let mut gain_val = app.mixer.channel_gain[i];
+                                                    if widgets::render_knob_sized(ui, &mut gain_val, 0.0..=2.0, "GAIN", deck_color, 28.0).changed() {
+                                                        app.mixer.channel_gain[i] = gain_val;
+                                                        if let Some(gain_id) = gain_node {
+                                                            let net_gain = gain_val * app.mixer.channel_faders[i];
+                                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                target_id: gain_id as u64,
+                                                                param_id: 0,
+                                                                value: net_gain,
+                                                                ramp_duration_samples: 128,
+                                                            }));
+                                                        }
+                                                    }
+                                                });
                                             });
                                         });
-
-                                        ui.add_space(2.0);
-
-                                        let params = app.decks.deck_insert_params[i].get(fx_idx).cloned().unwrap_or([0.5; 8]);
-
-                                        if is_mutator {
-                                            // MUTATOR 6 Parallel Mutation Macro Knobs
-                                            ui.vertical_centered(|ui| {
+                                    ui.add_space(4.0);
+                                }
+                                "3-BAND EQ" => {
+                                    Frame::none()
+                                        .fill(theme.bg_inset)
+                                        .rounding(Rounding::same(theme.radius_sm))
+                                        .inner_margin(Margin::same(4.0))
+                                        .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                        .show(ui, |ui| {
+                                            ui.set_width(STRIP_W - 20.0);
+                                            ui.vertical(|ui| {
                                                 ui.horizontal(|ui| {
-                                                    ui.spacing_mut().item_spacing.x = 2.0;
-
-                                                    // FLESH (Param 0)
-                                                    let mut flesh_val = params[0];
-                                                    if widgets::render_knob_sized(ui, &mut flesh_val, 0.0..=1.0, "FLESH", deck_color, 22.0).changed() {
-                                                        if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[0] = flesh_val; }
-                                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                            target_id: insert_node as u64,
-                                                            param_id: 0,
-                                                            value: flesh_val,
-                                                            ramp_duration_samples: 128,
-                                                        }));
+                                                    ui.set_width(ui.available_width());
+                                                    ui.label(RichText::new("3-BAND EQ").size(9.0).strong().color(theme.accent));
+                                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                        let close_btn = egui::Button::new(RichText::new("×").size(11.0).strong().color(theme.danger))
+                                                            .fill(theme.bg_inset)
+                                                            .min_size(Vec2::new(16.0, 16.0));
+                                                        if ui.add(close_btn).on_hover_text("Remove FX").clicked() {
+                                                            fx_to_remove = Some(fx_idx);
+                                                        }
+                                                    });
+                                                });
+                                                ui.add_space(2.0);
+                                                ui.vertical_centered(|ui| {
+                                                    // HIGH Knob
+                                                    let mut hi = app.mixer.channel_eq_high[i];
+                                                    if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HIGH", deck_color, 26.0).changed() {
+                                                        app.mixer.channel_eq_high[i] = hi;
+                                                        if let Some(node_id) = iso_node {
+                                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                target_id: node_id as u64,
+                                                                param_id: 2, // HI param
+                                                                value: hi,
+                                                                ramp_duration_samples: 128,
+                                                            }));
+                                                        }
                                                     }
 
-                                                    // BONE (Param 1)
-                                                    let mut bone_val = params[1];
-                                                    if widgets::render_knob_sized(ui, &mut bone_val, 0.0..=1.0, "BONE", deck_color, 22.0).changed() {
-                                                        if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[1] = bone_val; }
-                                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                            target_id: insert_node as u64,
-                                                            param_id: 1,
-                                                            value: bone_val,
-                                                            ramp_duration_samples: 128,
-                                                        }));
+                                                    ui.add_space(2.0);
+
+                                                    // MID Knob
+                                                    let mut mid = app.mixer.channel_eq_mid[i];
+                                                    if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", deck_color, 26.0).changed() {
+                                                        app.mixer.channel_eq_mid[i] = mid;
+                                                        if let Some(node_id) = iso_node {
+                                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                target_id: node_id as u64,
+                                                                param_id: 1, // MID param
+                                                                value: mid,
+                                                                ramp_duration_samples: 128,
+                                                            }));
+                                                        }
                                                     }
 
-                                                    // TEETH (Param 2)
-                                                    let mut teeth_val = params[2];
-                                                    if widgets::render_knob_sized(ui, &mut teeth_val, 0.0..=1.0, "TEETH", deck_color, 22.0).changed() {
-                                                        if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[2] = teeth_val; }
-                                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                            target_id: insert_node as u64,
-                                                            param_id: 2,
-                                                            value: teeth_val,
-                                                            ramp_duration_samples: 128,
+                                                    ui.add_space(2.0);
+
+                                                    // LOW Knob
+                                                    let mut low = app.mixer.channel_eq_low[i];
+                                                    if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", deck_color, 26.0).changed() {
+                                                        app.mixer.channel_eq_low[i] = low;
+                                                        if let Some(node_id) = iso_node {
+                                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                target_id: node_id as u64,
+                                                                param_id: 0, // LOW param
+                                                                value: low,
+                                                                ramp_duration_samples: 128,
+                                                            }));
+                                                        }
+                                                    }
+                                                });
+                                            });
+                                        });
+                                    ui.add_space(4.0);
+                                }
+                                "PITCH / SPEED" => {
+                                    Frame::none()
+                                        .fill(theme.bg_inset)
+                                        .rounding(Rounding::same(theme.radius_sm))
+                                        .inner_margin(Margin::same(4.0))
+                                        .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                        .show(ui, |ui| {
+                                            ui.set_width(STRIP_W - 20.0);
+                                            ui.vertical(|ui| {
+                                                ui.horizontal(|ui| {
+                                                    ui.set_width(ui.available_width());
+                                                    ui.label(RichText::new("PITCH / SPEED").size(9.0).strong().color(theme.accent));
+                                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                        let close_btn = egui::Button::new(RichText::new("×").size(11.0).strong().color(theme.danger))
+                                                            .fill(theme.bg_inset)
+                                                            .min_size(Vec2::new(16.0, 16.0));
+                                                        if ui.add(close_btn).on_hover_text("Remove FX").clicked() {
+                                                            fx_to_remove = Some(fx_idx);
+                                                        }
+                                                    });
+                                                });
+                                                ui.add_space(2.0);
+                                                ui.vertical_centered(|ui| {
+                                                    let mut pitch_val = app.mixer.channel_pitch[i];
+                                                    if widgets::render_knob_sized(ui, &mut pitch_val, 0.5..=1.5, "PITCH", deck_color, 26.0).changed() {
+                                                        app.mixer.channel_pitch[i] = pitch_val;
+                                                        let deck_char = (b'A' + (i % 26) as u8) as char;
+                                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam {
+                                                            deck_id: deck_char,
+                                                            param_type: nullherz_traits::DeckParamType::Pitch,
+                                                            value: pitch_val,
                                                         }));
                                                     }
+                                                });
+                                            });
+                                        });
+                                    ui.add_space(4.0);
+                                }
+                                _ => {
+                                    let name_clone = name.clone();
+                                    let is_mutator = name_clone.to_lowercase().contains("mutator");
+
+                                    let insert_node = app.get_node_id(&format!("deck_{}_fx{}", deck_char_letter, fx_idx + 1))
+                                        .or_else(|| app.get_node_id(&format!("deck_{}_insert", deck_char_letter)))
+                                        .unwrap_or(i as u32 * 4 + 2);
+
+                                    Frame::none()
+                                        .fill(theme.accent.linear_multiply(0.15))
+                                        .rounding(Rounding::same(theme.radius_sm))
+                                        .inner_margin(Margin::same(4.0))
+                                        .stroke(Stroke::new(1.0, theme.accent))
+                                        .show(ui, |ui| {
+                                            ui.set_width(STRIP_W - 20.0);
+                                            ui.vertical(|ui| {
+                                                ui.horizontal(|ui| {
+                                                    ui.set_width(ui.available_width());
+                                                    ui.label(RichText::new(format!("FX: {}", name_clone)).size(9.0).strong().color(theme.text_primary));
+                                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                        let close_btn = egui::Button::new(RichText::new("×").size(11.0).strong().color(theme.danger))
+                                                            .fill(theme.bg_inset)
+                                                            .min_size(Vec2::new(16.0, 16.0));
+                                                        if ui.add(close_btn).on_hover_text("Remove FX").clicked() {
+                                                            fx_to_remove = Some(fx_idx);
+                                                        }
+                                                    });
                                                 });
 
                                                 ui.add_space(2.0);
 
-                                                ui.horizontal(|ui| {
-                                                    ui.spacing_mut().item_spacing.x = 2.0;
+                                                let params = app.decks.deck_insert_params[i].get(fx_idx).cloned().unwrap_or([0.5; 8]);
 
-                                                    // PARASITE (Param 3)
-                                                    let mut para_val = params[3];
-                                                    if widgets::render_knob_sized(ui, &mut para_val, 0.0..=1.0, "PARA", deck_color, 22.0).changed() {
-                                                        if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[3] = para_val; }
-                                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                            target_id: insert_node as u64,
-                                                            param_id: 3,
-                                                            value: para_val,
-                                                            ramp_duration_samples: 128,
-                                                        }));
-                                                    }
+                                                if is_mutator {
+                                                    ui.vertical_centered(|ui| {
+                                                        ui.horizontal(|ui| {
+                                                            ui.spacing_mut().item_spacing.x = 2.0;
 
-                                                    // ASYM (Param 4)
-                                                    let mut asym_val = params[4];
-                                                    if widgets::render_knob_sized(ui, &mut asym_val, 0.0..=1.0, "ASYM", deck_color, 22.0).changed() {
-                                                        if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[4] = asym_val; }
-                                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                            target_id: insert_node as u64,
-                                                            param_id: 4,
-                                                            value: asym_val,
-                                                            ramp_duration_samples: 128,
-                                                        }));
-                                                    }
+                                                            let mut flesh_val = params[0];
+                                                            if widgets::render_knob_sized(ui, &mut flesh_val, 0.0..=1.0, "FLESH", deck_color, 22.0).changed() {
+                                                                if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[0] = flesh_val; }
+                                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                    target_id: insert_node as u64,
+                                                                    param_id: 0,
+                                                                    value: flesh_val,
+                                                                    ramp_duration_samples: 128,
+                                                                }));
+                                                            }
 
-                                                    // ABOM (Param 5)
-                                                    let mut abom_val = params[5];
-                                                    if widgets::render_knob_sized(ui, &mut abom_val, 0.0..=1.0, "ABOM", deck_color, 22.0).changed() {
-                                                        if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[5] = abom_val; }
-                                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                            target_id: insert_node as u64,
-                                                            param_id: 5,
-                                                            value: abom_val,
-                                                            ramp_duration_samples: 128,
-                                                        }));
-                                                    }
-                                                });
-                                            });
-                                        } else {
-                                            // Generic Insert Controls (Drive / Mix)
-                                            ui.horizontal(|ui| {
-                                                ui.spacing_mut().item_spacing.x = 4.0;
-                                                let mut drive_val = params[0];
-                                                if widgets::render_knob_sized(ui, &mut drive_val, 0.0..=5.0, "DRIVE", deck_color, 22.0).changed() {
-                                                    if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[0] = drive_val; }
-                                                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                        target_id: insert_node as u64,
-                                                        param_id: 0,
-                                                        value: drive_val,
-                                                        ramp_duration_samples: 128,
-                                                    }));
+                                                            let mut bone_val = params[1];
+                                                            if widgets::render_knob_sized(ui, &mut bone_val, 0.0..=1.0, "BONE", deck_color, 22.0).changed() {
+                                                                if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[1] = bone_val; }
+                                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                    target_id: insert_node as u64,
+                                                                    param_id: 1,
+                                                                    value: bone_val,
+                                                                    ramp_duration_samples: 128,
+                                                                }));
+                                                            }
+
+                                                            let mut teeth_val = params[2];
+                                                            if widgets::render_knob_sized(ui, &mut teeth_val, 0.0..=1.0, "TEETH", deck_color, 22.0).changed() {
+                                                                if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[2] = teeth_val; }
+                                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                    target_id: insert_node as u64,
+                                                                    param_id: 2,
+                                                                    value: teeth_val,
+                                                                    ramp_duration_samples: 128,
+                                                                }));
+                                                            }
+                                                        });
+
+                                                        ui.add_space(2.0);
+
+                                                        ui.horizontal(|ui| {
+                                                            ui.spacing_mut().item_spacing.x = 2.0;
+
+                                                            let mut para_val = params[3];
+                                                            if widgets::render_knob_sized(ui, &mut para_val, 0.0..=1.0, "PARA", deck_color, 22.0).changed() {
+                                                                if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[3] = para_val; }
+                                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                    target_id: insert_node as u64,
+                                                                    param_id: 3,
+                                                                    value: para_val,
+                                                                    ramp_duration_samples: 128,
+                                                                }));
+                                                            }
+
+                                                            let mut asym_val = params[4];
+                                                            if widgets::render_knob_sized(ui, &mut asym_val, 0.0..=1.0, "ASYM", deck_color, 22.0).changed() {
+                                                                if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[4] = asym_val; }
+                                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                    target_id: insert_node as u64,
+                                                                    param_id: 4,
+                                                                    value: asym_val,
+                                                                    ramp_duration_samples: 128,
+                                                                }));
+                                                            }
+
+                                                            let mut abom_val = params[5];
+                                                            if widgets::render_knob_sized(ui, &mut abom_val, 0.0..=1.0, "ABOM", deck_color, 22.0).changed() {
+                                                                if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[5] = abom_val; }
+                                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                    target_id: insert_node as u64,
+                                                                    param_id: 5,
+                                                                    value: abom_val,
+                                                                    ramp_duration_samples: 128,
+                                                                }));
+                                                            }
+                                                        });
+                                                    });
+                                                } else {
+                                                    ui.horizontal(|ui| {
+                                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                                        let mut drive_val = params[0];
+                                                        if widgets::render_knob_sized(ui, &mut drive_val, 0.0..=5.0, "DRIVE", deck_color, 22.0).changed() {
+                                                            if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[0] = drive_val; }
+                                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                target_id: insert_node as u64,
+                                                                param_id: 0,
+                                                                value: drive_val,
+                                                                ramp_duration_samples: 128,
+                                                            }));
+                                                        }
+
+                                                        let mut mix_val = params[7];
+                                                        if widgets::render_knob_sized(ui, &mut mix_val, 0.0..=1.0, "MIX", deck_color, 22.0).changed() {
+                                                            if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[7] = mix_val; }
+                                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                                target_id: insert_node as u64,
+                                                                param_id: 7,
+                                                                value: mix_val,
+                                                                ramp_duration_samples: 128,
+                                                            }));
+                                                        }
+                                                    });
                                                 }
-
-                                                let mut mix_val = params[7];
-                                                if widgets::render_knob_sized(ui, &mut mix_val, 0.0..=1.0, "MIX", deck_color, 22.0).changed() {
-                                                    if let Some(p) = app.decks.deck_insert_params[i].get_mut(fx_idx) { p[7] = mix_val; }
-                                                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                        target_id: insert_node as u64,
-                                                        param_id: 7,
-                                                        value: mix_val,
-                                                        ramp_duration_samples: 128,
-                                                    }));
-                                                }
                                             });
-                                        }
-                                    });
-                                });
+                                        });
 
-                            ui.add_space(4.0);
+                                    ui.add_space(4.0);
+                                }
+                            }
                         }
 
                         if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
@@ -665,19 +700,24 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                             app.store.active_tag_filter = Some("insert".to_string());
                         }
 
-                        if let Some((remove_idx, target_node)) = fx_to_remove {
+                        if let Some(remove_idx) = fx_to_remove {
                             if remove_idx < app.decks.deck_inserts[i].len() {
-                                app.decks.deck_inserts[i].remove(remove_idx);
-                            }
-                            if remove_idx < app.decks.deck_insert_params[i].len() {
-                                app.decks.deck_insert_params[i].remove(remove_idx);
-                            }
-                            let _ = app.command_sender.send(nullherz_traits::Command::Topology(
-                                nullherz_traits::TopologyCommand::SwapProcessor {
-                                    node_idx: target_node,
-                                    processor_type_id: nullherz_traits::ProcessorTypeId::BYPASS,
+                                let removed_name = app.decks.deck_inserts[i].remove(remove_idx);
+                                if remove_idx < app.decks.deck_insert_params[i].len() {
+                                    app.decks.deck_insert_params[i].remove(remove_idx);
                                 }
-                            ));
+                                if !["TRIM / GAIN", "3-BAND EQ", "PITCH / SPEED"].contains(&removed_name.as_str()) {
+                                    let target_node = app.get_node_id(&format!("deck_{}_fx{}", deck_char_letter, remove_idx + 1))
+                                        .or_else(|| app.get_node_id(&format!("deck_{}_insert", deck_char_letter)))
+                                        .unwrap_or(i as u32 * 4 + 2);
+                                    let _ = app.command_sender.send(nullherz_traits::Command::Topology(
+                                        nullherz_traits::TopologyCommand::SwapProcessor {
+                                            node_idx: target_node,
+                                            processor_type_id: nullherz_traits::ProcessorTypeId::BYPASS,
+                                        }
+                                    ));
+                                }
+                            }
                         }
                     });
                 });

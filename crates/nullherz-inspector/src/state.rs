@@ -303,8 +303,16 @@ impl Default for DeckState {
             deck_sync: [false; 16],
             deck_key_sync: [false; 16],
             deck_key_lock: [false; 16],
-            deck_inserts: std::array::from_fn(|_| Vec::new()),
-            deck_insert_params: std::array::from_fn(|_| Vec::new()),
+            deck_inserts: std::array::from_fn(|_| vec![
+                "TRIM / GAIN".to_string(),
+                "3-BAND EQ".to_string(),
+                "PITCH / SPEED".to_string(),
+            ]),
+            deck_insert_params: std::array::from_fn(|_| vec![
+                [1.0; 8],
+                [1.0; 8],
+                [1.0; 8],
+            ]),
         }
     }
 }
