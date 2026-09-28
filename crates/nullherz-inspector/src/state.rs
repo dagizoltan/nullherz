@@ -326,6 +326,7 @@ pub struct LibraryRefreshPayload {
 
 /// Library browsing, smart crates, and background loading.
 pub struct LibraryState {
+    pub active_category: Option<sidecar_sdk::AssetCategory>,
     pub active_crate: Option<String>,
     pub search_query: String,
     pub sort: nullherz_dna::TrackSort,
@@ -355,6 +356,7 @@ pub struct LibraryState {
 impl Default for LibraryState {
     fn default() -> Self {
         Self {
+            active_category: None,
             active_crate: None,
             search_query: String::new(),
             sort: nullherz_dna::TrackSort::default(),
@@ -1795,7 +1797,7 @@ impl Default for VizState {
 
 /// Sidecar store browsing and tag filtering state.
 pub struct StoreState {
-    pub active_tag_filter: Option<String>,
+    pub active_category: Option<sidecar_sdk::AssetCategory>,
     pub search_query: String,
     #[allow(dead_code)]
     pub selected_sidecar: Option<String>,
@@ -1805,7 +1807,7 @@ pub struct StoreState {
 impl Default for StoreState {
     fn default() -> Self {
         Self {
-            active_tag_filter: None,
+            active_category: None,
             search_query: String::new(),
             selected_sidecar: None,
             store_catalog: sidecar_sdk::SidecarStore::with_defaults(),

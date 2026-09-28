@@ -1,6 +1,7 @@
 use egui::{Color32, RichText, Ui, ScrollArea, Layout, Align, Stroke, Frame, Margin, Rounding};
 use crate::InspectorApp;
 use nullherz_dna::GeneticLibrary;
+use sidecar_sdk::AssetCategory;
 
 #[derive(Clone, Debug)]
 pub struct AudioLocation {
@@ -84,48 +85,72 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
         ui.add_space(theme.space_sm);
 
-        render_track_list(app, ui);
+        render_asset_list(app, ui);
     });
 }
 
 fn render_crates_and_smart_crates_section(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
 
-    // 1. Crates Header
+    // 1. Categories Header
     ui.label(
-        RichText::new(format!("{} CRATES", egui_phosphor::regular::FOLDER))
+        RichText::new("CATEGORIES")
             .size(theme.type_caption)
             .strong()
             .color(theme.text_secondary),
     );
     ui.add_space(theme.space_xs);
 
-    // Asset Categories & Crates Wrapping Grid
+    // Main Category Selector Chips
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(theme.space_xs, theme.space_xs);
 
-        let is_all = app.library.active_crate.is_none();
-        if ui.selectable_label(is_all, format!("{} ALL", egui_phosphor::regular::PACKAGE)).clicked() {
+        let is_all_cat = app.library.active_category.is_none() && app.library.active_crate.is_none();
+        if ui.selectable_label(is_all_cat, format!("{} ALL", egui_phosphor::regular::PACKAGE)).clicked() {
+            app.library.active_category = None;
             app.library.active_crate = None;
             app.library.library_needs_refresh = true;
         }
 
-        let categories = [
-            ("TRACKS", "track"),
-            ("SAMPLES", "sample"),
-            ("SEQUENCES", "sequence"),
-            ("INSTRUMENTS", "instrument"),
-            ("AUDIO INSERTS", "insert"),
-            ("VISUALS", "visual"),
-        ];
+        for category in AssetCategory::all() {
+            let is_selected = app.library.active_category == Some(*category) && app.library.active_crate.is_none();
+            let icon = match category {
+                AssetCategory::AudioFiles => egui_phosphor::regular::MUSIC_NOTES,
+                AssetCategory::AudioInsert => egui_phosphor::regular::SLIDERS_HORIZONTAL,
+                AssetCategory::VisualInsert => egui_phosphor::regular::EYE,
+                AssetCategory::AudioInstrument => egui_phosphor::regular::PIANO_KEYS,
+                AssetCategory::VisualInstrument => egui_phosphor::regular::APERTURE,
+            };
 
-        for (label, tag) in categories {
-            let is_selected = app.library.active_crate.as_deref() == Some(tag);
-            if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::FOLDER_SIMPLE, label)).clicked() {
-                app.library.active_crate = Some(tag.to_string());
+            if ui.selectable_label(is_selected, format!("{} {}", icon, category.name().to_uppercase())).clicked() {
+                app.library.active_category = Some(*category);
+                app.library.active_crate = None;
                 app.library.library_needs_refresh = true;
             }
         }
+    });
+
+    ui.add_space(theme.space_sm);
+
+    // 2. User Crates & Smart Crates Header + NEW button
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format!("{} USER & SMART CRATES", egui_phosphor::regular::FOLDER))
+                .size(theme.type_caption)
+                .strong()
+                .color(theme.text_secondary),
+        );
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if ui.button(RichText::new("+ NEW SMART").size(theme.type_caption)).clicked() {
+                app.library.smart_crate_builder_open = !app.library.smart_crate_builder_open;
+            }
+        });
+    });
+    ui.add_space(theme.space_xs);
+
+    // User Crates & Smart Crates Wrapping Grid
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(theme.space_xs, theme.space_xs);
 
         let crates = &app.library.cached_crates;
         for crate_name in crates {
@@ -135,38 +160,17 @@ fn render_crates_and_smart_crates_section(app: &mut InspectorApp, ui: &mut Ui) {
             let is_selected = app.library.active_crate.as_deref() == Some(crate_name.as_str());
             if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::TAG, crate_name)).clicked() {
                 app.library.active_crate = Some(crate_name.clone());
+                app.library.active_category = None;
                 app.library.library_needs_refresh = true;
             }
         }
-    });
-
-    ui.add_space(theme.space_sm);
-
-    // 2. Smart Crates Header + NEW button
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(format!("{} SMART CRATES", egui_phosphor::regular::STAR))
-                .size(theme.type_caption)
-                .strong()
-                .color(theme.text_secondary),
-        );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui.button(RichText::new("+ NEW").size(theme.type_caption)).clicked() {
-                app.library.smart_crate_builder_open = !app.library.smart_crate_builder_open;
-            }
-        });
-    });
-    ui.add_space(theme.space_xs);
-
-    // Smart Crates Wrapping Grid
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(theme.space_xs, theme.space_xs);
 
         let smart_crates = &app.library.cached_smart_crates;
         for smart in smart_crates {
             let is_selected = app.library.active_crate.as_deref() == Some(smart.name.as_str());
             if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::STAR, smart.name)).clicked() {
                 app.library.active_crate = Some(smart.name.clone());
+                app.library.active_category = None;
                 app.library.library_needs_refresh = true;
             }
         }
@@ -294,41 +298,53 @@ const TRACK_ROW_H: f32 = 26.0;
 /// Height of the inline detail panel on an expanded row.
 const TRACK_DETAIL_H: f32 = 250.0;
 
-fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
-    let theme = app.theme;
+fn render_asset_list(app: &mut InspectorApp, ui: &mut Ui) {
     if app.library.library_needs_refresh
         && app.library.bg_library_loader.is_none() {
             app.trigger_library_refresh();
         }
 
-    // Apply client-side search + sort on top of cached_library. Search now spans
-    // title / artist / album / genre (was title/artist only); sort by the
-    // selected TrackSort.
+    let search_q = app.library.search_query.trim().to_lowercase();
+
+    if let Some(cat) = app.library.active_category {
+        match cat {
+            AssetCategory::AudioFiles => {
+                render_audio_files_list(app, ui, &search_q);
+            }
+            AssetCategory::AudioInsert
+            | AssetCategory::VisualInsert
+            | AssetCategory::AudioInstrument
+            | AssetCategory::VisualInstrument => {
+                render_sidecars_for_category(app, ui, cat, &search_q);
+            }
+        }
+    } else if app.library.active_crate.is_some() {
+        render_audio_files_list(app, ui, &search_q);
+    } else {
+        render_all_categories_list(app, ui, &search_q);
+    }
+}
+
+fn render_audio_files_list(app: &mut InspectorApp, ui: &mut Ui, search_q: &str) {
+    let theme = app.theme;
     let mut displayed_tracks = app.library.cached_library.clone();
-    if !app.library.search_query.trim().is_empty() {
-        let q = app.library.search_query.to_lowercase();
+    if !search_q.is_empty() {
         displayed_tracks.retain(|t| {
-            t.title.to_lowercase().contains(&q)
-                || t.artist.to_lowercase().contains(&q)
-                || t.album.to_lowercase().contains(&q)
-                || t.genre.to_lowercase().contains(&q)
+            t.title.to_lowercase().contains(search_q)
+                || t.artist.to_lowercase().contains(search_q)
+                || t.album.to_lowercase().contains(search_q)
+                || t.genre.to_lowercase().contains(search_q)
         });
     }
     app.library.sort.order_tracks(&mut displayed_tracks);
 
     ui.label(
-        RichText::new(format!("{} TRACKS", displayed_tracks.len()))
+        RichText::new(format!("{} AUDIO FILES", displayed_tracks.len()))
             .size(theme.type_caption)
             .color(theme.text_secondary),
     );
     ui.add_space(theme.space_xs);
 
-    // Virtualised with VARIABLE row heights.
-    //
-    // `show_rows` needs every row the same height, which an accordion is not.
-    // `show_viewport` hands us the visible rectangle instead, so the rows
-    // outside it are replaced by two spacers and never laid out — a 5000-track
-    // library still costs one expanded row plus a screenful.
     ScrollArea::vertical()
         .id_source("lib_scroll")
         .auto_shrink([false, false])
@@ -338,7 +354,6 @@ fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
                 if expanded == Some(t.id) { TRACK_ROW_H + TRACK_DETAIL_H } else { TRACK_ROW_H }
             };
 
-            // Which rows intersect the viewport.
             let mut first = 0usize;
             let mut skipped_h = 0.0f32;
             let mut y = 0.0f32;
@@ -362,6 +377,216 @@ fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
                 render_track_row(app, ui, track);
             }
             ui.add_space(after_h);
+        });
+}
+
+fn render_sidecars_for_category(
+    app: &mut InspectorApp,
+    ui: &mut Ui,
+    category: AssetCategory,
+    search_q: &str,
+) {
+    let theme = app.theme;
+    let mut descriptors = app.store.store_catalog.filter_by_category(category);
+    if !search_q.is_empty() {
+        descriptors.retain(|d| {
+            d.id.to_lowercase().contains(search_q)
+                || d.name.to_lowercase().contains(search_q)
+                || d.description.to_lowercase().contains(search_q)
+                || d.tags.iter().any(|t| t.to_lowercase().contains(search_q))
+        });
+    }
+
+    ui.label(
+        RichText::new(format!("{} MODULES IN {}", descriptors.len(), category.name().to_uppercase()))
+            .size(theme.type_caption)
+            .color(theme.text_secondary),
+    );
+    ui.add_space(theme.space_xs);
+
+    ScrollArea::vertical()
+        .id_source("lib_sidecar_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for descriptor in descriptors {
+                render_sidecar_card_in_library(app, ui, &descriptor);
+                ui.add_space(theme.space_sm);
+            }
+        });
+}
+
+fn render_all_categories_list(app: &mut InspectorApp, ui: &mut Ui, search_q: &str) {
+    let theme = app.theme;
+
+    let mut displayed_tracks = app.library.cached_library.clone();
+    if !search_q.is_empty() {
+        displayed_tracks.retain(|t| {
+            t.title.to_lowercase().contains(search_q)
+                || t.artist.to_lowercase().contains(search_q)
+                || t.album.to_lowercase().contains(search_q)
+                || t.genre.to_lowercase().contains(search_q)
+        });
+    }
+    app.library.sort.order_tracks(&mut displayed_tracks);
+
+    let store_list = app.store.store_catalog.list();
+
+    ScrollArea::vertical()
+        .id_source("lib_all_categories_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            // Section 1: Audio Files
+            ui.label(
+                RichText::new(format!("━━━ AUDIO FILES ({}) ━━━", displayed_tracks.len()))
+                    .size(theme.type_caption)
+                    .strong()
+                    .color(theme.accent),
+            );
+            ui.add_space(theme.space_xs);
+
+            for track in &displayed_tracks {
+                render_track_row(app, ui, track);
+            }
+
+            ui.add_space(theme.space_md);
+
+            // Sidecar Categories
+            let sidecar_categories = [
+                AssetCategory::AudioInstrument,
+                AssetCategory::AudioInsert,
+                AssetCategory::VisualInstrument,
+                AssetCategory::VisualInsert,
+            ];
+
+            for cat in sidecar_categories {
+                let mut cat_items: Vec<_> = store_list
+                    .iter()
+                    .filter(|d| d.sidecar_type.category() == cat)
+                    .cloned()
+                    .collect();
+
+                if !search_q.is_empty() {
+                    cat_items.retain(|d| {
+                        d.id.to_lowercase().contains(search_q)
+                            || d.name.to_lowercase().contains(search_q)
+                            || d.description.to_lowercase().contains(search_q)
+                            || d.tags.iter().any(|t| t.to_lowercase().contains(search_q))
+                    });
+                }
+
+                if cat_items.is_empty() {
+                    continue;
+                }
+
+                ui.label(
+                    RichText::new(format!("━━━ {} ({}) ━━━", cat.name().to_uppercase(), cat_items.len()))
+                        .size(theme.type_caption)
+                        .strong()
+                        .color(theme.accent),
+                );
+                ui.add_space(theme.space_xs);
+
+                for descriptor in cat_items {
+                    render_sidecar_card_in_library(app, ui, &descriptor);
+                    ui.add_space(theme.space_sm);
+                }
+
+                ui.add_space(theme.space_sm);
+            }
+        });
+}
+
+fn render_sidecar_card_in_library(
+    app: &mut InspectorApp,
+    ui: &mut Ui,
+    descriptor: &sidecar_sdk::SidecarDescriptor,
+) {
+    let theme = app.theme;
+
+    Frame::none()
+        .fill(theme.bg_surface)
+        .rounding(Rounding::same(theme.radius_md))
+        .stroke(theme.border_stroke)
+        .inner_margin(Margin::same(theme.space_sm))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(&descriptor.name)
+                        .strong()
+                        .size(theme.type_caption + 1.0)
+                        .color(theme.text_primary),
+                );
+
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let cat = descriptor.sidecar_type.category();
+                    let (cat_label, cat_color) = match cat {
+                        AssetCategory::AudioInstrument => ("AUDIO INSTRUMENT", theme.deck_colors[0]),
+                        AssetCategory::AudioInsert => ("AUDIO INSERT", theme.accent),
+                        AssetCategory::VisualInstrument => ("VISUAL INSTRUMENT", theme.warning),
+                        AssetCategory::VisualInsert => ("VISUAL INSERT", theme.deck_colors[1]),
+                        AssetCategory::AudioFiles => ("AUDIO FILES", theme.text_secondary),
+                    };
+
+                    Frame::none()
+                        .fill(cat_color.linear_multiply(0.15))
+                        .rounding(Rounding::same(theme.radius_sm))
+                        .inner_margin(Margin::symmetric(theme.space_xs, 2.0))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new(cat_label)
+                                    .size(theme.type_caption - 1.0)
+                                    .strong()
+                                    .color(cat_color),
+                            );
+                        });
+                });
+            });
+
+            ui.add_space(2.0);
+
+            ui.label(
+                RichText::new(&descriptor.description)
+                    .size(theme.type_caption)
+                    .color(theme.text_secondary),
+            );
+
+            ui.add_space(theme.space_xs);
+
+            // Action Buttons
+            ui.horizontal(|ui| {
+                let cat = descriptor.sidecar_type.category();
+                if cat == AssetCategory::AudioInstrument {
+                    let slot = app.composer.selected_composer_track.unwrap_or(0);
+                    if ui.button(RichText::new(format!("→ LOAD TO TRACK {}", slot + 1)).size(theme.type_caption))
+                        .on_hover_text("Assign this instrument sidecar to selected composer track")
+                        .clicked()
+                    {
+                        app.composer.track_targets[slot] = descriptor.id.clone();
+                    }
+                } else if cat == AssetCategory::VisualInstrument || cat == AssetCategory::VisualInsert {
+                    if ui.button(RichText::new("→ LOAD TO VISUAL MIXER").size(theme.type_caption))
+                        .on_hover_text("Open in Visual Mixer surface")
+                        .clicked()
+                    {
+                        app.active_view = crate::View::Visuals;
+                    }
+                } else if cat == AssetCategory::AudioInsert {
+                    ui.label(RichText::new("LOAD TO DECK:").size(theme.type_caption).color(theme.text_disabled));
+                    for (i, &deck_char) in ['A', 'B', 'C', 'D'].iter().enumerate() {
+                        let deck_color = theme.deck_colors[i];
+                        if ui.button(
+                            RichText::new(format!("DECK {}", deck_char))
+                                .size(theme.type_caption)
+                                .color(deck_color),
+                        ).on_hover_text(format!("Load {} onto Deck {}", descriptor.name, deck_char)).clicked() {
+                            app.decks.deck_inserts[i].push(descriptor.name.clone());
+                            app.decks.deck_insert_params[i].push([0.5; 8]);
+                        }
+                    }
+                }
+            });
         });
 }
 

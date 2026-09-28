@@ -1,7 +1,7 @@
 pub mod store;
 pub mod package;
 pub use store::{
-    SidecarStore, SidecarDescriptor, SidecarType, SidecarChain,
+    SidecarStore, SidecarDescriptor, SidecarType, AssetCategory, SidecarChain,
     NeuralSaturationProcessor, NeuralFilterProcessor, NeuralSsmProcessor,
     NeuralNamProcessor, NeuralTcnProcessor,
     AlgorithmicDelayProcessor, AlgorithmicEqProcessor, AlgorithmicSynthInstrument,
