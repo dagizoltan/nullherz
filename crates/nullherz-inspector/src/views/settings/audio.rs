@@ -61,6 +61,55 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
         });
 
     ui.add_space(theme.space_md);
+    ui.strong("Hardware Low-Latency Optimization");
+    ui.add_space(theme.space_xs);
+    Frame::none()
+        .fill(theme.bg_surface)
+        .rounding(theme.radius_md)
+        .stroke(theme.border_stroke)
+        .inner_margin(theme.space_md)
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new("1-Click Exclusive Performance Mode: Acquires D-Bus ReserveDevice1, bypasses OS desktop sound server resampling, enables direct MMAP kernel buffer transfers and NO_PERIOD_WAKEUP.")
+                    .color(theme.text_secondary)
+                    .size(theme.type_caption),
+            );
+            ui.add_space(theme.space_sm);
+
+            let is_exclusive = app.settings.exclusive_performance_mode;
+            let btn_text = if is_exclusive {
+                "⚡ EXCLUSIVE PERFORMANCE MODE (ACTIVE)"
+            } else {
+                "⚡ ENGAGE EXCLUSIVE PERFORMANCE MODE (ALSA DIRECT HW MMAP)"
+            };
+
+            let mut perf_btn = egui::Button::new(RichText::new(btn_text).strong().color(if is_exclusive { theme.success } else { theme.accent }));
+            if is_exclusive {
+                perf_btn = perf_btn.fill(theme.success.linear_multiply(0.12)).stroke(egui::Stroke::new(1.5, theme.success));
+            }
+
+            if ui.add_sized([ui.available_width(), 32.0], perf_btn).clicked() {
+                app.settings.exclusive_performance_mode = !is_exclusive;
+                if app.settings.exclusive_performance_mode {
+                    unsafe {
+                        std::env::set_var("NULLHERZ_ALSA_MMAP", "1");
+                        std::env::set_var("NULLHERZ_NO_PERIOD_WAKEUP", "1");
+                        std::env::set_var("NULLHERZ_RESERVE_DEVICE", "1");
+                    }
+                    app.settings.active_backend = AudioBackendType::Alsa;
+                    nullherz_backends::alsa::AlsaBackend::reserve_dbus_device("hw:0,0");
+                    let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(AudioBackendType::Alsa)));
+                } else {
+                    unsafe {
+                        std::env::remove_var("NULLHERZ_ALSA_MMAP");
+                        std::env::remove_var("NULLHERZ_NO_PERIOD_WAKEUP");
+                        std::env::remove_var("NULLHERZ_RESERVE_DEVICE");
+                    }
+                }
+            }
+        });
+
+    ui.add_space(theme.space_md);
     ui.strong("Soundcard Wiring Test");
     ui.add_space(theme.space_xs);
     Frame::none()

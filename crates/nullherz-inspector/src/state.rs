@@ -562,6 +562,7 @@ pub struct SettingsState {
     pub qwerty_octave: i8,
     pub qwerty_held_keys: std::collections::HashSet<eframe::egui::Key>,
     pub recent_midi_events: std::collections::VecDeque<nullherz_traits::MidiEvent>,
+    pub exclusive_performance_mode: bool,
 }
 
 impl Default for SettingsState {
@@ -584,6 +585,7 @@ impl Default for SettingsState {
             qwerty_octave: 0,
             qwerty_held_keys: std::collections::HashSet::new(),
             recent_midi_events: std::collections::VecDeque::with_capacity(30),
+            exclusive_performance_mode: false,
         }
     }
 }

@@ -156,7 +156,19 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
     // the beat grid and the elapsed/total readout 8.8% out on 48 kHz material.
     let sr = (t.metadata.sample_rate.max(1)) as f32;
     let total_frames = t.metadata.total_samples.max(1);
-    let elapsed_samples = telemetry.as_ref().map(|tel| tel.deck_positions[i]).unwrap_or(0);
+    let raw_elapsed = telemetry.as_ref().map(|tel| tel.deck_positions[i]).unwrap_or(0);
+    let is_playing = app.decks.deck_playing[i];
+    let playback_rate = telemetry.as_ref().map(|t| t.deck_playback_rates[i]).unwrap_or(1.0);
+
+    // Sub-frame linear playhead interpolation across 60 Hz egui redraws
+    let elapsed_samples = if is_playing && telemetry.is_some() {
+        let now = ui.input(|inp| inp.time);
+        let dt = (now - app.last_update_time).max(0.0) as f32;
+        let interp_frames = (dt * playback_rate * sr) as u64;
+        (raw_elapsed + interp_frames).min(total_frames)
+    } else {
+        raw_elapsed
+    };
 
     let window_frames = NEEDLE_WINDOW_SECS * sr;
     let center = elapsed_samples as f32;
