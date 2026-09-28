@@ -918,22 +918,43 @@ impl AudioProcessor for AlgorithmicModulationProcessor {
 }
 
 // ============================================================================
-// 5. Algorithmic Dual-Oscillator Synthesizer (Real-Time Instrument)
+// 5. Algorithmic Dual-Oscillator Synthesizer (Real-Time Polyphonic Instrument)
 // ============================================================================
-pub struct AlgorithmicSynthInstrument {
-    pub active_note: Option<u8>,
+#[derive(Clone, Copy, Debug)]
+pub struct SynthVoice {
+    pub note: Option<u8>,
     pub phase_1: f32,
     pub phase_2: f32,
     pub envelope: f32,
+    pub active: bool,
+}
+
+impl SynthVoice {
+    pub fn new() -> Self {
+        Self {
+            note: None,
+            phase_1: 0.0,
+            phase_2: 0.0,
+            envelope: 0.0,
+            active: false,
+        }
+    }
+}
+
+impl Default for SynthVoice {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct AlgorithmicSynthInstrument {
+    pub voices: [SynthVoice; 8],
 }
 
 impl AlgorithmicSynthInstrument {
     pub fn new() -> Self {
         Self {
-            active_note: None,
-            phase_1: 0.0,
-            phase_2: 0.0,
-            envelope: 0.0,
+            voices: [SynthVoice::new(); 8],
         }
     }
 
@@ -955,31 +976,37 @@ impl SignalProcessor for AlgorithmicSynthInstrument {
         if num_ch == 0 { return; }
 
         let block_len = outputs[0].len();
-        let freq = match self.active_note {
-            Some(n) => Self::midi_note_to_freq(n),
-            None => 0.0,
-        };
-
-        let inc1 = freq / sample_rate;
-        let inc2 = (freq * 1.005) / sample_rate; // Slight detune
 
         for i in 0..block_len {
-            if self.active_note.is_some() {
-                self.envelope = (self.envelope + 0.005).min(1.0);
-            } else {
-                self.envelope = (self.envelope - 0.002).max(0.0);
+            let mut mixed_sample = 0.0f32;
+
+            for voice in &mut self.voices {
+                if voice.active {
+                    voice.envelope = (voice.envelope + 0.005).min(1.0);
+                } else {
+                    voice.envelope = (voice.envelope - 0.002).max(0.0);
+                }
+
+                if voice.envelope > 0.0001 {
+                    if let Some(note) = voice.note {
+                        let freq = Self::midi_note_to_freq(note);
+                        let inc1 = freq / sample_rate;
+                        let inc2 = (freq * 1.005) / sample_rate;
+
+                        let s1 = (voice.phase_1 * std::f32::consts::TAU).sin();
+                        let s2 = (voice.phase_2 * std::f32::consts::TAU).sin();
+
+                        mixed_sample += (s1 * 0.6 + s2 * 0.4) * voice.envelope * 0.15;
+
+                        voice.phase_1 = (voice.phase_1 + inc1).fract();
+                        voice.phase_2 = (voice.phase_2 + inc2).fract();
+                    }
+                }
             }
-
-            let s1 = (self.phase_1 * std::f32::consts::TAU).sin();
-            let s2 = (self.phase_2 * std::f32::consts::TAU).sin();
-            let sample = (s1 * 0.6 + s2 * 0.4) * self.envelope * 0.3;
-
-            self.phase_1 = (self.phase_1 + inc1).fract();
-            self.phase_2 = (self.phase_2 + inc2).fract();
 
             for ch in 0..num_ch {
                 if i < outputs[ch].len() {
-                    outputs[ch][i] = sample;
+                    outputs[ch][i] = mixed_sample;
                 }
             }
         }
@@ -995,14 +1022,56 @@ impl MidiResponder for AlgorithmicSynthInstrument {
         match status {
             0x90 => { // Note On
                 if velocity > 0 {
-                    self.active_note = Some(note);
-                } else if self.active_note == Some(note) {
-                    self.active_note = None;
+                    // Allocate voice: search for existing voice with same note or first inactive/quietest voice
+                    let mut allocated_idx = None;
+
+                    for (idx, voice) in self.voices.iter().enumerate() {
+                        if voice.note == Some(note) && voice.active {
+                            allocated_idx = Some(idx);
+                            break;
+                        }
+                    }
+
+                    if allocated_idx.is_none() {
+                        for (idx, voice) in self.voices.iter().enumerate() {
+                            if !voice.active && voice.envelope <= 0.001 {
+                                allocated_idx = Some(idx);
+                                break;
+                            }
+                        }
+                    }
+
+                    if allocated_idx.is_none() {
+                        // Find voice with lowest envelope (voice stealing)
+                        let mut min_env = 2.0f32;
+                        let mut min_idx = 0;
+                        for (idx, voice) in self.voices.iter().enumerate() {
+                            if voice.envelope < min_env {
+                                min_env = voice.envelope;
+                                min_idx = idx;
+                            }
+                        }
+                        allocated_idx = Some(min_idx);
+                    }
+
+                    if let Some(idx) = allocated_idx {
+                        self.voices[idx].note = Some(note);
+                        self.voices[idx].active = true;
+                    }
+                } else {
+                    // Velocity 0 = Note Off
+                    for voice in &mut self.voices {
+                        if voice.note == Some(note) {
+                            voice.active = false;
+                        }
+                    }
                 }
             }
             0x80 => { // Note Off
-                if self.active_note == Some(note) {
-                    self.active_note = None;
+                for voice in &mut self.voices {
+                    if voice.note == Some(note) {
+                        voice.active = false;
+                    }
                 }
             }
             _ => {}
