@@ -394,6 +394,10 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                         ui.add_space(2.0);
 
                         let mut fx_to_remove = None;
+                        let mut fx_to_move_up = None;
+                        let mut fx_to_move_down = None;
+
+                        let total_inserts = app.decks.deck_inserts[i].len();
 
                         for (fx_idx, name) in app.decks.deck_inserts[i].iter().enumerate() {
                             let name_str = name.as_str();
@@ -416,6 +420,22 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                             .min_size(Vec2::new(16.0, 16.0));
                                                         if ui.add(close_btn).on_hover_text("Remove FX").clicked() {
                                                             fx_to_remove = Some(fx_idx);
+                                                        }
+                                                        if fx_idx < total_inserts - 1 {
+                                                            let dn_btn = egui::Button::new(RichText::new("▼").size(9.0).strong().color(theme.text_secondary))
+                                                                .fill(theme.bg_inset)
+                                                                .min_size(Vec2::new(14.0, 14.0));
+                                                            if ui.add(dn_btn).on_hover_text("Move Down").clicked() {
+                                                                fx_to_move_down = Some(fx_idx);
+                                                            }
+                                                        }
+                                                        if fx_idx > 0 {
+                                                            let up_btn = egui::Button::new(RichText::new("▲").size(9.0).strong().color(theme.text_secondary))
+                                                                .fill(theme.bg_inset)
+                                                                .min_size(Vec2::new(14.0, 14.0));
+                                                            if ui.add(up_btn).on_hover_text("Move Up").clicked() {
+                                                                fx_to_move_up = Some(fx_idx);
+                                                            }
                                                         }
                                                     });
                                                 });
@@ -457,6 +477,22 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                             .min_size(Vec2::new(16.0, 16.0));
                                                         if ui.add(close_btn).on_hover_text("Remove FX").clicked() {
                                                             fx_to_remove = Some(fx_idx);
+                                                        }
+                                                        if fx_idx < total_inserts - 1 {
+                                                            let dn_btn = egui::Button::new(RichText::new("▼").size(9.0).strong().color(theme.text_secondary))
+                                                                .fill(theme.bg_inset)
+                                                                .min_size(Vec2::new(14.0, 14.0));
+                                                            if ui.add(dn_btn).on_hover_text("Move Down").clicked() {
+                                                                fx_to_move_down = Some(fx_idx);
+                                                            }
+                                                        }
+                                                        if fx_idx > 0 {
+                                                            let up_btn = egui::Button::new(RichText::new("▲").size(9.0).strong().color(theme.text_secondary))
+                                                                .fill(theme.bg_inset)
+                                                                .min_size(Vec2::new(14.0, 14.0));
+                                                            if ui.add(up_btn).on_hover_text("Move Up").clicked() {
+                                                                fx_to_move_up = Some(fx_idx);
+                                                            }
                                                         }
                                                     });
                                                 });
@@ -531,6 +567,22 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                         if ui.add(close_btn).on_hover_text("Remove FX").clicked() {
                                                             fx_to_remove = Some(fx_idx);
                                                         }
+                                                        if fx_idx < total_inserts - 1 {
+                                                            let dn_btn = egui::Button::new(RichText::new("▼").size(9.0).strong().color(theme.text_secondary))
+                                                                .fill(theme.bg_inset)
+                                                                .min_size(Vec2::new(14.0, 14.0));
+                                                            if ui.add(dn_btn).on_hover_text("Move Down").clicked() {
+                                                                fx_to_move_down = Some(fx_idx);
+                                                            }
+                                                        }
+                                                        if fx_idx > 0 {
+                                                            let up_btn = egui::Button::new(RichText::new("▲").size(9.0).strong().color(theme.text_secondary))
+                                                                .fill(theme.bg_inset)
+                                                                .min_size(Vec2::new(14.0, 14.0));
+                                                            if ui.add(up_btn).on_hover_text("Move Up").clicked() {
+                                                                fx_to_move_up = Some(fx_idx);
+                                                            }
+                                                        }
                                                     });
                                                 });
                                                 ui.add_space(2.0);
@@ -575,6 +627,22 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                             .min_size(Vec2::new(16.0, 16.0));
                                                         if ui.add(close_btn).on_hover_text("Remove FX").clicked() {
                                                             fx_to_remove = Some(fx_idx);
+                                                        }
+                                                        if fx_idx < total_inserts - 1 {
+                                                            let dn_btn = egui::Button::new(RichText::new("▼").size(9.0).strong().color(theme.text_secondary))
+                                                                .fill(theme.bg_inset)
+                                                                .min_size(Vec2::new(14.0, 14.0));
+                                                            if ui.add(dn_btn).on_hover_text("Move Down").clicked() {
+                                                                fx_to_move_down = Some(fx_idx);
+                                                            }
+                                                        }
+                                                        if fx_idx > 0 {
+                                                            let up_btn = egui::Button::new(RichText::new("▲").size(9.0).strong().color(theme.text_secondary))
+                                                                .fill(theme.bg_inset)
+                                                                .min_size(Vec2::new(14.0, 14.0));
+                                                            if ui.add(up_btn).on_hover_text("Move Up").clicked() {
+                                                                fx_to_move_up = Some(fx_idx);
+                                                            }
                                                         }
                                                     });
                                                 });
@@ -698,6 +766,24 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                         if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
                             app.active_right_tab = Some(crate::RightTab::Store);
                             app.store.active_tag_filter = Some("insert".to_string());
+                        }
+
+                        if let Some(idx) = fx_to_move_up {
+                            if idx > 0 && idx < app.decks.deck_inserts[i].len() {
+                                app.decks.deck_inserts[i].swap(idx, idx - 1);
+                                if idx < app.decks.deck_insert_params[i].len() {
+                                    app.decks.deck_insert_params[i].swap(idx, idx - 1);
+                                }
+                            }
+                        }
+
+                        if let Some(idx) = fx_to_move_down {
+                            if idx + 1 < app.decks.deck_inserts[i].len() {
+                                app.decks.deck_inserts[i].swap(idx, idx + 1);
+                                if idx + 1 < app.decks.deck_insert_params[i].len() {
+                                    app.decks.deck_insert_params[i].swap(idx, idx + 1);
+                                }
+                            }
                         }
 
                         if let Some(remove_idx) = fx_to_remove {
