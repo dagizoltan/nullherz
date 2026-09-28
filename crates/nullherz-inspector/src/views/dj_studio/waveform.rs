@@ -177,7 +177,16 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                 // Pre-band library rows: mono silhouette in the deck color.
                 wf.update_from_mip_window(&wgpu.queue, &t.metadata.mip_waveform, start_ratio, end_ratio, rect.width() as u32, color);
             } else {
-                wf.update_from_band_window(&wgpu.queue, &t.metadata.band_waveform, start_ratio, end_ratio, rect.width() as u32, style, color);
+                let eq_gains = if i < 16 {
+                    [
+                        app.mixer.channel_eq_low[i],
+                        app.mixer.channel_eq_mid[i],
+                        app.mixer.channel_eq_high[i],
+                    ]
+                } else {
+                    [1.0, 1.0, 1.0]
+                };
+                wf.update_from_band_window(&wgpu.queue, &t.metadata.band_waveform, start_ratio, end_ratio, rect.width() as u32, style, color, eq_gains);
             }
         }
 

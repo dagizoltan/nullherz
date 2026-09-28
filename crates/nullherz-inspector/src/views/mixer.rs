@@ -104,6 +104,16 @@ fn render_vertical_waveform(
         let start_ratio = (win_start / total_frames as f64) as f32;
         let end_ratio = (win_end / total_frames as f64) as f32;
 
+        let eq_gains = if deck_idx < 16 {
+            [
+                app.mixer.channel_eq_low[deck_idx],
+                app.mixer.channel_eq_mid[deck_idx],
+                app.mixer.channel_eq_high[deck_idx],
+            ]
+        } else {
+            [1.0, 1.0, 1.0]
+        };
+
         if let Some(wf_lock) = app.deck_waveform_renderers.get(deck_idx % 4).and_then(|opt| opt.as_ref()) {
             let mut wf = wf_lock.lock();
             let color = deck_color.to_array().map(|v| v as f32 / 255.0);
@@ -114,7 +124,7 @@ fn render_vertical_waveform(
                 if t.metadata.band_waveform.is_empty() {
                     wf.update_from_mip_window(&wgpu.queue, &t.metadata.mip_waveform, start_ratio, end_ratio, rect.height() as u32, color);
                 } else {
-                    wf.update_from_band_window(&wgpu.queue, &t.metadata.band_waveform, start_ratio, end_ratio, rect.height() as u32, style, color);
+                    wf.update_from_band_window(&wgpu.queue, &t.metadata.band_waveform, start_ratio, end_ratio, rect.height() as u32, style, color, eq_gains);
                 }
             }
 
@@ -138,9 +148,9 @@ fn render_vertical_waveform(
                         let idx_ratio = (frame_pos / total_frames as f64).clamp(0.0, 1.0) as f32;
                         let idx = (idx_ratio * num_windows as f32) as usize;
 
-                        let low_val = low_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0);
-                        let mid_val = mid_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0);
-                        let high_val = high_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0);
+                        let low_val = low_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0) * eq_gains[0];
+                        let mid_val = mid_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0) * eq_gains[1];
+                        let high_val = high_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0) * eq_gains[2];
 
                         let y = rect.min.y + slice_ratio * height;
                         let is_past = y > rect.center().y;
@@ -379,10 +389,10 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                 ui.group(|ui| {
                     ui.set_width(STRIP_W - 12.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("INSERTS RACK").size(theme.type_caption).strong().color(theme.text_secondary));
+                        ui.label(RichText::new("CHANNEL STRIP").size(theme.type_caption).strong().color(theme.text_secondary));
                         ui.add_space(2.0);
 
-                        // Insert Slot 1: 3-Band EQ (HI, MID, LOW)
+                        // 1. TRIM / GAIN Knob
                         Frame::none()
                             .fill(theme.bg_inset)
                             .rounding(Rounding::same(theme.radius_sm))
@@ -391,71 +401,8 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                             .show(ui, |ui| {
                                 ui.set_width(STRIP_W - 20.0);
                                 ui.vertical_centered(|ui| {
-                                    ui.label(RichText::new("1: 3-BAND EQ").size(9.0).strong().color(theme.accent));
-                                    ui.add_space(2.0);
-                                    ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 2.0;
-
-                                        // HI Knob
-                                        let mut hi = app.mixer.channel_eq_high[i];
-                                        if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", deck_color, 26.0).changed() {
-                                            app.mixer.channel_eq_high[i] = hi;
-                                            if let Some(node_id) = iso_node {
-                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                    target_id: node_id as u64,
-                                                    param_id: 2, // HI param
-                                                    value: hi,
-                                                    ramp_duration_samples: 128,
-                                                }));
-                                            }
-                                        }
-
-                                        // MID Knob
-                                        let mut mid = app.mixer.channel_eq_mid[i];
-                                        if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", deck_color, 26.0).changed() {
-                                            app.mixer.channel_eq_mid[i] = mid;
-                                            if let Some(node_id) = iso_node {
-                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                    target_id: node_id as u64,
-                                                    param_id: 1, // MID param
-                                                    value: mid,
-                                                    ramp_duration_samples: 128,
-                                                }));
-                                            }
-                                        }
-
-                                        // LOW Knob
-                                        let mut low = app.mixer.channel_eq_low[i];
-                                        if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", deck_color, 26.0).changed() {
-                                            app.mixer.channel_eq_low[i] = low;
-                                            if let Some(node_id) = iso_node {
-                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                    target_id: node_id as u64,
-                                                    param_id: 0, // LOW param
-                                                    value: low,
-                                                    ramp_duration_samples: 128,
-                                                }));
-                                            }
-                                        }
-                                    });
-                                });
-                            });
-
-                        ui.add_space(4.0);
-
-                        // Insert Slot 2: Trim / Gain Knob
-                        Frame::none()
-                            .fill(theme.bg_inset)
-                            .rounding(Rounding::same(theme.radius_sm))
-                            .inner_margin(Margin::same(4.0))
-                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
-                            .show(ui, |ui| {
-                                ui.set_width(STRIP_W - 20.0);
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new("2: TRIM").size(9.0).strong().color(theme.success));
-                                    ui.add_space(4.0);
                                     let mut gain_val = app.mixer.channel_faders[i];
-                                    if widgets::render_knob_sized(ui, &mut gain_val, 0.0..=2.0, "", deck_color, 24.0).changed() {
+                                    if widgets::render_knob_sized(ui, &mut gain_val, 0.0..=2.0, "GAIN", deck_color, 28.0).changed() {
                                         app.mixer.channel_faders[i] = gain_val;
                                         if let Some(gain_id) = gain_node {
                                             let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
@@ -471,7 +418,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                         ui.add_space(4.0);
 
-                        // Insert Slot 3: Pitch / Speed
+                        // 2. 3-BAND EQ (HIGH, MID, LOW vertically aligned)
                         Frame::none()
                             .fill(theme.bg_inset)
                             .rounding(Rounding::same(theme.radius_sm))
@@ -479,11 +426,71 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                             .stroke(Stroke::new(1.0, theme.border_stroke.color))
                             .show(ui, |ui| {
                                 ui.set_width(STRIP_W - 20.0);
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new("3: PITCH").size(9.0).strong().color(theme.accent));
-                                    ui.add_space(4.0);
+                                ui.vertical_centered(|ui| {
+                                    ui.label(RichText::new("3-BAND EQ").size(9.0).strong().color(theme.accent));
+                                    ui.add_space(2.0);
+
+                                    // HIGH Knob
+                                    let mut hi = app.mixer.channel_eq_high[i];
+                                    if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HIGH", deck_color, 26.0).changed() {
+                                        app.mixer.channel_eq_high[i] = hi;
+                                        if let Some(node_id) = iso_node {
+                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                target_id: node_id as u64,
+                                                param_id: 2, // HI param
+                                                value: hi,
+                                                ramp_duration_samples: 128,
+                                            }));
+                                        }
+                                    }
+
+                                    ui.add_space(2.0);
+
+                                    // MID Knob
+                                    let mut mid = app.mixer.channel_eq_mid[i];
+                                    if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", deck_color, 26.0).changed() {
+                                        app.mixer.channel_eq_mid[i] = mid;
+                                        if let Some(node_id) = iso_node {
+                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                target_id: node_id as u64,
+                                                param_id: 1, // MID param
+                                                value: mid,
+                                                ramp_duration_samples: 128,
+                                            }));
+                                        }
+                                    }
+
+                                    ui.add_space(2.0);
+
+                                    // LOW Knob
+                                    let mut low = app.mixer.channel_eq_low[i];
+                                    if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", deck_color, 26.0).changed() {
+                                        app.mixer.channel_eq_low[i] = low;
+                                        if let Some(node_id) = iso_node {
+                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                target_id: node_id as u64,
+                                                param_id: 0, // LOW param
+                                                value: low,
+                                                ramp_duration_samples: 128,
+                                            }));
+                                        }
+                                    }
+                                });
+                            });
+
+                        ui.add_space(4.0);
+
+                        // 3. PITCH / SPEED
+                        Frame::none()
+                            .fill(theme.bg_inset)
+                            .rounding(Rounding::same(theme.radius_sm))
+                            .inner_margin(Margin::same(4.0))
+                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                            .show(ui, |ui| {
+                                ui.set_width(STRIP_W - 20.0);
+                                ui.vertical_centered(|ui| {
                                     let mut pitch_val = app.mixer.channel_pitch[i];
-                                    if widgets::render_knob_sized(ui, &mut pitch_val, 0.5..=1.5, "", deck_color, 24.0).changed() {
+                                    if widgets::render_knob_sized(ui, &mut pitch_val, 0.5..=1.5, "PITCH", deck_color, 26.0).changed() {
                                         app.mixer.channel_pitch[i] = pitch_val;
                                         let deck_char = (b'A' + (i % 26) as u8) as char;
                                         let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetDeckParam {
@@ -497,7 +504,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                         ui.add_space(4.0);
 
-                        // Standardized container for FX slot to guarantee exact vertical alignment across channels
+                        // 4. ADDED FX INSERT SLOT
                         let insert_node = app.topo.node_map.get(&format!("deck_{}_insert", deck_char_letter))
                             .or_else(|| app.topo.node_map.get(&format!("deck_{}_fx1", deck_char_letter)))
                             .copied();
@@ -527,7 +534,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                         ui.add_space(2.0);
 
                                         if is_mutator {
-                                            // MUTATOR 6 Parallel Mutation Macro Knobs + Dry/Wet
+                                            // MUTATOR 6 Parallel Mutation Macro Knobs
                                             ui.vertical_centered(|ui| {
                                                 ui.horizontal(|ui| {
                                                     ui.spacing_mut().item_spacing.x = 2.0;
@@ -653,6 +660,11 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                     }
                                                 }
                                             });
+                                        }
+
+                                        ui.add_space(4.0);
+                                        if ui.add_sized([STRIP_W - 28.0, 18.0], egui::Button::new(RichText::new("REMOVE FX").size(8.5).strong().color(theme.danger)).fill(theme.bg_inset)).clicked() {
+                                            remove_insert = true;
                                         }
                                     });
                                 });

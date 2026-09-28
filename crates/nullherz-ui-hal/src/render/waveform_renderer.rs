@@ -272,7 +272,7 @@ impl WaveformRenderer {
     }
 
     /// Upload only a WINDOW of the band waveform — `[start_ratio, end_ratio)`
-    /// of the track — remapped to the full x range.
+    /// of the track — remapped to the full x range, modulated by per-band EQ gains `[low, mid, high]`.
     pub fn update_from_band_window(
         &mut self,
         queue: &wgpu::Queue,
@@ -282,6 +282,7 @@ impl WaveformRenderer {
         display_pixel_width: u32,
         style: WaveformStyle,
         accent_color: [f32; 4],
+        eq_gains: [f32; 3],
     ) {
         if band.is_empty() || end_ratio <= start_ratio { return; }
 
@@ -317,9 +318,16 @@ impl WaveformRenderer {
                 continue;
             }
             let idx = idx_f as usize;
-            let (l, m, h) = (low[idx], mid[idx], high[idx]);
-            let top = env_max[idx].clamp(-1.0, 1.0);
-            let bot = env_min[idx].clamp(-1.0, 1.0);
+            let l = low[idx] * eq_gains[0];
+            let m = mid[idx] * eq_gains[1];
+            let h = high[idx] * eq_gains[2];
+
+            let sum_orig = (low[idx] + mid[idx] + high[idx]).max(1e-6);
+            let sum_eq = (l + m + h).max(0.0);
+            let eq_scale = sum_eq / sum_orig;
+
+            let top = (env_max[idx] * eq_scale).clamp(-1.0, 1.0);
+            let bot = (env_min[idx] * eq_scale).clamp(-1.0, 1.0);
 
             let top_col = compute_sample_color(style, l, m, h, top, bot, accent_color, true);
             let bot_col = compute_sample_color(style, l, m, h, top, bot, accent_color, false);
