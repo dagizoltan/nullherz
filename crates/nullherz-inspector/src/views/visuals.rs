@@ -788,6 +788,8 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                 ui.horizontal_top(|ui| {
                     let num_channels = app.viz.channels.len();
                     let mut channel_to_remove = None;
+                    let mut channel_to_move_left = None;
+                    let mut channel_to_move_right = None;
 
                     for c_idx in 0..num_channels {
                         let channel = &mut app.viz.channels[c_idx];
@@ -802,19 +804,37 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                             .show(ui, |ui| {
                                 ui.set_width(VIZ_STRIP_W);
                                 ui.vertical(|ui| {
-                                    // Header
+                                    // Header with layer reordering controls
                                     ui.horizontal(|ui| {
-                                        ui.add_space((VIZ_STRIP_W - 50.0).max(0.0) / 2.0);
                                         if ui.button(egui::RichText::new(&channel.name).strong().size(theme.type_body).color(channel_color)).clicked() {
                                             app.viz.selected_channel_idx = c_idx;
                                         }
-                                        if num_channels > 1 {
-                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                if ui.button(egui_phosphor::regular::X).on_hover_text("Remove Strip").clicked() {
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            if num_channels > 1 {
+                                                let close_btn = egui::Button::new(egui::RichText::new("×").size(11.0).strong().color(theme.danger))
+                                                    .fill(theme.bg_inset)
+                                                    .min_size(egui::vec2(16.0, 16.0));
+                                                if ui.add(close_btn).on_hover_text("Remove Visual Strip").clicked() {
                                                     channel_to_remove = Some(c_idx);
                                                 }
-                                            });
-                                        }
+                                            }
+                                            if c_idx < num_channels - 1 {
+                                                let right_btn = egui::Button::new(egui::RichText::new("▼").size(9.0).strong().color(theme.text_secondary))
+                                                    .fill(theme.bg_inset)
+                                                    .min_size(egui::vec2(14.0, 14.0));
+                                                if ui.add(right_btn).on_hover_text("Move Layer Down").clicked() {
+                                                    channel_to_move_right = Some(c_idx);
+                                                }
+                                            }
+                                            if c_idx > 0 {
+                                                let left_btn = egui::Button::new(egui::RichText::new("▲").size(9.0).strong().color(theme.text_secondary))
+                                                    .fill(theme.bg_inset)
+                                                    .min_size(egui::vec2(14.0, 14.0));
+                                                if ui.add(left_btn).on_hover_text("Move Layer Up").clicked() {
+                                                    channel_to_move_left = Some(c_idx);
+                                                }
+                                            }
+                                        });
                                     });
                                     ui.add_space(theme.space_xs);
 
@@ -830,6 +850,36 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                                 }
                                             });
                                     });
+                                    ui.add_space(2.0);
+
+                                    // Multi-Input Audio Sources / Stems Selector Card
+                                    egui::Frame::none()
+                                        .fill(theme.bg_inset)
+                                        .rounding(egui::Rounding::same(theme.radius_sm))
+                                        .inner_margin(egui::Margin::same(4.0))
+                                        .stroke(egui::Stroke::new(1.0, theme.border_stroke.color))
+                                        .show(ui, |ui| {
+                                            ui.set_width(VIZ_STRIP_W - 20.0);
+                                            ui.vertical(|ui| {
+                                                ui.label(egui::RichText::new("INPUT BINDINGS").size(8.0).strong().color(theme.accent));
+                                                ui.horizontal_wrapped(|ui| {
+                                                    ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
+                                                    for input_src in state::VisualInputSource::all() {
+                                                        let is_attached = channel.attached_inputs.contains(input_src);
+                                                        let label = input_src.short_code();
+                                                        if ui.selectable_label(is_attached, egui::RichText::new(label).size(7.5).strong()).clicked() {
+                                                            if is_attached {
+                                                                if channel.attached_inputs.len() > 1 {
+                                                                    channel.attached_inputs.retain(|src| src != input_src);
+                                                                }
+                                                            } else {
+                                                                channel.attached_inputs.push(input_src.clone());
+                                                            }
+                                                        }
+                                                    }
+                                                });
+                                            });
+                                        });
                                     ui.add_space(2.0);
 
                                     // Visual Surface Live Preview Frame
@@ -1049,6 +1099,22 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                             ui.add_space(theme.space_sm);
                         }
 
+                        if let Some(idx) = channel_to_move_left {
+                            if idx > 0 && idx < app.viz.channels.len() {
+                                app.viz.channels.swap(idx, idx - 1);
+                                for (i, ch) in app.viz.channels.iter_mut().enumerate() {
+                                    ch.layer_z_index = i as i32;
+                                }
+                            }
+                        }
+                        if let Some(idx) = channel_to_move_right {
+                            if idx + 1 < app.viz.channels.len() {
+                                app.viz.channels.swap(idx, idx + 1);
+                                for (i, ch) in app.viz.channels.iter_mut().enumerate() {
+                                    ch.layer_z_index = i as i32;
+                                }
+                            }
+                        }
                         if let Some(idx_to_remove) = channel_to_remove {
                             if idx_to_remove < app.viz.channels.len() {
                                 app.viz.channels.remove(idx_to_remove);
