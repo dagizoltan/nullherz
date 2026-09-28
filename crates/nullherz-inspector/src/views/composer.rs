@@ -140,6 +140,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         ui.toggle_value(&mut app.composer.record_automation, RichText::new("🔴 RECORD AUTOMATION").color(if is_recording { app.theme.danger } else { app.theme.text_secondary }));
         ui.add_space(app.theme.space_md);
 
+        let is_kbd_open = app.composer.keyboard_grid.is_open;
+        ui.toggle_value(&mut app.composer.keyboard_grid.is_open, RichText::new("🎹 KEYBOARD GRID").color(if is_kbd_open { app.theme.accent } else { app.theme.text_secondary }));
+        ui.add_space(app.theme.space_md);
+
         if ui.button("STOP ALL CLIPS").clicked() {
             for i in 0..16 {
                  let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: seq_node, track_idx: i as u32 }));
@@ -461,6 +465,36 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 }
             }
         });
+
+    if app.composer.keyboard_grid.is_open {
+        ui.add_space(app.theme.space_sm);
+        Frame::none()
+            .fill(app.theme.bg_surface)
+            .rounding(Rounding::same(app.theme.radius_md))
+            .stroke(app.theme.border_stroke)
+            .inner_margin(Margin::same(app.theme.space_sm))
+            .show(ui, |ui| {
+                let deck_color = crate::InspectorApp::deck_color(&app.theme, grid_deck);
+                let note_triggers = widgets::render_keyboard_grid(
+                    ui,
+                    &mut app.composer.keyboard_grid.octave,
+                    &mut app.composer.keyboard_grid.style,
+                    &app.composer.keyboard_grid.active_held_notes,
+                    deck_color,
+                );
+
+                for trig in note_triggers {
+                    let event = nullherz_traits::MidiEvent {
+                        timestamp_samples: 0,
+                        status: if trig.is_note_on { 0x90 } else { 0x80 },
+                        data1: trig.note,
+                        data2: trig.velocity,
+                        _pad: 0,
+                    };
+                    let _ = app.command_sender.send(Command::Core(CoreCommand::InjectMidi(event)));
+                }
+            });
+    }
 }
 
 #[cfg(test)]

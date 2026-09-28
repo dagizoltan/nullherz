@@ -390,10 +390,30 @@ impl Default for LibraryState {
     }
 }
 
+/// Keyboard Grid UI State for playing instrument sidecars & samplers.
+pub struct KeyboardGridState {
+    pub is_open: bool,
+    pub style: nullherz_ui_hal::widgets::KeyboardGridStyle,
+    pub octave: i8,
+    pub active_held_notes: Vec<u8>,
+}
+
+impl Default for KeyboardGridState {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            style: nullherz_ui_hal::widgets::KeyboardGridStyle::PianoKeys,
+            octave: 0,
+            active_held_notes: Vec::new(),
+        }
+    }
+}
+
 /// Step-sequencer / song-builder grid state.
 pub struct ComposerState {
     /// Sample assigned to each sequencer track, independent of the decks.
     pub track_sources: [Option<u64>; 16],
+    pub keyboard_grid: KeyboardGridState,
     /// Step grids PER DECK: the composer edits the focused deck's
     /// sequencer, so each deck needs its own grid.
     pub sequencer_grid: [[Vec<f32>; 16]; 4],
@@ -423,6 +443,7 @@ impl Default for ComposerState {
     fn default() -> Self {
         Self {
             track_sources: [None; 16],
+            keyboard_grid: KeyboardGridState::default(),
             sequencer_grid: std::array::from_fn(|_| std::array::from_fn(|_| vec![0.0; 64])),
             selected_composer_track: None,
             sequencer_active_step: 0,
