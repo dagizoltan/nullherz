@@ -443,6 +443,7 @@ pub struct SamplerState {
     /// editing. `None` falls back to the focused deck so the old behaviour is
     /// still the default when nothing has been picked.
     pub source_track: Option<u64>,
+    #[allow(dead_code)]
     pub sampler_slicer_mode: bool,
     pub sampler_waveform_zoom: f32,
     pub sampler_input_gain: f32,
