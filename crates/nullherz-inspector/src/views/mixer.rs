@@ -104,6 +104,16 @@ fn render_vertical_waveform(
         let start_ratio = (win_start / total_frames as f64) as f32;
         let end_ratio = (win_end / total_frames as f64) as f32;
 
+        let eq_gains = if deck_idx < 16 {
+            [
+                app.mixer.channel_eq_low[deck_idx],
+                app.mixer.channel_eq_mid[deck_idx],
+                app.mixer.channel_eq_high[deck_idx],
+            ]
+        } else {
+            [1.0, 1.0, 1.0]
+        };
+
         if let Some(wf_lock) = app.deck_waveform_renderers.get(deck_idx % 4).and_then(|opt| opt.as_ref()) {
             let mut wf = wf_lock.lock();
             let color = deck_color.to_array().map(|v| v as f32 / 255.0);
@@ -114,7 +124,7 @@ fn render_vertical_waveform(
                 if t.metadata.band_waveform.is_empty() {
                     wf.update_from_mip_window(&wgpu.queue, &t.metadata.mip_waveform, start_ratio, end_ratio, rect.height() as u32, color);
                 } else {
-                    wf.update_from_band_window(&wgpu.queue, &t.metadata.band_waveform, start_ratio, end_ratio, rect.height() as u32, style, color);
+                    wf.update_from_band_window(&wgpu.queue, &t.metadata.band_waveform, start_ratio, end_ratio, rect.height() as u32, style, color, eq_gains);
                 }
             }
 
@@ -138,9 +148,9 @@ fn render_vertical_waveform(
                         let idx_ratio = (frame_pos / total_frames as f64).clamp(0.0, 1.0) as f32;
                         let idx = (idx_ratio * num_windows as f32) as usize;
 
-                        let low_val = low_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0);
-                        let mid_val = mid_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0);
-                        let high_val = high_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0);
+                        let low_val = low_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0) * eq_gains[0];
+                        let mid_val = mid_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0) * eq_gains[1];
+                        let high_val = high_lvl.get(idx).copied().unwrap_or(0.05).abs().clamp(0.01, 1.0) * eq_gains[2];
 
                         let y = rect.min.y + slice_ratio * height;
                         let is_past = y > rect.center().y;
