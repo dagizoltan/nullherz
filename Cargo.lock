@@ -3433,6 +3433,7 @@ dependencies = [
  "egui-phosphor",
  "egui-wgpu",
  "futures-util",
+ "ipc-layer",
  "midir",
  "nullherz-backends",
  "nullherz-conductor",

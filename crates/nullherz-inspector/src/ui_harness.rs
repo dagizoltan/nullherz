@@ -70,6 +70,7 @@ impl Harness {
             p2p_sync_success_toast: None,
             export_passport_success_toast: None,
             export_passport_error_toast: None,
+            rt_warnings: vec![],
             theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
             _conductor_thread: None,
