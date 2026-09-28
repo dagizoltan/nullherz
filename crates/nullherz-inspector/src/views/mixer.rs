@@ -691,8 +691,8 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                 // --- VOLUME FADER & STEREO VU METERS ---
                 ui.horizontal(|ui| {
-                    let total_fader_group_w = 48.0; // Fader 24 + Space 6 + Meter1 8 + Space 2 + Meter2 8
-                    let pad = (ui.available_width() - total_fader_group_w).max(0.0) / 2.0;
+                    let fader_w = 24.0;
+                    let pad = (ui.available_width() - fader_w).max(0.0) / 2.0;
                     ui.add_space(pad);
 
                     let r_fader = widgets::render_fader(ui, &mut app.mixer.channel_faders[i], 0.0..=1.2, deck_color, FADER_H, 30.0);
@@ -710,7 +710,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                         let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CheckpointParameterEdit));
                     }
 
-                    ui.add_space(6.0);
+                    ui.add_space(4.0);
 
                     // STEREO VU METERS (Left & Right channels side-by-side next to the centered fader)
                     if let (Some(t), Some(node)) = (telemetry, meter_node) {
@@ -1008,8 +1008,8 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
 
                 // --- VOLUME FADER & STEREO VU METERS ---
                 ui.horizontal(|ui| {
-                    let total_fader_group_w = 48.0; // Fader 24 + Space 6 + Meter1 8 + Space 2 + Meter2 8
-                    let pad = (ui.available_width() - total_fader_group_w).max(0.0) / 2.0;
+                    let fader_w = 24.0;
+                    let pad = (ui.available_width() - fader_w).max(0.0) / 2.0;
                     ui.add_space(pad);
 
                     let r_fader = widgets::render_fader(ui, &mut app.mixer.master_gain, 0.0..=1.2, accent, FADER_H, 30.0);
@@ -1027,7 +1027,7 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                         let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CheckpointParameterEdit));
                     }
 
-                    ui.add_space(6.0);
+                    ui.add_space(4.0);
 
                     // Stereo pair: damped master peaks are bound to master_sum_l/r in the update loop.
                     let _ = telemetry;
