@@ -271,10 +271,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             app.mixer.channel_faders[track_idx] = vol_val;
                                             let deck_char = (b'a' + (track_idx % 26) as u8) as char;
                                             if let Some(gain_id) = app.topo.node_map.get(&format!("deck_{}_gain", deck_char)).copied() {
+                                                let net_gain = app.mixer.channel_gain[track_idx] * vol_val;
                                                 let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
                                                     target_id: gain_id as u64,
                                                     param_id: 0,
-                                                    value: vol_val,
+                                                    value: net_gain,
                                                     ramp_duration_samples: 128,
                                                 }));
                                             }
