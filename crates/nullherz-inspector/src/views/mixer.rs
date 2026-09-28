@@ -84,7 +84,8 @@ fn render_vertical_waveform(
     theme: &nullherz_ui_hal::Theme,
     telemetry: &Option<Telemetry>,
 ) {
-    let (rect, _response) = ui.allocate_exact_size(Vec2::new(STRIP_W - 12.0, VERTICAL_WAVEFORM_H), egui::Sense::hover());
+    let wf_w = ui.available_width();
+    let (rect, _response) = ui.allocate_exact_size(Vec2::new(wf_w, VERTICAL_WAVEFORM_H), egui::Sense::hover());
 
     // Background inset matching DJ Studio Console waveform canvas
     ui.painter().rect_filled(rect, theme.radius_sm, theme.bg_inset);
@@ -368,11 +369,11 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                 // Waveform Style Dropdown Selector
                 ui.horizontal(|ui| {
-                    ui.add_space(2.0);
+                    let avail_w = ui.available_width();
                     let selected_style = app.mixer.waveform_styles[i];
                     egui::ComboBox::from_id_source(format!("ch_wf_style_{}", i))
                         .selected_text(RichText::new(selected_style.name()).size(8.5).strong().color(theme.text_primary))
-                        .width(STRIP_W - 20.0)
+                        .width(avail_w)
                         .show_ui(ui, |ui| {
                             for st in nullherz_ui_hal::render::waveform_renderer::WaveformStyle::all() {
                                 ui.selectable_value(&mut app.mixer.waveform_styles[i], *st, st.name());
@@ -401,14 +402,15 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                             .show(ui, |ui| {
                                 ui.set_width(STRIP_W - 20.0);
                                 ui.vertical_centered(|ui| {
-                                    let mut gain_val = app.mixer.channel_faders[i];
+                                    let mut gain_val = app.mixer.channel_gain[i];
                                     if widgets::render_knob_sized(ui, &mut gain_val, 0.0..=2.0, "GAIN", deck_color, 28.0).changed() {
-                                        app.mixer.channel_faders[i] = gain_val;
+                                        app.mixer.channel_gain[i] = gain_val;
                                         if let Some(gain_id) = gain_node {
+                                            let net_gain = gain_val * app.mixer.channel_faders[i];
                                             let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                                 target_id: gain_id as u64,
                                                 param_id: 0,
-                                                value: gain_val,
+                                                value: net_gain,
                                                 ramp_duration_samples: 128,
                                             }));
                                         }
@@ -525,7 +527,10 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                         ui.horizontal(|ui| {
                                             ui.label(RichText::new(format!("FX: {}", name_clone)).size(9.0).strong().color(theme.text_primary));
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                if ui.button(RichText::new("×").size(10.0).strong()).clicked() {
+                                                let close_btn = egui::Button::new(RichText::new("×").size(11.0).strong().color(theme.text_secondary))
+                                                    .fill(Color32::TRANSPARENT)
+                                                    .min_size(Vec2::new(14.0, 14.0));
+                                                if ui.add(close_btn).on_hover_text("Remove FX").clicked() {
                                                     remove_insert = true;
                                                 }
                                             });
@@ -661,11 +666,6 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                                 }
                                             });
                                         }
-
-                                        ui.add_space(4.0);
-                                        if ui.add_sized([STRIP_W - 28.0, 18.0], egui::Button::new(RichText::new("REMOVE FX").size(8.5).strong().color(theme.danger)).fill(theme.bg_inset)).clicked() {
-                                            remove_insert = true;
-                                        }
                                     });
                                 });
                         } else if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
@@ -691,13 +691,18 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                 // --- VOLUME FADER & STEREO VU METERS ---
                 ui.horizontal(|ui| {
+                    let total_fader_group_w = 48.0; // Fader 24 + Space 6 + Meter1 8 + Space 2 + Meter2 8
+                    let pad = (ui.available_width() - total_fader_group_w).max(0.0) / 2.0;
+                    ui.add_space(pad);
+
                     let r_fader = widgets::render_fader(ui, &mut app.mixer.channel_faders[i], 0.0..=1.2, deck_color, FADER_H, 30.0);
                     if r_fader.changed()
                         && let Some(gain_id) = gain_node {
+                            let net_gain = app.mixer.channel_gain[i] * app.mixer.channel_faders[i];
                             let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                 target_id: gain_id as u64,
                                 param_id: 0,
-                                value: app.mixer.channel_faders[i],
+                                value: net_gain,
                                 ramp_duration_samples: 128,
                             }));
                         }
@@ -707,7 +712,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
 
                     ui.add_space(6.0);
 
-                    // STEREO VU METERS (Left & Right channels side-by-side)
+                    // STEREO VU METERS (Left & Right channels side-by-side next to the centered fader)
                     if let (Some(t), Some(node)) = (telemetry, meter_node) {
                         let level_base = t.peak_levels.get(node as usize).copied().unwrap_or(0.0);
                         let bal = app.mixer.channel_balance[i];
@@ -725,10 +730,10 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                 });
 
                 ui.add_space(theme.space_xs);
-                ui.horizontal(|ui| {
-                    ui.add_space((STRIP_W - 50.0).max(0.0) / 2.0);
+                ui.vertical_centered(|ui| {
+                    let net_gain = app.mixer.channel_gain[i] * app.mixer.channel_faders[i];
                     ui.label(
-                        RichText::new(format!("{:+.1} dB", 20.0 * app.mixer.channel_faders[i].max(1e-3).log10()))
+                        RichText::new(format!("{:+.1} dB", 20.0 * net_gain.max(1e-3).log10()))
                             .monospace()
                             .size(theme.type_caption)
                             .color(theme.text_secondary),
@@ -851,28 +856,13 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                 });
                 ui.add_space(theme.space_xs);
 
-                // Master Output Selector Dropdown
-                ui.horizontal(|ui| {
-                    ui.add_space(2.0);
-                    let selected_output = app.mixer.master_output_source;
-                    egui::ComboBox::from_id_source("master_output_src")
-                        .selected_text(RichText::new(selected_output.name()).size(9.0).strong().color(theme.text_primary))
-                        .width(STRIP_W - 20.0)
-                        .show_ui(ui, |ui| {
-                            for out in MasterOutput::all() {
-                                ui.selectable_value(&mut app.mixer.master_output_source, *out, out.name());
-                            }
-                        });
-                });
-                ui.add_space(theme.space_xs);
-
                 // Waveform Style Dropdown Selector
                 ui.horizontal(|ui| {
-                    ui.add_space(2.0);
+                    let avail_w = ui.available_width();
                     let selected_style = app.mixer.waveform_styles[master_deck_idx];
                     egui::ComboBox::from_id_source("master_wf_style")
                         .selected_text(RichText::new(selected_style.name()).size(8.5).strong().color(theme.text_primary))
-                        .width(STRIP_W - 20.0)
+                        .width(avail_w)
                         .show_ui(ui, |ui| {
                             for st in nullherz_ui_hal::render::waveform_renderer::WaveformStyle::all() {
                                 ui.selectable_value(&mut app.mixer.waveform_styles[master_deck_idx], *st, st.name());
@@ -889,11 +879,10 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                 ui.group(|ui| {
                     ui.set_width(STRIP_W - 12.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("INSERTS RACK").size(theme.type_caption).strong().color(theme.text_secondary));
+                        ui.label(RichText::new("CHANNEL STRIP").size(theme.type_caption).strong().color(theme.text_secondary));
                         ui.add_space(2.0);
 
-                        // Master Insert Slot 1: 3-Band Mastering EQ (HI, MID, LOW)
-                        let master_eq_node = app.topo.node_map.get("master_eq").copied();
+                        // 1. TRIM / MASTER GAIN Knob
                         Frame::none()
                             .fill(theme.bg_inset)
                             .rounding(Rounding::same(theme.radius_sm))
@@ -902,71 +891,8 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                             .show(ui, |ui| {
                                 ui.set_width(STRIP_W - 20.0);
                                 ui.vertical_centered(|ui| {
-                                    ui.label(RichText::new("1: 3-BAND EQ").size(9.0).strong().color(accent));
-                                    ui.add_space(2.0);
-                                    ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 2.0;
-
-                                        // HI Knob
-                                        let mut hi = app.mixer.mastering_eq_high;
-                                        if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", accent, 26.0).changed() {
-                                            app.mixer.mastering_eq_high = hi;
-                                            if let Some(node_id) = master_eq_node {
-                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                    target_id: node_id as u64,
-                                                    param_id: 2,
-                                                    value: hi,
-                                                    ramp_duration_samples: 128,
-                                                }));
-                                            }
-                                        }
-
-                                        // MID Knob
-                                        let mut mid = app.mixer.mastering_eq_mid;
-                                        if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", accent, 26.0).changed() {
-                                            app.mixer.mastering_eq_mid = mid;
-                                            if let Some(node_id) = master_eq_node {
-                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                    target_id: node_id as u64,
-                                                    param_id: 1,
-                                                    value: mid,
-                                                    ramp_duration_samples: 128,
-                                                }));
-                                            }
-                                        }
-
-                                        // LOW Knob
-                                        let mut low = app.mixer.mastering_eq_low;
-                                        if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", accent, 26.0).changed() {
-                                            app.mixer.mastering_eq_low = low;
-                                            if let Some(node_id) = master_eq_node {
-                                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                                    target_id: node_id as u64,
-                                                    param_id: 0,
-                                                    value: low,
-                                                    ramp_duration_samples: 128,
-                                                }));
-                                            }
-                                        }
-                                    });
-                                });
-                            });
-
-                        ui.add_space(4.0);
-
-                        // Master Insert Slot 2: Trim / Master Gain
-                        Frame::none()
-                            .fill(theme.bg_inset)
-                            .rounding(Rounding::same(theme.radius_sm))
-                            .inner_margin(Margin::same(4.0))
-                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
-                            .show(ui, |ui| {
-                                ui.set_width(STRIP_W - 20.0);
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new("2: TRIM").size(9.0).strong().color(theme.success));
-                                    ui.add_space(4.0);
                                     let mut m_gain = app.mixer.master_gain;
-                                    if widgets::render_knob_sized(ui, &mut m_gain, 0.0..=2.0, "", accent, 24.0).changed() {
+                                    if widgets::render_knob_sized(ui, &mut m_gain, 0.0..=2.0, "GAIN", accent, 28.0).changed() {
                                         app.mixer.master_gain = m_gain;
                                         for node in [sum_l, sum_r].into_iter().flatten() {
                                             let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
@@ -982,7 +908,70 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
 
                         ui.add_space(4.0);
 
-                        // Master Insert Slot 3: Limiter / Dynamics
+                        // 2. 3-BAND EQ (HIGH, MID, LOW vertically aligned matching channel strips)
+                        let master_eq_node = app.topo.node_map.get("master_eq").copied();
+                        Frame::none()
+                            .fill(theme.bg_inset)
+                            .rounding(Rounding::same(theme.radius_sm))
+                            .inner_margin(Margin::same(4.0))
+                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                            .show(ui, |ui| {
+                                ui.set_width(STRIP_W - 20.0);
+                                ui.vertical_centered(|ui| {
+                                    ui.label(RichText::new("3-BAND EQ").size(9.0).strong().color(accent));
+                                    ui.add_space(2.0);
+
+                                    // HIGH Knob
+                                    let mut hi = app.mixer.mastering_eq_high;
+                                    if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HIGH", accent, 26.0).changed() {
+                                        app.mixer.mastering_eq_high = hi;
+                                        if let Some(node_id) = master_eq_node {
+                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                target_id: node_id as u64,
+                                                param_id: 2,
+                                                value: hi,
+                                                ramp_duration_samples: 128,
+                                            }));
+                                        }
+                                    }
+
+                                    ui.add_space(2.0);
+
+                                    // MID Knob
+                                    let mut mid = app.mixer.mastering_eq_mid;
+                                    if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", accent, 26.0).changed() {
+                                        app.mixer.mastering_eq_mid = mid;
+                                        if let Some(node_id) = master_eq_node {
+                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                target_id: node_id as u64,
+                                                param_id: 1,
+                                                value: mid,
+                                                ramp_duration_samples: 128,
+                                            }));
+                                        }
+                                    }
+
+                                    ui.add_space(2.0);
+
+                                    // LOW Knob
+                                    let mut low = app.mixer.mastering_eq_low;
+                                    if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", accent, 26.0).changed() {
+                                        app.mixer.mastering_eq_low = low;
+                                        if let Some(node_id) = master_eq_node {
+                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                target_id: node_id as u64,
+                                                param_id: 0,
+                                                value: low,
+                                                ramp_duration_samples: 128,
+                                            }));
+                                        }
+                                    }
+                                });
+                            });
+
+                        ui.add_space(4.0);
+
+                        // 3. LIMITER / DYNAMICS
                         let limiter_node = app.topo.node_map.get("master_limiter").copied();
                         Frame::none()
                             .fill(theme.bg_inset)
@@ -991,11 +980,9 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                             .stroke(Stroke::new(1.0, theme.border_stroke.color))
                             .show(ui, |ui| {
                                 ui.set_width(STRIP_W - 20.0);
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new("3: LIMIT").size(9.0).strong().color(accent));
-                                    ui.add_space(4.0);
+                                ui.vertical_centered(|ui| {
                                     let mut thresh = 1.0f32;
-                                    if widgets::render_knob_sized(ui, &mut thresh, 0.1..=1.0, "", accent, 24.0).changed() {
+                                    if widgets::render_knob_sized(ui, &mut thresh, 0.1..=1.0, "LIMIT", accent, 26.0).changed() {
                                         if let Some(lim_id) = limiter_node {
                                             let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
                                                 target_id: lim_id as u64,
@@ -1021,6 +1008,10 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
 
                 // --- VOLUME FADER & STEREO VU METERS ---
                 ui.horizontal(|ui| {
+                    let total_fader_group_w = 48.0; // Fader 24 + Space 6 + Meter1 8 + Space 2 + Meter2 8
+                    let pad = (ui.available_width() - total_fader_group_w).max(0.0) / 2.0;
+                    ui.add_space(pad);
+
                     let r_fader = widgets::render_fader(ui, &mut app.mixer.master_gain, 0.0..=1.2, accent, FADER_H, 30.0);
                     if r_fader.changed() {
                         for node in [sum_l, sum_r].into_iter().flatten() {
@@ -1038,8 +1029,7 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
 
                     ui.add_space(6.0);
 
-                    // Stereo pair: damped master peaks are bound to
-                    // master_sum_l/r in the update loop.
+                    // Stereo pair: damped master peaks are bound to master_sum_l/r in the update loop.
                     let _ = telemetry;
                     widgets::render_vu_meter(ui, app.viz.damped_master_peaks[0], app.mixer.master_peak_hold, accent, FADER_H);
                     ui.add_space(2.0);
@@ -1047,8 +1037,7 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                 });
 
                 ui.add_space(theme.space_xs);
-                ui.horizontal(|ui| {
-                    ui.add_space((STRIP_W - 50.0).max(0.0) / 2.0);
+                ui.vertical_centered(|ui| {
                     ui.label(
                         RichText::new(format!("{:+.1} dB", 20.0 * app.mixer.master_gain.max(1e-3).log10()))
                             .monospace()
@@ -1073,6 +1062,21 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                     },
                 );
 
+                ui.add_space(4.0);
+
+                // Master Output Selector Dropdown above transport button
+                ui.horizontal(|ui| {
+                    let avail_w = ui.available_width();
+                    let selected_output = app.mixer.master_output_source;
+                    egui::ComboBox::from_id_source("master_output_src")
+                        .selected_text(RichText::new(selected_output.name()).size(9.0).strong().color(theme.text_primary))
+                        .width(avail_w)
+                        .show_ui(ui, |ui| {
+                            for out in MasterOutput::all() {
+                                ui.selectable_value(&mut app.mixer.master_output_source, *out, out.name());
+                            }
+                        });
+                });
                 ui.add_space(4.0);
 
                 // Global Play/Stop Transport Toggle
