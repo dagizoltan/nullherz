@@ -730,484 +730,305 @@ pub fn render_detached_interactive_surface(
 /// Render the Visual Mixer View page
 pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
     const VIZ_STRIP_W: f32 = 140.0;
-    const VIZ_FADER_H: f32 = 120.0;
-
-    ui.horizontal(|ui| {
-        ui.heading(egui::RichText::new("VISUAL MIXER & TARGET SCREENS").strong().color(app.theme.text_primary));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button(format!("{} + Add Visual Channel", egui_phosphor::regular::PLUS)).clicked() {
-                let count = app.viz.channels.len() + 1;
-                app.viz.channels.push(state::VisualChannel::new(
-                    &format!("VIZ {}", count),
-                    state::VisualGenerator::RadialMandala,
-                    vec![state::VisualInputSource::MasterMix],
-                ));
-            }
-            ui.add_space(8.0);
-            if ui.button(format!("{} + Add Target Screen", egui_phosphor::regular::DESKTOP_TOWER)).clicked() {
-                let count = app.viz.target_screens.len() + 1;
-                app.viz.target_screens.push(state::VisualTargetScreen::new(
-                    &format!("screen_{}", count),
-                    &format!("Target Display Screen {}", count),
-                    state::CompositingLayoutMode::LayeredComposite,
-                ));
-            }
-        });
-    });
-    ui.separator();
-    ui.add_space(app.theme.space_xs);
-
-    ui.label(
-        egui::RichText::new("Visual Mixer matching system channel strip architecture. Route song stems into visual channels, layer/blend multi-channel visuals into Target Display Screens, and detach target compositing windows.")
-            .size(app.theme.type_caption)
-            .color(app.theme.text_secondary),
-    );
-    ui.add_space(app.theme.space_sm);
+    const VIZ_FADER_H: f32 = 150.0;
+    const VIZ_PREVIEW_H: f32 = 225.0;
 
     let theme = app.theme.clone();
 
-    // --- TARGET SCREENS MANAGEMENT & COMPOSITE PREVIEW MONITOR ---
-    egui::Frame::none()
-        .fill(theme.bg_surface)
-        .rounding(egui::Rounding::same(theme.radius_md))
-        .inner_margin(egui::Margin::same(theme.space_md))
-        .stroke(egui::Stroke::new(1.0, theme.border))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("TARGET SCREENS & COMPOSITOR").size(theme.type_body).strong().color(theme.accent));
-                ui.add_space(12.0);
+    ui.heading(egui::RichText::new("Visual Mixer & Target Screens").size(theme.type_heading));
 
-                let num_screens = app.viz.target_screens.len();
-                if app.viz.active_target_screen_idx >= num_screens {
-                    app.viz.active_target_screen_idx = num_screens.saturating_sub(1);
-                }
+    ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+        ui.add_space(theme.space_md);
 
-                // Screen Selector Tabs
-                for s_idx in 0..num_screens {
-                    let is_sel = app.viz.active_target_screen_idx == s_idx;
-                    let screen = &app.viz.target_screens[s_idx];
-                    if ui.selectable_label(is_sel, egui::RichText::new(&screen.name).strong()).clicked() {
-                        app.viz.active_target_screen_idx = s_idx;
-                    }
-                }
-            });
+        // Visual Channel Strips inside horizontal ScrollArea (matching System Mixer)
+        ui.horizontal_top(|ui| {
+            egui::ScrollArea::horizontal()
+                .id_source("visual_mixer_scroll")
+                .show(ui, |ui| {
+                    ui.horizontal_top(|ui| {
+                        let num_channels = app.viz.channels.len();
+                        let mut channel_to_remove = None;
 
-            ui.add_space(4.0);
+                        for c_idx in 0..num_channels {
+                            let channel = &mut app.viz.channels[c_idx];
+                            let is_selected = app.viz.selected_channel_idx == c_idx;
+                            let channel_color = theme.deck_colors[c_idx % 4];
 
-            if app.viz.active_target_screen_idx < app.viz.target_screens.len() {
-                let mut screen_to_remove = None;
-                let active_idx = app.viz.active_target_screen_idx;
-                let active_id = app.viz.target_screens[active_idx].id.clone();
+                            egui::Frame::none()
+                                .fill(theme.bg_surface)
+                                .rounding(egui::Rounding::same(theme.radius_md))
+                                .inner_margin(egui::Margin::same(theme.space_md))
+                                .stroke(egui::Stroke::new(1.0, if is_selected { theme.accent } else { theme.border }))
+                                .show(ui, |ui| {
+                                    ui.set_width(VIZ_STRIP_W);
+                                    ui.vertical(|ui| {
+                                        // Header
+                                        ui.horizontal(|ui| {
+                                            ui.add_space((VIZ_STRIP_W - 50.0).max(0.0) / 2.0);
+                                            if ui.button(egui::RichText::new(&channel.name).strong().size(theme.type_body).color(channel_color)).clicked() {
+                                                app.viz.selected_channel_idx = c_idx;
+                                            }
+                                            if num_channels > 1 {
+                                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                    if ui.button(egui_phosphor::regular::X).on_hover_text("Remove Strip").clicked() {
+                                                        channel_to_remove = Some(c_idx);
+                                                    }
+                                                });
+                                            }
+                                        });
+                                        ui.add_space(theme.space_xs);
 
-                ui.horizontal(|ui| {
-                    ui.label("Name:");
-                    ui.add_sized([160.0, 20.0], egui::TextEdit::singleline(&mut app.viz.target_screens[active_idx].name));
+                                        // Generator Dropdown Selector
+                                        ui.horizontal(|ui| {
+                                            let avail_w = ui.available_width();
+                                            egui::ComboBox::from_id_source(format!("gen_combo_{}", c_idx))
+                                                .selected_text(egui::RichText::new(channel.generator.name()).size(8.5).strong().color(theme.text_primary))
+                                                .width(avail_w)
+                                                .show_ui(ui, |ui| {
+                                                    for generator_item in state::VisualGenerator::all() {
+                                                        ui.selectable_value(&mut channel.generator, generator_item.clone(), generator_item.name());
+                                                    }
+                                                });
+                                        });
+                                        ui.add_space(2.0);
 
-                    ui.add_space(12.0);
-                    ui.label("Compositing Layout:");
-                    egui::ComboBox::from_id_source(format!("screen_layout_combo_{}", active_id))
-                        .selected_text(app.viz.target_screens[active_idx].layout_mode.name())
-                        .show_ui(ui, |ui| {
-                            for mode_item in state::CompositingLayoutMode::all() {
-                                ui.selectable_value(&mut app.viz.target_screens[active_idx].layout_mode, *mode_item, mode_item.name());
-                            }
-                        });
+                                        // Visual Preview Canvas Frame
+                                        let (rect, _resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), VIZ_PREVIEW_H), egui::Sense::click());
+                                        ui.painter().rect_filled(rect, theme.radius_sm, theme.bg_inset);
+                                        ui.painter().rect_stroke(rect, theme.radius_sm, egui::Stroke::new(1.0, theme.border_stroke.color));
 
-                    ui.add_space(12.0);
-                    ui.label("Network Output:");
-                    egui::ComboBox::from_id_source(format!("screen_net_protocol_combo_{}", active_id))
-                        .selected_text(app.viz.target_screens[active_idx].network_protocol.name())
-                        .show_ui(ui, |ui| {
-                            for proto_item in state::NetworkStreamProtocol::all() {
-                                ui.selectable_value(&mut app.viz.target_screens[active_idx].network_protocol, *proto_item, proto_item.name());
-                            }
-                        });
+                                        // --- VISUAL INSERTS RACK ---
+                                        ui.group(|ui| {
+                                            ui.set_width(VIZ_STRIP_W - 12.0);
+                                            ui.vertical_centered(|ui| {
+                                                ui.label(egui::RichText::new("CHANNEL STRIP").size(theme.type_caption).strong().color(theme.text_secondary));
+                                                ui.add_space(2.0);
 
-                    if app.viz.target_screens[active_idx].network_protocol != state::NetworkStreamProtocol::LocalViewport {
-                        ui.add_space(8.0);
-                        ui.label("Endpoint:");
-                        ui.add_sized([180.0, 20.0], egui::TextEdit::singleline(&mut app.viz.target_screens[active_idx].stream_endpoint));
-                        ui.label(
-                            egui::RichText::new("[● LIVE STREAM BUS]")
-                                .size(9.0)
-                                .strong()
-                                .color(theme.success),
-                        );
-                    }
+                                                // Parameter Knobs Card
+                                                egui::Frame::none()
+                                                    .fill(theme.bg_inset)
+                                                    .rounding(egui::Rounding::same(theme.radius_sm))
+                                                    .inner_margin(egui::Margin::same(4.0))
+                                                    .stroke(egui::Stroke::new(1.0, theme.border_stroke.color))
+                                                    .show(ui, |ui| {
+                                                        ui.set_width(VIZ_STRIP_W - 20.0);
+                                                        ui.vertical_centered(|ui| {
+                                                            ui.label(egui::RichText::new("PARAMS").size(9.0).strong().color(theme.accent));
+                                                            ui.horizontal(|ui| {
+                                                                ui.spacing_mut().item_spacing.x = 2.0;
+                                                                nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_speed, 0.1..=4.0, "SPD", channel_color, 24.0);
+                                                                nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_neural_temp, 0.0..=2.0, "TMP", channel_color, 24.0);
+                                                                nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_feedback, 0.0..=1.0, "FB", channel_color, 24.0);
+                                                            });
+                                                        });
+                                                    });
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let is_detached = app.viz.detached_target_screens.contains(&active_id);
-                        let detach_label = if is_detached {
-                            format!("{} Screen Detached", egui_phosphor::regular::ARROWS_IN_SIMPLE)
-                        } else {
-                            format!("{} Detach Screen Window", egui_phosphor::regular::ARROWS_OUT_SIMPLE)
-                        };
+                                                ui.add_space(4.0);
 
-                        if ui.button(detach_label).on_hover_text("Open Target Screen as Independent OS Window").clicked() {
-                            if is_detached {
-                                app.viz.detached_target_screens.remove(&active_id);
-                            } else {
-                                app.viz.detached_target_screens.insert(active_id.clone());
+                                                // Display list of chained visual insert sidecar slots with top-right '×' and up/down buttons
+                                                let mut insert_to_remove = None;
+                                                let mut insert_to_move_up = None;
+                                                let mut insert_to_move_down = None;
+                                                let total_visual_inserts = channel.visual_inserts.len();
+
+                                                for (ins_idx, ins_id) in channel.visual_inserts.iter().enumerate() {
+                                                    let ins_name = ins_id.clone();
+                                                    egui::Frame::none()
+                                                        .fill(theme.accent.linear_multiply(0.15))
+                                                        .rounding(egui::Rounding::same(theme.radius_sm))
+                                                        .inner_margin(egui::Margin::same(4.0))
+                                                        .stroke(egui::Stroke::new(1.0, theme.accent))
+                                                        .show(ui, |ui| {
+                                                            ui.set_width(VIZ_STRIP_W - 20.0);
+                                                            ui.vertical(|ui| {
+                                                                ui.horizontal(|ui| {
+                                                                    ui.set_width(ui.available_width());
+                                                                    ui.label(egui::RichText::new(format!("FX: {}", ins_name)).size(9.0).strong().color(theme.text_primary));
+                                                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                                        let close_btn = egui::Button::new(egui::RichText::new("×").size(11.0).strong().color(theme.danger))
+                                                                            .fill(theme.bg_inset)
+                                                                            .min_size(egui::vec2(16.0, 16.0));
+                                                                        if ui.add(close_btn).on_hover_text("Remove Visual FX").clicked() {
+                                                                            insert_to_remove = Some(ins_idx);
+                                                                        }
+                                                                        if ins_idx < total_visual_inserts - 1 {
+                                                                            let dn_btn = egui::Button::new(egui::RichText::new("▼").size(9.0).strong().color(theme.text_secondary))
+                                                                                .fill(theme.bg_inset)
+                                                                                .min_size(egui::vec2(14.0, 14.0));
+                                                                            if ui.add(dn_btn).on_hover_text("Move Down").clicked() {
+                                                                                insert_to_move_down = Some(ins_idx);
+                                                                            }
+                                                                        }
+                                                                        if ins_idx > 0 {
+                                                                            let up_btn = egui::Button::new(egui::RichText::new("▲").size(9.0).strong().color(theme.text_secondary))
+                                                                                .fill(theme.bg_inset)
+                                                                                .min_size(egui::vec2(14.0, 14.0));
+                                                                            if ui.add(up_btn).on_hover_text("Move Up").clicked() {
+                                                                                insert_to_move_up = Some(ins_idx);
+                                                                            }
+                                                                        }
+                                                                    });
+                                                                });
+                                                            });
+                                                        });
+                                                    ui.add_space(4.0);
+                                                }
+
+                                                if let Some(idx) = insert_to_move_up {
+                                                    if idx > 0 && idx < channel.visual_inserts.len() {
+                                                        channel.visual_inserts.swap(idx, idx - 1);
+                                                    }
+                                                }
+                                                if let Some(idx) = insert_to_move_down {
+                                                    if idx + 1 < channel.visual_inserts.len() {
+                                                        channel.visual_inserts.swap(idx, idx + 1);
+                                                    }
+                                                }
+                                                if let Some(rem_idx) = insert_to_remove {
+                                                    if rem_idx < channel.visual_inserts.len() {
+                                                        channel.visual_inserts.remove(rem_idx);
+                                                    }
+                                                }
+
+                                                if ui.add_sized([VIZ_STRIP_W - 20.0, 18.0], egui::Button::new(egui::RichText::new("+ VISUAL FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
+                                                    app.active_right_tab = Some(crate::RightTab::Store);
+                                                    app.store.active_tag_filter = Some("visual".to_string());
+                                                }
+                                            });
+                                        });
+
+                                        ui.add_space(theme.space_md);
+
+                                        // --- SENSITIVITY FADER & STEREO REACTIVITY VU METERS ---
+                                        ui.horizontal(|ui| {
+                                            let fader_w = 24.0;
+                                            let pad = (ui.available_width() - fader_w).max(0.0) / 2.0;
+                                            ui.add_space(pad);
+
+                                            nullherz_ui_hal::widgets::render_fader(ui, &mut channel.gain_sensitivity, 0.0..=2.0, channel_color, VIZ_FADER_H, 30.0);
+                                            ui.add_space(4.0);
+
+                                            let mut lvl_l = 0.0f32;
+                                            let mut lvl_r = 0.0f32;
+                                            if let Some(t) = telemetry {
+                                                lvl_l = t.peak_levels.first().copied().unwrap_or(0.0) * channel.gain_sensitivity;
+                                                lvl_r = t.peak_levels.get(1).copied().unwrap_or(lvl_l) * channel.gain_sensitivity;
+                                            }
+
+                                            nullherz_ui_hal::widgets::render_vu_meter(ui, lvl_l, lvl_r, channel_color, VIZ_FADER_H);
+                                        });
+
+                                        ui.add_space(theme.space_xs);
+
+                                        // Transport Row: Mute / Solo / Detached Window buttons
+                                        ui.horizontal(|ui| {
+                                            ui.add_space((VIZ_STRIP_W - 2.0 * theme.space_md - 96.0).max(0.0) / 2.0);
+
+                                            if ui.add_sized([30.0, 22.0], egui::SelectableLabel::new(channel.is_muted, "M")).clicked() {
+                                                channel.is_muted = !channel.is_muted;
+                                            }
+                                            if ui.add_sized([30.0, 22.0], egui::SelectableLabel::new(channel.is_solo, "S")).clicked() {
+                                                channel.is_solo = !channel.is_solo;
+                                            }
+
+                                            let is_detached = app.viz.detached_channel == Some(c_idx);
+                                            let detach_icon = if is_detached {
+                                                egui_phosphor::regular::ARROWS_IN_SIMPLE
+                                            } else {
+                                                egui_phosphor::regular::ARROWS_OUT_SIMPLE
+                                            };
+
+                                            if ui.add_sized([30.0, 22.0], egui::Button::new(egui::RichText::new(detach_icon).size(12.0).strong()).fill(theme.bg_inset)).clicked() {
+                                                if is_detached {
+                                                    app.viz.detached_channel = None;
+                                                } else {
+                                                    app.viz.detached_channel = Some(c_idx);
+                                                }
+                                            }
+                                        });
+                                    });
+                                });
+
+                            ui.add_space(theme.space_sm);
+                        }
+
+                        if let Some(idx_to_remove) = channel_to_remove {
+                            if idx_to_remove < app.viz.channels.len() {
+                                app.viz.channels.remove(idx_to_remove);
+                                if app.viz.selected_channel_idx >= app.viz.channels.len() {
+                                    app.viz.selected_channel_idx = app.viz.channels.len().saturating_sub(1);
+                                }
                             }
                         }
 
-                        if app.viz.target_screens.len() > 1 {
-                            if ui.button(egui_phosphor::regular::TRASH).on_hover_text("Delete Target Screen").clicked() {
-                                screen_to_remove = Some(active_idx);
-                            }
-                        }
+                        // Add "+" channel button
+                        egui::Frame::none()
+                            .fill(theme.bg_surface)
+                            .rounding(egui::Rounding::same(theme.radius_md))
+                            .inner_margin(egui::Margin::same(theme.space_md))
+                            .stroke(egui::Stroke::new(1.0, theme.border))
+                            .show(ui, |ui| {
+                                ui.set_width(VIZ_STRIP_W);
+                                ui.vertical_centered(|ui| {
+                                    ui.add_space(180.0);
+                                    let btn = egui::Button::new(egui::RichText::new("+").size(24.0).strong().color(theme.accent))
+                                        .fill(theme.bg_inset)
+                                        .min_size(egui::vec2(50.0, 50.0));
+                                    if ui.add(btn).on_hover_text("Add Visual Strip").clicked() {
+                                        let count = app.viz.channels.len() + 1;
+                                        app.viz.channels.push(state::VisualChannel::new(
+                                            &format!("VIZ {}", count),
+                                            state::VisualGenerator::RadialMandala,
+                                            vec![state::VisualInputSource::MasterMix],
+                                        ));
+                                    }
+                                    ui.add_space(4.0);
+                                    ui.label(egui::RichText::new("ADD VISUAL STRIP").size(9.0).strong().color(theme.text_secondary));
+                                });
+                            });
                     });
                 });
+        });
 
-                if let Some(rem_idx) = screen_to_remove {
-                    app.viz.target_screens.remove(rem_idx);
-                    app.viz.active_target_screen_idx = app.viz.active_target_screen_idx.saturating_sub(1);
-                } else {
-                    ui.add_space(6.0);
+        ui.add_space(theme.space_md);
 
-                    // SCREEN TRANSITIONS & SCENE CROSSFADER PANEL
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("SCENE CROSSFADER:").size(9.0).strong().color(theme.accent));
+        // Target Screens / Compositor Top Section
+        egui::Frame::none()
+            .fill(theme.bg_surface)
+            .rounding(egui::Rounding::same(theme.radius_md))
+            .inner_margin(egui::Margin::same(theme.space_md))
+            .stroke(egui::Stroke::new(1.0, theme.border))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("TARGET SCREENS & COMPOSITOR").size(theme.type_body).strong().color(theme.accent));
+                    ui.add_space(12.0);
 
-                        ui.label("From:");
-                        let from_name = app.viz.target_screens.iter()
-                            .find(|s| s.id == app.viz.screen_transition.from_screen_id)
-                            .map(|s| s.name.as_str())
-                            .unwrap_or("Screen A");
-                        egui::ComboBox::from_id_source("trans_from_screen")
-                            .selected_text(from_name)
-                            .show_ui(ui, |ui| {
-                                for target_screen in &app.viz.target_screens {
-                                    ui.selectable_value(&mut app.viz.screen_transition.from_screen_id, target_screen.id.clone(), &target_screen.name);
-                                }
-                            });
-
-                        ui.label("To:");
-                        let to_name = app.viz.target_screens.iter()
-                            .find(|s| s.id == app.viz.screen_transition.to_screen_id)
-                            .map(|s| s.name.as_str())
-                            .unwrap_or("Screen B");
-                        egui::ComboBox::from_id_source("trans_to_screen")
-                            .selected_text(to_name)
-                            .show_ui(ui, |ui| {
-                                for target_screen in &app.viz.target_screens {
-                                    ui.selectable_value(&mut app.viz.screen_transition.to_screen_id, target_screen.id.clone(), &target_screen.name);
-                                }
-                            });
-
-                        ui.label("Style:");
-                        egui::ComboBox::from_id_source("trans_style_combo")
-                            .selected_text(app.viz.screen_transition.transition_type.name())
-                            .show_ui(ui, |ui| {
-                                for style in state::ScreenTransitionType::all() {
-                                    ui.selectable_value(&mut app.viz.screen_transition.transition_type, *style, style.name());
-                                }
-                            });
-
-                        ui.label("Duration:");
-                        ui.add(egui::Slider::new(&mut app.viz.screen_transition.duration_secs, 0.2..=10.0).suffix("s"));
-
-                        let cur_time = ui.input(|i| i.time);
-                        if ui.button(egui::RichText::new("TAKE").strong().color(theme.accent)).on_hover_text("Trigger Auto Transition").clicked() {
-                            app.viz.screen_transition.start_time = cur_time;
-                            app.viz.screen_transition.progress = 0.0;
-                            app.viz.screen_transition.is_active = true;
-                        }
-
-                        if ui.button(egui::RichText::new("CUT").strong()).on_hover_text("Instant Cut Swap").clicked() {
-                            app.viz.screen_transition.progress = 1.0;
-                            app.viz.screen_transition.is_active = false;
-                        }
-                    });
-
-                    // Update Transition Progress
-                    if app.viz.screen_transition.is_active {
-                        let cur_time = ui.input(|i| i.time);
-                        let elapsed = (cur_time - app.viz.screen_transition.start_time) as f32;
-                        let duration = app.viz.screen_transition.duration_secs.max(0.1);
-                        let prog = (elapsed / duration).clamp(0.0, 1.0);
-                        app.viz.screen_transition.progress = prog;
-
-                        ui.add(egui::ProgressBar::new(prog).text(format!("Transitioning... {:.0}%", prog * 100.0)));
-
-                        if prog >= 1.0 {
-                            app.viz.screen_transition.is_active = false;
-                        }
+                    let num_screens = app.viz.target_screens.len();
+                    if app.viz.active_target_screen_idx >= num_screens {
+                        app.viz.active_target_screen_idx = num_screens.saturating_sub(1);
                     }
 
-                    ui.add_space(6.0);
+                    for s_idx in 0..num_screens {
+                        let is_sel = app.viz.active_target_screen_idx == s_idx;
+                        let screen = &app.viz.target_screens[s_idx];
+                        if ui.selectable_label(is_sel, egui::RichText::new(&screen.name).strong()).clicked() {
+                            app.viz.active_target_screen_idx = s_idx;
+                        }
+                    }
+                });
 
-                    // Target Screen Live Composite Preview Canvas
+                ui.add_space(4.0);
+
+                if app.viz.active_target_screen_idx < app.viz.target_screens.len() {
+                    let active_idx = app.viz.active_target_screen_idx;
+                    let active_id = app.viz.target_screens[active_idx].id.clone();
+
                     ui.group(|ui| {
                         ui.set_height(140.0);
                         render_composite_target_screen(app, &active_id, ui, telemetry);
                     });
                 }
-            }
-        });
-
-    ui.add_space(theme.space_md);
-
-    egui::ScrollArea::horizontal().id_source("visual_mixer_scroll").show(ui, |ui| {
-        ui.horizontal_top(|ui| {
-            let num_channels = app.viz.channels.len();
-            let mut channel_to_remove = None;
-
-            for c_idx in 0..num_channels {
-                let channel = &mut app.viz.channels[c_idx];
-                let is_selected = app.viz.selected_channel_idx == c_idx;
-                let channel_color = theme.deck_colors[c_idx % 4];
-
-                egui::Frame::none()
-                    .fill(theme.bg_surface)
-                    .rounding(egui::Rounding::same(theme.radius_md))
-                    .inner_margin(egui::Margin::same(theme.space_md))
-                    .stroke(egui::Stroke::new(1.0, if is_selected { theme.accent } else { theme.border }))
-                    .show(ui, |ui| {
-                        ui.set_width(VIZ_STRIP_W);
-                        ui.vertical(|ui| {
-                            // Strip Header
-                            ui.horizontal(|ui| {
-                                ui.add_space((VIZ_STRIP_W - 50.0).max(0.0) / 2.0);
-                                if ui.button(egui::RichText::new(&channel.name).strong().size(theme.type_body).color(channel_color)).clicked() {
-                                    app.viz.selected_channel_idx = c_idx;
-                                }
-                                if num_channels > 1 {
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if ui.button(egui_phosphor::regular::X).on_hover_text("Remove Strip").clicked() {
-                                            channel_to_remove = Some(c_idx);
-                                        }
-                                    });
-                                }
-                            });
-                            ui.add_space(theme.space_xs);
-
-                            // Generator Selector
-                            egui::ComboBox::from_id_source(format!("gen_combo_{}", c_idx))
-                                .selected_text(channel.generator.name())
-                                .show_ui(ui, |ui| {
-                                    for generator_item in state::VisualGenerator::all() {
-                                        ui.selectable_value(&mut channel.generator, generator_item.clone(), generator_item.name());
-                                    }
-                                });
-
-                            if channel.generator == state::VisualGenerator::RadialMandala {
-                                ui.add_space(2.0);
-                                egui::ComboBox::from_id_source(format!("mandala_style_combo_{}", c_idx))
-                                    .selected_text(channel.engine_radial_mandala.style.name())
-                                    .show_ui(ui, |ui| {
-                                        for style_item in crate::views::visual_engines::radial_mandala::MandalaStyle::all() {
-                                            ui.selectable_value(&mut channel.engine_radial_mandala.style, *style_item, style_item.name());
-                                        }
-                                    });
-                            } else if channel.generator == state::VisualGenerator::NeuralNcaMesh {
-                                ui.add_space(2.0);
-                                egui::ComboBox::from_id_source(format!("nca_topology_combo_{}", c_idx))
-                                    .selected_text(channel.engine_neural_nca_mesh.topology.name())
-                                    .show_ui(ui, |ui| {
-                                        for topo_item in crate::views::visual_engines::neural_nca_mesh::NcaMeshTopology::all() {
-                                            if ui.selectable_value(&mut channel.engine_neural_nca_mesh.topology, *topo_item, topo_item.name()).clicked() {
-                                                channel.engine_neural_nca_mesh.rebuild_mesh();
-                                            }
-                                        }
-                                    });
-                            }
-
-                            ui.add_space(2.0);
-                            egui::ComboBox::from_id_source(format!("organism_profile_combo_{}", c_idx))
-                                .selected_text(&channel.organism_profile.name)
-                                .show_ui(ui, |ui| {
-                                    for default_prof in crate::views::organism_profile::OrganismProfile::all_defaults() {
-                                        if ui.selectable_label(channel.organism_profile.id == default_prof.id, &default_prof.name).clicked() {
-                                            channel.organism_profile = default_prof;
-                                        }
-                                    }
-                                });
-
-                            ui.add_space(4.0);
-
-                            // TARGET SCREEN ROUTING & COMPOSITING CONTROLS
-                            ui.group(|ui| {
-                                ui.set_width(VIZ_STRIP_W - 12.0);
-                                ui.vertical_centered(|ui| {
-                                    ui.label(egui::RichText::new("TARGET DISPLAY").size(9.0).strong().color(theme.accent));
-
-                                    // Target Screen Selector
-                                    let current_target_name = app.viz.target_screens.iter()
-                                        .find(|s| s.id == channel.target_screen_id)
-                                        .map(|s| s.name.as_str())
-                                        .unwrap_or("Main Composite");
-
-                                    egui::ComboBox::from_id_source(format!("target_screen_combo_{}", c_idx))
-                                        .selected_text(current_target_name)
-                                        .show_ui(ui, |ui| {
-                                            for target_screen in &app.viz.target_screens {
-                                                ui.selectable_value(&mut channel.target_screen_id, target_screen.id.clone(), &target_screen.name);
-                                            }
-                                        });
-
-                                    ui.add_space(2.0);
-
-                                    // Blend Mode Dropdown
-                                    ui.label(egui::RichText::new("BLEND MODE").size(8.5).strong().color(theme.text_secondary));
-                                    egui::ComboBox::from_id_source(format!("blend_mode_combo_{}", c_idx))
-                                        .selected_text(channel.blend_mode.name())
-                                        .show_ui(ui, |ui| {
-                                            for mode_item in state::VisualBlendMode::all() {
-                                                ui.selectable_value(&mut channel.blend_mode, *mode_item, mode_item.name());
-                                            }
-                                        });
-
-                                    ui.add_space(2.0);
-
-                                    // Opacity & Layer Z-Index
-                                    ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 2.0;
-                                        ui.label(egui::RichText::new("OP").size(8.5).strong());
-                                        ui.add(egui::Slider::new(&mut channel.opacity, 0.0..=1.0).show_value(false));
-                                        ui.label(egui::RichText::new("Z:").size(8.5).strong());
-                                        ui.add(egui::DragValue::new(&mut channel.layer_z_index).clamp_range(-10..=10));
-                                    });
-                                });
-                            });
-
-                            ui.add_space(4.0);
-
-                            // Attached Input Badges / Multi-selection
-                            ui.group(|ui| {
-                                ui.set_width(VIZ_STRIP_W - 12.0);
-                                ui.vertical_centered(|ui| {
-                                    ui.label(egui::RichText::new("INPUT SOURCES").size(9.0).strong().color(theme.accent));
-                                    for src in state::VisualInputSource::all() {
-                                        let is_attached = channel.attached_inputs.contains(src);
-                                        let mut check_state = is_attached;
-                                        if ui.checkbox(&mut check_state, egui::RichText::new(src.name()).size(9.0)).changed() {
-                                            if check_state && !is_attached {
-                                                channel.attached_inputs.push(src.clone());
-                                            } else if !check_state {
-                                                channel.attached_inputs.retain(|s| s != src);
-                                            }
-                                        }
-                                    }
-                                });
-                            });
-
-                            ui.add_space(4.0);
-
-                            // VISUAL INSERTS RACK (Dynamic Visual Insert Sidecars Chaining)
-                            ui.group(|ui| {
-                                ui.set_width(VIZ_STRIP_W - 12.0);
-                                ui.vertical_centered(|ui| {
-                                    ui.label(egui::RichText::new("VISUAL INSERTS RACK").size(theme.type_caption).strong().color(theme.text_secondary));
-                                    ui.add_space(2.0);
-
-                                    egui::Frame::none()
-                                        .fill(theme.bg_inset)
-                                        .rounding(egui::Rounding::same(theme.radius_sm))
-                                        .inner_margin(egui::Margin::same(4.0))
-                                        .stroke(egui::Stroke::new(1.0, theme.border_stroke.color))
-                                        .show(ui, |ui| {
-                                            ui.set_width(VIZ_STRIP_W - 20.0);
-                                            ui.vertical_centered(|ui| {
-                                                ui.label(egui::RichText::new("PARAM CONTROLS").size(9.0).strong().color(theme.accent));
-                                                ui.horizontal(|ui| {
-                                                    ui.spacing_mut().item_spacing.x = 2.0;
-                                                    nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_speed, 0.1..=4.0, "SPD", channel_color, 24.0);
-                                                    nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_neural_temp, 0.0..=2.0, "TMP", channel_color, 24.0);
-                                                    nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_feedback, 0.0..=1.0, "FB", channel_color, 24.0);
-                                                });
-                                            });
-                                        });
-
-                                    ui.add_space(4.0);
-
-                                    // Display list of chained visual insert sidecar slots
-                                    let mut insert_to_remove = None;
-                                    for (ins_idx, ins_id) in channel.visual_inserts.iter().enumerate() {
-                                        ui.horizontal(|ui| {
-                                            ui.spacing_mut().item_spacing.x = 2.0;
-                                            ui.label(
-                                                egui::RichText::new(format!("{}: {}", ins_idx + 1, ins_id))
-                                                    .size(8.5)
-                                                    .strong()
-                                                    .color(theme.text_secondary),
-                                            );
-                                            if ui.button(egui_phosphor::regular::X).on_hover_text("Remove Insert").clicked() {
-                                                insert_to_remove = Some(ins_idx);
-                                            }
-                                        });
-                                    }
-
-                                    if let Some(rem_idx) = insert_to_remove {
-                                        channel.visual_inserts.remove(rem_idx);
-                                    }
-
-                                    ui.add_space(2.0);
-
-                                    if ui.add_sized([VIZ_STRIP_W - 20.0, 18.0], egui::Button::new(egui::RichText::new("+ VISUAL FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
-                                        app.active_right_tab = Some(crate::RightTab::Store);
-                                        app.store.active_tag_filter = Some("visual".to_string());
-                                    }
-                                });
-                            });
-
-                            ui.add_space(theme.space_sm);
-
-                            // Sensitivity Fader & Dual Stereo Reactivity VU Meters
-                            ui.horizontal(|ui| {
-                                nullherz_ui_hal::widgets::render_fader(ui, &mut channel.gain_sensitivity, 0.0..=2.0, channel_color, VIZ_FADER_H, 26.0);
-                                ui.add_space(4.0);
-
-                                let mut lvl_l = 0.0f32;
-                                let mut lvl_r = 0.0f32;
-                                if let Some(t) = telemetry {
-                                    lvl_l = t.peak_levels.first().copied().unwrap_or(0.0) * channel.gain_sensitivity;
-                                    lvl_r = t.peak_levels.get(1).copied().unwrap_or(lvl_l) * channel.gain_sensitivity;
-                                }
-
-                                nullherz_ui_hal::widgets::render_vu_meter(ui, lvl_l, lvl_r, channel_color, VIZ_FADER_H);
-                            });
-
-                            ui.add_space(theme.space_sm);
-
-                            // Mute / Solo / Detached Window buttons
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 2.0;
-                                if ui.add_sized([30.0, 20.0], egui::SelectableLabel::new(channel.is_muted, "M")).clicked() {
-                                    channel.is_muted = !channel.is_muted;
-                                }
-                                if ui.add_sized([30.0, 20.0], egui::SelectableLabel::new(channel.is_solo, "S")).clicked() {
-                                    channel.is_solo = !channel.is_solo;
-                                }
-
-                                let is_detached = app.viz.detached_channel == Some(c_idx);
-                                let detach_icon = if is_detached {
-                                    egui_phosphor::regular::ARROWS_IN_SIMPLE
-                                } else {
-                                    egui_phosphor::regular::ARROWS_OUT_SIMPLE
-                                };
-
-                                if ui.button(detach_icon).on_hover_text("Detach into Surface Window").clicked() {
-                                    if is_detached {
-                                        app.viz.detached_channel = None;
-                                    } else {
-                                        app.viz.detached_channel = Some(c_idx);
-                                    }
-                                }
-                            });
-                        });
-                    });
-
-                ui.add_space(theme.space_md);
-            }
-
-            if let Some(idx_to_remove) = channel_to_remove {
-                app.viz.channels.remove(idx_to_remove);
-                if app.viz.selected_channel_idx >= app.viz.channels.len() {
-                    app.viz.selected_channel_idx = app.viz.channels.len().saturating_sub(1);
-                }
-            }
-        });
+            });
     });
 }
 
