@@ -292,7 +292,7 @@ fn track_sort_label(s: nullherz_dna::TrackSort) -> &'static str {
 /// Compact row height: ~27 rows visible in a 700px sidebar.
 const TRACK_ROW_H: f32 = 26.0;
 /// Height of the inline detail panel on an expanded row.
-const TRACK_DETAIL_H: f32 = 232.0;
+const TRACK_DETAIL_H: f32 = 250.0;
 
 fn render_track_list(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
@@ -467,30 +467,22 @@ fn render_track_row(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dna::L
         }
     }
 
-    if is_expanded {
-        render_track_details(app, ui, track);
-    }
-    ui.painter().hline(rect.x_range(), rect.bottom(), Stroke::new(1.0_f32, theme.border));
+    let detail_bottom = if is_expanded {
+        render_track_details(app, ui, track)
+    } else {
+        rect.bottom()
+    };
+    ui.painter().hline(rect.x_range(), detail_bottom, Stroke::new(1.0_f32, theme.border));
 }
 
 /// The track inspector, inline under its own row.
-///
-/// This used to be a fixed card pinned above the list, which meant the details
-/// for a track were nowhere near the track — you selected a row at the bottom
-/// of a long list and read about it at the top, with the list shifting under
-/// you as the card appeared and disappeared. Rendering it in the row's own
-/// expansion keeps the subject and its detail in one place.
-fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dna::LibraryTrack) {
+fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dna::LibraryTrack) -> f32 {
     let theme = app.theme;
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), TRACK_DETAIL_H),
-        egui::Sense::hover(),
-    );
-    ui.painter().rect_filled(rect, theme.radius_sm, theme.bg_inset);
+    let mut save_clicked = false;
+    let mut preview_clicked = false;
+    let mut energy_clicked = false;
+    let mut edited: Option<nullherz_dna::LibraryTrack> = None;
 
-    // Edits bind to the cached copy, which the frame loop keeps in step with
-    // `selected_library_track`. If it is for some other row (or not loaded
-    // yet), show the read-only facts rather than someone else's fields.
     let editable = app
         .library
         .cached_inspected_track
@@ -498,121 +490,117 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
         .map(|t| t.id == track.id)
         .unwrap_or(false);
 
-    let pad = theme.space_sm;
-    let inner = rect.shrink2(egui::vec2(pad * 2.0, pad));
-    let mut save_clicked = false;
-    let mut preview_clicked = false;
-    let mut energy_clicked = false;
-    let mut edited: Option<nullherz_dna::LibraryTrack> = None;
+    let frame_res = Frame::none()
+        .fill(theme.bg_inset)
+        .rounding(Rounding::same(theme.radius_sm))
+        .inner_margin(Margin::same(theme.space_sm))
+        .stroke(Stroke::new(1.0, theme.border))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
 
-    ui.child_ui(inner, Layout::top_down(Align::Min)).vertical(|ui| {
-        ui.set_width(inner.width());
+            if editable {
+                let mut t = app.library.cached_inspected_track.take().expect("checked above");
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("TITLE").size(theme.type_caption).color(theme.text_disabled));
+                    ui.add_sized([ui.available_width() - 50.0, 18.0], egui::TextEdit::singleline(&mut t.title));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("ARTIST").size(theme.type_caption).color(theme.text_disabled));
+                    ui.add_sized([ui.available_width() - 50.0, 18.0], egui::TextEdit::singleline(&mut t.artist));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("GENRE").size(theme.type_caption).color(theme.text_disabled));
+                    ui.add_sized([ui.available_width() - 100.0, 18.0], egui::TextEdit::singleline(&mut t.genre));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button(RichText::new("SAVE").size(theme.type_caption)).clicked() {
+                            save_clicked = true;
+                        }
+                    });
+                });
+                edited = Some(t);
+            } else {
+                ui.label(RichText::new(&track.title).strong().size(theme.type_caption));
+                ui.label(RichText::new(&track.artist).size(theme.type_caption).color(theme.text_secondary));
+            }
 
-        if editable {
-            let mut t = app.library.cached_inspected_track.take().expect("checked above");
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("TITLE").size(theme.type_caption).color(theme.text_disabled));
-                ui.text_edit_singleline(&mut t.title);
+            ui.add_space(2.0);
+
+            let m = &track.metadata;
+            let sr = m.sample_rate.max(1);
+            let secs = m.total_samples as f32 / sr as f32;
+            ui.horizontal_wrapped(|ui| {
+                let mut kv = |k: &str, v: String| {
+                    ui.label(RichText::new(k).size(theme.type_caption).color(theme.text_disabled));
+                    ui.label(RichText::new(v).size(theme.type_caption).monospace().color(theme.text_secondary));
+                    ui.add_space(theme.space_xs);
+                };
+                kv("LEN", format!("{}:{:02}", (secs as u32) / 60, (secs as u32) % 60));
+                kv("RATE", format!("{sr} Hz"));
+                kv("CH", format!("{}", m.channels));
+                if m.bpm >= 20.0 { kv("BPM", format!("{:.1}", m.bpm)); }
+                if let Some(key) = m.root_key { kv("KEY", format!("{key:.0}")); }
+                if !track.album.is_empty() { kv("ALBUM", track.album.clone()); }
             });
+            ui.add(egui::Label::new(RichText::new(&track.path).size(9.0).color(theme.text_disabled)).truncate(true));
+
+            ui.add_space(2.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("ARTIST").size(theme.type_caption).color(theme.text_disabled));
-                ui.text_edit_singleline(&mut t.artist);
-            });
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("GENRE").size(theme.type_caption).color(theme.text_disabled));
-                ui.text_edit_singleline(&mut t.genre);
+                ui.label(RichText::new("GENETIC PROFILE").size(theme.type_caption).strong().color(theme.accent));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button(RichText::new("SAVE").size(theme.type_caption)).clicked() {
-                        save_clicked = true;
-                    }
+                    if ui.button(RichText::new("⚡ ENERGY MATCH").size(theme.type_caption))
+                        .on_hover_text("Generate a smart crate with similar energy").clicked() { energy_clicked = true; }
+                    if ui.button(RichText::new("▶ PREVIEW").size(theme.type_caption)).clicked() { preview_clicked = true; }
                 });
             });
-            edited = Some(t);
-        } else {
-            ui.label(RichText::new(&track.title).strong().size(theme.type_caption));
-            ui.label(RichText::new(&track.artist).size(theme.type_caption).color(theme.text_secondary));
-        }
+            egui::Grid::new(format!("dna_grid_{}", track.id))
+                .num_columns(2)
+                .spacing([theme.space_sm, 1.0])
+                .show(ui, |ui| {
+                    let d = &track.metadata.dna;
+                    for (label, val, text, color) in [
+                        ("Loudness", ((d.perception.lufs_integrated + 24.0) / 24.0).clamp(0.0, 1.0), format!("{:.1} LUFS", d.perception.lufs_integrated), theme.accent),
+                        ("Crest Factor", (d.perception.crest_factor_db / 12.0).clamp(0.0, 1.0), format!("{:.1} dB", d.perception.crest_factor_db), theme.warning),
+                        ("Brightness", d.perception.brightness, format!("{:.0}%", d.perception.brightness * 100.0), theme.deck_colors[0]),
+                        ("Energy", d.perception.perceptual_energy, format!("{:.0}%", d.perception.perceptual_energy * 100.0), theme.success),
+                        ("Flatness", d.perception.spectral_flatness, format!("{:.2}", d.perception.spectral_flatness), theme.deck_colors[2]),
+                        ("Syncopation", d.rhythmic.syncopation_index, format!("{:.0}%", d.rhythmic.syncopation_index * 100.0), theme.deck_colors[1]),
+                    ] {
+                        ui.label(RichText::new(label).size(theme.type_caption));
+                        ui.horizontal(|ui| {
+                            ui.add(egui::ProgressBar::new(val.clamp(0.0, 1.0)).desired_height(6.0).fill(color));
+                            ui.label(RichText::new(text).monospace().size(theme.type_caption).color(theme.text_secondary));
+                        });
+                        ui.end_row();
+                    }
+                });
 
-        ui.add_space(theme.space_xs);
-
-        let m = &track.metadata;
-        let sr = m.sample_rate.max(1);
-        let secs = m.total_samples as f32 / sr as f32;
-        ui.horizontal_wrapped(|ui| {
-            let mut kv = |k: &str, v: String| {
-                ui.label(RichText::new(k).size(theme.type_caption).color(theme.text_disabled));
-                ui.label(RichText::new(v).size(theme.type_caption).monospace().color(theme.text_secondary));
-                ui.add_space(theme.space_sm);
-            };
-            kv("LEN", format!("{}:{:02}", (secs as u32) / 60, (secs as u32) % 60));
-            kv("RATE", format!("{sr} Hz"));
-            kv("CH", format!("{}", m.channels));
-            if m.bpm >= 20.0 { kv("BPM", format!("{:.1}", m.bpm)); }
-            if let Some(key) = m.root_key { kv("KEY", format!("{key:.0}")); }
-            if !track.album.is_empty() { kv("ALBUM", track.album.clone()); }
-        });
-        ui.label(RichText::new(&track.path).size(theme.type_caption).color(theme.text_disabled));
-
-        ui.add_space(theme.space_xs);
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("GENETIC PROFILE").size(theme.type_caption).strong().color(theme.accent));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button(RichText::new("⚡ ENERGY MATCH").size(theme.type_caption))
-                    .on_hover_text("Generate a smart crate with similar energy").clicked() { energy_clicked = true; }
-                if ui.button(RichText::new("▶ PREVIEW").size(theme.type_caption)).clicked() { preview_clicked = true; }
-            });
-        });
-        egui::Grid::new(format!("dna_grid_{}", track.id))
-            .num_columns(2)
-            .spacing([theme.space_md, 2.0])
-            .show(ui, |ui| {
-                let d = &track.metadata.dna;
-                for (label, val, text, color) in [
-                    ("Loudness (LUFS)", ((d.perception.lufs_integrated + 24.0) / 24.0).clamp(0.0, 1.0), format!("{:.1} LUFS", d.perception.lufs_integrated), theme.accent),
-                    ("Crest Factor", (d.perception.crest_factor_db / 12.0).clamp(0.0, 1.0), format!("{:.1} dB", d.perception.crest_factor_db), theme.warning),
-                    ("Brightness", d.perception.brightness, format!("{:.0}%", d.perception.brightness * 100.0), theme.deck_colors[0]),
-                    ("Perceptual Energy", d.perception.perceptual_energy, format!("{:.0}%", d.perception.perceptual_energy * 100.0), theme.success),
-                    ("Spectral Flatness", d.perception.spectral_flatness, format!("{:.2}", d.perception.spectral_flatness), theme.deck_colors[2]),
-                    ("Syncopation", d.rhythmic.syncopation_index, format!("{:.0}%", d.rhythmic.syncopation_index * 100.0), theme.deck_colors[1]),
-                ] {
-                    ui.label(RichText::new(label).size(theme.type_caption));
-                    ui.horizontal(|ui| {
-                        ui.add(egui::ProgressBar::new(val.clamp(0.0, 1.0)).desired_height(8.0).fill(color));
-                        ui.label(RichText::new(text).monospace().size(theme.type_caption).color(theme.text_secondary));
-                    });
-                    ui.end_row();
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                if ui.button(RichText::new("→ SAMPLER").size(theme.type_caption)).clicked() {
+                    app.sampler.source_track = Some(track.id);
+                    app.active_view = crate::View::Sampler;
                 }
-            });
-
-        ui.add_space(theme.space_xs);
-        // Send the track to a tool without touching a deck — what makes the
-        // sampler and composer usable standalone.
-        ui.horizontal(|ui| {
-            if ui.button(RichText::new("→ SAMPLER").size(theme.type_caption)).clicked() {
-                app.sampler.source_track = Some(track.id);
-                app.active_view = crate::View::Sampler;
-            }
-            if ui.button(RichText::new("→ EDITOR").size(theme.type_caption)).clicked() {
-                app.library.selected_library_track = Some(track.id);
-                app.active_view = crate::View::Editor;
-            }
-            if ui.button(RichText::new("→ COMPOSER").size(theme.type_caption))
-                .on_hover_text("Load into the selected sequencer track").clicked()
-            {
-                let slot = app.composer.selected_composer_track.unwrap_or(0);
-                if slot < app.composer.track_sources.len() {
-                    app.composer.track_sources[slot] = Some(track.id);
-                    let grid_deck = app.decks.focused_deck.min(3);
-                    if app.composer.sequencer_grid[grid_deck][slot].iter().all(|&v| v == 0.0) {
-                        for b in 0..16 {
-                            app.composer.sequencer_grid[grid_deck][slot][b] = 1.0;
+                if ui.button(RichText::new("→ EDITOR").size(theme.type_caption)).clicked() {
+                    app.library.selected_library_track = Some(track.id);
+                    app.active_view = crate::View::Editor;
+                }
+                if ui.button(RichText::new("→ COMPOSER").size(theme.type_caption))
+                    .on_hover_text("Load into the selected sequencer track").clicked()
+                {
+                    let slot = app.composer.selected_composer_track.unwrap_or(0);
+                    if slot < app.composer.track_sources.len() {
+                        app.composer.track_sources[slot] = Some(track.id);
+                        let grid_deck = app.decks.focused_deck.min(3);
+                        if app.composer.sequencer_grid[grid_deck][slot].iter().all(|&v| v == 0.0) {
+                            for b in 0..16 {
+                                app.composer.sequencer_grid[grid_deck][slot][b] = 1.0;
+                            }
                         }
                     }
+                    app.active_view = crate::View::Composer;
                 }
-                app.active_view = crate::View::Composer;
-            }
+            });
         });
-    });
 
     if let Some(t) = edited {
         if save_clicked {
@@ -631,6 +619,8 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
         let _ = app.library_db.save_smart_crate(&new_crate);
         app.trigger_library_refresh();
     }
+
+    frame_res.response.rect.bottom()
 }
 
 fn render_card_group<F>(ui: &mut Ui, title: &str, theme: &nullherz_ui_hal::Theme, add_contents: F)

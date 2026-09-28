@@ -442,6 +442,31 @@ impl InspectorApp {
                                                     lvl_l = lvl_l.max(self.viz.damped_peaks[3]);
                                                     lvl_r = lvl_r.max(self.viz.damped_peaks[3] * 0.9);
                                                 }
+                                                state::VisualInputSource::StemKick => {
+                                                    let k_lvl = self.viz.damped_spectrum[0..8].iter().sum::<f32>() / 8.0;
+                                                    lvl_l = lvl_l.max(k_lvl * 1.5);
+                                                    lvl_r = lvl_r.max(k_lvl * 1.5);
+                                                }
+                                                state::VisualInputSource::StemSnare => {
+                                                    let s_lvl = self.viz.damped_spectrum[32..64].iter().sum::<f32>() / 32.0;
+                                                    lvl_l = lvl_l.max(s_lvl * 1.4);
+                                                    lvl_r = lvl_r.max(s_lvl * 1.4);
+                                                }
+                                                state::VisualInputSource::StemBass => {
+                                                    let b_lvl = self.viz.damped_spectrum[8..32].iter().sum::<f32>() / 24.0;
+                                                    lvl_l = lvl_l.max(b_lvl * 1.5);
+                                                    lvl_r = lvl_r.max(b_lvl * 1.5);
+                                                }
+                                                state::VisualInputSource::StemVocal => {
+                                                    let v_lvl = self.viz.damped_spectrum[40..80].iter().sum::<f32>() / 40.0;
+                                                    lvl_l = lvl_l.max(v_lvl * 1.3);
+                                                    lvl_r = lvl_r.max(v_lvl * 1.3);
+                                                }
+                                                state::VisualInputSource::StemOther => {
+                                                    let o_lvl = self.viz.damped_spectrum[64..128].iter().sum::<f32>() / 64.0;
+                                                    lvl_l = lvl_l.max(o_lvl * 1.2);
+                                                    lvl_r = lvl_r.max(o_lvl * 1.2);
+                                                }
                                                 state::VisualInputSource::MicInput => {
                                                     lvl_l = lvl_l.max(t.peak_levels.first().copied().unwrap_or(0.0));
                                                     lvl_r = lvl_r.max(t.peak_levels.first().copied().unwrap_or(0.0));

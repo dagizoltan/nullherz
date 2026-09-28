@@ -1504,25 +1504,53 @@ impl VisualTargetScreen {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum VisualInputSource {
+    MasterMix,
     DeckA,
     DeckB,
     DeckC,
     DeckD,
+    StemKick,
+    StemSnare,
+    StemBass,
+    StemVocal,
+    StemOther,
     MicInput,
-    MasterMix,
     MidiTriggerBus,
 }
 
 impl VisualInputSource {
     pub fn name(&self) -> &'static str {
         match self {
+            Self::MasterMix => "Master Mix Output",
             Self::DeckA => "Deck A Channel",
             Self::DeckB => "Deck B Channel",
             Self::DeckC => "Deck C Channel",
             Self::DeckD => "Deck D Channel",
+            Self::StemKick => "Kick Drum Stem",
+            Self::StemSnare => "Snare / Percussion Stem",
+            Self::StemBass => "Bass Line Stem",
+            Self::StemVocal => "Vocal / Lead Stem",
+            Self::StemOther => "Instruments / Synth Stem",
             Self::MicInput => "Mic Input",
-            Self::MasterMix => "Master Mix Output",
             Self::MidiTriggerBus => "MIDI Trigger Bus",
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn short_code(&self) -> &'static str {
+        match self {
+            Self::MasterMix => "MST",
+            Self::DeckA => "DCK A",
+            Self::DeckB => "DCK B",
+            Self::DeckC => "DCK C",
+            Self::DeckD => "DCK D",
+            Self::StemKick => "KICK",
+            Self::StemSnare => "SNR",
+            Self::StemBass => "BASS",
+            Self::StemVocal => "VOC",
+            Self::StemOther => "INST",
+            Self::MicInput => "MIC",
+            Self::MidiTriggerBus => "MIDI",
         }
     }
 
@@ -1533,6 +1561,11 @@ impl VisualInputSource {
             Self::DeckB,
             Self::DeckC,
             Self::DeckD,
+            Self::StemKick,
+            Self::StemSnare,
+            Self::StemBass,
+            Self::StemVocal,
+            Self::StemOther,
             Self::MicInput,
             Self::MidiTriggerBus,
         ]
