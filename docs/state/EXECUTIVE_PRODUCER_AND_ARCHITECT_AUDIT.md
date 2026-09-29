@@ -124,11 +124,12 @@ As producers and performers operating in live stadium, club DJ, and studio produ
 * The execution plane strictly enforces zero allocations in `process()` paths via `nullherz_traits::test_kit::rt_alloc` counting allocator.
 * All audio blocks, measurement blocks, and perception frames use `#[repr(C, align(64))]` 64-byte SIMD alignment matching AVX2/AVX-512 cache lines.
 
-### 5.2 Threading & Memory Hygiene
+### 5.2 Threading, Verification & CI Hygiene
 * **Memory Page Locking**:
   * `mlockall(MCL_CURRENT | MCL_FUTURE)` succeeds on startup, preventing Linux kernel swapping of real-time audio thread pages.
-* **Reachability Gate**:
+* **Reachability Gate & Local Verification**:
   * Every processor registered in `ProcessorRegistry` is validated via `reachability_gate_test.rs` to ensure it is reachable in the graph or explicitly marked experimental, preventing dead code or unrouted DSP nodes.
+  * **GitHub CI Detachment**: Due to billing constraints, cloud-hosted GitHub Actions workflows (`.github/workflows/ci.yml`) have been detached. Mandatory quality control is enforced locally via `scripts/verify.sh` and pre-push hooks (`.githooks/pre-push`), running workspace checks (`-D warnings`), debug & release timing budget suites, and headful audio console smoke tests before any code commit or push.
 
 ---
 
