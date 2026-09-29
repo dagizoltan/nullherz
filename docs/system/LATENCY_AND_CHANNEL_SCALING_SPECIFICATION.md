@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary
 
-This document establishes the plan of record for audio latency calculation, sample format behavior (16-bit, 24-bit integer, and 32-bit float), PipeWire vs. direct baremetal ALSA performance differences, and RAM-driven channel capacity scaling in the Nullherz engine.
+This document establishes the plan of record for audio latency calculation, sample format behavior (16-bit, 24-bit integer, and 32-bit float), PipeWire vs. direct baremetal ALSA performance differences, RAM-driven channel capacity scaling, and pre-configured engine performance profile presets in the Nullherz engine.
 
 ### Key Takeaways
 1. **Physical Latency Invariance**: Physical audio latency depends **strictly on Quantum Frame Size ($N$) and Sample Rate ($f_s$)**:
@@ -18,6 +18,7 @@ This document establishes the plan of record for audio latency calculation, samp
    * At **192 kHz / 32-bit Float (32 frames)**: **0.32 ms ($316\ \mu\text{s}$)** Raw Direct DSP Latency, **0.82 ms ($816\ \mu\text{s}$)** Full Console Master Latency.
    * At **96 kHz / 32-bit Float (32 frames)**: **0.48 ms** Raw Direct DSP Latency, **1.48 ms** Full Console Master Latency.
 3. **RAM-Driven Channel Scaling**: Static zero-allocation execution memory scales linearly with `MAX_CHANNELS`. A standard 16 GB workstation supports **up to 1,024 concurrent active channels** without memory pressure.
+4. **1-Click Engine Profile Presets**: Eliminates multi-parameter configuration hassle by bundling Sample Rate, Quantum Size, Bit Format, ALSA MMAP flags, and RT thread priorities into 4 performance presets.
 
 ---
 
@@ -26,7 +27,7 @@ This document establishes the plan of record for audio latency calculation, samp
 In Nullherz's deterministic zero-allocation real-time execution engine, all audio memory (PDC delay ring buffers, node routing indices, scratch buffers, and IPC shared-memory ring buffers) is pre-allocated on application startup.
 
 ### 2.1 Static Engine Memory Equation Per Channel
-For a engine configuration with $C$ channels (`MAX_CHANNELS`) and $M$ topology nodes (`MAX_NODES = 128`), the static memory required by the audio processing kernel is calculated as:
+For an engine configuration with $C$ channels (`MAX_CHANNELS`) and $M$ topology nodes (`MAX_NODES = 128`), the static memory required by the audio processing kernel is calculated as:
 
 $$\text{Memory}_{\text{Static}}(C) = \underbrace{M \times C \times S_{\text{PDC}} \times 4\text{ B}}_{\text{Plugin Delay Compensation (PDC) Ring}} + \underbrace{M \times C \times 4 \times 4\text{ B}}_{\text{Node Routing Indices}} + \underbrace{C \times N_{\text{Max}} \times 4\text{ B}}_{\text{SIMD Scratch Buffers}} + \underbrace{C \times K_{\text{SHM}}}_{\text{IPC Ring Buffers}}$$
 
@@ -132,6 +133,44 @@ Because physical buffer latency remains constant across channel counts, increasi
 | **Minimum Stable Quantum** | Usually restricted to $\ge 128$ or $256$ frames | **16 to 32 frames** hardware MMAP | Hardware-level minimum buffer sizes |
 | **Desktop Interoperability** | Multi-application sound mixing (Browser, Discord) | Exclusive device lock via `ReserveDevice1` | PipeWire allows multi-app sharing; Direct MMAP prioritizes engine purity |
 
-### Implementation Standard
-* **Desktop / Convenience Mode (PipeWire / Default ALSA)**: For track preparation, editing, or multi-app production (~5–12 ms latency).
-* **1-Click Exclusive Performance Mode (Direct ALSA MMAP)**: For live stadium DJing, scratching, finger-pad triggering, or ultra-low latency performance (**0.32 ms @ 192 kHz / 32-bit**). D-Bus `org.freedesktop.ReserveDevice1` pauses PipeWire's device grab and claims direct hardware MMAP access.
+---
+
+## 6. Pre-Configured Engine Performance Profile Presets
+
+To eliminate manual parameter configuration across sample rates, quantums, formats, and backend flags, Nullherz provides **4 1-Click Engine Performance Profile Presets** in Settings -> Audio:
+
+### ⚡ Preset 1: Ultra-Low Latency Live / Scratch (`PRESET_ULTRA_LOW_LATENCY`)
+* **Sample Rate**: `192000.0` Hz (192 kHz)
+* **Block Quantum Size**: `32` frames ($166.6 \ \mu\text{s}$ period)
+* **Format**: `32-bit Float` (`f32` native SIMD)
+* **Backend Flags**: Direct ALSA MMAP (`NULLHERZ_ALSA_MMAP=1`), `NO_PERIOD_WAKEUP=1`, D-Bus `ReserveDevice1` active
+* **Thread Scheduling**: `SCHED_FIFO` priority 90, CPU core pinning
+* **Latency**: **0.32 ms ($316 \ \mu\text{s}$)** Raw Direct DSP / **0.82 ms ($816 \ \mu\text{s}$)** Full Console
+* **Target Scenario**: Extreme live scratching, finger-drumming pads, sub-millisecond physical response.
+
+### 🎧 Preset 2: Stadium DJ & Arena Performance (`PRESET_STADIUM_DJ_ARENA`) — Default Recommended
+* **Sample Rate**: `96000.0` Hz (96 kHz)
+* **Block Quantum Size**: `32` frames ($333.3 \ \mu\text{s}$ period)
+* **Format**: `32-bit Float` (`f32` native SIMD)
+* **Backend Flags**: Direct ALSA MMAP (`NULLHERZ_ALSA_MMAP=1`), `NO_PERIOD_WAKEUP=1`, D-Bus `ReserveDevice1` active
+* **Thread Scheduling**: `SCHED_FIFO` priority 85
+* **Latency**: **0.48 ms** Raw Direct DSP / **1.48 ms** Full Console
+* **Target Scenario**: Mainstage stadium DJ sets, multi-deck beatmatching, 64-channel neural visual synchronization.
+
+### 🎛️ Preset 3: High-Density Studio Production (`PRESET_HIGH_DENSITY_STUDIO`)
+* **Sample Rate**: `48000.0` Hz (48 kHz)
+* **Block Quantum Size**: `64` frames ($1.33 \text{ ms}$ period)
+* **Format**: `32-bit Float` (`f32` native SIMD)
+* **Backend Flags**: Direct ALSA MMAP (`NULLHERZ_ALSA_MMAP=1`), standard double buffering
+* **Thread Scheduling**: `SCHED_FIFO` priority 70
+* **Latency**: **1.63 ms** Raw Direct DSP / **3.63 ms** Full Console
+* **Target Scenario**: Massive multitrack composition, 128-channel DAW arrangements, heavy insert FX chaining.
+
+### 💻 Preset 4: Desktop Convenience & Multi-App (`PRESET_DESKTOP_CONVENIENCE`)
+* **Sample Rate**: System PipeWire Default (Auto / 48 kHz)
+* **Block Quantum Size**: `256` frames ($5.33 \text{ ms}$ period)
+* **Format**: `System Preferred` (24-bit / 32-bit)
+* **Backend Flags**: PipeWire IPC shared-memory ring buffers (`ReserveDevice1` inactive)
+* **Thread Scheduling**: `SCHED_OTHER`
+* **Latency**: **~10.0 ms – 15.0 ms**
+* **Target Scenario**: Track auditioning, library tagging, screen recording, multi-app desktop production with browser/Discord audio active.
