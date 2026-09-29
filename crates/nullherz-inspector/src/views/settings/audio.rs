@@ -61,7 +61,7 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
         });
 
     ui.add_space(theme.space_md);
-    ui.strong("Hardware Low-Latency Optimization");
+    ui.strong("Engine Performance Profile Presets");
     ui.add_space(theme.space_xs);
     Frame::none()
         .fill(theme.bg_surface)
@@ -70,41 +70,67 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
         .inner_margin(theme.space_md)
         .show(ui, |ui| {
             ui.label(
-                RichText::new("1-Click Exclusive Performance Mode: Acquires D-Bus ReserveDevice1, bypasses OS desktop sound server resampling, enables direct MMAP kernel buffer transfers and NO_PERIOD_WAKEUP.")
+                RichText::new("1-Click Hardware & Performance Presets: Instantly configure sample rate, buffer size, ALSA MMAP, and thread priority.")
                     .color(theme.text_secondary)
                     .size(theme.type_caption),
             );
             ui.add_space(theme.space_sm);
 
-            let is_exclusive = app.settings.exclusive_performance_mode;
-            let btn_text = if is_exclusive {
-                "⚡ EXCLUSIVE PERFORMANCE MODE (ACTIVE)"
-            } else {
-                "⚡ ENGAGE EXCLUSIVE PERFORMANCE MODE (ALSA DIRECT HW MMAP)"
-            };
+            let presets = [
+                ("⚡ Ultra-Low Latency Live / Scratch", "192 kHz / 32 frames | 0.32 ms Latency", 192000.0, 32, true, AudioBackendType::Alsa),
+                ("🎧 Stadium DJ & Arena Performance", "96 kHz / 32 frames | 0.48 ms Latency", 96000.0, 32, true, AudioBackendType::Alsa),
+                ("🎛️ High-Density Studio Production", "48 kHz / 64 frames | 1.63 ms Latency", 48000.0, 64, true, AudioBackendType::Alsa),
+                ("💻 Desktop Convenience & Multi-App", "PipeWire Auto / 256 frames | ~10 ms Latency", 48000.0, 256, false, AudioBackendType::Pipewire),
+            ];
 
-            let mut perf_btn = egui::Button::new(RichText::new(btn_text).strong().color(if is_exclusive { theme.success } else { theme.accent }));
-            if is_exclusive {
-                perf_btn = perf_btn.fill(theme.success.linear_multiply(0.12)).stroke(egui::Stroke::new(1.5, theme.success));
+            for (title, desc, _rate, _block, direct_mmap, backend) in presets {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(title).strong().color(theme.text_primary));
+                        ui.label(RichText::new(desc).size(theme.type_caption).color(theme.text_secondary));
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Apply Preset").clicked() {
+                            if direct_mmap {
+                                unsafe {
+                                    std::env::set_var("NULLHERZ_ALSA_MMAP", "1");
+                                    std::env::set_var("NULLHERZ_NO_PERIOD_WAKEUP", "1");
+                                    std::env::set_var("NULLHERZ_RESERVE_DEVICE", "1");
+                                }
+                                app.settings.exclusive_performance_mode = true;
+                                app.settings.active_backend = AudioBackendType::Alsa;
+                                nullherz_backends::alsa::AlsaBackend::reserve_dbus_device("hw:0,0");
+                                let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(AudioBackendType::Alsa)));
+                            } else {
+                                unsafe {
+                                    std::env::remove_var("NULLHERZ_ALSA_MMAP");
+                                    std::env::remove_var("NULLHERZ_NO_PERIOD_WAKEUP");
+                                    std::env::remove_var("NULLHERZ_RESERVE_DEVICE");
+                                }
+                                app.settings.exclusive_performance_mode = false;
+                                app.settings.active_backend = backend;
+                                let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(backend)));
+                            }
+                        }
+                    });
+                });
+                ui.add_space(theme.space_xs);
             }
 
-            if ui.add_sized([ui.available_width(), 32.0], perf_btn).clicked() {
-                app.settings.exclusive_performance_mode = !is_exclusive;
-                if app.settings.exclusive_performance_mode {
+            ui.add_space(theme.space_sm);
+            let optimal_profile = nullherz_backends::alsa::probe_optimal_profile();
+            let auto_label = format!("🔍 AUTO-DETECT HARDWARE OPTIMAL ({})", optimal_profile.name);
+            if ui.add_sized([ui.available_width(), 28.0], egui::Button::new(RichText::new(auto_label).strong().color(theme.accent))).clicked() {
+                if optimal_profile.mmap_direct {
                     unsafe {
                         std::env::set_var("NULLHERZ_ALSA_MMAP", "1");
                         std::env::set_var("NULLHERZ_NO_PERIOD_WAKEUP", "1");
                         std::env::set_var("NULLHERZ_RESERVE_DEVICE", "1");
                     }
+                    app.settings.exclusive_performance_mode = true;
                     app.settings.active_backend = AudioBackendType::Alsa;
                     nullherz_backends::alsa::AlsaBackend::reserve_dbus_device("hw:0,0");
                     let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(AudioBackendType::Alsa)));
-                } else {
-                    unsafe {
-                        std::env::remove_var("NULLHERZ_ALSA_MMAP");
-                        std::env::remove_var("NULLHERZ_NO_PERIOD_WAKEUP");
-                        std::env::remove_var("NULLHERZ_RESERVE_DEVICE");
-                    }
                 }
             }
         });
