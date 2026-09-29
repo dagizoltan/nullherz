@@ -1307,6 +1307,38 @@ pub fn realtime_environment_warnings() -> Vec<String> {
     warnings
 }
 
+/// Applies real-time limits configuration to `/etc/security/limits.d/99-nullherz-realtime.conf`
+/// to grant `@audio - rtprio 95` and `@audio - memlock unlimited` permissions.
+pub fn apply_realtime_limits_fix() -> Result<String, String> {
+    let conf_content = "@audio - rtprio 95\n@audio - memlock unlimited\n";
+    let target_file = "/etc/security/limits.d/99-nullherz-realtime.conf";
+
+    // Attempt direct write if running with elevated permissions
+    if std::fs::write(target_file, conf_content).is_ok() {
+        return Ok(format!("Successfully wrote real-time limits to {}", target_file));
+    }
+
+    // Otherwise, invoke pkexec or sudo tee non-blockingly
+    let status = std::process::Command::new("pkexec")
+        .arg("tee")
+        .arg(target_file)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .and_then(|mut child| {
+            if let Some(mut stdin) = child.stdin.take() {
+                use std::io::Write;
+                let _ = stdin.write_all(conf_content.as_bytes());
+            }
+            child.wait()
+        });
+
+    match status {
+        Ok(s) if s.success() => Ok(format!("Successfully wrote real-time limits via pkexec to {}", target_file)),
+        _ => Err("Could not write limits file directly or via pkexec. Run: sudo scripts/baremetal_core_isolate.sh --apply".to_string()),
+    }
+}
+
 pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {
     thread_local! {
         static INITIALIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };

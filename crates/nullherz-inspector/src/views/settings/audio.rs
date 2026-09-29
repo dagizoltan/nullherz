@@ -200,11 +200,16 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                 }
 
                 ui.add_space(theme.space_xs);
-                ui.label(
-                    RichText::new("Recommended Fix: Add the following lines to /etc/security/limits.d/99-nullherz-realtime.conf and ensure your user is in the 'audio' group:")
-                        .color(theme.text_secondary)
-                        .size(theme.type_caption),
-                );
+                ui.horizontal(|ui| {
+                    if ui.button(RichText::new("⚡ FIX REAL-TIME PERMISSIONS (@audio rtprio 95)").strong().color(theme.accent)).clicked() {
+                        let _ = ipc_layer::apply_realtime_limits_fix();
+                    }
+                    ui.label(
+                        RichText::new("Generates /etc/security/limits.d/99-nullherz-realtime.conf for zero preemption risk across reboots.")
+                            .color(theme.text_secondary)
+                            .size(theme.type_caption),
+                    );
+                });
                 Frame::none()
                     .fill(theme.bg_inset)
                     .rounding(theme.radius_sm)
