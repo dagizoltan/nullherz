@@ -8,17 +8,17 @@
 
 ## 1. Executive Summary
 
-This document establishes the plan of record for audio latency calculation, sample format behavior (16-bit, 24-bit integer, and 32-bit float), PipeWire vs. direct baremetal ALSA performance differences, RAM-driven channel capacity scaling, and pre-configured engine performance profile presets in the Nullherz engine.
+This document establishes the plan of record for audio latency calculation, sample format behavior (16-bit, 24-bit integer, and 32-bit float), PipeWire vs. direct baremetal ALSA performance differences, RAM-driven channel capacity scaling, pre-configured performance presets, and device-based hardware auto-probing in the Nullherz engine.
 
 ### Key Takeaways
 1. **Physical Latency Invariance**: Physical audio latency depends **strictly on Quantum Frame Size ($N$) and Sample Rate ($f_s$)**:
    $$L_{\text{buf}} = \frac{N}{f_s}$$
    Increasing the number of active channels **does not add a single microsecond of physical buffer latency**.
 2. **Sub-Millisecond Execution**:
-   * At **192 kHz / 32-bit Float (32 frames)**: **0.32 ms ($316\ \mu\text{s}$)** Raw Direct DSP Latency, **0.82 ms ($816\ \mu\text{s}$)** Full Console Master Latency.
-   * At **96 kHz / 32-bit Float (32 frames)**: **0.48 ms** Raw Direct DSP Latency, **1.48 ms** Full Console Master Latency.
-3. **RAM-Driven Channel Scaling**: Static zero-allocation execution memory scales linearly with `MAX_CHANNELS`. A standard 16 GB workstation supports **up to 1,024 concurrent active channels** without memory pressure.
-4. **1-Click Engine Profile Presets**: Eliminates multi-parameter configuration hassle by bundling Sample Rate, Quantum Size, Bit Format, ALSA MMAP flags, and RT thread priorities into 4 performance presets.
+   * At **192 kHz / 32-bit Float or 24-bit Int (32 frames)**: **0.32 ms ($316\ \mu\text{s}$)** Raw Direct DSP Latency, **0.82 ms ($816\ \mu\text{s}$)** Full Console Master Latency.
+   * At **96 kHz / 32-bit Float or 24-bit Int (32 frames)**: **0.48 ms** Raw Direct DSP Latency, **1.48 ms** Full Console Master Latency.
+3. **RAM-Driven Channel Scaling**: Static zero-allocation execution memory scales linearly with `MAX_CHANNELS`. A standard 16 GB workstation supports **up to 256 concurrent active channels** without memory pressure.
+4. **Device-Based Auto-Presets**: Hardware probing queries device capabilities (`192 kHz / 24-bit`) and system RAM (`16 GB`) to automatically generate a tailored performance preset on startup.
 
 ---
 
@@ -174,3 +174,49 @@ To eliminate manual parameter configuration across sample rates, quantums, forma
 * **Thread Scheduling**: `SCHED_OTHER`
 * **Latency**: **~10.0 ms – 15.0 ms**
 * **Target Scenario**: Track auditioning, library tagging, screen recording, multi-app desktop production with browser/Discord audio active.
+
+---
+
+## 7. Device-Based Hardware Probing & Auto-Preset Generation
+
+When launching Nullherz or plugging in a USB Audio interface, `nullherz-backends` executes **Hardware Capability Probing** via ALSA hardware parameter queries (`snd_pcm_hw_params`) and system memory detection (`sysinfo` / `/proc/meminfo`).
+
+### 7.1 Auto-Probing Logic Pipeline
+```
+   [ Audio Device Plugged In / App Launch ]
+                      |
+                      v
+   1. Query Hardware Max Sample Rate  ---> (e.g., 192,000 Hz)
+   2. Query Hardware Sample Format    ---> (e.g., SND_PCM_FORMAT_S24_LE)
+   3. Query Minimum Hardware Quantum  ---> (e.g., 32 frames)
+   4. Query Total System RAM           ---> (e.g., 16,384 MB / 16 GB)
+                      |
+                      v
+   [ Generate Device-Matched Auto-Preset: "Hardware Optimal 192k/24-bit (16 GB)" ]
+```
+
+### 7.2 Custom Profile Specification: 24-bit / 192 kHz Interface + 16 GB RAM
+
+For a workstation equipped with a **24-bit / 192 kHz audio interface** and **16 GB RAM**, Nullherz auto-generates the following optimized configuration profile:
+
+```yaml
+preset_name: "Hardware Optimal 192k/24-bit (16 GB RAM)"
+target_sample_rate: 192000.0
+quantum_frame_size: 32
+pcm_format: "S24_LE" (24-bit in 32-bit container, shift-scaled to SIMD f32)
+max_channel_allocation: 256
+alsa_mmap_direct: true
+kernel_no_period_wakeup: true
+dbus_device_reservation: "org.freedesktop.ReserveDevice1"
+rt_thread_priority: 90
+isolated_core_affinity: 0
+performance_metrics:
+  raw_dsp_latency: "0.32 ms (316 microseconds)"
+  full_console_latency: "0.82 ms (816 microseconds with limiter)"
+  static_engine_ram: "539.5 MB"
+  deck_streaming_ram_reserve: "10.0 GB"
+  period_budget_utilization_32ch: "41.0%"
+```
+
+#### User Experience Benefit
+The user connects their 24-bit 192 kHz interface, and Nullherz automatically selects this optimal preset—instantly achieving **0.32 ms action-to-sound latency** and **256-channel capacity** with zero manual configuration.
