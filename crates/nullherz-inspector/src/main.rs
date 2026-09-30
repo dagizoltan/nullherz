@@ -85,7 +85,7 @@ pub struct GraphJson {
     pub node_assignments: nullherz_traits::NodeAssignmentArray,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum View {
     Player,
     Console,
@@ -1463,7 +1463,12 @@ impl eframe::App for InspectorApp {
                 });
             } else {
                 let view = self.active_view;
-                self.render_view_content(view, ui, &telemetry);
+                egui::ScrollArea::both()
+                    .id_source(format!("main_page_scroll_{:?}", view))
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.render_view_content(view, ui, &telemetry);
+                    });
             }
         });
 
