@@ -83,7 +83,7 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                 ("💻 Desktop Convenience & Multi-App", "PipeWire Auto / 256 frames | ~10 ms Latency", 48000.0, 256, false, AudioBackendType::Pipewire),
             ];
 
-            for (title, desc, _rate, _block, direct_mmap, backend) in presets {
+            for (title, desc, rate, block, direct_mmap, backend) in presets {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         ui.label(RichText::new(title).strong().color(theme.text_primary));
@@ -91,6 +91,8 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("Apply Preset").clicked() {
+                            app.settings.sample_rate = rate;
+                            app.settings.buffer_size = block;
                             if direct_mmap {
                                 unsafe {
                                     std::env::set_var("NULLHERZ_ALSA_MMAP", "1");
@@ -121,6 +123,8 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
             let optimal_profile = nullherz_backends::alsa::probe_optimal_profile();
             let auto_label = format!("🔍 AUTO-DETECT HARDWARE OPTIMAL ({})", optimal_profile.name);
             if ui.add_sized([ui.available_width(), 28.0], egui::Button::new(RichText::new(auto_label).strong().color(theme.accent))).clicked() {
+                app.settings.sample_rate = optimal_profile.sample_rate;
+                app.settings.buffer_size = optimal_profile.block_size;
                 if optimal_profile.mmap_direct {
                     unsafe {
                         std::env::set_var("NULLHERZ_ALSA_MMAP", "1");
