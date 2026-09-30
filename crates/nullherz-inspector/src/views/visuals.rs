@@ -317,7 +317,7 @@ pub fn render_composite_target_screen(
     app: &mut InspectorApp,
     target_screen_id: &str,
     ui: &mut egui::Ui,
-    _telemetry: &Option<Telemetry>,
+    telemetry: &Option<Telemetry>,
 ) {
     let screen_opt = app.viz.target_screens.iter().find(|s| s.id == target_screen_id).cloned();
     let Some(screen) = screen_opt else { return; };
@@ -508,6 +508,55 @@ pub fn render_composite_target_screen(
         egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
         egui::Color32::WHITE,
     );
+
+    // Render generator visual engines for all assigned active channels onto screen canvas rect
+    use crate::views::visual_engines::NeuralVisualEngine;
+    for (layer_slot, &c_idx) in matching_indices.iter().enumerate() {
+        let channel = &mut app.viz.channels[c_idx];
+        let nervous = &channel.nervous_system;
+        let genome = &channel.genome;
+
+        // Compute sub-cell canvas rectangle for this layer based on CompositingLayoutMode
+        let cell_canvas_rect = match screen.layout_mode {
+            state::CompositingLayoutMode::LayeredComposite => rect,
+            state::CompositingLayoutMode::Grid2x2 => {
+                let half_w = rect.width() * 0.5;
+                let half_h = rect.height() * 0.5;
+                match layer_slot {
+                    0 => egui::Rect::from_min_size(rect.min, egui::vec2(half_w, half_h)),
+                    1 => egui::Rect::from_min_size(rect.min + egui::vec2(half_w, 0.0), egui::vec2(half_w, half_h)),
+                    2 => egui::Rect::from_min_size(rect.min + egui::vec2(0.0, half_h), egui::vec2(half_w, half_h)),
+                    _ => egui::Rect::from_min_size(rect.min + egui::vec2(half_w, half_h), egui::vec2(half_w, half_h)),
+                }
+            }
+            state::CompositingLayoutMode::SideBySide => {
+                let cell_w = rect.width() / num_matching.max(1) as f32;
+                let min_x = rect.min.x + layer_slot as f32 * cell_w;
+                egui::Rect::from_min_size(egui::pos2(min_x, rect.min.y), egui::vec2(cell_w, rect.height()))
+            }
+            state::CompositingLayoutMode::PictureInPicture => {
+                if layer_slot == 0 {
+                    rect
+                } else {
+                    let rx = channel.viewport_rect[0].clamp(0.0, 1.0) * rect.width();
+                    let ry = channel.viewport_rect[1].clamp(0.0, 1.0) * rect.height();
+                    let rw = channel.viewport_rect[2].clamp(0.1, 1.0) * rect.width();
+                    let rh = channel.viewport_rect[3].clamp(0.1, 1.0) * rect.height();
+                    egui::Rect::from_min_size(rect.min + egui::vec2(rx, ry), egui::vec2(rw, rh))
+                }
+            }
+        };
+
+        match channel.generator {
+            state::VisualGenerator::RadialMandala => channel.engine_radial_mandala.render(ui, cell_canvas_rect, nervous, genome, telemetry, time as f32),
+            state::VisualGenerator::LiquidSurface => channel.engine_liquid_surface.render(ui, cell_canvas_rect, nervous, genome, telemetry, time as f32),
+            state::VisualGenerator::SpectralLandscape => channel.engine_spectral_landscape.render(ui, cell_canvas_rect, nervous, genome, telemetry, time as f32),
+            state::VisualGenerator::HyperAttractor => channel.engine_hyper_attractor.render(ui, cell_canvas_rect, nervous, genome, telemetry, time as f32),
+            state::VisualGenerator::ReactionDiffusion => channel.engine_reaction_diffusion.render(ui, cell_canvas_rect, nervous, genome, telemetry, time as f32),
+            state::VisualGenerator::NeuralRaymarcher => channel.engine_neural_raymarcher.render(ui, cell_canvas_rect, nervous, genome, telemetry, time as f32),
+            state::VisualGenerator::NeuralNcaMesh => channel.engine_neural_nca_mesh.render(ui, cell_canvas_rect, nervous, genome, telemetry, time as f32),
+        }
+    }
 
     // Interactive Drag-and-Drop Viewport Placement Handles for PictureInPicture Mode
     if screen.layout_mode == state::CompositingLayoutMode::PictureInPicture && matching_indices.len() > 1 {
