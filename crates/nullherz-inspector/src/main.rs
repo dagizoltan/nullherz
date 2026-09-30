@@ -1296,28 +1296,11 @@ impl eframe::App for InspectorApp {
 
                 let v_focused = v_ctx.input(|i| i.focused);
 
-                egui::CentralPanel::default().show(v_ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.heading(egui::RichText::new(format!("COMPOSITE OUTPUT — {}", screen_name)).strong().color(self.theme.accent));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let is_fullscreen = v_ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-                            let fs_icon = if is_fullscreen {
-                                egui_phosphor::regular::ARROWS_IN_SIMPLE
-                            } else {
-                                egui_phosphor::regular::ARROWS_OUT_SIMPLE
-                            };
-                            let fs_tooltip = if is_fullscreen { "Exit Fullscreen" } else { "Toggle Fullscreen" };
-                            if ui.button(fs_icon).on_hover_text(fs_tooltip).clicked() {
-                                v_ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
-                            }
-                            if ui.button(format!("{} Close Screen", egui_phosphor::regular::X)).clicked() {
-                                close_screen_window = true;
-                            }
-                        });
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::none().fill(egui::Color32::from_rgb(10, 12, 18)).inner_margin(egui::Margin::ZERO))
+                    .show(v_ctx, |ui| {
+                        self.render_detached_target_screen(&screen_id, v_ctx, ui, &telemetry);
                     });
-                    ui.separator();
-                    self.render_detached_target_screen(&screen_id, v_ctx, ui, &telemetry);
-                });
 
                 let v_cadence = if v_focused || is_focused {
                     std::time::Duration::from_millis(33)

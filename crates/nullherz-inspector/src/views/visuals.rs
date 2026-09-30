@@ -324,7 +324,8 @@ pub fn render_composite_target_screen(
 
     // Dynamically expand to full available frame size when detached, or constrain to row frame
     let avail_size = ui.available_size();
-    let (rect, response) = if avail_size.x > 300.0 && avail_size.y > 200.0 {
+    let is_detached_viewport = avail_size.x > 300.0 && avail_size.y > 200.0;
+    let (rect, response) = if is_detached_viewport {
         ui.allocate_exact_size(avail_size, egui::Sense::click_and_drag())
     } else {
         let desired_h = 130.0f32;
@@ -364,8 +365,8 @@ pub fn render_composite_target_screen(
     }
 
     // Prepare composite target framebuffer scaled to viewport canvas size
-    let target_w = (rect.width() as usize).clamp(160, 640);
-    let target_h = (rect.height() as usize).clamp(100, 400);
+    let target_w = (rect.width() as usize).clamp(160, 1920);
+    let target_h = (rect.height() as usize).clamp(100, 1080);
     let mut target_engine = state::PixelFeedbackEngine::new(target_w, target_h);
 
     // Initialize with screen clear color
