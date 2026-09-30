@@ -563,6 +563,8 @@ pub struct SettingsState {
     pub qwerty_held_keys: std::collections::HashSet<eframe::egui::Key>,
     pub recent_midi_events: std::collections::VecDeque<nullherz_traits::MidiEvent>,
     pub exclusive_performance_mode: bool,
+    pub sample_rate: f32,
+    pub buffer_size: usize,
 }
 
 impl Default for SettingsState {
@@ -586,6 +588,8 @@ impl Default for SettingsState {
             qwerty_held_keys: std::collections::HashSet::new(),
             recent_midi_events: std::collections::VecDeque::with_capacity(30),
             exclusive_performance_mode: false,
+            sample_rate: 48000.0,
+            buffer_size: 256,
         }
     }
 }
