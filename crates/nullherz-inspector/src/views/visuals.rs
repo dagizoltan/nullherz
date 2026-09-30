@@ -133,6 +133,75 @@ pub fn apply_visual_insert_chain(
                     }
                 }
             }
+            "pixel-sorting" => {
+                // Directional intensity-based pixel sorting
+                let threshold = 120u8;
+                for y in 0..h {
+                    let row_start = y * w;
+                    let row_end = row_start + w;
+                    let row = &mut engine.back_buffer[row_start..row_end];
+                    let mut start_idx = None;
+                    for x in 0..w {
+                        let brightness = (row[x][0] as u32 + row[x][1] as u32 + row[x][2] as u32) / 3;
+                        if brightness > threshold as u32 {
+                            if start_idx.is_none() {
+                                start_idx = Some(x);
+                            }
+                        } else if let Some(s) = start_idx {
+                            row[s..x].sort_by_key(|p| p[0] as u32 + p[1] as u32 + p[2] as u32);
+                            start_idx = None;
+                        }
+                    }
+                }
+            }
+            "kaleidoscope-mirror" => {
+                // 8-Fold Polar Symmetry Mirror
+                let center_x = w as f32 * 0.5;
+                let center_y = h as f32 * 0.5;
+                for y in 0..h {
+                    let ny = (y as f32 - center_y) / center_y;
+                    for x in 0..w {
+                        let nx = (x as f32 - center_x) / center_x;
+                        let r = (nx * nx + ny * ny).sqrt();
+                        let mut theta = ny.atan2(nx);
+                        let folds = 8.0;
+                        let sector = std::f32::consts::TAU / folds;
+                        theta = (theta.rem_euclid(sector) - sector * 0.5).abs();
+                        let src_x = ((center_x + r * theta.cos() * center_x).clamp(0.0, (w - 1) as f32)) as usize;
+                        let src_y = ((center_y + r * theta.sin() * center_y).clamp(0.0, (h - 1) as f32)) as usize;
+                        let src_idx = src_y * w + src_x;
+                        let tgt_idx = y * w + x;
+                        engine.front_buffer[tgt_idx] = engine.back_buffer[src_idx];
+                    }
+                }
+                engine.back_buffer.copy_from_slice(&engine.front_buffer);
+            }
+            "scanline-crt" => {
+                // CRT Scanline & Phosphor Decay
+                for y in 0..h {
+                    let scan_factor = if y % 2 == 0 { 0.70 } else { 1.0 };
+                    for x in 0..w {
+                        let idx = y * w + x;
+                        let pixel = &mut engine.back_buffer[idx];
+                        pixel[0] = (pixel[0] as f32 * scan_factor) as u8;
+                        pixel[1] = (pixel[1] as f32 * scan_factor) as u8;
+                        pixel[2] = (pixel[2] as f32 * scan_factor) as u8;
+                    }
+                }
+            }
+            "chromatic-aberration" => {
+                // Radial Chromatic Aberration RGB Offset
+                let offset = (3.0 + color_shift * 4.0) as usize;
+                for y in 0..h {
+                    for x in offset..(w - offset) {
+                        let idx = y * w + x;
+                        let r = engine.back_buffer[y * w + (x - offset)][0];
+                        let b = engine.back_buffer[y * w + (x + offset)][2];
+                        engine.back_buffer[idx][0] = r;
+                        engine.back_buffer[idx][2] = b;
+                    }
+                }
+            }
             _ => {
                 // Generic visual post-processing tint shift
                 let shift = (time * 2.0).sin() * 20.0;

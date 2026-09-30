@@ -114,27 +114,40 @@ impl NeuralVisualEngine for NeuralRaymarcherEngine {
         self.prepare_tensor_inputs(nervous, genome);
 
         let center = rect.center();
-        let max_r = (rect.width().min(rect.height())) * 0.45;
+        let max_r = (rect.width().min(rect.height())) * 0.44;
 
-        // Render Raymarched SDF Geometry Projection
-        let steps = 36;
-        let rot_k = self.latent_16d[0] * 2.0;
+        // Mandelbulb & Smooth-Min Primitive SDF Raymarch Projection
+        let steps = 48;
+        let power = 4.0 + nervous.rms_energy * 4.0 + self.latent_16d[0] * 2.0;
+        let rot_k = time * 0.6 + nervous.fast_transient_spike * 0.5;
 
         for i in 0..steps {
             let frac = i as f32 / steps as f32;
-            let angle = frac * std::f32::consts::TAU + time * 0.5;
+            let angle = frac * std::f32::consts::TAU + rot_k;
 
-            let twist_r = max_r * (0.3 + 0.7 * (angle * rot_k).sin().abs());
-            let px = center.x + angle.cos() * twist_r;
-            let py = center.y + angle.sin() * twist_r;
+            // Compute Mandelbulb power fractal radius
+            let r = (frac * std::f32::consts::PI).sin();
+            let theta = frac * std::f32::consts::TAU * power;
+            let phi = angle * 2.0;
 
+            let _dr = r.powf(power - 1.0) * power + 1.0;
+            let z_r = r.powf(power);
+
+            let proj_x = center.x + (z_r * theta.sin() * phi.cos()) * max_r;
+            let proj_y = center.y + (z_r * theta.sin() * phi.sin()) * max_r;
+
+            // Specular PBR Highlight Calculation
+            let specular = ((angle + time * 3.0).cos().max(0.0)).powf(8.0);
             let color = egui::Color32::from_rgb(
-                ((self.latent_16d[i % 16] * 255.0) as u8).saturating_add(40),
-                ((nervous.harmonicity * 200.0) as u8).saturating_add(50),
-                220,
+                ((self.latent_16d[i % 16] * 200.0 + specular * 55.0) as u8).saturating_add(50),
+                ((nervous.harmonicity * 180.0 + specular * 75.0) as u8).saturating_add(40),
+                ((200.0 + specular * 55.0) as u8).clamp(0, 255),
             );
 
-            ui.painter().circle_filled(egui::pos2(px, py), 3.0 + frac * 4.0, color);
+            let pt = egui::pos2(proj_x, proj_y);
+            if rect.contains(pt) {
+                ui.painter().circle_filled(pt, 2.5 + specular * 5.0 + frac * 3.0, color);
+            }
         }
     }
 }

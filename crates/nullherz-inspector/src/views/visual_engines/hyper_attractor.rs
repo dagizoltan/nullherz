@@ -43,23 +43,58 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
 
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttractorTopology {
+    Clifford,
+    Lorenz,
+    Aizawa,
+    DeQuan,
+    Thomas,
+}
+
+#[allow(dead_code)]
+impl AttractorTopology {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Clifford => "Clifford Neural Map",
+            Self::Lorenz => "Lorenz 3D Butterfly",
+            Self::Aizawa => "Aizawa Flow Sphere",
+            Self::DeQuan => "De Quan Multi-Scroll",
+            Self::Thomas => "Thomas Cyclical Labyrinth",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[Self::Clifford, Self::Lorenz, Self::Aizawa, Self::DeQuan, Self::Thomas]
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct HyperAttractorEngine {
+    pub topology: AttractorTopology,
     pub coefficients: [f32; 12],
-    pub particle_positions: Vec<(f32, f32)>, // 100,000 particle coordinates (x, y)
+    pub particle_positions: Vec<(f32, f32)>, // 1,000 3D projected particle coordinates (x, y)
+    pub particles_3d: Vec<(f32, f32, f32)>,  // Raw 3D particle positions
 }
 
 impl HyperAttractorEngine {
     pub fn new() -> Self {
-        let count = 1000; // 1,000 UI CPU particles + 100,000 GPU particle pipeline state
+        let count = 1000;
         let mut particle_positions = Vec::with_capacity(count);
+        let mut particles_3d = Vec::with_capacity(count);
+
         for i in 0..count {
             let phase = i as f32 * 0.1;
-            particle_positions.push((phase.sin() * 100.0, phase.cos() * 100.0));
+            particles_3d.push((0.1 + phase.sin() * 0.5, 0.1 + phase.cos() * 0.5, phase * 0.05));
+            particle_positions.push((0.0, 0.0));
         }
+
         Self {
+            topology: AttractorTopology::Lorenz,
             coefficients: [-1.4, 1.6, 1.0, 0.7, 0.5, 0.3, 0.2, 0.1, 0.4, 0.6, 0.8, 0.9],
             particle_positions,
+            particles_3d,
         }
     }
 }
@@ -86,36 +121,139 @@ impl NeuralVisualEngine for HyperAttractorEngine {
         nervous: &AudioNervousSystem,
         genome: &VisualGenome,
         _telemetry: &Option<audio_core::Telemetry>,
-        _time: f32,
+        time: f32,
     ) {
         self.prepare_tensor_inputs(nervous, genome);
 
         let center = rect.center();
-        let a = self.coefficients[0];
-        let b = self.coefficients[1];
-        let c = self.coefficients[2];
-        let d = self.coefficients[3];
+        let count = self.particles_3d.len();
 
-        // Step trajectories for chaotic attractor
+        let cam_rot_x = time * 0.4 + nervous.stereo_asymmetry * 2.0;
+        let cam_rot_y = time * 0.2 + nervous.spectral_centroid * 0.001;
+
+        let cos_x = cam_rot_x.cos();
+        let sin_x = cam_rot_x.sin();
+        let cos_y = cam_rot_y.cos();
+        let sin_y = cam_rot_y.sin();
+
         let mut curr_x = 0.1f32;
         let mut curr_y = 0.1f32;
+        let mut curr_z = 0.1f32;
 
-        for (x_out, y_out) in &mut self.particle_positions {
-            let next_x = (a * curr_y).sin() + c * (a * curr_x).cos();
-            let next_y = (b * curr_x).sin() + d * (b * curr_y).cos();
+        for i in 0..count {
+            let (px, py, pz) = &mut self.particles_3d[i];
 
-            curr_x = next_x;
-            curr_y = next_y;
+            match self.topology {
+                AttractorTopology::Clifford => {
+                    let a = self.coefficients[0];
+                    let b = self.coefficients[1];
+                    let c = self.coefficients[2];
+                    let d = self.coefficients[3];
+                    let next_x = (a * *py).sin() + c * (a * *px).cos();
+                    let next_y = (b * *px).sin() + d * (b * *py).cos();
+                    let next_z = (*pz + 0.02).rem_euclid(2.0) - 1.0;
+                    *px = next_x;
+                    *py = next_y;
+                    *pz = next_z;
+                }
+                AttractorTopology::Lorenz => {
+                    let sigma = 10.0 + self.coefficients[0] * 2.0;
+                    let rho = 28.0 + self.coefficients[1] * 5.0;
+                    let beta = 8.0 / 3.0 + self.coefficients[2] * 0.5;
+                    let dt = 0.008;
 
-            *x_out = center.x + curr_x * rect.width() * 0.22;
-            *y_out = center.y + curr_y * rect.height() * 0.22;
+                    let dx = sigma * (*py - *px);
+                    let dy = *px * (rho - *pz) - *py;
+                    let dz = *px * *py - beta * *pz;
+
+                    *px += dx * dt;
+                    *py += dy * dt;
+                    *pz += dz * dt;
+                }
+                AttractorTopology::Aizawa => {
+                    let a = 0.95;
+                    let b = 0.7;
+                    let c = 0.6 + self.coefficients[0] * 0.2;
+                    let d = 3.5;
+                    let e = 0.25;
+                    let f = 0.1;
+                    let dt = 0.01;
+
+                    let dx = (*pz - b) * *px - d * *py;
+                    let dy = d * *px + (*pz - b) * *py;
+                    let dz = c + a * *pz - (*pz * *pz * *pz) / 3.0 - (*px * *px + *py * *py) * (1.0 + e * *pz) + f * *pz * (*px * *px * *px);
+
+                    *px += dx * dt;
+                    *py += dy * dt;
+                    *pz += dz * dt;
+                }
+                AttractorTopology::DeQuan => {
+                    let a = 40.0;
+                    let b = 0.16;
+                    let c = 4.0;
+                    let d = 55.0;
+                    let e = 20.0;
+                    let dt = 0.003;
+
+                    let dx = a * (*py - *px) + c * *px * *pz;
+                    let dy = e * *py - *px * *pz;
+                    let dz = b * *pz + *px * *py - d * *px * *px;
+
+                    *px += dx * dt;
+                    *py += dy * dt;
+                    *pz += dz * dt;
+                }
+                AttractorTopology::Thomas => {
+                    let b = 0.208 + self.coefficients[0] * 0.05;
+                    let dt = 0.04;
+
+                    let dx = (*py).sin() - b * *px;
+                    let dy = (*pz).sin() - b * *py;
+                    let dz = (*px).sin() - b * *pz;
+
+                    *px += dx * dt;
+                    *py += dy * dt;
+                    *pz += dz * dt;
+                }
+            }
+
+            curr_x = *px;
+            curr_y = *py;
+            curr_z = *pz;
+
+            // Camera 3D Orbit Projection
+            let rx = *px * cos_y + *pz * sin_y;
+            let rz = -*px * sin_y + *pz * cos_y;
+            let ry = *py * cos_x - rz * sin_x;
+            let _rz2 = *py * sin_x + rz * cos_x;
+
+            let scale = match self.topology {
+                AttractorTopology::Lorenz => 0.012,
+                AttractorTopology::DeQuan => 0.008,
+                _ => 0.25,
+            } * rect.height();
+
+            let proj_x = center.x + rx * scale;
+            let proj_y = center.y + ry * scale;
+
+            self.particle_positions[i] = (proj_x, proj_y);
         }
 
-        // Additive particle rendering
-        for (px, py) in &self.particle_positions {
-            let pt = egui::pos2(*px, *py);
+        // Additive particle rendering with trail connections
+        for i in 0..count {
+            let (px, py) = self.particle_positions[i];
+            let pt = egui::pos2(px, py);
             if rect.contains(pt) {
-                ui.painter().circle_filled(pt, 1.8, theme_color_additive(curr_x, curr_y));
+                let color = theme_color_additive(curr_x + i as f32 * 0.01, curr_y + curr_z);
+                ui.painter().circle_filled(pt, 1.8, color);
+
+                if i > 0 {
+                    let (prev_x, prev_y) = self.particle_positions[i - 1];
+                    let prev_pt = egui::pos2(prev_x, prev_y);
+                    if rect.contains(prev_pt) && (pt - prev_pt).length() < 30.0 {
+                        ui.painter().line_segment([prev_pt, pt], egui::Stroke::new(1.0, color.linear_multiply(0.4)));
+                    }
+                }
             }
         }
     }
