@@ -758,7 +758,8 @@ pub fn probe_hardware_capabilities() -> HardwareCapabilities {
 
     if let Ok(alsa) = AlsaLib::load() {
         let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
-        let name = std::ffi::CString::new("default").unwrap();
+        let target_dev = std::env::var("NULLHERZ_ALSA_DEVICE").unwrap_or_else(|_| "hw:0,0".to_string());
+        let name = std::ffi::CString::new(target_dev.as_str()).unwrap_or_else(|_| std::ffi::CString::new("default").unwrap());
         let open_ret = unsafe { (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) };
         if open_ret == 0 && !pcm.is_null() {
             unsafe {

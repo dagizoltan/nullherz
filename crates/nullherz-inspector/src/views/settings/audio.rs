@@ -99,6 +99,7 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                             }));
                             if direct_mmap {
                                 unsafe {
+                                    std::env::set_var("NULLHERZ_ALSA_DEVICE", "hw:0,0");
                                     std::env::set_var("NULLHERZ_ALSA_MMAP", "1");
                                     std::env::set_var("NULLHERZ_NO_PERIOD_WAKEUP", "1");
                                     std::env::set_var("NULLHERZ_RESERVE_DEVICE", "1");
@@ -109,6 +110,7 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                                 let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(AudioBackendType::Alsa)));
                             } else {
                                 unsafe {
+                                    std::env::remove_var("NULLHERZ_ALSA_DEVICE");
                                     std::env::remove_var("NULLHERZ_ALSA_MMAP");
                                     std::env::remove_var("NULLHERZ_NO_PERIOD_WAKEUP");
                                     std::env::remove_var("NULLHERZ_RESERVE_DEVICE");
@@ -135,6 +137,7 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                 }));
                 if optimal_profile.mmap_direct {
                     unsafe {
+                        std::env::set_var("NULLHERZ_ALSA_DEVICE", "hw:0,0");
                         std::env::set_var("NULLHERZ_ALSA_MMAP", "1");
                         std::env::set_var("NULLHERZ_NO_PERIOD_WAKEUP", "1");
                         std::env::set_var("NULLHERZ_RESERVE_DEVICE", "1");
