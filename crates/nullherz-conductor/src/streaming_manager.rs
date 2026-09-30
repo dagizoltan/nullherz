@@ -141,6 +141,17 @@ impl StreamingManager {
         });
     }
 
+    pub fn stop_stream_id(&mut self, id: u64) {
+        if let Some(sig) = self.shutdown_signals.remove(&id) {
+            sig.store(true, Ordering::Relaxed);
+        }
+        self.streams.remove(&id);
+        if self.streams.is_empty() {
+            self.is_streaming = false;
+            self.start_time = None;
+        }
+    }
+
     pub fn stop_stream(&mut self) {
         self.is_streaming = false;
         self.start_time = None;
