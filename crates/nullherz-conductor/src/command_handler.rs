@@ -449,6 +449,30 @@ impl CommandHandler {
                 conductor.checkpoint_parameter_edit();
                 true
             }
+            CoreCommand::ConfigureAudioEngine { sample_rate, block_size } => {
+                {
+                    let mut lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
+                    if let Some(ref mut engine_arc) = *lock {
+                        if let Some(engine) = std::sync::Arc::get_mut(engine_arc) {
+                            engine.set_config(nullherz_traits::AudioConfig {
+                                sample_rate,
+                                block_size,
+                            });
+                        } else {
+                            let ptr = std::sync::Arc::as_ptr(engine_arc) as *mut dyn nullherz_traits::RenderingEngine;
+                            unsafe {
+                                (*ptr).set_config(nullherz_traits::AudioConfig {
+                                    sample_rate,
+                                    block_size,
+                                });
+                            }
+                        }
+                    }
+                }
+                conductor.period_size = block_size as u64;
+                let _ = conductor.update_system_config(None, None, None);
+                true
+            }
             CoreCommand::SwitchBackend(backend_type) => {
                 let _ = conductor.switch_backend(backend_type);
                 true
