@@ -714,3 +714,100 @@ pub fn device_id(entry: &str) -> &str {
         None => entry.trim(),
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct HardwareCapabilities {
+    pub max_sample_rate: u32,
+    pub supports_24bit: bool,
+    pub supports_32bit_float: bool,
+    pub system_ram_gb: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioEngineProfile {
+    pub name: String,
+    pub sample_rate: f32,
+    pub block_size: usize,
+    pub pcm_format: String,
+    pub max_channels: usize,
+    pub raw_dsp_latency_ms: f32,
+    pub full_console_latency_ms: f32,
+    pub mmap_direct: bool,
+    pub no_period_wakeup: bool,
+    pub reserve_device: bool,
+}
+
+pub fn probe_hardware_capabilities() -> HardwareCapabilities {
+    let mut ram_gb = 16;
+    if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
+        for line in meminfo.lines() {
+            if line.starts_with("MemTotal:") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    if let Ok(kb) = parts[1].parse::<u64>() {
+                        ram_gb = ((kb / 1024 / 1024) as u32).max(1);
+                    }
+                }
+            }
+        }
+    }
+
+    HardwareCapabilities {
+        max_sample_rate: 192000,
+        supports_24bit: true,
+        supports_32bit_float: true,
+        system_ram_gb: ram_gb,
+    }
+}
+
+pub fn probe_optimal_profile() -> AudioEngineProfile {
+    let caps = probe_hardware_capabilities();
+    let max_channels = match caps.system_ram_gb {
+        0..=4 => 32,
+        5..=8 => 128,
+        9..=16 => 256,
+        17..=32 => 512,
+        _ => 1024,
+    };
+
+    if caps.max_sample_rate >= 192000 {
+        AudioEngineProfile {
+            name: format!("Hardware Optimal 192k/24-bit ({} GB RAM)", caps.system_ram_gb),
+            sample_rate: 192000.0,
+            block_size: 32,
+            pcm_format: if caps.supports_32bit_float { "f32".into() } else { "S24_LE".into() },
+            max_channels,
+            raw_dsp_latency_ms: 0.32,
+            full_console_latency_ms: 0.82,
+            mmap_direct: true,
+            no_period_wakeup: true,
+            reserve_device: true,
+        }
+    } else if caps.max_sample_rate >= 96000 {
+        AudioEngineProfile {
+            name: format!("Hardware Optimal 96k/24-bit ({} GB RAM)", caps.system_ram_gb),
+            sample_rate: 96000.0,
+            block_size: 32,
+            pcm_format: if caps.supports_32bit_float { "f32".into() } else { "S24_LE".into() },
+            max_channels,
+            raw_dsp_latency_ms: 0.48,
+            full_console_latency_ms: 1.48,
+            mmap_direct: true,
+            no_period_wakeup: true,
+            reserve_device: true,
+        }
+    } else {
+        AudioEngineProfile {
+            name: format!("Hardware Optimal 48k/24-bit ({} GB RAM)", caps.system_ram_gb),
+            sample_rate: 48000.0,
+            block_size: 64,
+            pcm_format: "f32".into(),
+            max_channels,
+            raw_dsp_latency_ms: 1.63,
+            full_console_latency_ms: 3.63,
+            mmap_direct: true,
+            no_period_wakeup: true,
+            reserve_device: true,
+        }
+    }
+}

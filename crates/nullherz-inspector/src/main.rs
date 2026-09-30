@@ -835,6 +835,16 @@ impl InspectorApp {
                     ui.label(format!("BPM: {:.1}", t.bpm));
                     ui.separator();
                     ui.label(format!("POS: {:.2}", t.beat_position));
+                    ui.separator();
+
+                    let rt_warnings = ipc_layer::realtime_environment_warnings();
+                    if self.settings.exclusive_performance_mode && rt_warnings.is_empty() {
+                        ui.label(egui::RichText::new("⚡ RT 0.32ms (SCHED_FIFO 90)").strong().color(self.theme.success));
+                    } else if !rt_warnings.is_empty() {
+                        ui.label(egui::RichText::new("⚠️ PREEMPTION RISK (NO RTPRIO)").strong().color(self.theme.danger));
+                    } else {
+                        ui.label(egui::RichText::new("💻 DESKTOP ~10ms (PIPEWIRE)").color(self.theme.warning));
+                    }
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

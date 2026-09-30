@@ -79,12 +79,12 @@ pub fn render_vu_meter(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Col
     // Background
     ui.painter().rect_filled(rect, 1.0, Color32::from_rgb(10, 10, 12));
 
-    // Calibrated Ticks
+    // Calibrated Ticks (High-Contrast for Club/Studio Environments)
     for db in [-48, -24, -12, -6, 0, 6] {
         let val = 10.0f32.powf(db as f32 / 20.0);
         let ty = rect.max.y - (val * (height / 1.2)).min(height);
         if ty >= rect.min.y && ty <= rect.max.y {
-            ui.painter().hline(rect.x_range(), ty, Stroke::new(0.5_f32, Color32::from_gray(60)));
+            ui.painter().hline(rect.x_range(), ty, Stroke::new(0.75_f32, Color32::from_gray(90)));
         }
     }
 
@@ -110,11 +110,11 @@ pub fn render_vu_meter(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Col
 
     ui.painter().rect_filled(level_rect, 0.0, color);
 
-    // Peak Hold (Digital ballistic)
+    // Peak Hold (High-contrast white ballistic indicator line)
     let ph_h = (peak_hold * (height / 1.2)).min(height);
     let ph_y = rect.max.y - ph_h;
     if ph_y >= rect.min.y {
-        ui.painter().hline(rect.x_range(), ph_y, Stroke::new(1.0_f32, Color32::WHITE));
+        ui.painter().hline(rect.x_range(), ph_y, Stroke::new(1.5_f32, Color32::WHITE));
     }
 }
 

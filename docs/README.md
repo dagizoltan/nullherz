@@ -32,6 +32,7 @@ Core technical specifications and engineering principles.
 - [Verification & QA Strategy](./system/VERIFICATION_AND_QA_STRATEGY.md)
 - [Validation Runbook (Survival & RTL)](./system/VALIDATION_RUNBOOK.md) — procedures for the Validation Gate's blocking tests
 - [Embedded ARM & MPC Architecture](./system/EMBEDDED_ARM_MPC_ARCHITECTURE.md) — ARMv7 cross-compilation target, MPC Live 1 assembly, 32-bit type system, and touch UI
+- [Latency & Channel Scaling Specification](./system/LATENCY_AND_CHANNEL_SCALING_SPECIFICATION.md) — RAM-based channel capacity limits, 16/24/32-bit latency performance matrix across 44.1k–192k, multi-channel CPU workloads, and PipeWire vs. direct ALSA MMAP
 
 ## 📊 [Current State & Health](./state/)
 Tracking of system maturity and technical debt.

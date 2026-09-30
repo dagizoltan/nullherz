@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Local CI gate — the same checks as .github/workflows/ci.yml, runnable
-# without GitHub Actions. Run before pushing; wire it up as a pre-push hook
+# Local verification gate — primary check suite (GitHub Actions CI workflow
+# is detached due to billing issues). Run before pushing; wire it up as a pre-push hook
 # with:  git config core.hooksPath .githooks
 #
 # Usage:
