@@ -890,14 +890,14 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                         let channel_color = theme.deck_colors[c_idx % 4];
 
                                         egui::Frame::none()
-                                            .fill(theme.bg_surface)
+                                            .fill(if is_selected { theme.bg_surface.linear_multiply(1.15) } else { theme.bg_surface })
                                             .rounding(egui::Rounding::same(theme.radius_md))
                                             .inner_margin(egui::Margin::same(theme.space_md))
-                                            .stroke(egui::Stroke::new(1.0, if is_selected { theme.accent } else { theme.border }))
+                                            .stroke(egui::Stroke::new(if is_selected { 2.0 } else { 1.0 }, if is_selected { channel_color } else { theme.border }))
                                             .show(ui, |ui| {
                                                 ui.set_width(VIZ_STRIP_W);
                                                 ui.vertical(|ui| {
-                                                    // Layer Card Header
+                                                    // Standardized Mixer Header Bar
                                                     ui.horizontal(|ui| {
                                                         if ui.button(egui::RichText::new(&channel.name).strong().size(theme.type_body).color(channel_color)).clicked() {
                                                             app.viz.selected_channel_idx = c_idx;
@@ -909,6 +909,16 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                                             if ui.add(close_btn).on_hover_text("Remove Visual Layer").clicked() {
                                                                 channel_to_remove = Some(c_idx);
                                                             }
+
+                                                            // Mute & Solo Toggles
+                                                            let mute_bg = if channel.is_muted { theme.danger } else { theme.bg_inset };
+                                                            let mute_btn = egui::Button::new(egui::RichText::new("M").size(9.0).strong().color(if channel.is_muted { egui::Color32::WHITE } else { theme.text_secondary }))
+                                                                .fill(mute_bg)
+                                                                .min_size(egui::vec2(16.0, 16.0));
+                                                            if ui.add(mute_btn).on_hover_text("Mute Layer").clicked() {
+                                                                channel.is_muted = !channel.is_muted;
+                                                            }
+
                                                             if c_idx < num_channels - 1 {
                                                                 let right_btn = egui::Button::new(egui::RichText::new("►").size(9.0).strong().color(theme.text_secondary))
                                                                     .fill(theme.bg_inset)
@@ -930,7 +940,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
 
                                                     ui.add_space(2.0);
 
-                                                    // Generator Dropdown Selector
+                                                    // Generator Engine Dropdown Selector
                                                     egui::ComboBox::from_id_source(format!("gen_combo_{}", c_idx))
                                                         .selected_text(egui::RichText::new(channel.generator.name()).size(8.5).strong().color(theme.text_primary))
                                                         .width(VIZ_STRIP_W - 12.0)
@@ -942,7 +952,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
 
                                                     ui.add_space(2.0);
 
-                                                    // Multi-Input Audio Sources Selector
+                                                    // Audio Input Source Routing Chips
                                                     egui::Frame::none()
                                                         .fill(theme.bg_inset)
                                                         .rounding(egui::Rounding::same(theme.radius_sm))
@@ -973,7 +983,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
 
                                                     ui.add_space(2.0);
 
-                                                    // Layer Live Preview Surface
+                                                    // Layer Live Canvas Preview Surface
                                                     let (rect, _resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 130.0), egui::Sense::click());
                                                     ui.painter().rect_filled(rect, theme.radius_sm, theme.bg_inset);
                                                     ui.painter().rect_stroke(rect, theme.radius_sm, egui::Stroke::new(1.0, theme.border_stroke.color));
@@ -1036,7 +1046,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
 
                                                     ui.add_space(2.0);
 
-                                                    // Visual Inserts Rack
+                                                    // Mixer-Style Standardized Param Knobs Frame
                                                     egui::Frame::none()
                                                         .fill(theme.bg_inset)
                                                         .rounding(egui::Rounding::same(theme.radius_sm))
@@ -1045,13 +1055,58 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                                         .show(ui, |ui| {
                                                             ui.set_width(VIZ_STRIP_W - 20.0);
                                                             ui.vertical_centered(|ui| {
-                                                                ui.label(egui::RichText::new("PARAMS & INSERTS").size(8.0).strong().color(theme.text_secondary));
+                                                                ui.label(egui::RichText::new("PARAM CONTROLS").size(8.0).strong().color(theme.text_secondary));
                                                                 ui.horizontal(|ui| {
                                                                     ui.spacing_mut().item_spacing.x = 2.0;
+                                                                    nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.gain_sensitivity, 0.1..=3.0, "SENS", channel_color, 22.0);
                                                                     nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_speed, 0.1..=4.0, "SPD", channel_color, 22.0);
                                                                     nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_neural_temp, 0.0..=2.0, "TMP", channel_color, 22.0);
                                                                     nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_feedback, 0.0..=1.0, "FB", channel_color, 22.0);
                                                                 });
+                                                            });
+                                                        });
+
+                                                    ui.add_space(2.0);
+
+                                                    // Compositing Blend Mode & Opacity
+                                                    egui::Frame::none()
+                                                        .fill(theme.bg_inset)
+                                                        .rounding(egui::Rounding::same(theme.radius_sm))
+                                                        .inner_margin(egui::Margin::same(4.0))
+                                                        .stroke(egui::Stroke::new(1.0, theme.border_stroke.color))
+                                                        .show(ui, |ui| {
+                                                            ui.set_width(VIZ_STRIP_W - 20.0);
+                                                            ui.vertical(|ui| {
+                                                                ui.label(egui::RichText::new("BLEND & OPACITY").size(8.0).strong().color(theme.accent));
+                                                                ui.add_space(2.0);
+                                                                egui::ComboBox::from_id_source(format!("blend_cb_{}", c_idx))
+                                                                    .selected_text(egui::RichText::new(channel.blend_mode.name()).size(8.0).strong().color(theme.text_primary))
+                                                                    .width(VIZ_STRIP_W - 28.0)
+                                                                    .show_ui(ui, |ui| {
+                                                                        for mode in state::VisualBlendMode::all() {
+                                                                            ui.selectable_value(&mut channel.blend_mode, *mode, mode.name());
+                                                                        }
+                                                                    });
+                                                                ui.add_space(2.0);
+                                                                ui.horizontal(|ui| {
+                                                                    ui.label(egui::RichText::new("OP").size(8.0).strong().color(theme.text_secondary));
+                                                                    ui.add(egui::Slider::new(&mut channel.opacity, 0.0..=1.0).show_value(false));
+                                                                });
+                                                            });
+                                                        });
+
+                                                    ui.add_space(2.0);
+
+                                                    // Visual Inserts Rack Container
+                                                    egui::Frame::none()
+                                                        .fill(theme.bg_inset)
+                                                        .rounding(egui::Rounding::same(theme.radius_sm))
+                                                        .inner_margin(egui::Margin::same(4.0))
+                                                        .stroke(egui::Stroke::new(1.0, theme.border_stroke.color))
+                                                        .show(ui, |ui| {
+                                                            ui.set_width(VIZ_STRIP_W - 20.0);
+                                                            ui.vertical_centered(|ui| {
+                                                                ui.label(egui::RichText::new("FX INSERTS RACK").size(8.0).strong().color(theme.text_secondary));
 
                                                                 ui.add_space(2.0);
 
