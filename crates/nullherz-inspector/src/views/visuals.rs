@@ -322,10 +322,15 @@ pub fn render_composite_target_screen(
     let screen_opt = app.viz.target_screens.iter().find(|s| s.id == target_screen_id).cloned();
     let Some(screen) = screen_opt else { return; };
 
-    // Constrain height to card frame (140px) and compute 16:9 aspect width
-    let desired_h = 130.0f32;
-    let desired_w = (desired_h * (16.0 / 9.0)).min(ui.available_width());
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(desired_w, desired_h), egui::Sense::click_and_drag());
+    // Dynamically expand to full available frame size when detached, or constrain to row frame
+    let avail_size = ui.available_size();
+    let (rect, response) = if avail_size.x > 300.0 && avail_size.y > 200.0 {
+        ui.allocate_exact_size(avail_size, egui::Sense::click_and_drag())
+    } else {
+        let desired_h = 130.0f32;
+        let desired_w = (desired_h * (16.0 / 9.0)).min(ui.available_width());
+        ui.allocate_exact_size(egui::vec2(desired_w, desired_h), egui::Sense::click_and_drag())
+    };
 
     ui.painter().rect_filled(
         rect,
@@ -358,9 +363,9 @@ pub fn render_composite_target_screen(
         return;
     }
 
-    // Prepare composite target framebuffer
-    let target_w = 320usize;
-    let target_h = 200usize;
+    // Prepare composite target framebuffer scaled to viewport canvas size
+    let target_w = (rect.width() as usize).clamp(160, 640);
+    let target_h = (rect.height() as usize).clamp(100, 400);
     let mut target_engine = state::PixelFeedbackEngine::new(target_w, target_h);
 
     // Initialize with screen clear color
