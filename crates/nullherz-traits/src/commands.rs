@@ -182,6 +182,10 @@ pub enum CoreCommand {
     CommitTopology,
     SetBpm(f32),
     SetMasterDeck(char),
+    ConfigureAudioEngine {
+        sample_rate: f32,
+        block_size: usize,
+    },
     SwitchBackend(AudioBackendType),
     CalibrateLatency,
     InjectMidi(MidiEvent),

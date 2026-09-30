@@ -1318,25 +1318,24 @@ pub fn apply_realtime_limits_fix() -> Result<String, String> {
         return Ok(format!("Successfully wrote real-time limits to {}", target_file));
     }
 
-    // Otherwise, invoke pkexec or sudo tee non-blockingly
-    let status = std::process::Command::new("pkexec")
-        .arg("tee")
-        .arg(target_file)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .spawn()
-        .and_then(|mut child| {
-            if let Some(mut stdin) = child.stdin.take() {
-                use std::io::Write;
-                let _ = stdin.write_all(conf_content.as_bytes());
-            }
-            child.wait()
-        });
+    // Otherwise, spawn worker thread so UI thread is never blocked during authentication
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("pkexec")
+            .arg("tee")
+            .arg(target_file)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .and_then(|mut child| {
+                if let Some(mut stdin) = child.stdin.take() {
+                    use std::io::Write;
+                    let _ = stdin.write_all(conf_content.as_bytes());
+                }
+                child.wait()
+            });
+    });
 
-    match status {
-        Ok(s) if s.success() => Ok(format!("Successfully wrote real-time limits via pkexec to {}", target_file)),
-        _ => Err("Could not write limits file directly or via pkexec. Run: sudo scripts/baremetal_core_isolate.sh --apply".to_string()),
-    }
+    Ok(format!("Dispatched background real-time limits setup to {}", target_file))
 }
 
 pub fn setup_rt_thread(priority: i32, cpu_id: Option<usize>) {

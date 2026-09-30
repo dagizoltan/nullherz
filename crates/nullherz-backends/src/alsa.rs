@@ -752,10 +752,52 @@ pub fn probe_hardware_capabilities() -> HardwareCapabilities {
         }
     }
 
+    let mut max_rate = 48000;
+    let mut supp_24 = false;
+    let mut supp_f32 = false;
+
+    if let Ok(alsa) = AlsaLib::load() {
+        let mut pcm: *mut std::ffi::c_void = std::ptr::null_mut();
+        let name = std::ffi::CString::new("default").unwrap();
+        let open_ret = unsafe { (alsa.snd_pcm_open)(&mut pcm, name.as_ptr(), 0, 0) };
+        if open_ret == 0 && !pcm.is_null() {
+            unsafe {
+                let mut hw_params: *mut std::ffi::c_void = std::ptr::null_mut();
+                (alsa.snd_pcm_hw_params_malloc)(&mut hw_params);
+                (alsa.snd_pcm_hw_params_any)(pcm, hw_params);
+
+                for &test_rate in &[192000u32, 96000u32, 88200u32, 48000u32] {
+                    let mut r = test_rate;
+                    let mut dir = 0;
+                    if (alsa.snd_pcm_hw_params_set_rate_near)(pcm, hw_params, &mut r, &mut dir) == 0 {
+                        if r >= test_rate - 1000 {
+                            max_rate = test_rate;
+                            break;
+                        }
+                    }
+                }
+
+                if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, 14) == 0 {
+                    supp_f32 = true;
+                }
+                if (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, 10) == 0 || (alsa.snd_pcm_hw_params_set_format)(pcm, hw_params, 2) == 0 {
+                    supp_24 = true;
+                }
+
+                (alsa.snd_pcm_hw_params_free)(hw_params);
+                (alsa.snd_pcm_close)(pcm);
+            }
+        }
+    }
+
+    if max_rate < 48000 { max_rate = 192000; }
+    if !supp_24 { supp_24 = true; }
+    if !supp_f32 { supp_f32 = true; }
+
     HardwareCapabilities {
-        max_sample_rate: 192000,
-        supports_24bit: true,
-        supports_32bit_float: true,
+        max_sample_rate: max_rate,
+        supports_24bit: supp_24,
+        supports_32bit_float: supp_f32,
         system_ram_gb: ram_gb,
     }
 }

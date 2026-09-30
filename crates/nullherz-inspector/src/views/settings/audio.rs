@@ -93,6 +93,10 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                         if ui.button("Apply Preset").clicked() {
                             app.settings.sample_rate = rate;
                             app.settings.buffer_size = block;
+                            let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::ConfigureAudioEngine {
+                                sample_rate: rate,
+                                block_size: block,
+                            }));
                             if direct_mmap {
                                 unsafe {
                                     std::env::set_var("NULLHERZ_ALSA_MMAP", "1");
@@ -125,6 +129,10 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
             if ui.add_sized([ui.available_width(), 28.0], egui::Button::new(RichText::new(auto_label).strong().color(theme.accent))).clicked() {
                 app.settings.sample_rate = optimal_profile.sample_rate;
                 app.settings.buffer_size = optimal_profile.block_size;
+                let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::ConfigureAudioEngine {
+                    sample_rate: optimal_profile.sample_rate,
+                    block_size: optimal_profile.block_size,
+                }));
                 if optimal_profile.mmap_direct {
                     unsafe {
                         std::env::set_var("NULLHERZ_ALSA_MMAP", "1");
@@ -209,7 +217,7 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                         let _ = ipc_layer::apply_realtime_limits_fix();
                     }
                     ui.label(
-                        RichText::new("Generates /etc/security/limits.d/99-nullherz-realtime.conf for zero preemption risk across reboots.")
+                        RichText::new("Generates /etc/security/limits.d/99-nullherz-realtime.conf for zero preemption risk across reboots. Note: Linux PAM requires a one-time logout/login or reboot for rtprio limits to take effect.")
                             .color(theme.text_secondary)
                             .size(theme.type_caption),
                     );
