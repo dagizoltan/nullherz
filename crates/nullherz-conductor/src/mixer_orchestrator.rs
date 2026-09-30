@@ -231,6 +231,10 @@ impl MixerOrchestrator {
                         ramp_duration_samples: 0,
                     }));
 
+                    // FIRST-TRACK MASTER BPM AUTO-BINDING:
+                    // When transport_bpm <= 0.0 or sync_on is active, set global transport BPM.
+                    // Raw mode default load does not override active non-zero transport BPM unless sync is on.
+
                     // FACETS, not the full row: everything below is bpm, key and
                     // DNA. `get_track` would parse the whole JSON row including
                     // peaks/MIPs/band waveform — 61 ms for a 6-minute track

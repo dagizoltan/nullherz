@@ -280,8 +280,16 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
     // Glowing visual pulse on the active playhead needle matching the current beat/tempo
     let is_playing = app.decks.deck_playing[i];
     if is_playing {
-        let beat_pos = telemetry.as_ref().map(|tel| tel.beat_position).unwrap_or(0.0);
-        let pulse = (1.0 - (beat_pos % 1.0) as f32).powf(3.0);
+        let pulse = if t.metadata.bpm > 20.0 {
+            let spb = sr as f64 * 60.0 / t.metadata.bpm as f64;
+            let offset = t.metadata.beat_grid_offset as f64;
+            let deck_beat_pos = (elapsed_samples as f64 - offset) / spb;
+            let phase = (deck_beat_pos % 1.0 + 1.0) % 1.0;
+            (1.0 - phase as f32).powf(3.0)
+        } else {
+            let beat_pos = telemetry.as_ref().map(|tel| tel.beat_position).unwrap_or(0.0);
+            (1.0 - (beat_pos % 1.0) as f32).powf(3.0)
+        };
         let glow_color = deck_color.linear_multiply(pulse * 0.8);
         ui.painter().line_segment(
             [egui::pos2(cx, rect.min.y), egui::pos2(cx, rect.max.y)],
