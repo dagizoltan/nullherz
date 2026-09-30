@@ -232,21 +232,18 @@ impl MixerOrchestrator {
                     }));
 
                     // FIRST-TRACK MASTER BPM AUTO-BINDING:
-                    // When transport_bpm <= 0.0 or sync_on is active, set global transport BPM.
-                    // Raw mode default load does not override active non-zero transport BPM unless sync is on.
+                    // If transport_bpm <= 0.0 or sync_on is active, bind transport BPM to track BPM.
+                    let is_first_track = mixer_manager.transport_bpm <= 0.0;
 
                     // FACETS, not the full row: everything below is bpm, key and
                     // DNA. `get_track` would parse the whole JSON row including
                     // peaks/MIPs/band waveform — 61 ms for a 6-minute track
                     // against 2.5 ms for a 17-second one, on the latency-critical
                     // command path, while holding the library mutex.
-                    //
-                    // Skipped entirely in RAW: with both latches off there is
-                    // nothing here to read, so the lock is never taken.
-                    if sync_on || key_on {
+                    if sync_on || key_on || is_first_track {
                         let lib = library.lock();
                         if let Ok(Some(track)) = lib.get_track_facets(*sample_id) {
-                            if sync_on && track.bpm > 0.0 {
+                            if (sync_on || is_first_track) && track.bpm > 0.0 {
                                 translated.push(Command::Core(nullherz_traits::CoreCommand::SetBpm(track.bpm)));
                             }
 
