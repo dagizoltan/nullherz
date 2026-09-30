@@ -195,9 +195,15 @@ impl OrganismEditorState {
     }
 
     fn export_yaml(&mut self) {
+        let dir = "assets/organism_profiles";
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            self.status_message = Some(format!("Directory Error: {}", e));
+            return;
+        }
+
         match serde_json::to_string_pretty(&self.active_profile) {
             Ok(json_str) => {
-                let filename = format!("assets/organism_profiles/{}.yaml", self.active_profile.id);
+                let filename = format!("{}/{}.yaml", dir, self.active_profile.id);
                 if let Err(e) = std::fs::write(&filename, json_str) {
                     self.status_message = Some(format!("Export Error: {}", e));
                 } else {
