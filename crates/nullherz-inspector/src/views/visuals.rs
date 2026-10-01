@@ -1027,6 +1027,28 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
 
                                                     ui.add_space(2.0);
 
+                                                    // Organism Profile Selector & Save Button
+                                                    ui.horizontal(|ui| {
+                                                        ui.spacing_mut().item_spacing.x = 2.0;
+                                                        egui::ComboBox::from_id_source(format!("org_combo_{}", c_idx))
+                                                            .selected_text(egui::RichText::new(&channel.organism_profile.name).size(8.0).strong().color(theme.accent))
+                                                            .width(VIZ_STRIP_W - 36.0)
+                                                            .show_ui(ui, |ui| {
+                                                                for default_prof in crate::views::organism_profile::OrganismProfile::all_defaults() {
+                                                                    if ui.selectable_label(channel.organism_profile.id == default_prof.id, &default_prof.name).clicked() {
+                                                                        channel.organism_profile = default_prof;
+                                                                    }
+                                                                }
+                                                            });
+
+                                                        if ui.add_sized([20.0, 18.0], egui::Button::new(egui::RichText::new("🧬").size(9.0).strong()).fill(theme.bg_inset)).on_hover_text("Save Organism Profile JSON").clicked() {
+                                                            let path = format!("assets/organism_profiles/{}.json", channel.organism_profile.id);
+                                                            let _ = channel.organism_profile.save_to_json(&path);
+                                                        }
+                                                    });
+
+                                                    ui.add_space(2.0);
+
                                                     // Audio Input Source Routing Chips
                                                     egui::Frame::none()
                                                         .fill(theme.bg_inset)

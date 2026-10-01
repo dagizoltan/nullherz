@@ -168,6 +168,19 @@ impl Default for RenderSpec {
 }
 
 impl OrganismProfile {
+    pub fn save_to_json(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn load_from_json(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let content = std::fs::read_to_string(path)?;
+        let profile: OrganismProfile = serde_json::from_str(&content)?;
+        Ok(profile)
+    }
+
     pub fn mycelial_bloom() -> Self {
         Self {
             id: "mycelial-bloom".to_string(),
