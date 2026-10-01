@@ -1305,6 +1305,54 @@ impl SidecarStore {
 
         store.register(
             SidecarDescriptor::new(
+                "pixel-sorting",
+                "Directional Pixel Sorting FX",
+                SidecarType::VisualInsert,
+                &["visual", "real-time", "insert", "glitch"],
+                "Directional intensity-based pixel sorting visual insert FX",
+                0,
+            ),
+            || Box::new(NeuralFilterProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "kaleidoscope-mirror",
+                "8-Fold Polar Symmetry Mirror FX",
+                SidecarType::VisualInsert,
+                &["visual", "real-time", "insert", "symmetry"],
+                "8-Fold polar coordinate kaleidoscope mirroring FX",
+                0,
+            ),
+            || Box::new(NeuralFilterProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "scanline-crt",
+                "CRT Scanline & Phosphor Decay FX",
+                SidecarType::VisualInsert,
+                &["visual", "real-time", "insert", "retro"],
+                "Retro CRT scanline simulation and phosphor decay FX",
+                0,
+            ),
+            || Box::new(NeuralFilterProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
+                "chromatic-aberration",
+                "Radial Chromatic Aberration FX",
+                SidecarType::VisualInsert,
+                &["visual", "real-time", "insert", "optical"],
+                "Radial RGB color channel displacement aberration FX",
+                0,
+            ),
+            || Box::new(NeuralFilterProcessor::new()),
+        );
+
+        store.register(
+            SidecarDescriptor::new(
                 "bioluminescent-fluid-flow",
                 "Bioluminescent Fluid Flow Surface",
                 SidecarType::VisualGenerator,
@@ -1639,7 +1687,7 @@ mod store_tests {
     fn test_store_list_and_descriptors() {
         let store = SidecarStore::with_defaults();
         let list = store.list();
-        assert_eq!(list.len(), 26);
+        assert_eq!(list.len(), 30);
 
         let delay_desc = store.get_descriptor("algorithmic-delay").expect("algorithmic-delay must exist");
         assert_eq!(delay_desc.name, "Algorithmic Tape Delay");
@@ -1674,10 +1722,10 @@ mod store_tests {
         assert_eq!(instruments.len(), 2);
 
         let realtimes = store.filter_by_tag("real-time");
-        assert_eq!(realtimes.len(), 26);
+        assert_eq!(realtimes.len(), 30);
 
         let visuals = store.filter_by_tag("visual");
-        assert_eq!(visuals.len(), 10);
+        assert_eq!(visuals.len(), 14);
 
         // Multi-tag queries
         let neural_inserts = store.filter_by_tags(&["neural", "insert", "real-time"]);
@@ -1702,7 +1750,7 @@ mod store_tests {
         assert_eq!(viz_generators.len(), 9);
 
         let viz_inserts = store.filter_by_type(SidecarType::VisualInsert);
-        assert_eq!(viz_inserts.len(), 1);
+        assert_eq!(viz_inserts.len(), 5);
     }
 
     #[test]
@@ -1720,7 +1768,7 @@ mod store_tests {
         assert_eq!(visual_inst.len(), 9);
 
         let visual_inserts = store.filter_by_category(AssetCategory::VisualInsert);
-        assert_eq!(visual_inserts.len(), 1);
+        assert_eq!(visual_inserts.len(), 5);
 
         let audio_files = store.filter_by_category(AssetCategory::AudioFiles);
         assert_eq!(audio_files.len(), 0);

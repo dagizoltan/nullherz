@@ -432,7 +432,7 @@ pub struct ComposerState {
     #[allow(dead_code)]
     pub channel_kinds: [ChannelKind; 16],
     pub record_automation: bool,
-    pub _automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>,
+    pub automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>,
     #[allow(dead_code)]
     pub evolution_strengths: [f32; 16],
     pub auto_pollinate_enabled: bool,
@@ -455,7 +455,7 @@ impl Default for ComposerState {
             track_targets: std::array::from_fn(|_| "(default)".to_string()),
             channel_kinds: std::array::from_fn(|i| if i < 4 { ChannelKind::StereoInput } else { ChannelKind::InstrumentSampler }),
             record_automation: false,
-            _automation_data: std::collections::HashMap::new(),
+            automation_data: std::collections::HashMap::new(),
             evolution_strengths: [0.0; 16],
             auto_pollinate_enabled: false,
             grid_zoom: 1.0,
@@ -1667,6 +1667,22 @@ pub struct VisualChannel {
 }
 
 impl VisualChannel {
+    pub fn export_preset_json(&self) -> Result<String, serde_json::Error> {
+        let preset = serde_json::json!({
+            "name": self.name,
+            "generator": self.generator.name(),
+            "param_speed": self.param_speed,
+            "param_neural_temp": self.param_neural_temp,
+            "param_feedback": self.param_feedback,
+            "param_color_shift": self.param_color_shift,
+            "gain_sensitivity": self.gain_sensitivity,
+            "blend_mode": self.blend_mode.name(),
+            "opacity": self.opacity,
+            "visual_inserts": self.visual_inserts,
+        });
+        serde_json::to_string_pretty(&preset)
+    }
+
     pub fn new(name: &str, generator: VisualGenerator, inputs: Vec<VisualInputSource>) -> Self {
         Self {
             name: name.to_string(),
