@@ -1121,6 +1121,19 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
 
                                                     ui.add_space(2.0);
 
+                                                    // MIDI CC Translation & Learn Handler
+                                                    if let Some(event) = app.settings.recent_midi_events.back() {
+                                                        if (event.status & 0xF0) == 0xB0 { // Control Change
+                                                            if channel.midi_learn_active {
+                                                                channel.midi_cc_param = event.data1;
+                                                                channel.midi_learn_active = false;
+                                                            } else if event.data1 == channel.midi_cc_param {
+                                                                let norm_val = event.data2 as f32 / 127.0;
+                                                                channel.param_speed = 0.1 + norm_val * 3.9;
+                                                            }
+                                                        }
+                                                    }
+
                                                     // Mixer-Style Standardized Param Knobs Frame
                                                     egui::Frame::none()
                                                         .fill(theme.bg_inset)
@@ -1130,7 +1143,21 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                                         .show(ui, |ui| {
                                                             ui.set_width(VIZ_STRIP_W - 20.0);
                                                             ui.vertical_centered(|ui| {
-                                                                ui.label(egui::RichText::new("PARAM CONTROLS").size(8.0).strong().color(theme.text_secondary));
+                                                                ui.horizontal(|ui| {
+                                                                    ui.label(egui::RichText::new("PARAM CONTROLS").size(8.0).strong().color(theme.text_secondary));
+                                                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                                        let learn_bg = if channel.midi_learn_active { theme.accent } else { theme.bg_surface };
+                                                                        let learn_btn = egui::Button::new(egui::RichText::new(format!("CC{}", channel.midi_cc_param)).size(7.5).strong().color(if channel.midi_learn_active { egui::Color32::BLACK } else { theme.accent }))
+                                                                            .fill(learn_bg)
+                                                                            .min_size(egui::vec2(24.0, 14.0));
+                                                                        if ui.add(learn_btn).on_hover_text("Click to Learn MIDI CC for SPD").clicked() {
+                                                                            channel.midi_learn_active = !channel.midi_learn_active;
+                                                                        }
+                                                                    });
+                                                                });
+
+                                                                ui.add_space(2.0);
+
                                                                 ui.horizontal(|ui| {
                                                                     ui.spacing_mut().item_spacing.x = 2.0;
                                                                     nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.gain_sensitivity, 0.1..=3.0, "SENS", channel_color, 22.0);
@@ -1212,20 +1239,29 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
 
                                                     ui.add_space(2.0);
 
-                                                    // Detach Layer Surface Button
-                                                    let is_detached = app.viz.detached_channel == Some(c_idx);
-                                                    let detach_icon = if is_detached {
-                                                        egui_phosphor::regular::ARROWS_IN_SIMPLE
-                                                    } else {
-                                                        egui_phosphor::regular::ARROW_SQUARE_OUT
-                                                    };
-                                                    if ui.add_sized([VIZ_STRIP_W - 12.0, 20.0], egui::Button::new(egui::RichText::new(format!("{} Detach Layer", detach_icon)).size(8.5).strong()).fill(theme.bg_inset)).clicked() {
-                                                        if is_detached {
-                                                            app.viz.detached_channel = None;
+                                                    // Detach Layer Surface Button & Preset Export
+                                                    ui.horizontal(|ui| {
+                                                        ui.spacing_mut().item_spacing.x = 2.0;
+                                                        let is_detached = app.viz.detached_channel == Some(c_idx);
+                                                        let detach_icon = if is_detached {
+                                                            egui_phosphor::regular::ARROWS_IN_SIMPLE
                                                         } else {
-                                                            app.viz.detached_channel = Some(c_idx);
+                                                            egui_phosphor::regular::ARROW_SQUARE_OUT
+                                                        };
+                                                        if ui.add_sized([VIZ_STRIP_W - 36.0, 20.0], egui::Button::new(egui::RichText::new(format!("{} Detach", detach_icon)).size(8.0).strong()).fill(theme.bg_inset)).clicked() {
+                                                            if is_detached {
+                                                                app.viz.detached_channel = None;
+                                                            } else {
+                                                                app.viz.detached_channel = Some(c_idx);
+                                                            }
                                                         }
-                                                    }
+
+                                                        if ui.add_sized([20.0, 20.0], egui::Button::new(egui::RichText::new("💾").size(9.0).strong()).fill(theme.bg_inset)).on_hover_text("Export Channel Preset JSON").clicked() {
+                                                            if let Ok(json) = channel.export_preset_json() {
+                                                                let _ = std::fs::write(format!("visual_preset_{}.json", c_idx + 1), json);
+                                                            }
+                                                        }
+                                                    });
                                                 });
                                             });
 

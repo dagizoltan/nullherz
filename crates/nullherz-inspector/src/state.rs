@@ -1667,6 +1667,22 @@ pub struct VisualChannel {
 }
 
 impl VisualChannel {
+    pub fn export_preset_json(&self) -> Result<String, serde_json::Error> {
+        let preset = serde_json::json!({
+            "name": self.name,
+            "generator": self.generator.name(),
+            "param_speed": self.param_speed,
+            "param_neural_temp": self.param_neural_temp,
+            "param_feedback": self.param_feedback,
+            "param_color_shift": self.param_color_shift,
+            "gain_sensitivity": self.gain_sensitivity,
+            "blend_mode": self.blend_mode.name(),
+            "opacity": self.opacity,
+            "visual_inserts": self.visual_inserts,
+        });
+        serde_json::to_string_pretty(&preset)
+    }
+
     pub fn new(name: &str, generator: VisualGenerator, inputs: Vec<VisualInputSource>) -> Self {
         Self {
             name: name.to_string(),
