@@ -432,7 +432,7 @@ pub struct ComposerState {
     #[allow(dead_code)]
     pub channel_kinds: [ChannelKind; 16],
     pub record_automation: bool,
-    pub _automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>,
+    pub automation_data: std::collections::HashMap<u64, Vec<(f64, f32)>>,
     #[allow(dead_code)]
     pub evolution_strengths: [f32; 16],
     pub auto_pollinate_enabled: bool,
@@ -455,7 +455,7 @@ impl Default for ComposerState {
             track_targets: std::array::from_fn(|_| "(default)".to_string()),
             channel_kinds: std::array::from_fn(|i| if i < 4 { ChannelKind::StereoInput } else { ChannelKind::InstrumentSampler }),
             record_automation: false,
-            _automation_data: std::collections::HashMap::new(),
+            automation_data: std::collections::HashMap::new(),
             evolution_strengths: [0.0; 16],
             auto_pollinate_enabled: false,
             grid_zoom: 1.0,

@@ -57,6 +57,27 @@ pub struct NeuralNcaMeshEngine {
 }
 
 impl NeuralNcaMeshEngine {
+    #[allow(dead_code)]
+    pub fn export_obj_mesh(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        use std::io::Write;
+        let mut file = std::fs::File::create(path)?;
+        writeln!(file, "# Nullherz 3D Neural Cellular Automata Mesh")?;
+        for v in &self.vertices {
+            let px = v.base_pos[0] + v.displacement[0];
+            let py = v.base_pos[1] + v.displacement[1];
+            let pz = v.base_pos[2] + v.displacement[2];
+            writeln!(file, "v {:.4} {:.4} {:.4}", px, py, pz)?;
+        }
+        for (idx, v) in self.vertices.iter().enumerate() {
+            for &n_idx in &v.neighbors {
+                if idx < n_idx {
+                    writeln!(file, "l {} {}", idx + 1, n_idx + 1)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn new() -> Self {
         let mut engine = Self {
             topology: NcaMeshTopology::SphereMesh,

@@ -1182,10 +1182,22 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
 
                                                                 ui.horizontal(|ui| {
                                                                     ui.spacing_mut().item_spacing.x = 2.0;
-                                                                    nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.gain_sensitivity, 0.1..=3.0, "SENS", channel_color, 22.0);
-                                                                    nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_speed, 0.1..=4.0, "SPD", channel_color, 22.0);
-                                                                    nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_neural_temp, 0.0..=2.0, "TMP", channel_color, 22.0);
-                                                                    nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_feedback, 0.0..=1.0, "FB", channel_color, 22.0);
+                                                                    if nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.gain_sensitivity, 0.1..=3.0, "SENS", channel_color, 22.0).changed() && app.composer.record_automation {
+                                                                        let t = ui.input(|i| i.time);
+                                                                        app.composer.automation_data.entry(100 + c_idx as u64).or_default().push((t, channel.gain_sensitivity));
+                                                                    }
+                                                                    if nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_speed, 0.1..=4.0, "SPD", channel_color, 22.0).changed() && app.composer.record_automation {
+                                                                        let t = ui.input(|i| i.time);
+                                                                        app.composer.automation_data.entry(200 + c_idx as u64).or_default().push((t, channel.param_speed));
+                                                                    }
+                                                                    if nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_neural_temp, 0.0..=2.0, "TMP", channel_color, 22.0).changed() && app.composer.record_automation {
+                                                                        let t = ui.input(|i| i.time);
+                                                                        app.composer.automation_data.entry(300 + c_idx as u64).or_default().push((t, channel.param_neural_temp));
+                                                                    }
+                                                                    if nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.param_feedback, 0.0..=1.0, "FB", channel_color, 22.0).changed() && app.composer.record_automation {
+                                                                        let t = ui.input(|i| i.time);
+                                                                        app.composer.automation_data.entry(400 + c_idx as u64).or_default().push((t, channel.param_feedback));
+                                                                    }
                                                                 });
                                                             });
                                                         });
