@@ -36,6 +36,7 @@ pub mod modulation_fx;
 pub mod transient_shaper;
 pub mod tape_saturator;
 pub mod mutator;
+pub mod deck_stem_matrix;
 #[cfg(test)]
 mod sampler_tests;
 #[cfg(test)]
@@ -76,6 +77,7 @@ pub use modulation_fx::AlgorithmicModulationProcessor;
 pub use transient_shaper::TransientShaperProcessor;
 pub use tape_saturator::TapeSaturatorProcessor;
 pub use mutator::{MutatorProcessor, MutatorFactory};
+pub use deck_stem_matrix::DeckStemMatrixProcessor;
 pub use registry::ProcessorRegistry;
 
 #[cfg(test)]

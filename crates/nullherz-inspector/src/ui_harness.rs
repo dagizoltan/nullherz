@@ -94,6 +94,7 @@ impl Harness {
             genre: "test".into(),
             energy_level: 0.5,
             metadata: Arc::new(meta),
+            stems: None,
         };
         self.app.decks.now_playing[deck] = Some(id);
         self.app.decks.cached_tracks[deck] = Some(track.clone());

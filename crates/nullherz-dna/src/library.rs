@@ -27,6 +27,7 @@ struct StoredTrack {
     genre: String,
     energy_level: f32,
     metadata: nullherz_traits::SampleMetadata,
+    stems: Option<nullherz_traits::StemSetMetadata>,
 }
 
 /// Encode a track row.
@@ -54,6 +55,7 @@ pub(crate) fn encode_track(track: &LibraryTrack) -> Result<Vec<u8>, Box<dyn std:
         genre: track.genre.clone(),
         energy_level: track.energy_level,
         metadata: (*track.metadata).clone(),
+        stems: track.stems.clone(),
     };
     let body = rkyv::to_bytes::<_, 4096>(&stored)
         .map_err(|e| -> Box<dyn std::error::Error> { format!("rkyv encode: {e}").into() })?;
@@ -113,6 +115,7 @@ pub(crate) fn decode_track(bytes: &[u8]) -> Result<LibraryTrack, Box<dyn std::er
             genre: stored.genre,
             energy_level: stored.energy_level,
             metadata: Arc::new(stored.metadata),
+            stems: stored.stems,
         });
     }
     Ok(serde_json::from_slice(bytes)?)
@@ -129,6 +132,8 @@ pub struct LibraryTrack {
     pub energy_level: f32,
     #[serde(with = "crate::consensus::serde_arc")]
     pub metadata: Arc<nullherz_traits::SampleMetadata>,
+    #[serde(default)]
+    pub stems: Option<nullherz_traits::StemSetMetadata>,
 }
 
 /// The small, queryable subset of a track — exactly the fields the query /
@@ -738,6 +743,7 @@ impl LibraryDatabase {
                             dna,
                             ..nullherz_traits::SampleMetadata::new_empty()
                         }),
+                        stems: None,
                     };
                     self.save_track(&track)?;
                 }

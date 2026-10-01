@@ -74,7 +74,7 @@ fn main() {
     meta.sample_rate = SR as u32;
     c.transfusion_manager
         .sample_registry
-        .register_with_metadata(1, Arc::new(samples), Arc::new(meta));
+        .register_with_metadata(1, Arc::new(samples).into(), Arc::new(meta));
 
     let bs = block();
     let mut l = vec![0.0f32; bs];

@@ -87,6 +87,7 @@ fn test_load_does_not_block_and_deck_still_sounds() {
         genre: "t".into(),
         energy_level: 0.5,
         metadata: Arc::new(metadata),
+        stems: None,
     }).unwrap();
     assert!(conductor.transfusion_manager.sample_registry.get(track_id).is_none());
 
@@ -166,6 +167,7 @@ fn test_reload_during_decode_is_deduped_and_superseded() {
         path: wav_path.to_string_lossy().into_owned(),
         title: "slow".into(), artist: "t".into(), album: "t".into(), genre: "t".into(),
         energy_level: 0.5, metadata: Arc::new(metadata),
+        stems: None,
     }).unwrap();
 
     // An instantly-available tone registered directly (no decode needed).
@@ -178,7 +180,7 @@ fn test_reload_during_decode_is_deduped_and_superseded() {
     md.bpm = 120.0;
     md.total_samples = frames as u64;
     md.channels = 2;
-    conductor.transfusion_manager.sample_registry.register_with_metadata(fast_id, Arc::new(tone), Arc::new(md));
+    conductor.transfusion_manager.sample_registry.register_with_metadata(fast_id, Arc::new(tone).into(), Arc::new(md));
 
     let mut left = vec![0.0f32; BLOCK];
     let mut right = vec![0.0f32; BLOCK];

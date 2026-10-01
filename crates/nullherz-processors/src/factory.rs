@@ -28,7 +28,17 @@ use crate::algorithmic_reverb::*;
 use crate::modulation_fx::*;
 use crate::transient_shaper::*;
 use crate::tape_saturator::*;
+use crate::deck_stem_matrix::*;
 pub use crate::mutator::MutatorFactory;
+
+pub struct DeckStemMatrixFactory;
+impl ProcessorFactory for DeckStemMatrixFactory {
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(DeckStemMatrixProcessor::new(node_idx as u64, sample_rate)))
+    }
+    fn name(&self) -> &'static str { "DeckStemMatrix" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::DECK_STEM_MATRIX }
+}
 
 /// Identity pass-through, used to hold an insert slot open.
 ///

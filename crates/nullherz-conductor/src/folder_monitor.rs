@@ -219,7 +219,7 @@ impl FolderMonitor {
                 && track.metadata.channels as usize == decoded.channels
                 && track.metadata.sample_rate == decoded.sample_rate
             {
-                self.sample_registry.register_with_metadata(id, decoded.samples, track.metadata.clone());
+                self.sample_registry.register_with_metadata(id, decoded.samples.into(), track.metadata.clone());
                 println!("FolderMonitor: Hydrated registry for {}", path);
                 return;
             }
@@ -241,10 +241,11 @@ impl FolderMonitor {
             genre: "Unknown".to_string(),
             energy_level: 0.5,
             metadata: Arc::new(metadata),
+            stems: None,
         };
 
         let _ = lib.save_track(&track);
-        self.sample_registry.register_with_metadata(id, decoded.samples, track.metadata.clone());
+        self.sample_registry.register_with_metadata(id, decoded.samples.into(), track.metadata.clone());
         println!("FolderMonitor: Registered {}", path);
     }
 
@@ -451,7 +452,7 @@ mod tests {
         let second = registry.get(id).expect("still registered").buffer;
 
         assert!(
-            Arc::ptr_eq(&first, &second),
+            nullherz_traits::SampleBuffer::ptr_eq(&first, &second),
             "rescan re-decoded an already-registered file — the freeze regression is back"
         );
 

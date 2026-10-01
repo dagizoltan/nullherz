@@ -57,7 +57,7 @@ fn test_playhead_advances_past_f32_freeze_threshold() {
 
     let buffer = Arc::new(vec![0.25f32; frames]);
     let mut voice = SamplerVoice::new();
-    voice.trigger_at(buffer, 1.0, 1.0, start, 0.0);
+    voice.trigger_at(buffer.into(), 1.0, 1.0, start, 0.0);
     voice.set_layout(frames, 1);
 
     let mut out = vec![0.0f32; 2048];
@@ -87,7 +87,7 @@ fn test_fractional_rate_is_honoured_on_a_long_buffer() {
 
     let buffer = Arc::new(vec![0.25f32; frames]);
     let mut voice = SamplerVoice::new();
-    voice.trigger_at(buffer, rate, 1.0, start, 0.0);
+    voice.trigger_at(buffer.into(), rate, 1.0, start, 0.0);
     voice.set_layout(frames, 1);
 
     let blocks = 1024;
@@ -120,7 +120,7 @@ fn test_interpolation_fraction_survives_on_a_long_buffer() {
     let buffer = Arc::new(data);
     let mut voice = SamplerVoice::new();
     voice.interpolation = audio_dsp::InterpolationType::Linear;
-    voice.trigger_at(buffer, 1.0, 1.0, (base + 4) as f64 + 0.5, 0.0);
+    voice.trigger_at(buffer.into(), 1.0, 1.0, (base + 4) as f64 + 0.5, 0.0);
     voice.set_layout(frames, 1);
 
     let mut out = vec![0.0f32; 1];

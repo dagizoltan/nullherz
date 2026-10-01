@@ -376,7 +376,34 @@ pub enum StemClassification {
     Percussion,
     Bass,
     Synth,
+    LeadVocal,
+    BackingVocal,
+    Guitar,
+    PianoKeys,
+    SynthPad,
+    BrassStrings,
+    FxTexture,
     Unknown,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
+pub struct SingleStemMetadata {
+    pub classification: StemClassification,
+    pub relative_path: String,
+    pub lufs_integrated: f32,
+    pub peak_db: f32,
+    pub dna: SoundDNA,
+    pub mip_waveform: MipWaveform,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
+pub struct StemSetMetadata {
+    pub track_id: u64,
+    pub tier: u8, // 4, 6, 8, or 12
+    pub stems: Vec<SingleStemMetadata>,
+    pub created_at_timestamp: u64,
 }
 
 impl Default for StemClassification {

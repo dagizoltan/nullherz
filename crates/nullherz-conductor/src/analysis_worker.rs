@@ -20,6 +20,7 @@ thread_local! {
 pub struct AnalysisWorker {
     sample_registry: Arc<dyn SampleRegistry>,
     library: Option<Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>>,
+    stem_worker: Option<Arc<crate::stem_worker::StemExtractionWorker>>,
     /// Ids analysis is FINISHED with, shared with the conductor.
     ///
     /// Shared rather than owned because `start()` moves the worker onto its own
@@ -36,6 +37,7 @@ impl AnalysisWorker {
         Self {
             sample_registry,
             library: None,
+            stem_worker: None,
             processed_ids: Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new())),
             compatibility_matrix: std::collections::HashMap::new(),
             dirty_ids: std::collections::HashSet::new(),
@@ -44,6 +46,11 @@ impl AnalysisWorker {
 
     pub fn with_library(mut self, library: Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>) -> Self {
         self.library = Some(library);
+        self
+    }
+
+    pub fn with_stem_worker(mut self, worker: Arc<crate::stem_worker::StemExtractionWorker>) -> Self {
+        self.stem_worker = Some(worker);
         self
     }
 
@@ -93,7 +100,7 @@ impl AnalysisWorker {
         println!("AnalysisWorker: Processing {} new samples in batch", unprocessed_ids.len());
 
         let registry = self.sample_registry.clone();
-        let results: Vec<(u64, nullherz_traits::SampleMetadata, Arc<Vec<f32>>)> = unprocessed_ids.into_par_iter()
+        let results: Vec<(u64, nullherz_traits::SampleMetadata, nullherz_traits::SampleBuffer)> = unprocessed_ids.into_par_iter()
             .filter_map(|id| {
                 let sample = registry.get(id)?;
 
@@ -153,12 +160,17 @@ impl AnalysisWorker {
         if !tracks_to_save.is_empty() {
             if let Some(ref lib_mutex) = self.library {
                 let lib = lib_mutex.lock();
-                for (id, metadata) in tracks_to_save {
-                    if let Ok(Some(mut track)) = lib.get_track(id) {
-                        track.metadata = Arc::new(metadata);
+                for (id, metadata) in &tracks_to_save {
+                    if let Ok(Some(mut track)) = lib.get_track(*id) {
+                        track.metadata = Arc::new(metadata.clone());
                         let _ = lib.save_track(&track);
                         println!("AnalysisWorker: Enriched metadata for ID={}", id);
                     }
+                }
+            }
+            if let Some(ref worker) = self.stem_worker {
+                for (id, _) in &tracks_to_save {
+                    worker.request_extraction(*id);
                 }
             }
         }

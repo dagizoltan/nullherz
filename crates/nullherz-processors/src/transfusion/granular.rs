@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use nullherz_traits::{AudioProcessor, ProcessContext, ProcessorMetadata, ParameterMetadata};
 use audio_dsp::{SamplerVoice, InterpolationType};
 
@@ -19,7 +18,7 @@ pub struct GranularProcessor {
     voices: Vec<SamplerVoice>,
     voice_ages: [u32; MAX_GRAINS],
     voice_durations: [u32; MAX_GRAINS],
-    pub source_pool: [Option<Arc<Vec<f32>>>; MAX_SOURCES],
+    pub source_pool: [Option<nullherz_traits::SampleBuffer>; MAX_SOURCES],
     pub source_count: usize,
     render_buffer: [f32; ipc_layer::MAX_BLOCK_SIZE],
     grain_buffer: [f32; ipc_layer::MAX_BLOCK_SIZE],
@@ -74,7 +73,7 @@ impl GranularProcessor {
         (self.rng_state >> 32) as f32 / 4294967296.0
     }
 
-    pub fn add_source(&mut self, source: Arc<Vec<f32>>) {
+    pub fn add_source(&mut self, source: nullherz_traits::SampleBuffer) {
         if self.source_count < MAX_SOURCES {
             self.source_pool[self.source_count] = Some(source);
             self.source_count += 1;
@@ -153,7 +152,7 @@ fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], _context: 
 
                         let duration_samples = (self.grain_duration_ms * 0.001 * self.sample_rate) as u32;
 
-                        self.voices[idx].trigger(source, playback_rate, 1.0);
+                        self.voices[idx].trigger(source.to_voice_buffer(), playback_rate, 1.0);
                         self.voices[idx].play_head = start_pos as f64;
                         self.voices[idx].interpolation = self.interpolation;
                         self.voice_ages[idx] = 0;

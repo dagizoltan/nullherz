@@ -19,7 +19,7 @@ fn test_evicting_the_only_holder_frees_the_buffer() {
     let buf = sample_of(16_384);
     let weak = Arc::downgrade(&buf);
 
-    reg.register(7, buf);
+    reg.register(7, buf.into());
     // Drop our own handle so the registry is the sole owner. `weak` now tracks
     // exactly whether the registry is holding the audio.
     assert!(weak.upgrade().is_some(), "registry should be holding the buffer");
@@ -56,10 +56,11 @@ fn test_eviction_does_not_pull_the_buffer_from_a_live_user() {
     // the audio out from under the audio thread mid-block.
     let reg = nullherz_dna::SampleRegistry::new();
     let buf = sample_of(4_096);
-    reg.register(9, buf);
+    reg.register(9, buf.into());
 
     let in_use = reg.get(9).expect("registered").buffer;
-    let weak = Arc::downgrade(&in_use);
+    let nullherz_traits::SampleBuffer::Heap(ref heap_arc) = in_use else { panic!("expected Heap") };
+    let weak = Arc::downgrade(heap_arc);
 
     drop(reg.remove(9));
 
@@ -75,7 +76,7 @@ fn test_eviction_does_not_pull_the_buffer_from_a_live_user() {
 #[test]
 fn test_removing_an_unknown_id_is_a_no_op() {
     let reg = nullherz_dna::SampleRegistry::new();
-    reg.register(1, sample_of(64));
+    reg.register(1, sample_of(64).into());
     assert!(reg.remove(999).is_none(), "unknown id must report None");
     assert!(reg.get(1).is_some(), "an unrelated entry must survive a missed eviction");
 }
@@ -93,7 +94,7 @@ fn test_residency_falls_when_a_scan_is_reaped() {
     for id in 0..N {
         let buf = sample_of(FRAMES);
         weaks.push(Arc::downgrade(&buf));
-        reg.register(id, buf);
+        reg.register(id, buf.into());
     }
     assert_eq!(reg.list_ids().len(), N as usize);
 
@@ -127,11 +128,11 @@ fn test_register_after_evict_restores_the_sample() {
     // restore a fully usable entry, reaping would break playback.
     let reg = nullherz_dna::SampleRegistry::new();
     let meta = Arc::new(nullherz_traits::SampleMetadata::new_empty());
-    reg.register_with_metadata(3, sample_of(2_048), meta.clone());
+    reg.register_with_metadata(3, sample_of(2_048).into(), meta.clone());
     drop(reg.remove(3));
     assert!(reg.get(3).is_none());
 
-    reg.register_with_metadata(3, sample_of(2_048), meta);
+    reg.register_with_metadata(3, sample_of(2_048).into(), meta);
     let back = reg.get(3).expect("re-registration must restore the entry");
     assert_eq!(back.buffer.len(), 2_048);
 }
@@ -144,7 +145,7 @@ fn test_concurrent_readers_survive_eviction() {
     use std::sync::atomic::{AtomicBool, Ordering};
     let reg = Arc::new(nullherz_dna::SampleRegistry::new());
     for id in 0..128u64 {
-        reg.register(id, sample_of(256));
+        reg.register(id, sample_of(256).into());
     }
 
     let stop = Arc::new(AtomicBool::new(false));

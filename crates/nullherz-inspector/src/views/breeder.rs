@@ -493,29 +493,39 @@ impl BreederView {
         ui.columns(2, |columns| {
             // ==================== LEFT PANE: ASSEMBLY RACK ====================
             columns[0].vertical(|ui| {
-                ui.label(RichText::new("DONOR ASSEMBLY RACK").strong().size(theme.type_heading).color(theme.accent));
+                ui.label(RichText::new("STEM DONOR ASSEMBLY RACK (SLOTS A-D)").strong().size(theme.type_heading).color(theme.accent));
                 ui.add_space(theme.space_xs);
 
-                // Carrier Identity Anchor Card
-                Frame::none()
-                    .fill(theme.bg_dark)
-                    .rounding(theme.radius_md)
-                    .stroke(Stroke::new(1.5, theme.accent))
-                    .inner_margin(Margin::same(theme.space_sm))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("🎯 CARRIER IDENTITY ANCHOR").strong().size(theme.type_caption).color(theme.accent));
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let carrier_label = state.carrier_id
-                                    .and_then(|id| app.get_cached_track(id))
-                                    .map(|t| format!("{} - {}", t.title, t.artist))
-                                    .unwrap_or_else(|| "Select Carrier...".to_string());
-                                if ui.button(RichText::new(carrier_label).strong().size(theme.type_body)).clicked() {
-                                    state.selecting_parent = Some(0);
-                                }
+                // 4 Stem-Level Parent Donor Slots
+                let slots_info = [
+                    (0, "SLOT A: Rhythm / Percussion (Kick, Snare, Hats)", state.parent_a_id),
+                    (1, "SLOT B: Harmonic / Bass (Sub-Bass, Synth Bass)", state.parent_b_id),
+                    (2, "SLOT C: Vocal & Lead Melodies (Lead Vocal, Guitars, Keys)", state.parent_c_id),
+                    (3, "SLOT D: Micro-Timing / Groove Profile", state.parent_d_id),
+                ];
+
+                for (s_idx, s_title, s_id) in slots_info {
+                    Frame::none()
+                        .fill(theme.bg_inset)
+                        .rounding(theme.radius_md)
+                        .stroke(if s_id.is_some() { Stroke::new(1.0, theme.accent) } else { theme.border_stroke })
+                        .inner_margin(Margin::same(theme.space_sm))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(s_title).strong().size(theme.type_caption).color(theme.track_colors[s_idx % theme.track_colors.len()]));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    let track_label = s_id
+                                        .and_then(|id| app.get_cached_track(id))
+                                        .map(|t| format!("{} - {}", t.title, t.artist))
+                                        .unwrap_or_else(|| "Select Stem Donor...".to_string());
+                                    if ui.button(RichText::new(track_label).strong().size(theme.type_body)).clicked() {
+                                        state.selecting_parent = Some(s_idx);
+                                    }
+                                });
                             });
                         });
-                    });
+                    ui.add_space(theme.space_xs);
+                }
 
                 ui.add_space(theme.space_sm);
 
@@ -546,7 +556,7 @@ impl BreederView {
 
                 // Stackable Donor Cards
                 let mut remove_idx = None;
-                egui::ScrollArea::vertical().max_height(450.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(250.0).show(ui, |ui| {
                     for (idx, donor) in state.donors.iter_mut().enumerate() {
                         Frame::none()
                             .fill(theme.bg_inset)

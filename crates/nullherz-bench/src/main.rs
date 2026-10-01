@@ -41,6 +41,7 @@ fn main() {
                     dna,
                     ..SampleMetadata::new_empty()
                 }),
+                stems: None,
             };
             db.save_track(&track).unwrap();
         }

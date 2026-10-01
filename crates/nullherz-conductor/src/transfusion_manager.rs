@@ -150,7 +150,7 @@ impl EvolutionaryBreeder {
                 eprintln!("Evolutionary Breeder: failed to write {}: {}", path, e);
             }
 
-            self.sample_registry.register_with_metadata(child_id, Arc::new(child_buffer), child_metadata.clone());
+            self.sample_registry.register_with_metadata(child_id, Arc::new(child_buffer).into(), child_metadata.clone());
 
             if let Some(ref discovery) = self.discovery_service {
                 { let discovery = discovery.lock();
@@ -171,6 +171,7 @@ impl EvolutionaryBreeder {
                 genre: "Algorithmic".to_string(),
                 energy_level: 0.5,
                 metadata: child_metadata,
+                stems: None,
             };
             let _ = lib.save_track(&track);
         }
@@ -288,7 +289,7 @@ impl TransfusionManager {
                 eprintln!("Breeding: failed to write {}: {}", path, e);
             }
             let buffer_arc = Arc::new(child_buffer);
-            self.sample_registry.register_with_metadata(child_id, buffer_arc, child_metadata.clone());
+            self.sample_registry.register_with_metadata(child_id, buffer_arc.into(), child_metadata.clone());
 
             // 4. Save to Database
             let track = nullherz_dna::LibraryTrack {
@@ -300,6 +301,7 @@ impl TransfusionManager {
                 genre: "Hybrid".to_string(),
                 energy_level: 0.5,
                 metadata: child_metadata,
+                stems: None,
             };
             let _ = library.save_track(&track);
             println!("Breeding Commited: Created Child ID={}", child_id);
@@ -333,7 +335,7 @@ impl TransfusionManager {
                 eprintln!("Chaotic Breeding: failed to write {}: {}", path, e);
             }
             let buffer_arc = Arc::new(child_buffer);
-            self.sample_registry.register_with_metadata(child_id, buffer_arc, child_metadata.clone());
+            self.sample_registry.register_with_metadata(child_id, buffer_arc.into(), child_metadata.clone());
 
             // 4. Save to Database
             let track = nullherz_dna::LibraryTrack {
@@ -345,6 +347,7 @@ impl TransfusionManager {
                 genre: "Experimental".to_string(),
                 energy_level: 0.8,
                 metadata: child_metadata,
+                stems: None,
             };
             let _ = library.save_track(&track);
             println!("Chaotic Breeding Commited: Created Child ID={}", child_id);
@@ -405,7 +408,7 @@ impl TransfusionManager {
                 midi_map: None,
             });
 
-            self.sample_registry.register_with_metadata(sample_id, snapshot, metadata.clone());
+            self.sample_registry.register_with_metadata(sample_id, snapshot.into(), metadata.clone());
             eprintln!("Registered new transfusion source with metadata: ID={}", sample_id);
 
             // Save to LibraryDatabase for persistence
@@ -419,6 +422,7 @@ impl TransfusionManager {
                     genre: "Captured".to_string(),
                     energy_level: 0.5,
                     metadata,
+                    stems: None,
                 };
                 let _ = breeder.library.lock().save_track(&track);
             }

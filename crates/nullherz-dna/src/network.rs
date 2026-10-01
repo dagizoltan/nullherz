@@ -401,6 +401,7 @@ fn handle_gossip(payload: &str, lib_clone: &Arc<Mutex<LibraryDatabase>>, stream:
                                     dna,
                                     ..nullherz_traits::SampleMetadata::new_empty()
                                 }),
+                                stems: None,
                             };
                             {
                                 let lib = lib_c.lock();

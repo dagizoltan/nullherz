@@ -29,7 +29,7 @@ fn test_sampler_sync_logic() {
 
     sampler.apply_topology_mutation(nullherz_traits::TopologyMutation::AddSource {
         node_idx: 0,
-        buffer: buffer.clone(),
+        buffer: buffer.clone().into(),
         sample_id: 123,
         metadata: Some(Arc::new(metadata)),
     });
@@ -98,7 +98,7 @@ fn test_add_source_is_o1_no_deep_clone() {
     let start = std::time::Instant::now();
     sampler.apply_topology_mutation(nullherz_traits::TopologyMutation::AddSource {
         node_idx: 0,
-        buffer: big.clone(),
+        buffer: big.clone().into(),
         sample_id: 7,
         metadata: Some(metadata),
     });
@@ -177,7 +177,7 @@ mod stereo_playback_tests {
         let mut p = SamplerProcessor::new(0);
         p.apply_topology_mutation(TopologyMutation::AddSource {
             node_idx: 0,
-            buffer,
+            buffer: buffer.into(),
             sample_id: 1,
             metadata: Some(metadata),
         });
@@ -215,7 +215,7 @@ mod stereo_playback_tests {
 
         let mut p = SamplerProcessor::new(0);
         p.apply_topology_mutation(TopologyMutation::AddSource {
-            node_idx: 0, buffer, sample_id: 1, metadata: Some(metadata),
+            node_idx: 0, buffer: buffer.into(), sample_id: 1, metadata: Some(metadata),
         });
         p.apply_command(&nullherz_traits::Command::Performance(PerformanceCommand::PlayNode { node_idx: 0 }));
 
@@ -245,7 +245,7 @@ mod stereo_playback_tests {
         p.apply_command(&nullherz_traits::Command::Performance(PerformanceCommand::StopNode { node_idx: 0 }));
         let (buffer2, metadata2) = planar_stereo(220.0, 440.0, frames);
         p.apply_topology_mutation(TopologyMutation::AddSource {
-            node_idx: 0, buffer: buffer2, sample_id: 2, metadata: Some(metadata2),
+            node_idx: 0, buffer: buffer2.into(), sample_id: 2, metadata: Some(metadata2),
         });
         assert_eq!(p.get_playback_position(), 0, "a new source must clear held positions");
 
@@ -274,7 +274,7 @@ mod stereo_playback_tests {
         for (p, id) in [(&mut deck_a, 1u64), (&mut deck_b, 2u64)] {
             let (buffer, metadata) = planar_stereo(440.0, 880.0, frames);
             p.apply_topology_mutation(TopologyMutation::AddSource {
-                node_idx: 0, buffer, sample_id: id, metadata: Some(metadata),
+                node_idx: 0, buffer: buffer.into(), sample_id: id, metadata: Some(metadata),
             });
         }
         deck_a.apply_command(&nullherz_traits::Command::Performance(PerformanceCommand::PlayNode { node_idx: 0 }));
@@ -312,7 +312,7 @@ mod stereo_playback_tests {
         let mut p = SamplerProcessor::new(0);
         p.apply_topology_mutation(TopologyMutation::AddSource {
             node_idx: 0,
-            buffer: Arc::new(samples),
+            buffer: Arc::new(samples).into(),
             sample_id: 1,
             metadata: Some(Arc::new(meta)),
         });

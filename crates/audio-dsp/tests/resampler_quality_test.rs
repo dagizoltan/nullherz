@@ -48,7 +48,7 @@ fn resample(freq: f32, rate: f32, interp: Option<InterpolationType>) -> Vec<f32>
     let mut voice = SamplerVoice::new();
     if let Some(i) = interp { voice.interpolation = i; }
     voice.set_layout(frames, 1);
-    voice.trigger_at_ref(&src, rate, 1.0, 0.0, 0.0);
+    voice.trigger_at_ref(&src.into(), rate, 1.0, 0.0, 0.0);
 
     // `process_block_planar` ACCUMULATES; a dirty buffer would read as the
     // resampler adding energy.
@@ -138,7 +138,7 @@ fn test_rate_one_is_bit_exact_identity() {
         Arc::new((0..frames).map(|i| tone_sample(i, 997.0, SR, AMP)).collect());
     let mut voice = SamplerVoice::new();
     voice.set_layout(frames, 1);
-    voice.trigger_at_ref(&src, 1.0, 1.0, 0.0, 0.0);
+    voice.trigger_at_ref(&src.clone().into(), 1.0, 1.0, 0.0, 0.0);
 
     let n = frames - 16;
     let mut out = vec![0.0f32; n];

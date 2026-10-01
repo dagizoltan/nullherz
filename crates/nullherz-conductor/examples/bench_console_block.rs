@@ -82,7 +82,7 @@ fn register_stereo_tone(conductor: &Conductor, id: u64, left_hz: [f32; 3], right
     conductor
         .transfusion_manager
         .sample_registry
-        .register_with_metadata(id, Arc::new(samples), metadata.clone());
+        .register_with_metadata(id, Arc::new(samples).into(), metadata.clone());
 
     // The deck-load path resolves the track through the library row.
     let lib = conductor.library.lock();
@@ -95,6 +95,7 @@ fn register_stereo_tone(conductor: &Conductor, id: u64, left_hz: [f32; 3], right
         genre: "test tone".to_string(),
         energy_level: 0.5,
         metadata,
+        stems: None,
     })
     .expect("in-memory library save cannot fail");
 }

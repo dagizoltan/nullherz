@@ -65,6 +65,7 @@ mod tests {
             genre: "Test Genre".to_string(),
             energy_level: 0.8,
             metadata: Arc::new(nullherz_traits::SampleMetadata::new_empty()),
+            stems: None,
         };
 
         db.save_track(&track).unwrap();
@@ -95,6 +96,7 @@ mod tests {
                 id, path: format!("/p/{id}.wav"), title: format!("t{id}"),
                 artist: "a".into(), album: "al".into(), genre: genre.into(),
                 energy_level: 0.5, metadata: Arc::new(m),
+                stems: None,
             }
         };
 
@@ -145,6 +147,7 @@ mod tests {
             id, path: format!("/p/{id}.wav"), title: format!("t{id}"),
             artist: "a".into(), album: "al".into(), genre: genre.into(),
             energy_level: 0.5, metadata: Arc::new(nullherz_traits::SampleMetadata::new_empty()),
+            stems: None,
         };
         db.save_track(&mk(1, "techno")).unwrap();
         db.save_track(&mk(2, "house")).unwrap();
@@ -180,6 +183,7 @@ mod tests {
                 id, path: format!("/p/{id}.wav"),
                 title: title.into(), artist: artist.into(), album: album.into(),
                 genre: genre.into(), energy_level: 0.5, metadata: Arc::new(m),
+                stems: None,
             }
         };
         db.save_track(&mk(1, "Midnight Drive", "Aria", "Neon", "techno", 128.0)).unwrap();
@@ -259,6 +263,7 @@ mod tests {
             genre: "Techno".to_string(),
             energy_level: 0.9,
             metadata: Arc::new(nullherz_traits::SampleMetadata::new_empty()),
+            stems: None,
         };
 
         db.save_track(&track).unwrap();

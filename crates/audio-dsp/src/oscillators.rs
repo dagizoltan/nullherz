@@ -11,6 +11,12 @@ pub trait Oscillator {
     }
 }
 
+impl From<Arc<Vec<f32>>> for SampleBufferRef {
+    fn from(v: Arc<Vec<f32>>) -> Self {
+        SampleBufferRef::Heap(v)
+    }
+}
+
 const LUT_SIZE: usize = 1024;
 
 /// A Sine Oscillator using a Look-Up Table for performance.
@@ -364,11 +370,46 @@ pub enum InterpolationType {
     Sinc = 2,
 }
 
+#[derive(Clone)]
+pub enum SampleBufferRef {
+    Heap(Arc<Vec<f32>>),
+    Shared(Arc<dyn AsRef<[f32]> + Send + Sync>),
+}
+
+impl core::fmt::Debug for SampleBufferRef {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SampleBufferRef::Heap(v) => f.debug_tuple("Heap").field(&v.len()).finish(),
+            SampleBufferRef::Shared(s) => f.debug_tuple("Shared").field(&s.as_ref().as_ref().len()).finish(),
+        }
+    }
+}
+
+impl core::ops::Deref for SampleBufferRef {
+    type Target = [f32];
+    fn deref(&self) -> &[f32] {
+        match self {
+            SampleBufferRef::Heap(v) => v.as_slice(),
+            SampleBufferRef::Shared(s) => s.as_ref().as_ref(),
+        }
+    }
+}
+
+impl PartialEq for SampleBufferRef {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (SampleBufferRef::Heap(a), SampleBufferRef::Heap(b)) => Arc::ptr_eq(a, b),
+            (SampleBufferRef::Shared(a), SampleBufferRef::Shared(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+}
+
 /// A high-performance sampler voice with selectable interpolation.
-/// Shared ownership of the sample buffer is managed via Arc to prevent dangling pointers.
+/// Shared ownership of the sample buffer is managed via Arc or memory-mapped slice.
 #[derive(Debug, Clone)]
 pub struct SamplerVoice {
-    pub buffer: Option<Arc<Vec<f32>>>,
+    pub buffer: Option<SampleBufferRef>,
     /// Position accumulators are f64, NOT f32.
     ///
     /// f32 holds integers exactly only to 2^24. Past 2^26 = 67,108,864 frames
@@ -468,11 +509,11 @@ impl SamplerVoice {
         }
     }
 
-    pub fn trigger(&mut self, buffer: Arc<Vec<f32>>, playback_rate: f32, velocity: f32) {
+    pub fn trigger(&mut self, buffer: SampleBufferRef, playback_rate: f32, velocity: f32) {
         self.trigger_at(buffer, playback_rate, velocity, 0.0, 0.0);
     }
 
-    pub fn trigger_at(&mut self, buffer: Arc<Vec<f32>>, playback_rate: f32, velocity: f32, offset: f64, beat: f64) {
+    pub fn trigger_at(&mut self, buffer: SampleBufferRef, playback_rate: f32, velocity: f32, offset: f64, beat: f64) {
         self.buffer_frames = buffer.len();
         self.buffer_channels = 1;
         self.buffer = Some(buffer);
@@ -484,11 +525,10 @@ impl SamplerVoice {
         self.is_active = true;
     }
 
-    /// RT-Safe variant that avoids atomic increment of the Arc if possible.
-    pub fn trigger_at_ref(&mut self, buffer: &Arc<Vec<f32>>, playback_rate: f32, velocity: f32, offset: f64, beat: f64) {
-        // Only clone if the buffer actually changed
+    /// RT-Safe variant that avoids atomic increment if possible.
+    pub fn trigger_at_ref(&mut self, buffer: &SampleBufferRef, playback_rate: f32, velocity: f32, offset: f64, beat: f64) {
         let needs_clone = match &self.buffer {
-            Some(existing) => !Arc::ptr_eq(existing, buffer),
+            Some(existing) => existing != buffer,
             None => true,
         };
 

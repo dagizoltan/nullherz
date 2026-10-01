@@ -20,7 +20,7 @@ async fn test_analysis_pipeline() {
         buffer[pos] = 1.0; // Sharp transient
     }
     let sample_id = 12345;
-    sample_registry.register(sample_id, Arc::new(buffer));
+    sample_registry.register(sample_id, Arc::new(buffer).into());
 
     // Register track in library
     {
@@ -34,6 +34,7 @@ async fn test_analysis_pipeline() {
             genre: "Mock Genre".to_string(),
             energy_level: 0.5,
             metadata: Arc::new(SampleMetadata::new_empty()),
+            stems: None,
         }).unwrap();
     }
 
@@ -88,7 +89,7 @@ async fn test_root_key_detection() {
     }
 
     let sample_id = 999;
-    sample_registry.register(sample_id, Arc::new(buffer));
+    sample_registry.register(sample_id, Arc::new(buffer).into());
 
     let worker = nullherz_conductor::analysis_worker::AnalysisWorker::new(sample_registry.clone());
 

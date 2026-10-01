@@ -58,6 +58,7 @@ fn save_track(conductor: &Conductor, id: u64, path: &str) {
         genre: "c".into(),
         energy_level: 0.5,
         metadata: Arc::new(nullherz_traits::SampleMetadata::new_empty()),
+        stems: None,
     });
 }
 
@@ -76,7 +77,7 @@ fn test_reap_releases_scanned_tracks_but_keeps_what_is_on_a_deck() { with_reap_e
         save_track(&conductor, id, &path);
         let buf: Arc<Vec<f32>> = Arc::new(vec![0.1f32; 1_024]);
         weaks.push(Arc::downgrade(&buf));
-        registry.register(id, buf);
+        registry.register(id, buf.into());
     }
     assert_eq!(registry.list_ids().len(), N as usize, "precondition: all registered");
 
@@ -128,7 +129,7 @@ fn test_reap_never_evicts_a_sample_that_cannot_be_recovered() { with_reap_enable
 
     let orphan: Arc<Vec<f32>> = Arc::new(vec![0.7f32; 512]);
     let weak = Arc::downgrade(&orphan);
-    registry.register(9_001, orphan); // deliberately NOT saved to the library
+    registry.register(9_001, orphan.into()); // deliberately NOT saved to the library
 
     conductor.tick();
     registry.drain_garbage();
@@ -153,7 +154,7 @@ fn test_reap_keeps_a_track_whose_file_has_disappeared() { with_reap_enabled(|| {
     let mut conductor = Conductor::with_library_path(":memory:");
     let registry = conductor.transfusion_manager.sample_registry.clone();
     save_track(&conductor, 42, &path);
-    registry.register(42, Arc::new(vec![0.3f32; 256]));
+    registry.register(42, Arc::new(vec![0.3f32; 256]).into());
 
     std::fs::remove_file(&path).unwrap(); // drive unplugged / file moved
 
@@ -179,7 +180,7 @@ fn test_reap_leaves_in_flight_hydrations_alone() { with_reap_enabled(|| {
     let mut conductor = Conductor::with_library_path(":memory:");
     let registry = conductor.transfusion_manager.sample_registry.clone();
     save_track(&conductor, 77, &path);
-    registry.register(77, Arc::new(vec![0.9f32; 256]));
+    registry.register(77, Arc::new(vec![0.9f32; 256]).into());
     conductor.hydration_pending.insert(77);
 
     conductor.tick();
@@ -218,7 +219,7 @@ fn test_reap_keeps_a_track_that_analysis_has_not_reached() { with_reap_enabled(|
     for id in 100u64..102 {
         let path = write_wav(&dir, &format!("p{id}.wav"), 1_024);
         save_track(&conductor, id, &path);
-        registry.register(id, Arc::new(vec![0.2f32; 1_024]));
+        registry.register(id, Arc::new(vec![0.2f32; 1_024]).into());
     }
 
     conductor.tick();

@@ -30,7 +30,7 @@ fn loaded_sampler(bpm: f32) -> SamplerProcessor {
     meta.total_samples = FRAMES as u64;
     s.apply_topology_mutation(nullherz_traits::TopologyMutation::AddSource {
         node_idx: 1,
-        buffer: buf,
+        buffer: buf.into(),
         sample_id: 7,
         metadata: Some(Arc::new(meta)),
     });

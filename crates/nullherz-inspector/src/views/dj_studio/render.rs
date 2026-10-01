@@ -57,6 +57,15 @@ pub fn format_duration(samples: u64, sample_rate: f32) -> String {
     format!("{}:{:02}", minutes, seconds)
 }
 
+pub fn stem_color_for_classif(classif: nullherz_traits::StemClassification) -> Color32 {
+    match classif {
+        nullherz_traits::StemClassification::Kick | nullherz_traits::StemClassification::Snare | nullherz_traits::StemClassification::Clap | nullherz_traits::StemClassification::Hat | nullherz_traits::StemClassification::Percussion => Color32::from_rgb(0, 220, 255),
+        nullherz_traits::StemClassification::Bass => Color32::from_rgb(255, 215, 0),
+        nullherz_traits::StemClassification::LeadVocal | nullherz_traits::StemClassification::BackingVocal | nullherz_traits::StemClassification::Vocal => Color32::from_rgb(255, 105, 180),
+        _ => Color32::from_rgb(147, 112, 219),
+    }
+}
+
 pub fn render_time_display(ui: &mut egui::Ui, elapsed: &str, remaining: &str, accent_color: Color32, theme: &nullherz_ui_hal::Theme) {
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(elapsed).monospace().size(13.0).color(theme.text_secondary));
@@ -214,6 +223,55 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
                 meta_text.push_str(&format!("G:{}", t.genre));
             }
             ui.label(RichText::new(meta_text).size(theme.type_caption).color(theme.text_secondary));
+
+            // Interactive Stem Strip Toggle Controls
+            if let Some(ref stem_set) = t.stems {
+                ui.add_space(theme.space_xs);
+                ui.label(RichText::new("STEMS:").strong().size(theme.type_caption).color(theme.accent));
+                for (s_idx, single_stem) in stem_set.stems.iter().enumerate().take(4) {
+                    let classif_name = match single_stem.classification {
+                        nullherz_traits::StemClassification::Kick => "Drums",
+                        nullherz_traits::StemClassification::Snare => "Snare",
+                        nullherz_traits::StemClassification::Hat => "Hats",
+                        nullherz_traits::StemClassification::Bass => "Bass",
+                        nullherz_traits::StemClassification::LeadVocal | nullherz_traits::StemClassification::BackingVocal | nullherz_traits::StemClassification::Vocal => "Vocal",
+                        _ => "Other",
+                    };
+                    let stem_color = stem_color_for_classif(single_stem.classification);
+                    ui.label(RichText::new(classif_name).size(theme.type_caption).color(stem_color).strong());
+
+                    let target_node = app.get_node_id(&format!("deck_{}_stem_matrix", (b'a' + i as u8) as char))
+                        .or_else(|| app.get_node_id(&format!("deck_{}_sampler", (b'a' + i as u8) as char)));
+
+                    let is_muted = app.mixer.stem_mutes[i][s_idx];
+                    let is_solo = app.mixer.stem_solos[i][s_idx];
+
+                    if ui.selectable_label(is_muted, RichText::new("M").size(9.0)).clicked() {
+                        let new_mute = !is_muted;
+                        app.mixer.stem_mutes[i][s_idx] = new_mute;
+                        if let Some(node) = target_node {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                target_id: node as u64,
+                                param_id: (s_idx * 10) as u32,
+                                value: if new_mute { 1.0 } else { 0.0 },
+                                ramp_duration_samples: 0,
+                            }));
+                        }
+                    }
+                    if ui.selectable_label(is_solo, RichText::new("S").size(9.0)).clicked() {
+                        let new_solo = !is_solo;
+                        app.mixer.stem_solos[i][s_idx] = new_solo;
+                        if let Some(node) = target_node {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                target_id: node as u64,
+                                param_id: (s_idx * 10 + 1) as u32,
+                                value: if new_solo { 1.0 } else { 0.0 },
+                                ramp_duration_samples: 0,
+                            }));
+                        }
+                    }
+                }
+            }
 
             // Time Display on the far right
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

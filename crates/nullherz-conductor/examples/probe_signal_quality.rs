@@ -126,7 +126,7 @@ fn main() {
         meta.channels = 2;
         meta.sample_rate = SR as u32;
         let id = 900 + (-amp_db) as u64;
-        c.transfusion_manager.sample_registry.register_with_metadata(id, Arc::new(samples), Arc::new(meta));
+        c.transfusion_manager.sample_registry.register_with_metadata(id, Arc::new(samples).into(), Arc::new(meta));
 
         c.apply_mixer_commands(vec![
             Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id: 'A', sample_id: id }),
