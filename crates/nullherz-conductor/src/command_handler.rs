@@ -734,6 +734,10 @@ impl CommandHandler {
 
     fn handle_resource_command(conductor: &mut Conductor, cmd: ResourceCommand) -> bool {
         match cmd {
+            ResourceCommand::ExtractStems { track_id } => {
+                conductor.stem_worker.request_extraction(track_id);
+                true
+            }
             ResourceCommand::ScanFolder { path } => {
                 let folder_path = String::from_utf8_lossy(&path).trim_matches(char::from(0)).to_string();
                 if let Some(ref monitor) = conductor.folder_monitor {

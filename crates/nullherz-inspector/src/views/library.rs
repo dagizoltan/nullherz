@@ -824,6 +824,17 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
                     }
                     app.active_view = crate::View::Composer;
                 }
+
+                let is_demixed = track.stems.is_some();
+                let stem_button_text = if is_demixed { "✓ STEMS READY" } else { "⚡ SEPARATE STEMS" };
+                if ui.button(RichText::new(stem_button_text).size(theme.type_caption).color(if is_demixed { theme.success } else { theme.accent }))
+                    .on_hover_text("Extract 12-stem demixed components for multi-tier stem playback")
+                    .clicked()
+                {
+                    let _ = app.command_sender.send(nullherz_traits::Command::Resource(
+                        nullherz_traits::ResourceCommand::ExtractStems { track_id: track.id }
+                    ));
+                }
             });
         });
 

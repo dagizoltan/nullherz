@@ -490,6 +490,9 @@ pub enum ResourceCommand {
     ChopByTransient {
         sample_id: u64,
     },
+    ExtractStems {
+        track_id: u64,
+    },
 }
 
 #[repr(C)]
