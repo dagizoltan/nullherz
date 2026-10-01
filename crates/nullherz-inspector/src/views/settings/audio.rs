@@ -39,23 +39,40 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
 
             ui.add_space(theme.space_md);
             ui.horizontal(|ui| {
-                ui.label("Devices:");
-                // DISPLAY ONLY — there is no device-selection command in the
-                // protocol yet; the backend opens its default device. The old
-                // dropdown let you "select" a device that nothing consumed,
-                // and the "Scan" button was an admitted no-op (enumeration
-                // already refreshes every tick via telemetry).
-                ui.add_enabled_ui(false, |ui| {
-                    egui::ComboBox::from_id_source("audio_device_select")
-                        .selected_text(
-                            app.settings.audio_devices.first().map(String::as_str).unwrap_or("(default)"),
-                        )
-                        .show_ui(ui, |_ui| {});
-                });
+                ui.label("Output Device:");
+                let devices = &app.settings.audio_devices;
+                let mut selected = app.settings._selected_audio_device.clone();
+                let combo_text = if selected.is_empty() {
+                    devices.first().cloned().unwrap_or_else(|| "default".to_string())
+                } else {
+                    selected.clone()
+                };
+
+                egui::ComboBox::from_id_source("audio_output_device_select")
+                    .selected_text(RichText::new(&combo_text).strong().color(theme.text_primary))
+                    .width(220.0)
+                    .show_ui(ui, |ui| {
+                        for dev in devices {
+                            if ui.selectable_label(dev == &combo_text, dev).clicked() {
+                                selected = dev.clone();
+                                app.settings._selected_audio_device = dev.clone();
+
+                                let mut buf = [0u8; 64];
+                                let bytes = dev.as_bytes();
+                                let len = bytes.len().min(64);
+                                buf[..len].copy_from_slice(&bytes[..len]);
+
+                                let _ = app.command_sender.send(nullherz_traits::Command::Core(
+                                    nullherz_traits::CoreCommand::SetAudioOutputDevice(buf)
+                                ));
+                            }
+                        }
+                    });
+
                 ui.label(
-                    RichText::new("detected — output uses the backend default")
+                    RichText::new("hardware output stream")
                         .size(theme.type_caption)
-                        .color(theme.text_disabled),
+                        .color(theme.text_secondary),
                 );
             });
         });

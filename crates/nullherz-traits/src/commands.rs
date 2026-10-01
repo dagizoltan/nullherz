@@ -186,6 +186,10 @@ pub enum CoreCommand {
         sample_rate: f32,
         block_size: usize,
     },
+    #[serde(with = "serde_big_array::BigArray")]
+    SetAudioOutputDevice([u8; 64]),
+    #[serde(with = "serde_big_array::BigArray")]
+    SetAudioInputDevice([u8; 64]),
     SwitchBackend(AudioBackendType),
     CalibrateLatency,
     InjectMidi(MidiEvent),
