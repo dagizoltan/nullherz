@@ -9,6 +9,10 @@ use crate::{SettingsTab, View};
 pub enum ChannelInputSource {
     Track,
     AudiocardInput,
+    Input1_2,
+    Input3_4,
+    Input5_6,
+    Input7_8,
     Instrument,
 }
 
@@ -16,13 +20,25 @@ impl ChannelInputSource {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Track => "Track",
-            Self::AudiocardInput => "Audiocard Input",
+            Self::AudiocardInput => "Soundcard In (Default)",
+            Self::Input1_2 => "Soundcard In 1-2",
+            Self::Input3_4 => "Soundcard In 3-4",
+            Self::Input5_6 => "Soundcard In 5-6",
+            Self::Input7_8 => "Soundcard In 7-8",
             Self::Instrument => "Instrument",
         }
     }
 
     pub fn all() -> &'static [Self] {
-        &[Self::Track, Self::AudiocardInput, Self::Instrument]
+        &[
+            Self::Track,
+            Self::AudiocardInput,
+            Self::Input1_2,
+            Self::Input3_4,
+            Self::Input5_6,
+            Self::Input7_8,
+            Self::Instrument,
+        ]
     }
 }
 

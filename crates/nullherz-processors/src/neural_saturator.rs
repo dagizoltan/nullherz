@@ -9,6 +9,7 @@ pub struct NeuralSaturatorProcessor {
     pub drive: f32,
     pub output_gain: f32,
     pub mix: f32,
+    pub oversamplers: Vec<audio_dsp::util::Oversampler2x>,
 }
 
 impl NeuralSaturatorProcessor {
@@ -18,6 +19,7 @@ impl NeuralSaturatorProcessor {
             drive: 1.5,
             output_gain: 1.0,
             mix: 1.0,
+            oversamplers: (0..16).map(|_| audio_dsp::util::Oversampler2x::new()).collect(),
         }
     }
 
@@ -42,12 +44,20 @@ impl SignalProcessor for NeuralSaturatorProcessor {
         for ch in 0..num_ch {
             let in_buf = inputs[ch];
             let out_buf = &mut outputs[ch];
-            let n = in_buf.len().min(out_buf.len());
 
-            for i in 0..n {
-                let x = in_buf[i] * drive;
-                let sat = Self::pade_tanh(x) * gain;
-                out_buf[i] = in_buf[i] * (1.0 - mix) + sat * mix;
+            if ch < self.oversamplers.len() {
+                self.oversamplers[ch].process_block(in_buf, out_buf, |s| {
+                    let x = s * drive;
+                    let sat = Self::pade_tanh(x) * gain;
+                    s * (1.0 - mix) + sat * mix
+                });
+            } else {
+                let n = in_buf.len().min(out_buf.len());
+                for i in 0..n {
+                    let x = in_buf[i] * drive;
+                    let sat = Self::pade_tanh(x) * gain;
+                    out_buf[i] = in_buf[i] * (1.0 - mix) + sat * mix;
+                }
             }
         }
     }
@@ -56,6 +66,7 @@ impl SignalProcessor for NeuralSaturatorProcessor {
         self.drive = 1.5;
         self.output_gain = 1.0;
         self.mix = 1.0;
+        self.oversamplers = (0..16).map(|_| audio_dsp::util::Oversampler2x::new()).collect();
     }
 }
 
