@@ -84,7 +84,7 @@ fn register_sources(c: &Conductor) {
         let md = Arc::new(md);
         c.transfusion_manager
             .sample_registry
-            .register_with_metadata(id, Arc::new(buf), md.clone());
+            .register_with_metadata(id, Arc::new(buf).into(), md.clone());
         let lib = c.library.lock();
         lib.save_track(&nullherz_dna::LibraryTrack {
             id,
@@ -95,6 +95,7 @@ fn register_sources(c: &Conductor) {
             genre: "probe".into(),
             energy_level: 0.5,
             metadata: md,
+            stems: None,
         })
         .expect("in-memory save");
     }

@@ -23,6 +23,7 @@ fn sample_track(id: u64) -> LibraryTrack {
         genre: "Techno".into(),
         energy_level: 0.8125,
         metadata: Arc::new(md),
+        stems: None,
     }
 }
 
@@ -125,4 +126,70 @@ fn rows_decode_from_any_alignment() {
         assert_eq!(decoded.title, track.title, "row at +{shift} decoded wrong");
         assert_eq!(decoded.metadata.bpm, track.metadata.bpm, "row at +{shift} decoded wrong");
     }
+}
+
+#[test]
+fn stem_set_metadata_round_trips_through_rkyv_and_json() {
+    let stem_set = nullherz_traits::StemSetMetadata {
+        track_id: 12345,
+        tier: 12,
+        stems: vec![
+            nullherz_traits::SingleStemMetadata {
+                classification: nullherz_traits::StemClassification::Kick,
+                relative_path: "stems/12345/stem_00_kick.wav".into(),
+                lufs_integrated: -14.2,
+                peak_db: -0.5,
+                dna: nullherz_traits::SoundDNA::default(),
+                mip_waveform: nullherz_traits::MipWaveform { levels: vec![Arc::new(vec![0.1, 0.8, 0.3])] },
+            },
+            nullherz_traits::SingleStemMetadata {
+                classification: nullherz_traits::StemClassification::LeadVocal,
+                relative_path: "stems/12345/stem_06_lead_vocal.wav".into(),
+                lufs_integrated: -18.0,
+                peak_db: -2.1,
+                dna: nullherz_traits::SoundDNA::default(),
+                mip_waveform: nullherz_traits::MipWaveform { levels: vec![Arc::new(vec![0.2, 0.5])] },
+            },
+        ],
+        created_at_timestamp: 1700000000,
+    };
+
+    let json = serde_json::to_string(&stem_set).expect("json serialize");
+    let json_decoded: nullherz_traits::StemSetMetadata = serde_json::from_str(&json).expect("json deserialize");
+    assert_eq!(stem_set, json_decoded);
+
+    let rkyv_bytes = rkyv::to_bytes::<_, 4096>(&stem_set).expect("rkyv serialize");
+    let archived = rkyv::check_archived_root::<nullherz_traits::StemSetMetadata>(&rkyv_bytes).expect("check archived");
+    let mut de = rkyv::de::deserializers::SharedDeserializeMap::default();
+    let rkyv_decoded: nullherz_traits::StemSetMetadata = rkyv::Deserialize::deserialize(archived, &mut de).expect("rkyv deserialize");
+    assert_eq!(stem_set, rkyv_decoded);
+}
+
+#[test]
+fn track_with_stem_set_round_trips_through_database() {
+    let db = LibraryDatabase::load(":memory:").expect("in-memory db");
+    let mut track = sample_track(999);
+    track.stems = Some(nullherz_traits::StemSetMetadata {
+        track_id: 999,
+        tier: 4,
+        stems: vec![
+            nullherz_traits::SingleStemMetadata {
+                classification: nullherz_traits::StemClassification::Kick,
+                relative_path: "stems/999/stem_00_kick.wav".into(),
+                lufs_integrated: -12.0,
+                peak_db: -0.1,
+                dna: nullherz_traits::SoundDNA::default(),
+                mip_waveform: nullherz_traits::MipWaveform { levels: vec![] },
+            },
+        ],
+        created_at_timestamp: 1711111111,
+    });
+
+    db.save_track(&track).expect("save track with stems");
+    let loaded = db.get_track(999).expect("get").expect("found");
+    assert!(loaded.stems.is_some());
+    let loaded_stems = loaded.stems.unwrap();
+    assert_eq!(loaded_stems.tier, 4);
+    assert_eq!(loaded_stems.stems.len(), 1);
+    assert_eq!(loaded_stems.stems[0].classification, nullherz_traits::StemClassification::Kick);
 }

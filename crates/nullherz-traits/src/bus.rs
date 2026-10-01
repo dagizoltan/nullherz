@@ -23,16 +23,113 @@ pub trait TopologyMutationConsumer: Send {
     fn pop(&mut self) -> Option<TopologyMutation>;
 }
 
+#[derive(Debug)]
+pub struct MmapBuffer {
+    mmap: memmap2::Mmap,
+    pub sample_count: usize,
+}
+
+impl MmapBuffer {
+    pub fn from_mmap(mmap: memmap2::Mmap) -> Self {
+        let sample_count = mmap.len() / std::mem::size_of::<f32>();
+        Self { mmap, sample_count }
+    }
+
+    pub fn open<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<Self> {
+        let file = std::fs::File::open(path)?;
+        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+        Ok(Self::from_mmap(mmap))
+    }
+
+    pub fn as_slice(&self) -> &[f32] {
+        let ptr = self.mmap.as_ptr() as *const f32;
+        unsafe { std::slice::from_raw_parts(ptr, self.sample_count) }
+    }
+}
+
+impl PartialEq for MmapBuffer {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl AsRef<[f32]> for MmapBuffer {
+    fn as_ref(&self) -> &[f32] {
+        self.as_slice()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SampleBuffer {
+    Heap(Arc<Vec<f32>>),
+    Mmap(Arc<MmapBuffer>),
+}
+
+impl SampleBuffer {
+    pub fn as_slice(&self) -> &[f32] {
+        match self {
+            SampleBuffer::Heap(v) => v.as_slice(),
+            SampleBuffer::Mmap(m) => m.as_slice(),
+        }
+    }
+
+    pub fn ptr_eq(a: &Self, b: &Self) -> bool {
+        match (a, b) {
+            (SampleBuffer::Heap(h1), SampleBuffer::Heap(h2)) => Arc::ptr_eq(h1, h2),
+            (SampleBuffer::Mmap(m1), SampleBuffer::Mmap(m2)) => Arc::ptr_eq(m1, m2),
+            _ => false,
+        }
+    }
+
+    pub fn to_voice_buffer(&self) -> audio_dsp::SampleBufferRef {
+        match self {
+            SampleBuffer::Heap(arc) => audio_dsp::SampleBufferRef::Heap(arc.clone()),
+            SampleBuffer::Mmap(mmap) => audio_dsp::SampleBufferRef::Shared(mmap.clone() as Arc<dyn AsRef<[f32]> + Send + Sync>),
+        }
+    }
+}
+
+impl From<SampleBuffer> for audio_dsp::SampleBufferRef {
+    fn from(buf: SampleBuffer) -> Self {
+        buf.to_voice_buffer()
+    }
+}
+
+impl From<&SampleBuffer> for audio_dsp::SampleBufferRef {
+    fn from(buf: &SampleBuffer) -> Self {
+        buf.to_voice_buffer()
+    }
+}
+
+impl std::ops::Deref for SampleBuffer {
+    type Target = [f32];
+    fn deref(&self) -> &[f32] {
+        self.as_slice()
+    }
+}
+
+impl From<Arc<Vec<f32>>> for SampleBuffer {
+    fn from(v: Arc<Vec<f32>>) -> Self {
+        SampleBuffer::Heap(v)
+    }
+}
+
+impl From<Vec<f32>> for SampleBuffer {
+    fn from(v: Vec<f32>) -> Self {
+        SampleBuffer::Heap(Arc::new(v))
+    }
+}
+
 #[derive(Clone)]
 pub struct RegisteredSample {
-    pub buffer: Arc<Vec<f32>>,
+    pub buffer: SampleBuffer,
     pub metadata: Arc<SampleMetadata>,
 }
 
 pub trait SampleRegistry: Send + Sync {
     fn get(&self, id: u64) -> Option<RegisteredSample>;
-    fn register(&self, id: u64, buffer: Arc<Vec<f32>>);
-    fn register_with_metadata(&self, id: u64, buffer: Arc<Vec<f32>>, metadata: Arc<SampleMetadata>);
+    fn register(&self, id: u64, buffer: SampleBuffer);
+    fn register_with_metadata(&self, id: u64, buffer: SampleBuffer, metadata: Arc<SampleMetadata>);
     fn drain_garbage(&self);
     fn list_ids(&self) -> Vec<u64>;
 

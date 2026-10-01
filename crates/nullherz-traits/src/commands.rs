@@ -111,6 +111,7 @@ impl ProcessorTypeId {
     pub const TRANSIENT_SHAPER: Self = Self(240);
     pub const TAPE_SATURATOR: Self = Self(241);
     pub const MUTATOR: Self = Self(242);
+    pub const DECK_STEM_MATRIX: Self = Self(243);
 }
 
 impl From<u32> for ProcessorTypeId {

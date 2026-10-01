@@ -142,6 +142,7 @@ impl SidecarDiscoveryService {
                                         dna,
                                         ..nullherz_traits::SampleMetadata::new_empty()
                                     }),
+                                    stems: None,
                                 };
                                 let lib_lock = lib_db.lock();
                                 let _ = lib_lock.save_track(&track);

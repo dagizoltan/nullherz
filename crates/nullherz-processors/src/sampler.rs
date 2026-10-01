@@ -13,7 +13,7 @@ pub const PARAM_QUANTIZE: u32 = 2;
 pub struct SamplerProcessor {
     pub id: u64,
     pub voices: Vec<SamplerVoice>,
-    sample_buffer: std::sync::Arc<Vec<f32>>,
+    sample_buffer: nullherz_traits::SampleBuffer,
     sample_id: Option<u64>,
     metadata: Option<std::sync::Arc<nullherz_traits::SampleMetadata>>,
     quantize_enabled: bool,
@@ -48,7 +48,7 @@ impl SamplerProcessor {
         Self {
             id,
             voices,
-            sample_buffer: std::sync::Arc::new(Vec::new()),
+            sample_buffer: nullherz_traits::SampleBuffer::Heap(std::sync::Arc::new(Vec::new())),
             sample_id: None,
             metadata: None,
             // RAW by default: a sampler nobody has configured plays its source
@@ -71,7 +71,7 @@ impl SamplerProcessor {
     }
 
     pub fn set_sample(&mut self, buffer: Vec<f32>) {
-        self.sample_buffer = std::sync::Arc::new(buffer);
+        self.sample_buffer = buffer.into();
     }
 
     pub fn set_parameter(&mut self, param_id: u32, value: f32) {
@@ -185,7 +185,7 @@ impl SamplerProcessor {
             let offset = slice_idx as f64 * self.slice_grid_beats as f64 * samples_per_beat;
 
             // RT-HARDENING: Use buffer_ref instead of clone to avoid atomic overhead in the hot path
-            voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, offset, beat_pos);
+            voice.trigger_at_ref(&self.sample_buffer.to_voice_buffer(), self.playback_rate, 1.0, offset, beat_pos);
             voice.source_rate_ratio = rate_ratio;
             Self::apply_layout(voice, frames, channels);
         }
@@ -372,7 +372,7 @@ impl nullherz_traits::MidiResponder for SamplerProcessor {
                     let freq = 440.0 * 2.0f32.powf((event.data1 as f32 - 69.0) / 12.0);
                     let playback_rate = (freq / 440.0) * self.playback_rate;
                     let velocity = event.data2 as f32 / 127.0;
-                    voice.trigger(self.sample_buffer.clone(), playback_rate, velocity);
+                    voice.trigger(self.sample_buffer.to_voice_buffer(), playback_rate, velocity);
                     // Note transposition composes with source-rate compensation
                     // rather than replacing it: a 48 kHz sample must still sound
                     // at concert pitch for A4.
@@ -431,7 +431,7 @@ fn apply_topology_mutation(&mut self, mutation: nullherz_traits::TopologyMutatio
                     self.pending_play = false;
                     let (frames, channels) = (self.source_frames(), self.source_channels());
                     if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
-                        voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, self.cue_position, 0.0);
+                        voice.trigger_at_ref(&self.sample_buffer.to_voice_buffer(), self.playback_rate, 1.0, self.cue_position, 0.0);
                         Self::apply_layout(voice, frames, channels);
                     }
                 }
@@ -558,7 +558,7 @@ impl SamplerProcessor {
                             if let Some(voice) = self.voices.iter_mut()
                                 .find(|v| v.buffer.is_some() || !v.is_active)
                             {
-                                voice.trigger_at_ref(&self.sample_buffer, 1.0, 1.0, start, 0.0);
+                                voice.trigger_at_ref(&self.sample_buffer.to_voice_buffer(), 1.0, 1.0, start, 0.0);
                                 Self::apply_layout(voice, frames, channels);
                             }
                         }
@@ -655,11 +655,12 @@ impl SamplerProcessor {
                     // where it left off. It must still belong to the CURRENT
                     // source and sit inside the buffer — AddSource clears
                     // voices, so a stale resume cannot replay an old track.
+                    let vb = self.sample_buffer.to_voice_buffer();
                     let resumable = self.voices.iter_mut().find(|v| {
                         !v.is_active
                             && v.play_head > 0.0
                             && (v.play_head as usize) < frames
-                            && v.buffer.as_ref().is_some_and(|b| std::sync::Arc::ptr_eq(b, &self.sample_buffer))
+                            && v.buffer.as_ref().is_some_and(|b| b == &vb)
                     });
                     if let Some(voice) = resumable {
                         voice.is_active = true;
@@ -667,7 +668,7 @@ impl SamplerProcessor {
                         let channels = self.source_channels();
                         if let Some(voice) = self.voices.iter_mut().find(|v| !v.is_active) {
                             let beat_pos = context.and_then(|c| c.transport).map(|t| t.beat_position).unwrap_or(0.0);
-                            voice.trigger_at_ref(&self.sample_buffer, self.playback_rate, 1.0, self.cue_position, beat_pos);
+                            voice.trigger_at_ref(&vb, self.playback_rate, 1.0, self.cue_position, beat_pos);
                             Self::apply_layout(voice, frames, channels);
                         }
                     }

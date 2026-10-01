@@ -66,6 +66,7 @@ pub struct Conductor {
     pub audio_bridge: Arc<IpcAudioBridge>,
     pub midi_mapper: MidiMapper,
     pub midi_clock: crate::midi_clock::MidiClockTracker,
+    pub stem_worker: Arc<crate::stem_worker::StemExtractionWorker>,
     pub analysis_worker: Option<crate::analysis_worker::AnalysisWorker>,
     pub folder_monitor: Option<crate::folder_monitor::FolderMonitor>,
     pub streaming_manager: crate::streaming_manager::StreamingManager,
@@ -124,11 +125,11 @@ pub struct Conductor {
     pub active_transitions: Vec<DnaTransition>,
     pub undo_stack: Vec<(
         crate::persistence::ProjectState,
-        std::collections::HashMap<u64, (std::sync::Arc<Vec<f32>>, std::sync::Arc<nullherz_traits::SampleMetadata>)>,
+        std::collections::HashMap<u64, (nullherz_traits::SampleBuffer, std::sync::Arc<nullherz_traits::SampleMetadata>)>,
     )>,
     pub redo_stack: Vec<(
         crate::persistence::ProjectState,
-        std::collections::HashMap<u64, (std::sync::Arc<Vec<f32>>, std::sync::Arc<nullherz_traits::SampleMetadata>)>,
+        std::collections::HashMap<u64, (nullherz_traits::SampleBuffer, std::sync::Arc<nullherz_traits::SampleMetadata>)>,
     )>,
     // --- Live RTMP/Opus Broadcast Streaming ---
     /// Samples currently being decoded on background hydration threads
@@ -275,10 +276,14 @@ impl Conductor {
 
         let (hydration_done_tx, hydration_done_rx) = std::sync::mpsc::channel();
 
+        let stem_worker = Arc::new(crate::stem_worker::StemExtractionWorker::new(sample_registry.clone(), library.clone()));
+        stem_worker.start();
+
         // Built here so its "finished" set can be shared BEFORE `start()` moves
         // the worker onto its own thread. See `analysed_ids`.
         let analysis_worker = crate::analysis_worker::AnalysisWorker::new(sample_registry.clone())
-            .with_library(library.clone());
+            .with_library(library.clone())
+            .with_stem_worker(stem_worker.clone());
         let analysis_worker_handle = analysis_worker.analysed_ids();
 
         Self {
@@ -294,6 +299,7 @@ impl Conductor {
             sidecar_discovery,
             midi_mapper: MidiMapper::new(),
             midi_clock: crate::midi_clock::MidiClockTracker::new(),
+            stem_worker,
             analysis_worker: Some(analysis_worker),
             folder_monitor: Some(
                 crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())

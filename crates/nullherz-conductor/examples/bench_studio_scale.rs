@@ -124,7 +124,7 @@ fn register_tone(conductor: &Conductor, id: u64, base_hz: f32) {
     conductor
         .transfusion_manager
         .sample_registry
-        .register_with_metadata(id, Arc::new(samples), metadata.clone());
+        .register_with_metadata(id, Arc::new(samples).into(), metadata.clone());
 
     let lib = conductor.library.lock();
     lib.save_track(&nullherz_dna::LibraryTrack {
@@ -136,6 +136,7 @@ fn register_tone(conductor: &Conductor, id: u64, base_hz: f32) {
         genre: "test tone".to_string(),
         energy_level: 0.5,
         metadata,
+        stems: None,
     })
     .expect("in-memory library save cannot fail");
 }

@@ -113,7 +113,7 @@ fn render_master_at(amp: f32, sample_id: u64) -> Vec<f32> {
     meta.sample_rate = SR as u32;
     conductor.transfusion_manager.sample_registry.register_with_metadata(
         sample_id,
-        Arc::new(samples),
+        Arc::new(samples).into(),
         Arc::new(meta),
     );
 

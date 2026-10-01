@@ -28,7 +28,7 @@ fn test_sampler_slicer_offsets() {
 
     sampler.apply_topology_mutation(nullherz_traits::TopologyMutation::AddSource {
         node_idx: 0,
-        buffer: buffer.clone(),
+        buffer: buffer.clone().into(),
         sample_id: 123,
         metadata: Some(Arc::new(metadata)),
     });
@@ -97,7 +97,7 @@ fn test_sampler_slicer_phase_lock() {
 
     sampler.apply_topology_mutation(nullherz_traits::TopologyMutation::AddSource {
         node_idx: 0,
-        buffer: buffer.clone(),
+        buffer: buffer.clone().into(),
         sample_id: 123,
         metadata: Some(Arc::new(metadata)),
     });

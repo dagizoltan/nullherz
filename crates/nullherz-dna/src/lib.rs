@@ -21,7 +21,4 @@ pub use registry::*;
 pub use transfusion::*;
 pub use matchmaker::*;
 
-use std::sync::Arc;
-
-pub type SampleBuffer = Arc<Vec<f32>>;
-pub use nullherz_traits::RegisteredSample;
+pub use nullherz_traits::{RegisteredSample, SampleBuffer, MmapBuffer};

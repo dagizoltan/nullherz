@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let f32_data: &[f32] = bytemuck::cast_slice(&payload[cursor..cursor + sample_count * 4]);
                         registry_clone.register_with_metadata(
                             sample_id,
-                            Arc::new(f32_data.to_vec()),
+                            Arc::new(f32_data.to_vec()).into(),
                             Arc::new(SampleMetadata::new_empty())
                         );
                         println!("Sidecar: Registered mirrored sample ID={}", sample_id);

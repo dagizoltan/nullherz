@@ -3529,10 +3529,12 @@ dependencies = [
 name = "nullherz-traits"
 version = "0.1.0"
 dependencies = [
+ "audio-dsp",
  "bincode",
  "bytemuck",
  "dyn-clone",
  "libc",
+ "memmap2",
  "nix 0.29.0",
  "proptest",
  "rkyv",

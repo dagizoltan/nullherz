@@ -23,7 +23,7 @@ fn ramp() -> Arc<Vec<f32>> {
 
 fn voice_at(pos: f64, rate: f32) -> SamplerVoice {
     let mut v = SamplerVoice::new();
-    v.trigger(ramp(), rate, 1.0);
+    v.trigger(ramp().into(), rate, 1.0);
     v.play_head = pos;
     v.buffer_frames = FRAMES;
     v.buffer_channels = 1;

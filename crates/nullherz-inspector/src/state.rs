@@ -227,6 +227,8 @@ pub struct MixerState {
     pub _macro_names: [String; 8],
     pub personality_macro_mode: bool,
     pub spectral_window_shape: u32,
+    pub stem_mutes: [[bool; 12]; 16],
+    pub stem_solos: [[bool; 12]; 16],
 }
 
 impl Default for MixerState {
@@ -267,6 +269,8 @@ impl Default for MixerState {
             _macro_names: std::array::from_fn(|i| format!("MACRO {}", i + 1)),
             personality_macro_mode: false,
             spectral_window_shape: 0,
+            stem_mutes: [[false; 12]; 16],
+            stem_solos: [[false; 12]; 16],
         }
     }
 }

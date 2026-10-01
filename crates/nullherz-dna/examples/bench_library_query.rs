@@ -23,6 +23,7 @@ fn make_track(id: u64) -> LibraryTrack {
         genre: genre.into(),
         energy_level: (id % 10) as f32 / 10.0,
         metadata: Arc::new(m),
+        stems: None,
     }
 }
 

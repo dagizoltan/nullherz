@@ -149,7 +149,7 @@ impl CommandHandler {
                                 metadata.total_samples = decoded.frames as u64;
                                 metadata.channels = decoded.channels as u16;
                                 metadata.sample_rate = decoded.sample_rate;
-                                registry.register_with_metadata(id, decoded.samples, std::sync::Arc::new(metadata));
+                                registry.register_with_metadata(id, decoded.samples.into(), std::sync::Arc::new(metadata));
                                 // Receiver gone means the conductor is shutting
                                 // down; the registry entry still landed.
                                 let _ = done_tx.send(id);
@@ -165,7 +165,7 @@ impl CommandHandler {
                             metadata.channels = decoded.channels as u16;
                             metadata.sample_rate = decoded.sample_rate;
                             conductor.transfusion_manager.sample_registry.register_with_metadata(
-                                *sample_id, decoded.samples, std::sync::Arc::new(metadata));
+                                *sample_id, decoded.samples.into(), std::sync::Arc::new(metadata));
                         }
                     } else {
                         eprintln!("CommandHandler: LoadTrackToDeck {} has no library entry; the deck will stay silent.", sample_id);
@@ -729,7 +729,7 @@ impl CommandHandler {
         metadata.channels = decoded.channels as u16;
         metadata.sample_rate = decoded.sample_rate;
         conductor.transfusion_manager.sample_registry.register_with_metadata(
-            sample_id, decoded.samples, std::sync::Arc::new(metadata));
+            sample_id, decoded.samples.into(), std::sync::Arc::new(metadata));
     }
 
     fn handle_resource_command(conductor: &mut Conductor, cmd: ResourceCommand) -> bool {
@@ -748,9 +748,9 @@ impl CommandHandler {
                     for &s in sample.buffer.iter() { max_peak = max_peak.max(s.abs()); }
                     if max_peak > 0.0 {
                         let gain = 0.95 / max_peak;
-                        let mut new_buf = (*sample.buffer).clone();
+                        let mut new_buf = sample.buffer.to_vec();
                         for s in new_buf.iter_mut() { *s *= gain; }
-                        conductor.transfusion_manager.sample_registry.register_with_metadata(sample_id, Arc::new(new_buf), sample.metadata);
+                        conductor.transfusion_manager.sample_registry.register_with_metadata(sample_id, Arc::new(new_buf).into(), sample.metadata);
                     }
                 }
                 true
@@ -768,7 +768,7 @@ impl CommandHandler {
                          let mut metadata = (*sample.metadata).clone();
                          metadata.total_samples = new_frames as u64;
                          conductor.transfusion_manager.sample_registry.register_with_metadata(
-                             sample_id, Arc::new(cropped), Arc::new(metadata));
+                             sample_id, Arc::new(cropped).into(), Arc::new(metadata));
                      }
                  }
                  true
@@ -791,7 +791,7 @@ impl CommandHandler {
 
                      conductor.transfusion_manager.sample_registry.register_with_metadata(
                          sample_id,
-                         Arc::new(stretched),
+                         Arc::new(stretched).into(),
                          Arc::new(new_metadata.clone()),
                      );
 
@@ -889,7 +889,7 @@ impl CommandHandler {
 
                              conductor.transfusion_manager.sample_registry.register_with_metadata(
                                  slice_id,
-                                 Arc::new(slice_data),
+                                 Arc::new(slice_data).into(),
                                  Arc::new(slice_metadata.clone()),
                              );
 
@@ -903,6 +903,7 @@ impl CommandHandler {
                                      genre: "Sample Slice".to_string(),
                                      energy_level: 0.5,
                                      metadata: Arc::new(slice_metadata),
+                                     stems: None,
                                  };
                                  let _ = lib.save_track(&track);
                              }

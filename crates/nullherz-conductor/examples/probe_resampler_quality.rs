@@ -57,7 +57,7 @@ fn resample(freq: f32, rate: f32, interp: InterpolationType) -> Vec<f32> {
     let mut voice = SamplerVoice::new();
     voice.interpolation = interp;
     voice.set_layout(frames, 1);
-    voice.trigger_at_ref(&src, rate, 1.0, 0.0, 0.0);
+    voice.trigger_at_ref(&src.clone().into(), rate, 1.0, 0.0, 0.0);
 
     // `process_block_planar` ACCUMULATES into the output, so it must start
     // zeroed — a dirty buffer would read as the resampler adding energy.
@@ -196,7 +196,7 @@ fn main() {
                 let mut v = SamplerVoice::new();
                 v.interpolation = interp;
                 v.set_layout(frames, 1);
-                v.trigger_at_ref(&src, rate, 1.0, 0.0, 0.0);
+                v.trigger_at_ref(&src.clone().into(), rate, 1.0, 0.0, 0.0);
                 out.fill(0.0);
                 let mut sl = &mut out[..];
                 let mut outs: [&mut [f32]; 1] = [&mut sl];

@@ -123,7 +123,7 @@ fn console_response(freq: f32) -> f32 {
     meta.sample_rate = SR as u32;
     let id = 8000 + freq as u64;
     c.transfusion_manager.sample_registry
-        .register_with_metadata(id, Arc::new(samples), Arc::new(meta));
+        .register_with_metadata(id, Arc::new(samples).into(), Arc::new(meta));
     c.apply_mixer_commands(vec![
         Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id: 'A', sample_id: id }),
         Command::Performance(PerformanceCommand::PlayDeck { deck_id: 'A' }),

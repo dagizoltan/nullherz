@@ -62,7 +62,7 @@ pub enum TopologyMutation {
     },
     AddSource {
         node_idx: u32,
-        buffer: Arc<Vec<f32>>,
+        buffer: SampleBuffer,
         sample_id: u64,
         metadata: Option<Arc<SampleMetadata>>,
     },

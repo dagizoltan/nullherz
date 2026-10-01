@@ -83,7 +83,7 @@ fn register_track_with_key(conductor: &Conductor, id: u64, root_key: Option<f32>
     conductor
         .transfusion_manager
         .sample_registry
-        .register_with_metadata(id, Arc::new(samples), metadata.clone());
+        .register_with_metadata(id, Arc::new(samples).into(), metadata.clone());
 
     let lib = conductor.library.lock();
     lib.save_track(&nullherz_dna::LibraryTrack {
@@ -95,6 +95,7 @@ fn register_track_with_key(conductor: &Conductor, id: u64, root_key: Option<f32>
         genre: "test tone".to_string(),
         energy_level: 0.5,
         metadata,
+        stems: None,
     })
     .expect("in-memory library save cannot fail");
 }
@@ -206,7 +207,7 @@ fn test_fresh_sampler_does_not_time_stretch() {
     sampler.apply_topology_mutation(nullherz_traits::TopologyMutation::AddSource {
         node_idx: 0,
         sample_id: 1,
-        buffer: Arc::new(samples),
+        buffer: Arc::new(samples).into(),
         metadata: Some(Arc::new(metadata)),
     });
 

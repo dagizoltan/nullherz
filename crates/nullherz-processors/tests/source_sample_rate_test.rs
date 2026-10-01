@@ -36,7 +36,7 @@ fn frames_consumed_per_output_block(source_rate: u32, frames: usize) -> f64 {
 
     sampler.apply_topology_mutation(TopologyMutation::AddSource {
         node_idx: id as u32,
-        buffer: Arc::new(vec![0.25f32; frames]),
+        buffer: Arc::new(vec![0.25f32; frames]).into(),
         sample_id: id,
         metadata: Some(Arc::new(metadata)),
     });
@@ -130,7 +130,7 @@ fn test_beat_jump_moves_by_source_frames_not_device_frames() {
     metadata.bpm = bpm;
     sampler.apply_topology_mutation(TopologyMutation::AddSource {
         node_idx: id as u32,
-        buffer: Arc::new(vec![0.25f32; frames]),
+        buffer: Arc::new(vec![0.25f32; frames]).into(),
         sample_id: id,
         metadata: Some(Arc::new(metadata)),
     });
@@ -175,7 +175,7 @@ fn test_unknown_source_rate_does_not_transpose() {
     metadata.bpm = 0.0;
     sampler.apply_topology_mutation(TopologyMutation::AddSource {
         node_idx: id as u32,
-        buffer: Arc::new(vec![0.25f32; 44_100]),
+        buffer: Arc::new(vec![0.25f32; 44_100]).into(),
         sample_id: id,
         metadata: Some(Arc::new(metadata)),
     });

@@ -98,7 +98,7 @@ fn register_track(conductor: &Conductor, id: u64, frames: u64) {
     conductor
         .transfusion_manager
         .sample_registry
-        .register_with_metadata(id, Arc::new(buffer), metadata.clone());
+        .register_with_metadata(id, Arc::new(buffer).into(), metadata.clone());
 
     conductor
         .library
@@ -112,6 +112,7 @@ fn register_track(conductor: &Conductor, id: u64, frames: u64) {
             genre: "test".into(),
             energy_level: 0.5,
             metadata,
+            stems: None,
         })
         .expect("in-memory library save cannot fail");
 }

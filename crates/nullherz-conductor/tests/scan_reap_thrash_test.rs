@@ -39,14 +39,14 @@ struct CountingRegistry {
 
 impl nullherz_traits::SampleRegistry for CountingRegistry {
     fn get(&self, id: u64) -> Option<nullherz_traits::RegisteredSample> { self.inner.get(id) }
-    fn register(&self, id: u64, buffer: Arc<Vec<f32>>) {
+    fn register(&self, id: u64, buffer: nullherz_traits::SampleBuffer) {
         self.registrations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.inner.register(id, buffer);
     }
     fn register_with_metadata(
         &self,
         id: u64,
-        buffer: Arc<Vec<f32>>,
+        buffer: nullherz_traits::SampleBuffer,
         metadata: Arc<nullherz_traits::SampleMetadata>,
     ) {
         self.registrations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

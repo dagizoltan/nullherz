@@ -177,7 +177,32 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
     let start_ratio = (win_start / total_frames as f64) as f32;
     let end_ratio = (win_end / total_frames as f64) as f32;
 
-    if let Some(wf_lock) = &app.deck_waveform_renderers[i] {
+    if let Some(ref stem_set) = t.stems {
+        if !stem_set.stems.is_empty() {
+            let stem_count = stem_set.stems.len().min(12);
+            let sub_h = rect.height() / stem_count as f32;
+            for (s_idx, single_stem) in stem_set.stems.iter().take(12).enumerate() {
+                let sub_rect = egui::Rect::from_min_max(
+                    egui::pos2(rect.min.x, rect.min.y + s_idx as f32 * sub_h),
+                    egui::pos2(rect.max.x, rect.min.y + (s_idx + 1) as f32 * sub_h),
+                );
+                let stem_color = super::render::stem_color_for_classif(single_stem.classification);
+                if let Some(first_level) = single_stem.mip_waveform.levels.first() {
+                    let start_idx = ((start_ratio * first_level.len() as f32) as usize).clamp(0, first_level.len());
+                    let end_idx = ((end_ratio * first_level.len() as f32) as usize).clamp(0, first_level.len());
+                    if end_idx > start_idx {
+                        let window_peaks = &first_level[start_idx..end_idx];
+                        crate::views::composer::render_mini_waveform(
+                            ui.painter(),
+                            sub_rect.shrink(1.0),
+                            window_peaks,
+                            stem_color,
+                        );
+                    }
+                }
+            }
+        }
+    } else if let Some(wf_lock) = &app.deck_waveform_renderers[i] {
         let mut wf = wf_lock.lock();
         let color = deck_color.to_array().map(|v| v as f32 / 255.0);
         let style = app.mixer.waveform_styles[i];

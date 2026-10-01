@@ -159,7 +159,7 @@ fn render_console(amp: f32) -> Vec<f64> {
     meta.channels = 2;
     meta.sample_rate = SR as u32;
     c.transfusion_manager.sample_registry
-        .register_with_metadata(7001, Arc::new(samples), Arc::new(meta));
+        .register_with_metadata(7001, Arc::new(samples).into(), Arc::new(meta));
     c.apply_mixer_commands(vec![
         Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id: 'A', sample_id: 7001 }),
         Command::Performance(PerformanceCommand::PlayDeck { deck_id: 'A' }),

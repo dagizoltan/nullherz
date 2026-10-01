@@ -45,7 +45,7 @@ impl Rig {
         metadata.bpm = track_bpm;
         sampler.apply_topology_mutation(TopologyMutation::AddSource {
             node_idx: id as u32,
-            buffer: Arc::new(vec![0.25f32; frames]),
+            buffer: Arc::new(vec![0.25f32; frames]).into(),
             sample_id: id,
             metadata: Some(Arc::new(metadata)),
         });
