@@ -4,6 +4,10 @@ use num_traits::Float;
 use crate::util::AlignedBuffer;
 use crate::SimdFft;
 
+#[path = "spectral/stft_masking.rs"]
+pub mod stft_masking;
+pub use stft_masking::*;
+
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SpectralWindowShape {
