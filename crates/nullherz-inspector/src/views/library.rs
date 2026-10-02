@@ -799,6 +799,23 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
                     }
                 });
 
+            if let Some(ref stem_set) = track.stems {
+                ui.add_space(2.0);
+                ui.label(RichText::new("EXTRACTED STEM COMPONENTS").size(theme.type_caption).strong().color(theme.accent));
+                egui::Grid::new(format!("stems_grid_{}", track.id))
+                    .num_columns(3)
+                    .spacing([theme.space_sm, 2.0])
+                    .show(ui, |ui| {
+                        for single_stem in &stem_set.stems {
+                            let stem_color = super::dj_studio::render::stem_color_for_classif(single_stem.classification);
+                            ui.label(RichText::new(format!("{:?}", single_stem.classification)).size(theme.type_caption).color(stem_color).strong());
+                            ui.label(RichText::new(&single_stem.relative_path).size(9.0).monospace().color(theme.text_secondary));
+                            ui.label(RichText::new(format!("{:.1} dB", single_stem.peak_db)).size(theme.type_caption).color(theme.warning));
+                            ui.end_row();
+                        }
+                    });
+            }
+
             ui.add_space(2.0);
             ui.horizontal(|ui| {
                 if ui.button(RichText::new("→ SAMPLER").size(theme.type_caption)).clicked() {

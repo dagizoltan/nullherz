@@ -94,6 +94,7 @@ fn test_load_does_not_block_and_deck_still_sounds() {
     let mut left = vec![0.0f32; BLOCK];
     let mut right = vec![0.0f32; BLOCK];
     for _ in 0..256 {
+        conductor.tick();
         pump_block(&mut conductor, &mut left, &mut right);
     }
 

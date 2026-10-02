@@ -22,6 +22,7 @@ pub struct DeckNodes {
     /// Separate from the pitch slot because the two are independently
     /// engageable and one slot can only hold one processor.
     pub dna_slot_id: u32,
+    pub stem_matrix_id: u32,
     /// Post-EQ FX insert slots, in chain order. Swappable at runtime.
     pub fx_slot_ids: Vec<u32>,
     pub stereo_util_id: u32,
@@ -255,6 +256,7 @@ impl MixerManager {
         // is no such node now, which is the point.
         self.node_names.insert(format!("deck_{}_pitch_slot", id_lower), nodes.pitch_slot_id);
         self.node_names.insert(format!("deck_{}_dna_slot", id_lower), nodes.dna_slot_id);
+        self.node_names.insert(format!("deck_{}_stem_matrix", id_lower), nodes.stem_matrix_id);
         for (i, fx) in nodes.fx_slot_ids.iter().enumerate() {
             self.node_names.insert(format!("deck_{}_fx{}", id_lower, i + 1), *fx);
             if i == 0 {

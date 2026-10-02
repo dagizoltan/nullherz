@@ -63,9 +63,13 @@ pub fn create_dj_deck(
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: dna_slot_id, processor_type_id: ProcessorTypeId::BYPASS }));
     link_stereo(id_allocator, &mut commands, pitch_slot_id, dna_slot_id);
 
+    let stem_matrix_id = id_allocator.allocate_node_id();
+    commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: stem_matrix_id, processor_type_id: ProcessorTypeId::DECK_STEM_MATRIX }));
+    link_stereo(id_allocator, &mut commands, dna_slot_id, stem_matrix_id);
+
     let gain_id = id_allocator.allocate_node_id();
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: gain_id, processor_type_id: ProcessorTypeId::GAIN }));
-    link_stereo(id_allocator, &mut commands, dna_slot_id, gain_id);
+    link_stereo(id_allocator, &mut commands, stem_matrix_id, gain_id);
 
     let filter_id = id_allocator.allocate_node_id();
     commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: filter_id, processor_type_id: ProcessorTypeId::BIQUAD }));
@@ -143,6 +147,7 @@ pub fn create_dj_deck(
         filter_id,
         pitch_slot_id,
         dna_slot_id,
+        stem_matrix_id,
         fx_slot_ids,
         stereo_util_id,
         sequencer_id,
