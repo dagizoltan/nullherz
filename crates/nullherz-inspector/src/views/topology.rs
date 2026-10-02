@@ -348,7 +348,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     ui.add_space(theme.space_sm);
 
     ui.heading(RichText::new("Sidecar Discovery").size(theme.type_heading));
-    ui.label(RichText::new("Detected WASM and Native Sidecars in plugins/").size(theme.type_caption).color(theme.text_secondary));
+    ui.label(RichText::new("Detected WASM and Native Sidecars in sidecars/").size(theme.type_caption).color(theme.text_secondary));
     ui.add_space(theme.space_sm);
 
     // 4. Sidecars Card List with dynamic combo-box targeting

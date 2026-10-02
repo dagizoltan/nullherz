@@ -668,13 +668,13 @@ impl InspectorApp {
     fn render_left_sidebar(&mut self, ctx: &egui::Context, active_view: &mut View, id_prefix: &str) {
         egui::SidePanel::left(format!("{}_left_sidebar", id_prefix))
             .resizable(false)
-            .min_width(78.0)
-            .default_width(78.0)
+            .min_width(68.0)
+            .default_width(68.0)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
+                    ui.add_space(6.0);
+                    ui.label(egui::RichText::new("Ω").size(20.0).color(self.theme.accent));
                     ui.add_space(10.0);
-                    ui.label(egui::RichText::new("Ω").size(24.0).color(self.theme.accent));
-                    ui.add_space(20.0);
 
                     let top_nav = [
                         (View::Player, egui_phosphor::regular::DISC, "MEDIA PLAYER"),
@@ -699,7 +699,7 @@ impl InspectorApp {
 
                     let mut render_nav_btn = |ui: &mut egui::Ui, view: View, icon: &str, label: &str| {
                         let is_selected = *active_view == view;
-                        let size = egui::vec2(50.0, 50.0);
+                        let size = egui::vec2(44.0, 40.0);
                         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
 
                         if response.clicked() {
@@ -714,8 +714,8 @@ impl InspectorApp {
                                 self.theme.accent.linear_multiply(0.12),
                             );
                             let accent_bar = egui::Rect::from_min_max(
-                                rect.left_top() + egui::vec2(2.0, 8.0),
-                                rect.left_bottom() + egui::vec2(5.0, -8.0),
+                                rect.left_top() + egui::vec2(2.0, 6.0),
+                                rect.left_bottom() + egui::vec2(5.0, -6.0),
                             );
                             ui.painter().rect_filled(accent_bar, 1.5, self.theme.accent);
                         } else if response.hovered() {
@@ -738,31 +738,33 @@ impl InspectorApp {
                             rect.center(),
                             egui::Align2::CENTER_CENTER,
                             icon,
-                            egui::FontId::proportional(20.0),
+                            egui::FontId::proportional(18.0),
                             icon_color,
                         );
 
                         response.on_hover_text(label);
                     };
 
-                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                        ui.add_space(10.0);
-                        for (view, icon, label) in bottom_nav.into_iter().rev() {
-                            render_nav_btn(ui, view, icon, label);
-                            ui.add_space(10.0);
-                        }
-
-                        ui.separator();
-
-                        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                            egui::ScrollArea::vertical().id_source(format!("{}_nav_scroll", id_prefix)).show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_source(format!("{}_nav_scroll", id_prefix))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.vertical_centered(|ui| {
                                 for (view, icon, label) in top_nav {
                                     render_nav_btn(ui, view, icon, label);
-                                    ui.add_space(10.0);
+                                    ui.add_space(4.0);
+                                }
+
+                                ui.add_space(4.0);
+                                ui.separator();
+                                ui.add_space(4.0);
+
+                                for (view, icon, label) in bottom_nav {
+                                    render_nav_btn(ui, view, icon, label);
+                                    ui.add_space(4.0);
                                 }
                             });
                         });
-                    });
                 });
             });
     }

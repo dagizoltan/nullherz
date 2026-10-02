@@ -626,7 +626,7 @@ impl CommandHandler {
                     known.get(&plugin_name).cloned()
                 };
                 if let Some(m) = manifest {
-                    let binary_path = format!("plugins/{}", m.binary_name);
+                    let binary_path = format!("sidecars/{}", m.binary_name);
                     match conductor.sidecar_supervisor.manager.spawn_sidecar(&plugin_name, &binary_path, node_idx, 2, fx_runtime::FailurePolicy::AutoRestart) {
                         Ok(processor) => {
                             if let Some(ref mut prod) = conductor.topology_manager.topo_producer {
