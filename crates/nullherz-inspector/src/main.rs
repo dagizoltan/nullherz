@@ -668,7 +668,8 @@ impl InspectorApp {
     fn render_left_sidebar(&mut self, ctx: &egui::Context, active_view: &mut View, id_prefix: &str) {
         egui::SidePanel::left(format!("{}_left_sidebar", id_prefix))
             .resizable(false)
-            .default_width(70.0)
+            .min_width(78.0)
+            .default_width(78.0)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(10.0);

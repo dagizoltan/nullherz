@@ -104,10 +104,26 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         ui.add_space(app.theme.space_md);
 
+        // Beatgrid Precision Selector (1/16, 1/32, 1/64)
+        ui.label(RichText::new("PRECISION:").strong().size(app.theme.type_caption).color(app.theme.text_secondary));
+        let steps_per_bar = app.composer.grid_step_resolution.clamp(16, 64);
+        egui::ComboBox::from_id_source("grid_precision_select")
+            .width(65.0)
+            .selected_text(RichText::new(format!("1/{}", steps_per_bar)).size(app.theme.type_caption).strong())
+            .show_ui(ui, |ui| {
+                for res in [16, 32, 64] {
+                    if ui.selectable_label(app.composer.grid_step_resolution == res, format!("1/{} Note", res)).clicked() {
+                        app.composer.grid_step_resolution = res;
+                    }
+                }
+            });
+
+        ui.add_space(app.theme.space_md);
+
         // Pattern Length Selector
         ui.label(RichText::new("LENGTH:").strong().size(app.theme.type_caption).color(app.theme.text_secondary));
-        let steps_count = app.composer.sequencer_grid[grid_deck][0].len();
-        let current_bars = (steps_count / 16).max(1);
+        let current_steps = app.composer.sequencer_grid[grid_deck][0].len();
+        let current_bars = (current_steps / steps_per_bar).max(1);
         let mut selected_bars = current_bars;
 
         egui::ComboBox::from_id_source("pattern_length_select")
@@ -115,14 +131,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             .selected_text(RichText::new(format!("{} BARS", current_bars)).size(app.theme.type_caption).strong())
             .show_ui(ui, |ui| {
                 for bars in [1, 2, 4, 8] {
-                    if ui.selectable_label(current_bars == bars, format!("{} Bars ({} steps)", bars, bars * 16)).clicked() {
+                    if ui.selectable_label(current_bars == bars, format!("{} Bars ({} steps)", bars, bars * steps_per_bar)).clicked() {
                         selected_bars = bars;
                     }
                 }
             });
 
-        if selected_bars != current_bars {
-            let target_steps = selected_bars * 16;
+        let target_steps = selected_bars * steps_per_bar;
+        if target_steps != current_steps {
             for trk in 0..16 {
                 app.composer.sequencer_grid[grid_deck][trk].resize(target_steps, 0.0);
             }
@@ -314,22 +330,25 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             ui.spacing_mut().item_spacing.y = 0.0;
 
                             // Bar/Beat Timeline Header Row (26.0px height)
+                                let steps_per_bar = app.composer.grid_step_resolution.clamp(16, 64);
+                                let steps_per_beat = (steps_per_bar / 4).max(1);
+
                             let header_resp = ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 26.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                 ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
                                 for slot_idx in 0..steps_count {
-                                    if slot_idx > 0 && slot_idx % 4 == 0 {
+                                        if slot_idx > 0 && slot_idx % steps_per_beat == 0 {
                                         ui.add_space(4.0);
                                     }
                                     let (rect, response) = ui.allocate_exact_size(Vec2::new(slot_w, 24.0), Sense::click());
 
                                     if response.clicked() {
-                                        let bar = (slot_idx / 4) + 1;
+                                            let bar = (slot_idx / steps_per_bar) + 1;
                                         let beat_pos = (bar - 1) as f64 * 4.0;
                                         let _ = app.command_sender.send(Command::Performance(PerformanceCommand::JumpByBeats { node_idx: seq_node, beats: beat_pos as f32 }));
                                     }
 
-                                    if slot_idx % 4 == 0 {
-                                        let bar_num = (slot_idx / 4) + 1;
+                                        if slot_idx % steps_per_bar == 0 {
+                                            let bar_num = (slot_idx / steps_per_bar) + 1;
                                         ui.painter().rect_filled(rect, Rounding::same(2.0), app.theme.bg_surface);
                                         ui.painter().text(
                                             rect.center(),
@@ -338,6 +357,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             egui::FontId::new(10.0, egui::FontFamily::Monospace),
                                             app.theme.accent,
                                         );
+                                        } else if slot_idx % steps_per_beat == 0 {
+                                            let beat_num = (slot_idx % steps_per_bar) / steps_per_beat + 1;
+                                            ui.painter().text(
+                                                rect.center(),
+                                                egui::Align2::CENTER_CENTER,
+                                                format!(".{}", beat_num),
+                                                egui::FontId::new(9.0, egui::FontFamily::Monospace),
+                                                app.theme.text_secondary,
+                                            );
                                     } else {
                                         let tick_rect = egui::Rect::from_center_size(rect.center(), Vec2::new(2.0, 4.0));
                                         ui.painter().rect_filled(tick_rect, Rounding::same(1.0), app.theme.text_disabled.linear_multiply(0.4));
@@ -362,9 +390,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
 
+                                    let steps_per_bar = app.composer.grid_step_resolution.clamp(16, 64);
+                                    let steps_per_beat = (steps_per_bar / 4).max(1);
+
                                     for slot_idx in 0..steps_count {
-                                        if slot_idx > 0 && slot_idx % 4 == 0 {
+                                        if slot_idx > 0 && slot_idx % steps_per_beat == 0 {
                                             ui.add_space(4.0);
+                                        }
+                                        if slot_idx > 0 && slot_idx % steps_per_bar == 0 {
+                                            ui.add_space(6.0);
                                         }
 
                                         let (rect, response) = ui.allocate_exact_size(Vec2::new(slot_w, slot_h), Sense::click());

@@ -500,6 +500,7 @@ pub struct ComposerState {
     pub evolution_strengths: [f32; 16],
     pub auto_pollinate_enabled: bool,
     pub grid_zoom: f32,
+    pub grid_step_resolution: usize, // 16 = 1/16th, 32 = 1/32nd, 64 = 1/64th note precision
 }
 
 impl Default for ComposerState {
@@ -522,6 +523,7 @@ impl Default for ComposerState {
             evolution_strengths: [0.0; 16],
             auto_pollinate_enabled: false,
             grid_zoom: 1.0,
+            grid_step_resolution: 16,
         }
     }
 }

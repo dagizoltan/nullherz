@@ -86,8 +86,9 @@ pub fn stem_label_for_classif(classif: nullherz_traits::StemClassification) -> &
 }
 
 pub fn dispatch_stem_param(app: &mut InspectorApp, deck_idx: usize, stem_idx: usize, control_type: u32, value: f32) {
-    let target_node = app.get_node_id(&format!("deck_{}_stem_matrix", (b'a' + deck_idx as u8) as char))
-        .or_else(|| app.get_node_id(&format!("deck_{}_sampler", (b'a' + deck_idx as u8) as char)));
+    let target_node = app.get_node_id(&format!("deck_{}_stem_matrix", (b'a' + (deck_idx % 26) as u8) as char))
+        .or_else(|| app.get_node_id(&format!("deck_{}_dna_slot", (b'a' + (deck_idx % 26) as u8) as char)))
+        .or_else(|| app.get_node_id(&format!("deck_{}_sampler", (b'a' + (deck_idx % 26) as u8) as char)));
     if let Some(node) = target_node {
         let param_id = (stem_idx * 10) as u32 + control_type;
         let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
