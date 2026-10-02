@@ -177,64 +177,82 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
     let start_ratio = (win_start / total_frames as f64) as f32;
     let end_ratio = (win_end / total_frames as f64) as f32;
 
-    if let Some(ref stem_set) = t.stems {
-        if !stem_set.stems.is_empty() {
-            let stem_count = stem_set.stems.len().min(12);
-            let sub_h = rect.height() / stem_count as f32;
-            for (s_idx, single_stem) in stem_set.stems.iter().take(12).enumerate() {
-                let sub_rect = egui::Rect::from_min_max(
-                    egui::pos2(rect.min.x, rect.min.y + s_idx as f32 * sub_h),
-                    egui::pos2(rect.max.x, rect.min.y + (s_idx + 1) as f32 * sub_h),
-                );
-                let stem_color = super::render::stem_color_for_classif(single_stem.classification);
-                if let Some(first_level) = single_stem.mip_waveform.levels.first() {
-                    let start_idx = ((start_ratio * first_level.len() as f32) as usize).clamp(0, first_level.len());
-                    let end_idx = ((end_ratio * first_level.len() as f32) as usize).clamp(0, first_level.len());
-                    if end_idx > start_idx {
-                        let window_peaks = &first_level[start_idx..end_idx];
-                        crate::views::composer::render_mini_waveform(
-                            ui.painter(),
-                            sub_rect.shrink(1.0),
-                            window_peaks,
-                            stem_color,
+    use crate::state::DeckWaveformMode;
+    let wf_mode = app.mixer.deck_waveform_mode[i];
+    let render_gpu = wf_mode == DeckWaveformMode::Original || wf_mode == DeckWaveformMode::Overlay || (wf_mode == DeckWaveformMode::Stems && t.stems.is_none());
+    let render_stems = t.stems.is_some() && (wf_mode == DeckWaveformMode::Stems || wf_mode == DeckWaveformMode::Overlay);
+
+    if render_gpu {
+        if let Some(wf_lock) = &app.deck_waveform_renderers[i] {
+            let mut wf = wf_lock.lock();
+            let color = deck_color.to_array().map(|v| v as f32 / 255.0);
+            let style = app.mixer.waveform_styles[i];
+
+            if let Some(wgpu) = &app.wgpu_renderer {
+                let wgpu = wgpu.lock();
+                wf.update_globals(&wgpu.queue, 0.0, 1.0, false, style, color);
+                if t.metadata.band_waveform.is_empty() {
+                    wf.update_from_mip_window(&wgpu.queue, &t.metadata.mip_waveform, start_ratio, end_ratio, rect.width() as u32, color);
+                } else {
+                    let eq_gains = if i < 16 {
+                        [
+                            app.mixer.channel_eq_low[i],
+                            app.mixer.channel_eq_mid[i],
+                            app.mixer.channel_eq_high[i],
+                        ]
+                    } else {
+                        [1.0, 1.0, 1.0]
+                    };
+                    wf.update_from_band_window(&wgpu.queue, &t.metadata.band_waveform, start_ratio, end_ratio, rect.width() as u32, style, color, eq_gains);
+                }
+            }
+
+            nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_lock.clone());
+        } else {
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, format!("{} (NO GPU)", t.title), egui::FontId::monospace(theme.type_caption), theme.text_secondary);
+            ui.painter().line_segment(
+                [egui::pos2(rect.min.x, rect.center().y), egui::pos2(rect.max.x, rect.center().y)],
+                egui::Stroke::new(1.0_f32, theme.border)
+            );
+        }
+    }
+
+    if render_stems {
+        let alpha_multiply = if wf_mode == DeckWaveformMode::Overlay { 0.85 } else { 1.0 };
+        if let Some(ref stem_set) = t.stems {
+            if !stem_set.stems.is_empty() {
+                let stem_count = stem_set.stems.len().min(12);
+                let sub_h = rect.height() / stem_count as f32;
+                for (s_idx, single_stem) in stem_set.stems.iter().take(12).enumerate() {
+                    let sub_rect = egui::Rect::from_min_max(
+                        egui::pos2(rect.min.x, rect.min.y + s_idx as f32 * sub_h),
+                        egui::pos2(rect.max.x, rect.min.y + (s_idx + 1) as f32 * sub_h),
+                    );
+                    let mut stem_color = super::render::stem_color_for_classif(single_stem.classification);
+                    if alpha_multiply < 1.0 {
+                        stem_color = Color32::from_rgba_unmultiplied(
+                            stem_color.r(),
+                            stem_color.g(),
+                            stem_color.b(),
+                            ((stem_color.a() as f32) * alpha_multiply) as u8,
                         );
+                    }
+                    if let Some(first_level) = single_stem.mip_waveform.levels.first() {
+                        let start_idx = ((start_ratio * first_level.len() as f32) as usize).clamp(0, first_level.len());
+                        let end_idx = ((end_ratio * first_level.len() as f32) as usize).clamp(0, first_level.len());
+                        if end_idx > start_idx {
+                            let window_peaks = &first_level[start_idx..end_idx];
+                            crate::views::composer::render_mini_waveform(
+                                ui.painter(),
+                                sub_rect.shrink(1.0),
+                                window_peaks,
+                                stem_color,
+                            );
+                        }
                     }
                 }
             }
         }
-    } else if let Some(wf_lock) = &app.deck_waveform_renderers[i] {
-        let mut wf = wf_lock.lock();
-        let color = deck_color.to_array().map(|v| v as f32 / 255.0);
-        let style = app.mixer.waveform_styles[i];
-
-        if let Some(wgpu) = &app.wgpu_renderer {
-            let wgpu = wgpu.lock();
-            wf.update_globals(&wgpu.queue, 0.0, 1.0, false, style, color);
-            if t.metadata.band_waveform.is_empty() {
-                // Pre-band library rows: mono silhouette in the deck color.
-                wf.update_from_mip_window(&wgpu.queue, &t.metadata.mip_waveform, start_ratio, end_ratio, rect.width() as u32, color);
-            } else {
-                let eq_gains = if i < 16 {
-                    [
-                        app.mixer.channel_eq_low[i],
-                        app.mixer.channel_eq_mid[i],
-                        app.mixer.channel_eq_high[i],
-                    ]
-                } else {
-                    [1.0, 1.0, 1.0]
-                };
-                wf.update_from_band_window(&wgpu.queue, &t.metadata.band_waveform, start_ratio, end_ratio, rect.width() as u32, style, color, eq_gains);
-            }
-        }
-
-        nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_lock.clone());
-    } else {
-        // Draw simulated fallback waveform lines when GPU/WGPU is unavailable
-        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, format!("{} (NO GPU)", t.title), egui::FontId::monospace(theme.type_caption), theme.text_secondary);
-        ui.painter().line_segment(
-            [egui::pos2(rect.min.x, rect.center().y), egui::pos2(rect.max.x, rect.center().y)],
-            egui::Stroke::new(1.0_f32, theme.border)
-        );
     }
 
     let to_x = |frame_pos: f64| -> f32 {

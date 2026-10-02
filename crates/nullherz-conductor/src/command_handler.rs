@@ -44,6 +44,60 @@ fn map_planes(
 }
 
 impl CommandHandler {
+    pub fn try_hydrate_stem_sample(conductor: &mut Conductor, sample_id: u64) -> bool {
+        if conductor.transfusion_manager.sample_registry.get(sample_id).is_some() {
+            return true;
+        }
+        let lib = conductor.library.lock();
+        let all_tracks = lib.list_tracks().unwrap_or_default();
+        for track in all_tracks {
+            if let Some(ref stem_set) = track.stems {
+                for (idx, stem) in stem_set.stems.iter().enumerate() {
+                    let stem_id = track.id.wrapping_add((idx as u64 + 1) * 10000);
+                    if stem_id == sample_id {
+                        let stem_path = std::path::Path::new(&stem.relative_path);
+                        if stem_path.exists() {
+                            let mmap_buffer = nullherz_traits::MmapBuffer::open(stem_path)
+                                .map(|m| nullherz_traits::SampleBuffer::Mmap(Arc::new(m)))
+                                .ok();
+                            if let Some(buf) = mmap_buffer {
+                                let mut stem_meta = nullherz_traits::SampleMetadata::new_empty();
+                                stem_meta.sample_rate = track.metadata.sample_rate;
+                                stem_meta.channels = track.metadata.channels;
+                                stem_meta.total_samples = track.metadata.total_samples;
+                                stem_meta.mip_waveform = stem.mip_waveform.clone();
+                                conductor.transfusion_manager.sample_registry.register_with_metadata(
+                                    sample_id,
+                                    buf,
+                                    Arc::new(stem_meta),
+                                );
+                                println!("CommandHandler: Hydrated stem sample {} from {}", sample_id, stem.relative_path);
+                                return true;
+                            } else {
+                                let decoded = crate::folder_monitor::decode_audio_file(&stem.relative_path);
+                                if decoded.frames > 0 {
+                                    let mut stem_meta = nullherz_traits::SampleMetadata::new_empty();
+                                    stem_meta.sample_rate = decoded.sample_rate;
+                                    stem_meta.channels = decoded.channels as u16;
+                                    stem_meta.total_samples = decoded.frames as u64;
+                                    stem_meta.mip_waveform = stem.mip_waveform.clone();
+                                    conductor.transfusion_manager.sample_registry.register_with_metadata(
+                                        sample_id,
+                                        decoded.samples.into(),
+                                        Arc::new(stem_meta),
+                                    );
+                                    println!("CommandHandler: Decoded stem sample {} from {}", sample_id, stem.relative_path);
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     pub fn apply_mixer_commands(conductor: &mut Conductor, commands: Vec<Command>) {
         let mut final_commands = Vec::new();
 
@@ -121,6 +175,9 @@ impl CommandHandler {
                 if conductor.transfusion_manager.sample_registry.get(*sample_id).is_none()
                     && !conductor.hydration_pending.contains(sample_id)
                 {
+                    if Self::try_hydrate_stem_sample(conductor, *sample_id) {
+                        continue;
+                    }
                     let track = { conductor.library.lock().get_track(*sample_id).ok().flatten() };
                     if let Some(track) = track {
                         if !std::path::Path::new(&track.path).exists() {
@@ -406,6 +463,11 @@ impl CommandHandler {
         // Quality-of-life fallback: if hardcoded sample_id 1 or 2 is not found
         // in the registry, fall back to the first or second available sample.
         let mut sample_opt = conductor.transfusion_manager.sample_registry.get(sample_id);
+        if sample_opt.is_none() {
+            if Self::try_hydrate_stem_sample(conductor, sample_id) {
+                sample_opt = conductor.transfusion_manager.sample_registry.get(sample_id);
+            }
+        }
         if sample_opt.is_none() && (sample_id == 1 || sample_id == 2) {
             let ids = conductor.transfusion_manager.sample_registry.list_ids();
             if !ids.is_empty() {

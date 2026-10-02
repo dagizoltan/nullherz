@@ -66,6 +66,222 @@ pub fn stem_color_for_classif(classif: nullherz_traits::StemClassification) -> C
     }
 }
 
+pub fn stem_label_for_classif(classif: nullherz_traits::StemClassification) -> &'static str {
+    match classif {
+        nullherz_traits::StemClassification::Kick => "Kick",
+        nullherz_traits::StemClassification::Snare => "Snare",
+        nullherz_traits::StemClassification::Clap => "Clap",
+        nullherz_traits::StemClassification::Hat => "Hat",
+        nullherz_traits::StemClassification::Percussion => "Perc",
+        nullherz_traits::StemClassification::Bass => "Bass",
+        nullherz_traits::StemClassification::LeadVocal => "Lead Voc",
+        nullherz_traits::StemClassification::BackingVocal => "Back Voc",
+        nullherz_traits::StemClassification::Vocal => "Vocal",
+        nullherz_traits::StemClassification::Guitar => "Guitar",
+        nullherz_traits::StemClassification::PianoKeys => "Keys",
+        nullherz_traits::StemClassification::SynthPad => "Synth",
+        nullherz_traits::StemClassification::BrassStrings => "Brass",
+        _ => "Other",
+    }
+}
+
+pub fn dispatch_stem_param(app: &mut InspectorApp, deck_idx: usize, stem_idx: usize, control_type: u32, value: f32) {
+    let target_node = app.get_node_id(&format!("deck_{}_stem_matrix", (b'a' + deck_idx as u8) as char))
+        .or_else(|| app.get_node_id(&format!("deck_{}_sampler", (b'a' + deck_idx as u8) as char)));
+    if let Some(node) = target_node {
+        let param_id = (stem_idx * 10) as u32 + control_type;
+        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+            target_id: node as u64,
+            param_id,
+            value,
+            ramp_duration_samples: 0,
+        }));
+    }
+}
+
+fn apply_stem_macro_acapella(app: &mut InspectorApp, deck_idx: usize, stem_set: &nullherz_traits::StemSetMetadata) {
+    for (s_idx, single_stem) in stem_set.stems.iter().enumerate().take(12) {
+        let is_vocal = matches!(
+            single_stem.classification,
+            nullherz_traits::StemClassification::LeadVocal
+                | nullherz_traits::StemClassification::BackingVocal
+                | nullherz_traits::StemClassification::Vocal
+        );
+        app.mixer.stem_solos[deck_idx][s_idx] = is_vocal;
+        app.mixer.stem_mutes[deck_idx][s_idx] = !is_vocal;
+        dispatch_stem_param(app, deck_idx, s_idx, 1, if is_vocal { 1.0 } else { 0.0 });
+        dispatch_stem_param(app, deck_idx, s_idx, 0, if !is_vocal { 1.0 } else { 0.0 });
+    }
+}
+
+fn apply_stem_macro_instrumental(app: &mut InspectorApp, deck_idx: usize, stem_set: &nullherz_traits::StemSetMetadata) {
+    for (s_idx, single_stem) in stem_set.stems.iter().enumerate().take(12) {
+        let is_vocal = matches!(
+            single_stem.classification,
+            nullherz_traits::StemClassification::LeadVocal
+                | nullherz_traits::StemClassification::BackingVocal
+                | nullherz_traits::StemClassification::Vocal
+        );
+        app.mixer.stem_mutes[deck_idx][s_idx] = is_vocal;
+        app.mixer.stem_solos[deck_idx][s_idx] = false;
+        dispatch_stem_param(app, deck_idx, s_idx, 0, if is_vocal { 1.0 } else { 0.0 });
+        dispatch_stem_param(app, deck_idx, s_idx, 1, 0.0);
+    }
+}
+
+fn apply_stem_macro_drums_bass(app: &mut InspectorApp, deck_idx: usize, stem_set: &nullherz_traits::StemSetMetadata) {
+    for (s_idx, single_stem) in stem_set.stems.iter().enumerate().take(12) {
+        let is_rythm_bass = matches!(
+            single_stem.classification,
+            nullherz_traits::StemClassification::Kick
+                | nullherz_traits::StemClassification::Snare
+                | nullherz_traits::StemClassification::Clap
+                | nullherz_traits::StemClassification::Hat
+                | nullherz_traits::StemClassification::Percussion
+                | nullherz_traits::StemClassification::Bass
+        );
+        app.mixer.stem_solos[deck_idx][s_idx] = is_rythm_bass;
+        app.mixer.stem_mutes[deck_idx][s_idx] = !is_rythm_bass;
+        dispatch_stem_param(app, deck_idx, s_idx, 1, if is_rythm_bass { 1.0 } else { 0.0 });
+        dispatch_stem_param(app, deck_idx, s_idx, 0, if !is_rythm_bass { 1.0 } else { 0.0 });
+    }
+}
+
+fn apply_stem_macro_reset_all(app: &mut InspectorApp, deck_idx: usize, stem_set: &nullherz_traits::StemSetMetadata) {
+    for (s_idx, _) in stem_set.stems.iter().enumerate().take(12) {
+        app.mixer.stem_mutes[deck_idx][s_idx] = false;
+        app.mixer.stem_solos[deck_idx][s_idx] = false;
+        app.mixer.stem_gains[deck_idx][s_idx] = 0.0;
+        app.mixer.stem_pans[deck_idx][s_idx] = 0.0;
+        app.mixer.stem_eq_low[deck_idx][s_idx] = 1.0;
+        app.mixer.stem_eq_mid[deck_idx][s_idx] = 1.0;
+        app.mixer.stem_eq_high[deck_idx][s_idx] = 1.0;
+
+        dispatch_stem_param(app, deck_idx, s_idx, 0, 0.0);
+        dispatch_stem_param(app, deck_idx, s_idx, 1, 0.0);
+        dispatch_stem_param(app, deck_idx, s_idx, 2, 0.0);
+        dispatch_stem_param(app, deck_idx, s_idx, 3, 0.0);
+        dispatch_stem_param(app, deck_idx, s_idx, 4, 1.0);
+        dispatch_stem_param(app, deck_idx, s_idx, 5, 1.0);
+        dispatch_stem_param(app, deck_idx, s_idx, 6, 1.0);
+    }
+}
+
+pub fn render_expanded_stem_matrix(app: &mut InspectorApp, ui: &mut Ui, i: usize, _deck_color: Color32) {
+    let theme = app.theme;
+    let track = app.decks.cached_tracks[i].clone();
+    let Some(t) = track else { return; };
+    let Some(stem_set) = t.stems else { return; };
+
+    Frame::none()
+        .fill(theme.bg_inset)
+        .stroke(theme.border_stroke)
+        .rounding(Rounding::same(theme.radius_sm))
+        .inner_margin(Margin::symmetric(theme.space_sm, 4.0))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("STEM MATRIX (12-BAND ISOLATOR & ROUTING)").size(theme.type_caption).strong().color(theme.accent));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(RichText::new("RESET ALL").size(9.0)).clicked() {
+                        apply_stem_macro_reset_all(app, i, &stem_set);
+                    }
+                    if ui.button(RichText::new("DRUMS+BASS").size(9.0)).clicked() {
+                        apply_stem_macro_drums_bass(app, i, &stem_set);
+                    }
+                    if ui.button(RichText::new("INSTRUMENTAL").size(9.0)).clicked() {
+                        apply_stem_macro_instrumental(app, i, &stem_set);
+                    }
+                    if ui.button(RichText::new("ACAPELLA").size(9.0)).clicked() {
+                        apply_stem_macro_acapella(app, i, &stem_set);
+                    }
+                });
+            });
+
+            ui.add_space(2.0);
+
+            egui::ScrollArea::horizontal()
+                .id_source(format!("stem_matrix_scroll_{}", i))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        for (s_idx, single_stem) in stem_set.stems.iter().enumerate().take(12) {
+                            let stem_color = stem_color_for_classif(single_stem.classification);
+                            let label = stem_label_for_classif(single_stem.classification);
+
+                            Frame::none()
+                                .fill(theme.bg_surface)
+                                .stroke(Stroke::new(1.0, theme.border))
+                                .rounding(Rounding::same(theme.radius_sm))
+                                .inner_margin(Margin::symmetric(6.0, 4.0))
+                                .show(ui, |ui| {
+                                    ui.set_width(110.0);
+                                    ui.vertical(|ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(label).strong().size(theme.type_caption).color(stem_color));
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                let is_solo = app.mixer.stem_solos[i][s_idx];
+                                                if ui.selectable_label(is_solo, RichText::new("S").size(9.0)).clicked() {
+                                                    let new_solo = !is_solo;
+                                                    app.mixer.stem_solos[i][s_idx] = new_solo;
+                                                    dispatch_stem_param(app, i, s_idx, 1, if new_solo { 1.0 } else { 0.0 });
+                                                }
+                                                let is_muted = app.mixer.stem_mutes[i][s_idx];
+                                                if ui.selectable_label(is_muted, RichText::new("M").size(9.0)).clicked() {
+                                                    let new_mute = !is_muted;
+                                                    app.mixer.stem_mutes[i][s_idx] = new_mute;
+                                                    dispatch_stem_param(app, i, s_idx, 0, if new_mute { 1.0 } else { 0.0 });
+                                                }
+                                            });
+                                        });
+
+                                        ui.add_space(2.0);
+
+                                        // Gain slider
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new("VOL").size(8.0).color(theme.text_disabled));
+                                            let mut gain = app.mixer.stem_gains[i][s_idx];
+                                            if ui.add(egui::Slider::new(&mut gain, -24.0..=12.0).show_value(false)).changed() {
+                                                app.mixer.stem_gains[i][s_idx] = gain;
+                                                dispatch_stem_param(app, i, s_idx, 2, gain);
+                                            }
+                                        });
+
+                                        // 3-Band Isolator EQ (Low, Mid, High)
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new("EQ").size(8.0).color(theme.text_disabled));
+                                            let mut low = app.mixer.stem_eq_low[i][s_idx];
+                                            if ui.add(egui::DragValue::new(&mut low).clamp_range(0.0..=5.0).speed(0.05).prefix("L:")).changed() {
+                                                app.mixer.stem_eq_low[i][s_idx] = low;
+                                                dispatch_stem_param(app, i, s_idx, 4, low);
+                                            }
+                                            let mut mid = app.mixer.stem_eq_mid[i][s_idx];
+                                            if ui.add(egui::DragValue::new(&mut mid).clamp_range(0.0..=5.0).speed(0.05).prefix("M:")).changed() {
+                                                app.mixer.stem_eq_mid[i][s_idx] = mid;
+                                                dispatch_stem_param(app, i, s_idx, 5, mid);
+                                            }
+                                            let mut high = app.mixer.stem_eq_high[i][s_idx];
+                                            if ui.add(egui::DragValue::new(&mut high).clamp_range(0.0..=5.0).speed(0.05).prefix("H:")).changed() {
+                                                app.mixer.stem_eq_high[i][s_idx] = high;
+                                                dispatch_stem_param(app, i, s_idx, 6, high);
+                                            }
+                                        });
+
+                                        // Pan
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new("PAN").size(8.0).color(theme.text_disabled));
+                                            let mut pan = app.mixer.stem_pans[i][s_idx];
+                                            if ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false)).changed() {
+                                                app.mixer.stem_pans[i][s_idx] = pan;
+                                                dispatch_stem_param(app, i, s_idx, 3, pan);
+                                            }
+                                        });
+                                    });
+                                });
+                        }
+                    });
+                });
+        });
+}
+
 pub fn render_time_display(ui: &mut egui::Ui, elapsed: &str, remaining: &str, accent_color: Color32, theme: &nullherz_ui_hal::Theme) {
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(elapsed).monospace().size(13.0).color(theme.text_secondary));
@@ -93,6 +309,8 @@ fn render_waveform_lane(app: &mut InspectorApp, ui: &mut Ui, i: usize, lane_h: f
 
     let border_thickness = if is_focused { 1.5 } else { 1.0 };
     let header_h = 22.0;
+    let is_stem_expanded = app.mixer.stem_controls_expanded[i];
+    let stem_panel_h = if is_stem_expanded { 110.0 } else { 0.0 };
 
     let response = Frame::none()
         .fill(bg_color)
@@ -105,8 +323,12 @@ fn render_waveform_lane(app: &mut InspectorApp, ui: &mut Ui, i: usize, lane_h: f
                 // Condensed Header Strip
                 render_condensed_deck_header(app, ui, i, deck_color, is_focused, telemetry);
 
+                if is_stem_expanded {
+                    render_expanded_stem_matrix(app, ui, i, deck_color);
+                }
+
                 // Waveform Zone
-                let remaining_wf_h = (lane_h - header_h - 2.0 * border_thickness).max(10.0);
+                let remaining_wf_h = (lane_h - header_h - stem_panel_h - 2.0 * border_thickness).max(20.0);
                 waveform::render_deck_waveform_zone(app, ui, i, telemetry, deck_color, remaining_wf_h);
             });
         });
@@ -227,21 +449,22 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
             // Interactive Stem Strip Toggle Controls
             if let Some(ref stem_set) = t.stems {
                 ui.add_space(theme.space_xs);
-                ui.label(RichText::new("STEMS:").strong().size(theme.type_caption).color(theme.accent));
-                for (s_idx, single_stem) in stem_set.stems.iter().enumerate().take(4) {
-                    let classif_name = match single_stem.classification {
-                        nullherz_traits::StemClassification::Kick => "Drums",
-                        nullherz_traits::StemClassification::Snare => "Snare",
-                        nullherz_traits::StemClassification::Hat => "Hats",
-                        nullherz_traits::StemClassification::Bass => "Bass",
-                        nullherz_traits::StemClassification::LeadVocal | nullherz_traits::StemClassification::BackingVocal | nullherz_traits::StemClassification::Vocal => "Vocal",
-                        _ => "Other",
-                    };
-                    let stem_color = stem_color_for_classif(single_stem.classification);
-                    ui.label(RichText::new(classif_name).size(theme.type_caption).color(stem_color).strong());
+                let count = stem_set.stems.len();
+                let is_expanded = app.mixer.stem_controls_expanded[i];
+                let btn_text = if is_expanded {
+                    format!("🎛 STEMS ({}) ▲", count)
+                } else {
+                    format!("🎛 STEMS ({}) ▼", count)
+                };
+                if ui.button(RichText::new(btn_text).size(theme.type_caption).color(theme.accent).strong()).clicked() {
+                    app.mixer.stem_controls_expanded[i] = !app.mixer.stem_controls_expanded[i];
+                }
 
-                    let target_node = app.get_node_id(&format!("deck_{}_stem_matrix", (b'a' + i as u8) as char))
-                        .or_else(|| app.get_node_id(&format!("deck_{}_sampler", (b'a' + i as u8) as char)));
+                // Quick mute/solo chips for first 4 main stems in header
+                for (s_idx, single_stem) in stem_set.stems.iter().enumerate().take(4) {
+                    let classif_name = stem_label_for_classif(single_stem.classification);
+                    let stem_color = stem_color_for_classif(single_stem.classification);
+                    ui.label(RichText::new(classif_name).size(9.0).color(stem_color).strong());
 
                     let is_muted = app.mixer.stem_mutes[i][s_idx];
                     let is_solo = app.mixer.stem_solos[i][s_idx];
@@ -249,31 +472,17 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
                     if ui.selectable_label(is_muted, RichText::new("M").size(9.0)).clicked() {
                         let new_mute = !is_muted;
                         app.mixer.stem_mutes[i][s_idx] = new_mute;
-                        if let Some(node) = target_node {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                target_id: node as u64,
-                                param_id: (s_idx * 10) as u32,
-                                value: if new_mute { 1.0 } else { 0.0 },
-                                ramp_duration_samples: 0,
-                            }));
-                        }
+                        dispatch_stem_param(app, i, s_idx, 0, if new_mute { 1.0 } else { 0.0 });
                     }
                     if ui.selectable_label(is_solo, RichText::new("S").size(9.0)).clicked() {
                         let new_solo = !is_solo;
                         app.mixer.stem_solos[i][s_idx] = new_solo;
-                        if let Some(node) = target_node {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                target_id: node as u64,
-                                param_id: (s_idx * 10 + 1) as u32,
-                                value: if new_solo { 1.0 } else { 0.0 },
-                                ramp_duration_samples: 0,
-                            }));
-                        }
+                        dispatch_stem_param(app, i, s_idx, 1, if new_solo { 1.0 } else { 0.0 });
                     }
                 }
             }
 
-            // Time Display on the far right
+            // Time Display & Waveform Mode on the far right
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(theme.space_xs); // right padding
                 if is_loading {
@@ -288,6 +497,19 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
                     let remaining_str = format_duration(remaining_samples, sample_rate);
 
                     render_time_display(ui, &elapsed_str, &remaining_str, deck_color, &theme);
+
+                    ui.add_space(theme.space_xs);
+
+                    // Waveform Mode Selector Chip
+                    egui::ComboBox::from_id_source(format!("deck_wf_mode_cb_{}", i))
+                        .selected_text(egui::RichText::new(format!("WF: {}", app.mixer.deck_waveform_mode[i].short_code())).size(9.0).strong().color(deck_color))
+                        .width(80.0)
+                        .show_ui(ui, |ui| {
+                            use crate::state::DeckWaveformMode;
+                            for m in DeckWaveformMode::all() {
+                                ui.selectable_value(&mut app.mixer.deck_waveform_mode[i], *m, m.name());
+                            }
+                        });
                 }
             });
         } else {

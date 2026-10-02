@@ -103,6 +103,35 @@ pub enum AnalyzerMode {
     FullTrack,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeckWaveformMode {
+    Original,
+    Stems,
+    Overlay,
+}
+
+impl DeckWaveformMode {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Original => "Original Waveform",
+            Self::Stems => "Separated Stems",
+            Self::Overlay => "Original + Stems Overlay",
+        }
+    }
+
+    pub fn short_code(&self) -> &'static str {
+        match self {
+            Self::Original => "ORIG",
+            Self::Stems => "STEMS",
+            Self::Overlay => "OVERLAY",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[Self::Original, Self::Stems, Self::Overlay]
+    }
+}
+
 pub struct AnalyzerViewState {
     pub mode: AnalyzerMode,
     pub layer_raw: bool,
@@ -229,6 +258,13 @@ pub struct MixerState {
     pub spectral_window_shape: u32,
     pub stem_mutes: [[bool; 12]; 16],
     pub stem_solos: [[bool; 12]; 16],
+    pub deck_waveform_mode: [DeckWaveformMode; 16],
+    pub stem_gains: [[f32; 12]; 16],
+    pub stem_pans: [[f32; 12]; 16],
+    pub stem_eq_low: [[f32; 12]; 16],
+    pub stem_eq_mid: [[f32; 12]; 16],
+    pub stem_eq_high: [[f32; 12]; 16],
+    pub stem_controls_expanded: [bool; 16],
 }
 
 impl Default for MixerState {
@@ -271,6 +307,13 @@ impl Default for MixerState {
             spectral_window_shape: 0,
             stem_mutes: [[false; 12]; 16],
             stem_solos: [[false; 12]; 16],
+            deck_waveform_mode: [DeckWaveformMode::Original; 16],
+            stem_gains: [[0.0; 12]; 16],
+            stem_pans: [[0.0; 12]; 16],
+            stem_eq_low: [[1.0; 12]; 16],
+            stem_eq_mid: [[1.0; 12]; 16],
+            stem_eq_high: [[1.0; 12]; 16],
+            stem_controls_expanded: [false; 16],
         }
     }
 }
