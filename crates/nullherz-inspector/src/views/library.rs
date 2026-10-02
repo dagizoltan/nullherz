@@ -152,9 +152,16 @@ fn render_crates_and_smart_crates_section(app: &mut InspectorApp, ui: &mut Ui) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(theme.space_xs, theme.space_xs);
 
+        let is_stems_cat = app.library.active_crate.as_deref() == Some("stems");
+        if ui.selectable_label(is_stems_cat, format!("{} DEMIXED STEMS", egui_phosphor::regular::LIGHTNING)).clicked() {
+            app.library.active_crate = Some("stems".to_string());
+            app.library.active_category = None;
+            app.library.library_needs_refresh = true;
+        }
+
         let crates = &app.library.cached_crates;
         for crate_name in crates {
-            if ["track", "sample", "sequence", "instrument", "insert", "visual"].contains(&crate_name.as_str()) {
+            if ["track", "sample", "sequence", "instrument", "insert", "visual", "stems"].contains(&crate_name.as_str()) {
                 continue;
             }
             let is_selected = app.library.active_crate.as_deref() == Some(crate_name.as_str());
@@ -328,6 +335,11 @@ fn render_asset_list(app: &mut InspectorApp, ui: &mut Ui) {
 fn render_audio_files_list(app: &mut InspectorApp, ui: &mut Ui, search_q: &str) {
     let theme = app.theme;
     let mut displayed_tracks = app.library.cached_library.clone();
+
+    if app.library.active_crate.as_deref() == Some("stems") {
+        displayed_tracks.retain(|t| t.stems.is_some());
+    }
+
     if !search_q.is_empty() {
         displayed_tracks.retain(|t| {
             t.title.to_lowercase().contains(search_q)
@@ -836,6 +848,76 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
                     ));
                 }
             });
+
+            if let Some(ref stem_set) = track.stems {
+                ui.add_space(theme.space_xs);
+                ui.label(RichText::new(format!("EXTRACTED STEMS ({})", stem_set.stems.len())).size(theme.type_caption).strong().color(theme.accent));
+
+                for (s_idx, single_stem) in stem_set.stems.iter().enumerate() {
+                    let stem_id = track.id.wrapping_add((s_idx as u64 + 1) * 10000);
+                    let stem_color = crate::views::dj_studio::render::stem_color_for_classif(single_stem.classification);
+                    let label = crate::views::dj_studio::render::stem_label_for_classif(single_stem.classification);
+
+                    Frame::none()
+                        .fill(theme.bg_surface)
+                        .stroke(Stroke::new(1.0, theme.border))
+                        .rounding(Rounding::same(theme.radius_sm))
+                        .inner_margin(Margin::symmetric(theme.space_xs, 2.0))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                Frame::none()
+                                    .fill(stem_color.linear_multiply(0.2))
+                                    .rounding(Rounding::same(theme.radius_sm))
+                                    .inner_margin(Margin::symmetric(4.0, 1.0))
+                                    .show(ui, |ui| {
+                                        ui.label(RichText::new(label).strong().size(theme.type_caption).color(stem_color));
+                                    });
+
+                                ui.label(RichText::new(format!("{:.1} LUFS | {:.1} dB", single_stem.lufs_integrated, single_stem.peak_db))
+                                    .monospace().size(9.0).color(theme.text_secondary));
+
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    egui::ComboBox::from_id_source(format!("stem_deck_load_{}_{}", track.id, s_idx))
+                                        .selected_text(RichText::new("→ DECK").size(theme.type_caption))
+                                        .width(70.0)
+                                        .show_ui(ui, |ui| {
+                                            for (d_idx, &deck_char) in ['A', 'B', 'C', 'D'].iter().enumerate() {
+                                                if ui.selectable_label(false, format!("DECK {}", deck_char)).clicked() {
+                                                    let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                                                        nullherz_traits::PerformanceCommand::LoadTrackToDeck {
+                                                            deck_id: deck_char,
+                                                            sample_id: stem_id,
+                                                        }
+                                                    ));
+                                                    app.decks.now_playing[d_idx] = Some(stem_id);
+                                                }
+                                            }
+                                        });
+
+                                    if ui.button(RichText::new("→ SAMPLER").size(theme.type_caption)).clicked() {
+                                        app.sampler.source_track = Some(stem_id);
+                                        app.active_view = crate::View::Sampler;
+                                    }
+
+                                    if ui.button(RichText::new("→ COMPOSER").size(theme.type_caption)).clicked() {
+                                        let slot = app.composer.selected_composer_track.unwrap_or(0);
+                                        if slot < app.composer.track_sources.len() {
+                                            app.composer.track_sources[slot] = Some(stem_id);
+                                        }
+                                        app.active_view = crate::View::Composer;
+                                    }
+
+                                    if ui.button(RichText::new("▶ PREVIEW").size(theme.type_caption)).clicked() {
+                                        let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                                            nullherz_traits::PerformanceCommand::Preview { sample_id: stem_id }
+                                        ));
+                                    }
+                                });
+                            });
+                        });
+                    ui.add_space(2.0);
+                }
+            }
         });
 
     if let Some(t) = edited {
