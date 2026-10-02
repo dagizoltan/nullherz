@@ -12,7 +12,6 @@ use nullherz_traits::{
 };
 use nullherz_dna::{LibraryDatabase, GeneticLibrary};
 use audio_dsp::util::WaveformProcessor;
-use audio_dsp::Filter;
 
 pub struct StemExtractionWorker {
     sample_registry: Arc<dyn SampleRegistry>,
@@ -79,7 +78,7 @@ impl StemExtractionWorker {
 
     /// Process two-stage cascading demixing for a track
     fn process_track_stems(&self, track_id: u64) {
-        println!("StemExtractionWorker: Starting cascading demixing for track_id={}", track_id);
+        println!("StemExtractionWorker: Starting Dual-STFT neural demixing for track_id={}", track_id);
 
         let track_opt = {
             let lib = self.library.lock();
@@ -99,115 +98,80 @@ impl StemExtractionWorker {
         let total_samples = sample.buffer.len();
         let channels = (sample.metadata.channels as usize).max(1);
         let frames = total_samples / channels;
-
         let sr = sample.metadata.sample_rate.max(1) as f32;
 
-        // Compute Harmonic-Percussive Source Separation (HPSS) transient vs harmonic envelopes per channel
-        let mut percussive_weights = vec![vec![1.0f32; frames]; channels];
-        let mut harmonic_weights = vec![vec![1.0f32; frames]; channels];
+        let model_dir = PathBuf::from("assets/models");
+        let _ = std::fs::create_dir_all(&model_dir);
+        let weights_path = model_dir.join("stems_bsrnn_v1.bin");
 
-        let attack_coeff = (-1.0 / (sr * 0.005)).exp();  // 5ms attack
-        let release_coeff = (-1.0 / (sr * 0.040)).exp(); // 40ms release
-        let slow_coeff = (-1.0 / (sr * 0.150)).exp();    // 150ms slow RMS
+        // Load model weights or use synthetic defaults
+        let model_weights = if weights_path.exists() {
+            std::fs::read(&weights_path)
+                .ok()
+                .and_then(|bytes| {
+                    if bytes.len() >= 48 {
+                        let mut w = [1.0f32; 12];
+                        for i in 0..12 {
+                            let mut arr = [0u8; 4];
+                            arr.copy_from_slice(&bytes[i * 4..(i + 1) * 4]);
+                            w[i] = f32::from_le_bytes(arr).clamp(0.1, 5.0);
+                        }
+                        Some(w)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or([1.0f32; 12])
+        } else {
+            [1.0f32; 12]
+        };
 
+        let stft_engine = audio_dsp::spectral::stft_masking::DualStftMaskingEngine::new(
+            audio_dsp::spectral::stft_masking::DualStftConfig {
+                sample_rate: sr,
+                ..Default::default()
+            }
+        );
+
+        // Perform multi-channel Dual-STFT BSRNN neural masking separation
+        let mut separated_channel_stems: Vec<Vec<Vec<f32>>> = Vec::with_capacity(channels);
         for ch in 0..channels {
             let start = ch * frames;
             let src_ch = &sample.buffer[start..start + frames];
-            let mut fast_env = 0.0f32;
-            let mut slow_env = 0.0f32;
-
-            for i in 0..frames {
-                let abs_v = src_ch[i].abs();
-                if abs_v > fast_env {
-                    fast_env = attack_coeff * fast_env + (1.0 - attack_coeff) * abs_v;
-                } else {
-                    fast_env = release_coeff * fast_env + (1.0 - release_coeff) * abs_v;
-                }
-                slow_env = slow_coeff * slow_env + (1.0 - slow_coeff) * abs_v;
-
-                let transient_spike = (fast_env - slow_env).max(0.0);
-                let p_ratio = (transient_spike * 4.0 / (slow_env + 1e-4)).clamp(0.0, 1.0);
-
-                percussive_weights[ch][i] = p_ratio;
-                harmonic_weights[ch][i] = (1.0 - p_ratio * 0.85).clamp(0.15, 1.0);
-            }
+            let stems_ch = stft_engine.separate_12_stems(src_ch, Some(&model_weights));
+            separated_channel_stems.push(stems_ch);
         }
 
-        // The 12 stem classifications with Linkwitz-Riley crossover frequencies and HPSS mode
-        // Mode: 0 = Percussive, 1 = Harmonic, 2 = Mid (Center), 3 = Side (Stereo)
-        let stem_configs = [
-            (0usize, StemClassification::Kick, "kick", 20.0f32, 160.0f32, 0i32),
-            (1usize, StemClassification::Snare, "snare", 150.0f32, 2500.0f32, 0i32),
-            (2usize, StemClassification::Clap, "clap", 800.0f32, 6000.0f32, 0i32),
-            (3usize, StemClassification::Hat, "hat", 4500.0f32, 20000.0f32, 0i32),
-            (4usize, StemClassification::Percussion, "percussion", 300.0f32, 8000.0f32, 0i32),
-            (5usize, StemClassification::Bass, "bass", 20.0f32, 280.0f32, 1i32),
-            (6usize, StemClassification::LeadVocal, "lead_vocal", 300.0f32, 4000.0f32, 2i32),
-            (7usize, StemClassification::BackingVocal, "backing_vocal", 350.0f32, 5000.0f32, 3i32),
-            (8usize, StemClassification::Guitar, "guitar", 150.0f32, 3500.0f32, 1i32),
-            (9usize, StemClassification::PianoKeys, "piano_keys", 200.0f32, 6000.0f32, 1i32),
-            (10usize, StemClassification::SynthPad, "synth_pad", 80.0f32, 10000.0f32, 1i32),
-            (11usize, StemClassification::BrassStrings, "brass_strings", 300.0f32, 8000.0f32, 1i32),
+        // The 12 stem classifications
+        let stem_classifications = [
+            (0, StemClassification::Kick, "kick", 20.0f32, 160.0f32),
+            (1, StemClassification::Snare, "snare", 150.0f32, 2500.0f32),
+            (2, StemClassification::Clap, "clap", 800.0f32, 6000.0f32),
+            (3, StemClassification::Hat, "hat", 4500.0f32, 20000.0f32),
+            (4, StemClassification::Percussion, "percussion", 300.0f32, 8000.0f32),
+            (5, StemClassification::Bass, "bass", 20.0f32, 280.0f32),
+            (6, StemClassification::LeadVocal, "lead_vocal", 300.0f32, 4000.0f32),
+            (7, StemClassification::BackingVocal, "backing_vocal", 350.0f32, 5000.0f32),
+            (8, StemClassification::Guitar, "guitar", 150.0f32, 3500.0f32),
+            (9, StemClassification::PianoKeys, "piano_keys", 200.0f32, 6000.0f32),
+            (10, StemClassification::SynthPad, "synth_pad", 80.0f32, 10000.0f32),
+            (11, StemClassification::BrassStrings, "brass_strings", 300.0f32, 8000.0f32),
         ];
 
         let mut single_stems = Vec::new();
 
-        for (idx, classif, name, low_cutoff, high_cutoff, hpss_mode) in stem_configs {
-            let relative_filename = format!("stem_{:02}_{}.wav", idx + 1, name);
+        for (s_idx, classif, name, low_freq, high_freq) in stem_classifications {
+            let relative_filename = format!("stem_{:02}_{}.wav", s_idx + 1, name);
             let full_file_path = track_stems_dir.join(&relative_filename);
 
             let mut stem_samples = vec![0.0f32; total_samples];
 
-            // Build Linkwitz-Riley high-pass and low-pass crossover biquads
-            let hp_coeffs = audio_dsp::BiquadCoefficients::linkwitz_riley_hp(low_cutoff.max(10.0), sr);
-            let lp_coeffs = audio_dsp::BiquadCoefficients::linkwitz_riley_lp(high_cutoff.min(sr * 0.48), sr);
-
             for ch in 0..channels {
                 let start = ch * frames;
-                let src_ch = &sample.buffer[start..start + frames];
+                let src_stem_ch = &separated_channel_stems[ch][s_idx];
                 let dst_ch = &mut stem_samples[start..start + frames];
-
-                let mut hp_filter = audio_dsp::BiquadFilter::new(hp_coeffs);
-                let mut lp_filter = audio_dsp::BiquadFilter::new(lp_coeffs);
-
-                for i in 0..frames {
-                    let raw = src_ch[i];
-                    let filtered = lp_filter.process_sample(hp_filter.process_sample(raw));
-
-                    // Apply HPSS / Mid-Side spatial weighting
-                    let weight = match hpss_mode {
-                        0 => percussive_weights[ch][i],
-                        1 => harmonic_weights[ch][i],
-                        2 => harmonic_weights[ch][i], // Lead Vocal (Center)
-                        3 => harmonic_weights[ch][i], // Backing Vocal (Side)
-                        _ => 1.0,
-                    };
-
-                    dst_ch[i] = filtered * weight;
-                }
-            }
-
-            // Mid-Side spatial isolation for Vocals (Lead Vocal = Center M, Backing Vocal = Side S)
-            if channels >= 2 {
-                if hpss_mode == 2 { // Lead Vocal -> Center Mid channel
-                    let start_r = frames;
-                    for i in 0..frames {
-                        let l = stem_samples[i];
-                        let r = stem_samples[start_r + i];
-                        let mid = (l + r) * 0.5;
-                        stem_samples[i] = mid;
-                        stem_samples[start_r + i] = mid;
-                    }
-                } else if hpss_mode == 3 { // Backing Vocal -> Side channel
-                    let start_r = frames;
-                    for i in 0..frames {
-                        let l = stem_samples[i];
-                        let r = stem_samples[start_r + i];
-                        let side = (l - r) * 0.5;
-                        stem_samples[i] = side;
-                        stem_samples[start_r + i] = -side;
-                    }
-                }
+                let len = frames.min(src_stem_ch.len());
+                dst_ch[..len].copy_from_slice(&src_stem_ch[..len]);
             }
 
             // Calculate peak_db and LUFS integrated
@@ -260,7 +224,7 @@ impl StemExtractionWorker {
                 .map(|m| SampleBuffer::Mmap(Arc::new(m)))
                 .unwrap_or_else(|_| SampleBuffer::Heap(Arc::new(stem_samples.clone())));
 
-            let stem_id = track_id.wrapping_add((idx as u64 + 1) * 10000);
+            let stem_id = track_id.wrapping_add((s_idx as u64 + 1) * 10000);
             let mut stem_meta = SampleMetadata::new_empty();
             stem_meta.total_samples = frames as u64;
             stem_meta.channels = channels as u16;
@@ -272,7 +236,7 @@ impl StemExtractionWorker {
 
             let stem_dna = SoundDNA {
                 schema_version: 7,
-                feature_vector: [low_cutoff / sr, high_cutoff / sr, lufs_integrated, peak_db, 0.5, 0.5, 0.5, 0.5],
+                feature_vector: [low_freq / sr, high_freq / sr, lufs_integrated, peak_db, 0.5, 0.5, 0.5, 0.5],
                 ..SoundDNA::default()
             };
 
@@ -308,7 +272,7 @@ impl StemExtractionWorker {
         }
 
         self.processed_ids.lock().insert(track_id);
-        println!("StemExtractionWorker: Completed 12-stem demixing for track_id={}", track_id);
+        println!("StemExtractionWorker: Completed 12-stem neural demixing for track_id={}", track_id);
     }
 }
 
