@@ -878,18 +878,27 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
 
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     egui::ComboBox::from_id_source(format!("stem_deck_load_{}_{}", track.id, s_idx))
-                                        .selected_text(RichText::new("→ DECK").size(theme.type_caption))
-                                        .width(70.0)
+                                        .selected_text(RichText::new("→ MIXER CHANNEL").size(theme.type_caption))
+                                        .width(110.0)
                                         .show_ui(ui, |ui| {
-                                            for (d_idx, &deck_char) in ['A', 'B', 'C', 'D'].iter().enumerate() {
-                                                if ui.selectable_label(false, format!("DECK {}", deck_char)).clicked() {
+                                            let num_ch = app.mixer.num_channels.clamp(1, 16);
+                                            for c_idx in 0..num_ch {
+                                                let deck_char = (b'A' + (c_idx % 26) as u8) as char;
+                                                let label_str = format!("CH {} ({})", c_idx + 1, deck_char);
+                                                if ui.selectable_label(false, &label_str).clicked() {
                                                     let _ = app.command_sender.send(nullherz_traits::Command::Performance(
                                                         nullherz_traits::PerformanceCommand::LoadTrackToDeck {
                                                             deck_id: deck_char,
                                                             sample_id: stem_id,
                                                         }
                                                     ));
-                                                    app.decks.now_playing[d_idx] = Some(stem_id);
+                                                    app.decks.now_playing[c_idx] = Some(stem_id);
+                                                    app.decks.cached_tracks[c_idx] = app.get_cached_track(stem_id).or_else(|| {
+                                                        let mut stem_as_track = track.clone();
+                                                        stem_as_track.id = stem_id;
+                                                        stem_as_track.title = format!("{} [{}]", track.title, label);
+                                                        Some(stem_as_track)
+                                                    });
                                                 }
                                             }
                                         });
