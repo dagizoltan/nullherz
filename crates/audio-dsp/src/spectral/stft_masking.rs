@@ -69,13 +69,13 @@ impl DualStftMaskingEngine {
         let long_n = config.long_fft_size;
 
         let mut short_window = vec![0.0f32; short_n];
-        for i in 0..short_n {
-            short_window[i] = 0.5 * (1.0 - (2.0 * core::f32::consts::PI * i as f32 / short_n as f32).cos());
+        for (i, val) in short_window.iter_mut().enumerate().take(short_n) {
+            *val = 0.5 * (1.0 - (2.0 * core::f32::consts::PI * i as f32 / short_n as f32).cos());
         }
 
         let mut long_window = vec![0.0f32; long_n];
-        for i in 0..long_n {
-            long_window[i] = 0.5 * (1.0 - (2.0 * core::f32::consts::PI * i as f32 / long_n as f32).cos());
+        for (i, val) in long_window.iter_mut().enumerate().take(long_n) {
+            *val = 0.5 * (1.0 - (2.0 * core::f32::consts::PI * i as f32 / long_n as f32).cos());
         }
 
         Self {
@@ -177,9 +177,9 @@ impl DualStftMaskingEngine {
         let mut resampled = vec![0.5f32; target_frames];
         if !transient_energies.is_empty() {
             let scale = transient_energies.len() as f32 / target_frames as f32;
-            for i in 0..target_frames {
+            for (i, val) in resampled.iter_mut().enumerate().take(target_frames) {
                 let idx = ((i as f32 * scale) as usize).min(transient_energies.len() - 1);
-                resampled[i] = (transient_energies[idx] * 2.0).clamp(0.0, 1.0);
+                *val = (transient_energies[idx] * 2.0).clamp(0.0, 1.0);
             }
         }
 
@@ -215,16 +215,16 @@ impl DualStftMaskingEngine {
             }
 
             // Inverse FFT via conjugate swap
-            for i in 0..n {
-                im[i] = -im[i];
+            for val in im.iter_mut().take(n) {
+                *val = -*val;
             }
             self.long_fft.process(&mut re, &mut im);
 
             let scale = 1.0 / n as f32;
-            for i in 0..n {
+            for (i, &re_val) in re.iter().enumerate().take(n) {
                 let pos = start + i;
                 if pos < out.len() {
-                    let val = re[i] * scale * self.long_window[i];
+                    let val = re_val * scale * self.long_window[i];
                     out[pos] += val;
                     window_sum[pos] += self.long_window[i] * self.long_window[i];
                 }
