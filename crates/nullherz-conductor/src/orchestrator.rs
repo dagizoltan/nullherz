@@ -595,7 +595,7 @@ impl Conductor {
         std::thread::sleep(std::time::Duration::from_millis(50));
         let res = self.start_backend(backend_type);
         if res.is_ok() {
-            let _ = self.update_system_config(Some(backend_type), None, None);
+            let _ = self.update_system_config(Some(backend_type), None, None, None, None);
         }
         res
     }
@@ -610,12 +610,29 @@ impl Conductor {
                 // Captures are stamped with the device rate; a wrong value there
                 // makes the sampler transpose them on playback.
                 self.transfusion_manager.set_device_sample_rate(config.sample_rate);
+                if let Some(ref dev) = config.audio_output_device {
+                    if !dev.is_empty() {
+                        unsafe { std::env::set_var("NULLHERZ_ALSA_DEVICE", dev); }
+                    }
+                }
+                if let Some(ref dev) = config.audio_input_device {
+                    if !dev.is_empty() {
+                        unsafe { std::env::set_var("NULLHERZ_ALSA_INPUT_DEVICE", dev); }
+                    }
+                }
             }
         }
         Ok(())
     }
 
-    pub fn update_system_config(&mut self, backend_type: Option<nullherz_traits::AudioBackendType>, midi_ports: Option<Vec<String>>, calibration: Option<u32>) -> std::io::Result<()> {
+    pub fn update_system_config(
+        &mut self,
+        backend_type: Option<nullherz_traits::AudioBackendType>,
+        midi_ports: Option<Vec<String>>,
+        calibration: Option<u32>,
+        audio_output_device: Option<String>,
+        audio_input_device: Option<String>,
+    ) -> std::io::Result<()> {
         let path = "system_config.json";
         let mut config = if std::path::Path::new(path).exists() {
             let content = std::fs::read_to_string(path)?;
@@ -626,6 +643,8 @@ impl Conductor {
                 block_size: 256,
                 calibration_samples: 0,
                 period_size: 128,
+                audio_output_device: None,
+                audio_input_device: None,
             })
         } else {
             crate::persistence::SystemConfig {
@@ -635,6 +654,8 @@ impl Conductor {
                 block_size: 256,
                 calibration_samples: 0,
                 period_size: 128,
+                audio_output_device: None,
+                audio_input_device: None,
             }
         };
 
@@ -647,6 +668,12 @@ impl Conductor {
         if let Some(c) = calibration {
             config.calibration_samples = c;
             self.calibration_samples = c;
+        }
+        if let Some(out_dev) = audio_output_device {
+            config.audio_output_device = Some(out_dev);
+        }
+        if let Some(in_dev) = audio_input_device {
+            config.audio_input_device = Some(in_dev);
         }
         config.period_size = self.period_size;
 

@@ -119,6 +119,10 @@ pub struct SystemConfig {
     pub calibration_samples: u32,
     #[serde(default = "default_period_size")]
     pub period_size: u64,
+    #[serde(default)]
+    pub audio_output_device: Option<String>,
+    #[serde(default)]
+    pub audio_input_device: Option<String>,
 }
 
 pub const CURRENT_PROJECT_VERSION: u32 = 1;
@@ -473,6 +477,32 @@ mod tests {
         let loaded = ProjectState::load_from_rkyv(path).unwrap();
         assert_state_survives(&loaded);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_system_config_device_serialization_round_trip() {
+        let path = std::env::temp_dir().join(format!("nullherz_sys_config_{}.json", std::process::id()));
+        let path_str = path.to_str().unwrap();
+
+        let sys_config = SystemConfig {
+            audio_backend: "Alsa".to_string(),
+            midi_ports: vec!["Port 1".to_string()],
+            sample_rate: 48000,
+            block_size: 128,
+            calibration_samples: 10,
+            period_size: 128,
+            audio_output_device: Some("hw:1,0".to_string()),
+            audio_input_device: Some("hw:1,1".to_string()),
+        };
+
+        let json = serde_json::to_string_pretty(&sys_config).unwrap();
+        std::fs::write(path_str, &json).unwrap();
+
+        let loaded: SystemConfig = serde_json::from_str(&std::fs::read_to_string(path_str).unwrap()).unwrap();
+        assert_eq!(loaded.audio_output_device, Some("hw:1,0".to_string()));
+        assert_eq!(loaded.audio_input_device, Some("hw:1,1".to_string()));
+
+        let _ = std::fs::remove_file(path_str);
     }
 
     #[test]

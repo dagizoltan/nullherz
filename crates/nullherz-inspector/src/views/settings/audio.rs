@@ -57,8 +57,9 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                                 selected = dev.clone();
                                 app.settings._selected_audio_device = dev.clone();
 
+                                let clean_dev = nullherz_backends::alsa::device_id(dev);
                                 let mut buf = [0u8; 64];
-                                let bytes = dev.as_bytes();
+                                let bytes = clean_dev.as_bytes();
                                 let len = bytes.len().min(64);
                                 buf[..len].copy_from_slice(&bytes[..len]);
 
@@ -115,15 +116,20 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                                 block_size: block,
                             }));
                             if direct_mmap {
+                                let target_dev = if app.settings._selected_audio_device.is_empty() || app.settings._selected_audio_device == "default" {
+                                    "hw:0,0".to_string()
+                                } else {
+                                    nullherz_backends::alsa::device_id(&app.settings._selected_audio_device).to_string()
+                                };
                                 unsafe {
-                                    std::env::set_var("NULLHERZ_ALSA_DEVICE", "hw:0,0");
+                                    std::env::set_var("NULLHERZ_ALSA_DEVICE", &target_dev);
                                     std::env::set_var("NULLHERZ_ALSA_MMAP", "1");
                                     std::env::set_var("NULLHERZ_NO_PERIOD_WAKEUP", "1");
                                     std::env::set_var("NULLHERZ_RESERVE_DEVICE", "1");
                                 }
                                 app.settings.exclusive_performance_mode = true;
                                 app.settings.active_backend = AudioBackendType::Alsa;
-                                nullherz_backends::alsa::AlsaBackend::reserve_dbus_device("hw:0,0");
+                                nullherz_backends::alsa::AlsaBackend::reserve_dbus_device(&target_dev);
                                 let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(AudioBackendType::Alsa)));
                             } else {
                                 unsafe {
@@ -153,15 +159,20 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                     block_size: optimal_profile.block_size,
                 }));
                 if optimal_profile.mmap_direct {
+                    let target_dev = if app.settings._selected_audio_device.is_empty() || app.settings._selected_audio_device == "default" {
+                        "hw:0,0".to_string()
+                    } else {
+                        nullherz_backends::alsa::device_id(&app.settings._selected_audio_device).to_string()
+                    };
                     unsafe {
-                        std::env::set_var("NULLHERZ_ALSA_DEVICE", "hw:0,0");
+                        std::env::set_var("NULLHERZ_ALSA_DEVICE", &target_dev);
                         std::env::set_var("NULLHERZ_ALSA_MMAP", "1");
                         std::env::set_var("NULLHERZ_NO_PERIOD_WAKEUP", "1");
                         std::env::set_var("NULLHERZ_RESERVE_DEVICE", "1");
                     }
                     app.settings.exclusive_performance_mode = true;
                     app.settings.active_backend = AudioBackendType::Alsa;
-                    nullherz_backends::alsa::AlsaBackend::reserve_dbus_device("hw:0,0");
+                    nullherz_backends::alsa::AlsaBackend::reserve_dbus_device(&target_dev);
                     let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(AudioBackendType::Alsa)));
                 }
             }

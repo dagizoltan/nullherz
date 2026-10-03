@@ -547,16 +547,17 @@ impl CommandHandler {
                     }
                 }
                 conductor.period_size = block_size as u64;
-                let _ = conductor.update_system_config(None, None, None);
+                let _ = conductor.update_system_config(None, None, None, None, None);
                 true
             }
             CoreCommand::SetAudioOutputDevice(buf) => {
                 let dev_name = String::from_utf8_lossy(&buf).trim_matches(char::from(0)).to_string();
                 if !dev_name.is_empty() {
-                    let clean_dev = dev_name.split(" (").next().unwrap_or(&dev_name).trim();
-                    unsafe { std::env::set_var("NULLHERZ_ALSA_DEVICE", clean_dev); }
+                    let clean_dev = nullherz_backends::alsa::device_id(&dev_name).to_string();
+                    unsafe { std::env::set_var("NULLHERZ_ALSA_DEVICE", &clean_dev); }
                     let current_backend = nullherz_traits::AudioBackendType::Alsa;
                     let _ = conductor.switch_backend(current_backend);
+                    let _ = conductor.update_system_config(None, None, None, Some(clean_dev.clone()), None);
                     println!("CommandHandler: Set audio output device to: {}", clean_dev);
                 }
                 true
@@ -564,8 +565,9 @@ impl CommandHandler {
             CoreCommand::SetAudioInputDevice(buf) => {
                 let dev_name = String::from_utf8_lossy(&buf).trim_matches(char::from(0)).to_string();
                 if !dev_name.is_empty() {
-                    let clean_dev = dev_name.split(" (").next().unwrap_or(&dev_name).trim();
-                    unsafe { std::env::set_var("NULLHERZ_ALSA_INPUT_DEVICE", clean_dev); }
+                    let clean_dev = nullherz_backends::alsa::device_id(&dev_name).to_string();
+                    unsafe { std::env::set_var("NULLHERZ_ALSA_INPUT_DEVICE", &clean_dev); }
+                    let _ = conductor.update_system_config(None, None, None, None, Some(clean_dev.clone()));
                     println!("CommandHandler: Set audio input device to: {}", clean_dev);
                 }
                 true
@@ -617,7 +619,7 @@ impl CommandHandler {
             CoreCommand::SetMidiPorts(buffer) => {
                 let ports_str = String::from_utf8_lossy(&buffer).trim_matches(char::from(0)).to_string();
                 let ports: Vec<String> = ports_str.split(',').filter(|s| !s.is_empty()).map(|s| s.trim().to_string()).collect();
-                let _ = conductor.update_system_config(None, Some(ports), None);
+                let _ = conductor.update_system_config(None, Some(ports), None, None, None);
                 true
             }
             CoreCommand::CalibrateLatency => {
@@ -627,7 +629,7 @@ impl CommandHandler {
                 };
                 let samples = (sample_rate * 0.01) as u32;
                 conductor.calibration_samples = samples;
-                let _ = conductor.update_system_config(None, None, Some(samples));
+                let _ = conductor.update_system_config(None, None, Some(samples), None, None);
                 true
             }
             CoreCommand::InjectMidi(event) => {
