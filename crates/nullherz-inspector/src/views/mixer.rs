@@ -92,7 +92,7 @@ fn render_vertical_waveform(
     ui.painter().rect_stroke(rect, theme.radius_sm, Stroke::new(1.0, theme.border_stroke.color));
 
     let style = app.mixer.waveform_styles.get(deck_idx).copied().unwrap_or(nullherz_ui_hal::render::waveform_renderer::WaveformStyle::MultiBand);
-    let track = app.decks.cached_tracks.get(deck_idx).and_then(|t| t.clone());
+    let track = app.decks.cached_tracks.get(deck_idx % 4).and_then(|t| t.clone());
 
     if let Some(t) = track {
         let sr = (t.metadata.sample_rate.max(1)) as f32;
@@ -336,7 +336,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
         0.0
     };
 
-    let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions.get(i).copied().unwrap_or(0)).unwrap_or(0);
+    let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions.get(i % 4).copied().unwrap_or(0)).unwrap_or(0);
     let is_focused = app.decks.focused_deck == i;
 
     let border_stroke = if is_focused {
@@ -874,8 +874,8 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                     egui::vec2(STRIP_W - 2.0 * theme.space_md, 34.0),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
-                        let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions.get(i).copied().unwrap_or(0)).unwrap_or(0);
-                        if let Some(ref track) = app.decks.cached_tracks[i] {
+                        let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions.get(i % 4).copied().unwrap_or(0)).unwrap_or(0);
+                        if let Some(ref track) = app.decks.cached_tracks.get(i % 4).and_then(|t| t.as_ref()) {
                             let sample_rate = track.metadata.sample_rate.max(1) as f64;
                             let total_secs = track.metadata.total_samples as f64 / sample_rate;
                             let elapsed_secs = elapsed_samples as f64 / sample_rate;
@@ -924,7 +924,8 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                 ui.horizontal(|ui| {
                     ui.add_space((STRIP_W - 2.0 * theme.space_md - 96.0).max(0.0) / 2.0);
 
-                    let is_playing = app.decks.deck_playing[i];
+                    let active_deck_idx = i % 4;
+                    let is_playing = app.decks.deck_playing[active_deck_idx];
                     let play_icon = if is_playing { egui_phosphor::regular::PAUSE } else { egui_phosphor::regular::PLAY };
                     let play_btn = if is_playing {
                         egui::Button::new(RichText::new(play_icon).size(12.0).strong()).fill(theme.accent)
@@ -932,12 +933,12 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                         egui::Button::new(RichText::new(play_icon).size(12.0).strong()).fill(theme.bg_inset)
                     };
 
-                    let deck_char_upper = (b'A' + (i % 26) as u8) as char;
+                    let deck_char_upper = (b'A' + active_deck_idx as u8) as char;
                     if ui.add_sized([45.0, 22.0], play_btn).clicked() {
-                        app.decks.focused_deck = i;
+                        app.decks.focused_deck = active_deck_idx;
                         let new_playing = !is_playing;
-                        app.decks.deck_playing[i] = new_playing;
-                        app.viz.deck_still_snapshots[i] = 0;
+                        app.decks.deck_playing[active_deck_idx] = new_playing;
+                        app.viz.deck_still_snapshots[active_deck_idx] = 0;
                         if new_playing {
                             let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id: deck_char_upper }));
                         } else {
@@ -946,8 +947,8 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                     }
 
                     if ui.add_sized([45.0, 22.0], egui::Button::new(RichText::new("CUE").size(10.0).strong()).fill(theme.bg_inset)).clicked() {
-                        app.decks.focused_deck = i;
-                        let node_name = format!("deck_{}_sampler", (b'a' + (i % 26) as u8) as char);
+                        app.decks.focused_deck = active_deck_idx;
+                        let node_name = format!("deck_{}_sampler", (b'a' + active_deck_idx as u8) as char);
                         if let Some(node_idx) = app.get_node_id(&node_name) {
                             let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpToHotCue { node_idx, cue_idx: 0 }));
                         }
@@ -969,7 +970,7 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
 
     let master_peak = app.viz.damped_master_peaks[0].max(app.viz.damped_master_peaks[1]);
     let master_deck_idx = app.decks.master_deck.unwrap_or(app.decks.focused_deck);
-    let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions.get(master_deck_idx).copied().unwrap_or(0)).unwrap_or(0);
+    let elapsed_samples = telemetry.as_ref().map(|t| t.deck_positions.get(master_deck_idx % 4).copied().unwrap_or(0)).unwrap_or(0);
 
     Frame::none()
         .fill(theme.bg_surface)
@@ -988,20 +989,20 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                 // Waveform Style Dropdown Selector
                 ui.horizontal(|ui| {
                     let avail_w = ui.available_width();
-                    let selected_style = app.mixer.waveform_styles[master_deck_idx];
+                    let selected_style = app.mixer.waveform_styles[master_deck_idx % 4];
                     egui::ComboBox::from_id_source("master_wf_style")
                         .selected_text(RichText::new(selected_style.name()).size(8.5).strong().color(theme.text_primary))
                         .width(avail_w)
                         .show_ui(ui, |ui| {
                             for st in nullherz_ui_hal::render::waveform_renderer::WaveformStyle::all() {
-                                ui.selectable_value(&mut app.mixer.waveform_styles[master_deck_idx], *st, st.name());
+                                ui.selectable_value(&mut app.mixer.waveform_styles[master_deck_idx % 4], *st, st.name());
                             }
                         });
                 });
                 ui.add_space(2.0);
 
                 // Master Vertical Signal Visualizer matching active master track waveform
-                render_vertical_waveform(app, ui, master_deck_idx, elapsed_samples, master_peak, accent, &theme, telemetry);
+                render_vertical_waveform(app, ui, master_deck_idx % 4, elapsed_samples, master_peak, accent, &theme, telemetry);
                 ui.add_space(theme.space_xs);
 
                 // --- MASTER INSERTS RACK ---
