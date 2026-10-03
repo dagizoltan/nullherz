@@ -176,7 +176,29 @@ pub struct InspectorApp {
 
 impl InspectorApp {
     pub fn get_cached_track(&self, id: u64) -> Option<nullherz_dna::LibraryTrack> {
-        self.library.cached_library_raw.iter().find(|t| t.id == id).cloned()
+        if let Some(t) = self.library.cached_library_raw.iter().find(|t| t.id == id) {
+            return Some(t.clone());
+        }
+
+        // Search within extracted stem sets
+        for track in &self.library.cached_library_raw {
+            if let Some(ref stem_set) = track.stems {
+                for (s_idx, single_stem) in stem_set.stems.iter().enumerate() {
+                    let stem_id = track.id.wrapping_add((s_idx as u64 + 1) * 10000);
+                    if stem_id == id {
+                        let label = views::dj_studio::render::stem_label_for_classif(single_stem.classification);
+                        let mut stem_as_track = track.clone();
+                        stem_as_track.id = stem_id;
+                        stem_as_track.title = format!("{} [{}]", track.title, label);
+                        if !single_stem.relative_path.is_empty() {
+                            stem_as_track.path = single_stem.relative_path.clone();
+                        }
+                        return Some(stem_as_track);
+                    }
+                }
+            }
+        }
+        None
     }
 
     pub fn trigger_library_refresh(&mut self) {
