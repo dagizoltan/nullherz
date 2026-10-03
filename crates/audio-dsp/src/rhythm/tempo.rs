@@ -76,7 +76,7 @@ impl MultiHypothesisTempoEstimator {
             for &(ioi, weight) in &intervals_sec {
                 let ratio = ioi / period_sec;
                 let nearest_int = Float::round(ratio);
-                if nearest_int >= 1.0 && nearest_int <= 4.0 {
+                if (1.0..=4.0).contains(&nearest_int) {
                     let diff = Float::abs(ratio - nearest_int);
                     if diff < 0.08 {
                         // High-precision Fourier tempogram Gaussian resonance kernel

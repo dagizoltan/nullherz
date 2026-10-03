@@ -47,8 +47,8 @@ impl MultiFeatureOnsetDetector {
         let mut re = vec![0.0f32; self.fft_size];
         let mut im = vec![0.0f32; self.fft_size];
         let mut window = vec![0.0f32; self.fft_size];
-        for i in 0..self.fft_size {
-            window[i] = 0.5 * (1.0 - Float::cos(2.0 * core::f32::consts::PI * i as f32 / self.fft_size as f32));
+        for (i, val) in window.iter_mut().enumerate().take(self.fft_size) {
+            *val = 0.5 * (1.0 - Float::cos(2.0 * core::f32::consts::PI * i as f32 / self.fft_size as f32));
         }
 
         let mut flux_series = Vec::new();

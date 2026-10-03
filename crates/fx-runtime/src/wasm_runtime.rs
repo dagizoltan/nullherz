@@ -28,7 +28,7 @@ impl WasmSidecarHost {
              let state = caller.data_mut();
              unsafe {
                  if let Some(cmd) = (*state.cmd_buffer).pop() {
-                     let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
+                     let Some(mem) = caller.get_export("memory").and_then(|e| e.into_memory()) else { return -1; };
                      let memory_slice = mem.data_mut(&mut caller);
                      let start = ptr as usize;
                      let max_end = start + max_len as usize;
@@ -95,7 +95,7 @@ impl WasmSidecarHost {
              };
 
              if let Some(block) = block {
-                 let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
+                 let Some(mem) = caller.get_export("memory").and_then(|e| e.into_memory()) else { return 0; };
                  let data_bytes = bytemuck::cast_slice(&block.data);
                  let start = ptr as usize;
                  let end = start + data_bytes.len();
@@ -112,7 +112,7 @@ impl WasmSidecarHost {
         linker.func_wrap("nullherz", "set_audio_output", |mut caller: Caller<'_, WasmState>, channel: i32, ptr: i32, len: i32| -> i32 {
              let state = caller.data_mut();
              if let Some(&rb_ptr) = state.audio_outputs.get(channel as usize) {
-                 let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
+                 let Some(mem) = caller.get_export("memory").and_then(|e| e.into_memory()) else { return 0; };
                  let start = ptr as usize;
                  let byte_len = 256 * std::mem::size_of::<f32>();
                  let end = start + byte_len;

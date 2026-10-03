@@ -110,9 +110,9 @@ pub fn time_stretch(input: &[f32], ratio: f32) -> Vec<f32> {
 
     // Hann window
     let mut window = vec![0.0f32; grain_size];
-    for i in 0..grain_size {
+    for (i, val) in window.iter_mut().enumerate().take(grain_size) {
         let v = Float::sin(core::f32::consts::PI * i as f32 / (grain_size - 1) as f32);
-        window[i] = v * v;
+        *val = v * v;
     }
 
     let mut out_pos = 0;
@@ -132,9 +132,9 @@ pub fn time_stretch(input: &[f32], ratio: f32) -> Vec<f32> {
     }
 
     // Normalize output by window counts to reconstruct waveform perfectly
-    for i in 0..out_len {
+        for (i, val) in output.iter_mut().enumerate().take(out_len) {
         if count[i] > 0.01 {
-            output[i] /= count[i];
+                *val /= count[i];
         }
     }
     output
@@ -274,7 +274,7 @@ pub fn extract_spectral_envelope(re: &[f32], im: &[f32], env: &mut [f32], window
         count += 1;
     }
 
-    for i in 0..n {
+    for (i, env_val) in env.iter_mut().enumerate().take(n) {
         // Add new element to window if possible
         let add_idx = i + window_size;
         if add_idx < n {
@@ -289,7 +289,7 @@ pub fn extract_spectral_envelope(re: &[f32], im: &[f32], env: &mut [f32], window
             count -= 1;
         }
 
-        env[i] = current_sum / count as f32;
+        *env_val = current_sum / count as f32;
     }
 }
 
@@ -431,17 +431,17 @@ impl PolyphaseFilter {
         let cutoff = 1.0 / factor as f32;
         let center = (total_taps - 1) as f32 / 2.0;
 
-        for i in 0..total_taps {
+        for (i, val) in coefficients.iter_mut().enumerate().take(total_taps) {
             let x = i as f32 - center;
             if x == 0.0 {
-                coefficients[i] = 1.0;
+                *val = 1.0;
             } else {
                 let angle = core::f32::consts::PI * x * cutoff;
-                coefficients[i] = Float::sin(angle) / angle;
+                *val = Float::sin(angle) / angle;
             }
             // Hamming window
             let window = 0.54 - 0.46 * Float::cos(2.0 * core::f32::consts::PI * i as f32 / (total_taps - 1) as f32);
-            coefficients[i] *= window;
+            *val *= window;
         }
 
         Self {
@@ -460,12 +460,12 @@ impl PolyphaseFilter {
         }
         self.history[0] = input;
 
-        for p in 0..self.factor {
+        for (p, val) in output.iter_mut().enumerate().take(self.factor) {
             let mut sum = 0.0;
             for t in 0..self.taps_per_phase {
                 sum += self.history[t] * self.coefficients[t * self.factor + p];
             }
-            output[p] = sum * self.factor as f32;
+            *val = sum * self.factor as f32;
         }
     }
 
@@ -479,12 +479,12 @@ impl PolyphaseFilter {
         let mut result = 0.0;
         // In a true polyphase decimator, we integrate the 'factor' samples with the FIR taps.
         // For 8x, we take 8 samples and apply 8 corresponding phases.
-        for i in 0..self.factor {
+        for (i, &input_val) in input.iter().enumerate().take(self.factor) {
             // Shift history
             for j in (1..self.taps_per_phase).rev() {
                 self.history[j] = self.history[j - 1];
             }
-            self.history[0] = input[i];
+            self.history[0] = input_val;
 
             // Accumulate for current phase
             for t in 0..self.taps_per_phase {

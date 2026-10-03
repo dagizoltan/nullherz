@@ -497,8 +497,8 @@ impl SamplerVoice {
             overlap_count: 2,
             window_lut: {
                 let mut lut = [0.0f32; 1024];
-                for i in 0..1024 {
-                    lut[i] = 0.5 * (1.0 - Float::cos(2.0 * core::f32::consts::PI * i as f32 / 1023.0));
+                for (i, val) in lut.iter_mut().enumerate() {
+                    *val = 0.5 * (1.0 - Float::cos(2.0 * core::f32::consts::PI * i as f32 / 1023.0));
                 }
                 lut
             },

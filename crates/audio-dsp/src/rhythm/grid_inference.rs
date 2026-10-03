@@ -34,7 +34,7 @@ impl BeatGridInferenceEngine {
         }
 
         let primary_bpm = hypotheses[0].bpm;
-        let samples_per_beat = (self.sample_rate as f64 * 60.0 / primary_bpm as f64) as f64;
+        let samples_per_beat = self.sample_rate as f64 * 60.0 / primary_bpm as f64;
 
         if samples_per_beat <= 0.0 || total_frames == 0 {
             return BeatGrid::default();
