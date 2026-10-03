@@ -55,8 +55,19 @@ impl CommandHandler {
                 for (idx, stem) in stem_set.stems.iter().enumerate() {
                     let stem_id = track.id.wrapping_add((idx as u64 + 1) * 10000);
                     if stem_id == sample_id {
-                        let stem_path = std::path::Path::new(&stem.relative_path);
-                        if stem_path.exists() {
+                        let candidate_path = if std::path::Path::new(&stem.relative_path).exists() {
+                            Some(stem.relative_path.clone())
+                        } else {
+                            let alt_path = format!("library/{}", stem.relative_path);
+                            if std::path::Path::new(&alt_path).exists() {
+                                Some(alt_path)
+                            } else {
+                                None
+                            }
+                        };
+
+                        if let Some(valid_path) = candidate_path {
+                            let stem_path = std::path::Path::new(&valid_path);
                             let mmap_buffer = nullherz_traits::MmapBuffer::open(stem_path)
                                 .map(|m| nullherz_traits::SampleBuffer::Mmap(Arc::new(m)))
                                 .ok();
@@ -71,10 +82,10 @@ impl CommandHandler {
                                     buf,
                                     Arc::new(stem_meta),
                                 );
-                                println!("CommandHandler: Hydrated stem sample {} from {}", sample_id, stem.relative_path);
+                                println!("CommandHandler: Hydrated stem sample {} from {}", sample_id, valid_path);
                                 return true;
                             } else {
-                                let decoded = crate::folder_monitor::decode_audio_file(&stem.relative_path);
+                                let decoded = crate::folder_monitor::decode_audio_file(&valid_path);
                                 if decoded.frames > 0 {
                                     let mut stem_meta = nullherz_traits::SampleMetadata::new_empty();
                                     stem_meta.sample_rate = decoded.sample_rate;
@@ -86,7 +97,7 @@ impl CommandHandler {
                                         decoded.samples.into(),
                                         Arc::new(stem_meta),
                                     );
-                                    println!("CommandHandler: Decoded stem sample {} from {}", sample_id, stem.relative_path);
+                                    println!("CommandHandler: Decoded stem sample {} from {}", sample_id, valid_path);
                                     return true;
                                 }
                             }
