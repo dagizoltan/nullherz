@@ -109,6 +109,58 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                         ui.monospace(RichText::new(&target_dev_id).size(theme.type_caption).color(theme.accent));
                     });
                 });
+
+            ui.add_space(theme.space_md);
+            ui.label(RichText::new("Manual Audio Engine Parameters").color(theme.text_secondary));
+            ui.add_space(theme.space_xs);
+
+            ui.horizontal(|ui| {
+                ui.label("Sample Rate:");
+                let current_sr = app.settings.sample_rate;
+                let sr_text = format!("{:.0} Hz", current_sr);
+
+                egui::ComboBox::from_id_source("sample_rate_select")
+                    .selected_text(RichText::new(&sr_text).strong().color(theme.text_primary))
+                    .width(120.0)
+                    .show_ui(ui, |ui| {
+                        for rate in [44100.0f32, 48000.0f32, 96000.0f32, 192000.0f32] {
+                            let label = format!("{:.0} Hz", rate);
+                            if ui.selectable_label(current_sr == rate, label).clicked() {
+                                app.settings.sample_rate = rate;
+                                let _ = app.command_sender.send(nullherz_traits::Command::Core(
+                                    nullherz_traits::CoreCommand::ConfigureAudioEngine {
+                                        sample_rate: rate,
+                                        block_size: app.settings.buffer_size,
+                                    }
+                                ));
+                            }
+                        }
+                    });
+
+                ui.add_space(theme.space_md);
+
+                ui.label("Buffer Size (Frames):");
+                let current_buf = app.settings.buffer_size;
+                let buf_text = format!("{} frames", current_buf);
+
+                egui::ComboBox::from_id_source("buffer_size_select")
+                    .selected_text(RichText::new(&buf_text).strong().color(theme.text_primary))
+                    .width(120.0)
+                    .show_ui(ui, |ui| {
+                        for size in [32usize, 64, 128, 256, 512, 1024] {
+                            let label = format!("{} frames", size);
+                            if ui.selectable_label(current_buf == size, label).clicked() {
+                                app.settings.buffer_size = size;
+                                let _ = app.command_sender.send(nullherz_traits::Command::Core(
+                                    nullherz_traits::CoreCommand::ConfigureAudioEngine {
+                                        sample_rate: app.settings.sample_rate,
+                                        block_size: size,
+                                    }
+                                ));
+                            }
+                        }
+                    });
+            });
         });
 
     ui.add_space(theme.space_md);
