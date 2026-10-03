@@ -38,7 +38,7 @@ Through exhaustive reverse-engineering, mathematical profiling, and signal analy
 
 ### 2.3 The Execution Plane (`audio-core`, `audio-dsp`, `nullherz-processors`)
 - **Devirtualized Static Kernel Execution**: `AudioEngine<K: ProcessingKernel>` uses monomorphized, devirtualized static dispatch for zero-vtable overhead.
-- **Zero-Allocation Hot Path**: Enforced via `nullherz_traits::test_kit::rt_alloc` counting allocator. `process_block` performs 0 allocations during steady-state processing.
+- **Zero-Allocation Hot Path**: Enforced via `nullherz_traits::test_kit::rt_alloc` counting allocator. `process_block` performs 0 allocations during steady-state processing, validated across `audio-core` and `nullherz-processors` test suites.
 - **Floating-Point Denormal Protection**: Automatic initialization of FTZ (Flush-To-Zero) and DAZ (Denormals-Are-Zero) hardware control flags in `setup_rt_thread` prevents CPU subnormal float calculation slowdowns.
 
 ---
