@@ -184,6 +184,12 @@ impl CommandHandler {
                             eprintln!("CommandHandler: track {} path missing ({}); refusing to register silence.", sample_id, track.path);
                             continue;
                         }
+                        if let Some(ref stem_set) = track.stems {
+                            for (s_idx, _stem) in stem_set.stems.iter().enumerate() {
+                                let stem_id = track.id.wrapping_add((s_idx as u64 + 1) * 10000);
+                                Self::try_hydrate_stem_sample(conductor, stem_id);
+                            }
+                        }
                         let id = *sample_id;
                         let path = track.path.clone();
                         let meta_template = track.metadata.clone();

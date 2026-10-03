@@ -260,8 +260,10 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
     };
 
     // Beat grid inside the window: downbeats full-height and brighter.
-    if t.metadata.bpm > 20.0 {
-        let spb = sr as f64 * 60.0 / t.metadata.bpm as f64;
+    // Scales dynamically with deck playback_rate (pitch changes) so grid matches live tempo.
+    let effective_bpm = t.metadata.bpm as f64 * (playback_rate as f64).max(0.01);
+    if effective_bpm > 20.0 {
+        let spb = sr as f64 * 60.0 / effective_bpm;
         let offset = t.metadata.beat_grid_offset as f64;
         let first_beat = (((win_start - offset) / spb).floor().max(0.0)) as u64;
         let mut b = first_beat;
