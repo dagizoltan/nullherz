@@ -864,22 +864,26 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
                         .rounding(Rounding::same(theme.radius_sm))
                         .inner_margin(Margin::symmetric(theme.space_xs, 2.0))
                         .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                Frame::none()
-                                    .fill(stem_color.linear_multiply(0.2))
-                                    .rounding(Rounding::same(theme.radius_sm))
-                                    .inner_margin(Margin::symmetric(4.0, 1.0))
-                                    .show(ui, |ui| {
-                                        ui.label(RichText::new(label).strong().size(theme.type_caption).color(stem_color));
-                                    });
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    Frame::none()
+                                        .fill(stem_color.linear_multiply(0.2))
+                                        .rounding(Rounding::same(theme.radius_sm))
+                                        .inner_margin(Margin::symmetric(4.0, 1.0))
+                                        .show(ui, |ui| {
+                                            ui.label(RichText::new(label).strong().size(theme.type_caption).color(stem_color));
+                                        });
 
-                                ui.label(RichText::new(format!("{:.1} LUFS | {:.1} dB", single_stem.lufs_integrated, single_stem.peak_db))
-                                    .monospace().size(9.0).color(theme.text_secondary));
+                                    ui.add(egui::Label::new(
+                                        RichText::new(format!("{:.1} LUFS | {:.1} dB", single_stem.lufs_integrated, single_stem.peak_db))
+                                            .monospace().size(9.0).color(theme.text_secondary)
+                                    ).truncate(true));
+                                });
 
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.horizontal_wrapped(|ui| {
                                     egui::ComboBox::from_id_source(format!("stem_deck_load_{}_{}", track.id, s_idx))
                                         .selected_text(RichText::new("→ MIXER CHANNEL").size(theme.type_caption))
-                                        .width(110.0)
+                                        .width(90.0)
                                         .show_ui(ui, |ui| {
                                             let num_ch = app.mixer.num_channels.clamp(1, 16);
                                             for c_idx in 0..num_ch {
