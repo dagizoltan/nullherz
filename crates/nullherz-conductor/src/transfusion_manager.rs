@@ -213,6 +213,10 @@ impl TransfusionManager {
         }
     }
 
+    pub fn device_sample_rate(&self) -> u32 {
+        self.device_sample_rate
+    }
+
     pub fn with_library(mut self, library: Arc<parking_lot::Mutex<LibraryDatabase>>) -> Self {
         let mut breeder = EvolutionaryBreeder::new(self.sample_registry.clone(), library);
         breeder.discovery_service = self.discovery_service.clone();
