@@ -78,7 +78,7 @@ fn render_vertical_waveform(
     app: &mut InspectorApp,
     ui: &mut Ui,
     deck_idx: usize,
-    elapsed_samples: u64,
+    raw_elapsed: u64,
     peak_level: f32,
     deck_color: Color32,
     theme: &nullherz_ui_hal::Theme,
@@ -97,8 +97,21 @@ fn render_vertical_waveform(
     if let Some(t) = track {
         let sr = (t.metadata.sample_rate.max(1)) as f32;
         let total_frames = t.metadata.total_samples.max(1);
+        let active_deck = deck_idx % 4;
+        let is_playing = app.decks.deck_playing[active_deck];
+        let playback_rate = telemetry.as_ref().map(|tel| tel.deck_playback_rates[active_deck]).unwrap_or(1.0);
 
-        let window_frames = NEEDLE_WINDOW_SECS * sr;
+        // Sub-frame linear playhead interpolation matching waveform.rs
+        let elapsed_samples = if is_playing && telemetry.is_some() {
+            let now = ui.input(|inp| inp.time);
+            let dt = (now - app.last_telemetry_time).max(0.0) as f32;
+            let interp_frames = (dt * playback_rate * sr) as u64;
+            (raw_elapsed + interp_frames).min(total_frames)
+        } else {
+            raw_elapsed
+        };
+
+        let window_frames = NEEDLE_WINDOW_SECS * sr * (playback_rate as f32).max(0.01);
         let center = elapsed_samples as f32;
         let win_start = center as f64 - (window_frames as f64) * 0.5;
         let win_end = center as f64 + (window_frames as f64) * 0.5;
@@ -279,7 +292,6 @@ fn render_vertical_waveform(
 
         // Center playhead needle
         let playhead_y = rect.center().y;
-        let is_playing = app.decks.deck_playing.get(deck_idx % 4).copied().unwrap_or(false);
         if is_playing {
             let beat_pos = telemetry.as_ref().map(|tel| tel.beat_position as f32).unwrap_or(0.0);
             let pulse = (1.0 - (beat_pos % 1.0)).powf(3.0);
