@@ -163,7 +163,7 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
     // Sub-frame linear playhead interpolation across 60 Hz egui redraws
     let elapsed_samples = if is_playing && telemetry.is_some() {
         let now = ui.input(|inp| inp.time);
-        let dt = (now - app.last_update_time).max(0.0) as f32;
+        let dt = (now - app.last_telemetry_time).max(0.0) as f32;
         let interp_frames = (dt * playback_rate * sr) as u64;
         (raw_elapsed + interp_frames).min(total_frames)
     } else {

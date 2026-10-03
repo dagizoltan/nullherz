@@ -170,6 +170,7 @@ pub struct InspectorApp {
     pub(crate) rt_warnings: Vec<String>,
     pub(crate) theme: nullherz_ui_hal::Theme,
     pub(crate) last_update_time: f64,
+    pub(crate) last_telemetry_time: f64,
     pub(crate) _conductor_thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -616,6 +617,7 @@ impl InspectorApp {
             rt_warnings: ipc_layer::realtime_environment_warnings(),
             theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
+            last_telemetry_time: 0.0,
         };
         app.trigger_library_refresh();
 
@@ -1178,6 +1180,7 @@ impl eframe::App for InspectorApp {
             // play/stop toggle sent PlayDeck when the user meant StopDeck.
             if t.sample_counter != self.viz.last_playstate_counter {
                 self.viz.last_playstate_counter = t.sample_counter;
+                self.last_telemetry_time = current_time;
                 crate::state::update_deck_playing(
                     &t.deck_positions,
                     &mut self.viz.last_deck_positions,
@@ -1866,6 +1869,7 @@ mod tests {
             rt_warnings: vec![],
             theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
+            last_telemetry_time: 0.0,
             _conductor_thread: None,
         };
 
@@ -1924,6 +1928,7 @@ mod tests {
             rt_warnings: vec![],
             theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
+            last_telemetry_time: 0.0,
             _conductor_thread: None,
         };
 

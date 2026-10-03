@@ -203,8 +203,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 };
 
                                 if ui.add(play_btn).clicked() {
-                                    app.decks.deck_playing[deck_idx] = !is_deck_playing;
-                                    if app.decks.deck_playing[deck_idx] {
+                                    let new_playing = !is_deck_playing;
+                                    app.decks.deck_playing[deck_idx] = new_playing;
+                                    app.viz.deck_still_snapshots[deck_idx] = 0;
+                                    if new_playing {
                                         let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id: deck_char }));
                                     } else {
                                         let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::StopDeck { deck_id: deck_char }));
