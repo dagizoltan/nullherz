@@ -73,6 +73,7 @@ impl Harness {
             rt_warnings: vec![],
             theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
+            last_telemetry_time: 0.0,
             _conductor_thread: None,
         };
         Self { app, commands: rx, ctx: egui::Context::default(), time: 0.0 }

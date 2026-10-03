@@ -38,10 +38,12 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
             });
 
             ui.add_space(theme.space_md);
+
+            // Output Device & State Transparency Diagnostics
             ui.horizontal(|ui| {
                 ui.label("Output Device:");
                 let devices = &app.settings.audio_devices;
-                let mut selected = app.settings._selected_audio_device.clone();
+                let selected = app.settings._selected_audio_device.clone();
                 let combo_text = if selected.is_empty() {
                     devices.first().cloned().unwrap_or_else(|| "default".to_string())
                 } else {
@@ -50,11 +52,10 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
 
                 egui::ComboBox::from_id_source("audio_output_device_select")
                     .selected_text(RichText::new(&combo_text).strong().color(theme.text_primary))
-                    .width(220.0)
+                    .width(240.0)
                     .show_ui(ui, |ui| {
                         for dev in devices {
                             if ui.selectable_label(dev == &combo_text, dev).clicked() {
-                                selected = dev.clone();
                                 app.settings._selected_audio_device = dev.clone();
 
                                 let clean_dev = nullherz_backends::alsa::device_id(dev);
@@ -70,12 +71,44 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                         }
                     });
 
-                ui.label(
-                    RichText::new("hardware output stream")
-                        .size(theme.type_caption)
-                        .color(theme.text_secondary),
-                );
+                // Device State Badge
+                let (badge_text, badge_bg, badge_fg) = if devices.is_empty() {
+                    ("UNAVAILABLE", egui::Color32::from_rgb(100, 30, 30), egui::Color32::from_rgb(255, 100, 100))
+                } else if devices.contains(&combo_text) || combo_text == "default" {
+                    if app.settings.exclusive_performance_mode {
+                        ("ACTIVE [MMAP DIRECT]", egui::Color32::from_rgb(20, 80, 40), egui::Color32::from_rgb(100, 255, 150))
+                    } else {
+                        ("CONFIGURED", egui::Color32::from_rgb(20, 60, 100), egui::Color32::from_rgb(100, 200, 255))
+                    }
+                } else {
+                    ("SELECTED", egui::Color32::from_rgb(80, 70, 20), egui::Color32::from_rgb(255, 220, 100))
+                };
+
+                Frame::none()
+                    .fill(badge_bg)
+                    .rounding(2.0)
+                    .inner_margin(egui::vec2(6.0, 2.0))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(badge_text).size(10.0).strong().color(badge_fg));
+                    });
             });
+
+            // State Transparency & Hardware Diagnostics Line
+            let target_dev_id = nullherz_backends::alsa::device_id(&app.settings._selected_audio_device).to_string();
+            ui.add_space(theme.space_xs);
+            Frame::none()
+                .fill(theme.bg_inset)
+                .rounding(theme.radius_sm)
+                .inner_margin(theme.space_xs)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Requested Target:").size(theme.type_caption).color(theme.text_secondary));
+                        ui.label(RichText::new(&app.settings._selected_audio_device).size(theme.type_caption).strong());
+                        ui.add_space(theme.space_sm);
+                        ui.label(RichText::new("ALSA Handle:").size(theme.type_caption).color(theme.text_secondary));
+                        ui.monospace(RichText::new(&target_dev_id).size(theme.type_caption).color(theme.accent));
+                    });
+                });
         });
 
     ui.add_space(theme.space_md);

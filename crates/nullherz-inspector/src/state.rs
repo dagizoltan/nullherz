@@ -1956,7 +1956,7 @@ impl Default for TopologyViewState {
 /// is playing iff its playhead advanced, and only counts as stopped after
 /// `STILL_SNAPSHOTS_TO_STOP` consecutive still snapshots (a slow playback
 /// rate can hold a u64 position across a block without being stopped).
-pub const STILL_SNAPSHOTS_TO_STOP: u8 = 3;
+pub const STILL_SNAPSHOTS_TO_STOP: u8 = 8;
 
 pub fn update_deck_playing(
     positions: &[u64; 4],
@@ -2007,12 +2007,12 @@ mod playstate_tests {
         let mut playing = [false; 16];
         update_deck_playing(&[1_000, 0, 0, 0], &mut last, &mut still, &mut playing);
         assert!(playing[0]);
-        // One or two still snapshots: still playing (slow-rate tolerance).
-        update_deck_playing(&[1_000, 0, 0, 0], &mut last, &mut still, &mut playing);
-        assert!(playing[0]);
-        update_deck_playing(&[1_000, 0, 0, 0], &mut last, &mut still, &mut playing);
-        assert!(playing[0]);
-        // Third still snapshot: stopped.
+        // Still snapshots before threshold: still playing (slow-rate tolerance / command latency).
+        for _ in 0..(STILL_SNAPSHOTS_TO_STOP - 1) {
+            update_deck_playing(&[1_000, 0, 0, 0], &mut last, &mut still, &mut playing);
+            assert!(playing[0]);
+        }
+        // At threshold: stopped.
         update_deck_playing(&[1_000, 0, 0, 0], &mut last, &mut still, &mut playing);
         assert!(!playing[0], "deck still after {} snapshots must read stopped", STILL_SNAPSHOTS_TO_STOP);
     }

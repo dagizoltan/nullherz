@@ -27,7 +27,7 @@ pub struct Theme {
     pub warning: egui::Color32,
     pub danger: egui::Color32,
 
-    pub deck_colors: [egui::Color32; 4], // for multi-deck contexts (DJ console, mixer) — replaces ad hoc InspectorApp::deck_color
+    pub deck_colors: [egui::Color32; 4], // for multi-deck contexts (DJ console, mixer) — Deck A Cyan, Deck B Gold, Deck C Magenta, Deck D Violet
     pub track_colors: [egui::Color32; 16], // v2 track/deck colors
 
     // Typography — a real scale, referenced by name not number
@@ -62,7 +62,7 @@ impl Default for Theme {
     fn default() -> Self {
         let border_color = egui::Color32::from_gray(30);
         Self {
-            accent: egui::Color32::from_rgb(0, 255, 200),
+            accent: egui::Color32::from_rgb(0, 220, 255),
             bg_dark: egui::Color32::from_rgb(10, 10, 12),
             bg_med: egui::Color32::from_rgb(30, 30, 30),
             text_primary: egui::Color32::WHITE,
@@ -73,7 +73,7 @@ impl Default for Theme {
             bg_surface_raised: egui::Color32::from_rgb(30, 30, 35),
             bg_inset: egui::Color32::from_rgb(15, 15, 20),
             border: border_color,
-            border_focus: egui::Color32::from_rgb(0, 255, 200),
+            border_focus: egui::Color32::from_rgb(0, 220, 255),
 
             text_secondary: egui::Color32::from_gray(150),
             text_disabled: egui::Color32::from_gray(80),
@@ -84,17 +84,22 @@ impl Default for Theme {
             warning: egui::Color32::from_rgb(255, 200, 0),
             danger: egui::Color32::from_rgb(255, 50, 50),
 
+            // Hardware-Exact Deck Identity Colors:
+            // Deck A: Cyan #00DCFF
+            // Deck B: Gold #FFD700
+            // Deck C: Magenta #FF69B4
+            // Deck D: Violet #9370DB
             deck_colors: [
-                egui::Color32::from_rgb(0, 255, 200),
-                egui::Color32::from_rgb(0, 150, 255),
-                egui::Color32::from_rgb(255, 100, 0),
-                egui::Color32::from_rgb(255, 0, 100),
+                egui::Color32::from_rgb(0, 220, 255),   // Deck A Cyan #00DCFF
+                egui::Color32::from_rgb(255, 215, 0),   // Deck B Gold #FFD700
+                egui::Color32::from_rgb(255, 105, 180), // Deck C Magenta #FF69B4
+                egui::Color32::from_rgb(147, 112, 219), // Deck D Violet #9370DB
             ],
             track_colors: [
-                egui::Color32::from_rgb(0, 255, 200),   // Deck A Turquoise
-                egui::Color32::from_rgb(0, 150, 255),   // Deck B Blue
-                egui::Color32::from_rgb(255, 100, 0),   // Deck C Orange
-                egui::Color32::from_rgb(255, 0, 100),   // Deck D Red
+                egui::Color32::from_rgb(0, 220, 255),   // Deck A Cyan
+                egui::Color32::from_rgb(255, 215, 0),   // Deck B Gold
+                egui::Color32::from_rgb(255, 105, 180), // Deck C Magenta
+                egui::Color32::from_rgb(147, 112, 219), // Deck D Violet
                 egui::Color32::from_rgb(180, 100, 255), // Purple
                 egui::Color32::from_rgb(255, 200, 0),   // Yellow
                 egui::Color32::from_rgb(0, 200, 120),   // Green

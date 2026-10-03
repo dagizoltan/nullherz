@@ -170,6 +170,7 @@ pub struct InspectorApp {
     pub(crate) rt_warnings: Vec<String>,
     pub(crate) theme: nullherz_ui_hal::Theme,
     pub(crate) last_update_time: f64,
+    pub(crate) last_telemetry_time: f64,
     pub(crate) _conductor_thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -616,6 +617,7 @@ impl InspectorApp {
             rt_warnings: ipc_layer::realtime_environment_warnings(),
             theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
+            last_telemetry_time: 0.0,
         };
         app.trigger_library_refresh();
 
@@ -831,7 +833,7 @@ impl InspectorApp {
     fn render_bottom_bar(&mut self, ctx: &egui::Context, telemetry: &Option<Telemetry>, id_prefix: &str) {
         egui::TopBottomPanel::bottom(format!("{}_bottom_bar", id_prefix)).show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("nullherz Alpha").size(10.0).color(self.theme.text_disabled));
+                ui.label(egui::RichText::new("nullherz Studio").size(10.0).strong().color(self.theme.accent));
                 ui.separator();
 
                 if let Some(t) = telemetry {
@@ -840,13 +842,48 @@ impl InspectorApp {
                     ui.label(format!("POS: {:.2}", t.beat_position));
                     ui.separator();
 
+                    // Performance Mode Diagnostic Bar
+                    let sr_khz = self.settings.sample_rate / 1000.0;
+                    let block_f = self.settings.buffer_size;
+                    let latency_ms = (block_f as f64 / self.settings.sample_rate as f64) * 1000.0;
+                    let budget_ms = if t.sample_rate > 0.0 {
+                        (t.block_size as f32 / t.sample_rate) * 1000.0
+                    } else {
+                        (block_f as f32 / self.settings.sample_rate) * 1000.0
+                    };
+                    let dsp_load = if budget_ms > 0.0 {
+                        ((t.process_time_ns as f32 / 1_000_000.0) / budget_ms * 100.0).clamp(0.0, 100.0)
+                    } else {
+                        0.0
+                    };
+
                     let rt_warnings = ipc_layer::realtime_environment_warnings();
                     if self.settings.exclusive_performance_mode && rt_warnings.is_empty() {
-                        ui.label(egui::RichText::new("⚡ RT 0.32ms (SCHED_FIFO 90)").strong().color(self.theme.success));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "⚡ REALTIME {:.0}kHz | {}f ({:.2}ms) | DSP {:.1}%",
+                                sr_khz, block_f, latency_ms, dsp_load
+                            ))
+                            .strong()
+                            .color(self.theme.success),
+                        );
                     } else if !rt_warnings.is_empty() {
-                        ui.label(egui::RichText::new("⚠️ PREEMPTION RISK (NO RTPRIO)").strong().color(self.theme.danger));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "⚠️ PREEMPTION RISK | {}f ({:.2}ms) | DSP {:.1}%",
+                                block_f, latency_ms, dsp_load
+                            ))
+                            .strong()
+                            .color(self.theme.danger),
+                        );
                     } else {
-                        ui.label(egui::RichText::new("💻 DESKTOP ~10ms (PIPEWIRE)").color(self.theme.warning));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "💻 DESKTOP {:.0}kHz | {}f (~{:.1}ms) | DSP {:.1}%",
+                                sr_khz, block_f, latency_ms, dsp_load
+                            ))
+                            .color(self.theme.warning),
+                        );
                     }
                 }
 
@@ -1178,6 +1215,7 @@ impl eframe::App for InspectorApp {
             // play/stop toggle sent PlayDeck when the user meant StopDeck.
             if t.sample_counter != self.viz.last_playstate_counter {
                 self.viz.last_playstate_counter = t.sample_counter;
+                self.last_telemetry_time = current_time;
                 crate::state::update_deck_playing(
                     &t.deck_positions,
                     &mut self.viz.last_deck_positions,
@@ -1866,6 +1904,7 @@ mod tests {
             rt_warnings: vec![],
             theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
+            last_telemetry_time: 0.0,
             _conductor_thread: None,
         };
 
@@ -1924,6 +1963,7 @@ mod tests {
             rt_warnings: vec![],
             theme: nullherz_ui_hal::Theme::default(),
             last_update_time: 0.0,
+            last_telemetry_time: 0.0,
             _conductor_thread: None,
         };
 
