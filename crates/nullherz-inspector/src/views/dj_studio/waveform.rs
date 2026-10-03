@@ -170,7 +170,11 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
         raw_elapsed
     };
 
-    let window_frames = NEEDLE_WINDOW_SECS * sr;
+    // Visible audio window in source frames, scaled by live playback rate (pitch / BPM sync).
+    // At rate r, r * sr frames pass per second, so 8 seconds on screen covers
+    // NEEDLE_WINDOW_SECS * sr * rate source frames. This keeps the on-screen time window
+    // constant and adjusts the beat grid, cues, and waveform zoom dynamically as BPM changes.
+    let window_frames = NEEDLE_WINDOW_SECS * sr * (playback_rate as f32).max(0.01);
     let center = elapsed_samples as f32;
     let win_start = center as f64 - (window_frames as f64) * 0.5;
     let win_end = center as f64 + (window_frames as f64) * 0.5;
@@ -260,10 +264,9 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
     };
 
     // Beat grid inside the window: downbeats full-height and brighter.
-    // Scales dynamically with deck playback_rate (pitch changes) so grid matches live tempo.
-    let effective_bpm = t.metadata.bpm as f64 * (playback_rate as f64).max(0.01);
-    if effective_bpm > 20.0 {
-        let spb = sr as f64 * 60.0 / effective_bpm;
+    // Fixed in SOURCE frames so beat grid lines remain locked to waveform audio transients.
+    if t.metadata.bpm > 20.0 {
+        let spb = sr as f64 * 60.0 / t.metadata.bpm as f64;
         let offset = t.metadata.beat_grid_offset as f64;
         let first_beat = (((win_start - offset) / spb).floor().max(0.0)) as u64;
         let mut b = first_beat;
@@ -326,7 +329,8 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
     let is_playing = app.decks.deck_playing[i];
     if is_playing {
         let pulse = if t.metadata.bpm > 20.0 {
-            let spb = sr as f64 * 60.0 / t.metadata.bpm as f64;
+            let effective_bpm = t.metadata.bpm as f64 * (playback_rate as f64).max(0.01);
+            let spb = sr as f64 * 60.0 / effective_bpm;
             let offset = t.metadata.beat_grid_offset as f64;
             let deck_beat_pos = (elapsed_samples as f64 - offset) / spb;
             let phase = (deck_beat_pos % 1.0 + 1.0) % 1.0;
