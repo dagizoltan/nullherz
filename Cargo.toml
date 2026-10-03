@@ -33,6 +33,7 @@ members = [
     "crates/nullherz-gateway",
     "crates/nullherz-topology",
     "crates/nullherz-setup",
+    "crates/xtask",
 ]
 resolver = "2"
 

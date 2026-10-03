@@ -267,7 +267,7 @@ impl Conductor {
 
     pub fn with_library(library: Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>) -> Self {
         let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
-        let sidecar_discovery = crate::discovery::SidecarDiscoveryService::new("plugins").with_library(library.clone());
+        let sidecar_discovery = crate::discovery::SidecarDiscoveryService::new("sidecars").with_library(library.clone());
         let dna_discovery = sidecar_discovery.dna_discovery.clone();
 
         let mut transfusion_manager = TransfusionManager::new(sample_registry.clone());

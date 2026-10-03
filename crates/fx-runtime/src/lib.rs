@@ -430,7 +430,7 @@ mod tests {
     fn test_spawn_bitcrusher_sidecar() {
         let mut supervisor = SidecarSupervisor::new();
         let binary_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../plugins/bitcrusher")
+            .join("../../target/debug/bitcrusher")
             .canonicalize()
             .expect("Failed to resolve plugin binary path");
         assert!(binary_path.exists(), "Bitcrusher plugin binary must exist");

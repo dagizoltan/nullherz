@@ -38,3 +38,6 @@
 # bakes in whichever CPU did the build.
 
 # Intentionally empty of rustflags. Add nothing here without reading the above.
+
+[alias]
+xtask = "run --package xtask --"
