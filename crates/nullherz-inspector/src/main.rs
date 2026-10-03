@@ -752,16 +752,16 @@ impl InspectorApp {
                             ui.vertical_centered(|ui| {
                                 for (view, icon, label) in top_nav {
                                     render_nav_btn(ui, view, icon, label);
-                                    ui.add_space(4.0);
+                                    ui.add_space(2.0);
                                 }
 
-                                ui.add_space(4.0);
+                                ui.add_space(2.0);
                                 ui.separator();
-                                ui.add_space(4.0);
+                                ui.add_space(2.0);
 
                                 for (view, icon, label) in bottom_nav {
                                     render_nav_btn(ui, view, icon, label);
-                                    ui.add_space(4.0);
+                                    ui.add_space(2.0);
                                 }
                             });
                         });
