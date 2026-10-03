@@ -363,7 +363,13 @@ fn render_audio_files_list(app: &mut InspectorApp, ui: &mut Ui, search_q: &str) 
         .show_viewport(ui, |ui, viewport| {
             let expanded = app.library.expanded_track;
             let row_h = |t: &nullherz_dna::LibraryTrack| -> f32 {
-                if expanded == Some(t.id) { TRACK_ROW_H + TRACK_DETAIL_H } else { TRACK_ROW_H }
+                if expanded == Some(t.id) {
+                    let stem_count = t.stems.as_ref().map(|s| s.stems.len()).unwrap_or(0);
+                    let stem_h = (stem_count as f32 * 48.0).min(200.0);
+                    TRACK_ROW_H + TRACK_DETAIL_H + stem_h
+                } else {
+                    TRACK_ROW_H
+                }
             };
 
             let mut first = 0usize;
