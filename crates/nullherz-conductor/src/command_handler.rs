@@ -189,6 +189,15 @@ impl CommandHandler {
                                 let stem_id = track.id.wrapping_add((s_idx as u64 + 1) * 10000);
                                 Self::try_hydrate_stem_sample(conductor, stem_id);
                             }
+                            // Swap deck insert slot (dna_slot_id / stem_matrix) to DECK_STEM_MATRIX processor
+                            if let Some(nodes) = conductor.mixer_manager.deck_mappings.get(deck_id) {
+                                if let Some(ref mut prod) = conductor.topology_manager.topo_producer {
+                                    let _ = prod.push(nullherz_traits::TopologyMutation::SwapProcessor {
+                                        node_idx: nodes.dna_slot_id,
+                                        processor: Box::new(nullherz_processors::DeckStemMatrixProcessor::new(nodes.dna_slot_id as u64, conductor.period_size as f32)),
+                                    });
+                                }
+                            }
                         }
                         let id = *sample_id;
                         let path = track.path.clone();
