@@ -780,9 +780,9 @@ impl InspectorApp {
 
             egui::SidePanel::right(format!("{}_right_sidebar", id_prefix))
                 .resizable(true)
-                .min_width(280.0)
+                .min_width(320.0)
                 .max_width(600.0)
-                .default_width(450.0)
+                .default_width(480.0)
                 .frame(right_panel_frame)
                 .show(ctx, |ui| {
                     egui::Frame::none()
