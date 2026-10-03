@@ -175,7 +175,24 @@ pub struct InspectorApp {
 
 impl InspectorApp {
     pub fn get_cached_track(&self, id: u64) -> Option<nullherz_dna::LibraryTrack> {
-        self.library.cached_library_raw.iter().find(|t| t.id == id).cloned()
+        if let Some(t) = self.library.cached_library_raw.iter().find(|t| t.id == id).cloned() {
+            return Some(t);
+        }
+        for track in &self.library.cached_library_raw {
+            if let Some(ref stem_set) = track.stems {
+                for (s_idx, single_stem) in stem_set.stems.iter().enumerate() {
+                    let stem_id = track.id.wrapping_add((s_idx as u64 + 1) * 10000);
+                    if stem_id == id {
+                        let label = crate::views::dj_studio::render::stem_label_for_classif(single_stem.classification);
+                        let mut stem_as_track = track.clone();
+                        stem_as_track.id = stem_id;
+                        stem_as_track.title = format!("{} [{}]", track.title, label);
+                        return Some(stem_as_track);
+                    }
+                }
+            }
+        }
+        None
     }
 
     pub fn trigger_library_refresh(&mut self) {
@@ -1093,7 +1110,7 @@ impl eframe::App for InspectorApp {
 
         // Refresh the per-deck track cache only when the loaded id changes;
         // views read the cache instead of hitting redb every frame.
-        for i in 0..4 {
+        for i in 0..16 {
             let want = self.decks.now_playing[i];
             let have = self.decks.cached_tracks[i].as_ref().map(|t| t.id);
             if want != have {

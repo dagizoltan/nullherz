@@ -585,14 +585,15 @@ fn render_sidecar_card_in_library(
                         app.active_view = crate::View::Visuals;
                     }
                 } else if cat == AssetCategory::AudioInsert {
-                    ui.label(RichText::new("LOAD TO DECK:").size(theme.type_caption).color(theme.text_disabled));
-                    for (i, &deck_char) in ['A', 'B', 'C', 'D'].iter().enumerate() {
-                        let deck_color = theme.deck_colors[i];
+                    ui.label(RichText::new("LOAD TO CHANNEL:").size(theme.type_caption).color(theme.text_disabled));
+                    let num_ch = app.mixer.num_channels.clamp(1, 16);
+                    for i in 0..num_ch {
+                        let deck_color = theme.deck_colors[i % 4];
                         if ui.button(
-                            RichText::new(format!("DECK {}", deck_char))
+                            RichText::new(format!("CH {}", i + 1))
                                 .size(theme.type_caption)
                                 .color(deck_color),
-                        ).on_hover_text(format!("Load {} onto Deck {}", descriptor.name, deck_char)).clicked() {
+                        ).on_hover_text(format!("Load {} onto Channel {}", descriptor.name, i + 1)).clicked() {
                             app.decks.deck_inserts[i].push(descriptor.name.clone());
                             app.decks.deck_insert_params[i].push([0.5; 8]);
                         }
@@ -695,12 +696,14 @@ fn render_track_row(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dna::L
     // exactly as it was so the accordion does not cost anyone their muscle memory.
     if res.double_clicked() {
         let deck_idx = app.decks.focused_deck;
-        if deck_idx < 4 {
-            let deck_char = (b'A' + deck_idx as u8) as char;
+        let num_ch = app.mixer.num_channels.clamp(1, 16);
+        if deck_idx < num_ch {
+            let deck_char = (b'A' + (deck_idx % 26) as u8) as char;
             let _ = app.command_sender.send(nullherz_traits::Command::Performance(
                 nullherz_traits::PerformanceCommand::LoadTrackToDeck { deck_id: deck_char, sample_id: track.id },
             ));
             app.decks.now_playing[deck_idx] = Some(track.id);
+            app.decks.cached_tracks[deck_idx] = app.get_cached_track(track.id);
         }
     }
 
@@ -893,12 +896,7 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
                                                         }
                                                     ));
                                                     app.decks.now_playing[c_idx] = Some(stem_id);
-                                                    app.decks.cached_tracks[c_idx] = app.get_cached_track(stem_id).or_else(|| {
-                                                        let mut stem_as_track = track.clone();
-                                                        stem_as_track.id = stem_id;
-                                                        stem_as_track.title = format!("{} [{}]", track.title, label);
-                                                        Some(stem_as_track)
-                                                    });
+                                                    app.decks.cached_tracks[c_idx] = app.get_cached_track(stem_id);
                                                 }
                                             }
                                         });
