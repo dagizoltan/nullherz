@@ -817,13 +817,18 @@ impl InspectorApp {
                     ui.separator();
                     ui.add_space(self.theme.space_sm);
 
-                    match tab {
-                        RightTab::Library => views::library::render(self, ui),
-                        RightTab::Store => views::store::render(self, ui),
-                        RightTab::GeneticCloud => views::genetic_cloud::render(self, ui),
-                        RightTab::Notifications => views::notifications::render(self, ui),
-                        RightTab::Metrics => views::metrics::render(self, ui),
-                    }
+                    egui::ScrollArea::both()
+                        .id_source(format!("{}_right_sidebar_scroll", id_prefix))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            match tab {
+                                RightTab::Library => views::library::render(self, ui),
+                                RightTab::Store => views::store::render(self, ui),
+                                RightTab::GeneticCloud => views::genetic_cloud::render(self, ui),
+                                RightTab::Notifications => views::notifications::render(self, ui),
+                                RightTab::Metrics => views::metrics::render(self, ui),
+                            }
+                        });
                 });
         }
     }
