@@ -739,7 +739,7 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
         .inner_margin(Margin::same(theme.space_sm))
         .stroke(Stroke::new(1.0, theme.border))
         .show(ui, |ui| {
-            ui.set_width(ui.available_width());
+            ui.set_max_width(ui.available_width());
 
             if editable {
                 let mut t = app.library.cached_inspected_track.take().expect("checked above");
@@ -887,31 +887,29 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
                                 });
 
                                 ui.horizontal_wrapped(|ui| {
-                                    egui::ComboBox::from_id_source(format!("stem_deck_load_{}_{}", track.id, s_idx))
-                                        .selected_text(RichText::new("→ MIXER CHANNEL").size(theme.type_caption))
-                                        .width(90.0)
-                                        .show_ui(ui, |ui| {
-                                            let num_ch = app.mixer.num_channels.clamp(1, 16);
-                                            for c_idx in 0..num_ch {
-                                                let deck_char = (b'A' + (c_idx % 26) as u8) as char;
-                                                let label_str = format!("CH {} ({})", c_idx + 1, deck_char);
-                                                if ui.selectable_label(false, &label_str).clicked() {
-                                                    let _ = app.command_sender.send(nullherz_traits::Command::Performance(
-                                                        nullherz_traits::PerformanceCommand::LoadTrackToDeck {
-                                                            deck_id: deck_char,
-                                                            sample_id: stem_id,
-                                                        }
-                                                    ));
-                                                    app.decks.now_playing[c_idx] = Some(stem_id);
-                                                    app.decks.cached_tracks[c_idx] = app.get_cached_track(stem_id).or_else(|| {
-                                                        let mut stem_as_track = track.clone();
-                                                        stem_as_track.id = stem_id;
-                                                        stem_as_track.title = format!("{} [{}]", track.title, label);
-                                                        Some(stem_as_track)
-                                                    });
+                                    ui.label(RichText::new("LOAD DECK:").size(theme.type_caption).color(theme.text_disabled));
+                                    for (i, &deck_char) in ['A', 'B', 'C', 'D'].iter().enumerate() {
+                                        let deck_color = theme.deck_colors[i];
+                                        if ui.button(
+                                            RichText::new(format!("DECK {}", deck_char))
+                                                .size(theme.type_caption)
+                                                .color(deck_color),
+                                        ).on_hover_text(format!("Load {} stem onto Deck {}", label, deck_char)).clicked() {
+                                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                                                nullherz_traits::PerformanceCommand::LoadTrackToDeck {
+                                                    deck_id: deck_char,
+                                                    sample_id: stem_id,
                                                 }
-                                            }
-                                        });
+                                            ));
+                                            app.decks.now_playing[i] = Some(stem_id);
+                                            app.decks.cached_tracks[i] = app.get_cached_track(stem_id).or_else(|| {
+                                                let mut stem_as_track = track.clone();
+                                                stem_as_track.id = stem_id;
+                                                stem_as_track.title = format!("{} [{}]", track.title, label);
+                                                Some(stem_as_track)
+                                            });
+                                        }
+                                    }
 
                                     if ui.button(RichText::new("→ SAMPLER").size(theme.type_caption)).clicked() {
                                         app.sampler.source_track = Some(stem_id);
