@@ -557,6 +557,9 @@ impl CommandHandler {
                         }
                     }
                 }
+                conductor.topology_manager.current_sample_rate = sample_rate;
+                conductor.mixer_bridge.timeline.sample_rate = sample_rate;
+                conductor.transfusion_manager.set_device_sample_rate(sample_rate as u32);
                 conductor.period_size = block_size as u64;
                 let _ = conductor.update_system_config(None, None, None, None, None);
                 true
@@ -1073,5 +1076,29 @@ impl CommandHandler {
             return true;
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nullherz_traits::CoreCommand;
+
+    #[test]
+    fn test_configure_audio_engine_updates_rates_and_period() {
+        let mut conductor = Conductor::with_library_path(":memory:");
+        let handled = CommandHandler::handle_core_command(
+            &mut conductor,
+            CoreCommand::ConfigureAudioEngine {
+                sample_rate: 96000.0,
+                block_size: 512,
+            },
+        );
+
+        assert!(handled);
+        assert_eq!(conductor.topology_manager.current_sample_rate, 96000.0);
+        assert_eq!(conductor.mixer_bridge.timeline.sample_rate, 96000.0);
+        assert_eq!(conductor.transfusion_manager.device_sample_rate(), 96000);
+        assert_eq!(conductor.period_size, 512);
     }
 }

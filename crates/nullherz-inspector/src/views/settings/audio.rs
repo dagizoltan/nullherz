@@ -161,6 +161,31 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                         }
                     });
             });
+
+            ui.add_space(theme.space_xs);
+            let budget_ms = (app.settings.buffer_size as f32 / app.settings.sample_rate) * 1000.0;
+            let latency_ms = budget_ms;
+            Frame::none()
+                .fill(theme.bg_inset)
+                .rounding(theme.radius_sm)
+                .inner_margin(theme.space_xs)
+                .show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Deadline Budget:").size(theme.type_caption).color(theme.text_secondary));
+                            ui.label(RichText::new(format!("{:.2} ms per block", budget_ms)).size(theme.type_caption).strong().color(theme.accent));
+                            ui.add_space(theme.space_md);
+                            ui.label(RichText::new("Base Buffer Latency:").size(theme.type_caption).color(theme.text_secondary));
+                            ui.label(RichText::new(format!("{:.2} ms", latency_ms)).size(theme.type_caption).strong());
+                        });
+                        ui.add_space(2.0);
+                        ui.label(
+                            RichText::new("💡 Note on DSP Load vs. Buffer Size: Smaller buffer sizes (32–64 frames) yield ultra-low latency for live scratch, but restrict the engine to a sub-millisecond deadline budget—greatly INCREASING % DSP load and xrun risk. To relieve CPU pressure and lower DSP load %, increase buffer size to 256, 512, or 1024 frames.")
+                                .size(theme.type_caption)
+                                .color(theme.text_secondary),
+                        );
+                    });
+                });
         });
 
     ui.add_space(theme.space_md);
