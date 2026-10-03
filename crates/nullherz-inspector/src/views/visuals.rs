@@ -956,10 +956,11 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                     let mut channel_to_move_right = None;
 
                                     for c_idx in 0..num_channels {
-                                        let channel = &mut app.viz.channels[c_idx];
-                                        if channel.target_screen_id != screen_id {
-                                            continue;
-                                        }
+                                        ui.push_id(c_idx, |ui| {
+                                            let channel = &mut app.viz.channels[c_idx];
+                                            if channel.target_screen_id != screen_id {
+                                                return;
+                                            }
 
                                         let is_selected = app.viz.selected_channel_idx == c_idx;
                                         let channel_color = theme.deck_colors[c_idx % 4];
@@ -1300,7 +1301,8 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                             });
 
                                         ui.add_space(theme.space_sm);
-                                    }
+                                    });
+                                }
 
                                     if let Some(idx) = channel_to_move_left {
                                         if idx > 0 && idx < app.viz.channels.len() {

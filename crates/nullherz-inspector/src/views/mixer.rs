@@ -320,8 +320,9 @@ fn render_vertical_waveform(
 }
 
 fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>) {
-    let theme = app.theme;
-    let deck_color = crate::InspectorApp::deck_color(&theme, i % 4);
+    ui.push_id(i, |ui| {
+        let theme = app.theme;
+        let deck_color = crate::InspectorApp::deck_color(&theme, i % 4);
     let deck_char_letter = (b'a' + (i % 26) as u8) as char;
 
     // Resolve this channel's REAL node ids from the telemetry node map.
@@ -397,10 +398,12 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                         let mut fx_to_move_up = None;
                         let mut fx_to_move_down = None;
 
-                        let total_inserts = app.decks.deck_inserts[i].len();
+                        let insert_names = app.decks.deck_inserts[i].clone();
+                        let total_inserts = insert_names.len();
 
-                        for (fx_idx, name) in app.decks.deck_inserts[i].iter().enumerate() {
-                            let name_str = name.as_str();
+                        for (fx_idx, name) in insert_names.iter().enumerate() {
+                            ui.push_id(fx_idx, |ui| {
+                                let name_str = name.as_str();
                             match name_str {
                                 "TRIM / GAIN" => {
                                     Frame::none()
@@ -761,6 +764,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                     ui.add_space(4.0);
                                 }
                             }
+                            });
                         }
 
                         if ui.add_sized([STRIP_W - 20.0, 18.0], egui::Button::new(RichText::new("+ FX").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
@@ -949,11 +953,13 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                 });
             });
         });
+    });
 }
 
 fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
-    let theme = app.theme;
-    let accent = theme.accent;
+    ui.push_id("master_strip", |ui| {
+        let theme = app.theme;
+        let accent = theme.accent;
 
     // Master level is applied per side: the SUMMING nodes' gain (param 0).
     let sum_l = app.topo.node_map.get("master_sum_l").copied();
@@ -1223,4 +1229,5 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                 });
             });
         });
+    });
 }
