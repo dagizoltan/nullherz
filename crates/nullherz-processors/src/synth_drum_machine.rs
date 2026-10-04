@@ -502,6 +502,32 @@ impl AudioProcessor for SynthDrumMachineProcessor {
         if pad_idx >= NUM_PADS || pad_idx >= self.voices.len() { return 0.0; }
 
         match p_offset {
+            0 => match &self.voices[pad_idx] {
+                SynthVoiceEngine::Kick(k) => ((k.start_pitch_hz - 50.0) / 300.0).clamp(0.0, 1.0),
+                SynthVoiceEngine::Snare(s) => ((s.body_start_hz - 100.0) / 300.0).clamp(0.0, 1.0),
+                SynthVoiceEngine::HiHat(hh) => ((hh.hp_cutoff_hz - 3000.0) / 10000.0).clamp(0.0, 1.0),
+                SynthVoiceEngine::TomPerc(t) => ((t.start_freq_hz - 100.0) / 400.0).clamp(0.0, 1.0),
+            },
+            1 => match &self.voices[pad_idx] {
+                SynthVoiceEngine::Kick(k) => (k.amp_decay_ms / 2000.0).clamp(0.0, 1.0),
+                SynthVoiceEngine::Snare(s) => (s.body_decay_ms / 2000.0).clamp(0.0, 1.0),
+                SynthVoiceEngine::HiHat(hh) => (hh.decay_ms / 2000.0).clamp(0.0, 1.0),
+                SynthVoiceEngine::TomPerc(t) => (t.decay_ms / 2000.0).clamp(0.0, 1.0),
+            },
+            2 => match &self.voices[pad_idx] {
+                SynthVoiceEngine::Kick(k) => (k.pitch_decay_ms / 200.0).clamp(0.0, 1.0),
+                SynthVoiceEngine::Snare(s) => ((s.filter_cutoff_hz - 500.0) / 8000.0).clamp(0.0, 1.0),
+                SynthVoiceEngine::HiHat(_) => 0.5,
+                SynthVoiceEngine::TomPerc(t) => t.noise_click.clamp(0.0, 1.0),
+            },
+            3 => match &self.voices[pad_idx] {
+                SynthVoiceEngine::Snare(s) => s.noise_blend,
+                _ => 0.5,
+            },
+            4 => match &self.voices[pad_idx] {
+                SynthVoiceEngine::Kick(k) => ((k.drive - 0.5) / 4.0).clamp(0.0, 1.0),
+                _ => 0.5,
+            },
             6 => self.choke_groups[pad_idx] as f32,
             8 => self.output_channels[pad_idx] as f32,
             _ => 0.5,

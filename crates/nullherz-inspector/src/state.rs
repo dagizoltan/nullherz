@@ -563,6 +563,8 @@ pub struct SamplerState {
     pub subchannel_eq_low: [f32; 16],
     pub subchannel_mutes: [bool; 16],
     pub subchannel_solos: [bool; 16],
+    pub subchannel_inserts: [Vec<String>; 16],
+    pub subchannel_insert_params: [Vec<[f32; 8]>; 16],
 }
 
 impl Default for SamplerState {
@@ -592,6 +594,15 @@ impl Default for SamplerState {
             subchannel_eq_low: [1.0; 16],
             subchannel_mutes: [false; 16],
             subchannel_solos: [false; 16],
+            subchannel_inserts: std::array::from_fn(|i| {
+                match i {
+                    0 => vec!["SIGNAL GENERATOR (KICK)".into(), "PITCH SWEEP".into(), "DECAY ENVELOPE".into(), "SATURATION DRIVE".into(), "3-BAND EQ".into()],
+                    1 => vec!["SIGNAL GENERATOR (SNARE)".into(), "PITCH SWEEP".into(), "DECAY ENVELOPE".into(), "NOISE BLEND".into(), "3-BAND EQ".into()],
+                    2 | 3 => vec!["SIGNAL GENERATOR (HIHAT)".into(), "DECAY ENVELOPE".into(), "HP FILTER".into(), "3-BAND EQ".into()],
+                    _ => vec!["SIGNAL GENERATOR (PERC)".into(), "PITCH SWEEP".into(), "DECAY ENVELOPE".into(), "3-BAND EQ".into()],
+                }
+            }),
+            subchannel_insert_params: std::array::from_fn(|_| vec![[0.5; 8], [0.5; 8], [0.5; 8], [0.5; 8], [1.0; 8]]),
         }
     }
 }

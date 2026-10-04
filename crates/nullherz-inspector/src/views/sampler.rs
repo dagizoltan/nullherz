@@ -185,6 +185,133 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                                     ui.add_space(4.0);
 
+                                    // --- MODULAR INSERTS RACK ---
+                                    ui.add_space(2.0);
+                                    ui.label(RichText::new("INSERTS RACK").size(7.0).strong().color(app.theme.text_secondary));
+                                    ui.add_space(2.0);
+
+                                    let mut fx_to_remove = None;
+                                    let mut fx_to_move_up = None;
+                                    let mut fx_to_move_down = None;
+
+                                    let inserts = app.sampler.subchannel_inserts[sub_idx].clone();
+                                    let total_fx = inserts.len();
+
+                                    for (fx_i, fx_name) in inserts.iter().enumerate() {
+                                        ui.push_id(fx_i, |ui| {
+                                            Frame::none()
+                                                .fill(app.theme.bg_inset)
+                                                .rounding(Rounding::same(app.theme.radius_sm))
+                                                .inner_margin(Margin::same(2.0))
+                                                .stroke(Stroke::new(1.0, app.theme.border_stroke.color))
+                                                .show(ui, |ui| {
+                                                    ui.set_width(58.0);
+                                                    ui.vertical(|ui| {
+                                                        ui.horizontal(|ui| {
+                                                            ui.label(RichText::new(fx_name).size(6.0).strong().color(track_color));
+                                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                                if ui.add(egui::Button::new(RichText::new("×").size(8.0).strong().color(app.theme.danger)).min_size(Vec2::new(10.0, 10.0))).clicked() {
+                                                                    fx_to_remove = Some(fx_i);
+                                                                }
+                                                                if fx_i < total_fx - 1 {
+                                                                    if ui.add(egui::Button::new(RichText::new("▼").size(6.0)).min_size(Vec2::new(8.0, 8.0))).clicked() {
+                                                                        fx_to_move_down = Some(fx_i);
+                                                                    }
+                                                                }
+                                                                if fx_i > 0 {
+                                                                    if ui.add(egui::Button::new(RichText::new("▲").size(6.0)).min_size(Vec2::new(8.0, 8.0))).clicked() {
+                                                                        fx_to_move_up = Some(fx_i);
+                                                                    }
+                                                                }
+                                                            });
+                                                        });
+
+                                                        ui.add_space(1.0);
+
+                                                        if fx_name.contains("SIGNAL GENERATOR") {
+                                                            ui.label(RichText::new("GEN").size(6.0).color(app.theme.accent));
+                                                        } else if fx_name == "PITCH SWEEP" {
+                                                            let mut tune = app.sampler.pad_tune[sub_idx];
+                                                            if widgets::knobs::render_knob_sized(ui, &mut tune, 0.0..=1.0, "TUNE", app.theme.warning, 20.0).changed() {
+                                                                app.sampler.pad_tune[sub_idx] = tune;
+                                                                if let Some(dm_node) = app.get_node_id("drum_machine_node") {
+                                                                    let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
+                                                                        target_id: dm_node as u64, param_id: (sub_idx * 16 + 0) as u32, value: tune, ramp_duration_samples: 0,
+                                                                    }));
+                                                                }
+                                                            }
+                                                            let mut sweep = app.sampler.pad_sweep[sub_idx];
+                                                            if widgets::knobs::render_knob_sized(ui, &mut sweep, 0.0..=1.0, "SWEEP", app.theme.warning, 20.0).changed() {
+                                                                app.sampler.pad_sweep[sub_idx] = sweep;
+                                                                if let Some(dm_node) = app.get_node_id("drum_machine_node") {
+                                                                    let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
+                                                                        target_id: dm_node as u64, param_id: (sub_idx * 16 + 2) as u32, value: sweep, ramp_duration_samples: 0,
+                                                                    }));
+                                                                }
+                                                            }
+                                                        } else if fx_name == "DECAY ENVELOPE" {
+                                                            let mut decay = app.sampler.pad_decay[sub_idx];
+                                                            if widgets::knobs::render_knob_sized(ui, &mut decay, 0.0..=1.0, "DECAY", app.theme.warning, 20.0).changed() {
+                                                                app.sampler.pad_decay[sub_idx] = decay;
+                                                                if let Some(dm_node) = app.get_node_id("drum_machine_node") {
+                                                                    let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
+                                                                        target_id: dm_node as u64, param_id: (sub_idx * 16 + 1) as u32, value: decay, ramp_duration_samples: 0,
+                                                                    }));
+                                                                }
+                                                            }
+                                                        } else if fx_name == "SATURATION DRIVE" {
+                                                            let mut drive = app.sampler.pad_drive[sub_idx];
+                                                            if widgets::knobs::render_knob_sized(ui, &mut drive, 0.0..=1.0, "DRIVE", app.theme.danger, 20.0).changed() {
+                                                                app.sampler.pad_drive[sub_idx] = drive;
+                                                                if let Some(dm_node) = app.get_node_id("drum_machine_node") {
+                                                                    let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
+                                                                        target_id: dm_node as u64, param_id: (sub_idx * 16 + 4) as u32, value: drive, ramp_duration_samples: 0,
+                                                                    }));
+                                                                }
+                                                            }
+                                                        } else if fx_name == "3-BAND EQ" {
+                                                            widgets::knobs::render_knob_sized(ui, &mut app.sampler.subchannel_eq_high[sub_idx], 0.0..=2.0, "HI", track_color, 18.0);
+                                                            widgets::knobs::render_knob_sized(ui, &mut app.sampler.subchannel_eq_mid[sub_idx], 0.0..=2.0, "MID", track_color, 18.0);
+                                                            widgets::knobs::render_knob_sized(ui, &mut app.sampler.subchannel_eq_low[sub_idx], 0.0..=2.0, "LOW", track_color, 18.0);
+                                                        } else {
+                                                            let mut p_val = app.sampler.subchannel_insert_params[sub_idx].get(fx_i).map(|p| p[0]).unwrap_or(0.5);
+                                                            if widgets::knobs::render_knob_sized(ui, &mut p_val, 0.0..=1.0, "FX", track_color, 20.0).changed() {
+                                                                if let Some(p) = app.sampler.subchannel_insert_params[sub_idx].get_mut(fx_i) { p[0] = p_val; }
+                                                            }
+                                                        }
+                                                    });
+                                                });
+                                        });
+                                        ui.add_space(2.0);
+                                    }
+
+                                    // Add "+ FX" Button on subchannel
+                                    if ui.add_sized([56.0, 16.0], egui::Button::new(RichText::new("+ FX").size(8.0).strong()).fill(app.theme.bg_inset)).clicked() {
+                                        app.active_right_tab = Some(crate::RightTab::Store);
+                                        app.store.active_category = Some(sidecar_sdk::AssetCategory::AudioInsert);
+                                    }
+
+                                    if let Some(idx) = fx_to_move_up {
+                                        if idx > 0 && idx < app.sampler.subchannel_inserts[sub_idx].len() {
+                                            app.sampler.subchannel_inserts[sub_idx].swap(idx, idx - 1);
+                                            app.sampler.subchannel_insert_params[sub_idx].swap(idx, idx - 1);
+                                        }
+                                    }
+                                    if let Some(idx) = fx_to_move_down {
+                                        if idx + 1 < app.sampler.subchannel_inserts[sub_idx].len() {
+                                            app.sampler.subchannel_inserts[sub_idx].swap(idx, idx + 1);
+                                            app.sampler.subchannel_insert_params[sub_idx].swap(idx, idx + 1);
+                                        }
+                                    }
+                                    if let Some(remove_i) = fx_to_remove {
+                                        if remove_i < app.sampler.subchannel_inserts[sub_idx].len() {
+                                            app.sampler.subchannel_inserts[sub_idx].remove(remove_i);
+                                            app.sampler.subchannel_insert_params[sub_idx].remove(remove_i);
+                                        }
+                                    }
+
+                                    ui.add_space(2.0);
+
                                     // Rotary Knob: TRIM / GAIN
                                     let mut gain_val = app.sampler.subchannel_gain[sub_idx];
                                     if widgets::knobs::render_knob_sized(ui, &mut gain_val, 0.0..=2.0, "TRIM", track_color, 24.0).changed() {
@@ -198,68 +325,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             }));
                                         }
                                     }
-
-                                    ui.add_space(2.0);
-
-                                    // Rotary Knobs: ANALOG SYNTH/DRUM PARAMS (TUNE, DECAY, SWEEP, DRIVE)
-                                    let mut tune = app.sampler.pad_tune[sub_idx];
-                                    if widgets::knobs::render_knob_sized(ui, &mut tune, 0.0..=1.0, "TUNE", app.theme.warning, 22.0).changed() {
-                                        app.sampler.pad_tune[sub_idx] = tune;
-                                        if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                target_id: dm_node as u64,
-                                                param_id: (sub_idx * 16 + 0) as u32,
-                                                value: tune,
-                                                ramp_duration_samples: 0,
-                                            }));
-                                        }
-                                    }
-
-                                    let mut decay = app.sampler.pad_decay[sub_idx];
-                                    if widgets::knobs::render_knob_sized(ui, &mut decay, 0.0..=1.0, "DECAY", app.theme.warning, 22.0).changed() {
-                                        app.sampler.pad_decay[sub_idx] = decay;
-                                        if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                target_id: dm_node as u64,
-                                                param_id: (sub_idx * 16 + 1) as u32,
-                                                value: decay,
-                                                ramp_duration_samples: 0,
-                                            }));
-                                        }
-                                    }
-
-                                    let mut sweep = app.sampler.pad_sweep[sub_idx];
-                                    if widgets::knobs::render_knob_sized(ui, &mut sweep, 0.0..=1.0, "SWEEP", app.theme.warning, 22.0).changed() {
-                                        app.sampler.pad_sweep[sub_idx] = sweep;
-                                        if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                target_id: dm_node as u64,
-                                                param_id: (sub_idx * 16 + 2) as u32,
-                                                value: sweep,
-                                                ramp_duration_samples: 0,
-                                            }));
-                                        }
-                                    }
-
-                                    let mut drive = app.sampler.pad_drive[sub_idx];
-                                    if widgets::knobs::render_knob_sized(ui, &mut drive, 0.0..=1.0, "DRIVE", app.theme.danger, 22.0).changed() {
-                                        app.sampler.pad_drive[sub_idx] = drive;
-                                        if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                target_id: dm_node as u64,
-                                                param_id: (sub_idx * 16 + 4) as u32,
-                                                value: drive,
-                                                ramp_duration_samples: 0,
-                                            }));
-                                        }
-                                    }
-
-                                    ui.add_space(2.0);
-
-                                    // Rotary Knobs: 3-Band EQ
-                                    widgets::knobs::render_knob_sized(ui, &mut app.sampler.subchannel_eq_high[sub_idx], 0.0..=2.0, "HI", track_color, 20.0);
-                                    widgets::knobs::render_knob_sized(ui, &mut app.sampler.subchannel_eq_mid[sub_idx], 0.0..=2.0, "MID", track_color, 20.0);
-                                    widgets::knobs::render_knob_sized(ui, &mut app.sampler.subchannel_eq_low[sub_idx], 0.0..=2.0, "LOW", track_color, 20.0);
 
                                     ui.add_space(2.0);
 
