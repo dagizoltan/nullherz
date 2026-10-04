@@ -140,8 +140,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 ui.set_width(64.0);
                                 ui.vertical_centered(|ui| {
                                     // Subchannel Badge & Header
-                                    ui.label(RichText::new(format!("{:02}", sub_idx + 1)).strong().size(8.0).color(track_color));
-                                    ui.label(RichText::new(label).strong().size(9.0).color(app.theme.text_primary));
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new(format!("{:02}", sub_idx + 1)).strong().size(8.0).color(track_color));
+                                        ui.label(RichText::new(label).strong().size(8.0).color(app.theme.text_primary));
+                                        if ui.add(egui::Button::new(RichText::new("🔍").size(7.0)).fill(app.theme.bg_inset)).on_hover_text("Inspect Channel").clicked() {
+                                            app.mixer.focused_detail_channel = sub_idx + 4;
+                                            app.active_view = crate::View::ChannelDetail;
+                                        }
+                                    });
 
                                     ui.add_space(2.0);
 

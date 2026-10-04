@@ -4,6 +4,7 @@ pub mod modulation;
 pub mod topology;
 pub mod genetic_cloud;
 pub mod mixer;
+pub mod channel_detail;
 pub mod broadcast;
 pub mod settings;
 pub mod metrics;
