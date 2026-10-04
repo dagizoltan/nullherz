@@ -243,6 +243,60 @@ fn render_sidecar_card(
 
             ui.add_space(theme.space_sm);
 
+            // 1-Click Claim / Install Status
+            ui.horizontal(|ui| {
+                let installed_manifest_path = std::path::Path::new("storage/sidecars").join(format!("{}.json", descriptor.id));
+                let installed_bin_path = std::path::Path::new("storage/sidecars").join(&descriptor.id);
+                let is_installed = installed_manifest_path.exists() || installed_bin_path.exists();
+
+                if is_installed {
+                    Frame::none()
+                        .fill(theme.success.linear_multiply(0.15))
+                        .rounding(Rounding::same(theme.radius_sm))
+                        .inner_margin(Margin::symmetric(theme.space_sm, theme.space_xs))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new(format!("{} INSTALLED", egui_phosphor::regular::CHECK_CIRCLE))
+                                    .size(theme.type_caption)
+                                    .strong()
+                                    .color(theme.success),
+                            );
+                        });
+                } else {
+                    if ui.button(
+                        RichText::new(format!("{} CLAIM FREE ITEM", egui_phosphor::regular::DOWNLOAD_SIMPLE))
+                            .size(theme.type_caption)
+                            .strong()
+                            .color(theme.accent),
+                    )
+                    .on_hover_text("1-Click Download & Install into storage/sidecars/")
+                    .clicked()
+                    {
+                        let bundle_path = std::path::Path::new("assets/store_catalog").join(format!("{}.sidecar", descriptor.id));
+                        if bundle_path.exists() {
+                            if let Ok(bundle) = sidecar_sdk::SidecarPackageManager::unpack_bundle(&bundle_path) {
+                                let target_dir = std::path::Path::new("storage/sidecars");
+                                if let Ok(_info) = sidecar_sdk::SidecarPackageManager::install_bundle(&bundle, target_dir) {
+                                    if let Ok(db) = nullherz_dna::AssetDatabase::new("storage/db/library.db") {
+                                        let asset_manifest = sidecar_sdk::asset::asset_manifest_from_pkg(&bundle.manifest);
+                                        let _ = db.save_manifest(&asset_manifest);
+                                    }
+                                    println!("Store: Successfully claimed and installed {}", descriptor.name);
+                                }
+                            }
+                        } else {
+                            let _ = sidecar_sdk::SidecarPackageManager::populate_store_catalog(std::path::Path::new("assets/store_catalog"));
+                            if let Ok(bundle) = sidecar_sdk::SidecarPackageManager::unpack_bundle(&bundle_path) {
+                                let target_dir = std::path::Path::new("storage/sidecars");
+                                let _ = sidecar_sdk::SidecarPackageManager::install_bundle(&bundle, target_dir);
+                            }
+                        }
+                    }
+                }
+            });
+
+            ui.add_space(theme.space_xs);
+
             // Action Buttons
             ui.horizontal(|ui| {
                 if descriptor.sidecar_type == SidecarType::AudioInstrument || descriptor.sidecar_type == SidecarType::Instrument {

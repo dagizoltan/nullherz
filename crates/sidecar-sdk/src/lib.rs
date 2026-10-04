@@ -1,5 +1,6 @@
 pub mod store;
 pub mod package;
+pub mod asset;
 pub use store::{
     SidecarStore, SidecarDescriptor, SidecarType, AssetCategory, SidecarChain,
     NeuralSaturationProcessor, NeuralFilterProcessor, NeuralSsmProcessor,
@@ -9,6 +10,7 @@ pub use store::{
 pub use package::{
     SidecarPackageManifest, SidecarBundle, SidecarPackageManager, InstalledPackageInfo,
 };
+pub use asset::{AssetKind, AssetManifest};
 
 use ipc_layer::{ShmRingBuffer, AudioBlock, ShmSignal, EventFd};
 pub use nullherz_traits::{AudioProcessor, ProcessContext};

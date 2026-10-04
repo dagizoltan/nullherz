@@ -246,8 +246,10 @@ async fn main() {
     }
 
     // Resolve backend: CLI flag wins, then system_config.json, then ALSA.
+    let cfg_str = std::fs::read_to_string("storage/system_config.json")
+        .or_else(|_| std::fs::read_to_string("system_config.json"));
     let backend = args.backend.unwrap_or_else(|| {
-        std::fs::read_to_string("system_config.json")
+        cfg_str
             .ok()
             .and_then(|c| serde_json::from_str::<nullherz_conductor::persistence::SystemConfig>(&c).ok())
             .map(|cfg| match cfg.audio_backend.to_lowercase().as_str() {
@@ -463,7 +465,8 @@ async fn main() {
     // still printed "No block overran the period budget": `overrun_events` and
     // `overrun_count` were silently empty through the whole period sweep that
     // set the current default.
-    let (cfg_period, cfg_rate) = std::fs::read_to_string("system_config.json")
+    let (cfg_period, cfg_rate) = std::fs::read_to_string("storage/system_config.json")
+        .or_else(|_| std::fs::read_to_string("system_config.json"))
         .ok()
         .and_then(|c| serde_json::from_str::<nullherz_conductor::persistence::SystemConfig>(&c).ok())
         .map(|cfg| (cfg.period_size, cfg.sample_rate))

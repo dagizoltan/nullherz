@@ -72,10 +72,11 @@ fn main() {
     // 3. Save Configuration
     println!("\n[3/3] Saving Configuration...");
     let json = serde_json::to_string_pretty(&config).unwrap();
-    if let Err(e) = fs::write("system_config.json", json) {
-        eprintln!("Failed to save system_config.json: {}", e);
+    let _ = fs::create_dir_all("storage");
+    if let Err(e) = fs::write("storage/system_config.json", json) {
+        eprintln!("Failed to save storage/system_config.json: {}", e);
     } else {
-        println!("system_config.json generated successfully.");
+        println!("storage/system_config.json generated successfully.");
     }
 
     println!("\nSetup Complete. You can now start nullherz-conductor.");

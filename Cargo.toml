@@ -1,3 +1,20 @@
+[package]
+name = "nullherz"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nullherz-inspector = { path = "crates/nullherz-inspector" }
+nullherz-conductor = { path = "crates/nullherz-conductor" }
+nullherz-dna = { path = "crates/nullherz-dna" }
+sidecar-sdk = { path = "crates/sidecar-sdk" }
+nullherz-traits = { path = "crates/nullherz-traits" }
+clap = { version = "4.6", features = ["derive"] }
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+eframe = "0.27"
+
 [workspace]
 members = [
     "crates/nullherz-traits",

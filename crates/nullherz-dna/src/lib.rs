@@ -5,6 +5,7 @@
 
 pub mod consensus;
 pub mod library;
+pub mod asset_db;
 pub mod network;
 pub mod curation;
 pub mod registry;
@@ -15,6 +16,7 @@ mod tests;
 
 pub use consensus::*;
 pub use library::*;
+pub use asset_db::*;
 pub use network::*;
 pub use curation::*;
 pub use registry::*;
