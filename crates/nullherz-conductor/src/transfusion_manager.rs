@@ -12,6 +12,9 @@ pub(crate) fn is_generated_track(path: &str) -> bool {
     path.starts_with("evolution/")
         || path.starts_with("breeding/")
         || path.starts_with("captures/")
+        || path.starts_with("library/evolution/")
+        || path.starts_with("library/breeding/")
+        || path.starts_with("library/captures/")
 }
 
 /// Persist a bred child's audio to disk so it survives a restart and is
@@ -143,7 +146,7 @@ impl EvolutionaryBreeder {
             child_metadata_struct.total_samples = (child_buffer.len() / channels) as u64;
             let child_metadata = Arc::new(child_metadata_struct);
 
-            let path = format!("evolution/child_{}.wav", child_id);
+            let path = format!("library/evolution/child_{}.wav", child_id);
             // Persist the audio to disk, or the library row points at a file that
             // never existed and the child is silent after the next restart.
             if let Err(e) = write_planar_child_wav(&path, &child_buffer, channels) {
@@ -288,7 +291,7 @@ impl TransfusionManager {
             child_metadata_struct.total_samples = (child_buffer.len() / channels) as u64;
             let child_metadata = Arc::new(child_metadata_struct);
 
-            let path = format!("breeding/child_{}.wav", child_id);
+            let path = format!("library/breeding/child_{}.wav", child_id);
             if let Err(e) = write_planar_child_wav(&path, &child_buffer, channels) {
                 eprintln!("Breeding: failed to write {}: {}", path, e);
             }
@@ -334,7 +337,7 @@ impl TransfusionManager {
             child_metadata_struct.total_samples = (child_buffer.len() / channels) as u64;
             let child_metadata = Arc::new(child_metadata_struct);
 
-            let path = format!("breeding/chaotic_child_{}.wav", child_id);
+            let path = format!("library/breeding/chaotic_child_{}.wav", child_id);
             if let Err(e) = write_planar_child_wav(&path, &child_buffer, channels) {
                 eprintln!("Chaotic Breeding: failed to write {}: {}", path, e);
             }
@@ -419,7 +422,7 @@ impl TransfusionManager {
             if let Some(ref breeder) = self.evolutionary_breeder {
                 let track = nullherz_dna::LibraryTrack {
                     id: sample_id,
-                    path: format!("captures/capture_{}.wav", sample_id),
+                    path: format!("library/captures/capture_{}.wav", sample_id),
                     title: format!("Capture {}", sample_id),
                     artist: "Nullherz Sampler".to_string(),
                     album: "Live Captures".to_string(),

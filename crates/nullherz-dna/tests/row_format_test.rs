@@ -136,7 +136,7 @@ fn stem_set_metadata_round_trips_through_rkyv_and_json() {
         stems: vec![
             nullherz_traits::SingleStemMetadata {
                 classification: nullherz_traits::StemClassification::Kick,
-                relative_path: "stems/12345/stem_00_kick.wav".into(),
+                relative_path: "library/stems/12345/stem_00_kick.wav".into(),
                 lufs_integrated: -14.2,
                 peak_db: -0.5,
                 dna: nullherz_traits::SoundDNA::default(),
@@ -144,7 +144,7 @@ fn stem_set_metadata_round_trips_through_rkyv_and_json() {
             },
             nullherz_traits::SingleStemMetadata {
                 classification: nullherz_traits::StemClassification::LeadVocal,
-                relative_path: "stems/12345/stem_06_lead_vocal.wav".into(),
+                relative_path: "library/stems/12345/stem_06_lead_vocal.wav".into(),
                 lufs_integrated: -18.0,
                 peak_db: -2.1,
                 dna: nullherz_traits::SoundDNA::default(),
@@ -175,7 +175,7 @@ fn track_with_stem_set_round_trips_through_database() {
         stems: vec![
             nullherz_traits::SingleStemMetadata {
                 classification: nullherz_traits::StemClassification::Kick,
-                relative_path: "stems/999/stem_00_kick.wav".into(),
+                relative_path: "library/stems/999/stem_00_kick.wav".into(),
                 lufs_integrated: -12.0,
                 peak_db: -0.1,
                 dna: nullherz_traits::SoundDNA::default(),

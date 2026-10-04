@@ -245,6 +245,21 @@ impl FolderMonitor {
         };
 
         let _ = lib.save_track(&track);
+
+        // Auto-assign crate/tag based on directory path
+        let path_lower = path.to_lowercase();
+        if path_lower.contains("samples") {
+            let _ = lib.add_to_crate("sample", id);
+        } else if path_lower.contains("sequences") {
+            let _ = lib.add_to_crate("sequence", id);
+        } else if path_lower.contains("stems") {
+            let _ = lib.add_to_crate("stems", id);
+        } else if path_lower.contains("evolution") || path_lower.contains("breeding") {
+            let _ = lib.add_to_crate("evolution", id);
+        } else if path_lower.contains("tracks") {
+            let _ = lib.add_to_crate("track", id);
+        }
+
         self.sample_registry.register_with_metadata(id, decoded.samples.into(), track.metadata.clone());
         println!("FolderMonitor: Registered {}", path);
     }
