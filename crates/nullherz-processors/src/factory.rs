@@ -29,7 +29,50 @@ use crate::modulation_fx::*;
 use crate::transient_shaper::*;
 use crate::tape_saturator::*;
 use crate::deck_stem_matrix::*;
+use crate::sample_drum_machine::*;
+use crate::synth_drum_machine::*;
+use crate::neural_drum_machine::*;
 pub use crate::mutator::MutatorFactory;
+
+pub struct SampleDrumMachineFactory;
+impl ProcessorFactory for SampleDrumMachineFactory {
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(SampleDrumMachineProcessor::new(node_idx as u64, sample_rate)))
+    }
+    fn name(&self) -> &'static str { "SampleDrumMachine" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::SAMPLE_DRUM_MACHINE }
+    fn capabilities(&self) -> ProcessorCapability { ProcessorCapability { is_instrument: true, has_midi_input: true, ..ProcessorCapability::default() } }
+}
+
+pub struct SynthDrumMachineFactory;
+impl ProcessorFactory for SynthDrumMachineFactory {
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(SynthDrumMachineProcessor::new(node_idx as u64, sample_rate)))
+    }
+    fn name(&self) -> &'static str { "SynthDrumMachine" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::SYNTH_DRUM_MACHINE }
+    fn capabilities(&self) -> ProcessorCapability { ProcessorCapability { is_instrument: true, has_midi_input: true, ..ProcessorCapability::default() } }
+}
+
+pub struct NeuralDrumMachineFactory;
+impl ProcessorFactory for NeuralDrumMachineFactory {
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(NeuralDrumMachineProcessor::new(node_idx as u64, sample_rate)))
+    }
+    fn name(&self) -> &'static str { "NeuralDrumMachine" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::NEURAL_DRUM_MACHINE }
+    fn capabilities(&self) -> ProcessorCapability { ProcessorCapability { is_instrument: true, has_midi_input: true, ..ProcessorCapability::default() } }
+}
+
+pub struct DrumMachineFactory;
+impl ProcessorFactory for DrumMachineFactory {
+    fn create_processor(&self, node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        Some(Box::new(SampleDrumMachineProcessor::new(node_idx as u64, sample_rate)))
+    }
+    fn name(&self) -> &'static str { "DrumMachine" }
+    fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::DRUM_MACHINE }
+    fn capabilities(&self) -> ProcessorCapability { ProcessorCapability { is_instrument: true, has_midi_input: true, ..ProcessorCapability::default() } }
+}
 
 pub struct DeckStemMatrixFactory;
 impl ProcessorFactory for DeckStemMatrixFactory {

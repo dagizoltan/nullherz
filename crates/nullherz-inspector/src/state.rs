@@ -14,6 +14,7 @@ pub enum ChannelInputSource {
     Input5_6,
     Input7_8,
     Instrument,
+    DrumMachine,
 }
 
 impl ChannelInputSource {
@@ -26,6 +27,7 @@ impl ChannelInputSource {
             Self::Input5_6 => "Soundcard In 5-6",
             Self::Input7_8 => "Soundcard In 7-8",
             Self::Instrument => "Instrument",
+            Self::DrumMachine => "Drum Machine Subchannel",
         }
     }
 
@@ -38,6 +40,7 @@ impl ChannelInputSource {
             Self::Input5_6,
             Self::Input7_8,
             Self::Instrument,
+            Self::DrumMachine,
         ]
     }
 }
@@ -665,6 +668,7 @@ pub enum ChannelKind {
     StereoInput,
     InstrumentSampler,
     InstrumentSynth,
+    InstrumentDrumMachine,
 }
 
 /// Multidimensional Audio Nervous System feature field extracted from telemetry

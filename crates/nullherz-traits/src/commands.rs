@@ -112,6 +112,10 @@ impl ProcessorTypeId {
     pub const TAPE_SATURATOR: Self = Self(241);
     pub const MUTATOR: Self = Self(242);
     pub const DECK_STEM_MATRIX: Self = Self(243);
+    pub const DRUM_MACHINE: Self = Self(244);
+    pub const SAMPLE_DRUM_MACHINE: Self = Self(245);
+    pub const SYNTH_DRUM_MACHINE: Self = Self(246);
+    pub const NEURAL_DRUM_MACHINE: Self = Self(247);
 }
 
 impl From<u32> for ProcessorTypeId {

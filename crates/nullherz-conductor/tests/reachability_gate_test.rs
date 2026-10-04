@@ -77,6 +77,10 @@ fn known_unreachable() -> Vec<(&'static str, &'static str)> {
         ("TapeSaturator", "available for FX chains; not in default master chain"),
         ("Mutator", "available for FX chains; not in default master chain"),
         ("DeckStemMatrix", "multi-stem routing matrix; instantiated on demand for stem mixing"),
+        ("SampleDrumMachine", "instrument node; instantiated on demand for drum subchannels"),
+        ("SynthDrumMachine", "instrument node; instantiated on demand for drum subchannels"),
+        ("NeuralDrumMachine", "instrument node; instantiated on demand for drum subchannels"),
+        ("DrumMachine", "instrument node; instantiated on demand for drum subchannels"),
     ]
 }
 
