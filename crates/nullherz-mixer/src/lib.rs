@@ -463,6 +463,11 @@ impl MixerManager {
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: cap_id, input_idx: 0, new_buffer_idx: self.config.master_l as u32 }));
         commands.push(Command::Topology(nullherz_traits::TopologyCommand::UpdateEdge { node_idx: cap_id, input_idx: 1, new_buffer_idx: self.config.master_r as u32 }));
 
+        // --- DRUM MACHINE NODE ---
+        let dm_id = self.id_allocator.allocate_node_id();
+        self.node_names.insert("drum_machine_node".to_string(), dm_id);
+        commands.push(Command::Topology(nullherz_traits::TopologyCommand::AddNode { node_idx: dm_id, processor_type_id: ProcessorTypeId::SAMPLE_DRUM_MACHINE }));
+
         commands
     }
 }

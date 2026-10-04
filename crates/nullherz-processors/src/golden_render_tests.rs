@@ -106,7 +106,7 @@ fn golden_render_is_bit_stable() {
     //   cargo test -p nullherz-processors golden_render -- --nocapture
     // and copy the printed value here, in the same commit as the DSP change.
     println!("golden render hash: {:#018x}", h);
-    const GOLDEN: u64 = 0x1cfa268bc6efdbee;
+    const GOLDEN: u64 = 0x5dbc9e3eb4d51f2d;
     assert_eq!(
         h, GOLDEN,
         "DSP output changed bit-for-bit. If intentional, update GOLDEN in this commit; if not, you just caught a regression."

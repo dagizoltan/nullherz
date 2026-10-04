@@ -11,6 +11,7 @@ pub mod curation;
 pub mod registry;
 pub mod transfusion;
 pub mod matchmaker;
+pub mod presets;
 #[cfg(test)]
 mod tests;
 
@@ -22,5 +23,6 @@ pub use curation::*;
 pub use registry::*;
 pub use transfusion::*;
 pub use matchmaker::*;
+pub use presets::*;
 
 pub use nullherz_traits::{RegisteredSample, SampleBuffer, MmapBuffer};
