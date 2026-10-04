@@ -445,33 +445,77 @@ impl Drop for SharedMemory {
 }
 
 pub struct EventFd {
+    #[cfg(target_os = "linux")]
     fd: i32,
+    #[cfg(not(target_os = "linux"))]
+    read_fd: i32,
+    #[cfg(not(target_os = "linux"))]
+    write_fd: i32,
     owner: bool,
 }
 
 impl EventFd {
     pub fn create() -> Result<Self, IpcError> {
+        #[cfg(target_os = "linux")]
         unsafe {
             let fd = libc::eventfd(0, libc::EFD_CLOEXEC);
             if fd < 0 { return Err(IpcError::EventFdFailed(std::io::Error::last_os_error().to_string())); }
             Ok(Self { fd, owner: true })
         }
+        #[cfg(not(target_os = "linux"))]
+        unsafe {
+            let mut fds = [0i32; 2];
+            if libc::pipe(fds.as_mut_ptr()) < 0 {
+                return Err(IpcError::EventFdFailed(std::io::Error::last_os_error().to_string()));
+            }
+            Ok(Self { read_fd: fds[0], write_fd: fds[1], owner: true })
+        }
     }
-    pub fn from_raw(fd: i32) -> Self { Self { fd, owner: false } }
+    pub fn from_raw(fd: i32) -> Self {
+        #[cfg(target_os = "linux")]
+        { Self { fd, owner: false } }
+        #[cfg(not(target_os = "linux"))]
+        { Self { read_fd: fd, write_fd: fd, owner: false } }
+    }
     pub fn notify(&self) {
         let val: u64 = 1;
-        unsafe { libc::write(self.fd, &val as *const u64 as *const libc::c_void, 8); }
+        #[cfg(target_os = "linux")]
+        let target_fd = self.fd;
+        #[cfg(not(target_os = "linux"))]
+        let target_fd = self.write_fd;
+        unsafe { libc::write(target_fd, &val as *const u64 as *const libc::c_void, 8); }
     }
     pub fn wait(&self) -> u64 {
         let mut val: u64 = 0;
-        let _ = unsafe { libc::read(self.fd, &mut val as *mut u64 as *mut libc::c_void, 8) };
+        #[cfg(target_os = "linux")]
+        let target_fd = self.fd;
+        #[cfg(not(target_os = "linux"))]
+        let target_fd = self.read_fd;
+        let _ = unsafe { libc::read(target_fd, &mut val as *mut u64 as *mut libc::c_void, 8) };
         val
     }
-    pub fn fd(&self) -> i32 { self.fd }
+    pub fn fd(&self) -> i32 {
+        #[cfg(target_os = "linux")]
+        { self.fd }
+        #[cfg(not(target_os = "linux"))]
+        { self.read_fd }
+    }
 }
 
 impl Drop for EventFd {
-    fn drop(&mut self) { if self.owner { unsafe { libc::close(self.fd); } } }
+    fn drop(&mut self) {
+        if self.owner {
+            #[cfg(target_os = "linux")]
+            unsafe { libc::close(self.fd); }
+            #[cfg(not(target_os = "linux"))]
+            unsafe {
+                libc::close(self.read_fd);
+                if self.write_fd != self.read_fd {
+                    libc::close(self.write_fd);
+                }
+            }
+        }
+    }
 }
 
 /// What scheduling policy and priority a thread ACTUALLY has.
@@ -648,6 +692,7 @@ fn rtkit_make_realtime(priority: i32) -> Result<(), IpcError> {
 }
 
 pub fn set_rt_priority_for(pid: i32, priority: i32) -> Result<(), IpcError> {
+    #[cfg(target_os = "linux")]
     unsafe {
         let param = libc::sched_param { sched_priority: priority };
         let result = libc::sched_setscheduler(pid, libc::SCHED_FIFO, &param);
@@ -655,31 +700,51 @@ pub fn set_rt_priority_for(pid: i32, priority: i32) -> Result<(), IpcError> {
             return Err(IpcError::PriorityFailed(format!("PID {}: {}", pid, std::io::Error::last_os_error())));
         }
     }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (pid, priority);
+    }
     Ok(())
 }
 
 pub fn move_to_cgroup(cgroup_name: &str, pid: i32) -> Result<(), IpcError> {
-    let base_path = format!("/sys/fs/cgroup/{}", cgroup_name);
-    let procs_path = format!("{}/cgroup.procs", base_path);
+    #[cfg(target_os = "linux")]
+    {
+        let base_path = format!("/sys/fs/cgroup/{}", cgroup_name);
+        let procs_path = format!("{}/cgroup.procs", base_path);
 
-    if !std::path::Path::new(&base_path).exists() {
-        std::fs::create_dir_all(&base_path).map_err(|e| IpcError::CgroupFailed(format!("Failed to create directory {}: {}", base_path, e)))?;
+        if !std::path::Path::new(&base_path).exists() {
+            std::fs::create_dir_all(&base_path).map_err(|e| IpcError::CgroupFailed(format!("Failed to create directory {}: {}", base_path, e)))?;
+        }
+
+        std::fs::write(&procs_path, pid.to_string())
+            .map_err(|e| IpcError::CgroupFailed(format!("Failed to write PID to {}: {}", procs_path, e)))
     }
-
-    std::fs::write(&procs_path, pid.to_string())
-        .map_err(|e| IpcError::CgroupFailed(format!("Failed to write PID to {}: {}", procs_path, e)))
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (cgroup_name, pid);
+        Ok(())
+    }
 }
 
 pub fn set_cgroup_memory_limit(cgroup_name: &str, limit_bytes: usize) -> Result<(), IpcError> {
-    let base_path = format!("/sys/fs/cgroup/{}", cgroup_name);
-    let limit_path = format!("{}/memory.max", base_path);
+    #[cfg(target_os = "linux")]
+    {
+        let base_path = format!("/sys/fs/cgroup/{}", cgroup_name);
+        let limit_path = format!("{}/memory.max", base_path);
 
-    if !std::path::Path::new(&base_path).exists() {
-        std::fs::create_dir_all(&base_path).map_err(|e| IpcError::CgroupFailed(format!("Failed to create directory {}: {}", base_path, e)))?;
+        if !std::path::Path::new(&base_path).exists() {
+            std::fs::create_dir_all(&base_path).map_err(|e| IpcError::CgroupFailed(format!("Failed to create directory {}: {}", base_path, e)))?;
+        }
+
+        std::fs::write(&limit_path, limit_bytes.to_string())
+            .map_err(|e| IpcError::CgroupFailed(format!("Failed to set memory limit for {}: {}", cgroup_name, e)))
     }
-
-    std::fs::write(&limit_path, limit_bytes.to_string())
-        .map_err(|e| IpcError::CgroupFailed(format!("Failed to set memory limit for {}: {}", cgroup_name, e)))
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (cgroup_name, limit_bytes);
+        Ok(())
+    }
 }
 
 #[repr(C, align(64))]

@@ -172,6 +172,7 @@ pub enum AudioBackendType {
     Jack,
     Threaded,
     Mock,
+    CoreAudio,
 }
 
 #[repr(C)]

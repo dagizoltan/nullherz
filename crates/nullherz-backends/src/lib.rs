@@ -3,6 +3,7 @@ pub mod pipewire;
 pub mod jack;
 pub mod threaded;
 pub mod mock;
+pub mod coreaudio;
 pub mod chunking;
 
 pub use alsa::AlsaBackend;
@@ -10,6 +11,7 @@ pub use pipewire::PipewireBackend;
 pub use jack::JackBackend;
 pub use threaded::ThreadedBackend;
 pub use mock::MockBackend;
+pub use coreaudio::CoreAudioBackend;
 
 
 use std::sync::Arc;
@@ -48,6 +50,7 @@ impl BackendFactory {
             AudioBackendType::Jack => Box::new(JackBackend::new()),
             AudioBackendType::Threaded => Box::new(ThreadedBackend::new()),
             AudioBackendType::Mock => Box::new(MockBackend::new()),
+            AudioBackendType::CoreAudio => Box::new(CoreAudioBackend::new()),
         }
     }
 }
