@@ -220,18 +220,19 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                                 // Mute / Solo Buttons
                                 ui.horizontal(|ui| {
-                                    let mut mute = app.mixer.stem_mutes[0][sub_idx];
+                                    let stem_i = sub_idx % 12;
+                                    let mut mute = app.mixer.stem_mutes[0][stem_i];
                                     let mute_color = if mute { app.theme.danger } else { app.theme.bg_inset };
                                     if ui.add_sized([22.0, 14.0], egui::Button::new(RichText::new("M").size(7.0).strong()).fill(mute_color)).clicked() {
                                         mute = !mute;
-                                        app.mixer.stem_mutes[0][sub_idx] = mute;
+                                        app.mixer.stem_mutes[0][stem_i] = mute;
                                     }
 
-                                    let mut solo = app.mixer.stem_solos[0][sub_idx];
+                                    let mut solo = app.mixer.stem_solos[0][stem_i];
                                     let solo_color = if solo { app.theme.warning } else { app.theme.bg_inset };
                                     if ui.add_sized([22.0, 14.0], egui::Button::new(RichText::new("S").size(7.0).strong()).fill(solo_color)).clicked() {
                                         solo = !solo;
-                                        app.mixer.stem_solos[0][sub_idx] = solo;
+                                        app.mixer.stem_solos[0][stem_i] = solo;
                                     }
                                 });
 
