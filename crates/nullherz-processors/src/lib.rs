@@ -37,10 +37,15 @@ pub mod transient_shaper;
 pub mod tape_saturator;
 pub mod mutator;
 pub mod deck_stem_matrix;
+pub mod sample_drum_machine;
+pub mod synth_drum_machine;
+pub mod neural_drum_machine;
 #[cfg(test)]
 mod sampler_tests;
 #[cfg(test)]
 mod sampler_slicer_tests;
+#[cfg(test)]
+mod drum_machine_tests;
 #[cfg(feature = "test-utils")]
 pub mod test_kit;
 
@@ -78,6 +83,9 @@ pub use transient_shaper::TransientShaperProcessor;
 pub use tape_saturator::TapeSaturatorProcessor;
 pub use mutator::{MutatorProcessor, MutatorFactory};
 pub use deck_stem_matrix::DeckStemMatrixProcessor;
+pub use sample_drum_machine::SampleDrumMachineProcessor;
+pub use synth_drum_machine::SynthDrumMachineProcessor;
+pub use neural_drum_machine::NeuralDrumMachineProcessor;
 pub use registry::ProcessorRegistry;
 
 #[cfg(test)]
