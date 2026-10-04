@@ -482,19 +482,18 @@ pub struct ComposerState {
     /// Sample assigned to each sequencer track, independent of the decks.
     pub track_sources: [Option<u64>; 16],
     pub keyboard_grid: KeyboardGridState,
-    /// Step grids PER DECK: the composer edits the focused deck's
-    /// sequencer, so each deck needs its own grid.
+    /// Step grids PER DECK: legacy deck sequencer step grids.
     pub sequencer_grid: [[Vec<f32>; 16]; 4],
+    /// Independent 16-track Studio Composer Grid (Decoupled from DJ decks).
+    pub studio_sequencer_grid: [Vec<f32>; 16],
     pub selected_composer_track: Option<usize>,
     pub sequencer_active_step: usize,
+    pub composer_playing: bool,
+    pub sync_with_master_transport: bool,
     pub track_mutes: [bool; 16],
-    #[allow(dead_code)]
     pub track_solos: [bool; 16],
-    #[allow(dead_code)]
     pub track_volumes: [f32; 16],
-    #[allow(dead_code)]
     pub track_pans: [f32; 16],
-    #[allow(dead_code)]
     pub track_filters: [f32; 16],
     pub track_targets: [String; 16],
     #[allow(dead_code)]
@@ -514,8 +513,11 @@ impl Default for ComposerState {
             track_sources: [None; 16],
             keyboard_grid: KeyboardGridState::default(),
             sequencer_grid: std::array::from_fn(|_| std::array::from_fn(|_| vec![0.0; 64])),
+            studio_sequencer_grid: std::array::from_fn(|_| vec![0.0; 64]),
             selected_composer_track: None,
             sequencer_active_step: 0,
+            composer_playing: false,
+            sync_with_master_transport: true,
             track_mutes: [false; 16],
             track_solos: [false; 16],
             track_volumes: [1.0; 16],
