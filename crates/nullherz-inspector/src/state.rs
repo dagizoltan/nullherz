@@ -446,7 +446,7 @@ impl Default for LibraryState {
             selected_library_track: None,
             expanded_track: None,
             playlist_queue: std::collections::VecDeque::new(),
-            ingestion_path: "tracks/".to_string(),
+            ingestion_path: "library/tracks/".to_string(),
             _playlists: vec![],
             last_refresh_time: 0.0,
         }

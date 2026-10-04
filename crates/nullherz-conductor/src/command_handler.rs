@@ -622,8 +622,11 @@ impl CommandHandler {
             }
             CoreCommand::LoadMidiMap(buffer) => {
                 let name = String::from_utf8_lossy(&buffer).trim_matches(char::from(0)).to_string();
-                let path = format!("mappings/{}.json", name);
-                if let Ok(json) = std::fs::read_to_string(path) {
+                let library_path = format!("library/mappings/{}.json", name);
+                let fallback_path = format!("mappings/{}.json", name);
+                let json_res = std::fs::read_to_string(&library_path)
+                    .or_else(|_| std::fs::read_to_string(&fallback_path));
+                if let Ok(json) = json_res {
                     let _ = conductor.midi_mapper.load_from_json(&json);
                 }
                 true
