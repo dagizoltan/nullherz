@@ -97,6 +97,8 @@ pub struct Conductor {
     /// consult `None` in production and a permanently empty set in tests, which
     /// is exactly the wrong answer in both directions.
     analysed_ids: Arc<parking_lot::Mutex<std::collections::HashSet<u64>>>,
+    /// Pending analysis requests shared with the worker thread.
+    analysis_requests: Arc<parking_lot::Mutex<std::collections::HashSet<u64>>>,
     pub ptp_clock: Option<Arc<nullherz_traits::PtpClockProvider>>,
     last_autosave_secs: u64,
     pub last_genetic_evolve_secs: u64,
@@ -289,9 +291,11 @@ impl Conductor {
 
         // Built here so its "finished" set can be shared BEFORE `start()` moves
         // the worker onto its own thread. See `analysed_ids`.
+        let analysis_requests = Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new()));
         let analysis_worker = crate::analysis_worker::AnalysisWorker::new(sample_registry.clone())
             .with_library(library.clone())
-            .with_stem_worker(stem_worker.clone());
+            .with_stem_worker(stem_worker.clone())
+            .with_pending_requests(analysis_requests.clone());
         let analysis_worker_handle = analysis_worker.analysed_ids();
 
         Self {
@@ -332,6 +336,7 @@ impl Conductor {
             last_registry_reap_len: usize::MAX,
             last_analysed_len: usize::MAX,
             analysed_ids: analysis_worker_handle,
+            analysis_requests,
             midi_shm_name: next_midi_bridge_shm_name(),
             cached_audio_devices: Vec::new(),
             cached_residency: (0, 0),
@@ -1143,6 +1148,8 @@ impl Conductor {
     }
 
     pub fn request_analysis(&mut self, sample_id: u64) {
+        self.analysed_ids.lock().remove(&sample_id);
+        self.analysis_requests.lock().insert(sample_id);
         if let Some(ref mut worker) = self.analysis_worker {
             worker.request_analysis(sample_id);
         }

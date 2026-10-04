@@ -8,3 +8,6 @@ parking_lot = "0.12"
 nullherz-traits = { path = "../nullherz-traits" }
 ipc-layer = { path = "../ipc-layer" }
 libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cpal = "0.15"
