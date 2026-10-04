@@ -534,13 +534,6 @@ impl Default for ComposerState {
 /// Sampler capture/monitoring state.
 pub struct SamplerState {
     /// The sample this tool is working on, chosen independently of the decks.
-    ///
-    /// The sampler used to read `decks.now_playing[decks.focused_deck]`, which
-    /// made it a view onto whichever deck happened to have focus rather than a
-    /// tool in its own right: you could not chop a sample without first loading
-    /// it to a deck, and clicking another deck silently changed what you were
-    /// editing. `None` falls back to the focused deck so the old behaviour is
-    /// still the default when nothing has been picked.
     pub source_track: Option<u64>,
     #[allow(dead_code)]
     pub sampler_slicer_mode: bool,
@@ -551,6 +544,14 @@ pub struct SamplerState {
     pub sampler_is_stereo: bool,
     pub sampler_input_source: usize,
     pub next_sample_id: u64,
+    pub selected_pad: usize,
+    pub pad_tune: [f32; 16],
+    pub pad_decay: [f32; 16],
+    pub pad_sweep: [f32; 16],
+    pub pad_body_mix: [f32; 16],
+    pub pad_drive: [f32; 16],
+    pub pad_latent_coord: [f32; 16],
+    pub pad_cortical_drive: [f32; 16],
 }
 
 impl Default for SamplerState {
@@ -565,6 +566,14 @@ impl Default for SamplerState {
             sampler_is_stereo: true,
             sampler_input_source: 0,
             next_sample_id: 1000,
+            selected_pad: 0,
+            pad_tune: [0.5; 16],
+            pad_decay: [0.5; 16],
+            pad_sweep: [0.5; 16],
+            pad_body_mix: [0.5; 16],
+            pad_drive: [0.2; 16],
+            pad_latent_coord: [0.5; 16],
+            pad_cortical_drive: [0.5; 16],
         }
     }
 }
