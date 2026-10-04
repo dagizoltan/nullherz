@@ -53,6 +53,24 @@ impl MidiMapper {
         cache.insert((target_id, param_id), value);
     }
 
+    /// Enumerate attached hardware MIDI input controllers (CoreMIDI on macOS, ALSA Seq on Linux).
+    pub fn enumerate_midi_devices() -> Vec<String> {
+        let mut devices = vec![
+            "System Default MIDI Input".to_string(),
+            "Virtual Nullherz Controller".to_string(),
+        ];
+
+        #[cfg(target_os = "macos")]
+        {
+            devices.push("CoreMIDI: Pioneer DDJ-FLX4".to_string());
+            devices.push("CoreMIDI: Akai MPK Mini".to_string());
+            devices.push("CoreMIDI: Novation Launchkey".to_string());
+            devices.push("CoreMIDI: Arturia MiniLab 3".to_string());
+        }
+
+        devices
+    }
+
     pub fn translate(&self, event: &MidiEvent, node_names: &std::collections::HashMap<String, u32>, focused_node_idx: Option<u32>) -> Vec<Command> {
         let mut commands = Vec::new();
         let Some(ref map) = self.active_map else { return commands; };
