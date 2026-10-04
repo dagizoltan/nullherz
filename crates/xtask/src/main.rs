@@ -19,6 +19,9 @@ enum Commands {
         #[arg(short, long)]
         backend: Option<String>,
     },
+    /// Launch the standalone Nullherz local store & gateway server
+    #[command(name = "store-up", alias = "store:up")]
+    StoreUp,
     /// Purge transient database, autosave, and config files to clear state
     Purge,
 }
@@ -39,6 +42,17 @@ fn main() {
             let status = cmd.status().expect("Failed to execute cargo run --bin nullherz-inspector");
             if !status.success() {
                 eprintln!("❌ Application exited with status: {}", status);
+                std::process::exit(status.code().unwrap_or(1));
+            }
+        }
+        Commands::StoreUp => {
+            println!("🛒 Launching Nullherz Store Server...");
+            let mut cmd = Command::new("cargo");
+            cmd.arg("run").arg("--bin").arg("nullherz-server");
+
+            let status = cmd.status().expect("Failed to execute cargo run --bin nullherz-server");
+            if !status.success() {
+                eprintln!("❌ Store Server exited with status: {}", status);
                 std::process::exit(status.code().unwrap_or(1));
             }
         }
