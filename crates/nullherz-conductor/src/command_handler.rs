@@ -154,6 +154,9 @@ impl CommandHandler {
         // ready instead of the world stopping until it is.
         for cmd in &commands {
             if let Command::Performance(PerformanceCommand::LoadTrackToDeck { deck_id, sample_id }) = cmd {
+                // Enqueue on-demand DNA analysis when a track is loaded onto a deck
+                conductor.request_analysis(*sample_id);
+
                 // Remember which sample sits on which deck — needed to map a
                 // deck's sampler NODE back to its TRACK (hot-cue persistence),
                 // and by tick() to know which decks to re-drive on completion.

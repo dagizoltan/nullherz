@@ -1142,6 +1142,12 @@ impl Conductor {
         &self.analysed_ids
     }
 
+    pub fn request_analysis(&mut self, sample_id: u64) {
+        if let Some(ref mut worker) = self.analysis_worker {
+            worker.request_analysis(sample_id);
+        }
+    }
+
     /// Whether the registry reaper is enabled. See [`Conductor::reap_registry`]
     /// for why the default is ON, and what had to be true first.
     pub fn registry_reap_enabled() -> bool {
