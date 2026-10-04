@@ -63,7 +63,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
     ui.add_space(8.0);
 
-    // 16-PAD DRUM MACHINE MATRIX & KIT PRESETS
+    // 16-SUBCHANNEL DRUM SUBMIXER STRIPS & ANALOG DRUM MACHINE CONTROLS
     Frame::none()
         .fill(app.theme.bg_surface)
         .rounding(app.theme.radius_md)
@@ -71,7 +71,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         .inner_margin(app.theme.space_sm)
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.heading(RichText::new("DRUM MATRIX").strong().size(app.theme.type_body));
+                ui.heading(RichText::new("ANALOG DRUM MACHINE & INLINE SUBMIXER").strong().size(app.theme.type_body));
                 ui.add_space(10.0);
 
                 // Engine Selector
@@ -121,335 +121,184 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
             ui.add_space(6.0);
 
-            ui.horizontal_top(|ui| {
-                // 4x4 Pad Grid Layout
-                egui::Grid::new("drum_pads_4x4_grid")
-                    .num_columns(4)
-                    .spacing([6.0, 6.0])
-                    .show(ui, |ui| {
-                        for row in 0..4 {
-                            for col in 0..4 {
-                                let pad_idx = row * 4 + col;
-                                let note = (36 + pad_idx) as u8;
-                                let is_selected = app.sampler.selected_pad == pad_idx;
-                                let deck_color = crate::InspectorApp::deck_color(&app.theme, pad_idx % 4);
-                                let bg_fill = if is_selected {
-                                    deck_color.gamma_multiply(0.35)
-                                } else {
-                                    deck_color.gamma_multiply(0.12)
-                                };
+            // 16 Compact Subchannel Strips with Trigger, Rotary Knobs, Dropdown, Mute/Solo, Fader & VU Meter
+            egui::ScrollArea::horizontal().show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
 
-                                Frame::none()
-                                    .fill(bg_fill)
-                                    .rounding(Rounding::same(app.theme.radius_sm))
-                                    .stroke(Stroke::new(if is_selected { 2.0 } else { 1.0 }, deck_color))
-                                    .inner_margin(Margin::same(4.0))
-                                    .show(ui, |ui| {
-                                        ui.set_width(100.0);
-                                        ui.vertical(|ui| {
-                                            ui.horizontal(|ui| {
-                                                let pad_lbl = ui.selectable_label(is_selected, RichText::new(format!("P{:02} {}", pad_idx + 1, SUBCHANNEL_LABELS[pad_idx])).strong().size(9.0));
-                                                if pad_lbl.clicked() {
-                                                    app.sampler.selected_pad = pad_idx;
-                                                }
-                                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                    ui.label(RichText::new(format!("N{}", note)).size(7.0).color(app.theme.text_secondary));
-                                                });
-                                            });
+                    for sub_idx in 0..16 {
+                        let note = (36 + sub_idx) as u8;
+                        let track_color = crate::InspectorApp::deck_color(&app.theme, sub_idx % 4);
+                        let label = SUBCHANNEL_LABELS[sub_idx];
 
-                                            ui.add_space(1.0);
+                        Frame::none()
+                            .fill(app.theme.bg_dark)
+                            .rounding(Rounding::same(app.theme.radius_sm))
+                            .stroke(Stroke::new(1.0, track_color))
+                            .inner_margin(Margin::same(4.0))
+                            .show(ui, |ui| {
+                                ui.set_width(64.0);
+                                ui.vertical_centered(|ui| {
+                                    // Subchannel Badge & Header
+                                    ui.label(RichText::new(format!("{:02}", sub_idx + 1)).strong().size(8.0).color(track_color));
+                                    ui.label(RichText::new(label).strong().size(9.0).color(app.theme.text_primary));
 
-                                            // Trigger Button
-                                            let trig_btn = egui::Button::new(RichText::new("▶ TRIGGER").size(9.0).strong().color(app.theme.text_primary))
-                                                .fill(deck_color.linear_multiply(0.35));
-                                            if ui.add_sized([92.0, 18.0], trig_btn).clicked() {
-                                                let event = MidiEvent {
-                                                    timestamp_samples: 0,
-                                                    status: 0x90,
-                                                    data1: note,
-                                                    data2: 120,
-                                                    _pad: 0,
-                                                };
-                                                let _ = app.command_sender.send(Command::Core(CoreCommand::InjectMidi(event)));
-                                            }
+                                    ui.add_space(2.0);
 
-                                            ui.add_space(1.0);
-
-                                            // Sample Picker Dropdown per pad
-                                            let current_src = app.composer.track_sources[pad_idx];
-                                            let cached_track = current_src.and_then(|id| app.get_cached_track(id));
-                                            let label = cached_track.as_ref()
-                                                .map(|t| format!("♪ {}", t.title))
-                                                .unwrap_or_else(|| "⊕ SAMPLE".to_string());
-
-                                            egui::ComboBox::from_id_source(format!("pad_sample_sel_{}", pad_idx))
-                                                .width(92.0)
-                                                .selected_text(RichText::new(&label).size(8.0).strong())
-                                                .show_ui(ui, |ui| {
-                                                    if ui.selectable_label(current_src.is_none(), "(None)").clicked() {
-                                                        app.composer.track_sources[pad_idx] = None;
-                                                    }
-                                                    for lib_track in &app.library.cached_library_raw {
-                                                        let is_sel = current_src == Some(lib_track.id);
-                                                        if ui.selectable_label(is_sel, format!("♪ {}", lib_track.title)).clicked() {
-                                                            app.composer.track_sources[pad_idx] = Some(lib_track.id);
-                                                        }
-                                                    }
-                                                });
-                                        });
-                                    });
-                            }
-                            ui.end_row();
-                        }
-                    });
-
-                ui.add_space(8.0);
-
-                // PAD PARAMETER CONFIGURATION PANEL
-                let sel_pad = app.sampler.selected_pad;
-                let pad_color = crate::InspectorApp::deck_color(&app.theme, sel_pad % 4);
-
-                Frame::none()
-                    .fill(app.theme.bg_dark)
-                    .rounding(Rounding::same(app.theme.radius_md))
-                    .stroke(Stroke::new(1.0, pad_color))
-                    .inner_margin(Margin::same(8.0))
-                    .show(ui, |ui| {
-                        ui.set_width(260.0);
-                        ui.vertical(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("PAD {:02}: {} CONTROLS", sel_pad + 1, SUBCHANNEL_LABELS[sel_pad])).strong().size(app.theme.type_body).color(pad_color));
-                            });
-                            ui.add_space(6.0);
-
-                            egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
-                                egui::Grid::new("pad_param_grid")
-                                    .num_columns(2)
-                                    .spacing([10.0, 6.0])
-                                    .show(ui, |ui| {
-                                        // SYNTH ENGINE CONTROLS
-                                        ui.label(RichText::new("SYNTH PARAMS").strong().size(app.theme.type_caption).color(app.theme.warning));
-                                        ui.end_row();
-
-                                        ui.label("Synth Tune/Pitch");
-                                        let mut tune = app.sampler.pad_tune[sel_pad];
-                                        if ui.add(egui::Slider::new(&mut tune, 0.0..=1.0)).changed() {
-                                            app.sampler.pad_tune[sel_pad] = tune;
-                                            if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                                let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                    target_id: dm_node as u64,
-                                                    param_id: (sel_pad * 16 + 0) as u32,
-                                                    value: tune,
-                                                    ramp_duration_samples: 0,
-                                                }));
-                                            }
-                                        }
-                                        ui.end_row();
-
-                                        ui.label("Decay Envelope");
-                                        let mut decay = app.sampler.pad_decay[sel_pad];
-                                        if ui.add(egui::Slider::new(&mut decay, 0.0..=1.0)).changed() {
-                                            app.sampler.pad_decay[sel_pad] = decay;
-                                            if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                                let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                    target_id: dm_node as u64,
-                                                    param_id: (sel_pad * 16 + 1) as u32,
-                                                    value: decay,
-                                                    ramp_duration_samples: 0,
-                                                }));
-                                            }
-                                        }
-                                        ui.end_row();
-
-                                        ui.label("Pitch Sweep Amount");
-                                        let mut sweep = app.sampler.pad_sweep[sel_pad];
-                                        if ui.add(egui::Slider::new(&mut sweep, 0.0..=1.0)).changed() {
-                                            app.sampler.pad_sweep[sel_pad] = sweep;
-                                            if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                                let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                    target_id: dm_node as u64,
-                                                    param_id: (sel_pad * 16 + 2) as u32,
-                                                    value: sweep,
-                                                    ramp_duration_samples: 0,
-                                                }));
-                                            }
-                                        }
-                                        ui.end_row();
-
-                                        ui.label("Body/Snare Mix");
-                                        let mut body_mix = app.sampler.pad_body_mix[sel_pad];
-                                        if ui.add(egui::Slider::new(&mut body_mix, 0.0..=1.0)).changed() {
-                                            app.sampler.pad_body_mix[sel_pad] = body_mix;
-                                            if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                                let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                    target_id: dm_node as u64,
-                                                    param_id: (sel_pad * 16 + 3) as u32,
-                                                    value: body_mix,
-                                                    ramp_duration_samples: 0,
-                                                }));
-                                            }
-                                        }
-                                        ui.end_row();
-
-                                        ui.label("Padé Saturation Drive");
-                                        let mut drive = app.sampler.pad_drive[sel_pad];
-                                        if ui.add(egui::Slider::new(&mut drive, 0.0..=1.0)).changed() {
-                                            app.sampler.pad_drive[sel_pad] = drive;
-                                            if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                                let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                    target_id: dm_node as u64,
-                                                    param_id: (sel_pad * 16 + 4) as u32,
-                                                    value: drive,
-                                                    ramp_duration_samples: 0,
-                                                }));
-                                            }
-                                        }
-                                        ui.end_row();
-
-                                        ui.add_space(4.0);
-                                        ui.label(RichText::new("NEURAL PARAMS").strong().size(app.theme.type_caption).color(app.theme.success));
-                                        ui.end_row();
-
-                                        ui.label("Latent Timbre Coordinate");
-                                        let mut latent = app.sampler.pad_latent_coord[sel_pad];
-                                        if ui.add(egui::Slider::new(&mut latent, 0.0..=1.0)).changed() {
-                                            app.sampler.pad_latent_coord[sel_pad] = latent;
-                                            if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                                let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                    target_id: dm_node as u64,
-                                                    param_id: (sel_pad * 16 + 5) as u32,
-                                                    value: latent,
-                                                    ramp_duration_samples: 0,
-                                                }));
-                                            }
-                                        }
-                                        ui.end_row();
-
-                                        ui.label("Cortical Resonator Drive");
-                                        let mut cortical = app.sampler.pad_cortical_drive[sel_pad];
-                                        if ui.add(egui::Slider::new(&mut cortical, 0.0..=1.0)).changed() {
-                                            app.sampler.pad_cortical_drive[sel_pad] = cortical;
-                                            if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                                let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                    target_id: dm_node as u64,
-                                                    param_id: (sel_pad * 16 + 6) as u32,
-                                                    value: cortical,
-                                                    ramp_duration_samples: 0,
-                                                }));
-                                            }
-                                        }
-                                        ui.end_row();
-                                    });
-                            });
-                        });
-                    });
-            });
-        });
-
-    ui.add_space(8.0);
-
-    // COMPACT 16-CHANNEL DRUM SUBMIXER STRIPS
-    Frame::none()
-        .fill(app.theme.bg_surface)
-        .rounding(app.theme.radius_md)
-        .stroke(app.theme.border_stroke)
-        .inner_margin(app.theme.space_sm)
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading(RichText::new("16-CHANNEL DRUM SUBMIXER").strong().size(app.theme.type_body));
-                ui.add_space(10.0);
-                ui.label(RichText::new("COMPACT PIXEL-PERFECT SUBCHANNEL STRIPS (NO HORIZONTAL SCROLL)").size(app.theme.type_caption).color(app.theme.accent));
-            });
-
-            ui.add_space(6.0);
-
-            // 16 Compact Channels side-by-side without horizontal scrolling
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 3.0;
-
-                for sub_idx in 0..16 {
-                    let track_color = crate::InspectorApp::deck_color(&app.theme, sub_idx % 4);
-                    let label = SUBCHANNEL_LABELS[sub_idx];
-
-                    Frame::none()
-                        .fill(app.theme.bg_dark)
-                        .rounding(Rounding::same(app.theme.radius_sm))
-                        .stroke(Stroke::new(1.0, track_color))
-                        .inner_margin(Margin::same(3.0))
-                        .show(ui, |ui| {
-                            ui.set_width(58.0);
-                            ui.vertical_centered(|ui| {
-                                // Channel Header Badge
-                                ui.label(RichText::new(format!("{:02}", sub_idx + 1)).strong().size(8.0).color(track_color));
-                                ui.label(RichText::new(label).strong().size(8.0).color(app.theme.text_primary));
-
-                                ui.add_space(2.0);
-
-                                // Mute / Solo Buttons
-                                ui.horizontal(|ui| {
-                                    let stem_i = sub_idx % 12;
-                                    let mut mute = app.mixer.stem_mutes[0][stem_i];
-                                    let mute_color = if mute { app.theme.danger } else { app.theme.bg_inset };
-                                    if ui.add_sized([22.0, 14.0], egui::Button::new(RichText::new("M").size(7.0).strong()).fill(mute_color)).clicked() {
-                                        mute = !mute;
-                                        app.mixer.stem_mutes[0][stem_i] = mute;
+                                    // ▶ TRIGGER Button on subchannel
+                                    let trig_btn = egui::Button::new(RichText::new("▶ TRIG").size(8.0).strong().color(app.theme.text_primary))
+                                        .fill(track_color.linear_multiply(0.35));
+                                    if ui.add_sized([56.0, 18.0], trig_btn).clicked() {
+                                        let event = MidiEvent {
+                                            timestamp_samples: 0,
+                                            status: 0x90,
+                                            data1: note,
+                                            data2: 120,
+                                            _pad: 0,
+                                        };
+                                        let _ = app.command_sender.send(Command::Core(CoreCommand::InjectMidi(event)));
                                     }
 
-                                    let mut solo = app.mixer.stem_solos[0][stem_i];
-                                    let solo_color = if solo { app.theme.warning } else { app.theme.bg_inset };
-                                    if ui.add_sized([22.0, 14.0], egui::Button::new(RichText::new("S").size(7.0).strong()).fill(solo_color)).clicked() {
-                                        solo = !solo;
-                                        app.mixer.stem_solos[0][stem_i] = solo;
+                                    ui.add_space(2.0);
+
+                                    // Sample Picker Dropdown
+                                    let current_src = app.composer.track_sources[sub_idx];
+                                    let cached_track = current_src.and_then(|id| app.get_cached_track(id));
+                                    let combo_label = cached_track.as_ref()
+                                        .map(|t| format!("♪ {}", t.title))
+                                        .unwrap_or_else(|| "⊕ SAMPLE".to_string());
+
+                                    egui::ComboBox::from_id_source(format!("sub_sample_sel_{}", sub_idx))
+                                        .width(56.0)
+                                        .selected_text(RichText::new(&combo_label).size(7.0).strong())
+                                        .show_ui(ui, |ui| {
+                                            if ui.selectable_label(current_src.is_none(), "(None)").clicked() {
+                                                app.composer.track_sources[sub_idx] = None;
+                                            }
+                                            for lib_track in &app.library.cached_library_raw {
+                                                let is_sel = current_src == Some(lib_track.id);
+                                                if ui.selectable_label(is_sel, format!("♪ {}", lib_track.title)).clicked() {
+                                                    app.composer.track_sources[sub_idx] = Some(lib_track.id);
+                                                }
+                                            }
+                                        });
+
+                                    ui.add_space(4.0);
+
+                                    // Rotary Knob: TRIM / GAIN
+                                    let mut gain_val = app.sampler.subchannel_gain[sub_idx];
+                                    if widgets::knobs::render_knob_sized(ui, &mut gain_val, 0.0..=2.0, "TRIM", track_color, 24.0).changed() {
+                                        app.sampler.subchannel_gain[sub_idx] = gain_val;
+                                        if let Some(dm_node) = app.get_node_id("drum_machine_node") {
+                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
+                                                target_id: dm_node as u64,
+                                                param_id: (sub_idx * 16 + 7) as u32,
+                                                value: gain_val,
+                                                ramp_duration_samples: 0,
+                                            }));
+                                        }
+                                    }
+
+                                    ui.add_space(2.0);
+
+                                    // Rotary Knobs: ANALOG SYNTH/DRUM PARAMS (TUNE, DECAY, SWEEP, DRIVE)
+                                    let mut tune = app.sampler.pad_tune[sub_idx];
+                                    if widgets::knobs::render_knob_sized(ui, &mut tune, 0.0..=1.0, "TUNE", app.theme.warning, 22.0).changed() {
+                                        app.sampler.pad_tune[sub_idx] = tune;
+                                        if let Some(dm_node) = app.get_node_id("drum_machine_node") {
+                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
+                                                target_id: dm_node as u64,
+                                                param_id: (sub_idx * 16 + 0) as u32,
+                                                value: tune,
+                                                ramp_duration_samples: 0,
+                                            }));
+                                        }
+                                    }
+
+                                    let mut decay = app.sampler.pad_decay[sub_idx];
+                                    if widgets::knobs::render_knob_sized(ui, &mut decay, 0.0..=1.0, "DECAY", app.theme.warning, 22.0).changed() {
+                                        app.sampler.pad_decay[sub_idx] = decay;
+                                        if let Some(dm_node) = app.get_node_id("drum_machine_node") {
+                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
+                                                target_id: dm_node as u64,
+                                                param_id: (sub_idx * 16 + 1) as u32,
+                                                value: decay,
+                                                ramp_duration_samples: 0,
+                                            }));
+                                        }
+                                    }
+
+                                    let mut sweep = app.sampler.pad_sweep[sub_idx];
+                                    if widgets::knobs::render_knob_sized(ui, &mut sweep, 0.0..=1.0, "SWEEP", app.theme.warning, 22.0).changed() {
+                                        app.sampler.pad_sweep[sub_idx] = sweep;
+                                        if let Some(dm_node) = app.get_node_id("drum_machine_node") {
+                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
+                                                target_id: dm_node as u64,
+                                                param_id: (sub_idx * 16 + 2) as u32,
+                                                value: sweep,
+                                                ramp_duration_samples: 0,
+                                            }));
+                                        }
+                                    }
+
+                                    let mut drive = app.sampler.pad_drive[sub_idx];
+                                    if widgets::knobs::render_knob_sized(ui, &mut drive, 0.0..=1.0, "DRIVE", app.theme.danger, 22.0).changed() {
+                                        app.sampler.pad_drive[sub_idx] = drive;
+                                        if let Some(dm_node) = app.get_node_id("drum_machine_node") {
+                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
+                                                target_id: dm_node as u64,
+                                                param_id: (sub_idx * 16 + 4) as u32,
+                                                value: drive,
+                                                ramp_duration_samples: 0,
+                                            }));
+                                        }
+                                    }
+
+                                    ui.add_space(2.0);
+
+                                    // Rotary Knobs: 3-Band EQ
+                                    widgets::knobs::render_knob_sized(ui, &mut app.sampler.subchannel_eq_high[sub_idx], 0.0..=2.0, "HI", track_color, 20.0);
+                                    widgets::knobs::render_knob_sized(ui, &mut app.sampler.subchannel_eq_mid[sub_idx], 0.0..=2.0, "MID", track_color, 20.0);
+                                    widgets::knobs::render_knob_sized(ui, &mut app.sampler.subchannel_eq_low[sub_idx], 0.0..=2.0, "LOW", track_color, 20.0);
+
+                                    ui.add_space(2.0);
+
+                                    // Mute / Solo Buttons
+                                    ui.horizontal(|ui| {
+                                        let mut mute = app.sampler.subchannel_mutes[sub_idx];
+                                        let mute_color = if mute { app.theme.danger } else { app.theme.bg_inset };
+                                        if ui.add_sized([22.0, 14.0], egui::Button::new(RichText::new("M").size(7.0).strong()).fill(mute_color)).clicked() {
+                                            mute = !mute;
+                                            app.sampler.subchannel_mutes[sub_idx] = mute;
+                                        }
+
+                                        let mut solo = app.sampler.subchannel_solos[sub_idx];
+                                        let solo_color = if solo { app.theme.warning } else { app.theme.bg_inset };
+                                        if ui.add_sized([22.0, 14.0], egui::Button::new(RichText::new("S").size(7.0).strong()).fill(solo_color)).clicked() {
+                                            solo = !solo;
+                                            app.sampler.subchannel_solos[sub_idx] = solo;
+                                        }
+                                    });
+
+                                    ui.add_space(2.0);
+
+                                    // Linear Volume Fader
+                                    let mut fader_val = app.sampler.subchannel_faders[sub_idx];
+                                    if ui.add(egui::Slider::new(&mut fader_val, 0.0..=1.2).vertical().show_value(false)).changed() {
+                                        app.sampler.subchannel_faders[sub_idx] = fader_val;
+                                    }
+
+                                    ui.add_space(2.0);
+
+                                    // Peak VU Meter
+                                    if let Some(t) = telemetry {
+                                        let lvl = t.peak_levels.get(sub_idx).cloned().unwrap_or(0.0);
+                                        widgets::render_vu_meter(ui, lvl, app.mixer.channel_peak_hold[sub_idx], track_color, 30.0);
                                     }
                                 });
-
-                                ui.add_space(2.0);
-
-                                // Trim Gain
-                                ui.label(RichText::new("TRIM").size(6.0).color(app.theme.text_secondary));
-                                let mut gain_val = app.mixer.channel_gain[sub_idx];
-                                if ui.add(egui::Slider::new(&mut gain_val, 0.0..=2.0).show_value(false)).changed() {
-                                    app.mixer.channel_gain[sub_idx] = gain_val;
-                                    if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                        let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                            target_id: dm_node as u64,
-                                            param_id: (sub_idx * 16 + 7) as u32,
-                                            value: gain_val,
-                                            ramp_duration_samples: 0,
-                                        }));
-                                    }
-                                }
-
-                                ui.add_space(2.0);
-
-                                // Mini 3-Band EQ Sliders
-                                ui.label(RichText::new("HI").size(6.0).color(app.theme.text_secondary));
-                                ui.add(egui::Slider::new(&mut app.mixer.channel_eq_high[sub_idx], 0.0..=2.0).show_value(false));
-
-                                ui.label(RichText::new("MID").size(6.0).color(app.theme.text_secondary));
-                                ui.add(egui::Slider::new(&mut app.mixer.channel_eq_mid[sub_idx], 0.0..=2.0).show_value(false));
-
-                                ui.label(RichText::new("LOW").size(6.0).color(app.theme.text_secondary));
-                                ui.add(egui::Slider::new(&mut app.mixer.channel_eq_low[sub_idx], 0.0..=2.0).show_value(false));
-
-                                ui.add_space(2.0);
-
-                                // Vertical Fader
-                                let mut fader_val = app.mixer.channel_faders[sub_idx];
-                                if ui.add(egui::Slider::new(&mut fader_val, 0.0..=1.2).vertical().show_value(false)).changed() {
-                                    app.mixer.channel_faders[sub_idx] = fader_val;
-                                }
-
-                                ui.add_space(2.0);
-
-                                // Peak VU Meter
-                                if let Some(t) = telemetry {
-                                    let lvl = t.peak_levels.get(sub_idx).cloned().unwrap_or(0.0);
-                                    widgets::render_vu_meter(ui, lvl, app.mixer.channel_peak_hold[sub_idx], track_color, 35.0);
-                                }
                             });
-                        });
-                }
+                    }
+                });
             });
         });
 

@@ -32,8 +32,8 @@ mod tests {
         });
 
         // Set choke group 1 on pad 0 and pad 1
-        dm.set_parameter(8, 1.0, 0);  // Pad 0 choke group = 1
-        dm.set_parameter(24, 1.0, 0); // Pad 1 choke group = 1
+        dm.set_parameter(6, 1.0, 0);  // Pad 0 choke group = 1
+        dm.set_parameter(22, 1.0, 0); // Pad 1 choke group = 1
 
         // Trigger Pad 0
         dm.apply_midi(MidiEvent {
