@@ -10,7 +10,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub struct CoreAudioBackend {
     running: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
+    selected_device: String,
     pub xrun_counter: Arc<std::sync::atomic::AtomicU64>,
+    pub buffer_frames_count: Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl Default for CoreAudioBackend {
@@ -21,11 +23,20 @@ impl Default for CoreAudioBackend {
 
 impl CoreAudioBackend {
     pub fn new() -> Self {
+        let dev = std::env::var("NULLHERZ_COREAUDIO_DEVICE")
+            .or_else(|_| std::env::var("NULLHERZ_AUDIO_DEVICE"))
+            .unwrap_or_else(|_| "default".to_string());
         Self {
             running: Arc::new(AtomicBool::new(false)),
             handle: None,
+            selected_device: dev,
             xrun_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            buffer_frames_count: Arc::new(std::sync::atomic::AtomicU32::new(256)),
         }
+    }
+
+    pub fn set_device(&mut self, device_name: &str) {
+        self.selected_device = device_name.to_string();
     }
 }
 
@@ -104,10 +115,16 @@ impl AudioBackend for CoreAudioBackend {
 
     fn enumerate_devices(&self) -> Vec<String> {
         vec![
+            "default".to_string(),
             "CoreAudio: Built-in Output / Headphones".to_string(),
             "CoreAudio: Display Audio".to_string(),
             "CoreAudio: Multi-Output Device".to_string(),
+            "CoreAudio: Aggregate Device".to_string(),
         ]
+    }
+
+    fn buffer_frames(&self) -> Option<u32> {
+        Some(self.buffer_frames_count.load(Ordering::SeqCst))
     }
 
     fn xruns(&self) -> Option<u64> {
