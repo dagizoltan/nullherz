@@ -58,39 +58,39 @@ pub fn render_mini_waveform(
 }
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
-    let Some(seq_node) = app.get_node_id(&format!(
-        "deck_{}_sequencer",
-        (b'a' + app.decks.focused_deck.min(3) as u8) as char
-    )) else {
-        ui.label("Sequencer not available yet (topology still installing).");
-        return;
-    };
-    let grid_deck = app.decks.focused_deck.min(3);
+    let focused_deck_char = (b'a' + (app.decks.focused_deck % 4) as u8) as char;
+    let seq_node = app.get_node_id(&format!("deck_{}_sequencer", focused_deck_char)).unwrap_or(70);
 
     ui.horizontal(|ui| {
         ui.heading(RichText::new("COMPOSER ARRANGEMENT GRID").strong().color(app.theme.text_primary));
         ui.add_space(app.theme.space_md);
-        ui.label(RichText::new(format!("SYSTEM MIXER SYNC: {} ACTIVE CHANNELS", app.mixer.num_channels)).strong().size(app.theme.type_caption).color(app.theme.accent));
+        ui.label(RichText::new(format!("STUDIO DAW ENGINE: {} TRACKS", app.mixer.num_channels)).strong().size(app.theme.type_caption).color(app.theme.accent));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-             ui.label(egui::RichText::new("QUANTIZED: 1 BAR").color(app.theme.accent).size(app.theme.type_caption));
+             ui.label(egui::RichText::new("DECOUPLED STUDIO DAW").color(app.theme.accent).size(app.theme.type_caption));
         });
     });
     ui.add_space(app.theme.space_sm);
 
-    // Global Transport & Master Controls
+    // Studio Transport & Master Controls
     ui.horizontal(|ui| {
-        // Global PLAY / STOP
-        let play_btn = ui.selectable_label(app.decks.global_playing, RichText::new("▶ PLAY").strong().color(if app.decks.global_playing { app.theme.success } else { app.theme.text_secondary }));
+        // Independent Composer Transport PLAY / STOP Controls
+        let play_btn = ui.selectable_label(app.composer.composer_playing, RichText::new("▶ PLAY COMPOSER").strong().color(if app.composer.composer_playing { app.theme.success } else { app.theme.text_secondary }));
         if play_btn.clicked() {
-            app.decks.global_playing = true;
+            app.composer.composer_playing = true;
             let _ = app.command_sender.send(Command::Core(CoreCommand::Play));
         }
 
-        let stop_btn = ui.selectable_label(!app.decks.global_playing, RichText::new("■ STOP").strong().color(if !app.decks.global_playing { app.theme.danger } else { app.theme.text_secondary }));
+        let stop_btn = ui.selectable_label(!app.composer.composer_playing, RichText::new("■ STOP COMPOSER").strong().color(if !app.composer.composer_playing { app.theme.danger } else { app.theme.text_secondary }));
         if stop_btn.clicked() {
-            app.decks.global_playing = false;
+            app.composer.composer_playing = false;
             let _ = app.command_sender.send(Command::Core(CoreCommand::Stop));
         }
+
+        ui.add_space(app.theme.space_sm);
+
+        // Master Transport Sync Toggle
+        let is_synced = app.composer.sync_with_master_transport;
+        ui.toggle_value(&mut app.composer.sync_with_master_transport, RichText::new("🔒 SYNC MASTER CLOCK").color(if is_synced { app.theme.accent } else { app.theme.text_secondary }));
 
         ui.add_space(app.theme.space_md);
 
@@ -122,7 +122,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         // Pattern Length Selector
         ui.label(RichText::new("LENGTH:").strong().size(app.theme.type_caption).color(app.theme.text_secondary));
-        let current_steps = app.composer.sequencer_grid[grid_deck][0].len();
+        let current_steps = app.composer.studio_sequencer_grid[0].len();
         let current_bars = (current_steps / steps_per_bar).max(1);
         let mut selected_bars = current_bars;
 
@@ -140,7 +140,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         let target_steps = selected_bars * steps_per_bar;
         if target_steps != current_steps {
             for trk in 0..16 {
-                app.composer.sequencer_grid[grid_deck][trk].resize(target_steps, 0.0);
+                app.composer.studio_sequencer_grid[trk].resize(target_steps, 0.0);
             }
         }
 
@@ -163,7 +163,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         if ui.button("STOP ALL CLIPS").clicked() {
             for i in 0..16 {
                  let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: seq_node, track_idx: i as u32 }));
-                 app.composer.sequencer_grid[grid_deck][i].fill(0.0);
+                 app.composer.studio_sequencer_grid[i].fill(0.0);
             }
         }
 
@@ -193,13 +193,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         .inner_margin(Margin::same(app.theme.space_sm))
         .show(ui, |ui| {
             let mut extend_grid = false;
-            let steps_count = app.composer.sequencer_grid[grid_deck][0].len();
+            let steps_count = app.composer.studio_sequencer_grid[0].len();
             let slot_w = (40.0 * app.composer.grid_zoom).clamp(15.0, 120.0);
-            let slot_h = 72.0;
+            let slot_h = 88.0;
             let num_active_channels = app.mixer.num_channels.clamp(1, 16);
 
             ui.horizontal(|ui| {
-                // 1. LEFT SIDE: Stationary Track Headers column (160.0px width)
+                // 1. LEFT SIDE: Decoupled Studio Track Headers column (175.0px width)
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     ui.add_space(32.0); // Exact match: 26.0 timeline header + 6.0 gap
@@ -207,6 +207,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     for track_idx in 0..num_active_channels {
                         let track_color = crate::InspectorApp::deck_color(&app.theme, track_idx % 4);
                         let is_muted = app.composer.track_mutes[track_idx];
+                        let is_solo = app.composer.track_solos[track_idx];
                         let is_selected = app.composer.selected_composer_track == Some(track_idx);
 
                         let header_bg = if is_selected {
@@ -217,38 +218,40 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             track_color.gamma_multiply(0.2)
                         };
 
-                        // Exact Outer Height = slot_h (72.0px) to prevent height drift against grid rows
                         let inner_resp = Frame::none()
                             .fill(header_bg)
                             .rounding(Rounding::same(app.theme.radius_sm))
                             .stroke(Stroke::new(1.0, if is_selected { track_color } else { app.theme.border_stroke.color }))
                             .inner_margin(Margin::same(4.0))
                             .show(ui, |ui| {
-                                ui.set_width(150.0);
-                                ui.set_height(slot_h - 8.0); // 72.0 outer height minus 2x 4.0 inner margins
+                                ui.set_width(165.0);
+                                ui.set_height(slot_h - 8.0);
                                 ui.vertical(|ui| {
                                     ui.horizontal(|ui| {
                                         let (swatch_rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), Sense::hover());
                                         ui.painter().rect_filled(swatch_rect, Rounding::same(1.5), track_color);
                                         ui.add_space(2.0);
-                                        ui.label(RichText::new(format!("CH {}", (b'A' + (track_idx % 26) as u8) as char)).strong().size(app.theme.type_body).color(app.theme.text_primary));
+                                        ui.label(RichText::new(format!("TRK {:02}", track_idx + 1)).strong().size(app.theme.type_body).color(app.theme.text_primary));
 
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            let activator_color = if !is_muted { app.theme.warning } else { app.theme.bg_inset };
-                                            if ui.add_sized([22.0, 18.0], egui::Button::new(RichText::new("ON").size(app.theme.type_caption).strong()).fill(activator_color)).clicked() {
+                                            // Mute Button
+                                            let mute_color = if is_muted { app.theme.danger } else { app.theme.bg_inset };
+                                            if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("M").size(app.theme.type_caption).strong()).fill(mute_color)).clicked() {
                                                 app.composer.track_mutes[track_idx] = !is_muted;
                                                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackMute { node_idx: seq_node, track_idx: track_idx as u32, muted: app.composer.track_mutes[track_idx] }));
                                             }
 
-                                            // Apply Track Humanization Groove Button
-                                            let src_id = app.composer.track_sources[track_idx].or(app.decks.now_playing[track_idx]);
-                                            if let Some(lib_track) = src_id.and_then(|id| app.get_cached_track(id)) {
-                                                if ui.add_sized([40.0, 18.0], egui::Button::new(RichText::new("GROOVE").size(7.0).strong()).fill(app.theme.accent.linear_multiply(0.2))).on_hover_text("Apply pre-analyzed track micro-timing groove template").clicked() {
-                                                    let cmds = DnaSequencer::apply_groove(&lib_track.metadata.dna.rhythmic, seq_node, track_idx as u32);
-                                                    for cmd in cmds {
-                                                        let _ = app.command_sender.send(cmd);
-                                                    }
-                                                }
+                                            // Solo Button
+                                            let solo_color = if is_solo { app.theme.warning } else { app.theme.bg_inset };
+                                            if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("S").size(app.theme.type_caption).strong()).fill(solo_color)).clicked() {
+                                                app.composer.track_solos[track_idx] = !is_solo;
+                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetTrackSolo { node_idx: seq_node, track_idx: track_idx as u32, soloed: app.composer.track_solos[track_idx] }));
+                                            }
+
+                                            // + SIDECAR FX Store Button
+                                            if ui.add_sized([38.0, 18.0], egui::Button::new(RichText::new("+ SIDECAR").size(6.5).strong()).fill(app.theme.accent.linear_multiply(0.2))).on_hover_text("Open Sidecar Store for Studio Inserts & Instruments").clicked() {
+                                                app.store.search_query = "insert".to_string();
+                                                app.active_right_tab = Some(crate::RightTab::Store);
                                             }
                                         });
                                     });
@@ -256,15 +259,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     ui.add_space(2.0);
 
                                     // Sample / Full-Track Picker dropdown
-                                    let src_id = app.composer.track_sources[track_idx]
-                                        .or(app.decks.now_playing[track_idx]);
+                                    let src_id = app.composer.track_sources[track_idx];
                                     let cached_track = src_id.and_then(|id| app.get_cached_track(id));
                                     let sample_label = cached_track.as_ref()
                                         .map(|t| format!("♪ {}", t.title))
                                         .unwrap_or_else(|| "⊕ SAMPLE / TRACK".to_string());
 
-                                    egui::ComboBox::from_id_source(format!("seq_src_{}", track_idx))
-                                        .width(140.0)
+                                    egui::ComboBox::from_id_source(format!("seq_studio_src_{}", track_idx))
+                                        .width(155.0)
                                         .selected_text(RichText::new(&sample_label).size(app.theme.type_caption).strong())
                                         .show_ui(ui, |ui| {
                                             if ui.selectable_label(src_id.is_none(), "(None)").clicked() {
@@ -275,40 +277,35 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                 let label = format!("♪ {}", lib_track.title);
                                                 if ui.selectable_label(is_sel, label).clicked() {
                                                     app.composer.track_sources[track_idx] = Some(lib_track.id);
-                                                    app.decks.now_playing[track_idx] = Some(lib_track.id);
-                                                    app.decks.cached_tracks[track_idx] = Some(lib_track.clone());
                                                 }
                                             }
                                         });
 
                                     ui.add_space(2.0);
 
-                                    // Synced Volume Fader
+                                    // Volume Fader & Pan Slider
                                     ui.horizontal(|ui| {
                                         ui.label(RichText::new("VOL").size(8.0).color(app.theme.text_secondary));
-                                        let mut vol_val = app.mixer.channel_faders[track_idx];
-                                        if widgets::render_horizontal_fader(ui, &mut vol_val, 0.0..=1.2, track_color, 90.0, 10.0).changed() {
+                                        let mut vol_val = app.composer.track_volumes[track_idx];
+                                        if widgets::render_horizontal_fader(ui, &mut vol_val, 0.0..=1.2, track_color, 65.0, 10.0).changed() {
+                                            app.composer.track_volumes[track_idx] = vol_val;
                                             app.mixer.channel_faders[track_idx] = vol_val;
-                                            let deck_char = (b'a' + (track_idx % 26) as u8) as char;
-                                            if let Some(gain_id) = app.topo.node_map.get(&format!("deck_{}_gain", deck_char)).copied() {
-                                                let net_gain = app.mixer.channel_gain[track_idx] * vol_val;
-                                                let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                    target_id: gain_id as u64,
-                                                    param_id: 0,
-                                                    value: net_gain,
-                                                    ramp_duration_samples: 128,
-                                                }));
-                                            }
+                                        }
+
+                                        ui.add_space(2.0);
+                                        ui.label(RichText::new("PAN").size(8.0).color(app.theme.text_secondary));
+                                        let mut pan_val = app.composer.track_pans[track_idx];
+                                        if ui.add(egui::Slider::new(&mut pan_val, -1.0..=1.0).show_value(false)).changed() {
+                                            app.composer.track_pans[track_idx] = pan_val;
                                         }
                                     });
                                 });
                             });
 
                         let rect = inner_resp.response.rect;
-                        let response = ui.interact(rect, ui.make_persistent_id(format!("trk_hdr_{}", track_idx)), Sense::click());
+                        let response = ui.interact(rect, ui.make_persistent_id(format!("trk_hdr_studio_{}", track_idx)), Sense::click());
                         if response.clicked() {
                             app.composer.selected_composer_track = Some(track_idx);
-                            app.decks.focused_deck = track_idx;
                         }
 
                         if track_idx < num_active_channels - 1 {
@@ -330,25 +327,25 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             ui.spacing_mut().item_spacing.y = 0.0;
 
                             // Bar/Beat Timeline Header Row (26.0px height)
-                                let steps_per_bar = app.composer.grid_step_resolution.clamp(16, 64);
-                                let steps_per_beat = (steps_per_bar / 4).max(1);
+                            let steps_per_bar = app.composer.grid_step_resolution.clamp(16, 64);
+                            let steps_per_beat = (steps_per_bar / 4).max(1);
 
                             let header_resp = ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 26.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                 ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
                                 for slot_idx in 0..steps_count {
-                                        if slot_idx > 0 && slot_idx % steps_per_beat == 0 {
+                                    if slot_idx > 0 && slot_idx % steps_per_beat == 0 {
                                         ui.add_space(4.0);
                                     }
                                     let (rect, response) = ui.allocate_exact_size(Vec2::new(slot_w, 24.0), Sense::click());
 
                                     if response.clicked() {
-                                            let bar = (slot_idx / steps_per_bar) + 1;
+                                        let bar = (slot_idx / steps_per_bar) + 1;
                                         let beat_pos = (bar - 1) as f64 * 4.0;
                                         let _ = app.command_sender.send(Command::Performance(PerformanceCommand::JumpByBeats { node_idx: seq_node, beats: beat_pos as f32 }));
                                     }
 
-                                        if slot_idx % steps_per_bar == 0 {
-                                            let bar_num = (slot_idx / steps_per_bar) + 1;
+                                    if slot_idx % steps_per_bar == 0 {
+                                        let bar_num = (slot_idx / steps_per_bar) + 1;
                                         ui.painter().rect_filled(rect, Rounding::same(2.0), app.theme.bg_surface);
                                         ui.painter().text(
                                             rect.center(),
@@ -357,15 +354,15 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             egui::FontId::new(10.0, egui::FontFamily::Monospace),
                                             app.theme.accent,
                                         );
-                                        } else if slot_idx % steps_per_beat == 0 {
-                                            let beat_num = (slot_idx % steps_per_bar) / steps_per_beat + 1;
-                                            ui.painter().text(
-                                                rect.center(),
-                                                egui::Align2::CENTER_CENTER,
-                                                format!(".{}", beat_num),
-                                                egui::FontId::new(9.0, egui::FontFamily::Monospace),
-                                                app.theme.text_secondary,
-                                            );
+                                    } else if slot_idx % steps_per_beat == 0 {
+                                        let beat_num = (slot_idx % steps_per_bar) / steps_per_beat + 1;
+                                        ui.painter().text(
+                                            rect.center(),
+                                            egui::Align2::CENTER_CENTER,
+                                            format!(".{}", beat_num),
+                                            egui::FontId::new(9.0, egui::FontFamily::Monospace),
+                                            app.theme.text_secondary,
+                                        );
                                     } else {
                                         let tick_rect = egui::Rect::from_center_size(rect.center(), Vec2::new(2.0, 4.0));
                                         ui.painter().rect_filled(tick_rect, Rounding::same(1.0), app.theme.text_disabled.linear_multiply(0.4));
@@ -384,8 +381,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 let is_selected = app.composer.selected_composer_track == Some(track_idx);
 
                                 // Resolve track source sample / metadata
-                                let src_id = app.composer.track_sources[track_idx]
-                                    .or(app.decks.now_playing[track_idx]);
+                                let src_id = app.composer.track_sources[track_idx];
                                 let cached_track = src_id.and_then(|id| app.get_cached_track(id));
 
                                 ui.horizontal(|ui| {
@@ -409,7 +405,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                 extend_grid = true;
                                             }
 
-                                        let velocity = app.composer.sequencer_grid[grid_deck][track_idx][slot_idx];
+                                        let velocity = app.composer.studio_sequencer_grid[track_idx][slot_idx];
 
                                         let mut bg_color = if velocity > 0.0 || cached_track.is_some() {
                                             if is_muted {
@@ -456,9 +452,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         }
 
                                         if response.clicked() {
-                                            let is_on = app.composer.sequencer_grid[grid_deck][track_idx][slot_idx] == 0.0;
+                                            let is_on = app.composer.studio_sequencer_grid[track_idx][slot_idx] == 0.0;
                                             let val = if is_on { 1.0 } else { 0.0 };
-                                            app.composer.sequencer_grid[grid_deck][track_idx][slot_idx] = val;
+                                            app.composer.studio_sequencer_grid[track_idx][slot_idx] = val;
                                             let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
                                                 node_idx: seq_node,
                                                 track: track_idx as u32,
@@ -493,7 +489,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                 }
 
                                                 let (rect, response) = ui.allocate_exact_size(Vec2::new(slot_w, 22.0), Sense::click());
-                                                let vel_sub = app.composer.sequencer_grid[grid_deck][sub_i % 16][slot_idx];
+                                                let vel_sub = app.composer.studio_sequencer_grid[sub_i % 16][slot_idx];
 
                                                 let bg_sub = if vel_sub > 0.0 {
                                                     track_color.gamma_multiply(0.4)
@@ -515,9 +511,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                 }
 
                                                 if response.clicked() {
-                                                    let is_on = app.composer.sequencer_grid[grid_deck][sub_i % 16][slot_idx] == 0.0;
+                                                    let is_on = app.composer.studio_sequencer_grid[sub_i % 16][slot_idx] == 0.0;
                                                     let val = if is_on { 1.0 } else { 0.0 };
-                                                    app.composer.sequencer_grid[grid_deck][sub_i % 16][slot_idx] = val;
+                                                    app.composer.studio_sequencer_grid[sub_i % 16][slot_idx] = val;
                                                     if let Some(target_node) = app.get_node_id("drum_machine_node").or(Some(seq_node)) {
                                                         let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
                                                             node_idx: target_node,
@@ -560,7 +556,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
             if extend_grid {
                 for i in 0..16 {
-                    app.composer.sequencer_grid[grid_deck][i].resize(steps_count + 16, 0.0);
+                    app.composer.studio_sequencer_grid[i].resize(steps_count + 16, 0.0);
                 }
             }
         });
@@ -573,7 +569,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             .stroke(app.theme.border_stroke)
             .inner_margin(Margin::same(app.theme.space_sm))
             .show(ui, |ui| {
-                let deck_color = crate::InspectorApp::deck_color(&app.theme, grid_deck);
+                let selected_trk = app.composer.selected_composer_track.unwrap_or(0);
+                let deck_color = crate::InspectorApp::deck_color(&app.theme, selected_trk % 4);
                 let note_triggers = widgets::render_keyboard_grid(
                     ui,
                     &mut app.composer.keyboard_grid.octave,
