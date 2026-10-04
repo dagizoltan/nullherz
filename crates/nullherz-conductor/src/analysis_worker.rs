@@ -177,8 +177,15 @@ impl AnalysisWorker {
     }
 
     fn update_compatibility_matrix(&mut self) {
-        let Some(ref lib_mutex) = self.library else { return; };
-        if self.dirty_ids.is_empty() { return; }
+        if self.dirty_ids.is_empty() {
+            return;
+        }
+        let Some(ref lib_mutex) = self.library else {
+            self.dirty_ids.clear();
+            return;
+        };
+
+        let dirty_list: Vec<u64> = self.dirty_ids.drain().collect();
 
         let tracks = {
             let lib = lib_mutex.lock();
@@ -186,18 +193,14 @@ impl AnalysisWorker {
             t
         };
 
-        let dirty_list: Vec<u64> = self.dirty_ids.drain().collect();
+        if tracks.is_empty() {
+            return;
+        }
+
         for id in dirty_list {
             if let Some(track) = tracks.iter().find(|t| t.id == id) {
                 let compatibility = nullherz_dna::Matchmaker::rank_compatibility(&(*track.metadata).dna, &tracks, 10);
                 self.compatibility_matrix.insert(id, compatibility);
-            }
-        }
-
-        for track in &tracks {
-            if !self.compatibility_matrix.contains_key(&track.id) {
-                 let compatibility = nullherz_dna::Matchmaker::rank_compatibility(&(*track.metadata).dna, &tracks, 10);
-                 self.compatibility_matrix.insert(track.id, compatibility);
             }
         }
     }
