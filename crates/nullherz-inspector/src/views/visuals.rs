@@ -1219,11 +1219,26 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
 
                                                                 if channel.generator == state::VisualGenerator::SnnCorticalField {
                                                                     ui.add_space(2.0);
+                                                                    egui::ComboBox::from_id_source(format!("snn_palette_viz_{}", c_idx))
+                                                                        .selected_text(egui::RichText::new(channel.engine_snn_cortical_field.palette.name()).size(8.0).strong().color(theme.text_primary))
+                                                                        .width(VIZ_STRIP_W - 28.0)
+                                                                        .show_ui(ui, |ui| {
+                                                                            for palette_item in crate::views::visual_engines::snn_cortical_field::SnnPalette::all() {
+                                                                                ui.selectable_value(&mut channel.engine_snn_cortical_field.palette, *palette_item, palette_item.name());
+                                                                            }
+                                                                        });
+                                                                    ui.add_space(2.0);
+                                                                    ui.horizontal(|ui| {
+                                                                        ui.selectable_value(&mut channel.engine_snn_cortical_field.is_3d_projection, true, "3D");
+                                                                        ui.selectable_value(&mut channel.engine_snn_cortical_field.is_3d_projection, false, "2D");
+                                                                        ui.checkbox(&mut channel.engine_snn_cortical_field.draw_dendrites, "Dendrites");
+                                                                    });
+                                                                    ui.add_space(2.0);
                                                                     ui.horizontal(|ui| {
                                                                         ui.spacing_mut().item_spacing.x = 2.0;
                                                                         nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.engine_snn_cortical_field.decay, 0.50..=0.99, "LEAK", channel_color, 22.0);
                                                                         nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.engine_snn_cortical_field.lateral_coupling, 0.0..=0.50, "LATR", channel_color, 22.0);
-                                                                        nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.engine_snn_cortical_field.spike_flash, 0.0..=2.0, "BLM", channel_color, 22.0);
+                                                                        nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.engine_snn_cortical_field.dendrite_glow, 0.0..=2.0, "DNDR", channel_color, 22.0);
                                                                     });
                                                                 }
                                                             });
