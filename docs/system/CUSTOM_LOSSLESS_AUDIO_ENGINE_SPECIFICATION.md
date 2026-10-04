@@ -10,7 +10,8 @@ The **CLAC** (**C**ustom **L**ossless **A**udio **C**odec) format transforms aud
 3. **Pre-Baked Visual Reactive Envelopes:** 3-band / 16-band ERB spectral energy envelopes embedded in each frame for 0% CPU/GPU VJ FFT cost.
 4. **Interleaved Multi-Stem Architecture:** Sequential single-file handle streaming for up to 16 stems.
 5. **Zero-Cost $O(1)$ Seeking & Mipmaps:** Sample-accurate frame offset seek tables and multiscale visual peak pyramids.
-6. **Mathematical Bit-Exact Transparency:** -107.1 dB THD+N preservation (0.00044% THD+N) with zero distortion shift.
+6. **Baremetal & `#![no_std]` Native:** 100% zero-heap allocation execution, static buffer bounds, integer bitwise unpacking, and Q15/Q31 fixed-point DSP math fallback.
+7. **Mathematical Bit-Exact Transparency:** -107.1 dB THD+N preservation (0.00044% THD+N) with zero distortion shift.
 
 ---
 
@@ -59,7 +60,7 @@ The **CLAC** (**C**ustom **L**ossless **A**udio **C**odec) format transforms aud
 | :--- | :--- | :--- | :--- |
 | `0x00 - 0x03` | `[u8; 4]` | `magic` | Magic Header Bytes: 'C' 'L' 'A' 'C' (`0x434C4143`) |
 | `0x04 - 0x05` | `u16` | `version` | Codec Format Version (`0x0100` -> v1.0) |
-| `0x06 - 0x07` | `u16` | `flags` | Bit 0: Mipmaps, Bit 1: KLT, Bit 2: IEEE Float |
+| `0x06 - 0x07` | `u16` | `flags` | Bit 0: Mipmaps, Bit 1: KLT, Bit 2: Fixed-Point Q31 |
 | `0x08 - 0x0B` | `u32` | `sample_rate` | Sample Frequency in Hz (e.g. 48000, 96000) |
 | `0x0C - 0x0D` | `u16` | `bit_depth` | Bit Depth (16, 24, 32-bit int / IEEE float) |
 | `0x0E - 0x0F` | `u16` | `channels` | Stem Channel Count $M$ (1 .. 64) |
@@ -79,7 +80,7 @@ Embedded directly in the header section:
 
 ### 3. Embedded Multiscale Waveform Peak Mipmaps
 
-Storespacked peak pairs for instant UI rendering without decoding PCM audio:
+Stores packed peak pairs for instant UI rendering without decoding PCM audio:
 - **Level 0 (1:64 reduction):** High-resolution timeline view.
 - **Level 1 (1:512 reduction):** Medium timeline zoom.
 - **Level 2 (1:4096 reduction):** Full-track overview.
@@ -105,11 +106,45 @@ Each frame block packs stem residuals sequentially into a single contiguous memo
 
 ---
 
+## Baremetal & `#![no_std]` Native Execution Strategy
+
+CLAC is engineered to run on **baremetal hardware targets** (e.g., ARM Cortex-M7, Cortex-R5, Cortex-A53, Akai MPC Standalone hardware, microcontrollers) without operating system kernel dependencies, heap allocators, or floating-point hardware units (FPU).
+
+```
++-----------------------------------------------------------------------------------------------+
+|                                BAREMETAL EXECUTION LAYER                                      |
++-----------------------------------------------------------------------------------------------+
+|  • #![no_std] Capable Core DSP Kernel (core + alloc crate integration)                         |
+|  • Static Buffer Allocation: Zero malloc / free calls during stream execution                 |
+|  • Branchless Integer Bit Unpacking: Shift/Mask operations on u32/u64 registers               |
+|  • Q15 / Q31 Fixed-Point Fallback Math: Pure integer Levinson LPC & LMS prediction loops      |
+|  • Pre-Calculated Static tANS Decode Lookup Tables: 2 KB ROM / SRAM footprint                  |
++-----------------------------------------------------------------------------------------------+
+```
+
+### 1. Deterministic Static Memory Bounds
+
+On baremetal targets, memory is statically allocated at compile time or linked to fixed SRAM/SDRAM regions:
+- **Maximum Frame Size ($N_{\text{max}}$):** 2048 samples per block ($8\text{ KB}$ buffer per stereo channel at 32-bit precision).
+- **tANS State Lookup Table:** $1 \dots 2\text{ KB}$ static ROM table initialized in flash (`.rodata`).
+- **Decoder Context Memory Footprint:** $< 16\text{ KB}$ total RAM per active audio channel, allowing 16-stem parallel decoding in embedded SRAM.
+
+### 2. Pure Integer & Q15/Q31 Fixed-Point DSP Math
+
+For targets lacking floating-point units (FPUs) or operating under hard real-time interrupt deadlines:
+- **Integer Lifting Ladders:** Multi-channel KLT matrix transformations use pure integer arithmetic ($\lfloor \alpha \cdot x + 0.5 \rfloor$), guaranteeing exact bit-level reversibility on 32-bit RISC/ARM registers.
+- **Q31 Fixed-Point LPC Prediction:** Predictor coefficients $a_1 \dots a_P$ are quantized to Q31 fixed-point integers ($[-1.0, +1.0) \to [-2^{31}, 2^{31}-1]$).
+- **Saturating Multiply-Accumulate (MAC):** Utilizes hardware ARM SIMD MAC instructions (`SMLABB`, `SMLAD`, `SMUAD`) for single-cycle $32 \times 32 \to 64$-bit integer prediction loops.
+
+---
+
 ## Rust Core Engine Traits & Interfaces
 
 ### 1. Zero-Allocation Real-Time Decoder (`crates/clac-core/src/traits.rs`)
 
 ```rust
+#![no_std]
+
 use core::fmt::Debug;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,16 +157,18 @@ pub enum CodecError {
 }
 
 /// Real-time safe, zero-allocation frame decoder interface.
+/// Operates natively under #![no_std] without heap allocation.
 pub trait AudioFrameDecoder: Send {
-    /// Decodes a single .clac frame bitstream into planar float/pcm audio buffers.
+    /// Decodes a single .clac frame bitstream into planar fixed-point or float output slices.
     ///
-    /// # Real-Time Safety Guarantees
-    /// - MUST NOT allocate memory on the heap (no malloc/free).
-    /// - MUST NOT execute blocking syscalls or mutex locks.
-    fn decode_frame(
+    /// # Baremetal & Real-Time Safety Guarantees
+    /// - 100% Zero Heap Allocation (no malloc / free / Vec).
+    /// - Zero Blocking Syscalls, File I/O, or OS Mutexes.
+    /// - Deterministic Bounded Execution Time (O(N) cycles per frame).
+    fn decode_frame_q31(
         &mut self,
         bitstream_payload: &[u8],
-        output_channels: &mut [&mut [f32]],
+        output_channels: &mut [&mut [i32]],
     ) -> Result<usize, CodecError>;
 
     /// Resets predictor states for seamless sample-accurate seeking.
@@ -139,14 +176,15 @@ pub trait AudioFrameDecoder: Send {
 }
 
 /// Asynchronous background frame encoder interface.
+#[cfg(feature = "std")]
 pub trait AudioFrameEncoder: Send {
     fn encode_frame(
         &mut self,
         input_channels: &[&[f32]],
-        bitstream_out: &mut Vec<u8>,
+        bitstream_out: &mut alloc::vec::Vec<u8>,
     ) -> Result<usize, CodecError>;
 
-    fn flush(&mut self, bitstream_out: &mut Vec<u8>) -> Result<usize, CodecError>;
+    fn flush(&mut self, bitstream_out: &mut alloc::vec::Vec<u8>) -> Result<usize, CodecError>;
 }
 ```
 
