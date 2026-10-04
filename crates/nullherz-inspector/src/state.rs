@@ -1208,6 +1208,18 @@ impl SpikingNeuronNetwork {
             self.motor_outputs[m] += (target_motor - self.motor_outputs[m]) * 0.25;
         }
     }
+
+    /// Extract global spike firing ratio for bloom & shader controls
+    pub fn global_spike_density(&self) -> f32 {
+        let fired = self.spikes.iter().filter(|&&s| s).count();
+        fired as f32 / self.spikes.len() as f32
+    }
+
+    /// Extract mean membrane voltage across the network
+    pub fn avg_membrane_voltage(&self) -> f32 {
+        let sum: f32 = self.v.iter().sum();
+        sum / self.v.len() as f32
+    }
 }
 
 impl Default for SpikingNeuronNetwork {
@@ -1278,6 +1290,7 @@ impl PixelFeedbackEngine {
     }
 
     /// Step Milkdrop-style pixel feedback warp equation across the buffer
+    #[allow(dead_code)]
     pub fn step_feedback_warp(
         &mut self,
         zoom: f32,
@@ -1287,8 +1300,26 @@ impl PixelFeedbackEngine {
         time: f32,
         motor: &[f32; 16],
     ) {
+        self.step_feedback_warp_snn(zoom, rot, warp_freq, decay, time, motor, 0.0, 0.0);
+    }
+
+    /// Step Milkdrop-style pixel feedback warp equation coupled with SNN spiking field density and membrane voltage wavefronts
+    pub fn step_feedback_warp_snn(
+        &mut self,
+        zoom: f32,
+        rot: f32,
+        warp_freq: f32,
+        decay: f32,
+        time: f32,
+        motor: &[f32; 16],
+        spike_density: f32,
+        avg_voltage: f32,
+    ) {
         let half_w = self.width as f32 * 0.5;
         let half_h = self.height as f32 * 0.5;
+
+        let spike_zoom_boost = spike_density * 0.08;
+        let effective_zoom = zoom + spike_zoom_boost;
 
         for y in 0..self.height {
             let ny = (y as f32 - half_h) / half_h;
@@ -1298,9 +1329,9 @@ impl PixelFeedbackEngine {
                 let r = (nx * nx + ny * ny).sqrt();
                 let theta = ny.atan2(nx);
 
-                // Per-pixel warp coordinates
-                let warped_r = r * zoom + (theta * warp_freq + time * 2.0).sin() * 0.02 * motor[0];
-                let warped_theta = theta + rot + (r * 3.0 + time).cos() * 0.03 * motor[1];
+                // Per-pixel warp coordinates coupled with SNN spike density & voltage waves
+                let warped_r = r * effective_zoom + (theta * warp_freq + time * 2.0 + avg_voltage * 0.1).sin() * 0.02 * motor[0];
+                let warped_theta = theta + rot + (r * 3.0 + time + spike_density * 2.0).cos() * 0.03 * motor[1];
 
                 let u = (warped_r * warped_theta.cos() + 1.0) * 0.5;
                 let v = (warped_r * warped_theta.sin() + 1.0) * 0.5;
@@ -1311,12 +1342,22 @@ impl PixelFeedbackEngine {
                 let pix_b = self.sample_front_bilinear(u - 0.003 * motor[2], v)[2];
 
                 let idx = y * self.width + x;
-                self.back_buffer[idx] = [
-                    (pix_r as f32 * decay) as u8,
-                    (pix_g as f32 * decay) as u8,
-                    (pix_b as f32 * decay) as u8,
-                    255,
-                ];
+                if spike_density > 0.08 {
+                    let flash = ((spike_density * 80.0) as u8).min(60);
+                    self.back_buffer[idx] = [
+                        ((pix_r as f32 * decay) as u8).saturating_add(flash),
+                        ((pix_g as f32 * decay) as u8).saturating_add(flash / 2),
+                        ((pix_b as f32 * decay) as u8).saturating_add(flash / 4),
+                        255,
+                    ];
+                } else {
+                    self.back_buffer[idx] = [
+                        (pix_r as f32 * decay) as u8,
+                        (pix_g as f32 * decay) as u8,
+                        (pix_b as f32 * decay) as u8,
+                        255,
+                    ];
+                }
             }
         }
 
@@ -1426,6 +1467,7 @@ pub enum VisualGenerator {
     ReactionDiffusion,
     NeuralRaymarcher,
     NeuralNcaMesh,
+    SnnCorticalField,
 }
 
 impl VisualGenerator {
@@ -1438,6 +1480,7 @@ impl VisualGenerator {
             Self::ReactionDiffusion => "Turing Pattern Gray-Scott Morphogenesis",
             Self::NeuralRaymarcher => "Latent Signed Distance Field Raymarcher",
             Self::NeuralNcaMesh => "3D Neural Cellular Automata Mesh Growth",
+            Self::SnnCorticalField => "Spiking Cortical Membrane Potential Field",
         }
     }
 
@@ -1450,6 +1493,7 @@ impl VisualGenerator {
             Self::ReactionDiffusion,
             Self::NeuralRaymarcher,
             Self::NeuralNcaMesh,
+            Self::SnnCorticalField,
         ]
     }
 }
@@ -1775,6 +1819,7 @@ pub struct VisualChannel {
     pub engine_reaction_diffusion: crate::views::visual_engines::reaction_diffusion::ReactionDiffusionEngine,
     pub engine_neural_raymarcher: crate::views::visual_engines::neural_raymarcher::NeuralRaymarcherEngine,
     pub engine_neural_nca_mesh: crate::views::visual_engines::neural_nca_mesh::NeuralNcaMeshEngine,
+    pub engine_snn_cortical_field: crate::views::visual_engines::snn_cortical_field::SnnCorticalFieldEngine,
 }
 
 impl VisualChannel {
@@ -1853,6 +1898,7 @@ impl VisualChannel {
             engine_reaction_diffusion: crate::views::visual_engines::reaction_diffusion::ReactionDiffusionEngine::new(),
             engine_neural_raymarcher: crate::views::visual_engines::neural_raymarcher::NeuralRaymarcherEngine::new(),
             engine_neural_nca_mesh: crate::views::visual_engines::neural_nca_mesh::NeuralNcaMeshEngine::new(),
+            engine_snn_cortical_field: crate::views::visual_engines::snn_cortical_field::SnnCorticalFieldEngine::new(),
         }
     }
 }
