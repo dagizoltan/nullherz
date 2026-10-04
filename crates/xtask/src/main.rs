@@ -33,7 +33,7 @@ fn main() {
         Commands::Up { backend } => {
             println!("🚀 Starting Nullherz Inspector...");
             let mut cmd = Command::new("cargo");
-            cmd.arg("run").arg("--bin").arg("nullherz-inspector");
+            cmd.arg("run").arg("-p").arg("nullherz-inspector").arg("--bin").arg("nullherz-inspector");
 
             if let Some(b) = backend {
                 cmd.env("NULLHERZ_BACKEND", b);
@@ -48,7 +48,7 @@ fn main() {
         Commands::StoreUp => {
             println!("🛒 Launching Nullherz Store Server...");
             let mut cmd = Command::new("cargo");
-            cmd.arg("run").arg("--bin").arg("nullherz-server");
+            cmd.arg("run").arg("-p").arg("nullherz").arg("--bin").arg("nullherz-server");
 
             let status = cmd.status().expect("Failed to execute cargo run --bin nullherz-server");
             if !status.success() {
