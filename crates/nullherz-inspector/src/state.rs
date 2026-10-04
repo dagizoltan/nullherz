@@ -268,6 +268,7 @@ pub struct MixerState {
     pub stem_eq_mid: [[f32; 12]; 16],
     pub stem_eq_high: [[f32; 12]; 16],
     pub stem_controls_expanded: [bool; 16],
+    pub focused_detail_channel: usize,
 }
 
 impl Default for MixerState {
@@ -277,6 +278,7 @@ impl Default for MixerState {
             channel_input_sources: [ChannelInputSource::Track; 16],
             master_output_source: MasterOutput::MainSpeakers,
             waveform_styles: [nullherz_ui_hal::render::waveform_renderer::WaveformStyle::MultiBand; 16],
+            focused_detail_channel: 0,
             channel_faders: [1.0; 16],
             channel_gain: [1.0; 16],
             channel_pitch: [1.0; 16],

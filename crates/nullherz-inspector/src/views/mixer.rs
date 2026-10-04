@@ -372,8 +372,12 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
             ui.set_width(STRIP_W);
             ui.vertical(|ui| {
                 let header_resp = ui.horizontal(|ui| {
-                    ui.add_space((STRIP_W - 40.0).max(0.0) / 2.0);
+                    ui.add_space((STRIP_W - 60.0).max(0.0) / 2.0);
                     ui.label(RichText::new(format!("CH {}", (b'A' + (i % 26) as u8) as char)).strong().size(theme.type_body).color(deck_color));
+                    if ui.add(egui::Button::new(RichText::new("🔍").size(9.0)).fill(theme.bg_inset)).on_hover_text("Open Channel Inspector").clicked() {
+                        app.mixer.focused_detail_channel = i;
+                        app.active_view = crate::View::ChannelDetail;
+                    }
                 });
                 if header_resp.response.interact(egui::Sense::click()).clicked() {
                     app.decks.focused_deck = i;
@@ -993,8 +997,12 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
             ui.set_width(STRIP_W);
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.add_space((STRIP_W - 52.0).max(0.0) / 2.0);
+                    ui.add_space((STRIP_W - 70.0).max(0.0) / 2.0);
                     ui.label(RichText::new("MASTER").strong().size(theme.type_body).color(accent));
+                    if ui.add(egui::Button::new(RichText::new("🔍").size(9.0)).fill(theme.bg_inset)).on_hover_text("Open Channel Inspector").clicked() {
+                        app.mixer.focused_detail_channel = 20;
+                        app.active_view = crate::View::ChannelDetail;
+                    }
                 });
                 ui.add_space(theme.space_xs);
 
