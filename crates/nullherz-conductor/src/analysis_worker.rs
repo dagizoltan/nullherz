@@ -28,6 +28,7 @@ pub struct AnalysisWorker {
     /// invisible to the reaper exactly when it matters. An `Arc` survives the
     /// move; the conductor holds the other end from construction.
     processed_ids: Arc<parking_lot::Mutex<std::collections::HashSet<u64>>>,
+    pending_requests: Arc<parking_lot::Mutex<std::collections::HashSet<u64>>>,
     compatibility_matrix: std::collections::HashMap<u64, Vec<(u64, f32)>>,
     dirty_ids: std::collections::HashSet<u64>,
 }
@@ -39,6 +40,7 @@ impl AnalysisWorker {
             library: None,
             stem_worker: None,
             processed_ids: Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new())),
+            pending_requests: Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new())),
             compatibility_matrix: std::collections::HashMap::new(),
             dirty_ids: std::collections::HashSet::new(),
         }
@@ -54,8 +56,18 @@ impl AnalysisWorker {
         self
     }
 
+    pub fn with_pending_requests(mut self, pending: Arc<parking_lot::Mutex<std::collections::HashSet<u64>>>) -> Self {
+        self.pending_requests = pending;
+        self
+    }
+
+    pub fn pending_requests_handle(&self) -> Arc<parking_lot::Mutex<std::collections::HashSet<u64>>> {
+        self.pending_requests.clone()
+    }
+
     pub fn request_analysis(&mut self, id: u64) {
         self.processed_ids.lock().remove(&id);
+        self.pending_requests.lock().insert(id);
     }
 
     pub fn start(mut self) {
@@ -84,8 +96,18 @@ impl AnalysisWorker {
     }
 
     fn run_once(&mut self) {
-        let ids = self.sample_registry.list_ids();
-        let unprocessed_ids: Vec<u64> = ids.into_iter()
+        let requested_ids: Vec<u64> = {
+            let mut pending = self.pending_requests.lock();
+            let ids: Vec<u64> = pending.iter().copied().collect();
+            pending.clear();
+            ids
+        };
+
+        if requested_ids.is_empty() {
+            return;
+        }
+
+        let unprocessed_ids: Vec<u64> = requested_ids.into_iter()
             .filter(|id| !self.processed_ids.lock().contains(id))
             .collect();
 
@@ -166,11 +188,6 @@ impl AnalysisWorker {
                         let _ = lib.save_track(&track);
                         println!("AnalysisWorker: Enriched metadata for ID={}", id);
                     }
-                }
-            }
-            if let Some(ref worker) = self.stem_worker {
-                for (id, _) in &tracks_to_save {
-                    worker.request_extraction(*id);
                 }
             }
         }
