@@ -1,12 +1,14 @@
-use egui::{Ui, Frame, Vec2, Sense, RichText};
+use egui::{Ui, Frame, Vec2, Sense, RichText, Rounding, Stroke, Margin};
 use crate::InspectorApp;
 use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
+use nullherz_traits::{Command, CoreCommand, MidiEvent, TopologyCommand};
+use nullherz_dna::{GeneticLibrary, SampleDrumKitPreset, SynthDrumKitPreset, NeuralDrumKitPreset};
 
 #[allow(clippy::collapsible_if)]
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     ui.horizontal(|ui| {
-        ui.heading("Production Sampler & Capture");
+        ui.heading("Production Sampler & Drum Machine Matrix");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if app.sampler.sampler_is_recording {
                 let time = ui.input(|i| i.time);
@@ -15,23 +17,21 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             }
         });
     });
-    ui.add_space(10.0);
+    ui.add_space(8.0);
 
-    // Waveform Preview Area - Decoupled to Theme tokens
+    // Waveform Preview Area
     Frame::none()
         .fill(app.theme.bg_dark)
         .rounding(app.theme.radius_md)
         .stroke(app.theme.border_stroke)
         .inner_margin(app.theme.space_md)
         .show(ui, |ui| {
-            let (rect, _response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 160.0), Sense::hover());
+            let (rect, _response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 120.0), Sense::hover());
 
             if let (Some(wgpu_mtx), Some(wf_mtx)) = (&app.wgpu_renderer, &app.waveform_renderer) {
                  let _wgpu = wgpu_mtx.lock();
                  let mut wf = wf_mtx.lock();
 
-                 // Standalone sample preview: only read explicit sampler source track,
-                 // NOT auto-coupling or running with playing deck tracks.
                  if let Some(track_id) = app.sampler.source_track {
                      if let Some(track) = app.get_cached_track(track_id) {
                          wf.update_from_mip_waveform(&_wgpu.queue, &track.metadata.mip_waveform, app.sampler.sampler_waveform_zoom, rect.width() as u32, app.theme.accent.to_array().map(|v| v as f32 / 255.0));
@@ -45,7 +45,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             }
         });
 
-    ui.add_space(8.0);
+    ui.add_space(6.0);
     ui.horizontal(|ui| {
         ui.label("Zoom:");
         ui.add(egui::Slider::new(&mut app.sampler.sampler_waveform_zoom, 1.0..=32.0).logarithmic(true).show_value(false));
@@ -54,7 +54,222 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         });
     });
 
-    ui.add_space(15.0);
+    ui.add_space(12.0);
+
+    // 16-PAD DRUM MACHINE MATRIX & KIT PRESETS
+    Frame::none()
+        .fill(app.theme.bg_surface)
+        .rounding(app.theme.radius_md)
+        .stroke(app.theme.border_stroke)
+        .inner_margin(app.theme.space_md)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading(RichText::new("DRUM MACHINE 16-PAD MATRIX").strong().size(app.theme.type_body));
+                ui.add_space(10.0);
+
+                // Kit Preset Hot-loading
+                ui.label(RichText::new("PRESET KIT:").strong().size(app.theme.type_caption).color(app.theme.text_secondary));
+                if ui.add(egui::Button::new(RichText::new("SAMPLE KIT").size(app.theme.type_caption).strong()).fill(app.theme.accent.linear_multiply(0.2))).clicked() {
+                    let preset = SampleDrumKitPreset::default();
+                    for pad in &preset.pads {
+                        let idx = pad.pad_index as usize;
+                        if idx < 16 {
+                            if let Some(ref path) = pad.sample_path {
+                                app.composer.track_targets[idx] = path.to_string();
+                            }
+                        }
+                    }
+                }
+                if ui.add(egui::Button::new(RichText::new("ANALOG SYNTH KIT").size(app.theme.type_caption).strong()).fill(app.theme.warning.linear_multiply(0.2))).clicked() {
+                    let _preset = SynthDrumKitPreset::default();
+                }
+                if ui.add(egui::Button::new(RichText::new("CORTICAL NEURAL KIT").size(app.theme.type_caption).strong()).fill(app.theme.success.linear_multiply(0.2))).clicked() {
+                    let _preset = NeuralDrumKitPreset::default();
+                }
+            });
+
+            ui.add_space(8.0);
+
+            // 4x4 Pad Grid Layout
+            egui::Grid::new("drum_pads_4x4_grid")
+                .num_columns(4)
+                .spacing([8.0, 8.0])
+                .show(ui, |ui| {
+                    for row in 0..4 {
+                        for col in 0..4 {
+                            let pad_idx = row * 4 + col;
+                            let note = (36 + pad_idx) as u8;
+                            let deck_color = crate::InspectorApp::deck_color(&app.theme, pad_idx % 4);
+
+                            Frame::none()
+                                .fill(deck_color.gamma_multiply(0.15))
+                                .rounding(Rounding::same(app.theme.radius_sm))
+                                .stroke(Stroke::new(1.0, deck_color))
+                                .inner_margin(Margin::same(6.0))
+                                .show(ui, |ui| {
+                                    ui.set_width(125.0);
+                                    ui.vertical(|ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(format!("PAD {:02}", pad_idx + 1)).strong().size(app.theme.type_caption).color(app.theme.text_primary));
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                ui.label(RichText::new(format!("N{}", note)).size(8.0).color(app.theme.text_secondary));
+                                            });
+                                        });
+
+                                        ui.add_space(2.0);
+
+                                        // Trigger Button
+                                        let trig_btn = egui::Button::new(RichText::new("▶ TRIGGER").size(10.0).strong().color(app.theme.text_primary))
+                                            .fill(deck_color.linear_multiply(0.4));
+                                        if ui.add_sized([115.0, 24.0], trig_btn).clicked() {
+                                            let event = MidiEvent {
+                                                timestamp_samples: 0,
+                                                status: 0x90,
+                                                data1: note,
+                                                data2: 120,
+                                                _pad: 0,
+                                            };
+                                            let _ = app.command_sender.send(Command::Core(CoreCommand::InjectMidi(event)));
+                                        }
+
+                                        ui.add_space(2.0);
+
+                                        // Sample Picker Dropdown per pad
+                                        let current_src = app.composer.track_sources[pad_idx];
+                                        let cached_track = current_src.and_then(|id| app.get_cached_track(id));
+                                        let label = cached_track.as_ref()
+                                            .map(|t| format!("♪ {}", t.title))
+                                            .unwrap_or_else(|| "⊕ SELECT SAMPLE".to_string());
+
+                                        egui::ComboBox::from_id_source(format!("pad_sample_sel_{}", pad_idx))
+                                            .width(115.0)
+                                            .selected_text(RichText::new(&label).size(8.0).strong())
+                                            .show_ui(ui, |ui| {
+                                                if ui.selectable_label(current_src.is_none(), "(None)").clicked() {
+                                                    app.composer.track_sources[pad_idx] = None;
+                                                }
+                                                for lib_track in &app.library.cached_library_raw {
+                                                    let is_sel = current_src == Some(lib_track.id);
+                                                    if ui.selectable_label(is_sel, format!("♪ {}", lib_track.title)).clicked() {
+                                                        app.composer.track_sources[pad_idx] = Some(lib_track.id);
+                                                        if let Some(dm_node) = app.get_node_id("drum_machine_node") {
+                                                            let db = app.library_db.0.lock();
+                                                            if let Some(_buffer) = db.get_track(lib_track.id).ok().flatten().map(|t| nullherz_traits::SampleBuffer::from(t.metadata.peaks.as_slice().to_vec())) {
+                                                                let _ = app.command_sender.send(Command::Topology(TopologyCommand::AddNode {
+                                                                    processor_type_id: nullherz_traits::ProcessorTypeId::SAMPLE_DRUM_MACHINE,
+                                                                    node_idx: dm_node,
+                                                                }));
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            });
+
+                                        ui.add_space(2.0);
+
+                                        // Subchannel Output Selector
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new("SUBCH").size(8.0).color(app.theme.text_secondary));
+                                            let mut sub_ch = pad_idx;
+                                            if ui.add(egui::DragValue::new(&mut sub_ch).clamp_range(0..=15)).changed() {
+                                                if let Some(dm_node) = app.get_node_id("drum_machine_node") {
+                                                    let _ = app.command_sender.send(Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                        target_id: dm_node as u64,
+                                                        param_id: (pad_idx * 16 + 9) as u32,
+                                                        value: sub_ch as f32,
+                                                        ramp_duration_samples: 0,
+                                                    }));
+                                                }
+                                            }
+                                        });
+                                    });
+                                });
+                        }
+                        ui.end_row();
+                    }
+                });
+        });
+
+    ui.add_space(12.0);
+
+    // SUBCHANNEL MIXER STRIPS SECTION
+    Frame::none()
+        .fill(app.theme.bg_surface)
+        .rounding(app.theme.radius_md)
+        .stroke(app.theme.border_stroke)
+        .inner_margin(app.theme.space_md)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading(RichText::new("DRUM SUBCHANNEL MIXER STRIPS").strong().size(app.theme.type_body));
+                ui.add_space(10.0);
+                ui.label(RichText::new("16 INDIVIDUAL SUBCHANNEL STRIPS WITH TRIMS & EQ").size(app.theme.type_caption).color(app.theme.accent));
+            });
+
+            ui.add_space(8.0);
+
+            egui::ScrollArea::horizontal()
+                .id_source("drum_subchannel_mixer_scroll")
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+
+                        for sub_idx in 0..16 {
+                            let track_color = crate::InspectorApp::deck_color(&app.theme, sub_idx % 4);
+
+                            Frame::none()
+                                .fill(app.theme.bg_dark)
+                                .rounding(Rounding::same(app.theme.radius_sm))
+                                .stroke(Stroke::new(1.0, track_color))
+                                .inner_margin(Margin::same(6.0))
+                                .show(ui, |ui| {
+                                    ui.set_width(75.0);
+                                    ui.vertical_centered(|ui| {
+                                        ui.label(RichText::new(format!("SUB {:02}", sub_idx + 1)).strong().size(9.0).color(app.theme.text_primary));
+
+                                        ui.add_space(4.0);
+
+                                        // Trim Gain
+                                        ui.label(RichText::new("TRIM").size(7.0).color(app.theme.text_secondary));
+                                        let mut gain_val = app.mixer.channel_gain[sub_idx];
+                                        if ui.add(egui::Slider::new(&mut gain_val, 0.0..=2.0).show_value(false)).changed() {
+                                            app.mixer.channel_gain[sub_idx] = gain_val;
+                                        }
+
+                                        ui.add_space(4.0);
+
+                                        // 3-Band EQ Knobs
+                                        ui.label(RichText::new("EQ LOW").size(7.0).color(app.theme.text_secondary));
+                                        ui.add(egui::Slider::new(&mut app.mixer.channel_eq_low[sub_idx], 0.0..=2.0).show_value(false));
+
+                                        ui.label(RichText::new("EQ MID").size(7.0).color(app.theme.text_secondary));
+                                        ui.add(egui::Slider::new(&mut app.mixer.channel_eq_mid[sub_idx], 0.0..=2.0).show_value(false));
+
+                                        ui.label(RichText::new("EQ HIGH").size(7.0).color(app.theme.text_secondary));
+                                        ui.add(egui::Slider::new(&mut app.mixer.channel_eq_high[sub_idx], 0.0..=2.0).show_value(false));
+
+                                        ui.add_space(4.0);
+
+                                        // Fader
+                                        let mut fader_val = app.mixer.channel_faders[sub_idx];
+                                        if ui.add(egui::Slider::new(&mut fader_val, 0.0..=1.2).vertical().show_value(false)).changed() {
+                                            app.mixer.channel_faders[sub_idx] = fader_val;
+                                        }
+
+                                        ui.add_space(2.0);
+
+                                        // Peak VU Meter
+                                        if let Some(t) = telemetry {
+                                            let lvl = t.peak_levels.get(sub_idx).cloned().unwrap_or(0.0);
+                                            widgets::render_vu_meter(ui, lvl, app.mixer.channel_peak_hold[sub_idx], track_color, 45.0);
+                                        }
+                                    });
+                                });
+                        }
+                    });
+                });
+        });
+
+    ui.add_space(12.0);
 
     // Standalone Capture Controls Panel
     ui.vertical(|ui| {
@@ -84,14 +299,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         &options,
                     );
                     if app.sampler.sampler_input_source != old_source {
-                        // Routing Logic: Connect selected source to Capture node
                         let src_node = match app.sampler.sampler_input_source {
                             0 => app.get_node_id("master_sum_l"),
                             1 => app.get_node_id("deck_a_gain"),
                             2 => app.get_node_id("deck_b_gain"),
                             3 => app.get_node_id("deck_c_gain"),
                             4 => app.get_node_id("deck_d_gain"),
-                            _ => None, // Hardware In: no graph source
+                            _ => None,
                         };
                         if let (Some(src_node), Some(capture_node)) = (src_node, app.get_node_id("capture_node")) {
                             let _ = app.command_sender.send(nullherz_traits::Command::Topology(nullherz_traits::TopologyCommand::Connect {

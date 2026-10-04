@@ -156,6 +156,7 @@ fn test_ui_node_names_resolve_in_the_bootstrapped_graph() {
     // fails here instead of silently doing nothing.
     let mut required: Vec<String> = vec![
         "capture_node".into(),
+        "drum_machine_node".into(),
         "master_eq".into(),
         "master_sum_l".into(),
         "master_limiter".into(),
