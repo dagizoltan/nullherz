@@ -381,6 +381,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             for track_idx in 0..num_active_channels {
                                 let track_color = crate::InspectorApp::deck_color(&app.theme, track_idx % 4);
                                 let is_muted = app.composer.track_mutes[track_idx];
+                                let is_selected = app.composer.selected_composer_track == Some(track_idx);
 
                                 // Resolve track source sample / metadata
                                 let src_id = app.composer.track_sources[track_idx]
@@ -467,6 +468,70 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         }
                                     }
                                 });
+
+                                // 16-Subchannel Subgrid Composition for Selected/Instrument Track
+                                if is_selected {
+                                    ui.add_space(4.0);
+                                    let sub_labels = [
+                                        "SUB 01 KICK", "SUB 02 SNARE", "SUB 03 HH-CL", "SUB 04 HH-OP",
+                                        "SUB 05 TOM-LO", "SUB 06 TOM-MID", "SUB 07 TOM-HI", "SUB 08 PERC 1",
+                                        "SUB 09 PERC 2", "SUB 10 CLAP", "SUB 11 RIDE", "SUB 12 CRASH",
+                                        "SUB 13 FX 1", "SUB 14 FX 2", "SUB 15 AUX 1", "SUB 16 AUX 2",
+                                    ];
+
+                                    for sub_i in 0..16 {
+                                        ui.horizontal(|ui| {
+                                            ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
+                                            let sub_label = sub_labels[sub_i];
+
+                                            for slot_idx in 0..steps_count {
+                                                if slot_idx > 0 && slot_idx % steps_per_beat == 0 {
+                                                    ui.add_space(4.0);
+                                                }
+                                                if slot_idx > 0 && slot_idx % steps_per_bar == 0 {
+                                                    ui.add_space(6.0);
+                                                }
+
+                                                let (rect, response) = ui.allocate_exact_size(Vec2::new(slot_w, 22.0), Sense::click());
+                                                let vel_sub = app.composer.sequencer_grid[grid_deck][sub_i % 16][slot_idx];
+
+                                                let bg_sub = if vel_sub > 0.0 {
+                                                    track_color.gamma_multiply(0.4)
+                                                } else {
+                                                    track_color.gamma_multiply(0.05)
+                                                };
+
+                                                ui.painter().rect_filled(rect, Rounding::same(2.0), bg_sub);
+                                                ui.painter().rect_stroke(rect, Rounding::same(2.0), Stroke::new(0.8, if vel_sub > 0.0 { track_color } else { app.theme.border_stroke.color }));
+
+                                                if slot_idx == 0 {
+                                                    ui.painter().text(
+                                                        rect.left_center() + Vec2::new(4.0, 0.0),
+                                                        egui::Align2::LEFT_CENTER,
+                                                        sub_label,
+                                                        egui::FontId::new(7.5, egui::FontFamily::Monospace),
+                                                        app.theme.text_primary,
+                                                    );
+                                                }
+
+                                                if response.clicked() {
+                                                    let is_on = app.composer.sequencer_grid[grid_deck][sub_i % 16][slot_idx] == 0.0;
+                                                    let val = if is_on { 1.0 } else { 0.0 };
+                                                    app.composer.sequencer_grid[grid_deck][sub_i % 16][slot_idx] = val;
+                                                    if let Some(target_node) = app.get_node_id("drum_machine_node").or(Some(seq_node)) {
+                                                        let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
+                                                            node_idx: target_node,
+                                                            track: sub_i as u32,
+                                                            step: slot_idx as u32,
+                                                            value: val,
+                                                        }));
+                                                    }
+                                                }
+                                            }
+                                        });
+                                        ui.add_space(2.0);
+                                    }
+                                }
 
                                 if track_idx < num_active_channels - 1 {
                                     ui.add_space(6.0);
