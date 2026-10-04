@@ -1,0 +1,104 @@
+[
+  {
+    "asset_id": "neural-saturation",
+    "name": "Neural Saturation",
+    "kind": "AudioInsert",
+    "version": "1.0.0",
+    "author": "Nullherz Core",
+    "is_free": true,
+    "download_size_bytes": 0,
+    "tags": [
+      "neural",
+      "insert",
+      "saturation"
+    ],
+    "description": "Official Nullherz Neural Saturation sidecar module.",
+    "signature": null,
+    "binary_filename": "neural-saturation"
+  },
+  {
+    "asset_id": "algorithmic-delay",
+    "name": "Algorithmic Delay",
+    "kind": "AudioInsert",
+    "version": "1.0.0",
+    "author": "Nullherz Core",
+    "is_free": true,
+    "download_size_bytes": 0,
+    "tags": [
+      "delay",
+      "insert",
+      "algo"
+    ],
+    "description": "Official Nullherz Algorithmic Delay sidecar module.",
+    "signature": null,
+    "binary_filename": "algorithmic-delay"
+  },
+  {
+    "asset_id": "phase-goniometer-2d",
+    "name": "Phase Goniometer 2D",
+    "kind": "VisualInsert",
+    "version": "1.0.0",
+    "author": "Nullherz Core",
+    "is_free": true,
+    "download_size_bytes": 0,
+    "tags": [
+      "visual",
+      "goniometer",
+      "2d"
+    ],
+    "description": "Official Nullherz Phase Goniometer 2D sidecar module.",
+    "signature": null,
+    "binary_filename": "phase-goniometer-2d"
+  },
+  {
+    "asset_id": "algorithmic-synth",
+    "name": "Algorithmic Synth",
+    "kind": "AudioInstrument",
+    "version": "1.0.0",
+    "author": "Nullherz Core",
+    "is_free": true,
+    "download_size_bytes": 0,
+    "tags": [
+      "instrument",
+      "synth",
+      "algo"
+    ],
+    "description": "Official Nullherz Algorithmic Synth sidecar module.",
+    "signature": null,
+    "binary_filename": "algorithmic-synth"
+  },
+  {
+    "asset_id": "reaction-diffusion-nn",
+    "name": "Reaction Diffusion NN",
+    "kind": "VisualGenerator",
+    "version": "1.0.0",
+    "author": "Nullherz Core",
+    "is_free": true,
+    "download_size_bytes": 0,
+    "tags": [
+      "visual",
+      "generator",
+      "neural"
+    ],
+    "description": "Official Nullherz Reaction Diffusion NN sidecar module.",
+    "signature": null,
+    "binary_filename": "reaction-diffusion-nn"
+  },
+  {
+    "asset_id": "fft-spectrum-mesh",
+    "name": "FFT Spectrum Mesh",
+    "kind": "VisualInsert",
+    "version": "1.0.0",
+    "author": "Nullherz Core",
+    "is_free": true,
+    "download_size_bytes": 0,
+    "tags": [
+      "visual",
+      "fft",
+      "mesh"
+    ],
+    "description": "Official Nullherz FFT Spectrum Mesh sidecar module.",
+    "signature": null,
+    "binary_filename": "fft-spectrum-mesh"
+  }
+]

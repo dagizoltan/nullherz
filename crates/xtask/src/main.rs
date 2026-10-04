@@ -51,6 +51,13 @@ fn main() {
                 "autosave.rkyv",
                 "preferences.json",
                 "graph.json",
+                "storage/system_config.json",
+                "storage/graph.json",
+                "storage/autosave.json",
+                "storage/autosave.rkyv",
+                "storage/db/library.redb",
+                "storage/db/library.db",
+                "storage/db/library.db-journal",
             ];
 
             let mut removed_count = 0;

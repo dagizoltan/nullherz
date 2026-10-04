@@ -262,7 +262,15 @@ where
 
 impl Conductor {
     pub fn new() -> Self {
-        Self::with_library_path("library.redb")
+        let db_path = if std::path::Path::new("storage/db/library.redb").exists() {
+            "storage/db/library.redb"
+        } else if std::path::Path::new("library.redb").exists() {
+            "library.redb"
+        } else {
+            let _ = std::fs::create_dir_all("storage/db");
+            "storage/db/library.redb"
+        };
+        Self::with_library_path(db_path)
     }
 
     pub fn with_library(library: Arc<parking_lot::Mutex<nullherz_dna::LibraryDatabase>>) -> Self {
@@ -601,7 +609,11 @@ impl Conductor {
     }
 
     pub fn load_system_config(&mut self) -> std::io::Result<()> {
-        let path = "system_config.json";
+        let path = if std::path::Path::new("storage/system_config.json").exists() {
+            "storage/system_config.json"
+        } else {
+            "system_config.json"
+        };
         if std::path::Path::new(path).exists() {
             let content = std::fs::read_to_string(path)?;
             if let Ok(config) = serde_json::from_str::<crate::persistence::SystemConfig>(&content) {
@@ -678,7 +690,8 @@ impl Conductor {
         config.period_size = self.period_size;
 
         let json = serde_json::to_string_pretty(&config).map_err(|e| std::io::Error::other(e))?;
-        std::fs::write(path, json)
+        let _ = std::fs::create_dir_all("storage");
+        std::fs::write("storage/system_config.json", json)
     }
 
     pub fn drain_garbage(&mut self) {
@@ -1400,8 +1413,9 @@ impl Conductor {
             self.last_autosave_secs = now;
             let state = self.capture_state();
             spawn_blocking_background(move || {
-                let _ = state.save_to_file("autosave.json");
-                let _ = state.save_to_rkyv("autosave.rkyv");
+                let _ = std::fs::create_dir_all("storage");
+                let _ = state.save_to_file("storage/autosave.json");
+                let _ = state.save_to_rkyv("storage/autosave.rkyv");
                 println!("Conductor: Background Auto-Save complete.");
             });
         }

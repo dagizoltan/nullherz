@@ -7,6 +7,7 @@ use std::io::{Read, Write, Error, ErrorKind};
 use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
 use crate::store::SidecarType;
+use nullherz_dna::AssetManifest;
 
 pub const SIDECAR_MAGIC_HEADER: &[u8; 8] = b"NHZSDCAR";
 pub const SIDECAR_PACKAGE_VERSION: u32 = 1;
@@ -298,6 +299,55 @@ impl SidecarPackageManager {
             thumbnail_path,
         })
     }
+
+    /// Helper to populate store catalog with default mock `.sidecar` bundles and `catalog.json`
+    pub fn populate_store_catalog(output_dir: &Path) -> Result<(), Error> {
+        if !output_dir.exists() {
+            fs::create_dir_all(output_dir)?;
+        }
+
+        let items = vec![
+            ("neural-saturation", "Neural Saturation", SidecarType::AudioInsert, vec!["neural", "insert", "saturation"]),
+            ("algorithmic-delay", "Algorithmic Delay", SidecarType::AudioInsert, vec!["delay", "insert", "algo"]),
+            ("phase-goniometer-2d", "Phase Goniometer 2D", SidecarType::VisualInsert, vec!["visual", "goniometer", "2d"]),
+            ("algorithmic-synth", "Algorithmic Synth", SidecarType::AudioInstrument, vec!["instrument", "synth", "algo"]),
+            ("reaction-diffusion-nn", "Reaction Diffusion NN", SidecarType::VisualGenerator, vec!["visual", "generator", "neural"]),
+            ("fft-spectrum-mesh", "FFT Spectrum Mesh", SidecarType::VisualInsert, vec!["visual", "fft", "mesh"]),
+        ];
+
+        let mut catalog_manifests = Vec::new();
+
+        for (id, name, sidecar_type, tags) in items {
+            let manifest = SidecarPackageManifest {
+                id: id.to_string(),
+                name: name.to_string(),
+                version: "1.0.0".to_string(),
+                author: "Nullherz Core".to_string(),
+                sidecar_type,
+                tags: tags.into_iter().map(|s| s.to_string()).collect(),
+                description: format!("Official Nullherz {} sidecar module.", name),
+                latency_samples: 0,
+                binary_filename: id.to_string(),
+                thumbnail_filename: None,
+                parameter_metadata_filename: None,
+            };
+
+            let dummy_binary = format!("#!/bin/sh\necho \"Nullherz {} Sidecar Executable\"\n", id).into_bytes();
+            let bundle = SidecarBundle::new(manifest.clone(), dummy_binary, None, None);
+
+            let sidecar_path = output_dir.join(format!("{}.sidecar", id));
+            bundle.export_to_file(&sidecar_path)?;
+
+            let asset_manifest: AssetManifest = crate::asset::asset_manifest_from_pkg(&manifest);
+            catalog_manifests.push(asset_manifest);
+        }
+
+        let catalog_json = serde_json::to_string_pretty(&catalog_manifests)
+            .map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
+        fs::write(output_dir.join("catalog.json"), catalog_json)?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -394,6 +444,14 @@ mod tests {
         }
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_populate_store_catalog() {
+        let catalog_dir = Path::new("assets/store_catalog");
+        SidecarPackageManager::populate_store_catalog(catalog_dir).expect("Populating catalog must succeed");
+        assert!(catalog_dir.join("catalog.json").exists());
+        assert!(catalog_dir.join("neural-saturation.sidecar").exists());
     }
 
     #[test]
