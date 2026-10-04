@@ -485,13 +485,18 @@ pub fn render_composite_target_screen(
         let warp_freq = 4.0 + motor[2] * 4.0;
         let decay = (0.88 + channel.param_feedback * 0.10).clamp(0.70, 0.98);
 
-        channel.feedback_engine.step_feedback_warp(
+        let spike_density = channel.neuron_net.global_spike_density().max(channel.engine_snn_cortical_field.global_spike_density());
+        let avg_voltage = channel.neuron_net.avg_membrane_voltage() + channel.engine_snn_cortical_field.avg_voltage();
+
+        channel.feedback_engine.step_feedback_warp_snn(
             zoom,
             rot,
             warp_freq,
             decay,
             time as f32,
             &motor,
+            spike_density,
+            avg_voltage,
         );
 
         apply_visual_insert_chain(
@@ -630,6 +635,7 @@ pub fn render_composite_target_screen(
             state::VisualGenerator::ReactionDiffusion => channel.engine_reaction_diffusion.render(ui, cell_canvas_rect, nervous, genome, telemetry, time as f32),
             state::VisualGenerator::NeuralRaymarcher => channel.engine_neural_raymarcher.render(ui, cell_canvas_rect, nervous, genome, telemetry, time as f32),
             state::VisualGenerator::NeuralNcaMesh => channel.engine_neural_nca_mesh.render(ui, cell_canvas_rect, nervous, genome, telemetry, time as f32),
+            state::VisualGenerator::SnnCorticalField => channel.engine_snn_cortical_field.render(ui, cell_canvas_rect, nervous, genome, telemetry, time as f32),
         }
     }
 
@@ -770,13 +776,18 @@ pub fn render_detached_interactive_surface(
         let warp_freq = 4.0 + motor[2] * 4.0;
         let decay = (0.88 + channel.param_feedback * 0.10).clamp(0.70, 0.98);
 
-        channel.feedback_engine.step_feedback_warp(
+        let spike_density = channel.neuron_net.global_spike_density().max(channel.engine_snn_cortical_field.global_spike_density());
+        let avg_voltage = channel.neuron_net.avg_membrane_voltage() + channel.engine_snn_cortical_field.avg_voltage();
+
+        channel.feedback_engine.step_feedback_warp_snn(
             zoom,
             rot,
             warp_freq,
             decay,
             time as f32,
             &motor,
+            spike_density,
+            avg_voltage,
         );
 
         let fb_w = channel.feedback_engine.width as f32;
@@ -849,6 +860,7 @@ pub fn render_detached_interactive_surface(
             state::VisualGenerator::ReactionDiffusion => channel.engine_reaction_diffusion.render(ui, rect, nervous, genome, telemetry, time as f32),
             state::VisualGenerator::NeuralRaymarcher => channel.engine_neural_raymarcher.render(ui, rect, nervous, genome, telemetry, time as f32),
             state::VisualGenerator::NeuralNcaMesh => channel.engine_neural_nca_mesh.render(ui, rect, nervous, genome, telemetry, time as f32),
+            state::VisualGenerator::SnnCorticalField => channel.engine_snn_cortical_field.render(ui, rect, nervous, genome, telemetry, time as f32),
         }
     }
 }
@@ -1110,7 +1122,10 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                                     let warp_freq = 4.0 + motor[2] * 4.0;
                                                     let decay = (0.88 + channel.param_feedback * 0.10).clamp(0.70, 0.98);
 
-                                                    channel.feedback_engine.step_feedback_warp(zoom, rot, warp_freq, decay, time as f32, &motor);
+                                                    let spike_density = channel.neuron_net.global_spike_density().max(channel.engine_snn_cortical_field.global_spike_density());
+                                                    let avg_voltage = channel.neuron_net.avg_membrane_voltage() + channel.engine_snn_cortical_field.avg_voltage();
+
+                                                    channel.feedback_engine.step_feedback_warp_snn(zoom, rot, warp_freq, decay, time as f32, &motor, spike_density, avg_voltage);
                                                     apply_visual_insert_chain(&mut channel.feedback_engine, &channel.visual_inserts, channel.param_color_shift, time as f32);
 
                                                     let color_image = egui::ColorImage::from_rgba_unmultiplied(
@@ -1140,6 +1155,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                                         state::VisualGenerator::ReactionDiffusion => channel.engine_reaction_diffusion.render(ui, rect, nervous, genome, telemetry, time as f32),
                                                         state::VisualGenerator::NeuralRaymarcher => channel.engine_neural_raymarcher.render(ui, rect, nervous, genome, telemetry, time as f32),
                                                         state::VisualGenerator::NeuralNcaMesh => channel.engine_neural_nca_mesh.render(ui, rect, nervous, genome, telemetry, time as f32),
+                                                        state::VisualGenerator::SnnCorticalField => channel.engine_snn_cortical_field.render(ui, rect, nervous, genome, telemetry, time as f32),
                                                     }
 
                                                     ui.add_space(2.0);
@@ -1200,6 +1216,16 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                                                         app.composer.automation_data.entry(400 + c_idx as u64).or_default().push((t, channel.param_feedback));
                                                                     }
                                                                 });
+
+                                                                if channel.generator == state::VisualGenerator::SnnCorticalField {
+                                                                    ui.add_space(2.0);
+                                                                    ui.horizontal(|ui| {
+                                                                        ui.spacing_mut().item_spacing.x = 2.0;
+                                                                        nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.engine_snn_cortical_field.decay, 0.50..=0.99, "LEAK", channel_color, 22.0);
+                                                                        nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.engine_snn_cortical_field.lateral_coupling, 0.0..=0.50, "LATR", channel_color, 22.0);
+                                                                        nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.engine_snn_cortical_field.spike_flash, 0.0..=2.0, "BLM", channel_color, 22.0);
+                                                                    });
+                                                                }
                                                             });
                                                         });
 

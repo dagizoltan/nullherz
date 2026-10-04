@@ -365,6 +365,14 @@ impl InspectorApp {
                                                 }
                                             }
                                         });
+                                } else if channel.generator == state::VisualGenerator::SnnCorticalField {
+                                    ui.add_space(2.0);
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 2.0;
+                                        nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.engine_snn_cortical_field.decay, 0.50..=0.99, "LEAK", channel_color, 22.0);
+                                        nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.engine_snn_cortical_field.lateral_coupling, 0.0..=0.50, "LATR", channel_color, 22.0);
+                                        nullherz_ui_hal::widgets::render_knob_sized(ui, &mut channel.engine_snn_cortical_field.spike_flash, 0.0..=2.0, "BLM", channel_color, 22.0);
+                                    });
                                 }
 
                                 ui.add_space(2.0);
