@@ -38,13 +38,10 @@ async fn test_analysis_pipeline() {
         }).unwrap();
     }
 
-    let worker = nullherz_conductor::analysis_worker::AnalysisWorker::new(sample_registry.clone())
+    let mut worker = nullherz_conductor::analysis_worker::AnalysisWorker::new(sample_registry.clone())
         .with_library(library.clone());
 
-    // Run analysis manually (one iteration)
-    // We need to use a small hack to call run_once if it's private,
-    // or just use the public start and wait.
-    // Let's just call start and sleep briefly.
+    worker.request_analysis(sample_id);
     worker.start();
 
     // Wait for analysis
@@ -91,11 +88,9 @@ async fn test_root_key_detection() {
     let sample_id = 999;
     sample_registry.register(sample_id, Arc::new(buffer).into());
 
-    let worker = nullherz_conductor::analysis_worker::AnalysisWorker::new(sample_registry.clone());
+    let mut worker = nullherz_conductor::analysis_worker::AnalysisWorker::new(sample_registry.clone());
 
-    // Use the internal detect_root_key via a registry update and wait for background thread if we used start(),
-    // but for unit test we can just call the logic via a hack or by making it public.
-    // Given the current structure, we'll wait for the background analysis.
+    worker.request_analysis(sample_id);
     worker.start();
 
     let mut detected_key = None;
