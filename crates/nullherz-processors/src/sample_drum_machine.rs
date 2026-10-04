@@ -308,16 +308,15 @@ impl AudioProcessor for SampleDrumMachineProcessor {
         let pad = &mut self.pads[pad_idx];
 
         match p_offset {
-            0 => pad.start_crop = val.clamp(0.0, 1.0),
-            1 => pad.end_crop = val.clamp(0.0, 1.0),
-            2 => pad.pitch_semitones = val.clamp(-24.0, 24.0),
-            3 => pad.attack_ms = val.clamp(0.1, 10000.0),
-            4 => pad.decay_ms = val.clamp(0.1, 10000.0),
-            5 => pad.sustain = val.clamp(0.0, 1.0),
-            6 => pad.release_ms = val.clamp(0.1, 10000.0),
+            0 => pad.pitch_semitones = (val * 48.0 - 24.0).clamp(-24.0, 24.0),
+            1 => pad.decay_ms = (val * 2000.0).clamp(0.1, 10000.0),
+            2 => pad.start_crop = val.clamp(0.0, 1.0),
+            3 => pad.end_crop = val.clamp(0.0, 1.0),
+            4 => pad.transient_boost = val.clamp(0.0, 10.0),
+            5 => pad.attack_ms = (val * 1000.0).clamp(0.1, 10000.0),
+            6 => pad.choke_group = (val as u8).clamp(0, 16),
             7 => pad.transient_boost = val.clamp(0.0, 10.0),
-            8 => pad.choke_group = (val as u8).clamp(0, 16),
-            9 => pad.output_channel = (val as u8).clamp(0, 15),
+            8 => pad.output_channel = (val as u8).clamp(0, 15),
             _ => {}
         }
     }
@@ -329,16 +328,15 @@ impl AudioProcessor for SampleDrumMachineProcessor {
 
         let pad = &self.pads[pad_idx];
         match p_offset {
-            0 => pad.start_crop,
-            1 => pad.end_crop,
-            2 => pad.pitch_semitones,
-            3 => pad.attack_ms,
-            4 => pad.decay_ms,
-            5 => pad.sustain,
-            6 => pad.release_ms,
+            0 => (pad.pitch_semitones + 24.0) / 48.0,
+            1 => pad.decay_ms / 2000.0,
+            2 => pad.start_crop,
+            3 => pad.end_crop,
+            4 => pad.transient_boost,
+            5 => pad.attack_ms / 1000.0,
+            6 => pad.choke_group as f32,
             7 => pad.transient_boost,
-            8 => pad.choke_group as f32,
-            9 => pad.output_channel as f32,
+            8 => pad.output_channel as f32,
             _ => 0.0,
         }
     }

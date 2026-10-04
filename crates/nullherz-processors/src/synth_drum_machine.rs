@@ -168,7 +168,7 @@ impl SnareSynthProcessor {
             return 0.0;
         }
 
-        let body_freq = self.body_end_hz + (self.body_start_hz - self.body_end_hz) * (self.body_env / self.body_env.max(1e-5)).min(1.0);
+        let body_freq = self.body_end_hz + (self.body_start_hz - self.body_end_hz) * self.body_env;
         let phase_inc = (body_freq * std::f32::consts::TAU) / sample_rate;
         self.body_phase = (self.body_phase + phase_inc) % std::f32::consts::TAU;
 
@@ -455,16 +455,43 @@ impl AudioProcessor for SynthDrumMachineProcessor {
         let val = if value.is_finite() { value } else { 0.0 };
 
         match p_offset {
-            0 => self.choke_groups[pad_idx] = (val as u8).clamp(0, 16),
-            1 => self.output_channels[pad_idx] = (val as u8).clamp(0, 15),
-            2 => {
+            0 => {
                 match &mut self.voices[pad_idx] {
-                    SynthVoiceEngine::Kick(k) => k.drive = val.clamp(0.1, 10.0),
-                    SynthVoiceEngine::Snare(s) => s.noise_blend = val.clamp(0.0, 1.0),
-                    SynthVoiceEngine::HiHat(hh) => hh.decay_ms = val.clamp(10.0, 2000.0),
-                    SynthVoiceEngine::TomPerc(t) => t.decay_ms = val.clamp(10.0, 2000.0),
+                    SynthVoiceEngine::Kick(k) => { k.start_pitch_hz = 50.0 + val * 300.0; k.end_pitch_hz = 30.0 + val * 100.0; }
+                    SynthVoiceEngine::Snare(s) => { s.body_start_hz = 100.0 + val * 300.0; s.body_end_hz = 50.0 + val * 150.0; }
+                    SynthVoiceEngine::HiHat(hh) => { hh.hp_cutoff_hz = 3000.0 + val * 10000.0; }
+                    SynthVoiceEngine::TomPerc(t) => { t.start_freq_hz = 100.0 + val * 400.0; t.end_freq_hz = 50.0 + val * 200.0; }
                 }
             }
+            1 => {
+                let d_ms = (val * 2000.0).clamp(10.0, 5000.0);
+                match &mut self.voices[pad_idx] {
+                    SynthVoiceEngine::Kick(k) => k.amp_decay_ms = d_ms,
+                    SynthVoiceEngine::Snare(s) => { s.body_decay_ms = d_ms; s.noise_decay_ms = d_ms * 1.5; }
+                    SynthVoiceEngine::HiHat(hh) => hh.decay_ms = d_ms,
+                    SynthVoiceEngine::TomPerc(t) => t.decay_ms = d_ms,
+                }
+            }
+            2 => {
+                match &mut self.voices[pad_idx] {
+                    SynthVoiceEngine::Kick(k) => k.pitch_decay_ms = (val * 200.0).clamp(1.0, 500.0),
+                    SynthVoiceEngine::Snare(s) => s.filter_cutoff_hz = 500.0 + val * 8000.0,
+                    SynthVoiceEngine::HiHat(_) => {},
+                    SynthVoiceEngine::TomPerc(t) => t.noise_click = val.clamp(0.0, 1.0),
+                }
+            }
+            3 => {
+                if let SynthVoiceEngine::Snare(s) = &mut self.voices[pad_idx] {
+                    s.noise_blend = val.clamp(0.0, 1.0);
+                }
+            }
+            4 => {
+                if let SynthVoiceEngine::Kick(k) = &mut self.voices[pad_idx] {
+                    k.drive = 0.5 + val * 4.0;
+                }
+            }
+            6 => self.choke_groups[pad_idx] = (val as u8).clamp(0, 16),
+            8 => self.output_channels[pad_idx] = (val as u8).clamp(0, 15),
             _ => {}
         }
     }
@@ -475,9 +502,9 @@ impl AudioProcessor for SynthDrumMachineProcessor {
         if pad_idx >= NUM_PADS || pad_idx >= self.voices.len() { return 0.0; }
 
         match p_offset {
-            0 => self.choke_groups[pad_idx] as f32,
-            1 => self.output_channels[pad_idx] as f32,
-            _ => 0.0,
+            6 => self.choke_groups[pad_idx] as f32,
+            8 => self.output_channels[pad_idx] as f32,
+            _ => 0.5,
         }
     }
 

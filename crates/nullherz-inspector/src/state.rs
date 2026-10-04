@@ -544,14 +544,25 @@ pub struct SamplerState {
     pub sampler_is_stereo: bool,
     pub sampler_input_source: usize,
     pub next_sample_id: u64,
+    #[allow(dead_code)]
     pub selected_pad: usize,
     pub pad_tune: [f32; 16],
     pub pad_decay: [f32; 16],
     pub pad_sweep: [f32; 16],
+    #[allow(dead_code)]
     pub pad_body_mix: [f32; 16],
     pub pad_drive: [f32; 16],
+    #[allow(dead_code)]
     pub pad_latent_coord: [f32; 16],
+    #[allow(dead_code)]
     pub pad_cortical_drive: [f32; 16],
+    pub subchannel_faders: [f32; 16],
+    pub subchannel_gain: [f32; 16],
+    pub subchannel_eq_high: [f32; 16],
+    pub subchannel_eq_mid: [f32; 16],
+    pub subchannel_eq_low: [f32; 16],
+    pub subchannel_mutes: [bool; 16],
+    pub subchannel_solos: [bool; 16],
 }
 
 impl Default for SamplerState {
@@ -574,6 +585,13 @@ impl Default for SamplerState {
             pad_drive: [0.2; 16],
             pad_latent_coord: [0.5; 16],
             pad_cortical_drive: [0.5; 16],
+            subchannel_faders: [1.0; 16],
+            subchannel_gain: [1.0; 16],
+            subchannel_eq_high: [1.0; 16],
+            subchannel_eq_mid: [1.0; 16],
+            subchannel_eq_low: [1.0; 16],
+            subchannel_mutes: [false; 16],
+            subchannel_solos: [false; 16],
         }
     }
 }
