@@ -77,6 +77,7 @@ pub struct PtpClockProvider {
 }
 
 impl PtpClockProvider {
+    #[cfg(target_os = "linux")]
     pub fn new(_interface: &str) -> std::io::Result<Self> {
         use nix::sys::socket::*;
         use std::os::unix::io::AsRawFd;
@@ -95,6 +96,24 @@ impl PtpClockProvider {
             .map_err(std::io::Error::other)?;
 
         // Bind to interface (simplified for PTP example)
+        let addr = std::net::SocketAddrV4::new(std::net::Ipv4Addr::new(0,0,0,0), 319);
+        bind(fd.as_raw_fd(), &nix::sys::socket::SockaddrIn::from(addr)).map_err(std::io::Error::other)?;
+
+        Ok(Self {
+            _socket_fd: fd.as_raw_fd(),
+            offset_ns: std::sync::atomic::AtomicI64::new(0),
+            servo: ClockServo::default(),
+        })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn new(_interface: &str) -> std::io::Result<Self> {
+        use nix::sys::socket::*;
+        use std::os::unix::io::AsRawFd;
+
+        let fd = socket(AddressFamily::Inet, SockType::Datagram, SockFlag::empty(), None)
+            .map_err(std::io::Error::other)?;
+
         let addr = std::net::SocketAddrV4::new(std::net::Ipv4Addr::new(0,0,0,0), 319);
         bind(fd.as_raw_fd(), &nix::sys::socket::SockaddrIn::from(addr)).map_err(std::io::Error::other)?;
 
