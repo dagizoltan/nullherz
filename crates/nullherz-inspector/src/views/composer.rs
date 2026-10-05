@@ -468,8 +468,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
     ui.add_space(app.theme.space_sm);
 
-    // Collapsible Live System Mixer Drawer
+    // Collapsible Live System Mixer Drawer (temporarily swap mixer state)
+    std::mem::swap(&mut app.mixer, &mut app.composer.mixer);
     crate::views::mixer::render_mixer_drawer(app, ui, telemetry, false);
+    std::mem::swap(&mut app.mixer, &mut app.composer.mixer);
 
     if app.composer.keyboard_grid.is_open {
         ui.add_space(app.theme.space_sm);

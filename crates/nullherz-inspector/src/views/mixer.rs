@@ -50,8 +50,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
 /// Standalone collapsible/detachable bottom mixer drawer for DJ Console & Composer views.
 pub fn render_mixer_drawer(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>, show_crossfader: bool) {
+    let mut mixer_state = app.mixer.clone();
+    render_mixer_drawer_state(&mut mixer_state, app, ui, telemetry, show_crossfader);
+    app.mixer = mixer_state;
+}
+
+pub fn render_mixer_drawer_state(mixer_state: &mut crate::state::MixerState, app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>, show_crossfader: bool) {
     let theme = app.theme;
-    let is_open = app.mixer.mixer_drawer_open;
+    let is_open = mixer_state.mixer_drawer_open;
 
     Frame::none()
         .fill(theme.bg_dark)
@@ -63,11 +69,11 @@ pub fn render_mixer_drawer(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opti
                 let toggle_icon = if is_open { "▼" } else { "▲" };
                 let toggle_text = format!("{} MIXER DRAWER ({})", toggle_icon, if is_open { "EXPANDED" } else { "COLLAPSED" });
                 if ui.button(RichText::new(toggle_text).strong().size(theme.type_caption).color(theme.accent)).clicked() {
-                    app.mixer.mixer_drawer_open = !is_open;
+                    mixer_state.mixer_drawer_open = !is_open;
                 }
 
                 ui.add_space(theme.space_md);
-                ui.label(RichText::new(format!("ACTIVE CHANNELS: {}", app.mixer.num_channels)).size(theme.type_caption).color(theme.text_secondary));
+                ui.label(RichText::new(format!("ACTIVE CHANNELS: {}", mixer_state.num_channels)).size(theme.type_caption).color(theme.text_secondary));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let is_detached = app.detached_views.contains(&crate::View::Mixer);
@@ -92,7 +98,7 @@ pub fn render_mixer_drawer(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opti
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("CROSSFADER A").strong().color(theme.deck_colors[0]).size(theme.type_caption));
                         ui.add_space(theme.space_sm);
-                        widgets::render_horizontal_fader(ui, &mut app.mixer.crossfader_pos, 0.0..=1.0, theme.accent, 220.0, 16.0);
+                        widgets::render_horizontal_fader(ui, &mut mixer_state.crossfader_pos, 0.0..=1.0, theme.accent, 220.0, 16.0);
                         ui.add_space(theme.space_sm);
                         ui.label(RichText::new("CROSSFADER B").strong().color(theme.deck_colors[1]).size(theme.type_caption));
                     });
@@ -107,7 +113,7 @@ pub fn render_mixer_drawer(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opti
                         .max_width(scroll_width)
                         .show(ui, |ui| {
                             ui.horizontal_top(|ui| {
-                                let num_ch = app.mixer.num_channels.clamp(1, 16);
+                                let num_ch = mixer_state.num_channels.clamp(1, 16);
                                 for i in 0..num_ch {
                                     render_channel_strip_ext(app, ui, i, telemetry, show_crossfader);
                                     ui.add_space(theme.space_xs);

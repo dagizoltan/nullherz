@@ -195,6 +195,7 @@ impl Default for AnalyzerViewState {
 
 /// Dynamic multi-channel console (1..16 channels, default 4): faders, EQ, personality morphs, mastering chain, macros.
 #[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub struct MixerState {
     pub num_channels: usize,
     pub channel_input_sources: [ChannelInputSource; 16],
@@ -566,6 +567,8 @@ impl Default for KeyboardGridState {
 
 /// Step-sequencer / song-builder grid state.
 pub struct ComposerState {
+    /// Dedicated DAW Mixer state for Composer arrangement tracks 1..16.
+    pub mixer: MixerState,
     /// Sample assigned to each sequencer track, independent of the decks.
     pub track_sources: [Option<u64>; 16],
     /// Independent subchannel/pad sample assignments for each parent track [parent_track_idx][subchannel_idx].
@@ -605,6 +608,11 @@ pub struct ComposerState {
 impl Default for ComposerState {
     fn default() -> Self {
         Self {
+            mixer: MixerState {
+                num_channels: 16,
+                mixer_drawer_open: false,
+                ..Default::default()
+            },
             track_sources: [None; 16],
             subchannel_sources: [[None; 16]; 16],
             keyboard_grid: KeyboardGridState::default(),
