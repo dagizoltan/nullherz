@@ -45,98 +45,98 @@ impl AudioBackend for CoreAudioBackend {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let xrun_counter = self.xrun_counter.clone();
+        #[allow(unused_variables)]
+        let selected_device = self.selected_device.clone();
 
-        #[cfg(target_os = "macos")]
-        {
-            use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-            if let Ok(host) = std::panic::catch_unwind(|| cpal::default_host()) {
-                let device = if self.selected_device == "default" || self.selected_device.is_empty() {
-                    host.default_output_device()
-                } else {
-                    host.output_devices().ok().and_then(|mut devs| {
-                        devs.find(|d| d.name().map(|n| n.contains(&self.selected_device)).unwrap_or(false))
-                    }).or_else(|| host.default_output_device())
-                };
+        let handle = thread::spawn(move || {
+            ipc_layer::setup_audio_callback_thread(90);
+            let sched = ipc_layer::register_audio_thread();
 
-                if let Some(dev) = device {
-                    if let Ok(supported_config) = dev.default_output_config() {
-                        let sample_rate = supported_config.sample_rate().0 as f64;
-                        let config: cpal::StreamConfig = supported_config.into();
-                        let channels = config.channels as usize;
+            #[cfg(target_os = "macos")]
+            {
+                use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+                if let Ok(host) = std::panic::catch_unwind(|| cpal::default_host()) {
+                    let device = if selected_device == "default" || selected_device.is_empty() {
+                        host.default_output_device()
+                    } else {
+                        host.output_devices().ok().and_then(|mut devs| {
+                            devs.find(|d| d.name().map(|n| n.contains(&selected_device)).unwrap_or(false))
+                        }).or_else(|| host.default_output_device())
+                    };
 
-                        let engine_cb = engine_handle.clone();
-                        let running_cb = running.clone();
-                        let xrun_cb = xrun_counter.clone();
+                    if let Some(dev) = device {
+                        if let Ok(supported_config) = dev.default_output_config() {
+                            let config: cpal::StreamConfig = supported_config.into();
+                            let channels = config.channels as usize;
 
-                        let mut outputs_raw = vec![vec![0.0f32; period_size as usize]; 4];
+                            let engine_cb = engine_handle.clone();
+                            let running_cb = running.clone();
+                            let xrun_cb = xrun_counter.clone();
 
-                        let stream_res = dev.build_output_stream(
-                            &config,
-                            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                                if !running_cb.load(Ordering::Relaxed) {
-                                    return;
-                                }
-                                let frames = data.len() / channels.max(1);
-                                if let Some(ref engine_arc) = *engine_cb.lock() {
-                                    if outputs_raw[0].len() < frames {
-                                        outputs_raw = vec![vec![0.0f32; frames]; 4];
+                            let mut outputs_raw = vec![vec![0.0f32; period_size as usize]; 4];
+
+                            let stream_res = dev.build_output_stream(
+                                &config,
+                                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                                    if !running_cb.load(Ordering::Relaxed) {
+                                        return;
                                     }
-                                    let (out0, rest) = outputs_raw.split_at_mut(1);
-                                    let (out1, rest) = rest.split_at_mut(1);
-                                    let (out2, out3) = rest.split_at_mut(1);
-                                    let mut out_refs: [&mut [f32]; 4] = [
-                                        &mut out0[0][..frames],
-                                        &mut out1[0][..frames],
-                                        &mut out2[0][..frames],
-                                        &mut out3[0][..frames],
-                                    ];
-                                    let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-                                    unsafe {
-                                        (*engine_ptr).process_block(&[], &mut out_refs, frames);
-                                    }
-
-                                    // Interleave planar outputs into CoreAudio output buffer
-                                    for f in 0..frames {
-                                        let l = outputs_raw[0][f];
-                                        let r = outputs_raw[1][f];
-                                        if channels >= 2 {
-                                            data[f * channels] = l;
-                                            data[f * channels + 1] = r;
-                                        } else if channels == 1 {
-                                            data[f] = (l + r) * 0.5;
+                                    let frames = data.len() / channels.max(1);
+                                    if let Some(ref engine_arc) = *engine_cb.lock() {
+                                        if outputs_raw[0].len() < frames {
+                                            outputs_raw = vec![vec![0.0f32; frames]; 4];
                                         }
-                                    }
-                                } else {
-                                    data.fill(0.0);
-                                }
-                            },
-                            move |err| {
-                                eprintln!("[CoreAudio] Stream error: {}", err);
-                                xrun_cb.fetch_add(1, Ordering::Relaxed);
-                            },
-                            None,
-                        );
+                                        let (out0, rest) = outputs_raw.split_at_mut(1);
+                                        let (out1, rest) = rest.split_at_mut(1);
+                                        let (out2, out3) = rest.split_at_mut(1);
+                                        let mut out_refs: [&mut [f32]; 4] = [
+                                            &mut out0[0][..frames],
+                                            &mut out1[0][..frames],
+                                            &mut out2[0][..frames],
+                                            &mut out3[0][..frames],
+                                        ];
+                                        let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
+                                        unsafe {
+                                            (*engine_ptr).process_block(&[], &mut out_refs, frames);
+                                        }
 
-                        if let Ok(stream) = stream_res {
-                            if stream.play().is_ok() {
-                                let handle = thread::spawn(move || {
+                                        // Interleave planar outputs into CoreAudio output buffer
+                                        for f in 0..frames {
+                                            let l = outputs_raw[0][f];
+                                            let r = outputs_raw[1][f];
+                                            if channels >= 2 {
+                                                data[f * channels] = l;
+                                                data[f * channels + 1] = r;
+                                            } else if channels == 1 {
+                                                data[f] = (l + r) * 0.5;
+                                            }
+                                        }
+                                    } else {
+                                        data.fill(0.0);
+                                    }
+                                },
+                                move |err| {
+                                    eprintln!("[CoreAudio] Stream error: {}", err);
+                                    xrun_cb.fetch_add(1, Ordering::Relaxed);
+                                },
+                                None,
+                            );
+
+                            if let Ok(stream) = stream_res {
+                                if stream.play().is_ok() {
+                                    eprintln!("[CoreAudio] macOS cpal Stream Active on '{selected_device}': {sched}");
                                     while running.load(Ordering::SeqCst) {
                                         thread::sleep(std::time::Duration::from_millis(100));
                                     }
                                     drop(stream);
-                                });
-                                self.handle = Some(handle);
-                                return Ok(());
+                                    return;
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        let handle = thread::spawn(move || {
-            ipc_layer::setup_audio_callback_thread(90);
-            let sched = ipc_layer::register_audio_thread();
             eprintln!("[CoreAudio] macOS Audio Driver Active (Fallback Loop): {sched}");
 
             {
