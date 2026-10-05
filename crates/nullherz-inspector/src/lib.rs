@@ -732,22 +732,24 @@ impl InspectorApp {
                     ui.add_space(10.0);
 
                     let top_nav = [
-                        (View::Player, egui_phosphor::regular::DISC, "MEDIA PLAYER"),
                         (View::Console, egui_phosphor::regular::RADIO, "DJ CONSOLE"),
                         (View::Mixer, egui_phosphor::regular::SLIDERS, "MIXER STRIPS"),
                         (View::ChannelDetail, egui_phosphor::regular::MAGNIFYING_GLASS, "CHANNEL DETAIL"),
                         (View::Composer, egui_phosphor::regular::PIANO_KEYS, "COMPOSER"),
-                        (View::Library, egui_phosphor::regular::BOOKS, "TRACK LIBRARY"),
-                        (View::Editor, egui_phosphor::regular::SCISSORS, "EDITOR"),
-                        (View::Sampler, egui_phosphor::regular::MICROPHONE, "SAMPLER"),
-                        (View::Breeder, egui_phosphor::regular::DNA, "DNA BREEDER"),
                         (View::Visuals, egui_phosphor::regular::EYE, "NEURAL VISUALS"),
-                        (View::Analyzer, egui_phosphor::regular::ACTIVITY, "ANALYZER & PERCEPTION"),
-                        (View::Store, egui_phosphor::regular::SHOPPING_BAG, "SIDECAR STORE"),
                         (View::Broadcast, egui_phosphor::regular::BROADCAST, "BROADCAST"),
                     ];
 
+                    let middle_nav = [
+                        (View::Sampler, egui_phosphor::regular::MICROPHONE, "SAMPLER"),
+                        (View::Editor, egui_phosphor::regular::SCISSORS, "EDITOR"),
+                        (View::Analyzer, egui_phosphor::regular::ACTIVITY, "ANALYZER & PERCEPTION"),
+                        (View::Breeder, egui_phosphor::regular::DNA, "DNA BREEDER"),
+                    ];
+
                     let bottom_nav = [
+                        (View::Library, egui_phosphor::regular::BOOKS, "TRACK LIBRARY"),
+                        (View::Store, egui_phosphor::regular::SHOPPING_BAG, "SIDECAR STORE"),
                         (View::Topology, egui_phosphor::regular::SHARE_NETWORK, "TOPOLOGY"),
                         (View::Account, egui_phosphor::regular::USER, "ACCOUNT"),
                         (View::Settings, egui_phosphor::regular::GEAR, "SETTINGS"),
@@ -807,6 +809,15 @@ impl InspectorApp {
                         .show(ui, |ui| {
                             ui.vertical_centered(|ui| {
                                 for (view, icon, label) in top_nav {
+                                    render_nav_btn(ui, view, icon, label);
+                                    ui.add_space(2.0);
+                                }
+
+                                ui.add_space(2.0);
+                                ui.separator();
+                                ui.add_space(2.0);
+
+                                for (view, icon, label) in middle_nav {
                                     render_nav_btn(ui, view, icon, label);
                                     ui.add_space(2.0);
                                 }
