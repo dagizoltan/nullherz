@@ -17,16 +17,24 @@ pub fn detect_audio_locations() -> Vec<AudioLocation> {
         AudioLocation { label: "Sequences Folder".to_string(), path: "library/sequences/".to_string(), is_external: false },
     ];
 
-    if let Ok(user_music) = std::env::var("HOME") {
-        let music_dir = format!("{}/Music", user_music);
-        if std::path::Path::new(&music_dir).exists() {
-            locations.push(AudioLocation {
-                label: "User Music".to_string(),
-                path: music_dir,
-                is_external: false,
-            });
+    if let Ok(home) = std::env::var("HOME") {
+        for (label, sub) in [("User Music", "Music"), ("Downloads", "Downloads"), ("Desktop", "Desktop")] {
+            let user_dir = format!("{}/{}", home, sub);
+            if std::path::Path::new(&user_dir).exists() {
+                locations.push(AudioLocation {
+                    label: label.to_string(),
+                    path: user_dir,
+                    is_external: false,
+                });
+            }
         }
     }
+
+    // System / internal volume names to skip when scanning /Volumes on macOS
+    let macos_system_volumes = [
+        "macintosh hd", "system", "data", "preboot", "vm", "update", "recovery",
+        ".trashes", ".spotlight-v100", "com.apple",
+    ];
 
     // Scan mount roots for pendrives / external drives (Linux / macOS / Unix)
     let mount_roots = ["/media", "/run/media", "/mnt", "/Volumes"];
@@ -37,15 +45,23 @@ pub fn detect_audio_locations() -> Vec<AudioLocation> {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_dir() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        let name_lower = name.to_lowercase();
+
+                        // Skip macOS internal system volumes / root mounts
+                        if *root == "/Volumes" && macos_system_volumes.iter().any(|sys| name_lower.contains(sys)) {
+                            continue;
+                        }
+
                         // Check if user subdirectories exist under /media or /run/media
                         if root.contains("media") {
                             if let Ok(sub_entries) = std::fs::read_dir(&path) {
                                 for sub in sub_entries.flatten() {
                                     let sub_path = sub.path();
                                     if sub_path.is_dir() {
-                                        let name = sub.file_name().to_string_lossy().to_string();
+                                        let sub_name = sub.file_name().to_string_lossy().to_string();
                                         locations.push(AudioLocation {
-                                            label: format!("External Drive ({})", name),
+                                            label: format!("External Drive ({})", sub_name),
                                             path: sub_path.to_string_lossy().to_string(),
                                             is_external: true,
                                         });
@@ -53,7 +69,6 @@ pub fn detect_audio_locations() -> Vec<AudioLocation> {
                                 }
                             }
                         } else {
-                            let name = entry.file_name().to_string_lossy().to_string();
                             locations.push(AudioLocation {
                                 label: format!("External Drive ({})", name),
                                 path: path.to_string_lossy().to_string(),

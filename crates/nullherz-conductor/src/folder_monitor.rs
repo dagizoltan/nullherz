@@ -70,7 +70,21 @@ impl FolderMonitor {
     }
 
     pub fn scan_folder_sync(&self, path: &str) {
-        let path_obj = Path::new(path);
+        let expanded_path = if path == "~" || path.starts_with("~/") {
+            if let Ok(home) = std::env::var("HOME") {
+                if path == "~" {
+                    home
+                } else {
+                    format!("{}/{}", home, &path[2..])
+                }
+            } else {
+                path.to_string()
+            }
+        } else {
+            path.to_string()
+        };
+
+        let path_obj = Path::new(&expanded_path);
         if !path_obj.is_dir() { return; }
 
         let entries: Vec<_> = walkdir::WalkDir::new(path_obj)
@@ -429,6 +443,22 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_folder_monitor_tilde_expansion_scan() {
+        let sample_registry = Arc::new(nullherz_dna::SampleRegistry::new());
+        let db_path = "test_tilde_expansion.redb";
+        let _ = std::fs::remove_file(db_path);
+        let library_db = LibraryDatabase::load(db_path).unwrap();
+        let library = Arc::new(parking_lot::Mutex::new(library_db));
+
+        let monitor = FolderMonitor::new(sample_registry, library);
+
+        // Test that scanning "~/non_existent_directory" safety check expands path without panicking
+        monitor.scan_folder_sync("~/non_existent_directory_safely_ignored_by_walkdir");
+
+        let _ = std::fs::remove_file(db_path);
+    }
 
     #[test]
     fn test_folder_monitor_non_existent_path_safety() {
