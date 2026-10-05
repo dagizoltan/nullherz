@@ -320,6 +320,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     .show(ui, |ui| {
                         let mut grid_top_pos = Pos2::ZERO;
                         let mut grid_bottom_pos = Pos2::ZERO;
+                        let mut first_slot_x = 0.0f32;
 
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
@@ -334,6 +335,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         ui.add_space(4.0);
                                     }
                                     let (rect, response) = ui.allocate_exact_size(Vec2::new(slot_w, 24.0), Sense::click());
+
+                                    if slot_idx == 0 {
+                                        first_slot_x = rect.min.x;
+                                    }
 
                                     if response.clicked() {
                                         let bar = (slot_idx / steps_per_bar) + 1;
@@ -463,7 +468,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 if is_selected {
                                     ui.add_space(2.0);
                                     for pad_i in 0..16 {
-                                        ui.horizontal(|ui| {
+                                        ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                             ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
                                             for slot_idx in 0..steps_count {
                                                 if slot_idx > 0 && slot_idx % steps_per_beat == 0 {
@@ -521,9 +526,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             };
                             let playhead_step = live_beat.max(0.0).min(steps_count as f32);
                             let bars_before = (playhead_step / 4.0).floor();
-                            let playhead_x = grid_top_pos.x + (playhead_step * slot_w) + (playhead_step * 2.0) + (bars_before * 4.0);
+                            let playhead_x = first_slot_x + (playhead_step * slot_w) + (playhead_step * 2.0) + (bars_before * 4.0);
 
-                            if playhead_x >= grid_top_pos.x {
+                            if playhead_x >= first_slot_x {
                                 ui.painter().line_segment(
                                     [Pos2::new(playhead_x, grid_top_pos.y), Pos2::new(playhead_x, grid_bottom_pos.y)],
                                     Stroke::new(2.5_f32, app.theme.accent),
