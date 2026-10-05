@@ -80,6 +80,13 @@ impl FolderMonitor {
             } else {
                 path.to_string()
             }
+        } else if path.starts_with('/') && !Path::new(path).exists() {
+            let relative = &path[1..];
+            if Path::new(relative).exists() {
+                relative.to_string()
+            } else {
+                path.to_string()
+            }
         } else {
             path.to_string()
         };
@@ -92,9 +99,14 @@ impl FolderMonitor {
             .flatten()
             .filter(|e| e.file_type().is_file())
             .filter(|e| {
+                let file_name = e.file_name().to_string_lossy();
+                // Filter out hidden files and macOS AppleDouble sidecars (._*)
+                if file_name.starts_with('.') {
+                    return false;
+                }
                 if let Some(ext) = e.path().extension() {
                     let ext = ext.to_string_lossy().to_lowercase();
-                    ext == "wav" || ext == "flac" || ext == "mp3" || ext == "ogg"
+                    ext == "wav" || ext == "flac" || ext == "mp3" || ext == "ogg" || ext == "aiff" || ext == "aif" || ext == "m4a" || ext == "aac"
                 } else {
                     false
                 }

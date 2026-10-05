@@ -1932,14 +1932,15 @@ pub fn start_in_process_conductor(
                 worker.start();
             }
 
-            // Library auto-discovery on startup is DISABLED: scanning the
-            // tracks folder automatically decoded every file into the in-memory
-            // registry at boot, which on a library of large files spiked memory
-            // and froze the app soon after startup. The folder monitor is left
-            // in place (NOT taken) so the Library view's "scan folder" button
-            // (ResourceCommand::ScanFolder) can populate the library on demand —
-            // and keeping it here is what makes that manual command work at all,
-            // since `take()` used to move the monitor out of the conductor.
+            // Ensure default library directories exist on boot
+            for sub_dir in ["library/tracks", "library/samples", "library/sequences", "library/stems", "library/evolution", "library/breeding", "library/captures", "library/mappings"] {
+                let _ = std::fs::create_dir_all(sub_dir);
+            }
+
+            // Trigger initial background scan of user assets in library/
+            if let Some(ref monitor) = cond.folder_monitor {
+                monitor.scan_folder("library/");
+            }
 
             cond.sidecar_discovery.start_watcher();
 
