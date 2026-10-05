@@ -31,7 +31,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         let num_ch = app.mixer.num_channels.clamp(1, 16);
                         for i in 0..num_ch {
                             render_channel_strip_full(app, ui, i, telemetry, true, false);
-                            if app.mixer.channel_input_sources[i] == ChannelInputSource::DrumMachine || app.mixer.folded_pads[i] {
+                            if app.mixer.folded_pads[i] {
                                 ui.add_space(theme.space_xs);
                                 render_pad_subchannel_strips(app, ui, i);
                             }
@@ -80,7 +80,7 @@ pub fn render_mixer_drawer(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opti
                     let num_ch = app.mixer.num_channels.clamp(1, 16);
                     for i in 0..num_ch {
                         render_channel_strip_full(app, ui, i, telemetry, show_crossfader, true);
-                        if app.mixer.channel_input_sources[i] == ChannelInputSource::DrumMachine || app.mixer.folded_pads[i] {
+                        if app.mixer.folded_pads[i] {
                             ui.add_space(theme.space_xs);
                             render_pad_subchannel_strips(app, ui, i);
                         }
@@ -661,23 +661,34 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                         let strip_accent = if is_drum_machine { Color32::from_rgb(255, 127, 62) } else { deck_color };
 
                         let mut fold_clicked = false;
+                        let mut remove_ch_clicked = false;
                         let header_resp = ui.horizontal(|ui| {
-                            let fold_icon = if app.mixer.folded_pads[i] { "▼ " } else { "▸ " };
+                            let fold_icon = if app.mixer.folded_pads[i] { "▼" } else { "▸" };
                             if ui.button(RichText::new(fold_icon).size(9.0).color(strip_accent)).on_hover_text("Toggle inline subchannels").clicked() {
                                 fold_clicked = true;
                             }
 
                             ui.label(RichText::new(format!("CH {}", (b'A' + (i % 26) as u8) as char)).strong().size(theme.type_body).color(strip_accent));
-                            if is_drum_machine {
-                                ui.label(RichText::new("[DRUMS]").size(7.5).strong().color(Color32::from_rgb(255, 127, 62)));
-                            }
+
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.add(egui::Button::new(RichText::new("🔍").size(8.0)).fill(theme.bg_inset)).on_hover_text("Open Channel Inspector").clicked() {
+                                if app.mixer.num_channels > 1 {
+                                    if ui.add(egui::Button::new(RichText::new("✕").size(7.5)).fill(theme.bg_inset)).on_hover_text("Remove Channel").clicked() {
+                                        remove_ch_clicked = true;
+                                    }
+                                }
+                                if ui.add(egui::Button::new(RichText::new("🔍").size(7.5)).fill(theme.bg_inset)).on_hover_text("Open Channel Inspector").clicked() {
                                     app.mixer.focused_detail_channel = i;
                                     app.active_view = crate::View::ChannelDetail;
                                 }
                             });
                         });
+
+                        if remove_ch_clicked {
+                            if app.mixer.num_channels > 1 {
+                                app.mixer.num_channels -= 1;
+                            }
+                            return;
+                        }
 
                         if fold_clicked {
                             app.mixer.folded_pads[i] = !app.mixer.folded_pads[i];
@@ -925,6 +936,7 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
 
         // Render Custom User Subchannels (for non-instrument or instrument channels)
         let custom_count = app.mixer.custom_subchannels[parent_ch].len();
+        let mut remove_sub_idx: Option<usize> = None;
         for sub_idx in 0..custom_count {
             let sub_name = app.mixer.custom_subchannels[parent_ch][sub_idx].clone();
             ui.push_id((parent_ch, 100 + sub_idx), |ui| {
@@ -939,6 +951,11 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(format!("↳{:02}", sub_idx + 1)).size(theme.type_caption).strong().color(subchannel_color));
                                 ui.label(RichText::new(&sub_name).size(8.0).strong().color(theme.text_primary));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.add(egui::Button::new(RichText::new("✕").size(7.5)).fill(theme.bg_inset)).on_hover_text("Remove Subchannel").clicked() {
+                                        remove_sub_idx = Some(sub_idx);
+                                    }
+                                });
                             });
                             ui.add_space(2.0);
 
@@ -990,6 +1007,24 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
                         });
                     });
             });
+        }
+
+        if let Some(sub_idx) = remove_sub_idx {
+            if sub_idx < app.mixer.custom_subchannels[parent_ch].len() {
+                app.mixer.custom_subchannels[parent_ch].remove(sub_idx);
+                app.mixer.custom_subchannel_gain[parent_ch].remove(sub_idx);
+                app.mixer.custom_subchannel_pitch[parent_ch].remove(sub_idx);
+                app.mixer.custom_subchannel_eq_high[parent_ch].remove(sub_idx);
+                app.mixer.custom_subchannel_eq_mid[parent_ch].remove(sub_idx);
+                app.mixer.custom_subchannel_eq_low[parent_ch].remove(sub_idx);
+                app.mixer.custom_subchannel_faders[parent_ch].remove(sub_idx);
+                app.mixer.custom_subchannel_mutes[parent_ch].remove(sub_idx);
+                app.mixer.custom_subchannel_solos[parent_ch].remove(sub_idx);
+                if sub_idx < app.mixer.custom_subchannel_inserts[parent_ch].len() {
+                    app.mixer.custom_subchannel_inserts[parent_ch].remove(sub_idx);
+                    app.mixer.custom_subchannel_insert_params[parent_ch].remove(sub_idx);
+                }
+            }
         }
 
         // Add Subchannel Button Card
