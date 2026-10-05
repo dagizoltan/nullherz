@@ -56,7 +56,11 @@ static AUDIO_THREAD_TID: AtomicU64 = AtomicU64::new(0);
 /// care about, and on a machine without `RLIMIT_RTPRIO` or RTKit that is the
 /// only case there is.
 pub(crate) fn publish_audio_thread_tid() {
+    #[cfg(target_os = "linux")]
     let tid = unsafe { libc::syscall(libc::SYS_gettid) } as u64;
+    #[cfg(not(target_os = "linux"))]
+    let tid = std::thread::current().id().as_u64().get();
+
     // Relaxed: a single publication read much later by one monitor thread. The
     // value is a task id, not a pointer, and nothing is ordered against it.
     AUDIO_THREAD_TID.store(tid, Ordering::Relaxed);

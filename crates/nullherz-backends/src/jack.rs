@@ -146,4 +146,12 @@ impl AudioBackend for JackBackend {
             }
         }
     }
+
+    fn enumerate_devices(&self) -> Vec<String> {
+        vec![
+            "default".to_string(),
+            "JACK: system:playback_1 / system:playback_2".to_string(),
+            "JACK: system:playback_3 / system:playback_4".to_string(),
+        ]
+    }
 }
