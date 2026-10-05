@@ -111,7 +111,6 @@ pub enum View {
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum BottomDrawer {
     Mixer,
-    ClipEditor,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -891,7 +890,6 @@ impl InspectorApp {
                             ui.horizontal(|ui| {
                                 let title = match drawer {
                                     BottomDrawer::Mixer => "SYSTEM / STUDIO MIXER DRAWER",
-                                    BottomDrawer::ClipEditor => "CLIP & DRUM STEP EDITOR",
                                 };
                                 ui.label(egui::RichText::new(title).strong().size(self.theme.type_caption).color(self.theme.accent));
 
@@ -915,9 +913,6 @@ impl InspectorApp {
                             } else {
                                 views::mixer::render_mixer_drawer(self, ui, telemetry, true);
                             }
-                        }
-                        BottomDrawer::ClipEditor => {
-                            views::composer::render_clip_editor_drawer_panel(self, ui);
                         }
                     }
                 });
@@ -986,10 +981,9 @@ impl InspectorApp {
     fn render_bottom_bar(&mut self, ctx: &egui::Context, telemetry: &Option<Telemetry>, id_prefix: &str) {
         egui::TopBottomPanel::bottom(format!("{}_bottom_bar", id_prefix)).show(ctx, |ui| {
             ui.horizontal(|ui| {
-                // LEFT SIDE: Drawer Toggle Icon Buttons (Mixer & Clip Editor)
+                // LEFT SIDE: Drawer Toggle Icon Buttons (Mixer)
                 let drawer_btns = [
                     (BottomDrawer::Mixer, egui_phosphor::regular::SLIDERS, "MIXER DRAWER"),
-                    (BottomDrawer::ClipEditor, egui_phosphor::regular::PIANO_KEYS, "CLIP & DRUM EDITOR"),
                 ];
 
                 for (drawer, icon, label) in drawer_btns {

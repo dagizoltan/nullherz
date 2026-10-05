@@ -392,6 +392,8 @@ pub fn render_channel_strip_ext(app: &mut InspectorApp, ui: &mut Ui, i: usize, t
             theme.bg_surface
         };
 
+        let is_detached = app.detached_views.contains(&crate::View::Mixer);
+
         ui.horizontal(|ui| {
             Frame::none()
                 .fill(fill_color)
@@ -430,24 +432,26 @@ pub fn render_channel_strip_ext(app: &mut InspectorApp, ui: &mut Ui, i: usize, t
                         }
                         ui.add_space(theme.space_xs);
 
-                        // Waveform Style Dropdown Selector
-                        ui.horizontal(|ui| {
-                            let avail_w = ui.available_width();
-                            let selected_style = app.mixer.waveform_styles[i];
-                            egui::ComboBox::from_id_source(format!("ch_wf_style_{}", i))
-                                .selected_text(RichText::new(selected_style.name()).size(8.5).strong().color(theme.text_primary))
-                                .width(avail_w)
-                                .show_ui(ui, |ui| {
-                                    for st in nullherz_ui_hal::render::waveform_renderer::WaveformStyle::all() {
-                                        ui.selectable_value(&mut app.mixer.waveform_styles[i], *st, st.name());
-                                    }
-                                });
-                        });
-                        ui.add_space(2.0);
+                        if is_detached {
+                            // Waveform Style Dropdown Selector
+                            ui.horizontal(|ui| {
+                                let avail_w = ui.available_width();
+                                let selected_style = app.mixer.waveform_styles[i];
+                                egui::ComboBox::from_id_source(format!("ch_wf_style_{}", i))
+                                    .selected_text(RichText::new(selected_style.name()).size(8.5).strong().color(theme.text_primary))
+                                    .width(avail_w)
+                                    .show_ui(ui, |ui| {
+                                        for st in nullherz_ui_hal::render::waveform_renderer::WaveformStyle::all() {
+                                            ui.selectable_value(&mut app.mixer.waveform_styles[i], *st, st.name());
+                                        }
+                                    });
+                            });
+                            ui.add_space(2.0);
 
-                        // Vertical Waveform Canvas
-                        render_vertical_waveform(app, ui, i, elapsed_samples, level_base, deck_color, &theme, telemetry);
-                        ui.add_space(theme.space_xs);
+                            // Vertical Waveform Canvas (Only rendered in detached window)
+                            render_vertical_waveform(app, ui, i, elapsed_samples, level_base, deck_color, &theme, telemetry);
+                            ui.add_space(theme.space_xs);
+                        }
 
                         // --- INSERTS RACK ---
                         ui.group(|ui| {
