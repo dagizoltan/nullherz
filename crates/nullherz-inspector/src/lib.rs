@@ -90,6 +90,8 @@ pub enum View {
     Player,
     Console,
     Mixer,
+    HorizontalMixer,
+    Instrument,
     ChannelDetail,
     Composer,
     Library,
@@ -111,6 +113,8 @@ pub enum View {
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum BottomDrawer {
     Mixer,
+    HorizontalMixer,
+    Instrument,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -246,6 +250,8 @@ impl InspectorApp {
             View::Player => views::player::render(self, ui, telemetry),
             View::Sampler => views::sampler::render(self, ui, telemetry),
             View::Mixer => views::mixer::render(self, ui, telemetry),
+            View::HorizontalMixer => views::mixer::render_horizontal_mixer_drawer(self, ui, telemetry),
+            View::Instrument => views::sampler::render_instrument_drawer(self, ui, telemetry),
             View::ChannelDetail => views::channel_detail::render(self, ui, telemetry),
             View::Library => views::library::render(self, ui),
             View::Topology => views::topology::render(self, ui, telemetry),
@@ -885,11 +891,13 @@ impl InspectorApp {
                 .show(ctx, |ui| {
                     egui::Frame::none()
                         .fill(self.theme.bg_surface)
-                        .inner_margin(egui::Margin::symmetric(self.theme.space_md, self.theme.space_xs))
+                        .inner_margin(egui::Margin::symmetric(24.0, self.theme.space_xs))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 let title = match drawer {
                                     BottomDrawer::Mixer => "SYSTEM / STUDIO MIXER DRAWER",
+                                    BottomDrawer::HorizontalMixer => "GRAPHICAL FX & EQ MIXER DRAWER",
+                                    BottomDrawer::Instrument => "SELECTED CHANNEL INSTRUMENT DRAWER",
                                 };
                                 ui.label(egui::RichText::new(title).strong().size(self.theme.type_caption).color(self.theme.accent));
 
@@ -897,19 +905,22 @@ impl InspectorApp {
                                     if ui.button(egui_phosphor::regular::X).clicked() {
                                         self.active_bottom_drawer = None;
                                     }
-                                    if drawer == BottomDrawer::Mixer {
-                                        let is_detached = self.detached_views.contains(&View::Mixer);
-                                        let detach_label = if is_detached {
-                                            format!("{} Re-attach Window", egui_phosphor::regular::ARROWS_IN)
+                                    let target_view = match drawer {
+                                        BottomDrawer::Mixer => View::Mixer,
+                                        BottomDrawer::HorizontalMixer => View::HorizontalMixer,
+                                        BottomDrawer::Instrument => View::Instrument,
+                                    };
+                                    let is_detached = self.detached_views.contains(&target_view);
+                                    let detach_label = if is_detached {
+                                        format!("{} Re-attach Window", egui_phosphor::regular::ARROWS_IN)
+                                    } else {
+                                        format!("{} Detach Window", egui_phosphor::regular::ARROW_SQUARE_OUT)
+                                    };
+                                    if ui.button(egui::RichText::new(detach_label).size(self.theme.type_caption).strong()).clicked() {
+                                        if is_detached {
+                                            self.detached_views.remove(&target_view);
                                         } else {
-                                            format!("{} Detach Window", egui_phosphor::regular::ARROW_SQUARE_OUT)
-                                        };
-                                        if ui.button(egui::RichText::new(detach_label).size(self.theme.type_caption).strong()).clicked() {
-                                            if is_detached {
-                                                self.detached_views.remove(&View::Mixer);
-                                            } else {
-                                                self.detached_views.insert(View::Mixer);
-                                            }
+                                            self.detached_views.insert(target_view);
                                         }
                                     }
                                 });
@@ -921,13 +932,14 @@ impl InspectorApp {
 
                     match drawer {
                         BottomDrawer::Mixer => {
-                            if self.active_view == View::Composer {
-                                std::mem::swap(&mut self.mixer, &mut self.composer.mixer);
-                                views::mixer::render_mixer_drawer(self, ui, telemetry, false);
-                                std::mem::swap(&mut self.mixer, &mut self.composer.mixer);
-                            } else {
-                                views::mixer::render_mixer_drawer(self, ui, telemetry, true);
-                            }
+                            let show_crossfader = self.active_view != View::Composer;
+                            views::mixer::render_mixer_drawer(self, ui, telemetry, show_crossfader);
+                        }
+                        BottomDrawer::HorizontalMixer => {
+                            views::mixer::render_horizontal_mixer_drawer(self, ui, telemetry);
+                        }
+                        BottomDrawer::Instrument => {
+                            views::sampler::render_instrument_drawer(self, ui, telemetry);
                         }
                     }
                 });
@@ -996,9 +1008,11 @@ impl InspectorApp {
     fn render_bottom_bar(&mut self, ctx: &egui::Context, telemetry: &Option<Telemetry>, id_prefix: &str) {
         egui::TopBottomPanel::bottom(format!("{}_bottom_bar", id_prefix)).show(ctx, |ui| {
             ui.horizontal(|ui| {
-                // LEFT SIDE: Drawer Toggle Icon Buttons (Mixer)
+                // LEFT SIDE: Drawer Toggle Icon Buttons (Vertical Mixer, Horizontal Graphical Mixer, Channel Instrument)
                 let drawer_btns = [
-                    (BottomDrawer::Mixer, egui_phosphor::regular::SLIDERS, "MIXER DRAWER"),
+                    (BottomDrawer::Mixer, egui_phosphor::regular::SLIDERS, "VERTICAL MIXER DRAWER"),
+                    (BottomDrawer::HorizontalMixer, egui_phosphor::regular::EQUALIZER, "GRAPHICAL FX & EQ DRAWER"),
+                    (BottomDrawer::Instrument, egui_phosphor::regular::PIANO_KEYS, "CHANNEL INSTRUMENT DRAWER"),
                 ];
 
                 for (drawer, icon, label) in drawer_btns {
@@ -1825,6 +1839,8 @@ fn view_to_string(view: View) -> String {
         View::Player => "Player".to_string(),
         View::Console => "Console".to_string(),
         View::Mixer => "Mixer".to_string(),
+        View::HorizontalMixer => "Horizontal Graphical Mixer".to_string(),
+        View::Instrument => "Channel Instrument".to_string(),
         View::ChannelDetail => "Channel Detail".to_string(),
         View::Composer => "Composer".to_string(),
         View::Library => "Library".to_string(),
@@ -1848,6 +1864,8 @@ fn string_to_view(s: &str) -> View {
         "Player" => View::Player,
         "Console" => View::Console,
         "Mixer" => View::Mixer,
+        "HorizontalMixer" => View::HorizontalMixer,
+        "Instrument" => View::Instrument,
         "ChannelDetail" => View::ChannelDetail,
         "Composer" => View::Composer,
         "Library" => View::Library,

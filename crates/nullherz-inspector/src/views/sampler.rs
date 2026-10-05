@@ -1,9 +1,35 @@
 use egui::{Ui, Frame, Vec2, Sense, RichText, Rounding, Stroke, Margin};
 use crate::InspectorApp;
+use crate::state::ChannelInputSource;
 use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
 use nullherz_traits::{Command, CoreCommand, MidiEvent, TopologyCommand, MixerCommand};
 use nullherz_dna::SampleDrumKitPreset;
+
+pub fn render_instrument_drawer(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
+    let focus = app.mixer.focused_detail_channel;
+    let is_drum = (4..20).contains(&focus) || app.mixer.channel_input_sources[focus % 16] == ChannelInputSource::DrumMachine;
+
+    Frame::none()
+        .fill(app.theme.bg_surface)
+        .rounding(app.theme.radius_md)
+        .inner_margin(app.theme.space_md)
+        .show(ui, |ui| {
+            if is_drum {
+                ui.horizontal(|ui| {
+                    ui.heading(RichText::new(format!("SELECTED CHANNEL {:02} INSTRUMENT: DRUM MACHINE", focus + 1)).strong().size(app.theme.type_body));
+                });
+                ui.add_space(4.0);
+                render(app, ui, telemetry);
+            } else {
+                ui.horizontal(|ui| {
+                    ui.heading(RichText::new(format!("SELECTED CHANNEL {:02} INSTRUMENT: ANALOG SYNTHESIZER", focus + 1)).strong().size(app.theme.type_body));
+                });
+                ui.add_space(4.0);
+                crate::views::channel_detail::render(app, ui, telemetry);
+            }
+        });
+}
 
 const SUBCHANNEL_LABELS: [&str; 16] = [
     "KICK", "SNARE", "HH-CL", "HH-OP",

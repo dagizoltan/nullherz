@@ -72,8 +72,7 @@ pub fn render_goniometer(ui: &mut Ui, pts: &[f32; 128], size: f32, accent_color:
     }
 }
 
-pub fn render_vu_meter(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Color32, height: f32) {
-    let width = 8.0;
+pub fn render_vu_meter_sized(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Color32, width: f32, height: f32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
 
     // Background
@@ -116,6 +115,10 @@ pub fn render_vu_meter(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Col
     if ph_y >= rect.min.y {
         ui.painter().hline(rect.x_range(), ph_y, Stroke::new(1.5_f32, Color32::WHITE));
     }
+}
+
+pub fn render_vu_meter(ui: &mut Ui, peak: f32, peak_hold: f32, accent_color: Color32, height: f32) {
+    render_vu_meter_sized(ui, peak, peak_hold, accent_color, 4.0, height);
 }
 
 #[cfg(test)]
