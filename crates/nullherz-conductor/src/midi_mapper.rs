@@ -55,7 +55,7 @@ impl MidiMapper {
 
     /// Enumerate attached hardware MIDI input controllers (CoreMIDI on macOS, ALSA Seq on Linux).
     pub fn enumerate_midi_devices() -> Vec<String> {
-        let mut devices = vec![
+        let devices = vec![
             "System Default MIDI Input".to_string(),
             "Virtual Nullherz Controller".to_string(),
         ];

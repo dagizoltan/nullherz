@@ -629,7 +629,7 @@ fn render_track_row(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dna::L
     // button sat flush against the panel edge.
     let pad = theme.space_sm;
     let mut toggled = false;
-    ui.child_ui(rect.shrink2(egui::vec2(pad, 0.0)), Layout::left_to_right(Align::Center)).horizontal(|ui| {
+    ui.child_ui(rect.shrink2(egui::vec2(pad, 0.0)), Layout::left_to_right(Align::Center), None).horizontal(|ui| {
         // Details toggle — an explicit affordance, so opening details and
         // selecting a track stay separate actions.
         let chevron = if is_expanded { egui_phosphor::regular::CARET_DOWN } else { egui_phosphor::regular::CARET_RIGHT };
@@ -650,8 +650,8 @@ fn render_track_row(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dna::L
         let left_budget = (rect.width() - RIGHT_CONTROLS_W - pad * 2.0).max(40.0);
         ui.allocate_ui(egui::vec2(left_budget, rect.height()), |ui| {
             ui.horizontal(|ui| {
-                ui.add(egui::Label::new(RichText::new(&track.title).color(text_color).strong().size(theme.type_caption)).truncate(true));
-                ui.add(egui::Label::new(RichText::new(&track.artist).color(theme.text_secondary).size(theme.type_caption)).truncate(true));
+                ui.add(egui::Label::new(RichText::new(&track.title).color(text_color).strong().size(theme.type_caption)).truncate());
+                ui.add(egui::Label::new(RichText::new(&track.artist).color(theme.text_secondary).size(theme.type_caption)).truncate());
             });
         });
 
@@ -784,7 +784,7 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
                 if let Some(key) = m.root_key { kv("KEY", format!("{key:.0}")); }
                 if !track.album.is_empty() { kv("ALBUM", track.album.clone()); }
             });
-            ui.add(egui::Label::new(RichText::new(&track.path).size(9.0).color(theme.text_disabled)).truncate(true));
+            ui.add(egui::Label::new(RichText::new(&track.path).size(9.0).color(theme.text_disabled)).truncate());
 
             ui.add_space(2.0);
             ui.horizontal(|ui| {
@@ -883,7 +883,7 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
                                     ui.add(egui::Label::new(
                                         RichText::new(format!("{:.1} LUFS | {:.1} dB", single_stem.lufs_integrated, single_stem.peak_db))
                                             .monospace().size(9.0).color(theme.text_secondary)
-                                    ).truncate(true));
+                                    ).truncate());
                                 });
 
                                 ui.horizontal_wrapped(|ui| {

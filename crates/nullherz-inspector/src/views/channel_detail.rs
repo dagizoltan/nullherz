@@ -1,6 +1,6 @@
 use egui::{Ui, Frame, Vec2, Sense, RichText, Rounding, Stroke, Margin, Pos2};
 use crate::InspectorApp;
-use crate::state::{ChannelInputSource, MasterOutput};
+use crate::state::ChannelInputSource;
 use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
 use nullherz_traits::{Command, CoreCommand, MidiEvent, MixerCommand};
@@ -152,7 +152,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                     // Volume Fader & Stereo Peak VU Meter
                     ui.horizontal(|ui| {
-                        let fader_w = 28.0;
                         ui.add_space(40.0);
 
                         let mut fader_val = if is_master {

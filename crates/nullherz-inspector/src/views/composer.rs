@@ -2,7 +2,7 @@ use egui::{Ui, ScrollArea, Vec2, Sense, RichText, Stroke, Frame, Rounding, Margi
 use crate::InspectorApp;
 use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
-use nullherz_traits::{Command, PerformanceCommand, CoreCommand, MixerCommand};
+use nullherz_traits::{Command, PerformanceCommand, CoreCommand};
 pub use nullherz_conductor::pattern_manager::DnaSequencer;
 
 /// Helper to determine step status from telemetry safely.
