@@ -76,33 +76,39 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
     // the pointer IS rather than which widget won the claim to it, so adding an
     // overlay here later cannot silently kill scrubbing.
     if ui.rect_contains_pointer(rect) {
-        let (scroll_y, fine) = ui.input(|inp| (inp.raw_scroll_delta.y, inp.modifiers.shift));
+        let (scroll_y, fine, ctrl) = ui.input(|inp| (inp.raw_scroll_delta.y, inp.modifiers.shift, inp.modifiers.ctrl || inp.modifiers.command));
         if scroll_y.abs() > f32::EPSILON {
-            let node_name = match i {
-                0 => "deck_a_sampler",
-                1 => "deck_b_sampler",
-                2 => "deck_c_sampler",
-                3 => "deck_d_sampler",
-                _ => "",
-            };
-            if let Some(node_idx) = app.get_node_id(node_name) {
-                // Wheel-up (positive delta) moves forward through the track.
-                //
-                // Frames are the TRACK's own frames: `play_head` indexes the
-                // decoded source buffer, so a 44.1 kHz file scrubs by its own
-                // sample rate regardless of what the device negotiated.
-                let src_sr = t.metadata.sample_rate.max(1) as f32;
-                let scale = if fine { SCRUB_FINE_FACTOR } else { 1.0 };
-                let frames = (scroll_y * SCRUB_SECONDS_PER_SCROLL_UNIT * scale * src_sr) as i64;
-                if frames != 0 {
-                    let _ = app.command_sender.send(nullherz_traits::Command::Performance(
-                        nullherz_traits::PerformanceCommand::NudgePosition { node_idx, frames },
-                    ));
-                }
+            if ctrl {
+                // Ctrl + Scroll: Zoom DJ Console deck waveform window
+                let zoom_mult = if scroll_y > 0.0 { 1.15 } else { 0.85 };
+                app.sampler.sampler_waveform_zoom = (app.sampler.sampler_waveform_zoom * zoom_mult).clamp(0.25, 16.0);
                 ui.input_mut(|inp| {
                     inp.raw_scroll_delta = Vec2::ZERO;
                     inp.smooth_scroll_delta = Vec2::ZERO;
                 });
+            } else {
+                let node_name = match i {
+                    0 => "deck_a_sampler",
+                    1 => "deck_b_sampler",
+                    2 => "deck_c_sampler",
+                    3 => "deck_d_sampler",
+                    _ => "",
+                };
+                if let Some(node_idx) = app.get_node_id(node_name) {
+                    // Wheel-up (positive delta) moves forward through the track.
+                    let src_sr = t.metadata.sample_rate.max(1) as f32;
+                    let scale = if fine { SCRUB_FINE_FACTOR } else { 1.0 };
+                    let frames = (scroll_y * SCRUB_SECONDS_PER_SCROLL_UNIT * scale * src_sr) as i64;
+                    if frames != 0 {
+                        let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                            nullherz_traits::PerformanceCommand::NudgePosition { node_idx, frames },
+                        ));
+                    }
+                    ui.input_mut(|inp| {
+                        inp.raw_scroll_delta = Vec2::ZERO;
+                        inp.smooth_scroll_delta = Vec2::ZERO;
+                    });
+                }
             }
         }
     }
@@ -170,11 +176,9 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
         raw_elapsed
     };
 
-    // Visible audio window in source frames, scaled by live playback rate (pitch / BPM sync).
-    // At rate r, r * sr frames pass per second, so 8 seconds on screen covers
-    // NEEDLE_WINDOW_SECS * sr * rate source frames. This keeps the on-screen time window
-    // constant and adjusts the beat grid, cues, and waveform zoom dynamically as BPM changes.
-    let window_frames = NEEDLE_WINDOW_SECS * sr * (playback_rate as f32).max(0.01);
+    // Visible audio window in source frames, scaled by live playback rate & zoom (pitch / BPM sync).
+    let deck_zoom = app.sampler.sampler_waveform_zoom.clamp(0.25, 16.0);
+    let window_frames = (NEEDLE_WINDOW_SECS / deck_zoom) * sr * (playback_rate as f32).max(0.01);
     let center = elapsed_samples as f32;
     let win_start = center as f64 - (window_frames as f64) * 0.5;
     let win_end = center as f64 + (window_frames as f64) * 0.5;
