@@ -902,7 +902,7 @@ impl InspectorApp {
                                 ui.label(egui::RichText::new(title).strong().size(self.theme.type_caption).color(self.theme.accent));
 
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.button(egui_phosphor::regular::X).clicked() {
+                                    if ui.button(egui_phosphor::regular::X).on_hover_text("Close Drawer").clicked() {
                                         self.active_bottom_drawer = None;
                                     }
                                     let target_view = match drawer {
@@ -911,12 +911,13 @@ impl InspectorApp {
                                         BottomDrawer::Instrument => View::Instrument,
                                     };
                                     let is_detached = self.detached_views.contains(&target_view);
-                                    let detach_label = if is_detached {
-                                        format!("{} Re-attach Window", egui_phosphor::regular::ARROWS_IN)
+                                    let detach_icon = if is_detached {
+                                        egui_phosphor::regular::ARROWS_IN
                                     } else {
-                                        format!("{} Detach Window", egui_phosphor::regular::ARROW_SQUARE_OUT)
+                                        egui_phosphor::regular::ARROW_SQUARE_OUT
                                     };
-                                    if ui.button(egui::RichText::new(detach_label).size(self.theme.type_caption).strong()).clicked() {
+                                    let detach_tooltip = if is_detached { "Re-attach Window" } else { "Detach Window" };
+                                    if ui.button(detach_icon).on_hover_text(detach_tooltip).clicked() {
                                         if is_detached {
                                             self.detached_views.remove(&target_view);
                                         } else {
@@ -930,18 +931,26 @@ impl InspectorApp {
                     ui.separator();
                     ui.add_space(self.theme.space_xs);
 
-                    match drawer {
-                        BottomDrawer::Mixer => {
-                            let show_crossfader = self.active_view != View::Composer;
-                            views::mixer::render_mixer_drawer(self, ui, telemetry, show_crossfader);
-                        }
-                        BottomDrawer::HorizontalMixer => {
-                            views::mixer::render_horizontal_mixer_drawer(self, ui, telemetry);
-                        }
-                        BottomDrawer::Instrument => {
-                            views::sampler::render_instrument_drawer(self, ui, telemetry);
-                        }
-                    }
+                    egui::ScrollArea::both()
+                        .id_source(format!("{}_drawer_scroll_area", id_prefix))
+                        .show(ui, |ui| {
+                            egui::Frame::none()
+                                .inner_margin(egui::Margin::symmetric(24.0, self.theme.space_xs))
+                                .show(ui, |ui| {
+                                    match drawer {
+                                        BottomDrawer::Mixer => {
+                                            let show_crossfader = self.active_view != View::Composer;
+                                            views::mixer::render_mixer_drawer(self, ui, telemetry, show_crossfader);
+                                        }
+                                        BottomDrawer::HorizontalMixer => {
+                                            views::mixer::render_horizontal_mixer_drawer(self, ui, telemetry);
+                                        }
+                                        BottomDrawer::Instrument => {
+                                            views::sampler::render_instrument_drawer(self, ui, telemetry);
+                                        }
+                                    }
+                                });
+                        });
                 });
         }
     }
@@ -1635,7 +1644,7 @@ impl eframe::App for InspectorApp {
                             if ui.button(fs_icon).on_hover_text(fs_tooltip).clicked() {
                                 v_ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fullscreen));
                             }
-                            if ui.button(format!("{} Re-attach to Main", egui_phosphor::regular::ARROWS_IN)).clicked() {
+                            if ui.button(egui_phosphor::regular::ARROWS_IN).on_hover_text("Re-attach to Main Window").clicked() {
                                 close_detached = true;
                             }
                         });
@@ -1701,12 +1710,13 @@ impl eframe::App for InspectorApp {
                     }
 
                     let is_detached = self.detached_views.contains(&self.active_view);
-                    let btn_label = if is_detached {
-                        format!("{} Re-attach Window", egui_phosphor::regular::ARROWS_IN)
+                    let detach_icon = if is_detached {
+                        egui_phosphor::regular::ARROWS_IN
                     } else {
-                        format!("{} Detach Window", egui_phosphor::regular::ARROW_SQUARE_OUT)
+                        egui_phosphor::regular::ARROW_SQUARE_OUT
                     };
-                    if ui.button(btn_label).clicked() {
+                    let detach_tooltip = if is_detached { "Re-attach Window" } else { "Detach Window" };
+                    if ui.button(detach_icon).on_hover_text(detach_tooltip).clicked() {
                         if is_detached {
                             self.detached_views.remove(&self.active_view);
                         } else {
