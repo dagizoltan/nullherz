@@ -494,7 +494,7 @@ pub struct ComposerState {
     pub track_solos: [bool; 16],
     pub track_volumes: [f32; 16],
     pub track_pans: [f32; 16],
-    pub track_filters: [f32; 16],
+    pub _track_filters: [f32; 16],
     pub track_targets: [String; 16],
     #[allow(dead_code)]
     pub channel_kinds: [ChannelKind; 16],
@@ -522,7 +522,7 @@ impl Default for ComposerState {
             track_solos: [false; 16],
             track_volumes: [1.0; 16],
             track_pans: [0.0; 16],
-            track_filters: [0.5; 16],
+            _track_filters: [0.5; 16],
             track_targets: std::array::from_fn(|_| "(default)".to_string()),
             channel_kinds: std::array::from_fn(|i| if i < 4 { ChannelKind::StereoInput } else { ChannelKind::InstrumentSampler }),
             record_automation: false,
