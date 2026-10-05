@@ -27,32 +27,35 @@ pub fn render_mini_waveform(
         return;
     }
     let center_y = clip_rect.center().y;
-    let half_h = (clip_rect.height() * 0.42).max(2.0);
+    let half_h = (clip_rect.height() * 0.45).max(2.0);
     let width = clip_rect.width();
 
     if peaks.is_empty() {
-        let num_bars = (width / 3.0) as usize;
+        let num_bars = (width / 2.5) as usize;
         for i in 0..num_bars {
-            let x = clip_rect.left() + (i as f32 / num_bars.max(1) as f32) * width + 1.5;
+            let x = clip_rect.left() + (i as f32 / num_bars.max(1) as f32) * width + 1.2;
             let amp = (0.3 + 0.6 * ((i as f32 * 0.7).sin().abs())).clamp(0.1, 0.95);
             painter.line_segment(
                 [egui::pos2(x, center_y - amp * half_h), egui::pos2(x, center_y + amp * half_h)],
-                Stroke::new(1.2_f32, color),
+                Stroke::new(1.0_f32, color.linear_multiply(0.4)),
             );
         }
         return;
     }
 
     let num_peaks = peaks.len();
-    let steps = (width / 2.5) as usize;
+    let steps = (width * 1.5).max(4.0) as usize;
     for px in 0..steps {
-        let x = clip_rect.left() + (px as f32 / steps.max(1) as f32) * width + 1.2;
-        let peak_idx = (px * num_peaks) / steps.max(1);
-        let amp = peaks.get(peak_idx).copied().unwrap_or(0.2).abs().clamp(0.05, 1.0);
+        let x = clip_rect.left() + (px as f32 / steps as f32) * width;
+        let p_start = (px * num_peaks) / steps;
+        let p_end = (((px + 1) * num_peaks) / steps).max(p_start + 1);
+
+        let window_slice = &peaks[p_start.min(num_peaks.saturating_sub(1))..p_end.min(num_peaks)];
+        let max_amp = window_slice.iter().fold(0.0f32, |a, &v| a.max(v.abs())).clamp(0.02, 1.0);
 
         painter.line_segment(
-            [egui::pos2(x, center_y - amp * half_h), egui::pos2(x, center_y + amp * half_h)],
-            Stroke::new(1.2_f32, color),
+            [egui::pos2(x, center_y - max_amp * half_h), egui::pos2(x, center_y + max_amp * half_h)],
+            Stroke::new(1.0_f32, color),
         );
     }
 }
