@@ -418,7 +418,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         };
 
                                         if slot_idx == app.composer.sequencer_active_step {
-                                            bg_color = bg_color.linear_multiply(1.3);
+                                            bg_color = track_color.gamma_multiply(0.5);
                                         }
 
                                         ui.painter().rect_filled(rect, Rounding::same(2.0), bg_color);

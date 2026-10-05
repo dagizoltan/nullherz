@@ -358,7 +358,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
     };
 
     let fill_color = if is_focused {
-        theme.bg_surface.linear_multiply(1.2)
+        theme.bg_surface_raised
     } else {
         theme.bg_surface
     };

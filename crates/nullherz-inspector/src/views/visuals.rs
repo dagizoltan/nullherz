@@ -978,7 +978,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                         let channel_color = theme.deck_colors[c_idx % 4];
 
                                         egui::Frame::none()
-                                            .fill(if is_selected { theme.bg_surface.linear_multiply(1.15) } else { theme.bg_surface })
+                                            .fill(if is_selected { theme.bg_surface_raised } else { theme.bg_surface })
                                             .rounding(egui::Rounding::same(theme.radius_md))
                                             .inner_margin(egui::Margin::same(theme.space_md))
                                             .stroke(egui::Stroke::new(if is_selected { 2.0_f32 } else { 1.0_f32 }, if is_selected { channel_color } else { theme.border }))
