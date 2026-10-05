@@ -737,15 +737,13 @@ impl InspectorApp {
                 ui.vertical_centered(|ui| {
                     ui.add_space(6.0);
                     ui.label(egui::RichText::new("Ω").size(20.0).color(self.theme.accent));
-                    ui.add_space(10.0);
+                    ui.add_space(8.0);
 
                     let top_nav = [
-                        (View::Console, egui_phosphor::regular::RADIO, "DJ CONSOLE"),
-                        (View::Mixer, egui_phosphor::regular::SLIDERS, "MIXER STRIPS"),
                         (View::ChannelDetail, egui_phosphor::regular::MAGNIFYING_GLASS, "CHANNEL DETAIL"),
+                        (View::Console, egui_phosphor::regular::RADIO, "DJ CONSOLE"),
                         (View::Composer, egui_phosphor::regular::PIANO_KEYS, "COMPOSER"),
                         (View::Visuals, egui_phosphor::regular::EYE, "NEURAL VISUALS"),
-                        (View::Broadcast, egui_phosphor::regular::BROADCAST, "BROADCAST"),
                     ];
 
                     let middle_nav = [
@@ -756,6 +754,7 @@ impl InspectorApp {
                     ];
 
                     let bottom_nav = [
+                        (View::Broadcast, egui_phosphor::regular::BROADCAST, "BROADCAST"),
                         (View::Library, egui_phosphor::regular::BOOKS, "TRACK LIBRARY"),
                         (View::Store, egui_phosphor::regular::SHOPPING_BAG, "SIDECAR STORE"),
                         (View::Topology, egui_phosphor::regular::SHARE_NETWORK, "TOPOLOGY"),
@@ -765,7 +764,7 @@ impl InspectorApp {
 
                     let mut render_nav_btn = |ui: &mut egui::Ui, view: View, icon: &str, label: &str| {
                         let is_selected = *active_view == view;
-                        let size = egui::vec2(44.0, 40.0);
+                        let size = egui::vec2(44.0, 36.0);
                         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
 
                         if response.clicked() {
@@ -780,8 +779,8 @@ impl InspectorApp {
                                 self.theme.accent.linear_multiply(0.12),
                             );
                             let accent_bar = egui::Rect::from_min_max(
-                                rect.left_top() + egui::vec2(2.0, 6.0),
-                                rect.left_bottom() + egui::vec2(5.0, -6.0),
+                                rect.left_top() + egui::vec2(2.0, 4.0),
+                                rect.left_bottom() + egui::vec2(5.0, -4.0),
                             );
                             ui.painter().rect_filled(accent_bar, 1.5, self.theme.accent);
                         } else if response.hovered() {
@@ -811,35 +810,62 @@ impl InspectorApp {
                         response.on_hover_text(label);
                     };
 
-                    egui::ScrollArea::vertical()
-                        .id_source(format!("{}_nav_scroll", id_prefix))
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.vertical_centered(|ui| {
-                                for (view, icon, label) in top_nav {
-                                    render_nav_btn(ui, view, icon, label);
-                                    ui.add_space(2.0);
-                                }
+                    // TOP GROUP (Top-aligned)
+                    for (view, icon, label) in top_nav {
+                        render_nav_btn(ui, view, icon, label);
+                        ui.add_space(2.0);
+                    }
 
-                                ui.add_space(2.0);
-                                ui.separator();
-                                ui.add_space(2.0);
+                    // BOTTOM GROUP (Bottom-aligned)
+                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                        // EXIT BUTTON at the very bottom
+                        let exit_size = egui::vec2(44.0, 36.0);
+                        let (exit_rect, exit_res) = ui.allocate_exact_size(exit_size, egui::Sense::click());
 
-                                for (view, icon, label) in middle_nav {
-                                    render_nav_btn(ui, view, icon, label);
-                                    ui.add_space(2.0);
-                                }
+                        if exit_res.clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
 
-                                ui.add_space(2.0);
-                                ui.separator();
-                                ui.add_space(2.0);
+                        if exit_res.hovered() {
+                            ui.painter().rect_filled(
+                                exit_rect.shrink(1.0),
+                                self.theme.radius_md,
+                                self.theme.danger.linear_multiply(0.25),
+                            );
+                        } else {
+                            ui.painter().rect_filled(
+                                exit_rect.shrink(1.0),
+                                self.theme.radius_md,
+                                self.theme.danger.linear_multiply(0.08),
+                            );
+                        }
 
-                                for (view, icon, label) in bottom_nav {
-                                    render_nav_btn(ui, view, icon, label);
-                                    ui.add_space(2.0);
-                                }
-                            });
+                        ui.painter().text(
+                            exit_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            egui_phosphor::regular::POWER,
+                            egui::FontId::proportional(18.0),
+                            self.theme.danger,
+                        );
+                        exit_res.on_hover_text("EXIT STUDIO");
+
+                        ui.add_space(2.0);
+
+                        for (view, icon, label) in bottom_nav.into_iter().rev() {
+                            render_nav_btn(ui, view, icon, label);
+                            ui.add_space(2.0);
+                        }
+
+                        ui.add_space(4.0);
+
+                        // CENTER GROUP (Centered in remaining vertical space)
+                        ui.vertical_centered(|ui| {
+                            for (view, icon, label) in middle_nav {
+                                render_nav_btn(ui, view, icon, label);
+                                ui.add_space(2.0);
+                            }
                         });
+                    });
                 });
             });
     }
