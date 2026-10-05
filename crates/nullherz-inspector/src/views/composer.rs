@@ -70,24 +70,39 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     });
     ui.add_space(app.theme.space_sm);
 
-    // Studio Transport & Master Controls
+    // Modern Studio Transport Bar
     ui.horizontal(|ui| {
-        let play_btn = ui.selectable_label(app.composer.composer_playing, RichText::new("▶ PLAY COMPOSER").strong().color(if app.composer.composer_playing { app.theme.success } else { app.theme.text_secondary }));
-        if play_btn.clicked() {
-            app.composer.composer_playing = true;
-            let _ = app.command_sender.send(Command::Core(CoreCommand::Play));
+        let play_icon = if app.composer.composer_playing { egui_phosphor::regular::PAUSE } else { egui_phosphor::regular::PLAY };
+        let play_bg = if app.composer.composer_playing { app.theme.success } else { app.theme.bg_inset };
+
+        if ui.add_sized([28.0, 24.0], egui::Button::new(RichText::new(play_icon).size(12.0).strong()).fill(play_bg)).on_hover_text("Play / Pause Transport").clicked() {
+            app.composer.composer_playing = !app.composer.composer_playing;
+            if app.composer.composer_playing {
+                let _ = app.command_sender.send(Command::Core(CoreCommand::Play));
+            } else {
+                let _ = app.command_sender.send(Command::Core(CoreCommand::Stop));
+            }
         }
 
-        let stop_btn = ui.selectable_label(!app.composer.composer_playing, RichText::new("■ STOP COMPOSER").strong().color(if !app.composer.composer_playing { app.theme.danger } else { app.theme.text_secondary }));
-        if stop_btn.clicked() {
+        if ui.add_sized([28.0, 24.0], egui::Button::new(RichText::new(egui_phosphor::regular::SQUARE).size(12.0).strong()).fill(app.theme.bg_inset)).on_hover_text("Stop Transport").clicked() {
             app.composer.composer_playing = false;
             let _ = app.command_sender.send(Command::Core(CoreCommand::Stop));
         }
 
-        ui.add_space(app.theme.space_sm);
+        ui.add_space(app.theme.space_xs);
+
+        // Status indicator pill
+        let status_text = if app.composer.composer_playing { "COMPOSER RUNNING" } else { "STOPPED" };
+        let status_col = if app.composer.composer_playing { app.theme.success } else { app.theme.text_secondary };
+        ui.label(RichText::new(status_text).strong().size(9.0).color(status_col));
+
+        ui.add_space(app.theme.space_md);
 
         let is_synced = app.composer.sync_with_master_transport;
-        ui.toggle_value(&mut app.composer.sync_with_master_transport, RichText::new("🔒 SYNC MASTER CLOCK").color(if is_synced { app.theme.accent } else { app.theme.text_secondary }));
+        let sync_icon = if is_synced { egui_phosphor::regular::LOCK } else { egui_phosphor::regular::LOCK_OPEN };
+        if ui.add(egui::Button::new(RichText::new(format!("{} SYNC", sync_icon)).size(9.0).strong()).fill(if is_synced { app.theme.accent.linear_multiply(0.2) } else { app.theme.bg_inset })).on_hover_text("Sync Master Clock").clicked() {
+            app.composer.sync_with_master_transport = !app.composer.sync_with_master_transport;
+        }
 
         ui.add_space(app.theme.space_md);
 
@@ -100,7 +115,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         ui.add_space(app.theme.space_md);
 
-        ui.label(RichText::new("PRECISION:").strong().size(app.theme.type_caption).color(app.theme.text_secondary));
         let steps_per_bar = app.composer.grid_step_resolution.clamp(16, 64);
         egui::ComboBox::from_id_source("grid_precision_select")
             .width(65.0)
@@ -115,7 +129,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         ui.add_space(app.theme.space_md);
 
-        ui.label(RichText::new("LENGTH:").strong().size(app.theme.type_caption).color(app.theme.text_secondary));
         let current_steps = app.composer.studio_sequencer_grid[0].len();
         let current_bars = (current_steps / steps_per_bar).max(1);
         let mut selected_bars = current_bars;
@@ -143,38 +156,38 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         ui.add_space(app.theme.space_md);
 
-        ui.label(RichText::new("🔍 ZOOM:").size(app.theme.type_caption).strong().color(app.theme.text_secondary));
+        // Zoomable Beatgrid controls
+        if ui.button(egui_phosphor::regular::MAGNIFYING_GLASS_MINUS).on_hover_text("Zoom Out").clicked() {
+            app.composer.grid_zoom = (app.composer.grid_zoom - 0.25).max(0.5);
+        }
         ui.add(egui::Slider::new(&mut app.composer.grid_zoom, 0.5..=3.0).show_value(false));
+        if ui.button(egui_phosphor::regular::MAGNIFYING_GLASS_PLUS).on_hover_text("Zoom In").clicked() {
+            app.composer.grid_zoom = (app.composer.grid_zoom + 0.25).min(3.0);
+        }
 
         ui.add_space(app.theme.space_md);
 
         let is_recording = app.composer.record_automation;
-        ui.toggle_value(&mut app.composer.record_automation, RichText::new("🔴 RECORD AUTOMATION").color(if is_recording { app.theme.danger } else { app.theme.text_secondary }));
-        ui.add_space(app.theme.space_md);
+        if ui.add(egui::Button::new(RichText::new(format!("{} REC", egui_phosphor::regular::RECORD)).size(9.0).strong()).fill(if is_recording { app.theme.danger } else { app.theme.bg_inset })).on_hover_text("Record Automation").clicked() {
+            app.composer.record_automation = !app.composer.record_automation;
+        }
+
+        ui.add_space(app.theme.space_xs);
 
         let is_kbd_open = app.composer.keyboard_grid.is_open;
-        ui.toggle_value(&mut app.composer.keyboard_grid.is_open, RichText::new("🎹 KEYBOARD").color(if is_kbd_open { app.theme.accent } else { app.theme.text_secondary }));
-        ui.add_space(app.theme.space_md);
+        if ui.add(egui::Button::new(RichText::new(format!("{} KBD", egui_phosphor::regular::PIANO_KEYS)).size(9.0).strong()).fill(if is_kbd_open { app.theme.accent } else { app.theme.bg_inset })).on_hover_text("Toggle Keyboard").clicked() {
+            app.composer.keyboard_grid.is_open = !app.composer.keyboard_grid.is_open;
+        }
 
-        if ui.button("STOP ALL CLIPS").clicked() {
+        ui.add_space(app.theme.space_xs);
+
+        if ui.button(RichText::new("CLEAR").size(9.0).strong()).on_hover_text("Clear All Patterns").clicked() {
             for i in 0..16 {
                  let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: seq_node, track_idx: i as u32 }));
                  app.composer.studio_sequencer_grid[i].fill(0.0);
                  for sub in 0..16 {
                      app.composer.subchannel_sequencer_grid[i][sub].fill(0.0);
                  }
-            }
-        }
-    });
-    ui.add_space(app.theme.space_sm);
-
-    // Global Scene Launchers Control Row
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("LAUNCH SCENE:").strong().size(app.theme.type_caption).color(app.theme.text_secondary));
-        for scene_idx in 0..8 {
-            let btn_text = format!("SCENE {}", scene_idx + 1);
-            if ui.add_sized([70.0, 20.0], egui::Button::new(RichText::new(btn_text).size(app.theme.type_caption).strong()).fill(app.theme.accent.linear_multiply(0.12))).clicked() {
-                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::LaunchClip { row: 0xFF, col: scene_idx as u32 }));
             }
         }
     });

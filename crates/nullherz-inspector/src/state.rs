@@ -285,6 +285,8 @@ pub struct MixerState {
     pub custom_subchannel_solos: [Vec<bool>; 16],
     pub custom_subchannel_inserts: [Vec<Vec<String>>; 16],
     pub custom_subchannel_insert_params: [Vec<Vec<[f32; 8]>>; 16],
+    pub master_inserts: Vec<String>,
+    pub master_insert_params: Vec<[f32; 8]>,
 }
 
 impl Default for MixerState {
@@ -349,6 +351,8 @@ impl Default for MixerState {
             custom_subchannel_solos: std::array::from_fn(|_| vec![]),
             custom_subchannel_inserts: std::array::from_fn(|_| vec![]),
             custom_subchannel_insert_params: std::array::from_fn(|_| vec![]),
+            master_inserts: vec!["TRIM / GAIN".to_string(), "3-BAND EQ".to_string()],
+            master_insert_params: vec![[1.0; 8], [1.0; 8]],
         }
     }
 }

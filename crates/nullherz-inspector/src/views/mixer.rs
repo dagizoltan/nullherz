@@ -1362,6 +1362,116 @@ fn render_horizontal_master_card(app: &mut InspectorApp, ui: &mut Ui, telemetry:
         });
 }
 
+fn render_master_fx_rack_item(app: &mut InspectorApp, ui: &mut Ui, fx_idx: usize, accent_color: Color32) {
+    ui.push_id(("master_fx", fx_idx), |ui| {
+        let theme = app.theme;
+        let insert_name = app.mixer.master_inserts[fx_idx].clone();
+        let num_inserts = app.mixer.master_inserts.len();
+
+        Frame::none()
+            .fill(theme.bg_inset)
+            .rounding(Rounding::same(theme.radius_sm))
+            .inner_margin(Margin::same(2.0))
+            .stroke(Stroke::new(1.0, theme.border))
+            .show(ui, |ui| {
+                ui.set_width(STRIP_W - 12.0);
+                ui.vertical_centered(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Label::new(RichText::new(&insert_name).size(7.5).strong().color(accent_color)).truncate());
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // Remove button
+                            if ui.add(egui::Button::new(RichText::new("✕").size(7.0)).fill(theme.bg_inset)).clicked() {
+                                app.mixer.master_inserts.remove(fx_idx);
+                                if fx_idx < app.mixer.master_insert_params.len() {
+                                    app.mixer.master_insert_params.remove(fx_idx);
+                                }
+                                return;
+                            }
+
+                            // Reorder Down
+                            if fx_idx + 1 < num_inserts {
+                                if ui.add(egui::Button::new(RichText::new("▼").size(7.0)).fill(theme.bg_inset)).clicked() {
+                                    app.mixer.master_inserts.swap(fx_idx, fx_idx + 1);
+                                    if fx_idx + 1 < app.mixer.master_insert_params.len() {
+                                        app.mixer.master_insert_params.swap(fx_idx, fx_idx + 1);
+                                    }
+                                    return;
+                                }
+                            }
+
+                            // Reorder Up
+                            if fx_idx > 0 {
+                                if ui.add(egui::Button::new(RichText::new("▲").size(7.0)).fill(theme.bg_inset)).clicked() {
+                                    app.mixer.master_inserts.swap(fx_idx, fx_idx - 1);
+                                    if fx_idx < app.mixer.master_insert_params.len() {
+                                        app.mixer.master_insert_params.swap(fx_idx, fx_idx - 1);
+                                    }
+                                    return;
+                                }
+                            }
+                        });
+                    });
+
+                    ui.add_space(1.0);
+
+                    let name_upper = insert_name.to_uppercase();
+                    if name_upper.contains("TRIM") || name_upper.contains("GAIN") {
+                        let sum_l = app.topo.node_map.get("master_sum_l").copied();
+                        let sum_r = app.topo.node_map.get("master_sum_r").copied();
+                        let mut m_gain = app.mixer.master_gain;
+                        if widgets::render_knob_sized(ui, &mut m_gain, 0.0..=2.0, "TRIM", accent_color, 18.0).changed() {
+                            app.mixer.master_gain = m_gain;
+                            for node in [sum_l, sum_r].into_iter().flatten() {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: node as u64,
+                                    param_id: 0,
+                                    value: m_gain,
+                                    ramp_duration_samples: 128,
+                                }));
+                            }
+                        }
+                    } else if name_upper.contains("3-BAND") || name_upper.contains("EQ") {
+                        let master_eq_node = app.topo.node_map.get("master_eq").copied();
+                        let mut hi = app.mixer.mastering_eq_high;
+                        if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", accent_color, 18.0).changed() {
+                            app.mixer.mastering_eq_high = hi;
+                            if let Some(node_id) = master_eq_node {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: node_id as u64, param_id: 2, value: hi, ramp_duration_samples: 128,
+                                }));
+                            }
+                        }
+                        ui.add_space(1.0);
+                        let mut mid = app.mixer.mastering_eq_mid;
+                        if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", accent_color, 18.0).changed() {
+                            app.mixer.mastering_eq_mid = mid;
+                            if let Some(node_id) = master_eq_node {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: node_id as u64, param_id: 1, value: mid, ramp_duration_samples: 128,
+                                }));
+                            }
+                        }
+                        ui.add_space(1.0);
+                        let mut low = app.mixer.mastering_eq_low;
+                        if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", accent_color, 18.0).changed() {
+                            app.mixer.mastering_eq_low = low;
+                            if let Some(node_id) = master_eq_node {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: node_id as u64, param_id: 0, value: low, ramp_duration_samples: 128,
+                                }));
+                            }
+                        }
+                    } else {
+                        if let Some(params) = app.mixer.master_insert_params.get_mut(fx_idx) {
+                            widgets::render_knob_sized(ui, &mut params[0], 0.0..=1.0, "MIX", accent_color, 18.0);
+                        }
+                    }
+                });
+            });
+    });
+}
+
 pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>, in_drawer: bool) {
     ui.push_id("master_strip", |ui| {
         let theme = app.theme;
@@ -1415,72 +1525,21 @@ pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: 
                         ui.add_space(2.0);
                     }
 
-                    // Master Inserts Rack
+                    // Master Sortable Inserts Rack (Identical to Channel Strips)
                     ui.group(|ui| {
                         ui.set_width(STRIP_W - 8.0);
                         ui.vertical_centered(|ui| {
-                            ui.label(RichText::new("MASTER BUS").size(theme.type_caption).strong().color(theme.text_secondary));
-                            ui.add_space(2.0);
-
-                            // Master Gain Knob
-                            let mut m_gain = app.mixer.master_gain;
-                            if widgets::render_knob_sized(ui, &mut m_gain, 0.0..=2.0, "TRIM", accent, 20.0).changed() {
-                                app.mixer.master_gain = m_gain;
-                                for node in [sum_l, sum_r].into_iter().flatten() {
-                                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                        target_id: node as u64,
-                                        param_id: 0,
-                                        value: m_gain,
-                                        ramp_duration_samples: 128,
-                                    }));
-                                }
+                            let fx_count = app.mixer.master_inserts.len();
+                            for fx_i in 0..fx_count {
+                                render_master_fx_rack_item(app, ui, fx_i, accent);
+                                ui.add_space(2.0);
                             }
 
-                            ui.add_space(2.0);
-
-                            // Master EQ
-                            let master_eq_node = app.topo.node_map.get("master_eq").copied();
-                            let mut hi = app.mixer.mastering_eq_high;
-                            if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", accent, 18.0).changed() {
-                                app.mixer.mastering_eq_high = hi;
-                                if let Some(node_id) = master_eq_node {
-                                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                        target_id: node_id as u64,
-                                        param_id: 2,
-                                        value: hi,
-                                        ramp_duration_samples: 128,
-                                    }));
-                                }
-                            }
-
-                            ui.add_space(1.0);
-
-                            let mut mid = app.mixer.mastering_eq_mid;
-                            if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", accent, 18.0).changed() {
-                                app.mixer.mastering_eq_mid = mid;
-                                if let Some(node_id) = master_eq_node {
-                                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                        target_id: node_id as u64,
-                                        param_id: 1,
-                                        value: mid,
-                                        ramp_duration_samples: 128,
-                                    }));
-                                }
-                            }
-
-                            ui.add_space(1.0);
-
-                            let mut low = app.mixer.mastering_eq_low;
-                            if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", accent, 18.0).changed() {
-                                app.mixer.mastering_eq_low = low;
-                                if let Some(node_id) = master_eq_node {
-                                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                        target_id: node_id as u64,
-                                        param_id: 0,
-                                        value: low,
-                                        ramp_duration_samples: 128,
-                                    }));
-                                }
+                            if ui.add_sized([STRIP_W - 12.0, 16.0], egui::Button::new(RichText::new("+ FX").size(8.0).strong()).fill(theme.bg_inset)).clicked() {
+                                app.mixer.master_inserts.push("CUSTOM MASTER FX".into());
+                                app.mixer.master_insert_params.push([1.0; 8]);
+                                app.active_right_tab = Some(crate::RightTab::Store);
+                                app.store.active_category = Some(sidecar_sdk::AssetCategory::AudioInsert);
                             }
                         });
                     });
