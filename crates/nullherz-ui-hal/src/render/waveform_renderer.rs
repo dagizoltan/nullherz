@@ -312,30 +312,38 @@ impl WaveformRenderer {
 
         let mut vertices = Vec::with_capacity(count * 2);
         for i in 0..count {
-            let idx_f = f_start + (i as f32 / count as f32) * f_span;
+            let sub_start_f = f_start + (i as f32 / count as f32) * f_span;
+            let sub_end_f = f_start + ((i + 1) as f32 / count as f32) * f_span;
             let x = (i as f32 / count as f32) * 2.0;
-            if idx_f < 0.0 || idx_f >= n as f32 {
+
+            if sub_start_f < 0.0 || sub_start_f >= n as f32 {
                 vertices.push(WaveformVertex { position: [x, 0.0], color: [0.0, 0.0, 0.0, 0.0] });
                 vertices.push(WaveformVertex { position: [x, 0.0], color: [0.0, 0.0, 0.0, 0.0] });
                 continue;
             }
-            let idx = idx_f as usize;
-            let l = low[idx] * eq_gains[0];
-            let m = mid[idx] * eq_gains[1];
-            let h = high[idx] * eq_gains[2];
 
-            let sum_orig = (low[idx] + mid[idx] + high[idx]).max(1e-6);
+            let s_idx = (sub_start_f as usize).min(n.saturating_sub(1));
+            let e_idx = ((sub_end_f.ceil() as usize).max(s_idx + 1)).min(n);
+
+            let l = low[s_idx..e_idx].iter().fold(0.0f32, |a, &v| a.max(v)) * eq_gains[0];
+            let m = mid[s_idx..e_idx].iter().fold(0.0f32, |a, &v| a.max(v)) * eq_gains[1];
+            let h = high[s_idx..e_idx].iter().fold(0.0f32, |a, &v| a.max(v)) * eq_gains[2];
+
+            let sum_orig = (low[s_idx] + mid[s_idx] + high[s_idx]).max(1e-6);
             let sum_eq = (l + m + h).max(0.0);
             let eq_scale = sum_eq / sum_orig;
 
-            let top = (env_max[idx] * eq_scale).clamp(-1.0, 1.0);
-            let bot = (env_min[idx] * eq_scale).clamp(-1.0, 1.0);
+            let top = env_max[s_idx..e_idx].iter().fold(f32::MIN, |a, &v| a.max(v)) * eq_scale;
+            let bot = env_min[s_idx..e_idx].iter().fold(f32::MAX, |a, &v| a.min(v)) * eq_scale;
 
-            let top_col = compute_sample_color(style, l, m, h, top, bot, accent_color, true);
-            let bot_col = compute_sample_color(style, l, m, h, top, bot, accent_color, false);
+            let top_clamped = top.clamp(-1.0, 1.0);
+            let bot_clamped = bot.clamp(-1.0, 1.0);
 
-            vertices.push(WaveformVertex { position: [x, top], color: top_col });
-            vertices.push(WaveformVertex { position: [x, bot], color: bot_col });
+            let top_col = compute_sample_color(style, l, m, h, top_clamped, bot_clamped, accent_color, true);
+            let bot_col = compute_sample_color(style, l, m, h, top_clamped, bot_clamped, accent_color, false);
+
+            vertices.push(WaveformVertex { position: [x, top_clamped], color: top_col });
+            vertices.push(WaveformVertex { position: [x, bot_clamped], color: bot_col });
         }
         self.num_vertices = vertices.len() as u32;
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
