@@ -26,10 +26,12 @@ impl DiscoveryBeacon {
             }
 
             let msg = format!("nullherz_conductor:{}", self.port);
-            let addr = "255.255.255.255:9001";
+            let addrs = ["255.255.255.255:9001", "127.0.0.1:9001"];
 
             loop {
-                let _ = socket.send_to(msg.as_bytes(), addr);
+                for addr in &addrs {
+                    let _ = socket.send_to(msg.as_bytes(), addr);
+                }
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
         });

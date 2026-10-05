@@ -263,18 +263,20 @@ impl DiscoveryService {
             return;
         }
         if let Some(mdns) = &self.mdns {
-            let hostname = gethostname::gethostname().to_string_lossy().to_string();
+            let raw_host = gethostname::gethostname().to_string_lossy().to_string();
+            let host_clean = raw_host.trim_end_matches('.').trim_end_matches(".local");
+            let host_clean = if host_clean.is_empty() { "nullherz-node" } else { host_clean };
             if let Ok(service_info) = mdns_sd::ServiceInfo::new(
                 self.service_type,
-                &hostname,
-                &format!("{}.local.", hostname),
+                host_clean,
+                &format!("{}.local.", host_clean),
                 "0.0.0.0",
                 9001,
                 None,
             ) {
                 if mdns.register(service_info).is_ok() {
                     self.has_registered = true;
-                    println!("P2P Discovery: Announced '{}' to the genetic cloud via mDNS.", hostname);
+                    println!("P2P Discovery: Announced '{}' to the genetic cloud via mDNS.", host_clean);
                 }
             }
         }
