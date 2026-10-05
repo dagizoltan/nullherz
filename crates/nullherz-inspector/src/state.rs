@@ -273,6 +273,16 @@ pub struct MixerState {
     pub stem_eq_high: [[f32; 12]; 16],
     pub stem_controls_expanded: [bool; 16],
     pub focused_detail_channel: usize,
+    /// User-added custom subchannels for any channel (including non-instruments)
+    pub custom_subchannels: [Vec<String>; 16],
+    pub custom_subchannel_gain: [Vec<f32>; 16],
+    pub custom_subchannel_pitch: [Vec<f32>; 16],
+    pub custom_subchannel_eq_high: [Vec<f32>; 16],
+    pub custom_subchannel_eq_mid: [Vec<f32>; 16],
+    pub custom_subchannel_eq_low: [Vec<f32>; 16],
+    pub custom_subchannel_faders: [Vec<f32>; 16],
+    pub custom_subchannel_mutes: [Vec<bool>; 16],
+    pub custom_subchannel_solos: [Vec<bool>; 16],
 }
 
 impl Default for MixerState {
@@ -326,6 +336,15 @@ impl Default for MixerState {
             stem_eq_mid: [[1.0; 12]; 16],
             stem_eq_high: [[1.0; 12]; 16],
             stem_controls_expanded: [false; 16],
+            custom_subchannels: std::array::from_fn(|_| vec![]),
+            custom_subchannel_gain: std::array::from_fn(|_| vec![]),
+            custom_subchannel_pitch: std::array::from_fn(|_| vec![]),
+            custom_subchannel_eq_high: std::array::from_fn(|_| vec![]),
+            custom_subchannel_eq_mid: std::array::from_fn(|_| vec![]),
+            custom_subchannel_eq_low: std::array::from_fn(|_| vec![]),
+            custom_subchannel_faders: std::array::from_fn(|_| vec![]),
+            custom_subchannel_mutes: std::array::from_fn(|_| vec![]),
+            custom_subchannel_solos: std::array::from_fn(|_| vec![]),
         }
     }
 }
