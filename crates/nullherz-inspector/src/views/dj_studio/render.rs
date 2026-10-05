@@ -13,10 +13,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     render_header(ui, telemetry, &theme);
     ui.add_space(theme.space_xs);
 
-    // Waveform stack fills all remaining available height.
-    let waveform_section_h = ui.available_height().max(200.0);
+    // Calculate space for waveform lanes and bottom mixer drawer
+    let drawer_h = if app.mixer.mixer_drawer_open { 380.0 } else { 35.0 };
+    let waveform_section_h = (ui.available_height() - drawer_h).max(180.0);
     let spacing_h = 2.0;
-    let lane_h = ((waveform_section_h - spacing_h * 3.0) / 4.0).max(40.0);
+    let lane_h = ((waveform_section_h - spacing_h * 3.0) / 4.0).max(35.0);
 
     ui.vertical(|ui| {
         for i in 0..4 {
@@ -26,6 +27,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             }
         }
     });
+
+    ui.add_space(theme.space_xs);
+
+    // Collapsible Bottom Mixer Drawer with A/B Crossfader Bar
+    crate::views::mixer::render_mixer_drawer(app, ui, telemetry, true);
 }
 
 fn render_header(ui: &mut Ui, telemetry: &Option<Telemetry>, theme: &nullherz_ui_hal::Theme) {
