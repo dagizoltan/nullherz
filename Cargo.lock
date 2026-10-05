@@ -3694,8 +3694,6 @@ dependencies = [
 [[package]]
 name = "objc2"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "559c5a40fdd30eb5e344fbceacf7595a81e242529fb4e21cf5f43fb4f11ff98d"
 dependencies = [
  "objc-sys 0.3.5",
  "objc2-encode 3.0.0",
