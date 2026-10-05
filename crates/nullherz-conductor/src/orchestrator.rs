@@ -313,11 +313,29 @@ impl Conductor {
             midi_clock: crate::midi_clock::MidiClockTracker::new(),
             stem_worker,
             analysis_worker: Some(analysis_worker),
-            folder_monitor: Some(
-                crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())
+            folder_monitor: {
+                let default_dirs = [
+                    "library",
+                    "library/tracks",
+                    "library/samples",
+                    "library/sequences",
+                    "library/stems",
+                    "library/evolution",
+                    "library/breeding",
+                    "library/captures",
+                    "library/mappings",
+                ];
+                for dir in &default_dirs {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+
+                let monitor = crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())
                     .with_analysed_ids(analysis_worker_handle.clone())
-                    .with_pending_requests(analysis_requests.clone()),
-            ),
+                    .with_pending_requests(analysis_requests.clone());
+
+                monitor.scan_folder("library");
+                Some(monitor)
+            },
             streaming_manager: crate::streaming_manager::StreamingManager::new(),
             library,
             mixer_manager: nullherz_mixer::MixerManager::new(),

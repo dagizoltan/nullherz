@@ -78,9 +78,17 @@ impl FolderMonitor {
             .flatten()
             .filter(|e| e.file_type().is_file())
             .filter(|e| {
+                if let Some(file_name) = e.file_name().to_str() {
+                    if file_name.starts_with('.') {
+                        return false;
+                    }
+                }
                 if let Some(ext) = e.path().extension() {
                     let ext = ext.to_string_lossy().to_lowercase();
-                    ext == "wav" || ext == "flac" || ext == "mp3" || ext == "ogg"
+                    matches!(
+                        ext.as_str(),
+                        "wav" | "flac" | "mp3" | "ogg" | "aiff" | "aif" | "m4a" | "aac"
+                    )
                 } else {
                     false
                 }

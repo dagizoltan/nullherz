@@ -11,6 +11,10 @@ pub struct AudioLocation {
 }
 
 pub fn detect_audio_locations() -> Vec<AudioLocation> {
+    for dir in &["library/tracks", "library/samples", "library/sequences"] {
+        let _ = std::fs::create_dir_all(dir);
+    }
+
     let mut locations = vec![
         AudioLocation { label: "Tracks Folder".to_string(), path: "library/tracks/".to_string(), is_external: false },
         AudioLocation { label: "Samples Folder".to_string(), path: "library/samples/".to_string(), is_external: false },
@@ -37,23 +41,28 @@ pub fn detect_audio_locations() -> Vec<AudioLocation> {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_dir() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if name.starts_with('.') || name == "Macintosh HD" || name.starts_with("Macintosh HD") || name == "MobileBackups" {
+                            continue;
+                        }
                         // Check if user subdirectories exist under /media or /run/media
                         if root.contains("media") {
                             if let Ok(sub_entries) = std::fs::read_dir(&path) {
                                 for sub in sub_entries.flatten() {
                                     let sub_path = sub.path();
                                     if sub_path.is_dir() {
-                                        let name = sub.file_name().to_string_lossy().to_string();
-                                        locations.push(AudioLocation {
-                                            label: format!("External Drive ({})", name),
-                                            path: sub_path.to_string_lossy().to_string(),
-                                            is_external: true,
-                                        });
+                                        let sub_name = sub.file_name().to_string_lossy().to_string();
+                                        if !sub_name.starts_with('.') {
+                                            locations.push(AudioLocation {
+                                                label: format!("External Drive ({})", sub_name),
+                                                path: sub_path.to_string_lossy().to_string(),
+                                                is_external: true,
+                                            });
+                                        }
                                     }
                                 }
                             }
                         } else {
-                            let name = entry.file_name().to_string_lossy().to_string();
                             locations.push(AudioLocation {
                                 label: format!("External Drive ({})", name),
                                 path: path.to_string_lossy().to_string(),
