@@ -55,12 +55,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
 /// Standalone collapsible/detachable bottom mixer drawer for DJ Console & Composer views.
 pub fn render_mixer_drawer(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>, show_crossfader: bool) {
-    let mut mixer_state = app.mixer.clone();
-    render_mixer_drawer_state(&mut mixer_state, app, ui, telemetry, show_crossfader);
-    app.mixer = mixer_state;
-}
-
-pub fn render_mixer_drawer_state(mixer_state: &mut crate::state::MixerState, app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>, show_crossfader: bool) {
     let theme = app.theme;
 
     if show_crossfader {
@@ -68,7 +62,7 @@ pub fn render_mixer_drawer_state(mixer_state: &mut crate::state::MixerState, app
         ui.horizontal(|ui| {
             ui.label(RichText::new("CROSSFADER A").strong().color(theme.deck_colors[0]).size(theme.type_caption));
             ui.add_space(theme.space_sm);
-            widgets::render_horizontal_fader(ui, &mut mixer_state.crossfader_pos, 0.0..=1.0, theme.accent, 220.0, 16.0);
+            widgets::render_horizontal_fader(ui, &mut app.mixer.crossfader_pos, 0.0..=1.0, theme.accent, 220.0, 16.0);
             ui.add_space(theme.space_sm);
             ui.label(RichText::new("CROSSFADER B").strong().color(theme.deck_colors[1]).size(theme.type_caption));
         });
@@ -83,7 +77,7 @@ pub fn render_mixer_drawer_state(mixer_state: &mut crate::state::MixerState, app
             .max_width(scroll_width)
             .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
-                    let num_ch = mixer_state.num_channels.clamp(1, 16);
+                    let num_ch = app.mixer.num_channels.clamp(1, 16);
                     for i in 0..num_ch {
                         render_channel_strip_ext(app, ui, i, telemetry, show_crossfader);
                         if app.mixer.channel_input_sources[i] == ChannelInputSource::DrumMachine || app.mixer.folded_pads[i] {
