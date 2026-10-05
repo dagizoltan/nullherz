@@ -199,6 +199,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     ui.spacing_mut().item_spacing.y = 0.0;
                     ui.add_space(32.0); // Exact match for timeline header
 
+                    let pad_labels = [
+                        "01 KICK", "02 SNARE", "03 HH-CL", "04 HH-OP",
+                        "05 TOM-LO", "06 TOM-MID", "07 TOM-HI", "08 PERC 1",
+                        "09 PERC 2", "10 CLAP", "11 RIDE", "12 CRASH",
+                        "13 FX 1", "14 FX 2", "15 AUX 1", "16 AUX 2",
+                    ];
+
                     for track_idx in 0..num_active_channels {
                         let track_color = crate::InspectorApp::deck_color(&app.theme, track_idx % 4);
                         let is_muted = app.composer.track_mutes[track_idx];
@@ -226,7 +233,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         let (swatch_rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), Sense::hover());
                                         ui.painter().rect_filled(swatch_rect, Rounding::same(1.5), track_color);
                                         ui.add_space(2.0);
-                                        ui.label(RichText::new(format!("TRK {:02}", track_idx + 1)).strong().size(app.theme.type_caption).color(app.theme.text_primary));
+
+                                        let expand_icon = if is_selected { "▼ " } else { "▸ " };
+                                        ui.label(RichText::new(format!("{}TRK {:02}", expand_icon, track_idx + 1)).strong().size(app.theme.type_caption).color(app.theme.text_primary));
 
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             let mute_color = if is_muted { app.theme.danger } else { app.theme.bg_inset };
@@ -271,7 +280,30 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         let rect = inner_resp.response.rect;
                         let response = ui.interact(rect, ui.make_persistent_id(format!("trk_hdr_studio_{}", track_idx)), Sense::click());
                         if response.clicked() {
-                            app.composer.selected_composer_track = Some(track_idx);
+                            if app.composer.selected_composer_track == Some(track_idx) {
+                                app.composer.selected_composer_track = None;
+                            } else {
+                                app.composer.selected_composer_track = Some(track_idx);
+                            }
+                        }
+
+                        // ACCORDION EXPANSION: Render subchannel/pad headers directly below selected track
+                        if is_selected {
+                            ui.add_space(2.0);
+                            for pad_i in 0..16 {
+                                Frame::none()
+                                    .fill(app.theme.bg_inset)
+                                    .rounding(Rounding::same(2.0))
+                                    .inner_margin(Margin::symmetric(4.0, 1.0))
+                                    .show(ui, |ui| {
+                                        ui.set_width(175.0);
+                                        ui.set_height(20.0);
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(format!("  ↳ {}", pad_labels[pad_i])).size(8.0).strong().color(track_color));
+                                        });
+                                    });
+                                ui.add_space(1.0);
+                            }
                         }
 
                         if track_idx < num_active_channels - 1 {
@@ -342,6 +374,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             for track_idx in 0..num_active_channels {
                                 let track_color = crate::InspectorApp::deck_color(&app.theme, track_idx % 4);
                                 let is_muted = app.composer.track_mutes[track_idx];
+                                let is_selected = app.composer.selected_composer_track == Some(track_idx);
 
                                 let src_id = app.composer.track_sources[track_idx];
                                 let cached_track = src_id.and_then(|id| app.get_cached_track(id));
@@ -425,6 +458,51 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         }
                                     }
                                 });
+
+                                // ACCORDION EXPANSION: Render subchannel/pad step matrix directly below selected track
+                                if is_selected {
+                                    ui.add_space(2.0);
+                                    for pad_i in 0..16 {
+                                        ui.horizontal(|ui| {
+                                            ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
+                                            for slot_idx in 0..steps_count {
+                                                if slot_idx > 0 && slot_idx % steps_per_beat == 0 {
+                                                    ui.add_space(4.0);
+                                                }
+                                                if slot_idx > 0 && slot_idx % steps_per_bar == 0 {
+                                                    ui.add_space(6.0);
+                                                }
+
+                                                let (rect, response) = ui.allocate_exact_size(Vec2::new(slot_w, 20.0), Sense::click());
+                                                let vel = app.composer.subchannel_sequencer_grid[track_idx][pad_i][slot_idx];
+
+                                                let bg = if vel > 0.0 {
+                                                    track_color.gamma_multiply(0.45)
+                                                } else {
+                                                    app.theme.bg_inset
+                                                };
+
+                                                ui.painter().rect_filled(rect, Rounding::same(2.0), bg);
+                                                ui.painter().rect_stroke(rect, Rounding::same(2.0), Stroke::new(0.8_f32, if vel > 0.0 { track_color } else { app.theme.border_stroke.color }));
+
+                                                if response.clicked() {
+                                                    let is_on = app.composer.subchannel_sequencer_grid[track_idx][pad_i][slot_idx] == 0.0;
+                                                    let val = if is_on { 1.0 } else { 0.0 };
+                                                    app.composer.subchannel_sequencer_grid[track_idx][pad_i][slot_idx] = val;
+
+                                                    let target_node = app.get_node_id("drum_machine_node").unwrap_or(70);
+                                                    let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
+                                                        node_idx: target_node,
+                                                        track: pad_i as u32,
+                                                        step: slot_idx as u32,
+                                                        value: val,
+                                                    }));
+                                                }
+                                            }
+                                        });
+                                        ui.add_space(1.0);
+                                    }
+                                }
 
                                 if track_idx < num_active_channels - 1 {
                                     ui.add_space(4.0);
