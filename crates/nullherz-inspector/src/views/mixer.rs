@@ -6,6 +6,7 @@ use audio_core::Telemetry;
 
 /// Fixed strip width: every card is the same size regardless of window width.
 pub const STRIP_W: f32 = 140.0;
+#[allow(dead_code)]
 pub const PAD_STRIP_W: f32 = 75.0;
 pub const FADER_H: f32 = 150.0;
 pub const VERTICAL_WAVEFORM_H: f32 = 225.0;
