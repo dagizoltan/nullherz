@@ -200,6 +200,9 @@ pub struct MixerState {
     pub channel_input_sources: [ChannelInputSource; 16],
     pub master_output_source: MasterOutput,
     pub waveform_styles: [nullherz_ui_hal::render::waveform_renderer::WaveformStyle; 16],
+    pub mixer_drawer_open: bool,
+    pub folded_pads: [bool; 16],
+    pub crossfader_assign: [u8; 16],
     pub channel_faders: [f32; 16],
     /// Input trim gain per channel (1.0 = 0 dB trim). Separate from channel volume fader.
     pub channel_gain: [f32; 16],
@@ -278,6 +281,9 @@ impl Default for MixerState {
             channel_input_sources: [ChannelInputSource::Track; 16],
             master_output_source: MasterOutput::MainSpeakers,
             waveform_styles: [nullherz_ui_hal::render::waveform_renderer::WaveformStyle::MultiBand; 16],
+            mixer_drawer_open: true,
+            folded_pads: [false; 16],
+            crossfader_assign: [1; 16], // Default 1 = THRU
             focused_detail_channel: 0,
             channel_faders: [1.0; 16],
             channel_gain: [1.0; 16],
@@ -562,18 +568,26 @@ impl Default for KeyboardGridState {
 pub struct ComposerState {
     /// Sample assigned to each sequencer track, independent of the decks.
     pub track_sources: [Option<u64>; 16],
+    /// Independent subchannel/pad sample assignments for each parent track [parent_track_idx][subchannel_idx].
+    pub subchannel_sources: [[Option<u64>; 16]; 16],
     pub keyboard_grid: KeyboardGridState,
     /// Step grids PER DECK: legacy deck sequencer step grids.
     pub sequencer_grid: [[Vec<f32>; 16]; 4],
     /// Independent 16-track Studio Composer Grid (Decoupled from DJ decks).
     pub studio_sequencer_grid: [Vec<f32>; 16],
+    /// Independent 16-subchannel step grid per parent track [parent_track_idx][subchannel_idx].
+    pub subchannel_sequencer_grid: [[Vec<f32>; 16]; 16],
     pub selected_composer_track: Option<usize>,
+    pub selected_clip: Option<(usize, usize)>,
+    pub clip_editor_drawer_open: bool,
     pub sequencer_active_step: usize,
     pub composer_playing: bool,
     pub sync_with_master_transport: bool,
     pub track_mutes: [bool; 16],
     pub track_solos: [bool; 16],
+    #[allow(dead_code)]
     pub track_volumes: [f32; 16],
+    #[allow(dead_code)]
     pub track_pans: [f32; 16],
     pub _track_filters: [f32; 16],
     pub track_targets: [String; 16],
@@ -592,10 +606,14 @@ impl Default for ComposerState {
     fn default() -> Self {
         Self {
             track_sources: [None; 16],
+            subchannel_sources: [[None; 16]; 16],
             keyboard_grid: KeyboardGridState::default(),
             sequencer_grid: std::array::from_fn(|_| std::array::from_fn(|_| vec![0.0; 64])),
             studio_sequencer_grid: std::array::from_fn(|_| vec![0.0; 64]),
+            subchannel_sequencer_grid: std::array::from_fn(|_| std::array::from_fn(|_| vec![0.0; 64])),
             selected_composer_track: None,
+            selected_clip: None,
+            clip_editor_drawer_open: true,
             sequencer_active_step: 0,
             composer_playing: false,
             sync_with_master_transport: true,
