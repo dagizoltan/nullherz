@@ -1,4 +1,4 @@
-use egui::{Ui, Frame, Margin, Rounding, Stroke, RichText, ScrollArea, Color32, Pos2, Vec2};
+use egui::{Ui, Frame, Margin, Rounding, Stroke, RichText, ScrollArea, Color32, Pos2, Vec2, Sense};
 use crate::InspectorApp;
 use crate::state::{ChannelInputSource, MasterOutput};
 use nullherz_ui_hal::widgets;
@@ -742,7 +742,7 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                         // --- VOLUME FADER & STEREO VU METERS ---
                         ui.horizontal(|ui| {
                             let fader_w = 20.0;
-                            let pad = (ui.available_width() - fader_w).max(0.0) / 2.0;
+                            let pad = (ui.available_width() - fader_w - 12.0).max(0.0) / 2.0;
                             ui.add_space(pad);
 
                             let r_fader = widgets::render_fader(ui, &mut app.mixer.channel_faders[i], 0.0..=1.2, deck_color, FADER_H, 22.0);
@@ -760,21 +760,22 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
 
                             ui.add_space(2.0);
 
-                            // STEREO VU METERS
-                            if let (Some(t), Some(node)) = (telemetry, meter_node) {
-                                let level_base = t.peak_levels.get(node as usize).copied().unwrap_or(0.0);
-                                let bal = app.mixer.channel_balance[i];
-                                let level_l = level_base * (1.0 - (bal - 0.5).max(0.0));
-                                let level_r = level_base * (1.0 - (0.5 - bal).max(0.0));
+                            // STEREO VU METERS - Thinner and closer together
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 1.0;
+                                if let (Some(t), Some(node)) = (telemetry, meter_node) {
+                                    let level_base = t.peak_levels.get(node as usize).copied().unwrap_or(0.0);
+                                    let bal = app.mixer.channel_balance[i];
+                                    let level_l = level_base * (1.0 - (bal - 0.5).max(0.0));
+                                    let level_r = level_base * (1.0 - (0.5 - bal).max(0.0));
 
-                                widgets::render_vu_meter(ui, level_l, app.mixer.channel_peak_hold[i], deck_color, FADER_H);
-                                ui.add_space(1.0);
-                                widgets::render_vu_meter(ui, level_r, app.mixer.channel_peak_hold[i], deck_color, FADER_H);
-                            } else {
-                                widgets::render_vu_meter(ui, 0.0, 0.0, theme.text_disabled, FADER_H);
-                                ui.add_space(1.0);
-                                widgets::render_vu_meter(ui, 0.0, 0.0, theme.text_disabled, FADER_H);
-                            }
+                                    widgets::render_vu_meter_sized(ui, level_l, app.mixer.channel_peak_hold[i], deck_color, 4.0, FADER_H);
+                                    widgets::render_vu_meter_sized(ui, level_r, app.mixer.channel_peak_hold[i], deck_color, 4.0, FADER_H);
+                                } else {
+                                    widgets::render_vu_meter_sized(ui, 0.0, 0.0, theme.text_disabled, 4.0, FADER_H);
+                                    widgets::render_vu_meter_sized(ui, 0.0, 0.0, theme.text_disabled, 4.0, FADER_H);
+                                }
+                            });
                         });
 
                         ui.add_space(2.0);
@@ -903,14 +904,22 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
 
                                 ui.add_space(theme.space_sm);
 
-                                // Volume Fader & Mute/Solo
+                                // Volume Fader, VU Meter & Mute/Solo
                                 ui.horizontal(|ui| {
                                     let mut pad_fader = app.sampler.subchannel_faders[pad_idx];
-                                    if widgets::render_fader(ui, &mut pad_fader, 0.0..=1.2, subchannel_color, FADER_H, 20.0).changed() {
+                                    if widgets::render_fader(ui, &mut pad_fader, 0.0..=1.2, subchannel_color, FADER_H, 22.0).changed() {
                                         app.sampler.subchannel_faders[pad_idx] = pad_fader;
                                     }
 
-                                    ui.add_space(2.0);
+                                    ui.add_space(1.0);
+
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 1.0;
+                                        let lvl = app.viz.damped_peaks.get(pad_idx % 16).copied().unwrap_or(0.0) * pad_fader;
+                                        widgets::render_vu_meter_sized(ui, lvl, app.mixer.channel_peak_hold[pad_idx], subchannel_color, 4.0, FADER_H);
+                                    });
+
+                                    ui.add_space(1.0);
 
                                     ui.vertical(|ui| {
                                         let is_muted = app.sampler.subchannel_mutes[pad_idx];
@@ -982,11 +991,19 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
 
                             ui.horizontal(|ui| {
                                 let mut fader = app.mixer.custom_subchannel_faders[parent_ch][sub_idx];
-                                if widgets::render_fader(ui, &mut fader, 0.0..=1.2, subchannel_color, FADER_H, 20.0).changed() {
+                                if widgets::render_fader(ui, &mut fader, 0.0..=1.2, subchannel_color, FADER_H, 22.0).changed() {
                                     app.mixer.custom_subchannel_faders[parent_ch][sub_idx] = fader;
                                 }
 
-                                ui.add_space(2.0);
+                                ui.add_space(1.0);
+
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 1.0;
+                                    let lvl = app.viz.damped_peaks.get(parent_ch % 16).copied().unwrap_or(0.0) * fader;
+                                    widgets::render_vu_meter_sized(ui, lvl, app.mixer.channel_peak_hold[parent_ch], subchannel_color, 4.0, FADER_H);
+                                });
+
+                                ui.add_space(1.0);
 
                                 ui.vertical(|ui| {
                                     let is_muted = app.mixer.custom_subchannel_mutes[parent_ch][sub_idx];
@@ -1064,6 +1081,285 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
 #[allow(dead_code)]
 pub fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     render_master_strip_full(app, ui, telemetry, false);
+}
+
+pub fn render_horizontal_mixer_drawer(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
+    let theme = app.theme;
+    ui.horizontal(|ui| {
+        ui.heading(RichText::new("Horizontal Graphical FX Mixer").size(theme.type_body));
+        ui.add_space(theme.space_md);
+        ui.label(RichText::new("Interactive Parametric EQ, Limiter, & Saturator Graphical Inserts in 1:1 sync with Mixer").size(theme.type_caption).color(theme.text_secondary));
+    });
+    ui.add_space(theme.space_xs);
+
+    ScrollArea::horizontal()
+        .id_source("horizontal_mixer_scroll")
+        .show(ui, |ui| {
+            ui.horizontal_top(|ui| {
+                let num_ch = app.mixer.num_channels.clamp(1, 16);
+                for i in 0..num_ch {
+                    render_horizontal_channel_card(app, ui, i, telemetry);
+                    ui.add_space(theme.space_sm);
+                }
+
+                // Pinned Master Card
+                render_horizontal_master_card(app, ui, telemetry);
+            });
+        });
+}
+
+fn render_horizontal_channel_card(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry: &Option<Telemetry>) {
+    let theme = app.theme;
+    let deck_color = crate::InspectorApp::deck_color(&theme, i % 4);
+    let card_w = 340.0;
+
+    Frame::none()
+        .fill(theme.bg_surface)
+        .rounding(Rounding::same(theme.radius_md))
+        .inner_margin(Margin::same(theme.space_sm))
+        .stroke(Stroke::new(1.0_f32, if app.decks.focused_deck == i { deck_color } else { theme.border }))
+        .show(ui, |ui| {
+            ui.set_width(card_w);
+            ui.vertical(|ui| {
+                // Header Row
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("CH {}", (b'A' + (i % 26) as u8) as char)).strong().size(theme.type_body).color(deck_color));
+                    ui.add_space(theme.space_xs);
+
+                    // Mute / Solo
+                    let mute = app.mixer.stem_mutes[0][i % 12];
+                    let mute_bg = if mute { theme.danger } else { theme.bg_inset };
+                    if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("M").size(8.0).strong()).fill(mute_bg)).clicked() {
+                        app.mixer.stem_mutes[0][i % 12] = !mute;
+                    }
+
+                    let solo = app.mixer.stem_solos[0][i % 12];
+                    let solo_bg = if solo { theme.warning } else { theme.bg_inset };
+                    if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("S").size(8.0).strong()).fill(solo_bg)).clicked() {
+                        app.mixer.stem_solos[0][i % 12] = !solo;
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Peak VU Meter
+                        let peak_lvl = telemetry.as_ref().and_then(|t| t.peak_levels.get(i)).copied().unwrap_or(0.0);
+                        widgets::render_vu_meter_sized(ui, peak_lvl, app.mixer.channel_peak_hold[i], deck_color, 4.0, 20.0);
+
+                        // Fader Slider
+                        let mut fader = app.mixer.channel_faders[i];
+                        if ui.add(egui::Slider::new(&mut fader, 0.0..=1.2).show_value(false)).changed() {
+                            app.mixer.channel_faders[i] = fader;
+                        }
+                    });
+                });
+
+                ui.add_space(2.0);
+
+                // Quick Rotary Knobs Row: Trim, Hi, Mid, Low
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    widgets::render_knob_sized(ui, &mut app.mixer.channel_gain[i], 0.0..=2.0, "TRIM", deck_color, 20.0);
+                    widgets::render_knob_sized(ui, &mut app.mixer.channel_eq_high[i], 0.0..=2.0, "HI", deck_color, 20.0);
+                    widgets::render_knob_sized(ui, &mut app.mixer.channel_eq_mid[i], 0.0..=2.0, "MID", deck_color, 20.0);
+                    widgets::render_knob_sized(ui, &mut app.mixer.channel_eq_low[i], 0.0..=2.0, "LOW", deck_color, 20.0);
+                    widgets::render_knob_sized(ui, &mut app.mixer.channel_balance[i], 0.0..=1.0, "PAN", deck_color, 20.0);
+                });
+
+                ui.add_space(4.0);
+
+                // GRAPHICAL PARAMETRIC EQ INSERT CANVAS
+                ui.label(RichText::new("3-BAND PARAMETRIC EQ CURVE").size(8.0).strong().color(theme.text_secondary));
+                render_graphical_eq_canvas(app, ui, i, card_w - 16.0, 90.0, deck_color);
+
+                ui.add_space(4.0);
+
+                // GRAPHICAL LIMITER / DYNAMIC TRANSFER CURVE CANVAS
+                ui.label(RichText::new("DYNAMIC LIMITER & SATURATION TRANSFER").size(8.0).strong().color(theme.text_secondary));
+                render_graphical_limiter_canvas(app, ui, i, card_w - 16.0, 60.0, deck_color, telemetry);
+            });
+        });
+}
+
+fn render_graphical_eq_canvas(
+    app: &mut InspectorApp,
+    ui: &mut Ui,
+    ch_idx: usize,
+    width: f32,
+    height: f32,
+    accent_color: Color32,
+) {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click_and_drag());
+    let theme = app.theme;
+
+    ui.painter().rect_filled(rect, theme.radius_sm, theme.bg_dark);
+    ui.painter().rect_stroke(rect, theme.radius_sm, Stroke::new(1.0_f32, theme.border_stroke.color));
+
+    // Frequency grid lines: 100Hz, 1kHz, 10kHz
+    for norm_freq in [0.22, 0.52, 0.82] {
+        let x = rect.min.x + norm_freq * rect.width();
+        ui.painter().line_segment(
+            [Pos2::new(x, rect.min.y), Pos2::new(x, rect.max.y)],
+            Stroke::new(0.5_f32, theme.text_disabled.linear_multiply(0.3)),
+        );
+    }
+    // 0dB Center line
+    let mid_y = rect.center().y;
+    ui.painter().line_segment(
+        [Pos2::new(rect.min.x, mid_y), Pos2::new(rect.max.x, mid_y)],
+        Stroke::new(0.75_f32, theme.text_disabled.linear_multiply(0.4)),
+    );
+
+    let low_val = app.mixer.channel_eq_low[ch_idx];
+    let mid_val = app.mixer.channel_eq_mid[ch_idx];
+    let high_val = app.mixer.channel_eq_high[ch_idx];
+
+    // Compute and draw 64-point smooth parametric EQ response curve
+    let points_count = 64;
+    let mut curve_pts = Vec::with_capacity(points_count);
+
+    for pt_i in 0..points_count {
+        let t = pt_i as f32 / (points_count - 1) as f32;
+        let x = rect.min.x + t * rect.width();
+
+        // 3-band shelf & bell gain influence
+        let low_influence = (1.0 - t * 2.5).max(0.0);
+        let mid_influence = (1.0 - ((t - 0.5) * 3.0).abs()).max(0.0);
+        let high_influence = ((t - 0.6) * 2.5).max(0.0);
+
+        let net_gain = (low_val - 1.0) * low_influence + (mid_val - 1.0) * mid_influence + (high_val - 1.0) * high_influence;
+        let y = mid_y - net_gain * (height * 0.38);
+
+        curve_pts.push(Pos2::new(x, y.clamp(rect.min.y + 2.0, rect.max.y - 2.0)));
+    }
+
+    if curve_pts.len() > 1 {
+        ui.painter().add(egui::Shape::line(curve_pts, Stroke::new(1.8_f32, accent_color)));
+    }
+
+    // Draggable handle points for Low (x=22%), Mid (x=50%), High (x=80%)
+    let handles = [
+        (0.22, low_val, 0),
+        (0.50, mid_val, 1),
+        (0.80, high_val, 2),
+    ];
+
+    for (norm_x, val, band_idx) in handles {
+        let h_x = rect.min.x + norm_x * rect.width();
+        let h_y = mid_y - (val - 1.0) * (height * 0.38);
+        let h_pos = Pos2::new(h_x, h_y.clamp(rect.min.y + 4.0, rect.max.y - 4.0));
+
+        ui.painter().circle_filled(h_pos, 4.0, accent_color);
+        ui.painter().circle_stroke(h_pos, 4.0, Stroke::new(1.0_f32, Color32::WHITE));
+
+        // Interactive dragging on EQ curve handles
+        if response.dragged() {
+            if let Some(mouse_pos) = response.interact_pointer_pos() {
+                if (mouse_pos.x - h_x).abs() < 30.0 {
+                    let dy = (mid_y - mouse_pos.y) / (height * 0.38);
+                    let new_val = (1.0 + dy).clamp(0.0, 2.0);
+                    match band_idx {
+                        0 => app.mixer.channel_eq_low[ch_idx] = new_val,
+                        1 => app.mixer.channel_eq_mid[ch_idx] = new_val,
+                        2 => app.mixer.channel_eq_high[ch_idx] = new_val,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn render_graphical_limiter_canvas(
+    app: &mut InspectorApp,
+    ui: &mut Ui,
+    ch_idx: usize,
+    width: f32,
+    height: f32,
+    accent_color: Color32,
+    telemetry: &Option<Telemetry>,
+) {
+    let (rect, _response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    let theme = app.theme;
+
+    ui.painter().rect_filled(rect, theme.radius_sm, theme.bg_dark);
+    ui.painter().rect_stroke(rect, theme.radius_sm, Stroke::new(1.0_f32, theme.border_stroke.color));
+
+    // Ideal 1:1 linear transfer line
+    ui.painter().line_segment(
+        [Pos2::new(rect.min.x, rect.max.y), Pos2::new(rect.max.x, rect.min.y)],
+        Stroke::new(0.75_f32, theme.text_disabled.linear_multiply(0.3)),
+    );
+
+    // Soft-knee Limiter / Saturation Transfer Curve
+    let mut transfer_pts = Vec::with_capacity(32);
+    for i in 0..32 {
+        let in_val = i as f32 / 31.0;
+        // Soft-knee Padé saturation equation
+        let x2 = in_val * in_val;
+        let out_val = (in_val * (27.0 + x2) / (27.0 + 9.0 * x2)).clamp(0.0, 1.0);
+
+        let x = rect.min.x + in_val * rect.width();
+        let y = rect.max.y - out_val * rect.height();
+        transfer_pts.push(Pos2::new(x, y));
+    }
+
+    if transfer_pts.len() > 1 {
+        ui.painter().add(egui::Shape::line(transfer_pts, Stroke::new(1.5_f32, accent_color)));
+    }
+
+    // Dynamic Gain Reduction / Signal Position Dot
+    let peak_lvl = telemetry.as_ref().and_then(|t| t.peak_levels.get(ch_idx)).copied().unwrap_or(0.0).clamp(0.0, 1.2);
+    let dot_in = (peak_lvl / 1.2).clamp(0.0, 1.0);
+    let dot_out = (dot_in * (27.0 + dot_in * dot_in) / (27.0 + 9.0 * dot_in * dot_in)).clamp(0.0, 1.0);
+    let dot_pos = Pos2::new(rect.min.x + dot_in * rect.width(), rect.max.y - dot_out * rect.height());
+
+    ui.painter().circle_filled(dot_pos, 3.0, if peak_lvl > 1.0 { theme.danger } else { theme.success });
+}
+
+fn render_horizontal_master_card(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
+    let theme = app.theme;
+    let accent = theme.accent;
+    let card_w = 340.0;
+
+    Frame::none()
+        .fill(theme.bg_surface)
+        .rounding(Rounding::same(theme.radius_md))
+        .inner_margin(Margin::same(theme.space_sm))
+        .stroke(Stroke::new(1.0_f32, accent))
+        .show(ui, |ui| {
+            ui.set_width(card_w);
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("MASTER BUS").strong().size(theme.type_body).color(accent));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        widgets::render_vu_meter_sized(ui, app.viz.damped_master_peaks[0], app.mixer.master_peak_hold, accent, 4.0, 20.0);
+                        widgets::render_vu_meter_sized(ui, app.viz.damped_master_peaks[1], app.mixer.master_peak_hold, accent, 4.0, 20.0);
+
+                        let mut gain = app.mixer.master_gain;
+                        if ui.add(egui::Slider::new(&mut gain, 0.0..=1.2).show_value(false)).changed() {
+                            app.mixer.master_gain = gain;
+                        }
+                    });
+                });
+
+                ui.add_space(2.0);
+
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    widgets::render_knob_sized(ui, &mut app.mixer.master_gain, 0.0..=2.0, "TRIM", accent, 20.0);
+                    widgets::render_knob_sized(ui, &mut app.mixer.mastering_eq_high, 0.0..=2.0, "HI", accent, 20.0);
+                    widgets::render_knob_sized(ui, &mut app.mixer.mastering_eq_mid, 0.0..=2.0, "MID", accent, 20.0);
+                    widgets::render_knob_sized(ui, &mut app.mixer.mastering_eq_low, 0.0..=2.0, "LOW", accent, 20.0);
+                });
+
+                ui.add_space(4.0);
+
+                ui.label(RichText::new("MASTER EQUALIZATION & LIMITER RESPONSE").size(8.0).strong().color(theme.text_secondary));
+                render_graphical_eq_canvas(app, ui, 0, card_w - 16.0, 90.0, accent);
+
+                ui.add_space(4.0);
+                render_graphical_limiter_canvas(app, ui, 0, card_w - 16.0, 60.0, accent, telemetry);
+            });
+        });
 }
 
 pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>, in_drawer: bool) {
@@ -1194,7 +1490,7 @@ pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: 
                     // Master Fader & Stereo VU Meters
                     ui.horizontal(|ui| {
                         let fader_w = 20.0;
-                        let pad = (ui.available_width() - fader_w).max(0.0) / 2.0;
+                        let pad = (ui.available_width() - fader_w - 12.0).max(0.0) / 2.0;
                         ui.add_space(pad);
 
                         let r_fader = widgets::render_fader(ui, &mut app.mixer.master_gain, 0.0..=1.2, accent, FADER_H, 22.0);
@@ -1211,9 +1507,11 @@ pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: 
 
                         ui.add_space(2.0);
 
-                        widgets::render_vu_meter(ui, app.viz.damped_master_peaks[0], app.mixer.master_peak_hold, accent, FADER_H);
-                        ui.add_space(1.0);
-                        widgets::render_vu_meter(ui, app.viz.damped_master_peaks[1], app.mixer.master_peak_hold, accent, FADER_H);
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 1.0;
+                            widgets::render_vu_meter_sized(ui, app.viz.damped_master_peaks[0], app.mixer.master_peak_hold, accent, 4.0, FADER_H);
+                            widgets::render_vu_meter_sized(ui, app.viz.damped_master_peaks[1], app.mixer.master_peak_hold, accent, 4.0, FADER_H);
+                        });
                     });
 
                     ui.add_space(2.0);

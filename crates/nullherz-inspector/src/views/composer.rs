@@ -282,8 +282,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         if response.clicked() {
                             if app.composer.selected_composer_track == Some(track_idx) {
                                 app.composer.selected_composer_track = None;
+                                app.mixer.folded_pads[track_idx] = false;
                             } else {
                                 app.composer.selected_composer_track = Some(track_idx);
+                                app.mixer.folded_pads[track_idx] = true;
+                                app.mixer.focused_detail_channel = track_idx;
                             }
                         }
 
