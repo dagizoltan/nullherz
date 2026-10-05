@@ -19,6 +19,8 @@ pub struct FolderMonitor {
     /// cannot reclaim, and decoding the next file while they pile up is how a
     /// 957 MB folder became a 2 GB allocation failure.
     analysed_ids: Option<Arc<parking_lot::Mutex<std::collections::HashSet<u64>>>>,
+    /// Pending analysis request queue shared with AnalysisWorker.
+    pending_requests: Option<Arc<parking_lot::Mutex<std::collections::HashSet<u64>>>>,
     library: Arc<parking_lot::Mutex<LibraryDatabase>>,
     /// Ids this monitor has already decoded and handed to the registry.
     ///
@@ -41,6 +43,7 @@ impl Clone for FolderMonitor {
         Self {
             sample_registry: self.sample_registry.clone(),
             analysed_ids: self.analysed_ids.clone(),
+            pending_requests: self.pending_requests.clone(),
             library: self.library.clone(),
             scanned: self.scanned.clone(),
         }
@@ -52,6 +55,7 @@ impl FolderMonitor {
         Self {
             sample_registry,
             analysed_ids: None,
+            pending_requests: None,
             library,
             scanned: Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new())),
         }
@@ -106,6 +110,15 @@ impl FolderMonitor {
         ids: Arc<parking_lot::Mutex<std::collections::HashSet<u64>>>,
     ) -> Self {
         self.analysed_ids = Some(ids);
+        self
+    }
+
+    /// Pending analysis queue shared with `AnalysisWorker`.
+    pub fn with_pending_requests(
+        mut self,
+        pending: Arc<parking_lot::Mutex<std::collections::HashSet<u64>>>,
+    ) -> Self {
+        self.pending_requests = Some(pending);
         self
     }
 
@@ -221,6 +234,16 @@ impl FolderMonitor {
             {
                 self.sample_registry.register_with_metadata(id, decoded.samples.into(), track.metadata.clone());
                 println!("FolderMonitor: Hydrated registry for {}", path);
+
+                // Enqueue for analysis if metadata.peaks is empty so initial/legacy tracks get enriched
+                if track.metadata.peaks.is_empty() {
+                    if let Some(ref analysed) = self.analysed_ids {
+                        analysed.lock().remove(&id);
+                    }
+                    if let Some(ref pending) = self.pending_requests {
+                        pending.lock().insert(id);
+                    }
+                }
                 return;
             }
             println!("FolderMonitor: Content changed for {}; re-analyzing.", path);
@@ -261,6 +284,12 @@ impl FolderMonitor {
         }
 
         self.sample_registry.register_with_metadata(id, decoded.samples.into(), track.metadata.clone());
+        if let Some(ref analysed) = self.analysed_ids {
+            analysed.lock().remove(&id);
+        }
+        if let Some(ref pending) = self.pending_requests {
+            pending.lock().insert(id);
+        }
         println!("FolderMonitor: Registered {}", path);
     }
 
@@ -469,6 +498,83 @@ mod tests {
         assert!(
             nullherz_traits::SampleBuffer::ptr_eq(&first, &second),
             "rescan re-decoded an already-registered file — the freeze regression is back"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Registering/hydrating a track with empty peaks must enqueue it into pending_requests
+    /// and processing it with AnalysisWorker must generate non-empty waveform peaks and MIPs.
+    #[test]
+    fn test_folder_monitor_enqueues_analysis_and_populates_peaks() {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let dir = std::env::temp_dir().join(format!("nh_peaks_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let wav = dir.join("sine.wav");
+        let wav_str = wav.to_str().unwrap().to_string();
+        {
+            let spec = hound::WavSpec {
+                channels: 1, sample_rate: 44100, bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            };
+            let mut w = hound::WavWriter::create(&wav, spec).unwrap();
+            for i in 0..8820 {
+                w.write_sample(((i as f32 * 0.1).sin() * 10000.0) as i16).unwrap();
+            }
+            w.finalize().unwrap();
+        }
+
+        let registry = Arc::new(nullherz_dna::SampleRegistry::new());
+        let db_path = dir.join("lib.redb");
+        let library_db = LibraryDatabase::load(db_path.to_str().unwrap()).unwrap();
+        let library = Arc::new(parking_lot::Mutex::new(library_db));
+
+        let pending_requests = Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new()));
+        let monitor = FolderMonitor::new(registry.clone(), library.clone())
+            .with_pending_requests(pending_requests.clone());
+
+        let mut worker = crate::analysis_worker::AnalysisWorker::new(registry.clone())
+            .with_library(library.clone())
+            .with_pending_requests(pending_requests.clone());
+
+        let mut hasher = DefaultHasher::new();
+        wav_str.hash(&mut hasher);
+        let id = hasher.finish();
+
+        // Scan folder sync -> decodes file and registers
+        monitor.scan_folder_sync(dir.to_str().unwrap());
+
+        // Verify id was enqueued in pending_requests
+        assert!(
+            pending_requests.lock().contains(&id),
+            "folder monitor did not enqueue newly registered sample for analysis"
+        );
+
+        // Before analysis, registry metadata peaks should be empty
+        let initial_sample = registry.get(id).expect("sample in registry");
+        assert!(initial_sample.metadata.peaks.is_empty(), "initial peaks should be empty");
+
+        // Run AnalysisWorker once
+        worker.run_once();
+
+        // After analysis, registry metadata peaks and MIPs must be populated!
+        let enriched_sample = registry.get(id).expect("sample still in registry");
+        assert!(
+            !enriched_sample.metadata.peaks.is_empty(),
+            "analysis worker failed to populate waveform peaks"
+        );
+        assert!(
+            !enriched_sample.metadata.mip_waveform.levels.is_empty(),
+            "analysis worker failed to populate MIP levels"
+        );
+
+        // Verify persisted LibraryTrack in LibraryDatabase also has non-empty peaks
+        let db_track = library.lock().get_track(id).unwrap().expect("track in db");
+        assert!(
+            !db_track.metadata.peaks.is_empty(),
+            "persisted library track should have non-empty peaks after analysis"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
