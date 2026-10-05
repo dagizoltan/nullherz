@@ -97,7 +97,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         // Global BPM
         ui.label(RichText::new("BPM").strong().size(app.theme.type_caption).color(app.theme.text_secondary));
         let mut bpm = app.decks.global_bpm;
-        if ui.add(egui::DragValue::new(&mut bpm).speed(0.1).clamp_range(20.0..=300.0)).changed() {
+        if ui.add(egui::DragValue::new(&mut bpm).speed(0.1).range(20.0..=300.0)).changed() {
             app.decks.global_bpm = bpm;
             let _ = app.command_sender.send(Command::Core(CoreCommand::SetBpm(bpm)));
         }
