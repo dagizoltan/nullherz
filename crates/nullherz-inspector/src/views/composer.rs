@@ -58,7 +58,7 @@ pub fn render_mini_waveform(
 }
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
-    let seq_node = app.get_node_id("studio_sequencer_node").or_else(|| app.get_node_id("sequencer_node")).unwrap_or(70);
+    let seq_node = app.get_node_id("deck_a_sequencer").unwrap_or(70);
 
     ui.horizontal(|ui| {
         ui.heading(RichText::new("COMPOSER ARRANGEMENT GRID").strong().color(app.theme.text_primary));

@@ -2150,7 +2150,7 @@ impl Default for TopologyViewState {
                 ("deck_c_sampler".to_string(), 8), ("deck_c_gain".to_string(), 12), ("deck_c_filter".to_string(), 11),
                 ("deck_d_sampler".to_string(), 12), ("deck_d_gain".to_string(), 16), ("deck_d_filter".to_string(), 15),
                 ("master_sum".to_string(), 30), ("master_crossfader".to_string(), 20), ("master_limiter".to_string(), 35),
-                ("capture_node".to_string(), 110), ("sequencer_node".to_string(), 70), ("sampler_node".to_string(), 100),
+                ("capture_node".to_string(), 110), ("sequencer_node".to_string(), 70), ("studio_sequencer_node".to_string(), 70), ("sampler_node".to_string(), 100),
             ].into_iter().collect(),
         }
     }
