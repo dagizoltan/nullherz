@@ -461,18 +461,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
             }
         });
 
-    ui.add_space(app.theme.space_sm);
-
-    // Collapsible Bottom Clip & Drum Editor Drawer
-    render_clip_editor_drawer(app, ui);
-
-    ui.add_space(app.theme.space_sm);
-
-    // Collapsible Live System Mixer Drawer (temporarily swap mixer state)
-    std::mem::swap(&mut app.mixer, &mut app.composer.mixer);
-    crate::views::mixer::render_mixer_drawer(app, ui, telemetry, false);
-    std::mem::swap(&mut app.mixer, &mut app.composer.mixer);
-
     if app.composer.keyboard_grid.is_open {
         ui.add_space(app.theme.space_sm);
         Frame::none()
@@ -505,124 +493,110 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     }
 }
 
-fn render_clip_editor_drawer(app: &mut InspectorApp, ui: &mut Ui) {
+pub fn render_clip_editor_drawer_panel(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
-    let is_open = app.composer.clip_editor_drawer_open;
     let selected_trk = app.composer.selected_composer_track.unwrap_or(0);
     let track_color = crate::InspectorApp::deck_color(&theme, selected_trk % 4);
 
-    Frame::none()
-        .fill(theme.bg_surface)
-        .stroke(theme.border_stroke)
-        .rounding(Rounding::same(theme.radius_md))
-        .inner_margin(Margin::symmetric(theme.space_md, theme.space_xs))
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(format!("TRK {:02} CLIP & DRUM STEP MATRIX", selected_trk + 1)).strong().size(theme.type_caption).color(track_color));
+
+        ui.add_space(theme.space_md);
+
+        let src_id = app.composer.track_sources[selected_trk];
+        let cached_track = src_id.and_then(|id| app.get_cached_track(id));
+        let track_title = cached_track.as_ref().map(|t| t.title.as_str()).unwrap_or("No Sample / Instrument Loaded");
+        ui.label(RichText::new(format!("♪ {}", track_title)).size(theme.type_caption).color(theme.text_secondary));
+    });
+
+    ui.add_space(theme.space_xs);
+    ui.separator();
+    ui.add_space(theme.space_xs);
+
+    let steps_count = app.composer.studio_sequencer_grid[0].len();
+    let steps_per_bar = app.composer.grid_step_resolution.clamp(16, 64);
+    let steps_per_beat = (steps_per_bar / 4).max(1);
+    let slot_w = (32.0 * app.composer.grid_zoom).clamp(14.0, 90.0);
+
+    let pad_labels = [
+        "01 KICK", "02 SNARE", "03 HH-CL", "04 HH-OP",
+        "05 TOM-LO", "06 TOM-MID", "07 TOM-HI", "08 PERC 1",
+        "09 PERC 2", "10 CLAP", "11 RIDE", "12 CRASH",
+        "13 FX 1", "14 FX 2", "15 AUX 1", "16 AUX 2",
+    ];
+
+    ScrollArea::both()
+        .id_source("bottom_drawer_clip_editor_scroll")
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let icon = if is_open { "▼" } else { "▲" };
-                let toggle_text = format!("{} CLIP & DRUM EDITOR (TRACK {:02})", icon, selected_trk + 1);
-                if ui.button(RichText::new(toggle_text).strong().size(theme.type_caption).color(track_color)).clicked() {
-                    app.composer.clip_editor_drawer_open = !is_open;
-                }
+            ui.vertical(|ui| {
+                for pad_i in 0..16 {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
 
-                ui.add_space(theme.space_md);
+                        // Pad Label & Sample Picker button
+                        ui.allocate_ui_with_layout(Vec2::new(130.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.label(RichText::new(pad_labels[pad_i]).size(8.5).strong().color(track_color));
 
-                let src_id = app.composer.track_sources[selected_trk];
-                let cached_track = src_id.and_then(|id| app.get_cached_track(id));
-                let track_title = cached_track.as_ref().map(|t| t.title.as_str()).unwrap_or("No Sample / Instrument Loaded");
-                ui.label(RichText::new(format!("♪ {}", track_title)).size(theme.type_caption).color(theme.text_secondary));
-            });
+                            let sub_src = app.composer.subchannel_sources[selected_trk][pad_i];
+                            let sub_track = sub_src.and_then(|id| app.get_cached_track(id));
+                            let picker_text = sub_track.as_ref().map(|t| t.title.chars().take(8).collect::<String>()).unwrap_or_else(|| "⊕ Sample".into());
 
-            if is_open {
-                ui.add_space(theme.space_xs);
-                ui.separator();
-                ui.add_space(theme.space_xs);
-
-                let steps_count = app.composer.studio_sequencer_grid[0].len();
-                let steps_per_bar = app.composer.grid_step_resolution.clamp(16, 64);
-                let steps_per_beat = (steps_per_bar / 4).max(1);
-                let slot_w = (32.0 * app.composer.grid_zoom).clamp(14.0, 90.0);
-
-                let pad_labels = [
-                    "01 KICK", "02 SNARE", "03 HH-CL", "04 HH-OP",
-                    "05 TOM-LO", "06 TOM-MID", "07 TOM-HI", "08 PERC 1",
-                    "09 PERC 2", "10 CLAP", "11 RIDE", "12 CRASH",
-                    "13 FX 1", "14 FX 2", "15 AUX 1", "16 AUX 2",
-                ];
-
-                ScrollArea::horizontal()
-                    .id_source("bottom_clip_editor_scroll")
-                    .show(ui, |ui| {
-                        ui.vertical(|ui| {
-                            for pad_i in 0..16 {
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
-
-                                    // Pad Label & Sample Picker button
-                                    ui.allocate_ui_with_layout(Vec2::new(130.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                        ui.label(RichText::new(pad_labels[pad_i]).size(8.5).strong().color(track_color));
-
-                                        let sub_src = app.composer.subchannel_sources[selected_trk][pad_i];
-                                        let sub_track = sub_src.and_then(|id| app.get_cached_track(id));
-                                        let picker_text = sub_track.as_ref().map(|t| t.title.chars().take(8).collect::<String>()).unwrap_or_else(|| "⊕ Sample".into());
-
-                                        egui::ComboBox::from_id_source(format!("pad_picker_{}_{}", selected_trk, pad_i))
-                                            .width(65.0)
-                                            .selected_text(RichText::new(picker_text).size(7.5))
-                                            .show_ui(ui, |ui| {
-                                                if ui.selectable_label(sub_src.is_none(), "(None)").clicked() {
-                                                    app.composer.subchannel_sources[selected_trk][pad_i] = None;
-                                                }
-                                                for lib_t in &app.library.cached_library_raw {
-                                                    if ui.selectable_label(sub_src == Some(lib_t.id), &lib_t.title).clicked() {
-                                                        app.composer.subchannel_sources[selected_trk][pad_i] = Some(lib_t.id);
-                                                    }
-                                                }
-                                            });
-                                    });
-
-                                    ui.add_space(4.0);
-
-                                    // Pad Step Matrix (Scoped strictly to this parent track & pad)
-                                    for slot_idx in 0..steps_count {
-                                        if slot_idx > 0 && slot_idx % steps_per_beat == 0 {
-                                            ui.add_space(3.0);
-                                        }
-                                        if slot_idx > 0 && slot_idx % steps_per_bar == 0 {
-                                            ui.add_space(5.0);
-                                        }
-
-                                        let (rect, response) = ui.allocate_exact_size(Vec2::new(slot_w, 20.0), Sense::click());
-                                        let vel = app.composer.subchannel_sequencer_grid[selected_trk][pad_i][slot_idx];
-
-                                        let bg = if vel > 0.0 {
-                                            track_color.gamma_multiply(0.45)
-                                        } else {
-                                            theme.bg_inset
-                                        };
-
-                                        ui.painter().rect_filled(rect, Rounding::same(2.0), bg);
-                                        ui.painter().rect_stroke(rect, Rounding::same(2.0), Stroke::new(0.8_f32, if vel > 0.0 { track_color } else { theme.border_stroke.color }));
-
-                                        if response.clicked() {
-                                            let is_on = app.composer.subchannel_sequencer_grid[selected_trk][pad_i][slot_idx] == 0.0;
-                                            let val = if is_on { 1.0 } else { 0.0 };
-                                            app.composer.subchannel_sequencer_grid[selected_trk][pad_i][slot_idx] = val;
-
-                                            let target_node = app.get_node_id("drum_machine_node").unwrap_or(70);
-                                            let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
-                                                node_idx: target_node,
-                                                track: pad_i as u32,
-                                                step: slot_idx as u32,
-                                                value: val,
-                                            }));
+                            egui::ComboBox::from_id_source(format!("pad_picker_{}_{}", selected_trk, pad_i))
+                                .width(65.0)
+                                .selected_text(RichText::new(picker_text).size(7.5))
+                                .show_ui(ui, |ui| {
+                                    if ui.selectable_label(sub_src.is_none(), "(None)").clicked() {
+                                        app.composer.subchannel_sources[selected_trk][pad_i] = None;
+                                    }
+                                    for lib_t in &app.library.cached_library_raw {
+                                        if ui.selectable_label(sub_src == Some(lib_t.id), &lib_t.title).clicked() {
+                                            app.composer.subchannel_sources[selected_trk][pad_i] = Some(lib_t.id);
                                         }
                                     }
                                 });
-                                ui.add_space(1.0);
-                            }
                         });
+
+                        ui.add_space(4.0);
+
+                        // Pad Step Matrix (Scoped strictly to this parent track & pad)
+                        for slot_idx in 0..steps_count {
+                            if slot_idx > 0 && slot_idx % steps_per_beat == 0 {
+                                ui.add_space(3.0);
+                            }
+                            if slot_idx > 0 && slot_idx % steps_per_bar == 0 {
+                                ui.add_space(5.0);
+                            }
+
+                            let (rect, response) = ui.allocate_exact_size(Vec2::new(slot_w, 20.0), Sense::click());
+                            let vel = app.composer.subchannel_sequencer_grid[selected_trk][pad_i][slot_idx];
+
+                            let bg = if vel > 0.0 {
+                                track_color.gamma_multiply(0.45)
+                            } else {
+                                theme.bg_inset
+                            };
+
+                            ui.painter().rect_filled(rect, Rounding::same(2.0), bg);
+                            ui.painter().rect_stroke(rect, Rounding::same(2.0), Stroke::new(0.8_f32, if vel > 0.0 { track_color } else { theme.border_stroke.color }));
+
+                            if response.clicked() {
+                                let is_on = app.composer.subchannel_sequencer_grid[selected_trk][pad_i][slot_idx] == 0.0;
+                                let val = if is_on { 1.0 } else { 0.0 };
+                                app.composer.subchannel_sequencer_grid[selected_trk][pad_i][slot_idx] = val;
+
+                                let target_node = app.get_node_id("drum_machine_node").unwrap_or(70);
+                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
+                                    node_idx: target_node,
+                                    track: pad_i as u32,
+                                    step: slot_idx as u32,
+                                    value: val,
+                                }));
+                            }
+                        }
                     });
-            }
+                    ui.add_space(1.0);
+                }
+            });
         });
 }
 
@@ -753,6 +727,7 @@ mod tests {
             analyzer: Default::default(),
             library_db: library_db_wrapper,
             active_right_tab: None,
+            active_bottom_drawer: None,
             breeding_view: crate::views::breeder::BreederView::new(),
             wgpu_renderer: None,
             waveform_renderer: None,
