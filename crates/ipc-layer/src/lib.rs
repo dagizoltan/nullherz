@@ -358,9 +358,11 @@ will not see each other's data. Shared-memory names must be unique per process."
 
             let mut ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, flags, fd, 0);
             #[cfg(target_os = "linux")]
-            if ptr == libc::MAP_FAILED && (flags & libc::MAP_HUGETLB) != 0 {
-                // Fallback to standard MAP_SHARED if MAP_HUGETLB allocation failed
-                ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd, 0);
+            {
+                if ptr == libc::MAP_FAILED && (flags & libc::MAP_HUGETLB) != 0 {
+                    // Fallback to standard MAP_SHARED if MAP_HUGETLB allocation failed
+                    ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd, 0);
+                }
             }
             libc::close(fd);
             if ptr == libc::MAP_FAILED { return Err(IpcError::MmapFailed(std::io::Error::last_os_error().to_string())); }
@@ -685,32 +687,36 @@ pub fn set_rt_priority(priority: i32) -> Result<(), IpcError> {
 /// Non-RT setup path: spawning dbus-send here is deliberate and fine.
 fn rtkit_make_realtime(priority: i32) -> Result<(), IpcError> {
     #[cfg(target_os = "linux")]
-    unsafe {
-        // RTKit refuses processes with unlimited RTTIME (runaway-RT guard).
-        let lim = libc::rlimit { rlim_cur: 200_000_000, rlim_max: 200_000_000 }; // 200ms
-        libc::setrlimit(libc::RLIMIT_RTTIME, &lim);
+    {
+        unsafe {
+            // RTKit refuses processes with unlimited RTTIME (runaway-RT guard).
+            let lim = libc::rlimit { rlim_cur: 200_000_000, rlim_max: 200_000_000 }; // 200ms
+            libc::setrlimit(libc::RLIMIT_RTTIME, &lim);
+        }
+        let tid = unsafe { libc::syscall(libc::SYS_gettid) } as u64;
+        let prio = priority.clamp(1, 99) as u32;
+        let out = std::process::Command::new("dbus-send")
+            .args([
+                "--system", "--print-reply", "--type=method_call",
+                "--dest=org.freedesktop.RealtimeKit1",
+                "/org/freedesktop/RealtimeKit1",
+                "org.freedesktop.RealtimeKit1.MakeThreadRealtimeWithPID",
+            ])
+            .arg(format!("uint64:{}", std::process::id()))
+            .arg(format!("uint64:{}", tid))
+            .arg(format!("uint32:{}", prio.min(20)))
+            .output();
+        match out {
+            Ok(o) if o.status.success() => Ok(()),
+            Ok(o) => Err(IpcError::PriorityFailed(format!(
+                "rtkit refused: {}", String::from_utf8_lossy(&o.stderr).trim()))),
+            Err(e) => Err(IpcError::PriorityFailed(format!("rtkit unavailable: {}", e))),
+        }
     }
-    #[cfg(target_os = "linux")]
-    let tid = unsafe { libc::syscall(libc::SYS_gettid) } as u64;
     #[cfg(not(target_os = "linux"))]
-    let tid = std::thread::current().id().as_u64().get();
-    let prio = priority.clamp(1, 99) as u32;
-    let out = std::process::Command::new("dbus-send")
-        .args([
-            "--system", "--print-reply", "--type=method_call",
-            "--dest=org.freedesktop.RealtimeKit1",
-            "/org/freedesktop/RealtimeKit1",
-            "org.freedesktop.RealtimeKit1.MakeThreadRealtimeWithPID",
-        ])
-        .arg(format!("uint64:{}", std::process::id()))
-        .arg(format!("uint64:{}", tid))
-        .arg(format!("uint32:{}", prio.min(20)))
-        .output();
-    match out {
-        Ok(o) if o.status.success() => Ok(()),
-        Ok(o) => Err(IpcError::PriorityFailed(format!(
-            "rtkit refused: {}", String::from_utf8_lossy(&o.stderr).trim()))),
-        Err(e) => Err(IpcError::PriorityFailed(format!("rtkit unavailable: {}", e))),
+    {
+        let _ = priority;
+        Err(IpcError::PriorityFailed("RTKit is only supported on Linux".to_string()))
     }
 }
 

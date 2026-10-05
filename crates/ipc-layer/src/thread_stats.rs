@@ -59,7 +59,7 @@ pub(crate) fn publish_audio_thread_tid() {
     #[cfg(target_os = "linux")]
     let tid = unsafe { libc::syscall(libc::SYS_gettid) } as u64;
     #[cfg(not(target_os = "linux"))]
-    let tid = std::thread::current().id().as_u64().get();
+    let tid = 0u64;
 
     // Relaxed: a single publication read much later by one monitor thread. The
     // value is a task id, not a pointer, and nothing is ordered against it.
