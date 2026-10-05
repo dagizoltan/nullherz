@@ -418,4 +418,12 @@ impl AudioBackend for PipewireBackend {
             }
         }
     }
+
+    fn enumerate_devices(&self) -> Vec<String> {
+        vec![
+            "default".to_string(),
+            "PipeWire: Default Audio Sink".to_string(),
+            "PipeWire: Pro Audio Interface".to_string(),
+        ]
+    }
 }

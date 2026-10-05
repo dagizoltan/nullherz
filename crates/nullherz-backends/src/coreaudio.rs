@@ -204,10 +204,6 @@ impl AudioBackend for CoreAudioBackend {
     fn enumerate_devices(&self) -> Vec<String> {
         let mut list = vec![
             "default".to_string(),
-            "CoreAudio: Built-in Output / Headphones".to_string(),
-            "CoreAudio: Display Audio".to_string(),
-            "CoreAudio: Multi-Output Device".to_string(),
-            "CoreAudio: Aggregate Device".to_string(),
         ];
 
         #[cfg(target_os = "macos")]
@@ -225,6 +221,11 @@ impl AudioBackend for CoreAudioBackend {
                     }
                 }
             }
+        }
+
+        if list.len() == 1 {
+            list.push("CoreAudio: Built-in Output / Headphones".to_string());
+            list.push("CoreAudio: Multi-Output Device".to_string());
         }
 
         list

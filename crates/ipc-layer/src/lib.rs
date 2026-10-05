@@ -357,6 +357,7 @@ will not see each other's data. Shared-memory names must be unique per process."
             let flags = libc::MAP_SHARED;
 
             let mut ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, flags, fd, 0);
+            #[cfg(target_os = "linux")]
             if ptr == libc::MAP_FAILED && (flags & libc::MAP_HUGETLB) != 0 {
                 // Fallback to standard MAP_SHARED if MAP_HUGETLB allocation failed
                 ptr = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd, 0);
@@ -543,6 +544,7 @@ pub struct SchedStatus {
 impl SchedStatus {
     /// Read the calling thread's live scheduling state.
     pub fn current() -> Self {
+        #[cfg(target_os = "linux")]
         unsafe {
             // `sched_getscheduler` ORs in SCHED_RESET_ON_FORK (0x4000_0000) when
             // set, which RTKit always sets — so a naive comparison against
@@ -558,6 +560,8 @@ impl SchedStatus {
             };
             Self { policy, priority }
         }
+        #[cfg(not(target_os = "linux"))]
+        Self { policy: libc::SCHED_OTHER, priority: 0 }
     }
 
     /// Is this a realtime policy at all?
@@ -566,12 +570,20 @@ impl SchedStatus {
     }
 
     pub fn policy_name(&self) -> &'static str {
+        #[cfg(target_os = "linux")]
         match self.policy {
             libc::SCHED_OTHER => "SCHED_OTHER",
             libc::SCHED_FIFO => "SCHED_FIFO",
             libc::SCHED_RR => "SCHED_RR",
             libc::SCHED_BATCH => "SCHED_BATCH",
             libc::SCHED_IDLE => "SCHED_IDLE",
+            _ => "unknown",
+        }
+        #[cfg(not(target_os = "linux"))]
+        match self.policy {
+            libc::SCHED_OTHER => "SCHED_OTHER",
+            libc::SCHED_FIFO => "SCHED_FIFO",
+            libc::SCHED_RR => "SCHED_RR",
             _ => "unknown",
         }
     }
@@ -588,10 +600,17 @@ impl std::fmt::Display for SchedStatus {
 /// Zero means this user cannot obtain a realtime policy directly; RTKit may
 /// still grant one over D-Bus.
 pub fn rtprio_limit() -> Option<u64> {
-    let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-    if unsafe { libc::getrlimit(libc::RLIMIT_RTPRIO, &mut lim) } == 0 {
-        Some(lim.rlim_cur as u64)
-    } else {
+    #[cfg(target_os = "linux")]
+    {
+        let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        if unsafe { libc::getrlimit(libc::RLIMIT_RTPRIO, &mut lim) } == 0 {
+            Some(lim.rlim_cur as u64)
+        } else {
+            None
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
         None
     }
 }
@@ -665,12 +684,16 @@ pub fn set_rt_priority(priority: i32) -> Result<(), IpcError> {
 /// Ask rtkit-daemon (if present) to make the current thread realtime.
 /// Non-RT setup path: spawning dbus-send here is deliberate and fine.
 fn rtkit_make_realtime(priority: i32) -> Result<(), IpcError> {
+    #[cfg(target_os = "linux")]
     unsafe {
         // RTKit refuses processes with unlimited RTTIME (runaway-RT guard).
         let lim = libc::rlimit { rlim_cur: 200_000_000, rlim_max: 200_000_000 }; // 200ms
         libc::setrlimit(libc::RLIMIT_RTTIME, &lim);
     }
+    #[cfg(target_os = "linux")]
     let tid = unsafe { libc::syscall(libc::SYS_gettid) } as u64;
+    #[cfg(not(target_os = "linux"))]
+    let tid = std::thread::current().id().as_u64().get();
     let prio = priority.clamp(1, 99) as u32;
     let out = std::process::Command::new("dbus-send")
         .args([
