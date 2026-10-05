@@ -263,9 +263,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 points: [start, cp1, cp2, end],
                 closed: false,
                 fill: Color32::TRANSPARENT,
-                stroke: egui::Stroke::new(2.0_f32, base_color.gamma_multiply(glow)),
+                stroke: egui::Stroke::new(2.0_f32, base_color.gamma_multiply(glow)).into(),
             };
-            painter.add(egui::Shape::CubicBezier(bezier));
+            painter.add(egui::Shape::CubicBezier(bezier.clone()));
 
             // Buffer Index Label
             painter.text(start + egui::vec2(10.0, -10.0), egui::Align2::LEFT_BOTTOM, format!("B{}", edge.buffer_idx), egui::FontId::monospace(theme.type_caption), theme.text_secondary);
@@ -292,7 +292,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     points: [start, cp1, cp2, mouse_pos],
                     closed: false,
                     fill: Color32::TRANSPARENT,
-                    stroke: egui::Stroke::new(2.0_f32, theme.warning),
+                    stroke: egui::Stroke::new(2.0_f32, theme.warning).into(),
                 }));
             }
 

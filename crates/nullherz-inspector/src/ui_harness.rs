@@ -156,7 +156,11 @@ mod tests {
     /// with zero scroll and a test that fails for a reason that has nothing to
     /// do with the code under test.
     fn wheel(delta: f32) -> egui::Event {
-        egui::Event::Scroll(egui::vec2(0.0, delta))
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, delta),
+            modifiers: egui::Modifiers::default(),
+        }
     }
 
     #[test]

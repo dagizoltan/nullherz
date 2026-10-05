@@ -1630,7 +1630,7 @@ pub fn run() -> eframe::Result<()> {
     eframe::run_native(
         "nullherz Studio",
         native_options,
-        Box::new(|cc| create_app(cc)),
+        Box::new(|cc| Ok(create_app(cc))),
     )
 }
 
