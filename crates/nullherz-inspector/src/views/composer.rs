@@ -75,6 +75,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
     // Modern Studio Transport Bar
     ui.horizontal(|ui| {
+        let is_recording = app.composer.record_automation;
+        if ui.add(egui::Button::new(RichText::new(format!("{} REC", egui_phosphor::regular::RECORD)).size(9.0).strong()).fill(if is_recording { app.theme.danger } else { app.theme.bg_inset })).on_hover_text("Record Automation").clicked() {
+            app.composer.record_automation = !app.composer.record_automation;
+        }
+
+        ui.add_space(app.theme.space_xs);
+
         let play_icon = if app.composer.composer_playing { egui_phosphor::regular::PAUSE } else { egui_phosphor::regular::PLAY };
         let play_bg = if app.composer.composer_playing { app.theme.success } else { app.theme.bg_inset };
 
@@ -169,13 +176,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         }
 
         ui.add_space(app.theme.space_md);
-
-        let is_recording = app.composer.record_automation;
-        if ui.add(egui::Button::new(RichText::new(format!("{} REC", egui_phosphor::regular::RECORD)).size(9.0).strong()).fill(if is_recording { app.theme.danger } else { app.theme.bg_inset })).on_hover_text("Record Automation").clicked() {
-            app.composer.record_automation = !app.composer.record_automation;
-        }
-
-        ui.add_space(app.theme.space_xs);
 
         let is_kbd_open = app.composer.keyboard_grid.is_open;
         if ui.add(egui::Button::new(RichText::new(format!("{} KBD", egui_phosphor::regular::PIANO_KEYS)).size(9.0).strong()).fill(if is_kbd_open { app.theme.accent } else { app.theme.bg_inset })).on_hover_text("Toggle Keyboard").clicked() {
