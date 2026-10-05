@@ -62,6 +62,7 @@ impl Harness {
             analyzer: state::AnalyzerViewState::default(),
             library_db: SharedLibraryDb(Arc::new(parking_lot::Mutex::new(db))),
             active_right_tab: None,
+            active_bottom_drawer: None,
             breeding_view: crate::views::breeder::BreederView::new(),
             wgpu_renderer: None,
             waveform_renderer: None,

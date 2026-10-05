@@ -108,6 +108,12 @@ pub enum View {
     Tools,
 }
 
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum BottomDrawer {
+    Mixer,
+    ClipEditor,
+}
+
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum RightTab {
     Library,
@@ -159,6 +165,7 @@ pub struct InspectorApp {
     pub(crate) analyzer: state::AnalyzerViewState,
     pub(crate) library_db: SharedLibraryDb,
     pub(crate) active_right_tab: Option<RightTab>,
+    pub(crate) active_bottom_drawer: Option<BottomDrawer>,
     pub(crate) breeding_view: views::breeder::BreederView,
     pub(crate) wgpu_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::wgpu_backend::WgpuRenderer>>>,
     pub(crate) waveform_renderer: Option<Arc<Mutex<nullherz_ui_hal::render::waveform_renderer::WaveformRenderer>>>,
@@ -659,6 +666,7 @@ impl InspectorApp {
             analyzer: Default::default(),
             library_db: library_db_wrapper,
             active_right_tab: Some(RightTab::Library),
+            active_bottom_drawer: None,
             breeding_view: views::breeder::BreederView::new(),
             wgpu_renderer: None,
             waveform_renderer: None,
@@ -836,6 +844,60 @@ impl InspectorApp {
             });
     }
 
+    fn render_bottom_drawer(&mut self, ctx: &egui::Context, telemetry: &Option<Telemetry>, id_prefix: &str) {
+        if let Some(drawer) = self.active_bottom_drawer {
+            let drawer_frame = egui::Frame::none()
+                .fill(self.theme.bg_surface)
+                .stroke(self.theme.border_stroke)
+                .shadow(self.theme.shadow_md);
+
+            egui::TopBottomPanel::bottom(format!("{}_bottom_drawer_panel", id_prefix))
+                .resizable(true)
+                .min_height(200.0)
+                .default_height(340.0)
+                .max_height(600.0)
+                .frame(drawer_frame)
+                .show(ctx, |ui| {
+                    egui::Frame::none()
+                        .fill(self.theme.bg_surface)
+                        .inner_margin(egui::Margin::symmetric(self.theme.space_md, self.theme.space_xs))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                let title = match drawer {
+                                    BottomDrawer::Mixer => "SYSTEM / STUDIO MIXER DRAWER",
+                                    BottomDrawer::ClipEditor => "CLIP & DRUM STEP EDITOR",
+                                };
+                                ui.label(egui::RichText::new(title).strong().size(self.theme.type_caption).color(self.theme.accent));
+
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.button(egui_phosphor::regular::X).clicked() {
+                                        self.active_bottom_drawer = None;
+                                    }
+                                });
+                            });
+                        });
+
+                    ui.separator();
+                    ui.add_space(self.theme.space_xs);
+
+                    match drawer {
+                        BottomDrawer::Mixer => {
+                            if self.active_view == View::Composer {
+                                std::mem::swap(&mut self.mixer, &mut self.composer.mixer);
+                                views::mixer::render_mixer_drawer(self, ui, telemetry, false);
+                                std::mem::swap(&mut self.mixer, &mut self.composer.mixer);
+                            } else {
+                                views::mixer::render_mixer_drawer(self, ui, telemetry, true);
+                            }
+                        }
+                        BottomDrawer::ClipEditor => {
+                            views::composer::render_clip_editor_drawer_panel(self, ui);
+                        }
+                    }
+                });
+        }
+    }
+
     fn render_right_sidebar(&mut self, ctx: &egui::Context, id_prefix: &str) {
         if let Some(tab) = self.active_right_tab {
             let right_panel_frame = egui::Frame::none()
@@ -898,60 +960,67 @@ impl InspectorApp {
     fn render_bottom_bar(&mut self, ctx: &egui::Context, telemetry: &Option<Telemetry>, id_prefix: &str) {
         egui::TopBottomPanel::bottom(format!("{}_bottom_bar", id_prefix)).show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("nullherz Studio").size(10.0).strong().color(self.theme.accent));
-                ui.separator();
+                // LEFT SIDE: Drawer Toggle Icon Buttons (Mixer & Clip Editor)
+                let drawer_btns = [
+                    (BottomDrawer::Mixer, egui_phosphor::regular::SLIDERS, "MIXER DRAWER"),
+                    (BottomDrawer::ClipEditor, egui_phosphor::regular::PIANO_KEYS, "CLIP & DRUM EDITOR"),
+                ];
 
-                if let Some(t) = telemetry {
-                    ui.label(format!("BPM: {:.1}", t.bpm));
-                    ui.separator();
-                    ui.label(format!("POS: {:.2}", t.beat_position));
-                    ui.separator();
+                for (drawer, icon, label) in drawer_btns {
+                    let is_sel = self.active_bottom_drawer == Some(drawer);
+                    let size = egui::vec2(32.0, 28.0);
+                    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
 
-                    // Performance Mode Diagnostic Bar
-                    let sr_khz = self.settings.sample_rate / 1000.0;
-                    let block_f = self.settings.buffer_size;
-                    let latency_ms = (block_f as f64 / self.settings.sample_rate as f64) * 1000.0;
-                    let budget_ms = if t.sample_rate > 0.0 {
-                        (t.block_size as f32 / t.sample_rate) * 1000.0
-                    } else {
-                        (block_f as f32 / self.settings.sample_rate) * 1000.0
-                    };
-                    let dsp_load = if budget_ms > 0.0 {
-                        ((t.process_time_ns as f32 / 1_000_000.0) / budget_ms * 100.0).clamp(0.0, 100.0)
-                    } else {
-                        0.0
-                    };
+                    if response.clicked() {
+                        if self.active_bottom_drawer == Some(drawer) {
+                            self.active_bottom_drawer = None;
+                        } else {
+                            self.active_bottom_drawer = Some(drawer);
+                        }
+                        ui.ctx().request_repaint();
+                    }
 
-                    let rt_warnings = ipc_layer::realtime_environment_warnings();
-                    if self.settings.exclusive_performance_mode && rt_warnings.is_empty() {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "⚡ REALTIME {:.0}kHz | {}f ({:.2}ms) | DSP {:.1}%",
-                                sr_khz, block_f, latency_ms, dsp_load
-                            ))
-                            .strong()
-                            .color(self.theme.success),
+                    if is_sel {
+                        ui.painter().rect_filled(
+                            rect.shrink(1.0),
+                            self.theme.radius_sm,
+                            self.theme.accent.linear_multiply(0.18),
                         );
-                    } else if !rt_warnings.is_empty() {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "⚠️ PREEMPTION RISK | {}f ({:.2}ms) | DSP {:.1}%",
-                                block_f, latency_ms, dsp_load
-                            ))
-                            .strong()
-                            .color(self.theme.danger),
+                        let accent_bar = egui::Rect::from_min_max(
+                            rect.left_top() + egui::vec2(1.0, 2.0),
+                            rect.left_bottom() + egui::vec2(3.0, -2.0),
                         );
-                    } else {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "💻 DESKTOP {:.0}kHz | {}f (~{:.1}ms) | DSP {:.1}%",
-                                sr_khz, block_f, latency_ms, dsp_load
-                            ))
-                            .color(self.theme.warning),
+                        ui.painter().rect_filled(accent_bar, 1.0, self.theme.accent);
+                    } else if response.hovered() {
+                        ui.painter().rect_filled(
+                            rect.shrink(1.0),
+                            self.theme.radius_sm,
+                            self.theme.bg_med.linear_multiply(0.4),
                         );
                     }
+
+                    let icon_color = if is_sel {
+                        self.theme.accent
+                    } else if response.hovered() {
+                        self.theme.text_primary
+                    } else {
+                        self.theme.text_secondary
+                    };
+
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        icon,
+                        egui::FontId::proportional(15.0),
+                        icon_color,
+                    );
+
+                    response.on_hover_text(label);
                 }
 
+                ui.separator();
+
+                // RIGHT SIDE: Right sidebar tabs + broadcast button (aligned right)
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let tabs = [
                         (RightTab::Library, egui_phosphor::regular::FOLDER_OPEN, "LIBRARY"),
@@ -1015,6 +1084,62 @@ impl InspectorApp {
 
                     ui.separator();
                     ui.toggle_value(&mut self.broadcast.is_streaming, format!("{} BROADCAST", egui_phosphor::regular::BROADCAST));
+
+                    // CENTER: Branding, BPM, POS, Realtime DSP Info
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.label(egui::RichText::new("nullherz Studio").size(10.0).strong().color(self.theme.accent));
+
+                        if let Some(t) = telemetry {
+                            ui.separator();
+                            ui.label(format!("BPM: {:.1}", t.bpm));
+                            ui.separator();
+                            ui.label(format!("POS: {:.2}", t.beat_position));
+                            ui.separator();
+
+                            let sr_khz = self.settings.sample_rate / 1000.0;
+                            let block_f = self.settings.buffer_size;
+                            let latency_ms = (block_f as f64 / self.settings.sample_rate as f64) * 1000.0;
+                            let budget_ms = if t.sample_rate > 0.0 {
+                                (t.block_size as f32 / t.sample_rate) * 1000.0
+                            } else {
+                                (block_f as f32 / self.settings.sample_rate) * 1000.0
+                            };
+                            let dsp_load = if budget_ms > 0.0 {
+                                ((t.process_time_ns as f32 / 1_000_000.0) / budget_ms * 100.0).clamp(0.0, 100.0)
+                            } else {
+                                0.0
+                            };
+
+                            let rt_warnings = ipc_layer::realtime_environment_warnings();
+                            if self.settings.exclusive_performance_mode && rt_warnings.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "⚡ REALTIME {:.0}kHz | {}f ({:.2}ms) | DSP {:.1}%",
+                                        sr_khz, block_f, latency_ms, dsp_load
+                                    ))
+                                    .strong()
+                                    .color(self.theme.success),
+                                );
+                            } else if !rt_warnings.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "⚠️ PREEMPTION RISK | {}f ({:.2}ms) | DSP {:.1}%",
+                                        block_f, latency_ms, dsp_load
+                                    ))
+                                    .strong()
+                                    .color(self.theme.danger),
+                                );
+                            } else {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "💻 DESKTOP {:.0}kHz | {}f (~{:.1}ms) | DSP {:.1}%",
+                                        sr_khz, block_f, latency_ms, dsp_load
+                                    ))
+                                    .color(self.theme.warning),
+                                );
+                            }
+                        }
+                    });
                 });
             });
         });
@@ -1332,6 +1457,9 @@ impl eframe::App for InspectorApp {
 
         // 3. Bottom Bar (Status & Global Controls)
         self.render_bottom_bar(ctx, &telemetry, "main");
+
+        // 3b. Sliding Bottom Drawer Panel (Mixer / Clip Editor)
+        self.render_bottom_drawer(ctx, &telemetry, "main");
 
         // --- Render Single Detached Visual Surface Window ---
         if let Some(c_idx) = self.viz.detached_channel {
@@ -1969,6 +2097,7 @@ mod tests {
             analyzer: Default::default(),
             library_db: SharedLibraryDb(db_arc),
             active_right_tab: None,
+            active_bottom_drawer: None,
             breeding_view: views::breeder::BreederView::new(),
             wgpu_renderer: None,
             waveform_renderer: None,
@@ -2028,6 +2157,7 @@ mod tests {
             analyzer: Default::default(),
             library_db: SharedLibraryDb(db_arc),
             active_right_tab: Some(RightTab::Library),
+            active_bottom_drawer: None,
             breeding_view: views::breeder::BreederView::new(),
             wgpu_renderer: None,
             waveform_renderer: None,
