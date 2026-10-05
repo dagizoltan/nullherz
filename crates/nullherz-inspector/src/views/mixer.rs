@@ -5,10 +5,10 @@ use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
 
 /// Fixed strip width: every card is the same size regardless of window width.
-pub const STRIP_W: f32 = 92.0;
+pub const STRIP_W: f32 = 78.0;
 #[allow(dead_code)]
-pub const PAD_STRIP_W: f32 = 92.0;
-pub const FADER_H: f32 = 120.0;
+pub const PAD_STRIP_W: f32 = 78.0;
+pub const FADER_H: f32 = 110.0;
 pub const VERTICAL_WAVEFORM_H: f32 = 200.0;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
@@ -108,69 +108,137 @@ fn render_add_channel_button(app: &mut InspectorApp, ui: &mut Ui) {
                 ui.add_space(180.0);
                 let btn = egui::Button::new(RichText::new("+").size(24.0).strong().color(theme.accent))
                     .fill(theme.bg_inset)
-                    .min_size(Vec2::new(50.0, 50.0));
+                    .min_size(Vec2::new(40.0, 40.0));
                 if ui.add(btn).on_hover_text("Add Channel Strip").clicked() {
                     if app.mixer.num_channels < 16 {
                         app.mixer.num_channels += 1;
                     }
                 }
                 ui.add_space(4.0);
-                ui.label(RichText::new("ADD CHANNEL").size(9.0).strong().color(theme.text_secondary));
+                ui.label(RichText::new("ADD CHANNEL").size(8.0).strong().color(theme.text_secondary));
             });
         });
 }
 
-fn render_insert_fx_rack_item(app: &mut InspectorApp, ui: &mut Ui, deck_idx: usize, fx_idx: usize, accent_color: Color32) {
-    ui.push_id(fx_idx, |ui| {
+fn render_channel_fx_rack_item(app: &mut InspectorApp, ui: &mut Ui, ch_idx: usize, fx_idx: usize, accent_color: Color32) {
+    ui.push_id(("ch_fx", ch_idx, fx_idx), |ui| {
         let theme = app.theme;
-        let insert_name = app.decks.deck_inserts[deck_idx][fx_idx].clone();
-        let num_inserts = app.decks.deck_inserts[deck_idx].len();
+        let active_deck = ch_idx % 4;
+        let insert_name = app.decks.deck_inserts[active_deck][fx_idx].clone();
+        let num_inserts = app.decks.deck_inserts[active_deck].len();
 
         Frame::none()
             .fill(theme.bg_inset)
             .rounding(Rounding::same(theme.radius_sm))
-            .inner_margin(Margin::same(3.0))
+            .inner_margin(Margin::same(2.0))
             .stroke(Stroke::new(1.0, theme.border))
             .show(ui, |ui| {
-                ui.set_width(STRIP_W - 20.0);
-                ui.vertical(|ui| {
+                ui.set_width(STRIP_W - 12.0);
+                ui.vertical_centered(|ui| {
                     ui.horizontal(|ui| {
-                        ui.add(egui::Label::new(RichText::new(&insert_name).size(8.0).strong().color(accent_color)).truncate());
+                        ui.add(egui::Label::new(RichText::new(&insert_name).size(7.5).strong().color(accent_color)).truncate());
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             // Remove button
-                            if ui.add(egui::Button::new(RichText::new("✕").size(8.0)).fill(theme.bg_inset)).clicked() {
-                                app.decks.deck_inserts[deck_idx].remove(fx_idx);
-                                app.decks.deck_insert_params[deck_idx].remove(fx_idx);
+                            if ui.add(egui::Button::new(RichText::new("✕").size(7.0)).fill(theme.bg_inset)).clicked() {
+                                app.decks.deck_inserts[active_deck].remove(fx_idx);
+                                if fx_idx < app.decks.deck_insert_params[active_deck].len() {
+                                    app.decks.deck_insert_params[active_deck].remove(fx_idx);
+                                }
                                 return;
                             }
 
                             // Reorder Down
                             if fx_idx + 1 < num_inserts {
-                                if ui.add(egui::Button::new(RichText::new("▼").size(8.0)).fill(theme.bg_inset)).clicked() {
-                                    app.decks.deck_inserts[deck_idx].swap(fx_idx, fx_idx + 1);
-                                    app.decks.deck_insert_params[deck_idx].swap(fx_idx, fx_idx + 1);
+                                if ui.add(egui::Button::new(RichText::new("▼").size(7.0)).fill(theme.bg_inset)).clicked() {
+                                    app.decks.deck_inserts[active_deck].swap(fx_idx, fx_idx + 1);
+                                    if fx_idx + 1 < app.decks.deck_insert_params[active_deck].len() {
+                                        app.decks.deck_insert_params[active_deck].swap(fx_idx, fx_idx + 1);
+                                    }
                                     return;
                                 }
                             }
 
                             // Reorder Up
                             if fx_idx > 0 {
-                                if ui.add(egui::Button::new(RichText::new("▲").size(8.0)).fill(theme.bg_inset)).clicked() {
-                                    app.decks.deck_inserts[deck_idx].swap(fx_idx, fx_idx - 1);
-                                    app.decks.deck_insert_params[deck_idx].swap(fx_idx, fx_idx - 1);
+                                if ui.add(egui::Button::new(RichText::new("▲").size(7.0)).fill(theme.bg_inset)).clicked() {
+                                    app.decks.deck_inserts[active_deck].swap(fx_idx, fx_idx - 1);
+                                    if fx_idx < app.decks.deck_insert_params[active_deck].len() {
+                                        app.decks.deck_insert_params[active_deck].swap(fx_idx, fx_idx - 1);
+                                    }
                                     return;
                                 }
                             }
                         });
                     });
 
-                    // Parameter slider
-                    if let Some(params) = app.decks.deck_insert_params[deck_idx].get_mut(fx_idx) {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("MIX").size(7.5).color(theme.text_disabled));
-                            ui.add(egui::Slider::new(&mut params[0], 0.0..=1.0).show_value(false));
-                        });
+                    ui.add_space(1.0);
+
+                    let name_upper = insert_name.to_uppercase();
+                    if name_upper.contains("TRIM") || name_upper.contains("GAIN") {
+                        let gain_node = app.topo.node_map.get(&format!("deck_{}_gain", (b'a' + active_deck as u8) as char)).copied();
+                        let mut gain_val = app.mixer.channel_gain[ch_idx];
+                        if widgets::render_knob_sized(ui, &mut gain_val, 0.0..=2.0, "GAIN", accent_color, 18.0).changed() {
+                            app.mixer.channel_gain[ch_idx] = gain_val;
+                            if let Some(gain_id) = gain_node {
+                                let net_gain = gain_val * app.mixer.channel_faders[ch_idx];
+                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: gain_id as u64,
+                                    param_id: 0,
+                                    value: net_gain,
+                                    ramp_duration_samples: 128,
+                                }));
+                            }
+                        }
+                    } else if name_upper.contains("PITCH") || name_upper.contains("SPEED") {
+                        let mut pitch_val = app.mixer.channel_pitch[ch_idx];
+                        if widgets::render_knob_sized(ui, &mut pitch_val, 0.5..=2.0, "PITCH", accent_color, 18.0).changed() {
+                            app.mixer.channel_pitch[ch_idx] = pitch_val;
+                        }
+                    } else if name_upper.contains("3-BAND") || name_upper.contains("EQ") || name_upper.contains("ISOLATOR") {
+                        let iso_node = app.topo.node_map.get(&format!("deck_{}_isolator", (b'a' + active_deck as u8) as char)).copied();
+                        let mut hi = app.mixer.channel_eq_high[ch_idx];
+                        if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", accent_color, 18.0).changed() {
+                            app.mixer.channel_eq_high[ch_idx] = hi;
+                            if let Some(node_id) = iso_node {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: node_id as u64,
+                                    param_id: 2,
+                                    value: hi,
+                                    ramp_duration_samples: 128,
+                                }));
+                            }
+                        }
+                        ui.add_space(1.0);
+                        let mut mid = app.mixer.channel_eq_mid[ch_idx];
+                        if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", accent_color, 18.0).changed() {
+                            app.mixer.channel_eq_mid[ch_idx] = mid;
+                            if let Some(node_id) = iso_node {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: node_id as u64,
+                                    param_id: 1,
+                                    value: mid,
+                                    ramp_duration_samples: 128,
+                                }));
+                            }
+                        }
+                        ui.add_space(1.0);
+                        let mut low = app.mixer.channel_eq_low[ch_idx];
+                        if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", accent_color, 18.0).changed() {
+                            app.mixer.channel_eq_low[ch_idx] = low;
+                            if let Some(node_id) = iso_node {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                    target_id: node_id as u64,
+                                    param_id: 0,
+                                    value: low,
+                                    ramp_duration_samples: 128,
+                                }));
+                            }
+                        }
+                    } else {
+                        if let Some(params) = app.decks.deck_insert_params[active_deck].get_mut(fx_idx) {
+                            widgets::render_knob_sized(ui, &mut params[0], 0.0..=1.0, "MIX", accent_color, 18.0);
+                        }
                     }
                 });
             });
@@ -186,17 +254,17 @@ fn render_sampler_subchannel_fx_item(app: &mut InspectorApp, ui: &mut Ui, pad_id
         Frame::none()
             .fill(theme.bg_inset)
             .rounding(Rounding::same(theme.radius_sm))
-            .inner_margin(Margin::same(3.0))
+            .inner_margin(Margin::same(2.0))
             .stroke(Stroke::new(1.0, theme.border))
             .show(ui, |ui| {
-                ui.set_width(STRIP_W - 20.0);
-                ui.vertical(|ui| {
+                ui.set_width(STRIP_W - 12.0);
+                ui.vertical_centered(|ui| {
                     ui.horizontal(|ui| {
-                        ui.add(egui::Label::new(RichText::new(&insert_name).size(8.0).strong().color(accent_color)).truncate());
+                        ui.add(egui::Label::new(RichText::new(&insert_name).size(7.5).strong().color(accent_color)).truncate());
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             // Remove button
-                            if ui.add(egui::Button::new(RichText::new("✕").size(8.0)).fill(theme.bg_inset)).clicked() {
+                            if ui.add(egui::Button::new(RichText::new("✕").size(7.0)).fill(theme.bg_inset)).clicked() {
                                 app.sampler.subchannel_inserts[pad_idx].remove(fx_idx);
                                 if fx_idx < app.sampler.subchannel_insert_params[pad_idx].len() {
                                     app.sampler.subchannel_insert_params[pad_idx].remove(fx_idx);
@@ -206,7 +274,7 @@ fn render_sampler_subchannel_fx_item(app: &mut InspectorApp, ui: &mut Ui, pad_id
 
                             // Reorder Down
                             if fx_idx + 1 < num_inserts {
-                                if ui.add(egui::Button::new(RichText::new("▼").size(8.0)).fill(theme.bg_inset)).clicked() {
+                                if ui.add(egui::Button::new(RichText::new("▼").size(7.0)).fill(theme.bg_inset)).clicked() {
                                     app.sampler.subchannel_inserts[pad_idx].swap(fx_idx, fx_idx + 1);
                                     if fx_idx + 1 < app.sampler.subchannel_insert_params[pad_idx].len() {
                                         app.sampler.subchannel_insert_params[pad_idx].swap(fx_idx, fx_idx + 1);
@@ -217,7 +285,7 @@ fn render_sampler_subchannel_fx_item(app: &mut InspectorApp, ui: &mut Ui, pad_id
 
                             // Reorder Up
                             if fx_idx > 0 {
-                                if ui.add(egui::Button::new(RichText::new("▲").size(8.0)).fill(theme.bg_inset)).clicked() {
+                                if ui.add(egui::Button::new(RichText::new("▲").size(7.0)).fill(theme.bg_inset)).clicked() {
                                     app.sampler.subchannel_inserts[pad_idx].swap(fx_idx, fx_idx - 1);
                                     if fx_idx < app.sampler.subchannel_insert_params[pad_idx].len() {
                                         app.sampler.subchannel_insert_params[pad_idx].swap(fx_idx, fx_idx - 1);
@@ -228,12 +296,38 @@ fn render_sampler_subchannel_fx_item(app: &mut InspectorApp, ui: &mut Ui, pad_id
                         });
                     });
 
-                    // Parameter slider
-                    if let Some(params) = app.sampler.subchannel_insert_params[pad_idx].get_mut(fx_idx) {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("MIX").size(7.5).color(theme.text_disabled));
-                            ui.add(egui::Slider::new(&mut params[0], 0.0..=1.0).show_value(false));
-                        });
+                    ui.add_space(1.0);
+
+                    let name_upper = insert_name.to_uppercase();
+                    if name_upper.contains("TRIM") || name_upper.contains("GAIN") {
+                        let mut gain = app.sampler.subchannel_gain[pad_idx];
+                        if widgets::render_knob_sized(ui, &mut gain, 0.0..=2.0, "GAIN", accent_color, 18.0).changed() {
+                            app.sampler.subchannel_gain[pad_idx] = gain;
+                        }
+                    } else if name_upper.contains("PITCH") || name_upper.contains("TUNE") {
+                        let mut pitch = app.sampler.pad_tune[pad_idx];
+                        if widgets::render_knob_sized(ui, &mut pitch, 0.0..=1.0, "PITCH", accent_color, 18.0).changed() {
+                            app.sampler.pad_tune[pad_idx] = pitch;
+                        }
+                    } else if name_upper.contains("3-BAND") || name_upper.contains("EQ") {
+                        let mut hi = app.sampler.subchannel_eq_high[pad_idx];
+                        if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", accent_color, 18.0).changed() {
+                            app.sampler.subchannel_eq_high[pad_idx] = hi;
+                        }
+                        ui.add_space(1.0);
+                        let mut mid = app.sampler.subchannel_eq_mid[pad_idx];
+                        if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", accent_color, 18.0).changed() {
+                            app.sampler.subchannel_eq_mid[pad_idx] = mid;
+                        }
+                        ui.add_space(1.0);
+                        let mut low = app.sampler.subchannel_eq_low[pad_idx];
+                        if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", accent_color, 18.0).changed() {
+                            app.sampler.subchannel_eq_low[pad_idx] = low;
+                        }
+                    } else {
+                        if let Some(params) = app.sampler.subchannel_insert_params[pad_idx].get_mut(fx_idx) {
+                            widgets::render_knob_sized(ui, &mut params[0], 0.0..=1.0, "MIX", accent_color, 18.0);
+                        }
                     }
                 });
             });
@@ -249,17 +343,17 @@ fn render_custom_subchannel_fx_item(app: &mut InspectorApp, ui: &mut Ui, parent_
         Frame::none()
             .fill(theme.bg_inset)
             .rounding(Rounding::same(theme.radius_sm))
-            .inner_margin(Margin::same(3.0))
+            .inner_margin(Margin::same(2.0))
             .stroke(Stroke::new(1.0, theme.border))
             .show(ui, |ui| {
-                ui.set_width(STRIP_W - 20.0);
-                ui.vertical(|ui| {
+                ui.set_width(STRIP_W - 12.0);
+                ui.vertical_centered(|ui| {
                     ui.horizontal(|ui| {
-                        ui.add(egui::Label::new(RichText::new(&insert_name).size(8.0).strong().color(accent_color)).truncate());
+                        ui.add(egui::Label::new(RichText::new(&insert_name).size(7.5).strong().color(accent_color)).truncate());
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             // Remove button
-                            if ui.add(egui::Button::new(RichText::new("✕").size(8.0)).fill(theme.bg_inset)).clicked() {
+                            if ui.add(egui::Button::new(RichText::new("✕").size(7.0)).fill(theme.bg_inset)).clicked() {
                                 app.mixer.custom_subchannel_inserts[parent_ch][sub_idx].remove(fx_idx);
                                 if fx_idx < app.mixer.custom_subchannel_insert_params[parent_ch][sub_idx].len() {
                                     app.mixer.custom_subchannel_insert_params[parent_ch][sub_idx].remove(fx_idx);
@@ -269,7 +363,7 @@ fn render_custom_subchannel_fx_item(app: &mut InspectorApp, ui: &mut Ui, parent_
 
                             // Reorder Down
                             if fx_idx + 1 < num_inserts {
-                                if ui.add(egui::Button::new(RichText::new("▼").size(8.0)).fill(theme.bg_inset)).clicked() {
+                                if ui.add(egui::Button::new(RichText::new("▼").size(7.0)).fill(theme.bg_inset)).clicked() {
                                     app.mixer.custom_subchannel_inserts[parent_ch][sub_idx].swap(fx_idx, fx_idx + 1);
                                     if fx_idx + 1 < app.mixer.custom_subchannel_insert_params[parent_ch][sub_idx].len() {
                                         app.mixer.custom_subchannel_insert_params[parent_ch][sub_idx].swap(fx_idx, fx_idx + 1);
@@ -280,7 +374,7 @@ fn render_custom_subchannel_fx_item(app: &mut InspectorApp, ui: &mut Ui, parent_
 
                             // Reorder Up
                             if fx_idx > 0 {
-                                if ui.add(egui::Button::new(RichText::new("▲").size(8.0)).fill(theme.bg_inset)).clicked() {
+                                if ui.add(egui::Button::new(RichText::new("▲").size(7.0)).fill(theme.bg_inset)).clicked() {
                                     app.mixer.custom_subchannel_inserts[parent_ch][sub_idx].swap(fx_idx, fx_idx - 1);
                                     if fx_idx < app.mixer.custom_subchannel_insert_params[parent_ch][sub_idx].len() {
                                         app.mixer.custom_subchannel_insert_params[parent_ch][sub_idx].swap(fx_idx, fx_idx - 1);
@@ -291,12 +385,38 @@ fn render_custom_subchannel_fx_item(app: &mut InspectorApp, ui: &mut Ui, parent_
                         });
                     });
 
-                    // Parameter slider
-                    if let Some(params) = app.mixer.custom_subchannel_insert_params[parent_ch][sub_idx].get_mut(fx_idx) {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("MIX").size(7.5).color(theme.text_disabled));
-                            ui.add(egui::Slider::new(&mut params[0], 0.0..=1.0).show_value(false));
-                        });
+                    ui.add_space(1.0);
+
+                    let name_upper = insert_name.to_uppercase();
+                    if name_upper.contains("TRIM") || name_upper.contains("GAIN") {
+                        let mut gain = app.mixer.custom_subchannel_gain[parent_ch][sub_idx];
+                        if widgets::render_knob_sized(ui, &mut gain, 0.0..=2.0, "GAIN", accent_color, 18.0).changed() {
+                            app.mixer.custom_subchannel_gain[parent_ch][sub_idx] = gain;
+                        }
+                    } else if name_upper.contains("PITCH") {
+                        let mut pitch = app.mixer.custom_subchannel_pitch[parent_ch][sub_idx];
+                        if widgets::render_knob_sized(ui, &mut pitch, 0.5..=2.0, "PITCH", accent_color, 18.0).changed() {
+                            app.mixer.custom_subchannel_pitch[parent_ch][sub_idx] = pitch;
+                        }
+                    } else if name_upper.contains("3-BAND") || name_upper.contains("EQ") {
+                        let mut hi = app.mixer.custom_subchannel_eq_high[parent_ch][sub_idx];
+                        if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", accent_color, 18.0).changed() {
+                            app.mixer.custom_subchannel_eq_high[parent_ch][sub_idx] = hi;
+                        }
+                        ui.add_space(1.0);
+                        let mut mid = app.mixer.custom_subchannel_eq_mid[parent_ch][sub_idx];
+                        if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", accent_color, 18.0).changed() {
+                            app.mixer.custom_subchannel_eq_mid[parent_ch][sub_idx] = mid;
+                        }
+                        ui.add_space(1.0);
+                        let mut low = app.mixer.custom_subchannel_eq_low[parent_ch][sub_idx];
+                        if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", accent_color, 18.0).changed() {
+                            app.mixer.custom_subchannel_eq_low[parent_ch][sub_idx] = low;
+                        }
+                    } else {
+                        if let Some(params) = app.mixer.custom_subchannel_insert_params[parent_ch][sub_idx].get_mut(fx_idx) {
+                            widgets::render_knob_sized(ui, &mut params[0], 0.0..=1.0, "MIX", accent_color, 18.0);
+                        }
                     }
                 });
             });
@@ -532,7 +652,7 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
             Frame::none()
                 .fill(fill_color)
                 .rounding(Rounding::same(theme.radius_md))
-                .inner_margin(Margin::same(theme.space_md))
+                .inner_margin(Margin::same(4.0))
                 .stroke(border_stroke)
                 .show(ui, |ui| {
                     ui.set_width(STRIP_W);
@@ -543,16 +663,16 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                         let mut fold_clicked = false;
                         let header_resp = ui.horizontal(|ui| {
                             let fold_icon = if app.mixer.folded_pads[i] { "▼ " } else { "▸ " };
-                            if ui.button(RichText::new(fold_icon).size(10.0).color(strip_accent)).on_hover_text("Toggle inline subchannels").clicked() {
+                            if ui.button(RichText::new(fold_icon).size(9.0).color(strip_accent)).on_hover_text("Toggle inline subchannels").clicked() {
                                 fold_clicked = true;
                             }
 
                             ui.label(RichText::new(format!("CH {}", (b'A' + (i % 26) as u8) as char)).strong().size(theme.type_body).color(strip_accent));
                             if is_drum_machine {
-                                ui.label(RichText::new("[DRUMS]").size(8.0).strong().color(Color32::from_rgb(255, 127, 62)));
+                                ui.label(RichText::new("[DRUMS]").size(7.5).strong().color(Color32::from_rgb(255, 127, 62)));
                             }
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.add(egui::Button::new(RichText::new("🔍").size(9.0)).fill(theme.bg_inset)).on_hover_text("Open Channel Inspector").clicked() {
+                                if ui.add(egui::Button::new(RichText::new("🔍").size(8.0)).fill(theme.bg_inset)).on_hover_text("Open Channel Inspector").clicked() {
                                     app.mixer.focused_detail_channel = i;
                                     app.active_view = crate::View::ChannelDetail;
                                 }
@@ -564,7 +684,7 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                         } else if header_resp.response.interact(egui::Sense::click()).clicked() {
                             app.decks.focused_deck = i;
                         }
-                        ui.add_space(theme.space_xs);
+                        ui.add_space(2.0);
 
                         if is_detached {
                             // Waveform Style Dropdown Selector
@@ -572,7 +692,7 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                                 let avail_w = ui.available_width();
                                 let selected_style = app.mixer.waveform_styles[i];
                                 egui::ComboBox::from_id_source(format!("ch_wf_style_{}", i))
-                                    .selected_text(RichText::new(selected_style.name()).size(8.5).strong().color(theme.text_primary))
+                                    .selected_text(RichText::new(selected_style.name()).size(8.0).strong().color(theme.text_primary))
                                     .width(avail_w)
                                     .show_ui(ui, |ui| {
                                         for st in nullherz_ui_hal::render::waveform_renderer::WaveformStyle::all() {
@@ -584,103 +704,37 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
 
                             // Vertical Waveform Canvas (Only rendered in detached window)
                             render_vertical_waveform(app, ui, i, elapsed_samples, level_base, deck_color, &theme, telemetry);
-                            ui.add_space(theme.space_xs);
+                            ui.add_space(2.0);
                         }
 
-                        // Centered Column Controls Group: GAIN, PITCH, 3-BAND EQ, FX RACK
+                        // Centered Column Controls Group: SORTABLE ROTARY FX RACK
                         ui.group(|ui| {
                             ui.set_width(STRIP_W - 8.0);
                             ui.vertical_centered(|ui| {
-                                // Gain / Trim Knob (Size 18.0)
-                                let mut gain_val = app.mixer.channel_gain[i];
-                                if widgets::render_knob_sized(ui, &mut gain_val, 0.0..=2.0, "GAIN", strip_accent, 18.0).changed() {
-                                    app.mixer.channel_gain[i] = gain_val;
-                                    if let Some(gain_id) = gain_node {
-                                        let net_gain = gain_val * app.mixer.channel_faders[i];
-                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                            target_id: gain_id as u64,
-                                            param_id: 0,
-                                            value: net_gain,
-                                            ramp_duration_samples: 128,
-                                        }));
-                                    }
-                                }
-
-                                ui.add_space(1.0);
-
-                                // Pitch / Speed Knob (Size 18.0)
-                                let mut pitch_val = app.mixer.channel_pitch[i];
-                                if widgets::render_knob_sized(ui, &mut pitch_val, 0.5..=2.0, "PITCH", strip_accent, 18.0).changed() {
-                                    app.mixer.channel_pitch[i] = pitch_val;
-                                }
-
-                                ui.add_space(1.0);
-
-                                // 3-Band EQ Knobs (Size 18.0 each, Centered Column)
-                                let mut hi = app.mixer.channel_eq_high[i];
-                                if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", strip_accent, 18.0).changed() {
-                                    app.mixer.channel_eq_high[i] = hi;
-                                    if let Some(node_id) = iso_node {
-                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                            target_id: node_id as u64,
-                                            param_id: 2,
-                                            value: hi,
-                                            ramp_duration_samples: 128,
-                                        }));
-                                    }
-                                }
-
-                                let mut mid = app.mixer.channel_eq_mid[i];
-                                if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", strip_accent, 18.0).changed() {
-                                    app.mixer.channel_eq_mid[i] = mid;
-                                    if let Some(node_id) = iso_node {
-                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                            target_id: node_id as u64,
-                                            param_id: 1,
-                                            value: mid,
-                                            ramp_duration_samples: 128,
-                                        }));
-                                    }
-                                }
-
-                                let mut low = app.mixer.channel_eq_low[i];
-                                if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", strip_accent, 18.0).changed() {
-                                    app.mixer.channel_eq_low[i] = low;
-                                    if let Some(node_id) = iso_node {
-                                        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                            target_id: node_id as u64,
-                                            param_id: 0,
-                                            value: low,
-                                            ramp_duration_samples: 128,
-                                        }));
-                                    }
-                                }
-
-                                ui.add_space(2.0);
-
-                                // Sortable FX Rack
                                 let fx_count = app.decks.deck_inserts[i % 4].len();
                                 for fx_i in 0..fx_count {
-                                    render_insert_fx_rack_item(app, ui, i % 4, fx_i, strip_accent);
-                                    ui.add_space(1.0);
+                                    render_channel_fx_rack_item(app, ui, i, fx_i, strip_accent);
+                                    ui.add_space(2.0);
                                 }
 
                                 if ui.add_sized([STRIP_W - 12.0, 16.0], egui::Button::new(RichText::new("+ FX").size(8.0).strong()).fill(theme.bg_inset)).clicked() {
+                                    app.decks.deck_inserts[i % 4].push("CUSTOM INSERT FX".into());
+                                    app.decks.deck_insert_params[i % 4].push([1.0; 8]);
                                     app.active_right_tab = Some(crate::RightTab::Store);
                                     app.store.active_category = Some(sidecar_sdk::AssetCategory::AudioInsert);
                                 }
                             });
                         });
 
-                        ui.add_space(theme.space_md);
+                        ui.add_space( theme.space_sm);
 
                         // --- VOLUME FADER & STEREO VU METERS ---
                         ui.horizontal(|ui| {
-                            let fader_w = 24.0;
+                            let fader_w = 20.0;
                             let pad = (ui.available_width() - fader_w).max(0.0) / 2.0;
                             ui.add_space(pad);
 
-                            let r_fader = widgets::render_fader(ui, &mut app.mixer.channel_faders[i], 0.0..=1.2, deck_color, FADER_H, 30.0);
+                            let r_fader = widgets::render_fader(ui, &mut app.mixer.channel_faders[i], 0.0..=1.2, deck_color, FADER_H, 22.0);
                             if r_fader.changed() {
                                 if let Some(gain_id) = gain_node {
                                     let net_gain = app.mixer.channel_gain[i] * app.mixer.channel_faders[i];
@@ -693,7 +747,7 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                                 }
                             }
 
-                            ui.add_space(4.0);
+                            ui.add_space(2.0);
 
                             // STEREO VU METERS
                             if let (Some(t), Some(node)) = (telemetry, meter_node) {
@@ -703,30 +757,30 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                                 let level_r = level_base * (1.0 - (0.5 - bal).max(0.0));
 
                                 widgets::render_vu_meter(ui, level_l, app.mixer.channel_peak_hold[i], deck_color, FADER_H);
-                                ui.add_space(2.0);
+                                ui.add_space(1.0);
                                 widgets::render_vu_meter(ui, level_r, app.mixer.channel_peak_hold[i], deck_color, FADER_H);
                             } else {
                                 widgets::render_vu_meter(ui, 0.0, 0.0, theme.text_disabled, FADER_H);
-                                ui.add_space(2.0);
+                                ui.add_space(1.0);
                                 widgets::render_vu_meter(ui, 0.0, 0.0, theme.text_disabled, FADER_H);
                             }
                         });
 
-                        ui.add_space(4.0);
+                        ui.add_space(2.0);
 
-                        // Crossfader Assignment Selector (A / THRU / B)
+                        // Crossfader Assignment Selector (A / OFF / B)
                         if show_crossfader {
                             ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 2.0;
+                                ui.spacing_mut().item_spacing.x = 1.0;
                                 let assign = app.mixer.crossfader_assign[i];
 
-                                let a_btn = ui.selectable_label(assign == 0, RichText::new("A").size(8.0).strong());
+                                let a_btn = ui.selectable_label(assign == 0, RichText::new("A").size(7.5).strong());
                                 if a_btn.clicked() { app.mixer.crossfader_assign[i] = 0; }
 
-                                let thru_btn = ui.selectable_label(assign == 1, RichText::new("OFF").size(8.0).strong());
+                                let thru_btn = ui.selectable_label(assign == 1, RichText::new("OFF").size(7.5).strong());
                                 if thru_btn.clicked() { app.mixer.crossfader_assign[i] = 1; }
 
-                                let b_btn = ui.selectable_label(assign == 2, RichText::new("B").size(8.0).strong());
+                                let b_btn = ui.selectable_label(assign == 2, RichText::new("B").size(7.5).strong());
                                 if b_btn.clicked() { app.mixer.crossfader_assign[i] = 2; }
                             });
                             ui.add_space(2.0);
@@ -736,15 +790,15 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                         ui.horizontal(|ui| {
                             let selected_source = app.mixer.channel_input_sources[i];
                             egui::ComboBox::from_id_source(format!("ch_input_src_{}", i))
-                                .selected_text(RichText::new(selected_source.name()).size(8.5).strong().color(theme.text_primary))
-                                .width(STRIP_W - 20.0)
+                                .selected_text(RichText::new(selected_source.name()).size(8.0).strong().color(theme.text_primary))
+                                .width(STRIP_W - 12.0)
                                 .show_ui(ui, |ui| {
                                     for src in ChannelInputSource::all() {
                                         ui.selectable_value(&mut app.mixer.channel_input_sources[i], *src, src.name());
                                     }
                                 });
                         });
-                        ui.add_space(4.0);
+                        ui.add_space(2.0);
 
                         // Transport Row
                         ui.horizontal(|ui| {
@@ -752,13 +806,13 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                             let is_playing = app.decks.deck_playing[active_deck_idx];
                             let play_icon = if is_playing { egui_phosphor::regular::PAUSE } else { egui_phosphor::regular::PLAY };
                             let play_btn = if is_playing {
-                                egui::Button::new(RichText::new(play_icon).size(11.0).strong()).fill(theme.accent)
+                                egui::Button::new(RichText::new(play_icon).size(10.0).strong()).fill(theme.accent)
                             } else {
-                                egui::Button::new(RichText::new(play_icon).size(11.0).strong()).fill(theme.bg_inset)
+                                egui::Button::new(RichText::new(play_icon).size(10.0).strong()).fill(theme.bg_inset)
                             };
 
                             let deck_char_upper = (b'A' + active_deck_idx as u8) as char;
-                            if ui.add_sized([45.0, 20.0], play_btn).clicked() {
+                            if ui.add_sized([34.0, 18.0], play_btn).clicked() {
                                 app.decks.focused_deck = active_deck_idx;
                                 let new_playing = !is_playing;
                                 app.decks.deck_playing[active_deck_idx] = new_playing;
@@ -769,7 +823,7 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                                 }
                             }
 
-                            if ui.add_sized([45.0, 20.0], egui::Button::new(RichText::new("CUE").size(9.0).strong()).fill(theme.bg_inset)).clicked() {
+                            if ui.add_sized([34.0, 18.0], egui::Button::new(RichText::new("CUE").size(8.5).strong()).fill(theme.bg_inset)).clicked() {
                                 app.decks.focused_deck = active_deck_idx;
                                 let node_name = format!("deck_{}_sampler", (b'a' + active_deck_idx as u8) as char);
                                 if let Some(node_idx) = app.get_node_id(&node_name) {
@@ -805,60 +859,26 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
                     Frame::none()
                         .fill(theme.bg_surface)
                         .rounding(Rounding::same(theme.radius_md))
-                        .inner_margin(Margin::same(theme.space_md))
+                        .inner_margin(Margin::same(4.0))
                         .stroke(Stroke::new(1.0, subchannel_color.linear_multiply(0.7)))
                         .show(ui, |ui| {
                             ui.set_width(STRIP_W);
                             ui.vertical(|ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new(format!("↳ {:02}", pad_idx + 1)).size(theme.type_caption).strong().color(subchannel_color));
-                                    ui.label(RichText::new(pad_names[pad_idx]).size(8.5).strong().color(theme.text_primary));
+                                    ui.label(RichText::new(format!("↳{:02}", pad_idx + 1)).size(theme.type_caption).strong().color(subchannel_color));
+                                    ui.label(RichText::new(pad_names[pad_idx]).size(8.0).strong().color(theme.text_primary));
                                 });
-                                ui.add_space(theme.space_xs);
+                                ui.add_space(2.0);
 
                                 // Subchannel Centered Controls Group
                                 ui.group(|ui| {
                                     ui.set_width(STRIP_W - 8.0);
                                     ui.vertical_centered(|ui| {
-                                        // Gain / Trim knob
-                                        let mut gain = app.sampler.subchannel_gain[pad_idx];
-                                        if widgets::render_knob_sized(ui, &mut gain, 0.0..=2.0, "GAIN", subchannel_color, 18.0).changed() {
-                                            app.sampler.subchannel_gain[pad_idx] = gain;
-                                        }
-
-                                        ui.add_space(1.0);
-
-                                        // Pitch knob
-                                        let mut pitch = app.sampler.pad_tune[pad_idx];
-                                        if widgets::render_knob_sized(ui, &mut pitch, 0.0..=1.0, "PITCH", subchannel_color, 18.0).changed() {
-                                            app.sampler.pad_tune[pad_idx] = pitch;
-                                        }
-
-                                        ui.add_space(1.0);
-
-                                        // 3-Band EQ
-                                        let mut hi = app.sampler.subchannel_eq_high[pad_idx];
-                                        if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", subchannel_color, 18.0).changed() {
-                                            app.sampler.subchannel_eq_high[pad_idx] = hi;
-                                        }
-
-                                        let mut mid = app.sampler.subchannel_eq_mid[pad_idx];
-                                        if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", subchannel_color, 18.0).changed() {
-                                            app.sampler.subchannel_eq_mid[pad_idx] = mid;
-                                        }
-
-                                        let mut low = app.sampler.subchannel_eq_low[pad_idx];
-                                        if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", subchannel_color, 18.0).changed() {
-                                            app.sampler.subchannel_eq_low[pad_idx] = low;
-                                        }
-
-                                        ui.add_space(2.0);
-
                                         // FX Rack for subchannel
                                         let fx_count = app.sampler.subchannel_inserts[pad_idx].len();
                                         for fx_i in 0..fx_count {
                                             render_sampler_subchannel_fx_item(app, ui, pad_idx, fx_i, subchannel_color);
-                                            ui.add_space(1.0);
+                                            ui.add_space(2.0);
                                         }
 
                                         if ui.add_sized([STRIP_W - 12.0, 16.0], egui::Button::new(RichText::new("+ FX").size(8.0).strong()).fill(theme.bg_inset)).clicked() {
@@ -870,12 +890,12 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
                                     });
                                 });
 
-                                ui.add_space(theme.space_md);
+                                ui.add_space(theme.space_sm);
 
                                 // Volume Fader & Mute/Solo
                                 ui.horizontal(|ui| {
                                     let mut pad_fader = app.sampler.subchannel_faders[pad_idx];
-                                    if widgets::render_fader(ui, &mut pad_fader, 0.0..=1.2, subchannel_color, FADER_H, 24.0).changed() {
+                                    if widgets::render_fader(ui, &mut pad_fader, 0.0..=1.2, subchannel_color, FADER_H, 20.0).changed() {
                                         app.sampler.subchannel_faders[pad_idx] = pad_fader;
                                     }
 
@@ -884,7 +904,7 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
                                     ui.vertical(|ui| {
                                         let is_muted = app.sampler.subchannel_mutes[pad_idx];
                                         let mute_color = if is_muted { theme.danger } else { theme.bg_inset };
-                                        if ui.add_sized([22.0, 20.0], egui::Button::new(RichText::new("M").size(8.0).strong()).fill(mute_color)).clicked() {
+                                        if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("M").size(7.5).strong()).fill(mute_color)).clicked() {
                                             app.sampler.subchannel_mutes[pad_idx] = !is_muted;
                                         }
 
@@ -892,7 +912,7 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
 
                                         let is_solo = app.sampler.subchannel_solos[pad_idx];
                                         let solo_color = if is_solo { theme.warning } else { theme.bg_inset };
-                                        if ui.add_sized([22.0, 20.0], egui::Button::new(RichText::new("S").size(8.0).strong()).fill(solo_color)).clicked() {
+                                        if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("S").size(7.5).strong()).fill(solo_color)).clicked() {
                                             app.sampler.subchannel_solos[pad_idx] = !is_solo;
                                         }
                                     });
@@ -911,56 +931,25 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
                 Frame::none()
                     .fill(theme.bg_surface)
                     .rounding(Rounding::same(theme.radius_md))
-                    .inner_margin(Margin::same(theme.space_md))
+                    .inner_margin(Margin::same(4.0))
                     .stroke(Stroke::new(1.0, subchannel_color.linear_multiply(0.7)))
                     .show(ui, |ui| {
                         ui.set_width(STRIP_W);
                         ui.vertical(|ui| {
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("↳ {:02}", sub_idx + 1)).size(theme.type_caption).strong().color(subchannel_color));
-                                ui.label(RichText::new(&sub_name).size(8.5).strong().color(theme.text_primary));
+                                ui.label(RichText::new(format!("↳{:02}", sub_idx + 1)).size(theme.type_caption).strong().color(subchannel_color));
+                                ui.label(RichText::new(&sub_name).size(8.0).strong().color(theme.text_primary));
                             });
-                            ui.add_space(theme.space_xs);
+                            ui.add_space(2.0);
 
                             ui.group(|ui| {
                                 ui.set_width(STRIP_W - 8.0);
                                 ui.vertical_centered(|ui| {
-                                    let mut gain = app.mixer.custom_subchannel_gain[parent_ch][sub_idx];
-                                    if widgets::render_knob_sized(ui, &mut gain, 0.0..=2.0, "GAIN", subchannel_color, 18.0).changed() {
-                                        app.mixer.custom_subchannel_gain[parent_ch][sub_idx] = gain;
-                                    }
-
-                                    ui.add_space(1.0);
-
-                                    let mut pitch = app.mixer.custom_subchannel_pitch[parent_ch][sub_idx];
-                                    if widgets::render_knob_sized(ui, &mut pitch, 0.5..=2.0, "PITCH", subchannel_color, 18.0).changed() {
-                                        app.mixer.custom_subchannel_pitch[parent_ch][sub_idx] = pitch;
-                                    }
-
-                                    ui.add_space(1.0);
-
-                                    let mut hi = app.mixer.custom_subchannel_eq_high[parent_ch][sub_idx];
-                                    if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", subchannel_color, 18.0).changed() {
-                                        app.mixer.custom_subchannel_eq_high[parent_ch][sub_idx] = hi;
-                                    }
-
-                                    let mut mid = app.mixer.custom_subchannel_eq_mid[parent_ch][sub_idx];
-                                    if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", subchannel_color, 18.0).changed() {
-                                        app.mixer.custom_subchannel_eq_mid[parent_ch][sub_idx] = mid;
-                                    }
-
-                                    let mut low = app.mixer.custom_subchannel_eq_low[parent_ch][sub_idx];
-                                    if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", subchannel_color, 18.0).changed() {
-                                        app.mixer.custom_subchannel_eq_low[parent_ch][sub_idx] = low;
-                                    }
-
-                                    ui.add_space(2.0);
-
                                     // Custom Subchannel Sortable FX Rack
                                     let fx_count = app.mixer.custom_subchannel_inserts[parent_ch][sub_idx].len();
                                     for fx_i in 0..fx_count {
                                         render_custom_subchannel_fx_item(app, ui, parent_ch, sub_idx, fx_i, subchannel_color);
-                                        ui.add_space(1.0);
+                                        ui.add_space(2.0);
                                     }
 
                                     if ui.add_sized([STRIP_W - 12.0, 16.0], egui::Button::new(RichText::new("+ FX").size(8.0).strong()).fill(theme.bg_inset)).clicked() {
@@ -972,11 +961,11 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
                                 });
                             });
 
-                            ui.add_space(theme.space_md);
+                            ui.add_space(theme.space_sm);
 
                             ui.horizontal(|ui| {
                                 let mut fader = app.mixer.custom_subchannel_faders[parent_ch][sub_idx];
-                                if widgets::render_fader(ui, &mut fader, 0.0..=1.2, subchannel_color, FADER_H, 24.0).changed() {
+                                if widgets::render_fader(ui, &mut fader, 0.0..=1.2, subchannel_color, FADER_H, 20.0).changed() {
                                     app.mixer.custom_subchannel_faders[parent_ch][sub_idx] = fader;
                                 }
 
@@ -985,7 +974,7 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
                                 ui.vertical(|ui| {
                                     let is_muted = app.mixer.custom_subchannel_mutes[parent_ch][sub_idx];
                                     let mute_color = if is_muted { theme.danger } else { theme.bg_inset };
-                                    if ui.add_sized([22.0, 20.0], egui::Button::new(RichText::new("M").size(8.0).strong()).fill(mute_color)).clicked() {
+                                    if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("M").size(7.5).strong()).fill(mute_color)).clicked() {
                                         app.mixer.custom_subchannel_mutes[parent_ch][sub_idx] = !is_muted;
                                     }
 
@@ -993,7 +982,7 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
 
                                     let is_solo = app.mixer.custom_subchannel_solos[parent_ch][sub_idx];
                                     let solo_color = if is_solo { theme.warning } else { theme.bg_inset };
-                                    if ui.add_sized([22.0, 20.0], egui::Button::new(RichText::new("S").size(8.0).strong()).fill(solo_color)).clicked() {
+                                    if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("S").size(7.5).strong()).fill(solo_color)).clicked() {
                                         app.mixer.custom_subchannel_solos[parent_ch][sub_idx] = !is_solo;
                                     }
                                 });
@@ -1007,15 +996,15 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
         Frame::none()
             .fill(theme.bg_surface)
             .rounding(Rounding::same(theme.radius_md))
-            .inner_margin(Margin::same(theme.space_md))
+            .inner_margin(Margin::same(4.0))
             .stroke(Stroke::new(1.0_f32, subchannel_color.linear_multiply(0.5)))
             .show(ui, |ui| {
                 ui.set_width(STRIP_W);
                 ui.vertical_centered(|ui| {
-                    ui.add_space(120.0);
-                    let btn = egui::Button::new(RichText::new("+").size(20.0).strong().color(subchannel_color))
+                    ui.add_space(100.0);
+                    let btn = egui::Button::new(RichText::new("+").size(18.0).strong().color(subchannel_color))
                         .fill(theme.bg_inset)
-                        .min_size(Vec2::new(40.0, 40.0));
+                        .min_size(Vec2::new(36.0, 36.0));
                     if ui.add(btn).on_hover_text("Add Custom Subchannel").clicked() {
                         let new_sub_num = app.mixer.custom_subchannels[parent_ch].len() + 1;
                         app.mixer.custom_subchannels[parent_ch].push(format!("SUB {:02}", new_sub_num));
@@ -1027,11 +1016,11 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
                         app.mixer.custom_subchannel_faders[parent_ch].push(1.0);
                         app.mixer.custom_subchannel_mutes[parent_ch].push(false);
                         app.mixer.custom_subchannel_solos[parent_ch].push(false);
-                        app.mixer.custom_subchannel_inserts[parent_ch].push(vec![]);
-                        app.mixer.custom_subchannel_insert_params[parent_ch].push(vec![]);
+                        app.mixer.custom_subchannel_inserts[parent_ch].push(vec!["TRIM / GAIN".into(), "PITCH".into(), "3-BAND EQ".into()]);
+                        app.mixer.custom_subchannel_insert_params[parent_ch].push(vec![[1.0; 8], [1.0; 8], [1.0; 8]]);
                     }
                     ui.add_space(4.0);
-                    ui.label(RichText::new("+ SUBCHANNEL").size(8.0).strong().color(subchannel_color));
+                    ui.label(RichText::new("+ SUBCHANNEL").size(7.5).strong().color(subchannel_color));
                 });
             });
     });
@@ -1057,7 +1046,7 @@ pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: 
         Frame::none()
             .fill(theme.bg_surface)
             .rounding(Rounding::same(theme.radius_md))
-            .inner_margin(Margin::same(theme.space_md))
+            .inner_margin(Margin::same(4.0))
             .stroke(Stroke::new(1.0_f32, accent.gamma_multiply(0.6)))
             .show(ui, |ui| {
                 ui.set_width(STRIP_W);
@@ -1065,13 +1054,13 @@ pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: 
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("MASTER").strong().size(theme.type_body).color(accent));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(egui::Button::new(RichText::new("🔍").size(9.0)).fill(theme.bg_inset)).on_hover_text("Open Master Inspector").clicked() {
+                            if ui.add(egui::Button::new(RichText::new("🔍").size(8.0)).fill(theme.bg_inset)).on_hover_text("Open Master Inspector").clicked() {
                                 app.mixer.focused_detail_channel = 20;
                                 app.active_view = crate::View::ChannelDetail;
                             }
                         });
                     });
-                    ui.add_space(theme.space_xs);
+                    ui.add_space(2.0);
 
                     let is_detached = !in_drawer && app.detached_views.contains(&crate::View::Mixer);
                     if is_detached {
@@ -1080,7 +1069,7 @@ pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: 
                             let avail_w = ui.available_width();
                             let selected_style = app.mixer.waveform_styles[master_deck_idx % 4];
                             egui::ComboBox::from_id_source("master_wf_style")
-                                .selected_text(RichText::new(selected_style.name()).size(8.5).strong().color(theme.text_primary))
+                                .selected_text(RichText::new(selected_style.name()).size(8.0).strong().color(theme.text_primary))
                                 .width(avail_w)
                                 .show_ui(ui, |ui| {
                                     for st in nullherz_ui_hal::render::waveform_renderer::WaveformStyle::all() {
@@ -1092,19 +1081,19 @@ pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: 
 
                         // Master Vertical Waveform Visualizer
                         render_vertical_waveform(app, ui, master_deck_idx % 4, elapsed_samples, master_peak, accent, &theme, telemetry);
-                        ui.add_space(theme.space_xs);
+                        ui.add_space(2.0);
                     }
 
                     // Master Inserts Rack
                     ui.group(|ui| {
-                        ui.set_width(STRIP_W - 12.0);
+                        ui.set_width(STRIP_W - 8.0);
                         ui.vertical_centered(|ui| {
                             ui.label(RichText::new("MASTER BUS").size(theme.type_caption).strong().color(theme.text_secondary));
                             ui.add_space(2.0);
 
                             // Master Gain Knob
                             let mut m_gain = app.mixer.master_gain;
-                            if widgets::render_knob_sized(ui, &mut m_gain, 0.0..=2.0, "TRIM", accent, 28.0).changed() {
+                            if widgets::render_knob_sized(ui, &mut m_gain, 0.0..=2.0, "TRIM", accent, 20.0).changed() {
                                 app.mixer.master_gain = m_gain;
                                 for node in [sum_l, sum_r].into_iter().flatten() {
                                     let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
@@ -1121,7 +1110,7 @@ pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: 
                             // Master EQ
                             let master_eq_node = app.topo.node_map.get("master_eq").copied();
                             let mut hi = app.mixer.mastering_eq_high;
-                            if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", accent, 24.0).changed() {
+                            if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", accent, 18.0).changed() {
                                 app.mixer.mastering_eq_high = hi;
                                 if let Some(node_id) = master_eq_node {
                                     let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
@@ -1133,8 +1122,10 @@ pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: 
                                 }
                             }
 
+                            ui.add_space(1.0);
+
                             let mut mid = app.mixer.mastering_eq_mid;
-                            if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", accent, 24.0).changed() {
+                            if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", accent, 18.0).changed() {
                                 app.mixer.mastering_eq_mid = mid;
                                 if let Some(node_id) = master_eq_node {
                                     let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
@@ -1146,8 +1137,10 @@ pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: 
                                 }
                             }
 
+                            ui.add_space(1.0);
+
                             let mut low = app.mixer.mastering_eq_low;
-                            if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", accent, 24.0).changed() {
+                            if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", accent, 18.0).changed() {
                                 app.mixer.mastering_eq_low = low;
                                 if let Some(node_id) = master_eq_node {
                                     let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
@@ -1161,15 +1154,15 @@ pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: 
                         });
                     });
 
-                    ui.add_space(theme.space_md);
+                    ui.add_space(theme.space_sm);
 
                     // Master Fader & Stereo VU Meters
                     ui.horizontal(|ui| {
-                        let fader_w = 24.0;
+                        let fader_w = 20.0;
                         let pad = (ui.available_width() - fader_w).max(0.0) / 2.0;
                         ui.add_space(pad);
 
-                        let r_fader = widgets::render_fader(ui, &mut app.mixer.master_gain, 0.0..=1.2, accent, FADER_H, 30.0);
+                        let r_fader = widgets::render_fader(ui, &mut app.mixer.master_gain, 0.0..=1.2, accent, FADER_H, 22.0);
                         if r_fader.changed() {
                             for node in [sum_l, sum_r].into_iter().flatten() {
                                 let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
@@ -1181,21 +1174,21 @@ pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: 
                             }
                         }
 
-                        ui.add_space(4.0);
+                        ui.add_space(2.0);
 
                         widgets::render_vu_meter(ui, app.viz.damped_master_peaks[0], app.mixer.master_peak_hold, accent, FADER_H);
-                        ui.add_space(2.0);
+                        ui.add_space(1.0);
                         widgets::render_vu_meter(ui, app.viz.damped_master_peaks[1], app.mixer.master_peak_hold, accent, FADER_H);
                     });
 
-                    ui.add_space(4.0);
+                    ui.add_space(2.0);
 
                     // Master Output Selector
                     ui.horizontal(|ui| {
                         let avail_w = ui.available_width();
                         let selected_output = app.mixer.master_output_source;
                         egui::ComboBox::from_id_source("master_output_src")
-                            .selected_text(RichText::new(selected_output.name()).size(8.5).strong().color(theme.text_primary))
+                            .selected_text(RichText::new(selected_output.name()).size(8.0).strong().color(theme.text_primary))
                             .width(avail_w)
                             .show_ui(ui, |ui| {
                                 for out in MasterOutput::all() {
@@ -1203,19 +1196,19 @@ pub fn render_master_strip_full(app: &mut InspectorApp, ui: &mut Ui, telemetry: 
                                 }
                             });
                     });
-                    ui.add_space(4.0);
+                    ui.add_space(2.0);
 
                     // Global Play/Stop
                     ui.horizontal(|ui| {
                         let is_playing = app.decks.global_playing;
                         let play_icon = if is_playing { egui_phosphor::regular::PAUSE } else { egui_phosphor::regular::PLAY };
                         let play_btn = if is_playing {
-                            egui::Button::new(RichText::new(play_icon).size(11.0).strong()).fill(accent)
+                            egui::Button::new(RichText::new(play_icon).size(10.0).strong()).fill(accent)
                         } else {
-                            egui::Button::new(RichText::new(play_icon).size(11.0).strong()).fill(theme.bg_inset)
+                            egui::Button::new(RichText::new(play_icon).size(10.0).strong()).fill(theme.bg_inset)
                         };
 
-                        if ui.add_sized([STRIP_W - 10.0, 20.0], play_btn).clicked() {
+                        if ui.add_sized([STRIP_W - 10.0, 18.0], play_btn).clicked() {
                             app.decks.global_playing = !is_playing;
                             if app.decks.global_playing {
                                 let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Play));

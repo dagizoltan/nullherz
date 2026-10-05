@@ -728,15 +728,8 @@ impl Default for SamplerState {
             subchannel_eq_low: [1.0; 16],
             subchannel_mutes: [false; 16],
             subchannel_solos: [false; 16],
-            subchannel_inserts: std::array::from_fn(|i| {
-                match i {
-                    0 => vec!["SIGNAL GENERATOR (KICK)".into(), "PITCH SWEEP".into(), "DECAY ENVELOPE".into(), "SATURATION DRIVE".into(), "3-BAND EQ".into()],
-                    1 => vec!["SIGNAL GENERATOR (SNARE)".into(), "PITCH SWEEP".into(), "DECAY ENVELOPE".into(), "NOISE BLEND".into(), "3-BAND EQ".into()],
-                    2 | 3 => vec!["SIGNAL GENERATOR (HIHAT)".into(), "DECAY ENVELOPE".into(), "HP FILTER".into(), "3-BAND EQ".into()],
-                    _ => vec!["SIGNAL GENERATOR (PERC)".into(), "PITCH SWEEP".into(), "DECAY ENVELOPE".into(), "3-BAND EQ".into()],
-                }
-            }),
-            subchannel_insert_params: std::array::from_fn(|_| vec![[0.5; 8], [0.5; 8], [0.5; 8], [0.5; 8], [1.0; 8]]),
+            subchannel_inserts: std::array::from_fn(|_| vec!["TRIM / GAIN".into(), "PITCH".into(), "3-BAND EQ".into()]),
+            subchannel_insert_params: std::array::from_fn(|_| vec![[1.0; 8], [1.0; 8], [1.0; 8]]),
         }
     }
 }
