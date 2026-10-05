@@ -897,6 +897,21 @@ impl InspectorApp {
                                     if ui.button(egui_phosphor::regular::X).clicked() {
                                         self.active_bottom_drawer = None;
                                     }
+                                    if drawer == BottomDrawer::Mixer {
+                                        let is_detached = self.detached_views.contains(&View::Mixer);
+                                        let detach_label = if is_detached {
+                                            format!("{} Re-attach Window", egui_phosphor::regular::ARROWS_IN)
+                                        } else {
+                                            format!("{} Detach Window", egui_phosphor::regular::ARROW_SQUARE_OUT)
+                                        };
+                                        if ui.button(egui::RichText::new(detach_label).size(self.theme.type_caption).strong()).clicked() {
+                                            if is_detached {
+                                                self.detached_views.remove(&View::Mixer);
+                                            } else {
+                                                self.detached_views.insert(View::Mixer);
+                                            }
+                                        }
+                                    }
                                 });
                             });
                         });
