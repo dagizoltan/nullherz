@@ -252,17 +252,17 @@ pub fn render_expanded_stem_matrix(app: &mut InspectorApp, ui: &mut Ui, i: usize
                                         ui.horizontal(|ui| {
                                             ui.label(RichText::new("EQ").size(8.0).color(theme.text_disabled));
                                             let mut low = app.mixer.stem_eq_low[i][s_idx];
-                                            if ui.add(egui::DragValue::new(&mut low).clamp_range(0.0..=5.0).speed(0.05).prefix("L:")).changed() {
+                                            if ui.add(egui::DragValue::new(&mut low).range(0.0..=5.0).speed(0.05).prefix("L:")).changed() {
                                                 app.mixer.stem_eq_low[i][s_idx] = low;
                                                 dispatch_stem_param(app, i, s_idx, 4, low);
                                             }
                                             let mut mid = app.mixer.stem_eq_mid[i][s_idx];
-                                            if ui.add(egui::DragValue::new(&mut mid).clamp_range(0.0..=5.0).speed(0.05).prefix("M:")).changed() {
+                                            if ui.add(egui::DragValue::new(&mut mid).range(0.0..=5.0).speed(0.05).prefix("M:")).changed() {
                                                 app.mixer.stem_eq_mid[i][s_idx] = mid;
                                                 dispatch_stem_param(app, i, s_idx, 5, mid);
                                             }
                                             let mut high = app.mixer.stem_eq_high[i][s_idx];
-                                            if ui.add(egui::DragValue::new(&mut high).clamp_range(0.0..=5.0).speed(0.05).prefix("H:")).changed() {
+                                            if ui.add(egui::DragValue::new(&mut high).range(0.0..=5.0).speed(0.05).prefix("H:")).changed() {
                                                 app.mixer.stem_eq_high[i][s_idx] = high;
                                                 dispatch_stem_param(app, i, s_idx, 6, high);
                                             }

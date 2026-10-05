@@ -127,7 +127,7 @@ fn render_piano_keyboard(
         };
 
         painter.rect_filled(key_rect, 2.0, fill_color);
-        painter.rect_stroke(key_rect, 2.0, Stroke::new(1.0, Color32::from_rgb(180, 190, 200)));
+        painter.rect_stroke(key_rect, 2.0, Stroke::new(1.0_f32, Color32::from_rgb(180, 190, 200)));
 
         // Label on white key
         let text_color = if is_active || key_response.is_pointer_button_down_on() {
@@ -186,7 +186,7 @@ fn render_piano_keyboard(
         };
 
         painter.rect_filled(black_rect, 1.0, fill_color);
-        painter.rect_stroke(black_rect, 1.0, Stroke::new(1.0, Color32::from_rgb(40, 45, 60)));
+        painter.rect_stroke(black_rect, 1.0, Stroke::new(1.0_f32, Color32::from_rgb(40, 45, 60)));
 
         if key_response.clicked() || key_response.drag_started() {
             let click_y = key_response.interact_pointer_pos().map(|p| p.y - black_rect.top()).unwrap_or(black_h * 0.5);
@@ -239,7 +239,7 @@ fn render_pad_matrix(
                     };
 
                     ui.painter().rect_filled(rect, 4.0, fill_color);
-                    ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, color.linear_multiply(0.4)));
+                    ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0_f32, color.linear_multiply(0.4)));
 
                     let text_color = if is_active || response.is_pointer_button_down_on() {
                         Color32::WHITE
