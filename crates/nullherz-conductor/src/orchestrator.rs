@@ -315,7 +315,8 @@ impl Conductor {
             analysis_worker: Some(analysis_worker),
             folder_monitor: Some(
                 crate::folder_monitor::FolderMonitor::new(sample_registry, library.clone())
-                    .with_analysed_ids(analysis_worker_handle.clone()),
+                    .with_analysed_ids(analysis_worker_handle.clone())
+                    .with_pending_requests(analysis_requests.clone()),
             ),
             streaming_manager: crate::streaming_manager::StreamingManager::new(),
             library,

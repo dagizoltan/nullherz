@@ -95,7 +95,7 @@ impl AnalysisWorker {
         self.processed_ids.clone()
     }
 
-    fn run_once(&mut self) {
+    pub fn run_once(&mut self) {
         let requested_ids: Vec<u64> = {
             let mut pending = self.pending_requests.lock();
             let ids: Vec<u64> = pending.iter().copied().collect();
