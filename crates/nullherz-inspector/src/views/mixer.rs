@@ -57,76 +57,39 @@ pub fn render_mixer_drawer(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opti
 
 pub fn render_mixer_drawer_state(mixer_state: &mut crate::state::MixerState, app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>, show_crossfader: bool) {
     let theme = app.theme;
-    let is_open = mixer_state.mixer_drawer_open;
 
-    Frame::none()
-        .fill(theme.bg_dark)
-        .stroke(theme.border_stroke)
-        .rounding(Rounding::same(theme.radius_md))
-        .inner_margin(Margin::symmetric(theme.space_md, theme.space_xs))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let toggle_icon = if is_open { "▼" } else { "▲" };
-                let toggle_text = format!("{} MIXER DRAWER ({})", toggle_icon, if is_open { "EXPANDED" } else { "COLLAPSED" });
-                if ui.button(RichText::new(toggle_text).strong().size(theme.type_caption).color(theme.accent)).clicked() {
-                    mixer_state.mixer_drawer_open = !is_open;
-                }
+    if show_crossfader {
+        // DJ Console A/B Crossfader Bar inside drawer
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("CROSSFADER A").strong().color(theme.deck_colors[0]).size(theme.type_caption));
+            ui.add_space(theme.space_sm);
+            widgets::render_horizontal_fader(ui, &mut mixer_state.crossfader_pos, 0.0..=1.0, theme.accent, 220.0, 16.0);
+            ui.add_space(theme.space_sm);
+            ui.label(RichText::new("CROSSFADER B").strong().color(theme.deck_colors[1]).size(theme.type_caption));
+        });
+        ui.add_space(theme.space_xs);
+    }
 
-                ui.add_space(theme.space_md);
-                ui.label(RichText::new(format!("ACTIVE CHANNELS: {}", mixer_state.num_channels)).size(theme.type_caption).color(theme.text_secondary));
+    ui.horizontal_top(|ui| {
+        let scroll_width = (ui.available_width() - STRIP_W - theme.space_md).max(100.0);
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let is_detached = app.detached_views.contains(&crate::View::Mixer);
-                    let btn_label = if is_detached { "⧉ Re-attach Mixer" } else { "⧉ Detach Mixer Window" };
-                    if ui.button(RichText::new(btn_label).size(theme.type_caption)).clicked() {
-                        if is_detached {
-                            app.detached_views.remove(&crate::View::Mixer);
-                        } else {
-                            app.detached_views.insert(crate::View::Mixer);
-                        }
+        ScrollArea::horizontal()
+            .id_source("drawer_mixer_scroll")
+            .max_width(scroll_width)
+            .show(ui, |ui| {
+                ui.horizontal_top(|ui| {
+                    let num_ch = mixer_state.num_channels.clamp(1, 16);
+                    for i in 0..num_ch {
+                        render_channel_strip_ext(app, ui, i, telemetry, show_crossfader);
+                        ui.add_space(theme.space_xs);
                     }
                 });
             });
 
-            if is_open {
-                ui.add_space(theme.space_xs);
-                ui.separator();
-                ui.add_space(theme.space_xs);
-
-                if show_crossfader {
-                    // DJ Console A/B Crossfader Bar inside drawer
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("CROSSFADER A").strong().color(theme.deck_colors[0]).size(theme.type_caption));
-                        ui.add_space(theme.space_sm);
-                        widgets::render_horizontal_fader(ui, &mut mixer_state.crossfader_pos, 0.0..=1.0, theme.accent, 220.0, 16.0);
-                        ui.add_space(theme.space_sm);
-                        ui.label(RichText::new("CROSSFADER B").strong().color(theme.deck_colors[1]).size(theme.type_caption));
-                    });
-                    ui.add_space(theme.space_xs);
-                }
-
-                ui.horizontal_top(|ui| {
-                    let scroll_width = (ui.available_width() - STRIP_W - theme.space_md).max(100.0);
-
-                    ScrollArea::horizontal()
-                        .id_source("drawer_mixer_scroll")
-                        .max_width(scroll_width)
-                        .show(ui, |ui| {
-                            ui.horizontal_top(|ui| {
-                                let num_ch = mixer_state.num_channels.clamp(1, 16);
-                                for i in 0..num_ch {
-                                    render_channel_strip_ext(app, ui, i, telemetry, show_crossfader);
-                                    ui.add_space(theme.space_xs);
-                                }
-                            });
-                        });
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                        render_master_strip(app, ui, telemetry);
-                    });
-                });
-            }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+            render_master_strip(app, ui, telemetry);
         });
+    });
 }
 
 fn render_add_channel_button(app: &mut InspectorApp, ui: &mut Ui) {
@@ -173,7 +136,17 @@ fn render_vertical_waveform(
     ui.painter().rect_stroke(rect, theme.radius_sm, Stroke::new(1.0_f32, theme.border_stroke.color));
 
     let style = app.mixer.waveform_styles.get(deck_idx).copied().unwrap_or(nullherz_ui_hal::render::waveform_renderer::WaveformStyle::MultiBand);
-    let track = app.decks.cached_tracks.get(deck_idx % 4).and_then(|t| t.clone());
+    let track = if app.active_view == crate::View::Composer {
+        app.composer.track_sources.get(deck_idx)
+            .and_then(|opt| *opt)
+            .and_then(|id| app.get_cached_track(id))
+    } else if deck_idx < 4 {
+        app.decks.cached_tracks.get(deck_idx).and_then(|t| t.clone())
+    } else {
+        app.composer.track_sources.get(deck_idx)
+            .and_then(|opt| *opt)
+            .and_then(|id| app.get_cached_track(id))
+    };
 
     if let Some(t) = track {
         let sr = (t.metadata.sample_rate.max(1)) as f32;
@@ -371,19 +344,18 @@ pub fn render_channel_strip_ext(app: &mut InspectorApp, ui: &mut Ui, i: usize, t
                 .show(ui, |ui| {
                     ui.set_width(STRIP_W);
                     ui.vertical(|ui| {
+                        let is_drum_machine = app.mixer.channel_input_sources[i] == ChannelInputSource::DrumMachine;
+                        let strip_accent = if is_drum_machine { Color32::from_rgb(255, 127, 62) } else { deck_color };
+
                         let header_resp = ui.horizontal(|ui| {
-                            ui.label(RichText::new(format!("CH {}", (b'A' + (i % 26) as u8) as char)).strong().size(theme.type_body).color(deck_color));
+                            ui.label(RichText::new(format!("CH {}", (b'A' + (i % 26) as u8) as char)).strong().size(theme.type_body).color(strip_accent));
+                            if is_drum_machine {
+                                ui.label(RichText::new("[DRUMS]").size(8.0).strong().color(Color32::from_rgb(255, 127, 62)));
+                            }
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui.add(egui::Button::new(RichText::new("🔍").size(9.0)).fill(theme.bg_inset)).on_hover_text("Open Channel Inspector").clicked() {
                                     app.mixer.focused_detail_channel = i;
                                     app.active_view = crate::View::ChannelDetail;
-                                }
-
-                                // Pad Submixer fold button ("mixer in a mixer")
-                                let is_folded = app.mixer.folded_pads[i];
-                                let pad_btn_text = if is_folded { "▲ PADS" } else { "▸ PADS" };
-                                if ui.button(RichText::new(pad_btn_text).size(8.0).strong().color(theme.accent)).on_hover_text("Toggle folded drum pad submixer").clicked() {
-                                    app.mixer.folded_pads[i] = !is_folded;
                                 }
                             });
                         });
@@ -593,8 +565,8 @@ pub fn render_channel_strip_ext(app: &mut InspectorApp, ui: &mut Ui, i: usize, t
                     });
                 });
 
-            // "Mixer in a Mixer" — Unfolded Drum Pad Submixer Strips
-            if app.mixer.folded_pads[i] {
+            // Permanent Inline Drum Pad Submixer Strips for Drum Machine channels
+            if app.mixer.channel_input_sources[i] == ChannelInputSource::DrumMachine || app.mixer.folded_pads[i] {
                 ui.add_space(2.0);
                 render_folded_pad_submixer(app, ui, i);
             }
@@ -602,9 +574,9 @@ pub fn render_channel_strip_ext(app: &mut InspectorApp, ui: &mut Ui, i: usize, t
     });
 }
 
-fn render_folded_pad_submixer(app: &mut InspectorApp, ui: &mut Ui, parent_ch: usize) {
+fn render_folded_pad_submixer(app: &mut InspectorApp, ui: &mut Ui, _parent_ch: usize) {
     let theme = app.theme;
-    let deck_color = crate::InspectorApp::deck_color(&theme, parent_ch % 4);
+    let subchannel_color = Color32::from_rgb(255, 127, 62); // Warm drum accent (#FF7F3E)
 
     let pad_names = [
         "KICK", "SNARE", "HH-CL", "HH-OP", "TOM-L", "TOM-M", "TOM-H", "PERC1",
@@ -615,7 +587,7 @@ fn render_folded_pad_submixer(app: &mut InspectorApp, ui: &mut Ui, parent_ch: us
         .fill(theme.bg_inset)
         .rounding(Rounding::same(theme.radius_sm))
         .inner_margin(Margin::same(4.0))
-        .stroke(Stroke::new(1.0, deck_color.linear_multiply(0.4)))
+        .stroke(Stroke::new(1.0, subchannel_color.linear_multiply(0.5)))
         .show(ui, |ui| {
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
@@ -625,13 +597,14 @@ fn render_folded_pad_submixer(app: &mut InspectorApp, ui: &mut Ui, parent_ch: us
                             .fill(theme.bg_surface)
                             .rounding(Rounding::same(theme.radius_sm))
                             .inner_margin(Margin::same(2.0))
+                            .stroke(Stroke::new(1.0, subchannel_color.linear_multiply(0.7)))
                             .show(ui, |ui| {
                                 ui.set_width(PAD_STRIP_W);
                                 ui.vertical_centered(|ui| {
-                                    ui.label(RichText::new(format!("{:02} {}", pad_idx + 1, pad_names[pad_idx])).size(7.5).strong().color(deck_color));
+                                    ui.label(RichText::new(format!("{:02} {}", pad_idx + 1, pad_names[pad_idx])).size(7.5).strong().color(subchannel_color));
 
                                     let mut pad_fader = app.sampler.subchannel_faders[pad_idx];
-                                    if widgets::render_fader(ui, &mut pad_fader, 0.0..=1.2, deck_color, 80.0, 18.0).changed() {
+                                    if widgets::render_fader(ui, &mut pad_fader, 0.0..=1.2, subchannel_color, 80.0, 18.0).changed() {
                                         app.sampler.subchannel_faders[pad_idx] = pad_fader;
                                     }
 
