@@ -283,6 +283,8 @@ pub struct MixerState {
     pub custom_subchannel_faders: [Vec<f32>; 16],
     pub custom_subchannel_mutes: [Vec<bool>; 16],
     pub custom_subchannel_solos: [Vec<bool>; 16],
+    pub custom_subchannel_inserts: [Vec<Vec<String>>; 16],
+    pub custom_subchannel_insert_params: [Vec<Vec<[f32; 8]>>; 16],
 }
 
 impl Default for MixerState {
@@ -345,6 +347,8 @@ impl Default for MixerState {
             custom_subchannel_faders: std::array::from_fn(|_| vec![]),
             custom_subchannel_mutes: std::array::from_fn(|_| vec![]),
             custom_subchannel_solos: std::array::from_fn(|_| vec![]),
+            custom_subchannel_inserts: std::array::from_fn(|_| vec![]),
+            custom_subchannel_insert_params: std::array::from_fn(|_| vec![]),
         }
     }
 }
