@@ -664,7 +664,7 @@ pub fn render_composite_target_screen(
 
             // Draw PIP interactive viewport bounding box with handle handles
             let stroke_color = app.theme.deck_colors[(layer_slot - 1) % 4];
-            ui.painter().rect_stroke(pip_rect, 2.0, egui::Stroke::new(2.0, stroke_color));
+            ui.painter().rect_stroke(pip_rect, 2.0, egui::Stroke::new(2.0_f32, stroke_color));
             ui.painter().rect_filled(
                 egui::Rect::from_center_size(pip_rect.right_bottom(), egui::vec2(8.0, 8.0)),
                 2.0,
@@ -888,7 +888,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
             .fill(theme.bg_surface)
             .rounding(egui::Rounding::same(theme.radius_md))
             .inner_margin(egui::Margin::same(theme.space_md))
-            .stroke(egui::Stroke::new(1.0, theme.border))
+            .stroke(egui::Stroke::new(1.0_f32, theme.border))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
                     // Screen Row Header
@@ -941,7 +941,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                             .fill(theme.bg_inset)
                             .rounding(egui::Rounding::same(theme.radius_sm))
                             .inner_margin(egui::Margin::same(4.0))
-                            .stroke(egui::Stroke::new(1.0, theme.border_stroke.color))
+                            .stroke(egui::Stroke::new(1.0_f32, theme.border_stroke.color))
                             .show(ui, |ui| {
                                 ui.set_width(240.0);
                                 ui.vertical_centered(|ui| {
@@ -981,7 +981,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                             .fill(if is_selected { theme.bg_surface.linear_multiply(1.15) } else { theme.bg_surface })
                                             .rounding(egui::Rounding::same(theme.radius_md))
                                             .inner_margin(egui::Margin::same(theme.space_md))
-                                            .stroke(egui::Stroke::new(if is_selected { 2.0 } else { 1.0 }, if is_selected { channel_color } else { theme.border }))
+                                            .stroke(egui::Stroke::new(if is_selected { 2.0_f32 } else { 1.0_f32 }, if is_selected { channel_color } else { theme.border }))
                                             .show(ui, |ui| {
                                                 ui.set_width(VIZ_STRIP_W);
                                                 ui.vertical(|ui| {
@@ -1067,7 +1067,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                                         .fill(theme.bg_inset)
                                                         .rounding(egui::Rounding::same(theme.radius_sm))
                                                         .inner_margin(egui::Margin::same(4.0))
-                                                        .stroke(egui::Stroke::new(1.0, theme.border_stroke.color))
+                                                        .stroke(egui::Stroke::new(1.0_f32, theme.border_stroke.color))
                                                         .show(ui, |ui| {
                                                             ui.set_width(VIZ_STRIP_W - 20.0);
                                                             ui.vertical(|ui| {
@@ -1096,7 +1096,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                                     // Layer Live Canvas Preview Surface
                                                     let (rect, _resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 130.0), egui::Sense::click());
                                                     ui.painter().rect_filled(rect, theme.radius_sm, theme.bg_inset);
-                                                    ui.painter().rect_stroke(rect, theme.radius_sm, egui::Stroke::new(1.0, theme.border_stroke.color));
+                                                    ui.painter().rect_stroke(rect, theme.radius_sm, egui::Stroke::new(1.0_f32, theme.border_stroke.color));
 
                                                     let time = ui.input(|i| i.time) * channel.param_speed as f64;
                                                     let low_energy = app.viz.damped_spectrum[0..16].iter().sum::<f32>() / 16.0 * channel.gain_sensitivity;
@@ -1178,7 +1178,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                                         .fill(theme.bg_inset)
                                                         .rounding(egui::Rounding::same(theme.radius_sm))
                                                         .inner_margin(egui::Margin::same(4.0))
-                                                        .stroke(egui::Stroke::new(1.0, theme.border_stroke.color))
+                                                        .stroke(egui::Stroke::new(1.0_f32, theme.border_stroke.color))
                                                         .show(ui, |ui| {
                                                             ui.set_width(VIZ_STRIP_W - 20.0);
                                                             ui.vertical_centered(|ui| {
@@ -1251,7 +1251,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                                         .fill(theme.bg_inset)
                                                         .rounding(egui::Rounding::same(theme.radius_sm))
                                                         .inner_margin(egui::Margin::same(4.0))
-                                                        .stroke(egui::Stroke::new(1.0, theme.border_stroke.color))
+                                                        .stroke(egui::Stroke::new(1.0_f32, theme.border_stroke.color))
                                                         .show(ui, |ui| {
                                                             ui.set_width(VIZ_STRIP_W - 20.0);
                                                             ui.vertical(|ui| {
@@ -1280,7 +1280,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                                         .fill(theme.bg_inset)
                                                         .rounding(egui::Rounding::same(theme.radius_sm))
                                                         .inner_margin(egui::Margin::same(4.0))
-                                                        .stroke(egui::Stroke::new(1.0, theme.border_stroke.color))
+                                                        .stroke(egui::Stroke::new(1.0_f32, theme.border_stroke.color))
                                                         .show(ui, |ui| {
                                                             ui.set_width(VIZ_STRIP_W - 20.0);
                                                             ui.vertical_centered(|ui| {
@@ -1366,7 +1366,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                                         .fill(theme.bg_surface)
                                         .rounding(egui::Rounding::same(theme.radius_md))
                                         .inner_margin(egui::Margin::same(theme.space_md))
-                                        .stroke(egui::Stroke::new(1.0, theme.border))
+                                        .stroke(egui::Stroke::new(1.0_f32, theme.border))
                                         .show(ui, |ui| {
                                             ui.set_width(VIZ_STRIP_W);
                                             ui.vertical_centered(|ui| {
@@ -1412,7 +1412,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
     ui.horizontal(|ui| {
         let add_screen_btn = egui::Button::new(egui::RichText::new("📺 + ADD NEW TARGET SCREEN").strong().size(theme.type_body).color(theme.accent))
             .fill(theme.bg_surface)
-            .stroke(egui::Stroke::new(1.0, theme.accent))
+            .stroke(egui::Stroke::new(1.0_f32, theme.accent))
             .min_size(egui::vec2(ui.available_width(), 32.0));
 
         if ui.add(add_screen_btn).clicked() {

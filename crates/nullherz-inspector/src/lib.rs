@@ -316,7 +316,7 @@ impl InspectorApp {
                         .fill(theme.bg_surface)
                         .rounding(egui::Rounding::same(theme.radius_md))
                         .inner_margin(egui::Margin::same(theme.space_md))
-                        .stroke(egui::Stroke::new(1.0, if is_selected { theme.accent } else { theme.border }))
+                        .stroke(egui::Stroke::new(1.0_f32, if is_selected { theme.accent } else { theme.border }))
                         .show(ui, |ui| {
                             ui.set_width(VIZ_STRIP_W);
                             ui.vertical(|ui| {
@@ -433,7 +433,7 @@ impl InspectorApp {
                                             .fill(theme.bg_inset)
                                             .rounding(egui::Rounding::same(theme.radius_sm))
                                             .inner_margin(egui::Margin::same(4.0))
-                                            .stroke(egui::Stroke::new(1.0, theme.border_stroke.color))
+                                            .stroke(egui::Stroke::new(1.0_f32, theme.border_stroke.color))
                                             .show(ui, |ui| {
                                                 ui.set_width(VIZ_STRIP_W - 20.0);
                                                 ui.vertical_centered(|ui| {
@@ -1480,7 +1480,7 @@ impl eframe::App for InspectorApp {
             if !self.rt_warnings.is_empty() {
                 egui::Frame::none()
                     .fill(self.theme.danger.linear_multiply(0.12))
-                    .stroke(egui::Stroke::new(1.0, self.theme.danger))
+                    .stroke(egui::Stroke::new(1.0_f32, self.theme.danger))
                     .rounding(egui::Rounding::same(self.theme.radius_sm))
                     .inner_margin(egui::Margin::symmetric(self.theme.space_md, self.theme.space_xs))
                     .show(ui, |ui| {

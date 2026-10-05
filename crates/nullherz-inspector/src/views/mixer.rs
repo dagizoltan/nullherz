@@ -89,7 +89,7 @@ fn render_vertical_waveform(
 
     // Background inset matching DJ Studio Console waveform canvas
     ui.painter().rect_filled(rect, theme.radius_sm, theme.bg_inset);
-    ui.painter().rect_stroke(rect, theme.radius_sm, Stroke::new(1.0, theme.border_stroke.color));
+    ui.painter().rect_stroke(rect, theme.radius_sm, Stroke::new(1.0_f32, theme.border_stroke.color));
 
     let style = app.mixer.waveform_styles.get(deck_idx).copied().unwrap_or(nullherz_ui_hal::render::waveform_renderer::WaveformStyle::MultiBand);
     let track = app.decks.cached_tracks.get(deck_idx % 4).and_then(|t| t.clone());
@@ -200,7 +200,7 @@ fn render_vertical_waveform(
 
                         painter.line_segment(
                             [Pos2::new(center_x - bar_w, y), Pos2::new(center_x + bar_w, y)],
-                            Stroke::new(2.0, col),
+                            Stroke::new(2.0_f32, col),
                         );
                     }
                 }
@@ -220,7 +220,7 @@ fn render_vertical_waveform(
 
                         painter.line_segment(
                             [Pos2::new(center_x - bar_w, y), Pos2::new(center_x + bar_w, y)],
-                            Stroke::new(2.0, deck_color.linear_multiply(0.8)),
+                            Stroke::new(2.0_f32, deck_color.linear_multiply(0.8)),
                         );
                     }
                 }
@@ -253,7 +253,7 @@ fn render_vertical_waveform(
                     };
                     painter.line_segment(
                         [Pos2::new(center_x - w * 0.5, y), Pos2::new(center_x + w * 0.5, y)],
-                        Stroke::new(1.0, Color32::from_white_alpha(alpha)),
+                        Stroke::new(1.0_f32, Color32::from_white_alpha(alpha)),
                     );
 
                     let beat_num = (b % 4) + 1;
@@ -277,7 +277,7 @@ fn render_vertical_waveform(
                     let y = to_y(p);
                     painter.line_segment(
                         [Pos2::new(rect.min.x, y), Pos2::new(rect.min.x + 10.0, y)],
-                        Stroke::new(2.0, theme.accent),
+                        Stroke::new(2.0_f32, theme.accent),
                     );
                     painter.text(
                         Pos2::new(rect.min.x + 12.0, y - 4.0),
@@ -304,11 +304,11 @@ fn render_vertical_waveform(
 
         painter.line_segment(
             [Pos2::new(rect.min.x + 1.0, playhead_y), Pos2::new(rect.max.x - 1.0, playhead_y)],
-            Stroke::new(3.0, Color32::from_black_alpha(160)),
+            Stroke::new(3.0_f32, Color32::from_black_alpha(160)),
         );
         painter.line_segment(
             [Pos2::new(rect.min.x + 1.0, playhead_y), Pos2::new(rect.max.x - 1.0, playhead_y)],
-            Stroke::new(1.5, theme.text_primary),
+            Stroke::new(1.5_f32, theme.text_primary),
         );
 
         return;
@@ -326,7 +326,7 @@ fn render_vertical_waveform(
 
         ui.painter().line_segment(
             [Pos2::new(center_x - bar_w, y), Pos2::new(center_x + bar_w, y)],
-            Stroke::new(2.0, deck_color.linear_multiply(0.6)),
+            Stroke::new(2.0_f32, deck_color.linear_multiply(0.6)),
         );
     }
 }
@@ -352,7 +352,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
     let is_focused = app.decks.focused_deck == i;
 
     let border_stroke = if is_focused {
-        Stroke::new(2.0, deck_color)
+        Stroke::new(2.0_f32, deck_color)
     } else {
         Stroke::new(1.0_f32, theme.border)
     };
@@ -426,7 +426,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                         .fill(theme.bg_inset)
                                         .rounding(Rounding::same(theme.radius_sm))
                                         .inner_margin(Margin::same(4.0))
-                                        .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                        .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                                         .show(ui, |ui| {
                                             ui.set_width(STRIP_W - 20.0);
                                             ui.vertical(|ui| {
@@ -483,7 +483,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                         .fill(theme.bg_inset)
                                         .rounding(Rounding::same(theme.radius_sm))
                                         .inner_margin(Margin::same(4.0))
-                                        .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                        .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                                         .show(ui, |ui| {
                                             ui.set_width(STRIP_W - 20.0);
                                             ui.vertical(|ui| {
@@ -572,7 +572,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                         .fill(theme.bg_inset)
                                         .rounding(Rounding::same(theme.radius_sm))
                                         .inner_margin(Margin::same(4.0))
-                                        .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                        .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                                         .show(ui, |ui| {
                                             ui.set_width(STRIP_W - 20.0);
                                             ui.vertical(|ui| {
@@ -633,7 +633,7 @@ fn render_channel_strip(app: &mut InspectorApp, ui: &mut Ui, i: usize, telemetry
                                         .fill(theme.accent.linear_multiply(0.15))
                                         .rounding(Rounding::same(theme.radius_sm))
                                         .inner_margin(Margin::same(4.0))
-                                        .stroke(Stroke::new(1.0, theme.accent))
+                                        .stroke(Stroke::new(1.0_f32, theme.accent))
                                         .show(ui, |ui| {
                                             ui.set_width(STRIP_W - 20.0);
                                             ui.vertical(|ui| {
@@ -1037,7 +1037,7 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                             .fill(theme.bg_inset)
                             .rounding(Rounding::same(theme.radius_sm))
                             .inner_margin(Margin::same(4.0))
-                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                            .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                             .show(ui, |ui| {
                                 ui.set_width(STRIP_W - 20.0);
                                 ui.vertical_centered(|ui| {
@@ -1064,7 +1064,7 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                             .fill(theme.bg_inset)
                             .rounding(Rounding::same(theme.radius_sm))
                             .inner_margin(Margin::same(4.0))
-                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                            .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                             .show(ui, |ui| {
                                 ui.set_width(STRIP_W - 20.0);
                                 ui.vertical_centered(|ui| {
@@ -1127,7 +1127,7 @@ fn render_master_strip(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<T
                             .fill(theme.bg_inset)
                             .rounding(Rounding::same(theme.radius_sm))
                             .inner_margin(Margin::same(4.0))
-                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                            .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                             .show(ui, |ui| {
                                 ui.set_width(STRIP_W - 20.0);
                                 ui.vertical_centered(|ui| {

@@ -187,7 +187,7 @@ impl RadialMandalaEngine {
                     let j = (i + n / 2) % n;
                     ui.painter().line_segment(
                         [star_pts[i], star_pts[j]],
-                        egui::Stroke::new(0.8, color.linear_multiply(0.4)),
+                        egui::Stroke::new(0.8_f32, color.linear_multiply(0.4)),
                     );
                 }
             }
@@ -199,7 +199,7 @@ impl RadialMandalaEngine {
                     ui.painter().circle_stroke(
                         star_pts[i],
                         circle_r,
-                        egui::Stroke::new(1.0, color.linear_multiply(0.5)),
+                        egui::Stroke::new(1.0_f32, color.linear_multiply(0.5)),
                     );
                 }
             }
@@ -245,13 +245,13 @@ impl RadialMandalaEngine {
             let hue = (i as f32 / n as f32 + self.color_palette_shift) % 1.0;
             let color = hsva_to_color32(hue, 0.85, 0.95, 0.5 + nervous.low_band * 0.5);
 
-            ui.painter().line_segment([p1, p2], egui::Stroke::new(1.0, color));
+            ui.painter().line_segment([p1, p2], egui::Stroke::new(1.0_f32, color));
         }
 
         // Active radar pulse arc
         let sweep_angle = (time * 2.0) % std::f32::consts::TAU;
         let sweep_p2 = egui::pos2(center.x + sweep_angle.cos() * max_r, center.y + sweep_angle.sin() * max_r);
-        ui.painter().line_segment([center, sweep_p2], egui::Stroke::new(3.0, egui::Color32::from_rgb(0, 255, 200)));
+        ui.painter().line_segment([center, sweep_p2], egui::Stroke::new(3.0_f32, egui::Color32::from_rgb(0, 255, 200)));
     }
 
     fn render_celestial_pulse(
@@ -283,7 +283,7 @@ impl RadialMandalaEngine {
             let hue = (0.05 + ray_pulse * 0.15 + self.color_palette_shift) % 1.0; // Warm gold-orange
             let color = hsva_to_color32(hue, 0.9, 1.0, 0.6 + nervous.high_band * 0.4);
 
-            ui.painter().line_segment([center, p_end], egui::Stroke::new(1.8, color));
+            ui.painter().line_segment([center, p_end], egui::Stroke::new(1.8_f32, color));
         }
 
         // Orbital starlight points
@@ -337,7 +337,7 @@ impl RadialMandalaEngine {
                 for i in 0..petal_pts.len() - 1 {
                     ui.painter().line_segment(
                         [petal_pts[i], petal_pts[i + 1]],
-                        egui::Stroke::new(1.8, color),
+                        egui::Stroke::new(1.8_f32, color),
                     );
                 }
             }
@@ -427,7 +427,7 @@ impl RadialMandalaEngine {
             let hue = (frac * 0.85 + 0.65 + self.color_palette_shift) % 1.0;
             let color = hsva_to_color32(hue, 0.95, 1.0, 0.85 + nervous.onset_strength * 0.15);
 
-            ui.painter().line_segment([p_start, p_end], egui::Stroke::new(2.5, color));
+            ui.painter().line_segment([p_start, p_end], egui::Stroke::new(2.5_f32, color));
         }
     }
 
@@ -467,7 +467,7 @@ impl RadialMandalaEngine {
             let color = egui::Color32::from_rgba_unmultiplied(240, 245, 255, (alpha * 255.0) as u8);
 
             for i in 0..pts.len() - 1 {
-                ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(1.2, color));
+                ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(1.2_f32, color));
             }
         }
 
@@ -479,7 +479,7 @@ impl RadialMandalaEngine {
             ui.painter().circle_stroke(
                 arc_center,
                 outer_r * 0.7,
-                egui::Stroke::new(0.8, egui::Color32::from_rgba_unmultiplied(200, 220, 255, 100)),
+                egui::Stroke::new(0.8_f32, egui::Color32::from_rgba_unmultiplied(200, 220, 255, 100)),
             );
         }
     }
@@ -569,7 +569,7 @@ impl RadialMandalaEngine {
             let p1 = egui::pos2(center.x + theta.cos() * inner_disc_r, center.y + theta.sin() * inner_disc_r);
             let p2 = egui::pos2(center.x + theta.cos() * (inner_disc_r + spike_len), center.y + theta.sin() * (inner_disc_r + spike_len));
 
-            let stroke_w = if cardinal_boost > 1.0 { 1.8 } else { 1.0 };
+            let stroke_w = if cardinal_boost > 1.0 { 1.8_f32 } else { 1.0_f32 };
             ui.painter().line_segment(
                 [p1, p2],
                 egui::Stroke::new(stroke_w, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 220)),
@@ -585,7 +585,7 @@ impl RadialMandalaEngine {
         ui.painter().circle_stroke(
             center,
             inner_disc_r,
-            egui::Stroke::new(2.5, egui::Color32::from_rgb(220, 225, 235)),
+            egui::Stroke::new(2.5_f32, egui::Color32::from_rgb(220, 225, 235)),
         );
     }
 
@@ -606,7 +606,7 @@ impl RadialMandalaEngine {
             let frac = r_i as f32 / ring_count as f32;
             let radius = max_r * frac * (1.0 + nervous.low_band * 0.05);
 
-            let stroke_w = if r_i == ring_count { 2.0 } else { 1.0 };
+            let stroke_w = if r_i == ring_count { 2.0_f32 } else { 1.0_f32 };
             let alpha = 0.3 + 0.4 * frac;
             let ring_color = egui::Color32::from_rgba_unmultiplied(0, 220, 255, (alpha * 255.0) as u8);
 
@@ -621,7 +621,7 @@ impl RadialMandalaEngine {
                 let p1 = egui::pos2(center.x + theta.cos() * (radius - tick_len), center.y + theta.sin() * (radius - tick_len));
                 let p2 = egui::pos2(center.x + theta.cos() * (radius + tick_len), center.y + theta.sin() * (radius + tick_len));
 
-                ui.painter().line_segment([p1, p2], egui::Stroke::new(1.0, ring_color.linear_multiply(0.7)));
+                ui.painter().line_segment([p1, p2], egui::Stroke::new(1.0_f32, ring_color.linear_multiply(0.7)));
             }
         }
 
@@ -648,7 +648,7 @@ impl RadialMandalaEngine {
             let hue = (0.55 + frac * 0.25 + self.color_palette_shift) % 1.0; // Cyan to Deep Blue/Purple
             let color = hsva_to_color32(hue, 0.9, 1.0, 0.8 + nervous.onset_strength * 0.2);
 
-            ui.painter().line_segment([p1, p2], egui::Stroke::new(2.0, color));
+            ui.painter().line_segment([p1, p2], egui::Stroke::new(2.0_f32, color));
         }
 
         // Central glowing radar core disc
@@ -661,7 +661,7 @@ impl RadialMandalaEngine {
         ui.painter().circle_stroke(
             center,
             core_r,
-            egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 230, 255)),
+            egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(0, 230, 255)),
         );
     }
 
@@ -751,7 +751,7 @@ impl RadialMandalaEngine {
             let color = hsva_to_color32(hue, 0.9, 0.95, alpha);
 
             for i in 0..pts.len() - 1 {
-                ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(1.4, color));
+                ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(1.4_f32, color));
             }
         }
 
@@ -764,12 +764,12 @@ impl RadialMandalaEngine {
         ui.painter().circle_stroke(
             center,
             center_disc_r,
-            egui::Stroke::new(2.5, egui::Color32::from_rgb(0, 200, 255)),
+            egui::Stroke::new(2.5_f32, egui::Color32::from_rgb(0, 200, 255)),
         );
         ui.painter().circle_stroke(
             center,
             center_disc_r * 0.92,
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 0, 200)),
+            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 0, 200)),
         );
     }
 }

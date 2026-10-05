@@ -124,7 +124,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: 
     let (rect, _response) = ui.allocate_exact_size(available_size, egui::Sense::hover());
 
     ui.painter().rect_filled(rect, theme.radius_md, egui::Color32::from_rgb(10, 12, 18));
-    ui.painter().rect_stroke(rect, theme.radius_md, egui::Stroke::new(1.0, theme.border));
+    ui.painter().rect_stroke(rect, theme.radius_md, egui::Stroke::new(1.0_f32, theme.border));
 
     let time = ui.input(|i| i.time);
     let spectrum_a = &app.viz.damped_spectrum;
@@ -175,7 +175,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: 
             egui::vec2(rect.width() - 30.0, 22.0),
         );
         ui.painter().rect_filled(alert_rect, theme.radius_sm, theme.danger.linear_multiply(0.2));
-        ui.painter().rect_stroke(alert_rect, theme.radius_sm, egui::Stroke::new(1.0, theme.danger));
+        ui.painter().rect_stroke(alert_rect, theme.radius_sm, egui::Stroke::new(1.0_f32, theme.danger));
 
         let alert_msg = if has_clipping {
             format!("⚡ ACOUSTIC ANOMALY: INTER-SAMPLE CLIPPING DETECTED ({:.1} dBFS)", 20.0 * peak_max.log10())
@@ -224,7 +224,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: 
                     220,
                 ).linear_multiply(alpha * 0.85);
 
-                ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(1.0, color));
+                ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(1.0_f32, color));
             }
         }
     }
@@ -252,7 +252,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: 
                 let peak_y = (rect.bottom() - bar_h - 2.0).clamp(rect.top(), rect.bottom());
                 ui.painter().line_segment(
                     [egui::pos2(rect.left() + i as f32 * bin_w, peak_y), egui::pos2(rect.left() + (i + 1) as f32 * bin_w - 1.0, peak_y)],
-                    egui::Stroke::new(1.5, theme.accent),
+                    egui::Stroke::new(1.5_f32, theme.accent),
                 );
             }
         }
@@ -275,7 +275,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: 
         let wheel_r = 45.0;
 
         ui.painter().circle_filled(wheel_center, wheel_r, egui::Color32::from_rgb(18, 24, 38).linear_multiply(0.92));
-        ui.painter().circle_stroke(wheel_center, wheel_r, egui::Stroke::new(1.5, theme.accent));
+        ui.painter().circle_stroke(wheel_center, wheel_r, egui::Stroke::new(1.5_f32, theme.accent));
 
         ui.painter().text(
             wheel_center - egui::vec2(0.0, 8.0),
@@ -305,7 +305,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: 
             let bx = rect.left() + i as f32 * beat_w;
             let is_downbeat = i % 4 == 0;
             let stroke_color = if is_downbeat { theme.accent } else { theme.text_disabled };
-            let stroke_w = if is_downbeat { 2.0 } else { 1.0 };
+            let stroke_w = if is_downbeat { 2.0_f32 } else { 1.0_f32 };
 
             ui.painter().line_segment(
                 [egui::pos2(bx, rect.top()), egui::pos2(bx, rect.bottom())],
@@ -316,7 +316,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: 
         let playhead_x = rect.left() + ((beat_pos % 16.0) / 16.0) * rect.width();
         ui.painter().line_segment(
             [egui::pos2(playhead_x, rect.top()), egui::pos2(playhead_x, rect.bottom())],
-            egui::Stroke::new(2.5, theme.warning),
+            egui::Stroke::new(2.5_f32, theme.warning),
         );
 
         ui.painter().text(
@@ -341,7 +341,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: 
             for i in 0..num_bins.saturating_sub(1) {
                 ui.painter().line_segment(
                     [phon_pts[i], phon_pts[i + 1]],
-                    egui::Stroke::new(1.2, egui::Color32::from_rgb(0, 220, 180).linear_multiply(*phon / 100.0)),
+                    egui::Stroke::new(1.2_f32, egui::Color32::from_rgb(0, 220, 180).linear_multiply(*phon / 100.0)),
                 );
             }
         }
@@ -464,7 +464,7 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry
                 let (rect, _response) = ui.allocate_exact_size(available_size, egui::Sense::hover());
 
                 ui.painter().rect_filled(rect, theme.radius_sm, egui::Color32::from_rgb(12, 16, 24));
-                ui.painter().rect_stroke(rect, theme.radius_sm, egui::Stroke::new(1.0, theme.border));
+                ui.painter().rect_stroke(rect, theme.radius_sm, egui::Stroke::new(1.0_f32, theme.border));
 
                 let peaks = track.metadata.peaks.as_slice();
                 if !peaks.is_empty() {
@@ -478,7 +478,7 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry
                         let h = (amp.abs() * half_h).clamp(1.0, half_h);
                         ui.painter().line_segment(
                             [egui::pos2(x, center_y - h), egui::pos2(x, center_y + h)],
-                            egui::Stroke::new(1.2, theme.accent.linear_multiply(0.8)),
+                            egui::Stroke::new(1.2_f32, theme.accent.linear_multiply(0.8)),
                         );
                     }
                 }
@@ -493,7 +493,7 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry
                         let tx = rect.left() + pos_norm * rect.width();
                         ui.painter().line_segment(
                             [egui::pos2(tx, rect.bottom()), egui::pos2(tx, rect.bottom() - 25.0)],
-                            egui::Stroke::new(1.0, theme.danger.linear_multiply(0.7)),
+                            egui::Stroke::new(1.0_f32, theme.danger.linear_multiply(0.7)),
                         );
                     }
                 }
@@ -506,7 +506,7 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry
 
                 ui.painter().line_segment(
                     [egui::pos2(playhead_x, rect.top()), egui::pos2(playhead_x, rect.bottom())],
-                    egui::Stroke::new(2.0, theme.warning),
+                    egui::Stroke::new(2.0_f32, theme.warning),
                 );
 
                 ui.add_space(theme.space_xs);

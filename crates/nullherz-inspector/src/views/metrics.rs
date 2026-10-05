@@ -225,13 +225,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 // Draw polar crosshair axes
                 ui.painter().line_segment(
                     [egui::pos2(center.x - scale, center.y), egui::pos2(center.x + scale, center.y)],
-                    Stroke::new(1.0, theme.border),
+                    Stroke::new(1.0_f32, theme.border),
                 );
                 ui.painter().line_segment(
                     [egui::pos2(center.x, center.y - scale), egui::pos2(center.x, center.y + scale)],
-                    Stroke::new(1.0, theme.border),
+                    Stroke::new(1.0_f32, theme.border),
                 );
-                ui.painter().circle_stroke(center, scale, Stroke::new(1.0, theme.border));
+                ui.painter().circle_stroke(center, scale, Stroke::new(1.0_f32, theme.border));
 
                 // Project 16D latent space to 2D using a simple fixed projection
                 let mut x = 0.0;
@@ -244,7 +244,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
                 let pos = center + egui::vec2(x * scale, y * scale);
                 ui.painter().circle_filled(pos, 6.0, theme.accent);
-                ui.painter().circle_stroke(pos, 8.0, Stroke::new(1.5, theme.text_primary));
+                ui.painter().circle_stroke(pos, 8.0, Stroke::new(1.5_f32, theme.text_primary));
 
                 ui.add_space(theme.space_xs);
                 ui.label(RichText::new("TIMBRAL TRAJECTORY (16D LANDSCAPE)").small().color(theme.text_secondary));

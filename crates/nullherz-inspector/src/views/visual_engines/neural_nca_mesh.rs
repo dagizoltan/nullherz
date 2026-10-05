@@ -440,7 +440,7 @@ impl NeuralVisualEngine for NeuralNcaMeshEngine {
             // Draw wireframe neighbor connection lines
             for &n_idx in &v.neighbors {
                 if let Some(&(_, p2, _, _)) = proj_vertices.iter().find(|item| item.0 == n_idx) {
-                    ui.painter().line_segment([p1, p2], egui::Stroke::new(1.0, color.linear_multiply(0.4)));
+                    ui.painter().line_segment([p1, p2], egui::Stroke::new(1.0_f32, color.linear_multiply(0.4)));
                 }
             }
 
@@ -457,7 +457,7 @@ impl NeuralVisualEngine for NeuralNcaMeshEngine {
                 let p_sprout = egui::pos2(center.x + sx * scale * s_inv, center.y + sy * scale * s_inv);
 
                 let crystal_color = egui::Color32::from_rgba_unmultiplied(255, 120, 240, (alpha * 220.0) as u8);
-                ui.painter().line_segment([p1, p_sprout], egui::Stroke::new(1.8, crystal_color));
+                ui.painter().line_segment([p1, p_sprout], egui::Stroke::new(1.8_f32, crystal_color));
                 ui.painter().circle_filled(p_sprout, 2.5 + v.sprout_len * 2.0, crystal_color);
             }
 

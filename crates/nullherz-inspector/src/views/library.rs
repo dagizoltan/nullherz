@@ -737,7 +737,7 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
         .fill(theme.bg_inset)
         .rounding(Rounding::same(theme.radius_sm))
         .inner_margin(Margin::same(theme.space_sm))
-        .stroke(Stroke::new(1.0, theme.border))
+        .stroke(Stroke::new(1.0_f32, theme.border))
         .show(ui, |ui| {
             ui.set_max_width(ui.available_width());
 
@@ -866,7 +866,7 @@ fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dn
 
                     Frame::none()
                         .fill(theme.bg_surface)
-                        .stroke(Stroke::new(1.0, theme.border))
+                        .stroke(Stroke::new(1.0_f32, theme.border))
                         .rounding(Rounding::same(theme.radius_sm))
                         .inner_margin(Margin::symmetric(theme.space_xs, 2.0))
                         .show(ui, |ui| {

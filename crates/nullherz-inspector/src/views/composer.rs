@@ -37,7 +37,7 @@ pub fn render_mini_waveform(
             let amp = (0.3 + 0.6 * ((i as f32 * 0.7).sin().abs())).clamp(0.1, 0.95);
             painter.line_segment(
                 [egui::pos2(x, center_y - amp * half_h), egui::pos2(x, center_y + amp * half_h)],
-                Stroke::new(1.2, color),
+                Stroke::new(1.2_f32, color),
             );
         }
         return;
@@ -52,7 +52,7 @@ pub fn render_mini_waveform(
 
         painter.line_segment(
             [egui::pos2(x, center_y - amp * half_h), egui::pos2(x, center_y + amp * half_h)],
-            Stroke::new(1.2, color),
+            Stroke::new(1.2_f32, color),
         );
     }
 }
@@ -221,7 +221,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         let inner_resp = Frame::none()
                             .fill(header_bg)
                             .rounding(Rounding::same(app.theme.radius_sm))
-                            .stroke(Stroke::new(1.0, if is_selected { track_color } else { app.theme.border_stroke.color }))
+                            .stroke(Stroke::new(1.0_f32, if is_selected { track_color } else { app.theme.border_stroke.color }))
                             .inner_margin(Margin::same(4.0))
                             .show(ui, |ui| {
                                 ui.set_width(165.0);
@@ -423,7 +423,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                                         ui.painter().rect_filled(rect, Rounding::same(2.0), bg_color);
                                         let border_stroke = if velocity > 0.0 {
-                                            Stroke::new(1.0, track_color)
+                                            Stroke::new(1.0_f32, track_color)
                                         } else {
                                             app.theme.border_stroke
                                         };
@@ -498,7 +498,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                 };
 
                                                 ui.painter().rect_filled(rect, Rounding::same(2.0), bg_sub);
-                                                ui.painter().rect_stroke(rect, Rounding::same(2.0), Stroke::new(0.8, if vel_sub > 0.0 { track_color } else { app.theme.border_stroke.color }));
+                                                ui.painter().rect_stroke(rect, Rounding::same(2.0), Stroke::new(0.8_f32, if vel_sub > 0.0 { track_color } else { app.theme.border_stroke.color }));
 
                                                 if slot_idx == 0 {
                                                     ui.painter().text(
@@ -547,7 +547,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             if playhead_x >= grid_top_pos.x {
                                 ui.painter().line_segment(
                                     [Pos2::new(playhead_x, grid_top_pos.y), Pos2::new(playhead_x, grid_bottom_pos.y)],
-                                    Stroke::new(2.5, app.theme.accent),
+                                    Stroke::new(2.5_f32, app.theme.accent),
                                 );
                             }
                         });

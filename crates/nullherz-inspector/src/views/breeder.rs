@@ -311,7 +311,7 @@ impl BreederView {
                 // Result Waveform Box
                 let (res_wf_rect, _) = ui.allocate_exact_size(Vec2::new(300.0, 65.0), Sense::hover());
                 ui.painter().rect_filled(res_wf_rect, theme.radius_md, theme.bg_inset);
-                ui.painter().rect_stroke(res_wf_rect, theme.radius_md, Stroke::new(1.5, theme.success));
+                ui.painter().rect_stroke(res_wf_rect, theme.radius_md, Stroke::new(1.5_f32, theme.success));
 
                 let track_a_opt = state.parent_a_id.and_then(|id| app.get_cached_track(id));
                 let track_b_opt = state.parent_b_id.and_then(|id| app.get_cached_track(id));
@@ -508,7 +508,7 @@ impl BreederView {
                     Frame::none()
                         .fill(theme.bg_inset)
                         .rounding(theme.radius_md)
-                        .stroke(if s_id.is_some() { Stroke::new(1.0, theme.accent) } else { theme.border_stroke })
+                        .stroke(if s_id.is_some() { Stroke::new(1.0_f32, theme.accent) } else { theme.border_stroke })
                         .inner_margin(Margin::same(theme.space_sm))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
@@ -640,7 +640,7 @@ impl BreederView {
                 ui.label(RichText::new("🌊 EXPECTED OFFSPRING RESULT WAVEFORM").size(theme.type_caption).strong().color(theme.text_secondary));
                 let (res_wf_rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 70.0), Sense::hover());
                 ui.painter().rect_filled(res_wf_rect, theme.radius_md, theme.bg_inset);
-                ui.painter().rect_stroke(res_wf_rect, theme.radius_md, Stroke::new(1.5, theme.success));
+                ui.painter().rect_stroke(res_wf_rect, theme.radius_md, Stroke::new(1.5_f32, theme.success));
 
                 let carrier_track_opt = state.carrier_id.or(state.parent_a_id).and_then(|id| app.get_cached_track(id));
                 let donor_track_opt = state.donors.first().and_then(|d| app.get_cached_track(d.donor_id));
@@ -807,11 +807,11 @@ impl BreederView {
 
                 let y1_energy = map_rect.bottom() - (0.3 + 0.5 * (i as f32 * 0.2).sin().abs()) * h;
                 let y2_energy = map_rect.bottom() - (0.3 + 0.5 * ((i + 1) as f32 * 0.2).sin().abs()) * h;
-                ui.painter().line_segment([egui::pos2(x1, y1_energy), egui::pos2(x2, y2_energy)], Stroke::new(1.5, theme.accent));
+                ui.painter().line_segment([egui::pos2(x1, y1_energy), egui::pos2(x2, y2_energy)], Stroke::new(1.5_f32, theme.accent));
 
                 let y1_transient = map_rect.bottom() - (0.1 + 0.8 * (i % 8 == 0) as u8 as f32) * h;
                 let y2_transient = map_rect.bottom() - (0.1 + 0.8 * ((i + 1) % 8 == 0) as u8 as f32) * h;
-                ui.painter().line_segment([egui::pos2(x1, y1_transient), egui::pos2(x2, y2_transient)], Stroke::new(1.5, theme.danger));
+                ui.painter().line_segment([egui::pos2(x1, y1_transient), egui::pos2(x2, y2_transient)], Stroke::new(1.5_f32, theme.danger));
             }
 
             ui.add_space(theme.space_md);

@@ -211,7 +211,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         Frame::none()
                             .fill(app.theme.bg_dark)
                             .rounding(Rounding::same(app.theme.radius_sm))
-                            .stroke(Stroke::new(1.0, track_color))
+                            .stroke(Stroke::new(1.0_f32, track_color))
                             .inner_margin(Margin::same(8.0))
                             .show(ui, |ui| {
                                 ui.vertical(|ui| {
@@ -276,7 +276,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         // High-Resolution Waveform Canvas Inspector for Decks A..D
                         let (rect, _response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 160.0), Sense::hover());
                         ui.painter().rect_filled(rect, app.theme.radius_sm, app.theme.bg_dark);
-                        ui.painter().rect_stroke(rect, app.theme.radius_sm, Stroke::new(1.0, track_color));
+                        ui.painter().rect_stroke(rect, app.theme.radius_sm, Stroke::new(1.0_f32, track_color));
 
                         if let (Some(wgpu_mtx), Some(wf_mtx)) = (&app.wgpu_renderer, &app.waveform_renderer) {
                             let _wgpu = wgpu_mtx.lock();
@@ -330,7 +330,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     Frame::none()
                                         .fill(app.theme.bg_inset)
                                         .rounding(Rounding::same(app.theme.radius_sm))
-                                        .stroke(Stroke::new(1.0, track_color))
+                                        .stroke(Stroke::new(1.0_f32, track_color))
                                         .inner_margin(Margin::same(6.0))
                                         .show(ui, |ui| {
                                             ui.horizontal(|ui| {

@@ -251,7 +251,7 @@ impl NeuralVisualEngine for HyperAttractorEngine {
                     let (prev_x, prev_y) = self.particle_positions[i - 1];
                     let prev_pt = egui::pos2(prev_x, prev_y);
                     if rect.contains(prev_pt) && (pt - prev_pt).length() < 30.0 {
-                        ui.painter().line_segment([prev_pt, pt], egui::Stroke::new(1.0, color.linear_multiply(0.4)));
+                        ui.painter().line_segment([prev_pt, pt], egui::Stroke::new(1.0_f32, color.linear_multiply(0.4)));
                     }
                 }
             }

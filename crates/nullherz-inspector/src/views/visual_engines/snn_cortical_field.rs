@@ -358,14 +358,14 @@ impl NeuralVisualEngine for SnnCorticalFieldEngine {
                     painter.add(egui::Shape::convex_polygon(
                         vec![p0, p1, p2, p3],
                         fill_color,
-                        egui::Stroke::new(0.5, egui::Color32::from_white_alpha(30)),
+                        egui::Stroke::new(0.5_f32, egui::Color32::from_white_alpha(30)),
                     ));
 
                     // Draw active firing synaptic dendrite lines
                     if self.draw_dendrites && is_spiking {
                         let stroke_color = egui::Color32::from_rgba_unmultiplied(255, 255, 200, (200.0 * self.dendrite_glow) as u8);
-                        painter.line_segment([p0, p1], egui::Stroke::new(1.5, stroke_color));
-                        painter.line_segment([p1, p2], egui::Stroke::new(1.5, stroke_color));
+                        painter.line_segment([p0, p1], egui::Stroke::new(1.5_f32, stroke_color));
+                        painter.line_segment([p1, p2], egui::Stroke::new(1.5_f32, stroke_color));
                     }
                 }
             }
@@ -393,7 +393,7 @@ impl NeuralVisualEngine for SnnCorticalFieldEngine {
                     if self.draw_dendrites && is_spiking && c < self.grid_width - 1 {
                         let p_start = cell_rect.center();
                         let p_end = egui::pos2(p_start.x + cell_w, p_start.y);
-                        painter.line_segment([p_start, p_end], egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 255, 220)));
+                        painter.line_segment([p_start, p_end], egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(255, 255, 220)));
                     }
                 }
             }

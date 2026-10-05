@@ -134,7 +134,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         Frame::none()
                             .fill(app.theme.bg_dark)
                             .rounding(Rounding::same(app.theme.radius_sm))
-                            .stroke(Stroke::new(1.0, track_color))
+                            .stroke(Stroke::new(1.0_f32, track_color))
                             .inner_margin(Margin::same(4.0))
                             .show(ui, |ui| {
                                 ui.set_width(64.0);
@@ -209,7 +209,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                 .fill(app.theme.bg_inset)
                                                 .rounding(Rounding::same(app.theme.radius_sm))
                                                 .inner_margin(Margin::same(2.0))
-                                                .stroke(Stroke::new(1.0, app.theme.border_stroke.color))
+                                                .stroke(Stroke::new(1.0_f32, app.theme.border_stroke.color))
                                                 .show(ui, |ui| {
                                                     ui.set_width(58.0);
                                                     ui.vertical(|ui| {

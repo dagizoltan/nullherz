@@ -212,7 +212,7 @@ pub fn render_expanded_stem_matrix(app: &mut InspectorApp, ui: &mut Ui, i: usize
 
                             Frame::none()
                                 .fill(theme.bg_surface)
-                                .stroke(Stroke::new(1.0, theme.border))
+                                .stroke(Stroke::new(1.0_f32, theme.border))
                                 .rounding(Rounding::same(theme.radius_sm))
                                 .inner_margin(Margin::symmetric(6.0, 4.0))
                                 .show(ui, |ui| {
