@@ -291,17 +291,17 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         if is_selected {
                             ui.add_space(2.0);
                             for pad_i in 0..16 {
-                                Frame::none()
-                                    .fill(app.theme.bg_inset)
-                                    .rounding(Rounding::same(2.0))
-                                    .inner_margin(Margin::symmetric(4.0, 1.0))
-                                    .show(ui, |ui| {
-                                        ui.set_width(175.0);
-                                        ui.set_height(20.0);
-                                        ui.horizontal(|ui| {
-                                            ui.label(RichText::new(format!("  ↳ {}", pad_labels[pad_i])).size(8.0).strong().color(track_color));
-                                        });
-                                    });
+                                ui.allocate_ui_with_layout(Vec2::new(175.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                    let (rect, _) = ui.allocate_exact_size(Vec2::new(175.0, 20.0), Sense::hover());
+                                    ui.painter().rect_filled(rect, Rounding::same(2.0), app.theme.bg_inset);
+                                    ui.painter().text(
+                                        Pos2::new(rect.min.x + 8.0, rect.center().y),
+                                        egui::Align2::LEFT_CENTER,
+                                        format!("↳ {}", pad_labels[pad_i]),
+                                        egui::FontId::new(9.0, egui::FontFamily::Proportional),
+                                        track_color,
+                                    );
+                                });
                                 ui.add_space(1.0);
                             }
                         }
@@ -398,18 +398,18 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                                         let velocity = app.composer.studio_sequencer_grid[track_idx][slot_idx];
 
-                                        let mut bg_color = if velocity > 0.0 || cached_track.is_some() {
+                                        let mut bg_color = if velocity > 0.0 {
                                             if is_muted {
                                                 app.theme.bg_inset
                                             } else {
-                                                track_color.gamma_multiply(0.25)
+                                                track_color.gamma_multiply(0.35)
                                             }
                                         } else {
                                             track_color.gamma_multiply(0.03)
                                         };
 
-                                        if slot_idx == app.composer.sequencer_active_step {
-                                            bg_color = track_color.gamma_multiply(0.5);
+                                        if app.composer.composer_playing && slot_idx == app.composer.sequencer_active_step {
+                                            bg_color = track_color.gamma_multiply(0.6);
                                         }
 
                                         ui.painter().rect_filled(rect, Rounding::same(2.0), bg_color);
@@ -512,12 +512,16 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             grid_bottom_pos = ui.cursor().left_top();
 
                             // Live Playhead Needle Drawing across the timeline
-                            let live_beat = telemetry.as_ref()
-                                .map(|t| t.beat_position as f32)
-                                .unwrap_or(app.composer.sequencer_active_step as f32);
+                            let live_beat = if app.composer.composer_playing {
+                                telemetry.as_ref()
+                                    .map(|t| t.beat_position as f32)
+                                    .unwrap_or(app.composer.sequencer_active_step as f32)
+                            } else {
+                                0.0
+                            };
                             let playhead_step = live_beat.max(0.0).min(steps_count as f32);
                             let bars_before = (playhead_step / 4.0).floor();
-                            let playhead_x = grid_top_pos.x + (playhead_step * slot_w) + (playhead_step * 2.0) + (bars_before * 4.0) + (slot_w * 0.5);
+                            let playhead_x = grid_top_pos.x + (playhead_step * slot_w) + (playhead_step * 2.0) + (bars_before * 4.0);
 
                             if playhead_x >= grid_top_pos.x {
                                 ui.painter().line_segment(
