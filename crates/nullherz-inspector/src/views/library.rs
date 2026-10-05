@@ -1,7 +1,8 @@
 use egui::{Color32, RichText, Ui, ScrollArea, Layout, Align, Stroke, Frame, Margin, Rounding};
 use crate::InspectorApp;
+use crate::state::{MainCategory, AudioSubcategory, SidecarSubcategory};
 use nullherz_dna::GeneticLibrary;
-use sidecar_sdk::AssetCategory;
+use sidecar_sdk::{AssetCategory, SidecarDescriptor};
 
 #[derive(Clone, Debug)]
 pub struct AudioLocation {
@@ -30,13 +31,11 @@ pub fn detect_audio_locations() -> Vec<AudioLocation> {
         }
     }
 
-    // System / internal volume names to skip when scanning /Volumes on macOS
     let macos_system_volumes = [
         "macintosh hd", "system", "data", "preboot", "vm", "update", "recovery",
         ".trashes", ".spotlight-v100", "com.apple",
     ];
 
-    // Scan mount roots for pendrives / external drives (Linux / macOS / Unix)
     let mount_roots = ["/media", "/run/media", "/mnt", "/Volumes"];
     for root in &mount_roots {
         let p = std::path::Path::new(root);
@@ -48,12 +47,10 @@ pub fn detect_audio_locations() -> Vec<AudioLocation> {
                         let name = entry.file_name().to_string_lossy().to_string();
                         let name_lower = name.to_lowercase();
 
-                        // Skip macOS internal system volumes / root mounts
                         if *root == "/Volumes" && macos_system_volumes.iter().any(|sys| name_lower.contains(sys)) {
                             continue;
                         }
 
-                        // Check if user subdirectories exist under /media or /run/media
                         if root.contains("media") {
                             if let Ok(sub_entries) = std::fs::read_dir(&path) {
                                 for sub in sub_entries.flatten() {
@@ -84,62 +81,73 @@ pub fn detect_audio_locations() -> Vec<AudioLocation> {
     locations
 }
 
+/// Main View entry point (Grid View default)
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
+    render_with_mode(app, ui, false);
+}
+
+/// Right Sidebar entry point (List View default)
+pub fn render_sidebar(app: &mut InspectorApp, ui: &mut Ui) {
+    render_with_mode(app, ui, true);
+}
+
+pub fn render_with_mode(app: &mut InspectorApp, ui: &mut Ui, is_sidebar: bool) {
     let theme = app.theme;
 
+    if app.library.library_needs_refresh && app.library.bg_library_loader.is_none() {
+        app.trigger_library_refresh();
+    }
+
     ui.vertical(|ui| {
-        // Crates Grid and Smart Crates Grid under each other
-        render_crates_and_smart_crates_section(app, ui);
+        // 1. Categories Header & Selector
+        render_categories_header(app, ui);
 
         ui.add_space(theme.space_sm);
         ui.separator();
         ui.add_space(theme.space_sm);
 
-        // Track Browser (Toolbar + Tracks) under
+        // 2. Toolbar (Search query, Sort, Ingestion path scanner)
         render_toolbar(app, ui);
 
         ui.add_space(theme.space_sm);
 
-        render_asset_list(app, ui);
+        // 3. Asset Grid (Main View) or Asset List (Sidebar)
+        if is_sidebar {
+            render_asset_list(app, ui);
+        } else {
+            render_asset_grid(app, ui);
+        }
     });
 }
 
-fn render_crates_and_smart_crates_section(app: &mut InspectorApp, ui: &mut Ui) {
+fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
 
-    // 1. Categories Header
+    // Main Category Selector Buttons
     ui.label(
-        RichText::new("CATEGORIES")
+        RichText::new("MAIN CATEGORY")
             .size(theme.type_caption)
             .strong()
             .color(theme.text_secondary),
     );
     ui.add_space(theme.space_xs);
 
-    // Main Category Selector Chips
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(theme.space_xs, theme.space_xs);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(theme.space_sm, theme.space_xs);
 
-        let is_all_cat = app.library.active_category.is_none() && app.library.active_crate.is_none();
-        if ui.selectable_label(is_all_cat, format!("{} ALL", egui_phosphor::regular::PACKAGE)).clicked() {
-            app.library.active_category = None;
-            app.library.active_crate = None;
-            app.library.library_needs_refresh = true;
-        }
-
-        for category in AssetCategory::all() {
-            let is_selected = app.library.active_category == Some(*category) && app.library.active_crate.is_none();
-            let icon = match category {
-                AssetCategory::AudioFiles => egui_phosphor::regular::MUSIC_NOTES,
-                AssetCategory::AudioInsert => egui_phosphor::regular::SLIDERS_HORIZONTAL,
-                AssetCategory::VisualInsert => egui_phosphor::regular::EYE,
-                AssetCategory::AudioInstrument => egui_phosphor::regular::PIANO_KEYS,
-                AssetCategory::VisualInstrument => egui_phosphor::regular::APERTURE,
+        for main_cat in MainCategory::all() {
+            let is_selected = app.library.active_main_category == *main_cat;
+            let (icon, label_text) = match main_cat {
+                MainCategory::Audio => (egui_phosphor::regular::MUSIC_NOTES, "AUDIO"),
+                MainCategory::Sidecars => (egui_phosphor::regular::PACKAGE, "SIDECARS"),
             };
 
-            if ui.selectable_label(is_selected, format!("{} {}", icon, category.name().to_uppercase())).clicked() {
-                app.library.active_category = Some(*category);
-                app.library.active_crate = None;
+            let text = RichText::new(format!("{} {}", icon, label_text))
+                .size(theme.type_caption + 1.0)
+                .strong();
+
+            if ui.selectable_label(is_selected, text).clicked() {
+                app.library.active_main_category = *main_cat;
                 app.library.library_needs_refresh = true;
             }
         }
@@ -147,53 +155,78 @@ fn render_crates_and_smart_crates_section(app: &mut InspectorApp, ui: &mut Ui) {
 
     ui.add_space(theme.space_sm);
 
-    // 2. User Crates & Smart Crates Header + NEW button
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(format!("{} USER & SMART CRATES", egui_phosphor::regular::FOLDER))
-                .size(theme.type_caption)
-                .strong()
-                .color(theme.text_secondary),
-        );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui.button(RichText::new("+ NEW SMART").size(theme.type_caption)).clicked() {
-                app.library.smart_crate_builder_open = !app.library.smart_crate_builder_open;
-            }
-        });
-    });
+    // Subcategory Chips
+    ui.label(
+        RichText::new("SUBCATEGORIES")
+            .size(theme.type_caption)
+            .strong()
+            .color(theme.text_secondary),
+    );
     ui.add_space(theme.space_xs);
 
-    // User Crates & Smart Crates Wrapping Grid
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(theme.space_xs, theme.space_xs);
 
-        let is_stems_cat = app.library.active_crate.as_deref() == Some("stems");
-        if ui.selectable_label(is_stems_cat, format!("{} DEMIXED STEMS", egui_phosphor::regular::LIGHTNING)).clicked() {
-            app.library.active_crate = Some("stems".to_string());
-            app.library.active_category = None;
-            app.library.library_needs_refresh = true;
-        }
+        match app.library.active_main_category {
+            MainCategory::Audio => {
+                for sub in AudioSubcategory::all() {
+                    let is_selected = app.library.active_audio_sub == *sub && app.library.active_crate.is_none();
+                    let icon = match sub {
+                        AudioSubcategory::All => egui_phosphor::regular::STACK,
+                        AudioSubcategory::Tracks => egui_phosphor::regular::DISC,
+                        AudioSubcategory::Samples => egui_phosphor::regular::WAVEFORM,
+                        AudioSubcategory::Stems => egui_phosphor::regular::LIGHTNING,
+                    };
 
-        let crates = &app.library.cached_crates;
-        for crate_name in crates {
-            if ["track", "sample", "sequence", "instrument", "insert", "visual", "stems"].contains(&crate_name.as_str()) {
-                continue;
-            }
-            let is_selected = app.library.active_crate.as_deref() == Some(crate_name.as_str());
-            if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::TAG, crate_name)).clicked() {
-                app.library.active_crate = Some(crate_name.clone());
-                app.library.active_category = None;
-                app.library.library_needs_refresh = true;
-            }
-        }
+                    if ui.selectable_label(is_selected, format!("{} {}", icon, sub.name().to_uppercase())).clicked() {
+                        app.library.active_audio_sub = *sub;
+                        app.library.active_crate = None;
+                        app.library.library_needs_refresh = true;
+                    }
+                }
 
-        let smart_crates = &app.library.cached_smart_crates;
-        for smart in smart_crates {
-            let is_selected = app.library.active_crate.as_deref() == Some(smart.name.as_str());
-            if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::STAR, smart.name)).clicked() {
-                app.library.active_crate = Some(smart.name.clone());
-                app.library.active_category = None;
-                app.library.library_needs_refresh = true;
+                // Crate filters
+                let is_stems_crate = app.library.active_crate.as_deref() == Some("stems");
+                if ui.selectable_label(is_stems_crate, format!("{} DEMIXED STEMS", egui_phosphor::regular::LIGHTNING)).clicked() {
+                    app.library.active_crate = Some("stems".to_string());
+                    app.library.active_audio_sub = AudioSubcategory::Stems;
+                    app.library.library_needs_refresh = true;
+                }
+
+                for crate_name in app.library.cached_crates.clone() {
+                    if ["track", "sample", "sequence", "instrument", "insert", "visual", "stems"].contains(&crate_name.as_str()) {
+                        continue;
+                    }
+                    let is_selected = app.library.active_crate.as_deref() == Some(crate_name.as_str());
+                    if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::TAG, crate_name)).clicked() {
+                        app.library.active_crate = Some(crate_name);
+                        app.library.library_needs_refresh = true;
+                    }
+                }
+
+                for smart in app.library.cached_smart_crates.clone() {
+                    let is_selected = app.library.active_crate.as_deref() == Some(smart.name.as_str());
+                    if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::STAR, smart.name)).clicked() {
+                        app.library.active_crate = Some(smart.name);
+                        app.library.library_needs_refresh = true;
+                    }
+                }
+            }
+            MainCategory::Sidecars => {
+                for sub in SidecarSubcategory::all() {
+                    let is_selected = app.library.active_sidecar_sub == *sub;
+                    let icon = match sub {
+                        SidecarSubcategory::All => egui_phosphor::regular::PACKAGE,
+                        SidecarSubcategory::AudioInstruments => egui_phosphor::regular::PIANO_KEYS,
+                        SidecarSubcategory::AudioInserts => egui_phosphor::regular::SLIDERS_HORIZONTAL,
+                        SidecarSubcategory::VisualInstruments => egui_phosphor::regular::APERTURE,
+                        SidecarSubcategory::VisualInserts => egui_phosphor::regular::EYE,
+                    };
+
+                    if ui.selectable_label(is_selected, format!("{} {}", icon, sub.name().to_uppercase())).clicked() {
+                        app.library.active_sidecar_sub = *sub;
+                    }
+                }
             }
         }
     });
@@ -202,22 +235,21 @@ fn render_crates_and_smart_crates_section(app: &mut InspectorApp, ui: &mut Ui) {
 fn render_toolbar(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
 
-    // Smart Crate Builder
     if app.library.smart_crate_builder_open {
         render_smart_crate_builder(app, ui);
         ui.add_space(theme.space_sm);
     }
 
-    // Row 1: Search query input + Magnifier icon + Refresh button
+    // Row 1: Search Query + Sort
     ui.horizontal(|ui| {
         ui.label(egui_phosphor::regular::MAGNIFYING_GLASS);
         ui.add_space(theme.space_xs);
         ui.text_edit_singleline(&mut app.library.search_query);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui.button(egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE).on_hover_text("Refresh").clicked() {
+            if ui.button(egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE).on_hover_text("Refresh Library").clicked() {
                 app.library.library_needs_refresh = true;
             }
-            egui::ComboBox::from_id_source("lib_sort")
+            egui::ComboBox::from_id_source("lib_sort_select")
                 .selected_text(track_sort_label(app.library.sort))
                 .show_ui(ui, |ui| {
                     use nullherz_dna::TrackSort::*;
@@ -225,7 +257,7 @@ fn render_toolbar(app: &mut InspectorApp, ui: &mut Ui) {
                         ui.selectable_value(&mut app.library.sort, s, track_sort_label(s));
                     }
                 })
-                .response.on_hover_text("Sort");
+                .response.on_hover_text("Sort Order");
         });
     });
     ui.add_space(theme.space_xs);
@@ -241,7 +273,7 @@ fn render_toolbar(app: &mut InspectorApp, ui: &mut Ui) {
             .map(|loc| loc.label.as_str())
             .unwrap_or("Custom Path");
 
-        egui::ComboBox::from_id_source("lib_location_select")
+        egui::ComboBox::from_id_source("lib_location_select_main")
             .selected_text(RichText::new(format!("{} {}", egui_phosphor::regular::HARD_DRIVES, selected_label)).size(theme.type_caption).strong())
             .width(160.0)
             .show_ui(ui, |ui| {
@@ -315,55 +347,411 @@ fn track_sort_label(s: nullherz_dna::TrackSort) -> &'static str {
     }
 }
 
-/// Compact row height: ~27 rows visible in a 700px sidebar.
-const TRACK_ROW_H: f32 = 26.0;
-/// Height of the inline detail panel on an expanded row.
-const TRACK_DETAIL_H: f32 = 250.0;
+// ============================================================================
+// GRID VIEW RENDERING (Main Page)
+// ============================================================================
 
-fn render_asset_list(app: &mut InspectorApp, ui: &mut Ui) {
-    if app.library.library_needs_refresh
-        && app.library.bg_library_loader.is_none() {
-            app.trigger_library_refresh();
-        }
-
+fn render_asset_grid(app: &mut InspectorApp, ui: &mut Ui) {
     let search_q = app.library.search_query.trim().to_lowercase();
 
-    if let Some(cat) = app.library.active_category {
-        match cat {
-            AssetCategory::AudioFiles => {
-                render_audio_files_list(app, ui, &search_q);
-            }
-            AssetCategory::AudioInsert
-            | AssetCategory::VisualInsert
-            | AssetCategory::AudioInstrument
-            | AssetCategory::VisualInstrument => {
-                render_sidecars_for_category(app, ui, cat, &search_q);
-            }
+    match app.library.active_main_category {
+        MainCategory::Audio => {
+            render_audio_grid(app, ui, &search_q);
         }
-    } else if app.library.active_crate.is_some() {
-        render_audio_files_list(app, ui, &search_q);
-    } else {
-        render_all_categories_list(app, ui, &search_q);
+        MainCategory::Sidecars => {
+            render_sidecar_grid(app, ui, &search_q);
+        }
     }
 }
 
-fn render_audio_files_list(app: &mut InspectorApp, ui: &mut Ui, search_q: &str) {
-    let theme = app.theme;
-    let mut displayed_tracks = app.library.cached_library.clone();
+fn get_filtered_audio_tracks(app: &InspectorApp, search_q: &str) -> Vec<nullherz_dna::LibraryTrack> {
+    let mut tracks = app.library.cached_library.clone();
+
+    // Filter by Subcategory
+    match app.library.active_audio_sub {
+        AudioSubcategory::All => {}
+        AudioSubcategory::Tracks => {
+            tracks.retain(|t| !t.path.contains("samples/") && !t.path.contains("sequences/") && t.stems.is_none());
+        }
+        AudioSubcategory::Samples => {
+            tracks.retain(|t| t.path.contains("samples/") || t.path.contains("sequences/"));
+        }
+        AudioSubcategory::Stems => {
+            tracks.retain(|t| t.stems.is_some() || t.path.contains("stems/"));
+        }
+    }
 
     if app.library.active_crate.as_deref() == Some("stems") {
-        displayed_tracks.retain(|t| t.stems.is_some());
+        tracks.retain(|t| t.stems.is_some());
     }
 
     if !search_q.is_empty() {
-        displayed_tracks.retain(|t| {
+        tracks.retain(|t| {
             t.title.to_lowercase().contains(search_q)
                 || t.artist.to_lowercase().contains(search_q)
                 || t.album.to_lowercase().contains(search_q)
                 || t.genre.to_lowercase().contains(search_q)
         });
     }
-    app.library.sort.order_tracks(&mut displayed_tracks);
+
+    app.library.sort.order_tracks(&mut tracks);
+    tracks
+}
+
+fn render_audio_grid(app: &mut InspectorApp, ui: &mut Ui, search_q: &str) {
+    let theme = app.theme;
+    let tracks = get_filtered_audio_tracks(app, search_q);
+
+    ui.label(
+        RichText::new(format!("{} AUDIO ITEMS AVAILABLE", tracks.len()))
+            .size(theme.type_caption)
+            .color(theme.text_secondary),
+    );
+    ui.add_space(theme.space_xs);
+
+    ScrollArea::vertical()
+        .id_source("lib_audio_grid_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let avail_w = ui.available_width();
+            let card_w = 340.0;
+            let cols = ((avail_w + theme.space_sm) / (card_w + theme.space_sm)).floor().max(1.0) as usize;
+
+            egui::Grid::new("library_audio_card_grid")
+                .num_columns(cols)
+                .spacing([theme.space_sm, theme.space_sm])
+                .show(ui, |ui| {
+                    for (idx, track) in tracks.iter().enumerate() {
+                        render_audio_card_grid_item(app, ui, track, card_w);
+                        if (idx + 1) % cols == 0 {
+                            ui.end_row();
+                        }
+                    }
+                });
+        });
+}
+
+fn render_audio_card_grid_item(
+    app: &mut InspectorApp,
+    ui: &mut Ui,
+    track: &nullherz_dna::LibraryTrack,
+    card_w: f32,
+) {
+    let theme = app.theme;
+    let is_loaded = app.decks.now_playing.iter().any(|np| np.as_ref() == Some(&track.id));
+    let is_selected = app.library.selected_library_track == Some(track.id);
+
+    Frame::none()
+        .fill(if is_selected { theme.accent.linear_multiply(0.10) } else { theme.bg_surface })
+        .rounding(Rounding::same(theme.radius_md))
+        .stroke(Stroke::new(1.0, if is_loaded { theme.accent } else { theme.border }))
+        .inner_margin(Margin::same(theme.space_sm))
+        .show(ui, |ui| {
+            ui.set_width(card_w);
+            ui.set_min_height(190.0);
+
+            ui.vertical(|ui| {
+                // Header: Title & Artist
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(egui_phosphor::regular::MUSIC_NOTE)
+                            .size(16.0)
+                            .color(if is_loaded { theme.accent } else { theme.text_secondary }),
+                    );
+                    ui.add(egui::Label::new(
+                        RichText::new(&track.title)
+                            .strong()
+                            .size(theme.type_caption + 1.0)
+                            .color(if is_loaded { theme.accent } else { theme.text_primary }),
+                    ).truncate());
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button(egui_phosphor::regular::TRASH).on_hover_text("Delete track").clicked() {
+                            let _ = app.library_db.remove_track(track.id);
+                            app.library.library_needs_refresh = true;
+                        }
+                    });
+                });
+
+                ui.label(
+                    RichText::new(&track.artist)
+                        .size(theme.type_caption)
+                        .color(theme.text_secondary),
+                );
+
+                ui.add_space(4.0);
+
+                // Waveform / DNA Sparklines
+                let (spark_rect, _) = ui.allocate_at_least(egui::vec2(card_w - 16.0, 16.0), egui::Sense::hover());
+                ui.painter().rect_filled(spark_rect, theme.radius_sm, theme.bg_inset);
+                let tilt = (track.metadata.dna.spectral.tilt + 1.0) / 2.0;
+                let sync = track.metadata.dna.rhythmic.syncopation_index;
+                let glitch = track.metadata.dna.artifacts.glitch_density;
+                let bar_w = spark_rect.width() / 3.0;
+                for (i, (val, color)) in [(tilt, theme.deck_colors[1]), (sync, theme.success), (glitch, theme.deck_colors[2])].iter().enumerate() {
+                    let h = spark_rect.height() * val.clamp(0.1, 1.0);
+                    let x = spark_rect.left() + (i as f32 * bar_w);
+                    let r = egui::Rect::from_min_max(egui::pos2(x + 1.0, spark_rect.bottom() - h), egui::pos2(x + bar_w - 1.0, spark_rect.bottom()));
+                    ui.painter().rect_filled(r, 0.5, *color);
+                }
+
+                ui.add_space(4.0);
+
+                // Track Metadata badges
+                let m = &track.metadata;
+                let sr = m.sample_rate.max(1);
+                let secs = m.total_samples as f32 / sr as f32;
+                let bpm_text = if m.bpm >= 20.0 { format!("{:.0} BPM", m.bpm) } else { "— BPM".to_string() };
+                let key_text = m.root_key.map(|k| format!("KEY {:.0}", k)).unwrap_or_else(|| "KEY —".to_string());
+                let len_text = format!("{}:{:02}", (secs as u32) / 60, (secs as u32) % 60);
+
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("{} | {} | {}", bpm_text, key_text, len_text)).monospace().size(10.0).color(theme.text_secondary));
+                    if track.stems.is_some() {
+                        ui.add_space(theme.space_xs);
+                        Frame::none()
+                            .fill(theme.success.linear_multiply(0.15))
+                            .rounding(Rounding::same(theme.radius_sm))
+                            .inner_margin(Margin::symmetric(4.0, 1.0))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new("STEMS READY").size(9.0).strong().color(theme.success));
+                            });
+                    }
+                });
+
+                ui.add_space(theme.space_xs);
+
+                // Quick Action Buttons
+                ui.horizontal(|ui| {
+                    if ui.button(RichText::new("▶ PREVIEW").size(theme.type_caption)).clicked() {
+                        let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                            nullherz_traits::PerformanceCommand::Preview { sample_id: track.id }
+                        ));
+                    }
+
+                    if ui.button(RichText::new("→ SAMPLER").size(theme.type_caption)).clicked() {
+                        app.sampler.source_track = Some(track.id);
+                        app.active_view = crate::View::Sampler;
+                    }
+
+                    if ui.button(RichText::new("→ COMPOSER").size(theme.type_caption)).clicked() {
+                        let slot = app.composer.selected_composer_track.unwrap_or(0);
+                        if slot < app.composer.track_sources.len() {
+                            app.composer.track_sources[slot] = Some(track.id);
+                        }
+                        app.active_view = crate::View::Composer;
+                    }
+                });
+
+                ui.add_space(2.0);
+
+                // Load to Deck Row
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 2.0);
+                    ui.label(RichText::new("LOAD:").size(theme.type_caption).color(theme.text_disabled));
+                    for (i, &deck_char) in ['A', 'B', 'C', 'D'].iter().enumerate() {
+                        let deck_color = theme.deck_colors[i];
+                        if ui.button(
+                            RichText::new(format!("DECK {}", deck_char))
+                                .size(theme.type_caption)
+                                .color(deck_color),
+                        ).on_hover_text(format!("Load track onto Deck {}", deck_char)).clicked() {
+                            let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                                nullherz_traits::PerformanceCommand::LoadTrackToDeck { deck_id: deck_char, sample_id: track.id },
+                            ));
+                            app.decks.now_playing[i] = Some(track.id);
+                        }
+                    }
+                });
+            });
+        });
+}
+
+fn get_filtered_sidecars(app: &InspectorApp, search_q: &str) -> Vec<SidecarDescriptor> {
+    let mut descriptors = app.store.store_catalog.list();
+
+    match app.library.active_sidecar_sub {
+        SidecarSubcategory::All => {}
+        SidecarSubcategory::AudioInstruments => {
+            descriptors.retain(|d| d.sidecar_type.category() == AssetCategory::AudioInstrument);
+        }
+        SidecarSubcategory::AudioInserts => {
+            descriptors.retain(|d| d.sidecar_type.category() == AssetCategory::AudioInsert);
+        }
+        SidecarSubcategory::VisualInstruments => {
+            descriptors.retain(|d| d.sidecar_type.category() == AssetCategory::VisualInstrument);
+        }
+        SidecarSubcategory::VisualInserts => {
+            descriptors.retain(|d| d.sidecar_type.category() == AssetCategory::VisualInsert);
+        }
+    }
+
+    if !search_q.is_empty() {
+        descriptors.retain(|d| {
+            d.id.to_lowercase().contains(search_q)
+                || d.name.to_lowercase().contains(search_q)
+                || d.description.to_lowercase().contains(search_q)
+                || d.tags.iter().any(|t| t.to_lowercase().contains(search_q))
+        });
+    }
+
+    descriptors
+}
+
+fn render_sidecar_grid(app: &mut InspectorApp, ui: &mut Ui, search_q: &str) {
+    let theme = app.theme;
+    let descriptors = get_filtered_sidecars(app, search_q);
+
+    ui.label(
+        RichText::new(format!("{} SIDECAR MODULES AVAILABLE", descriptors.len()))
+            .size(theme.type_caption)
+            .color(theme.text_secondary),
+    );
+    ui.add_space(theme.space_xs);
+
+    ScrollArea::vertical()
+        .id_source("lib_sidecar_grid_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let avail_w = ui.available_width();
+            let card_w = 340.0;
+            let cols = ((avail_w + theme.space_sm) / (card_w + theme.space_sm)).floor().max(1.0) as usize;
+
+            egui::Grid::new("library_sidecar_card_grid")
+                .num_columns(cols)
+                .spacing([theme.space_sm, theme.space_sm])
+                .show(ui, |ui| {
+                    for (idx, descriptor) in descriptors.iter().enumerate() {
+                        render_sidecar_card_grid_item(app, ui, descriptor, card_w);
+                        if (idx + 1) % cols == 0 {
+                            ui.end_row();
+                        }
+                    }
+                });
+        });
+}
+
+fn render_sidecar_card_grid_item(
+    app: &mut InspectorApp,
+    ui: &mut Ui,
+    descriptor: &SidecarDescriptor,
+    card_w: f32,
+) {
+    let theme = app.theme;
+
+    Frame::none()
+        .fill(theme.bg_surface)
+        .rounding(Rounding::same(theme.radius_md))
+        .stroke(theme.border_stroke)
+        .inner_margin(Margin::same(theme.space_sm))
+        .show(ui, |ui| {
+            ui.set_width(card_w);
+            ui.set_min_height(170.0);
+
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(&descriptor.name)
+                            .strong()
+                            .size(theme.type_caption + 1.0)
+                            .color(theme.text_primary),
+                    );
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let cat = descriptor.sidecar_type.category();
+                        let (cat_label, cat_color) = match cat {
+                            AssetCategory::AudioInstrument => ("AUDIO INSTRUMENT", theme.deck_colors[0]),
+                            AssetCategory::AudioInsert => ("AUDIO INSERT", theme.accent),
+                            AssetCategory::VisualInstrument => ("VISUAL INSTRUMENT", theme.warning),
+                            AssetCategory::VisualInsert => ("VISUAL INSERT", theme.deck_colors[1]),
+                            AssetCategory::AudioFiles => ("AUDIO FILES", theme.text_secondary),
+                        };
+
+                        Frame::none()
+                            .fill(cat_color.linear_multiply(0.15))
+                            .rounding(Rounding::same(theme.radius_sm))
+                            .inner_margin(Margin::symmetric(theme.space_xs, 2.0))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    RichText::new(cat_label)
+                                        .size(theme.type_caption - 1.0)
+                                        .strong()
+                                        .color(cat_color),
+                                );
+                            });
+                    });
+                });
+
+                ui.add_space(2.0);
+
+                ui.label(
+                    RichText::new(&descriptor.description)
+                        .size(theme.type_caption)
+                        .color(theme.text_secondary),
+                );
+
+                ui.add_space(theme.space_xs);
+
+                // Action Buttons
+                ui.horizontal_wrapped(|ui| {
+                    let cat = descriptor.sidecar_type.category();
+                    if cat == AssetCategory::AudioInstrument {
+                        let slot = app.composer.selected_composer_track.unwrap_or(0);
+                        if ui.button(RichText::new(format!("→ LOAD TO TRACK {}", slot + 1)).size(theme.type_caption))
+                            .on_hover_text("Assign this instrument sidecar to selected composer track")
+                            .clicked()
+                        {
+                            app.composer.track_targets[slot] = descriptor.id.clone();
+                        }
+                    } else if cat == AssetCategory::VisualInstrument || cat == AssetCategory::VisualInsert {
+                        if ui.button(RichText::new("→ LOAD TO VISUAL MIXER").size(theme.type_caption))
+                            .on_hover_text("Open in Visual Mixer surface")
+                            .clicked()
+                        {
+                            app.active_view = crate::View::Visuals;
+                        }
+                    } else if cat == AssetCategory::AudioInsert {
+                        ui.label(RichText::new("LOAD TO DECK:").size(theme.type_caption).color(theme.text_disabled));
+                        for (i, &deck_char) in ['A', 'B', 'C', 'D'].iter().enumerate() {
+                            let deck_color = theme.deck_colors[i];
+                            if ui.button(
+                                RichText::new(format!("DECK {}", deck_char))
+                                    .size(theme.type_caption)
+                                    .color(deck_color),
+                            ).on_hover_text(format!("Load {} onto Deck {}", descriptor.name, deck_char)).clicked() {
+                                app.decks.deck_inserts[i].push(descriptor.name.clone());
+                                app.decks.deck_insert_params[i].push([0.5; 8]);
+                            }
+                        }
+                    }
+                });
+            });
+        });
+}
+
+// ============================================================================
+// LIST VIEW RENDERING (Right Sidebar)
+// ============================================================================
+
+const TRACK_ROW_H: f32 = 26.0;
+const TRACK_DETAIL_H: f32 = 250.0;
+
+fn render_asset_list(app: &mut InspectorApp, ui: &mut Ui) {
+    let search_q = app.library.search_query.trim().to_lowercase();
+
+    match app.library.active_main_category {
+        MainCategory::Audio => {
+            render_audio_files_list(app, ui, &search_q);
+        }
+        MainCategory::Sidecars => {
+            render_sidecars_list(app, ui, &search_q);
+        }
+    }
+}
+
+fn render_audio_files_list(app: &mut InspectorApp, ui: &mut Ui, search_q: &str) {
+    let theme = app.theme;
+    let displayed_tracks = get_filtered_audio_tracks(app, search_q);
 
     ui.label(
         RichText::new(format!("{} AUDIO FILES", displayed_tracks.len()))
@@ -373,7 +761,7 @@ fn render_audio_files_list(app: &mut InspectorApp, ui: &mut Ui, search_q: &str) 
     ui.add_space(theme.space_xs);
 
     ScrollArea::vertical()
-        .id_source("lib_scroll")
+        .id_source("lib_sidebar_audio_scroll")
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {
             let expanded = app.library.expanded_track;
@@ -413,117 +801,23 @@ fn render_audio_files_list(app: &mut InspectorApp, ui: &mut Ui, search_q: &str) 
         });
 }
 
-fn render_sidecars_for_category(
-    app: &mut InspectorApp,
-    ui: &mut Ui,
-    category: AssetCategory,
-    search_q: &str,
-) {
+fn render_sidecars_list(app: &mut InspectorApp, ui: &mut Ui, search_q: &str) {
     let theme = app.theme;
-    let mut descriptors = app.store.store_catalog.filter_by_category(category);
-    if !search_q.is_empty() {
-        descriptors.retain(|d| {
-            d.id.to_lowercase().contains(search_q)
-                || d.name.to_lowercase().contains(search_q)
-                || d.description.to_lowercase().contains(search_q)
-                || d.tags.iter().any(|t| t.to_lowercase().contains(search_q))
-        });
-    }
+    let descriptors = get_filtered_sidecars(app, search_q);
 
     ui.label(
-        RichText::new(format!("{} MODULES IN {}", descriptors.len(), category.name().to_uppercase()))
+        RichText::new(format!("{} SIDECAR MODULES", descriptors.len()))
             .size(theme.type_caption)
             .color(theme.text_secondary),
     );
     ui.add_space(theme.space_xs);
 
     ScrollArea::vertical()
-        .id_source("lib_sidecar_scroll")
+        .id_source("lib_sidebar_sidecar_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             for descriptor in descriptors {
                 render_sidecar_card_in_library(app, ui, &descriptor);
-                ui.add_space(theme.space_sm);
-            }
-        });
-}
-
-fn render_all_categories_list(app: &mut InspectorApp, ui: &mut Ui, search_q: &str) {
-    let theme = app.theme;
-
-    let mut displayed_tracks = app.library.cached_library.clone();
-    if !search_q.is_empty() {
-        displayed_tracks.retain(|t| {
-            t.title.to_lowercase().contains(search_q)
-                || t.artist.to_lowercase().contains(search_q)
-                || t.album.to_lowercase().contains(search_q)
-                || t.genre.to_lowercase().contains(search_q)
-        });
-    }
-    app.library.sort.order_tracks(&mut displayed_tracks);
-
-    let store_list = app.store.store_catalog.list();
-
-    ScrollArea::vertical()
-        .id_source("lib_all_categories_scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            // Section 1: Audio Files
-            ui.label(
-                RichText::new(format!("━━━ AUDIO FILES ({}) ━━━", displayed_tracks.len()))
-                    .size(theme.type_caption)
-                    .strong()
-                    .color(theme.accent),
-            );
-            ui.add_space(theme.space_xs);
-
-            for track in &displayed_tracks {
-                render_track_row(app, ui, track);
-            }
-
-            ui.add_space(theme.space_md);
-
-            // Sidecar Categories
-            let sidecar_categories = [
-                AssetCategory::AudioInstrument,
-                AssetCategory::AudioInsert,
-                AssetCategory::VisualInstrument,
-                AssetCategory::VisualInsert,
-            ];
-
-            for cat in sidecar_categories {
-                let mut cat_items: Vec<_> = store_list
-                    .iter()
-                    .filter(|d| d.sidecar_type.category() == cat)
-                    .cloned()
-                    .collect();
-
-                if !search_q.is_empty() {
-                    cat_items.retain(|d| {
-                        d.id.to_lowercase().contains(search_q)
-                            || d.name.to_lowercase().contains(search_q)
-                            || d.description.to_lowercase().contains(search_q)
-                            || d.tags.iter().any(|t| t.to_lowercase().contains(search_q))
-                    });
-                }
-
-                if cat_items.is_empty() {
-                    continue;
-                }
-
-                ui.label(
-                    RichText::new(format!("━━━ {} ({}) ━━━", cat.name().to_uppercase(), cat_items.len()))
-                        .size(theme.type_caption)
-                        .strong()
-                        .color(theme.accent),
-                );
-                ui.add_space(theme.space_xs);
-
-                for descriptor in cat_items {
-                    render_sidecar_card_in_library(app, ui, &descriptor);
-                    ui.add_space(theme.space_sm);
-                }
-
                 ui.add_space(theme.space_sm);
             }
         });
@@ -623,7 +917,6 @@ fn render_sidecar_card_in_library(
         });
 }
 
-/// One library row, plus its details when expanded.
 fn render_track_row(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dna::LibraryTrack) {
     let theme = app.theme;
     let is_expanded = app.library.expanded_track == Some(track.id);
@@ -640,13 +933,9 @@ fn render_track_row(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dna::L
         ui.painter().rect_filled(rect, theme.radius_sm, theme.accent.linear_multiply(0.10));
     }
 
-    // Symmetric padding. The row used to pad only on the left, so the delete
-    // button sat flush against the panel edge.
     let pad = theme.space_sm;
     let mut toggled = false;
     ui.child_ui(rect.shrink2(egui::vec2(pad, 0.0)), Layout::left_to_right(Align::Center), None).horizontal(|ui| {
-        // Details toggle — an explicit affordance, so opening details and
-        // selecting a track stay separate actions.
         let chevron = if is_expanded { egui_phosphor::regular::CARET_DOWN } else { egui_phosphor::regular::CARET_RIGHT };
         if ui
             .add(egui::Button::new(RichText::new(chevron).size(theme.type_caption)).frame(false))
@@ -659,8 +948,6 @@ fn render_track_row(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dna::L
         let is_loaded = app.decks.now_playing.iter().any(|np| np.as_ref() == Some(&track.id));
         let text_color = if is_loaded { theme.accent } else { theme.text_primary };
 
-        // Reserve the right-hand controls explicitly rather than by magic
-        // constant, so a longer BPM or a wider sparkline cannot overlap the title.
         const RIGHT_CONTROLS_W: f32 = 118.0;
         let left_budget = (rect.width() - RIGHT_CONTROLS_W - pad * 2.0).max(40.0);
         ui.allocate_ui(egui::vec2(left_budget, rect.height()), |ui| {
@@ -703,17 +990,12 @@ fn render_track_row(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dna::L
             app.library.expanded_track = None;
         } else {
             app.library.expanded_track = Some(track.id);
-            // Expanding IS inspecting. `cached_inspected_track` is synced from
-            // this in the frame loop, and it is what the editable fields below
-            // bind to — without it the panel would open with stale content.
             app.library.selected_library_track = Some(track.id);
         }
     } else if res.clicked() {
         app.library.selected_library_track = Some(track.id);
     }
 
-    // Double-click still loads to the focused deck — the primary gesture, kept
-    // exactly as it was so the accordion does not cost anyone their muscle memory.
     if res.double_clicked() {
         let deck_idx = app.decks.focused_deck;
         if deck_idx < 4 {
@@ -733,7 +1015,6 @@ fn render_track_row(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dna::L
     ui.painter().hline(rect.x_range(), detail_bottom, Stroke::new(1.0_f32, theme.border));
 }
 
-/// The track inspector, inline under its own row.
 fn render_track_details(app: &mut InspectorApp, ui: &mut Ui, track: &nullherz_dna::LibraryTrack) -> f32 {
     let theme = app.theme;
     let mut save_clicked = false;

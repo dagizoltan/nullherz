@@ -392,8 +392,86 @@ pub struct LibraryRefreshPayload {
     pub smart_crates: Vec<nullherz_dna::SmartCrateDefinition>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MainCategory {
+    Audio,
+    Sidecars,
+}
+
+impl MainCategory {
+    #[allow(dead_code)]
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Audio => "Audio",
+            Self::Sidecars => "Sidecars",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[Self::Audio, Self::Sidecars]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioSubcategory {
+    All,
+    Tracks,
+    Samples,
+    Stems,
+}
+
+impl AudioSubcategory {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::All => "All Audio",
+            Self::Tracks => "Tracks",
+            Self::Samples => "Samples",
+            Self::Stems => "Demixed Stems",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[Self::All, Self::Tracks, Self::Samples, Self::Stems]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidecarSubcategory {
+    All,
+    AudioInstruments,
+    AudioInserts,
+    VisualInstruments,
+    VisualInserts,
+}
+
+impl SidecarSubcategory {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::All => "All Sidecars",
+            Self::AudioInstruments => "Audio Instruments",
+            Self::AudioInserts => "Audio Inserts",
+            Self::VisualInstruments => "Visual Instruments",
+            Self::VisualInserts => "Visual Inserts",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::All,
+            Self::AudioInstruments,
+            Self::AudioInserts,
+            Self::VisualInstruments,
+            Self::VisualInserts,
+        ]
+    }
+}
+
 /// Library browsing, smart crates, and background loading.
 pub struct LibraryState {
+    pub active_main_category: MainCategory,
+    pub active_audio_sub: AudioSubcategory,
+    pub active_sidecar_sub: SidecarSubcategory,
+    #[allow(dead_code)]
     pub active_category: Option<sidecar_sdk::AssetCategory>,
     pub active_crate: Option<String>,
     pub search_query: String,
@@ -424,6 +502,9 @@ pub struct LibraryState {
 impl Default for LibraryState {
     fn default() -> Self {
         Self {
+            active_main_category: MainCategory::Audio,
+            active_audio_sub: AudioSubcategory::All,
+            active_sidecar_sub: SidecarSubcategory::All,
             active_category: None,
             active_crate: None,
             search_query: String::new(),
@@ -1997,6 +2078,9 @@ impl Default for VizState {
 
 /// Sidecar store browsing and tag filtering state.
 pub struct StoreState {
+    pub active_main_category: MainCategory,
+    pub active_audio_sub: AudioSubcategory,
+    pub active_sidecar_sub: SidecarSubcategory,
     pub active_category: Option<sidecar_sdk::AssetCategory>,
     pub search_query: String,
     #[allow(dead_code)]
@@ -2007,6 +2091,9 @@ pub struct StoreState {
 impl Default for StoreState {
     fn default() -> Self {
         Self {
+            active_main_category: MainCategory::Audio,
+            active_audio_sub: AudioSubcategory::All,
+            active_sidecar_sub: SidecarSubcategory::All,
             active_category: None,
             search_query: String::new(),
             selected_sidecar: None,
