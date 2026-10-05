@@ -185,14 +185,6 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui) {
                     }
                 }
 
-                // Crate filters
-                let is_stems_crate = app.library.active_crate.as_deref() == Some("stems");
-                if ui.selectable_label(is_stems_crate, format!("{} DEMIXED STEMS", egui_phosphor::regular::LIGHTNING)).clicked() {
-                    app.library.active_crate = Some("stems".to_string());
-                    app.library.active_audio_sub = AudioSubcategory::Stems;
-                    app.library.library_needs_refresh = true;
-                }
-
                 for crate_name in app.library.cached_crates.clone() {
                     if ["track", "sample", "sequence", "instrument", "insert", "visual", "stems"].contains(&crate_name.as_str()) {
                         continue;
@@ -369,20 +361,22 @@ fn get_filtered_audio_tracks(app: &InspectorApp, search_q: &str) -> Vec<nullherz
 
     // Filter by Subcategory
     match app.library.active_audio_sub {
-        AudioSubcategory::All => {}
+        AudioSubcategory::All => {
+            tracks.retain(|t| !t.path.contains("library/stems/") && !t.path.contains("stems/stem_"));
+        }
         AudioSubcategory::Tracks => {
-            tracks.retain(|t| !t.path.contains("samples/") && !t.path.contains("sequences/") && t.stems.is_none());
+            tracks.retain(|t| !t.path.contains("samples/") && !t.path.contains("sequences/") && !t.path.contains("stems/") && t.stems.is_none());
         }
         AudioSubcategory::Samples => {
-            tracks.retain(|t| t.path.contains("samples/") || t.path.contains("sequences/"));
+            tracks.retain(|t| (t.path.contains("samples/") || t.path.contains("sequences/")) && !t.path.contains("stems/"));
         }
         AudioSubcategory::Stems => {
-            tracks.retain(|t| t.stems.is_some() || t.path.contains("stems/"));
+            tracks.retain(|t| t.stems.is_some() && !t.path.contains("stems/stem_"));
         }
     }
 
     if app.library.active_crate.as_deref() == Some("stems") {
-        tracks.retain(|t| t.stems.is_some());
+        tracks.retain(|t| t.stems.is_some() && !t.path.contains("stems/stem_"));
     }
 
     if !search_q.is_empty() {
