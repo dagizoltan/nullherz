@@ -4,7 +4,6 @@
 //! telemetry, theme, renderers).
 
 use crate::{SettingsTab, View};
-use nullherz_backends::AudioBackend;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ChannelInputSource {

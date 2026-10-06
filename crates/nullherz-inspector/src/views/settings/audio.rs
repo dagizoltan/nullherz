@@ -1,7 +1,6 @@
 use egui::{Ui, Frame, RichText};
 use crate::InspectorApp;
 use nullherz_traits::AudioBackendType;
-use nullherz_backends::AudioBackend;
 
 pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
