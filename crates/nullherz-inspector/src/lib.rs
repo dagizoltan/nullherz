@@ -1161,46 +1161,40 @@ impl InspectorApp {
                     ui.separator();
                     ui.toggle_value(&mut self.broadcast.is_streaming, egui_phosphor::regular::BROADCAST).on_hover_text("Toggle Live Broadcast");
 
-                    // CENTER: Branding, BPM, POS, Realtime DSP Info
+                    // CENTER: Branding & System Indicator Pills
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
                         ui.label(egui::RichText::new("nullherz Studio").size(10.0).strong().color(self.theme.accent));
 
                         if let Some(t) = telemetry {
-                            ui.add_space(4.0);
+                            ui.separator();
 
-                            // Helper function for status indicator pills
-                            let render_pill = |ui: &mut egui::Ui, text: &str, bg_color: egui::Color32, stroke_color: egui::Color32, text_color: egui::Color32| {
+                            let theme = self.theme;
+                            let render_pill = |ui: &mut egui::Ui, icon: &str, label: &str, val: &str, color: egui::Color32, bg_fill: egui::Color32| {
                                 egui::Frame::none()
-                                    .fill(bg_color)
-                                    .stroke(egui::Stroke::new(1.0, stroke_color))
-                                    .rounding(egui::Rounding::same(self.theme.radius_sm))
+                                    .fill(bg_fill)
+                                    .rounding(egui::Rounding::same(3.0))
                                     .inner_margin(egui::Margin::symmetric(6.0, 2.0))
+                                    .stroke(egui::Stroke::new(1.0, color.linear_multiply(0.4)))
                                     .show(ui, |ui| {
-                                        ui.label(egui::RichText::new(text).size(10.0).strong().color(text_color));
+                                        ui.horizontal(|ui| {
+                                            ui.spacing_mut().item_spacing.x = 3.0;
+                                            if !icon.is_empty() {
+                                                ui.label(egui::RichText::new(icon).size(10.0).color(color));
+                                            }
+                                            if !label.is_empty() {
+                                                ui.label(egui::RichText::new(label).size(8.5).strong().color(theme.text_secondary));
+                                            }
+                                            ui.label(egui::RichText::new(val).monospace().size(9.5).strong().color(color));
+                                        });
                                     });
                             };
 
-                            // BPM Indicator Pill
-                            render_pill(
-                                ui,
-                                &format!("{} {:.1} BPM", egui_phosphor::regular::METRONOME, t.bpm),
-                                self.theme.bg_inset,
-                                self.theme.border_stroke.color,
-                                self.theme.text_primary,
-                            );
+                            // 1. BPM Indicator Pill
+                            render_pill(ui, egui_phosphor::regular::PULSE, "BPM", &format!("{:.1}", t.bpm), theme.accent, theme.bg_inset);
 
-                            ui.add_space(2.0);
-
-                            // POS Indicator Pill
-                            render_pill(
-                                ui,
-                                &format!("{} POS {:.2}", egui_phosphor::regular::TIMER, t.beat_position),
-                                self.theme.bg_inset,
-                                self.theme.border_stroke.color,
-                                self.theme.accent,
-                            );
-
-                            ui.add_space(2.0);
+                            // 2. POS Beat Position Pill
+                            render_pill(ui, egui_phosphor::regular::TIMER, "POS", &format!("{:.2}", t.beat_position), theme.text_primary, theme.bg_inset);
 
                             let sr_khz = self.settings.sample_rate / 1000.0;
                             let block_f = self.settings.buffer_size;
@@ -1217,31 +1211,22 @@ impl InspectorApp {
                             };
 
                             let rt_warnings = ipc_layer::realtime_environment_warnings();
-                            if self.settings.exclusive_performance_mode && rt_warnings.is_empty() {
-                                render_pill(
-                                    ui,
-                                    &format!("{} REALTIME {:.0}kHz • {}f ({:.2}ms) • DSP {:.1}%", egui_phosphor::regular::LIGHTNING, sr_khz, block_f, latency_ms, dsp_load),
-                                    self.theme.success.linear_multiply(0.12),
-                                    self.theme.success,
-                                    self.theme.success,
-                                );
-                            } else if !rt_warnings.is_empty() {
-                                render_pill(
-                                    ui,
-                                    &format!("{} PREEMPTION RISK • {}f ({:.2}ms) • DSP {:.1}%", egui_phosphor::regular::WARNING, block_f, latency_ms, dsp_load),
-                                    self.theme.danger.linear_multiply(0.12),
-                                    self.theme.danger,
-                                    self.theme.danger,
-                                );
+
+                            // 3. System Engine State / Preemption Risk Pill
+                            if !rt_warnings.is_empty() {
+                                render_pill(ui, egui_phosphor::regular::WARNING, "", "PREEMPTION RISK", theme.danger, theme.danger.linear_multiply(0.18));
+                            } else if self.settings.exclusive_performance_mode {
+                                render_pill(ui, egui_phosphor::regular::LIGHTNING, "REALTIME", &format!("{:.0}kHz", sr_khz), theme.success, theme.success.linear_multiply(0.18));
                             } else {
-                                render_pill(
-                                    ui,
-                                    &format!("{} DESKTOP {:.0}kHz • {}f (~{:.1}ms) • DSP {:.1}%", egui_phosphor::regular::DESKTOP, sr_khz, block_f, latency_ms, dsp_load),
-                                    self.theme.warning.linear_multiply(0.12),
-                                    self.theme.warning,
-                                    self.theme.warning,
-                                );
+                                render_pill(ui, egui_phosphor::regular::DESKTOP, "DESKTOP", &format!("{:.0}kHz", sr_khz), theme.warning, theme.bg_inset);
                             }
+
+                            // 4. Buffer & Latency Pill
+                            render_pill(ui, egui_phosphor::regular::EQUALIZER, "BUF", &format!("{}f ({:.2}ms)", block_f, latency_ms), theme.text_primary, theme.bg_inset);
+
+                            // 5. DSP Load Pill
+                            let dsp_color = if dsp_load > 80.0 { theme.danger } else if dsp_load > 50.0 { theme.warning } else { theme.success };
+                            render_pill(ui, egui_phosphor::regular::CPU, "DSP", &format!("{:.1}%", dsp_load), dsp_color, dsp_color.linear_multiply(0.12));
                         }
                     });
                 });
