@@ -570,6 +570,12 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
     if let Some(track) = cached_track {
         ui.group(|ui| {
             ui.vertical(|ui| {
+                let total_samples = track.metadata.total_samples.max(1);
+                let sr = track.metadata.sample_rate.max(1) as f64;
+                let total_sec = total_samples as f64 / sr;
+                let duration_min = (total_sec / 60.0).floor() as u32;
+                let duration_sec = (total_sec % 60.0).floor() as u32;
+
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(&track.title).strong().size(theme.type_body).color(theme.text_primary));
                     ui.label(egui::RichText::new(format!("by {}", track.artist)).size(theme.type_caption).color(theme.text_secondary));
@@ -577,7 +583,8 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let root_k = track.metadata.root_key.map(|k| k as usize % 12).unwrap_or(0);
                         let (k_name, camelot) = pitch_index_to_camelot(root_k, true);
-                        ui.label(egui::RichText::new(format!("KEY: {} ({}) | BPM: {:.1}", k_name, camelot, track.metadata.bpm)).strong().size(theme.type_caption).color(theme.accent));
+                        ui.label(egui::RichText::new(format!("KEY: {} ({}) | BPM: {:.1} | DURATION: {:02}:{:02} ({} samples)",
+                            k_name, camelot, track.metadata.bpm, duration_min, duration_sec, total_samples)).strong().size(theme.type_caption).color(theme.accent));
                     });
                 });
 
@@ -585,8 +592,8 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                 ui.add_space(2.0);
 
                 // --- Full-Track Multi-Band Waveform Canvas ---
-                let available_size = egui::vec2(ui.available_width(), 140.0);
-                let (rect, _response) = ui.allocate_exact_size(available_size, egui::Sense::hover());
+                let available_size = egui::vec2(ui.available_width(), 150.0);
+                let (rect, _response) = ui.allocate_exact_size(available_size, egui::Sense::click_and_drag());
 
                 ui.painter().rect_filled(rect, theme.radius_sm, egui::Color32::from_rgb(12, 16, 24));
                 ui.painter().rect_stroke(rect, theme.radius_sm, egui::Stroke::new(1.0_f32, theme.border));
@@ -608,12 +615,11 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                     }
                 }
 
-                // Render transients timeline
+                // Render ALL transients across the complete track duration
                 let transients = track.metadata.transients.as_slice();
                 if !transients.is_empty() {
-                    let track_duration_samples = (peaks.len() as f64 * 128.0).max(1.0);
-                    for &t_frame in transients.iter().take(200) {
-                        let pos_norm = (t_frame as f64 / track_duration_samples).clamp(0.0, 1.0) as f32;
+                    for &t_frame in transients.iter() {
+                        let pos_norm = (t_frame as f64 / total_samples as f64).clamp(0.0, 1.0) as f32;
                         let tx = rect.left() + pos_norm * rect.width();
                         ui.painter().line_segment(
                             [egui::pos2(tx, rect.bottom()), egui::pos2(tx, rect.bottom() - 25.0)],
@@ -622,10 +628,29 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                     }
                 }
 
+                // Render Hot-Cues across the track timeline
+                for (cue_idx, &cue_opt) in track.metadata.hot_cues.iter().enumerate() {
+                    if let Some(cue_frame) = cue_opt {
+                        let cue_norm = (cue_frame as f64 / total_samples as f64).clamp(0.0, 1.0) as f32;
+                        let cx = rect.left() + cue_norm * rect.width();
+                        ui.painter().line_segment(
+                            [egui::pos2(cx, rect.top()), egui::pos2(cx, rect.bottom())],
+                            egui::Stroke::new(1.5_f32, theme.success),
+                        );
+                        ui.painter().text(
+                            egui::pos2(cx + 3.0, rect.top() + 10.0),
+                            egui::Align2::LEFT_TOP,
+                            format!("CUE {}", cue_idx + 1),
+                            egui::FontId::proportional(8.0),
+                            theme.success,
+                        );
+                    }
+                }
+
                 // Playhead position line
                 let beat_pos = telemetry.as_ref().map(|t| t.beat_position as f32).unwrap_or(0.0);
-                let beats_in_track = (track.metadata.bpm * 3.0).max(16.0);
-                let playhead_norm = ((beat_pos % beats_in_track) / beats_in_track).clamp(0.0, 1.0);
+                let total_beats = (total_sec * (track.metadata.bpm as f64 / 60.0)).max(1.0) as f32;
+                let playhead_norm = ((beat_pos % total_beats) / total_beats).clamp(0.0, 1.0);
                 let playhead_x = rect.left() + playhead_norm * rect.width();
 
                 ui.painter().line_segment(
@@ -699,7 +724,7 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                             ui.label(egui::RichText::new("MICRO-TIMING GROOVE DEVIATIONS (16THs)").strong().size(8.5).color(theme.warning));
 
                             let groove = &track.metadata.dna.rhythmic.micro_timing;
-                            for (idx, &dev) in groove.iter().take(8).enumerate() {
+                            for (idx, &dev) in groove.iter().enumerate() {
                                 ui.horizontal(|ui| {
                                     ui.label(egui::RichText::new(format!("STEP {:02}", idx + 1)).size(7.5).color(theme.text_secondary));
                                     let dev_norm = (dev as f32 / 128.0).clamp(-1.0, 1.0);
