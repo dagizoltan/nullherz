@@ -796,6 +796,9 @@ pub struct SettingsState {
     pub exclusive_performance_mode: bool,
     pub sample_rate: f32,
     pub buffer_size: usize,
+    pub auto_midi_discovery: bool,
+    pub discovered_midi_ports: Vec<String>,
+    pub last_midi_scan_time: f64,
 }
 
 impl Default for SettingsState {
@@ -821,6 +824,9 @@ impl Default for SettingsState {
             exclusive_performance_mode: false,
             sample_rate: 48000.0,
             buffer_size: 256,
+            auto_midi_discovery: true,
+            discovered_midi_ports: Vec::new(),
+            last_midi_scan_time: 0.0,
         }
     }
 }
