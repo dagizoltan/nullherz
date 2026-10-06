@@ -1,4 +1,4 @@
-use egui::Ui;
+use egui::{Ui, Frame, RichText, Stroke, Color32, Margin};
 use audio_core::Telemetry;
 use crate::InspectorApp;
 use crate::state::AnalyzerMode;
@@ -79,26 +79,51 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         .id_source("analyzer_scroll_area")
         .show(ui, |ui| {
             ui.vertical(|ui| {
-                // --- Top Screen/Mode Selector Bar ---
-                ui.horizontal(|ui| {
-                    ui.selectable_value(
-                        &mut app.analyzer.mode,
-                        AnalyzerMode::RealTime,
-                        egui::RichText::new("⚡ REAL-TIME PERCEPTION").strong().size(theme.type_body),
-                    );
-                    ui.selectable_value(
-                        &mut app.analyzer.mode,
-                        AnalyzerMode::FullTrack,
-                        egui::RichText::new("📊 FULL-TRACK ANALYSIS").strong().size(theme.type_body),
-                    );
+                // --- Studio Mode Selector Header Card ---
+                Frame::none()
+                    .fill(theme.bg_surface)
+                    .rounding(theme.radius_md)
+                    .stroke(Stroke::new(1.0, theme.border))
+                    .inner_margin(Margin::symmetric(theme.space_md, theme.space_xs))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let rt_active = app.analyzer.mode == AnalyzerMode::RealTime;
+                            let ft_active = app.analyzer.mode == AnalyzerMode::FullTrack;
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if app.analyzer.mode == AnalyzerMode::RealTime {
-                            ui.toggle_value(&mut app.analyzer.ab_enabled, egui::RichText::new("A/B COMPARES").strong().size(theme.type_caption));
-                        }
+                            let rt_btn = egui::Button::new(
+                                RichText::new(format!("{} REAL-TIME PERCEPTION", egui_phosphor::regular::LIGHTNING))
+                                    .strong()
+                                    .size(theme.type_body)
+                                    .color(if rt_active { Color32::BLACK } else { theme.text_primary })
+                            ).fill(if rt_active { theme.accent } else { theme.bg_inset });
+
+                            if ui.add(rt_btn).clicked() {
+                                app.analyzer.mode = AnalyzerMode::RealTime;
+                            }
+
+                            let ft_btn = egui::Button::new(
+                                RichText::new(format!("{} FULL-TRACK PASSPORT", egui_phosphor::regular::CHART_PIE))
+                                    .strong()
+                                    .size(theme.type_body)
+                                    .color(if ft_active { Color32::BLACK } else { theme.text_primary })
+                            ).fill(if ft_active { theme.accent } else { theme.bg_inset });
+
+                            if ui.add(ft_btn).clicked() {
+                                app.analyzer.mode = AnalyzerMode::FullTrack;
+                            }
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if app.analyzer.mode == AnalyzerMode::RealTime {
+                                    let ab_bg = if app.analyzer.ab_enabled { theme.warning } else { theme.bg_inset };
+                                    let ab_fg = if app.analyzer.ab_enabled { Color32::BLACK } else { theme.text_secondary };
+                                    if ui.add(egui::Button::new(RichText::new("A/B COMPARES").strong().size(theme.type_caption).color(ab_fg)).fill(ab_bg)).clicked() {
+                                        app.analyzer.ab_enabled = !app.analyzer.ab_enabled;
+                                    }
+                                }
+                            });
+                        });
                     });
-                });
-                ui.separator();
+
                 ui.add_space(theme.space_xs);
 
                 match app.analyzer.mode {
@@ -113,27 +138,34 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     let theme = app.theme;
 
-    // Layer Filter Chips in Clean Categorized Groups
-    ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new("DISPLAY:").size(theme.type_caption).strong().color(theme.accent));
-        ui.toggle_value(&mut app.analyzer.layer_spectral, "[SPECTRAL]");
-        ui.toggle_value(&mut app.analyzer.show_waterfall, "[3D WATERFALL]");
-        ui.toggle_value(&mut app.analyzer.layer_raw, "[RAW]");
+    // Layer Filter Chips in Clean Studio Card
+    Frame::none()
+        .fill(theme.bg_surface)
+        .rounding(theme.radius_sm)
+        .stroke(Stroke::new(1.0, theme.border))
+        .inner_margin(Margin::symmetric(theme.space_md, theme.space_xs))
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("DISPLAY:").size(theme.type_caption).strong().color(theme.accent));
+                ui.toggle_value(&mut app.analyzer.layer_spectral, "[SPECTRAL]");
+                ui.toggle_value(&mut app.analyzer.show_waterfall, "[3D WATERFALL]");
+                ui.toggle_value(&mut app.analyzer.layer_raw, "[RAW]");
 
-        ui.add_space(10.0);
-        ui.label(egui::RichText::new("PERCEPTION:").size(theme.type_caption).strong().color(theme.accent));
-        ui.toggle_value(&mut app.analyzer.show_camelot_wheel, "[CAMELOT]");
-        ui.toggle_value(&mut app.analyzer.layer_harmonic, "[ISO 226 PHON]");
-        ui.toggle_value(&mut app.analyzer.layer_rhythm, "[RHYTHM]");
-        ui.toggle_value(&mut app.analyzer.layer_transient, "[TRANSIENT]");
+                ui.add_space(12.0);
+                ui.label(RichText::new("PERCEPTION:").size(theme.type_caption).strong().color(theme.accent));
+                ui.toggle_value(&mut app.analyzer.show_camelot_wheel, "[CAMELOT]");
+                ui.toggle_value(&mut app.analyzer.layer_harmonic, "[ISO 226 PHON]");
+                ui.toggle_value(&mut app.analyzer.layer_rhythm, "[RHYTHM]");
+                ui.toggle_value(&mut app.analyzer.layer_transient, "[TRANSIENT]");
 
-        ui.add_space(10.0);
-        ui.label(egui::RichText::new("METRICS:").size(theme.type_caption).strong().color(theme.accent));
-        ui.toggle_value(&mut app.analyzer.layer_energy, "[LUFS]");
-        ui.toggle_value(&mut app.analyzer.layer_stereo, "[STEREO VECTORSCOPE]");
-        ui.toggle_value(&mut app.analyzer.layer_collision, "[COLLISION]");
-    });
-    ui.separator();
+                ui.add_space(12.0);
+                ui.label(RichText::new("METRICS:").size(theme.type_caption).strong().color(theme.accent));
+                ui.toggle_value(&mut app.analyzer.layer_energy, "[LUFS]");
+                ui.toggle_value(&mut app.analyzer.layer_stereo, "[STEREO VECTORSCOPE]");
+                ui.toggle_value(&mut app.analyzer.layer_collision, "[COLLISION]");
+            });
+        });
+
     ui.add_space(theme.space_xs);
 
     // Compute Live LUFS & Maintain History Queue before UI layout
@@ -180,7 +212,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
         let (rect, response) = ui.allocate_exact_size(available_size, egui::Sense::hover());
 
         ui.painter().rect_filled(rect, theme.radius_md, egui::Color32::from_rgb(10, 12, 18));
-        ui.painter().rect_stroke(rect, theme.radius_md, egui::Stroke::new(1.0_f32, theme.border));
+        ui.painter().rect_stroke(rect, theme.radius_md, Stroke::new(1.0_f32, theme.border));
 
         // --- Real-Time Acoustic Anomaly Detector Banner ---
         let peak_max = app.viz.damped_master_peaks[0].max(app.viz.damped_master_peaks[1]);
@@ -195,7 +227,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
                 egui::vec2(rect.width() - 30.0, 22.0),
             );
             ui.painter().rect_filled(alert_rect, theme.radius_sm, theme.danger.linear_multiply(0.2));
-            ui.painter().rect_stroke(alert_rect, theme.radius_sm, egui::Stroke::new(1.0_f32, theme.danger));
+            ui.painter().rect_stroke(alert_rect, theme.radius_sm, Stroke::new(1.0_f32, theme.danger));
 
             let alert_msg = if has_clipping {
                 format!("⚡ ACOUSTIC ANOMALY: INTER-SAMPLE CLIPPING DETECTED ({:.1} dBFS)", 20.0 * peak_max.log10())
@@ -238,7 +270,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
                         220,
                     ).linear_multiply(alpha * 0.85);
 
-                    ui.painter().line_segment([pts[i], pts[i + 1]], egui::Stroke::new(1.0_f32, color));
+                    ui.painter().line_segment([pts[i], pts[i + 1]], Stroke::new(1.0_f32, color));
                 }
             }
         }
@@ -266,7 +298,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
                     let peak_y = (rect.bottom() - bar_h - 2.0).clamp(rect.top(), rect.bottom());
                     ui.painter().line_segment(
                         [egui::pos2(rect.left() + i as f32 * bin_w, peak_y), egui::pos2(rect.left() + (i + 1) as f32 * bin_w - 1.0, peak_y)],
-                        egui::Stroke::new(1.5_f32, theme.accent),
+                        Stroke::new(1.5_f32, theme.accent),
                     );
                 }
             }
@@ -285,7 +317,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
                     // Draw vertical guideline
                     ui.painter().line_segment(
                         [egui::pos2(pos.x, rect.top()), egui::pos2(pos.x, rect.bottom())],
-                        egui::Stroke::new(1.0, theme.accent.linear_multiply(0.6)),
+                        Stroke::new(1.0, theme.accent.linear_multiply(0.6)),
                     );
 
                     // Draw hover tooltip pill
@@ -296,7 +328,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
                     );
                     let pill_rect = egui::Rect::from_min_size(pill_pos, egui::vec2(140.0, 20.0));
                     ui.painter().rect_filled(pill_rect, theme.radius_sm, egui::Color32::from_rgb(20, 28, 42));
-                    ui.painter().rect_stroke(pill_rect, theme.radius_sm, egui::Stroke::new(1.0, theme.accent));
+                    ui.painter().rect_stroke(pill_rect, theme.radius_sm, Stroke::new(1.0, theme.accent));
                     ui.painter().text(
                         pill_rect.center(),
                         egui::Align2::CENTER_CENTER,
@@ -325,7 +357,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
             let wheel_r = 45.0;
 
             ui.painter().circle_filled(wheel_center, wheel_r, egui::Color32::from_rgb(18, 24, 38).linear_multiply(0.92));
-            ui.painter().circle_stroke(wheel_center, wheel_r, egui::Stroke::new(1.5_f32, theme.accent));
+            ui.painter().circle_stroke(wheel_center, wheel_r, Stroke::new(1.5_f32, theme.accent));
 
             ui.painter().text(
                 wheel_center - egui::vec2(0.0, 8.0),
@@ -359,14 +391,14 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
 
                 ui.painter().line_segment(
                     [egui::pos2(bx, rect.top()), egui::pos2(bx, rect.bottom())],
-                    egui::Stroke::new(stroke_w, stroke_color.linear_multiply(0.4)),
+                    Stroke::new(stroke_w, stroke_color.linear_multiply(0.4)),
                 );
             }
 
             let playhead_x = rect.left() + ((beat_pos % 16.0) / 16.0) * rect.width();
             ui.painter().line_segment(
                 [egui::pos2(playhead_x, rect.top()), egui::pos2(playhead_x, rect.bottom())],
-                egui::Stroke::new(2.5_f32, theme.warning),
+                Stroke::new(2.5_f32, theme.warning),
             );
 
             ui.painter().text(
@@ -391,7 +423,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
                 for i in 0..num_bins.saturating_sub(1) {
                     ui.painter().line_segment(
                         [phon_pts[i], phon_pts[i + 1]],
-                        egui::Stroke::new(1.2_f32, egui::Color32::from_rgb(0, 220, 180).linear_multiply(*phon / 100.0)),
+                        Stroke::new(1.2_f32, egui::Color32::from_rgb(0, 220, 180).linear_multiply(*phon / 100.0)),
                     );
                 }
             }
@@ -416,15 +448,15 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
             let (v_rect, _) = ui.allocate_exact_size(vec_size, egui::Sense::hover());
 
             ui.painter().rect_filled(v_rect, theme.radius_md, egui::Color32::from_rgb(12, 14, 20));
-            ui.painter().rect_stroke(v_rect, theme.radius_md, egui::Stroke::new(1.0_f32, theme.border));
+            ui.painter().rect_stroke(v_rect, theme.radius_md, Stroke::new(1.0_f32, theme.border));
 
             let center = v_rect.center();
             let radius = 80.0;
 
             // Draw Lissajous crosshairs (M/S axes)
-            ui.painter().circle_stroke(center, radius, egui::Stroke::new(1.0, theme.border));
-            ui.painter().line_segment([egui::pos2(center.x - radius, center.y), egui::pos2(center.x + radius, center.y)], egui::Stroke::new(1.0, theme.border));
-            ui.painter().line_segment([egui::pos2(center.x, center.y - radius), egui::pos2(center.x, center.y + radius)], egui::Stroke::new(1.0, theme.border));
+            ui.painter().circle_stroke(center, radius, Stroke::new(1.0, theme.border));
+            ui.painter().line_segment([egui::pos2(center.x - radius, center.y), egui::pos2(center.x + radius, center.y)], Stroke::new(1.0, theme.border));
+            ui.painter().line_segment([egui::pos2(center.x, center.y - radius), egui::pos2(center.x, center.y + radius)], Stroke::new(1.0, theme.border));
 
             ui.painter().text(egui::pos2(center.x, center.y - radius - 8.0), egui::Align2::CENTER_CENTER, "+M (Mono)", egui::FontId::proportional(8.0), theme.text_secondary);
             ui.painter().text(egui::pos2(center.x + radius + 12.0, center.y), egui::Align2::CENTER_CENTER, "+S (Side)", egui::FontId::proportional(8.0), theme.text_secondary);
@@ -440,7 +472,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
             }
 
             for i in 0..points.len().saturating_sub(1) {
-                ui.painter().line_segment([points[i], points[i + 1]], egui::Stroke::new(1.2, theme.accent.linear_multiply(0.8)));
+                ui.painter().line_segment([points[i], points[i + 1]], Stroke::new(1.2, theme.accent.linear_multiply(0.8)));
             }
 
             // Phase correlation indicator
@@ -458,13 +490,13 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
     ui.add_space(theme.space_xs);
 
     // --- Dynamic 4-Deck Cross-Collision Matrix & Streaming Targets ---
-    egui::CollapsingHeader::new(egui::RichText::new("4-DECK CROSS-COLLISION MATRIX & STREAMING COMPLIANCE").strong().color(theme.accent))
+    egui::CollapsingHeader::new(RichText::new("4-DECK CROSS-COLLISION MATRIX & STREAMING COMPLIANCE").strong().color(theme.accent))
         .default_open(true)
         .show(ui, |ui| {
             ui.columns(2, |cols| {
                 cols[0].group(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(egui::RichText::new("4-DECK FREQUENCY COLLISION").strong().size(theme.type_caption).color(theme.danger));
+                        ui.label(RichText::new("4-DECK FREQUENCY COLLISION").strong().size(theme.type_caption).color(theme.danger));
                         ui.add_space(2.0);
 
                         let peaks = &app.viz.damped_peaks;
@@ -477,9 +509,9 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
 
                         let format_col = |val: usize| {
                             if val > 65 {
-                                egui::RichText::new(format!("{}% ⚡", val)).color(theme.danger)
+                                RichText::new(format!("{}% ⚡", val)).color(theme.danger)
                             } else {
-                                egui::RichText::new(format!("{}%", val)).color(theme.text_secondary)
+                                RichText::new(format!("{}%", val)).color(theme.text_secondary)
                             }
                         };
 
@@ -497,7 +529,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
 
                 cols[1].group(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(egui::RichText::new("EBU R128 & STREAMING COMPLIANCE").strong().size(theme.type_caption).color(theme.success));
+                        ui.label(RichText::new("EBU R128 & STREAMING COMPLIANCE").strong().size(theme.type_caption).color(theme.success));
                         ui.add_space(2.0);
 
                         let spot_pen = (integrated_lufs - (-14.0)).max(0.0);
@@ -506,22 +538,22 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
 
                         let format_pen = |pen: f32| {
                             if pen > 0.1 {
-                                egui::RichText::new(format!("Penalty: -{:.1} dB", pen)).color(theme.warning)
+                                RichText::new(format!("Penalty: -{:.1} dB", pen)).color(theme.warning)
                             } else {
-                                egui::RichText::new("OK (0.0 dB)").color(theme.success)
+                                RichText::new("OK (0.0 dB)").color(theme.success)
                             }
                         };
 
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("Spotify (-14 LUFS):").size(9.0));
+                            ui.label(RichText::new("Spotify (-14 LUFS):").size(9.0));
                             ui.label(format_pen(spot_pen));
                         });
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("Apple Music (-16 LUFS):").size(9.0));
+                            ui.label(RichText::new("Apple Music (-16 LUFS):").size(9.0));
                             ui.label(format_pen(apple_pen));
                         });
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("YouTube (-14 LUFS):").size(9.0));
+                            ui.label(RichText::new("YouTube (-14 LUFS):").size(9.0));
                             ui.label(format_pen(yt_pen));
                         });
                     });
@@ -535,32 +567,39 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
     let theme = app.theme;
 
     // --- On-Demand Track Selector Bar ---
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("SELECT TRACK FOR ANALYSIS:").strong().size(theme.type_caption).color(theme.accent));
+    Frame::none()
+        .fill(theme.bg_surface)
+        .rounding(theme.radius_sm)
+        .stroke(Stroke::new(1.0, theme.border))
+        .inner_margin(Margin::symmetric(theme.space_md, theme.space_xs))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("SELECT TRACK FOR ANALYSIS:").strong().size(theme.type_caption).color(theme.accent));
 
-        let focused_deck = app.decks.focused_deck.min(15);
-        let deck_track_id = app.decks.now_playing[focused_deck];
+                let focused_deck = app.decks.focused_deck.min(15);
+                let deck_track_id = app.decks.now_playing[focused_deck];
 
-        let selected_id = app.library.selected_library_track.or(deck_track_id);
+                let selected_id = app.library.selected_library_track.or(deck_track_id);
 
-        let current_title = selected_id
-            .and_then(|id| app.get_cached_track(id))
-            .map(|t| format!("{} — {}", t.artist, t.title))
-            .unwrap_or_else(|| "Select track from library...".to_string());
+                let current_title = selected_id
+                    .and_then(|id| app.get_cached_track(id))
+                    .map(|t| format!("{} — {}", t.artist, t.title))
+                    .unwrap_or_else(|| "Select track from library...".to_string());
 
-        egui::ComboBox::from_id_source("full_track_analyzer_combo")
-            .selected_text(current_title)
-            .width(300.0)
-            .show_ui(ui, |ui| {
-                for track in &app.library.cached_library {
-                    let text = format!("{} — {}", track.artist, track.title);
-                    if ui.selectable_label(app.library.selected_library_track == Some(track.id), text).clicked() {
-                        app.library.selected_library_track = Some(track.id);
-                    }
-                }
+                egui::ComboBox::from_id_source("full_track_analyzer_combo")
+                    .selected_text(current_title)
+                    .width(320.0)
+                    .show_ui(ui, |ui| {
+                        for track in &app.library.cached_library {
+                            let text = format!("{} — {}", track.artist, track.title);
+                            if ui.selectable_label(app.library.selected_library_track == Some(track.id), text).clicked() {
+                                app.library.selected_library_track = Some(track.id);
+                            }
+                        }
+                    });
             });
-    });
-    ui.separator();
+        });
+
     ui.add_space(theme.space_xs);
 
     let focused_deck = app.decks.focused_deck.min(15);
@@ -577,13 +616,13 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                 let duration_sec = (total_sec % 60.0).floor() as u32;
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(&track.title).strong().size(theme.type_body).color(theme.text_primary));
-                    ui.label(egui::RichText::new(format!("by {}", track.artist)).size(theme.type_caption).color(theme.text_secondary));
+                    ui.label(RichText::new(&track.title).strong().size(theme.type_body).color(theme.text_primary));
+                    ui.label(RichText::new(format!("by {}", track.artist)).size(theme.type_caption).color(theme.text_secondary));
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let root_k = track.metadata.root_key.map(|k| k as usize % 12).unwrap_or(0);
                         let (k_name, camelot) = pitch_index_to_camelot(root_k, true);
-                        ui.label(egui::RichText::new(format!("KEY: {} ({}) | BPM: {:.1} | DURATION: {:02}:{:02} ({} samples)",
+                        ui.label(RichText::new(format!("KEY: {} ({}) | BPM: {:.1} | DURATION: {:02}:{:02} ({} samples)",
                             k_name, camelot, track.metadata.bpm, duration_min, duration_sec, total_samples)).strong().size(theme.type_caption).color(theme.accent));
                     });
                 });
@@ -596,7 +635,7 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                 let (rect, _response) = ui.allocate_exact_size(available_size, egui::Sense::click_and_drag());
 
                 ui.painter().rect_filled(rect, theme.radius_sm, egui::Color32::from_rgb(12, 16, 24));
-                ui.painter().rect_stroke(rect, theme.radius_sm, egui::Stroke::new(1.0_f32, theme.border));
+                ui.painter().rect_stroke(rect, theme.radius_sm, Stroke::new(1.0_f32, theme.border));
 
                 let peaks = track.metadata.peaks.as_slice();
                 if !peaks.is_empty() {
@@ -610,7 +649,7 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                         let h = (amp.abs() * half_h).clamp(1.0, half_h);
                         ui.painter().line_segment(
                             [egui::pos2(x, center_y - h), egui::pos2(x, center_y + h)],
-                            egui::Stroke::new(1.2_f32, theme.accent.linear_multiply(0.8)),
+                            Stroke::new(1.2_f32, theme.accent.linear_multiply(0.8)),
                         );
                     }
                 }
@@ -623,7 +662,7 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                         let tx = rect.left() + pos_norm * rect.width();
                         ui.painter().line_segment(
                             [egui::pos2(tx, rect.bottom()), egui::pos2(tx, rect.bottom() - 25.0)],
-                            egui::Stroke::new(1.0_f32, theme.danger.linear_multiply(0.7)),
+                            Stroke::new(1.0_f32, theme.danger.linear_multiply(0.7)),
                         );
                     }
                 }
@@ -635,7 +674,7 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                         let cx = rect.left() + cue_norm * rect.width();
                         ui.painter().line_segment(
                             [egui::pos2(cx, rect.top()), egui::pos2(cx, rect.bottom())],
-                            egui::Stroke::new(1.5_f32, theme.success),
+                            Stroke::new(1.5_f32, theme.success),
                         );
                         ui.painter().text(
                             egui::pos2(cx + 3.0, rect.top() + 10.0),
@@ -655,7 +694,7 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
 
                 ui.painter().line_segment(
                     [egui::pos2(playhead_x, rect.top()), egui::pos2(playhead_x, rect.bottom())],
-                    egui::Stroke::new(2.0_f32, theme.warning),
+                    Stroke::new(2.0_f32, theme.warning),
                 );
 
                 ui.add_space(theme.space_xs);
@@ -664,21 +703,21 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                 ui.columns(2, |cols| {
                     cols[0].group(|ui| {
                         ui.vertical(|ui| {
-                            ui.label(egui::RichText::new("16D SOUNDDNA POLAR LATENT RADAR").strong().size(theme.type_caption).color(theme.accent));
+                            ui.label(RichText::new("16D SOUNDDNA POLAR LATENT RADAR").strong().size(theme.type_caption).color(theme.accent));
                             ui.add_space(4.0);
 
                             let radar_size = egui::vec2(ui.available_width(), 160.0);
                             let (r_rect, _) = ui.allocate_exact_size(radar_size, egui::Sense::hover());
 
                             ui.painter().rect_filled(r_rect, theme.radius_sm, egui::Color32::from_rgb(10, 14, 22));
-                            ui.painter().rect_stroke(r_rect, theme.radius_sm, egui::Stroke::new(1.0, theme.border));
+                            ui.painter().rect_stroke(r_rect, theme.radius_sm, Stroke::new(1.0, theme.border));
 
                             let r_center = r_rect.center();
                             let r_max_radius = 65.0;
 
                             // Concentric radar rings
                             for ring in &[0.33f32, 0.66, 1.0] {
-                                ui.painter().circle_stroke(r_center, r_max_radius * ring, egui::Stroke::new(1.0, theme.border.linear_multiply(0.5)));
+                                ui.painter().circle_stroke(r_center, r_max_radius * ring, Stroke::new(1.0, theme.border.linear_multiply(0.5)));
                             }
 
                             let latent = &track.metadata.dna.spectral.latent_space;
@@ -696,14 +735,14 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                                 // Draw radial spokes
                                 let edge_x = r_center.x + angle.cos() * r_max_radius;
                                 let edge_y = r_center.y + angle.sin() * r_max_radius;
-                                ui.painter().line_segment([r_center, egui::pos2(edge_x, edge_y)], egui::Stroke::new(1.0, theme.border.linear_multiply(0.3)));
+                                ui.painter().line_segment([r_center, egui::pos2(edge_x, edge_y)], Stroke::new(1.0, theme.border.linear_multiply(0.3)));
                             }
 
                             // Fill SoundDNA radar polygon
                             if polygon_pts.len() >= 3 {
                                 for i in 0..16 {
                                     let next_i = (i + 1) % 16;
-                                    ui.painter().line_segment([polygon_pts[i], polygon_pts[next_i]], egui::Stroke::new(1.5, theme.accent));
+                                    ui.painter().line_segment([polygon_pts[i], polygon_pts[next_i]], Stroke::new(1.5, theme.accent));
                                 }
                             }
                         });
@@ -711,26 +750,26 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
 
                     cols[1].group(|ui| {
                         ui.vertical(|ui| {
-                            ui.label(egui::RichText::new("FULL TRACK PERCEPTION & GROOVE PROFILE").strong().size(theme.type_caption).color(theme.success));
+                            ui.label(RichText::new("FULL TRACK PERCEPTION & GROOVE PROFILE").strong().size(theme.type_caption).color(theme.success));
                             ui.add_space(4.0);
 
-                            ui.label(egui::RichText::new(format!("Integrated LUFS: {:.1} LUFS", track.metadata.dna.perception.lufs_integrated)).size(9.0));
-                            ui.label(egui::RichText::new(format!("Crest Factor: {:.1} dB", track.metadata.dna.perception.crest_factor_db)).size(9.0));
-                            ui.label(egui::RichText::new(format!("Zero Crossing Rate: {:.3}", track.metadata.dna.perception.zero_crossing_rate)).size(9.0));
-                            ui.label(egui::RichText::new(format!("Spectral Brightness: {:.2}", track.metadata.dna.perception.brightness)).size(9.0));
-                            ui.label(egui::RichText::new(format!("Syncopation Index: {:.2}", track.metadata.dna.rhythmic.syncopation_index)).size(9.0));
+                            ui.label(RichText::new(format!("Integrated LUFS: {:.1} LUFS", track.metadata.dna.perception.lufs_integrated)).size(9.0));
+                            ui.label(RichText::new(format!("Crest Factor: {:.1} dB", track.metadata.dna.perception.crest_factor_db)).size(9.0));
+                            ui.label(RichText::new(format!("Zero Crossing Rate: {:.3}", track.metadata.dna.perception.zero_crossing_rate)).size(9.0));
+                            ui.label(RichText::new(format!("Spectral Brightness: {:.2}", track.metadata.dna.perception.brightness)).size(9.0));
+                            ui.label(RichText::new(format!("Syncopation Index: {:.2}", track.metadata.dna.rhythmic.syncopation_index)).size(9.0));
 
                             ui.add_space(6.0);
-                            ui.label(egui::RichText::new("MICRO-TIMING GROOVE DEVIATIONS (16THs)").strong().size(8.5).color(theme.warning));
+                            ui.label(RichText::new("MICRO-TIMING GROOVE DEVIATIONS (16THs)").strong().size(8.5).color(theme.warning));
 
                             let groove = &track.metadata.dna.rhythmic.micro_timing;
                             for (idx, &dev) in groove.iter().enumerate() {
                                 ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(format!("STEP {:02}", idx + 1)).size(7.5).color(theme.text_secondary));
+                                    ui.label(RichText::new(format!("STEP {:02}", idx + 1)).size(7.5).color(theme.text_secondary));
                                     let dev_norm = (dev as f32 / 128.0).clamp(-1.0, 1.0);
                                     let dev_ms = dev_norm * 25.0;
                                     let sign = if dev_ms >= 0.0 { "+" } else { "" };
-                                    ui.label(egui::RichText::new(format!("{}{:.1} ms", sign, dev_ms)).size(7.5).monospace().color(theme.warning));
+                                    ui.label(RichText::new(format!("{}{:.1} ms", sign, dev_ms)).size(7.5).monospace().color(theme.warning));
                                 });
                             }
                         });
@@ -741,12 +780,12 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
 
                 // --- Export Actions ---
                 ui.horizontal(|ui| {
-                    if ui.button(egui::RichText::new("💾 EXPORT FULL TRACK DNA PASSPORT (JSON)").size(theme.type_caption)).clicked() {
+                    if ui.button(RichText::new("💾 EXPORT FULL TRACK DNA PASSPORT (JSON)").size(theme.type_caption)).clicked() {
                         if let Ok(json) = serde_json::to_string_pretty(&track) {
                             let _ = std::fs::write(format!("dna_passport_{}.json", track.id), json);
                         }
                     }
-                    if ui.button(egui::RichText::new("🔍 FIND SIMILAR SOUNDS IN LIBRARY").size(theme.type_caption)).clicked() {
+                    if ui.button(RichText::new("🔍 FIND SIMILAR SOUNDS IN LIBRARY").size(theme.type_caption)).clicked() {
                         app.active_view = crate::View::Library;
                     }
                 });
@@ -756,8 +795,8 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
         ui.group(|ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(40.0);
-                ui.label(egui::RichText::new("NO TRACK LOADED FOR FULL-TRACK ANALYSIS").strong().size(theme.type_body).color(theme.text_secondary));
-                ui.label(egui::RichText::new("Load a track on the focused DJ Deck or select a track in the Library to inspect its complete SoundDNA passport, multi-band waveform, and full-length perception profile.").size(theme.type_caption).color(theme.text_disabled));
+                ui.label(RichText::new("NO TRACK LOADED FOR FULL-TRACK ANALYSIS").strong().size(theme.type_body).color(theme.text_secondary));
+                ui.label(RichText::new("Load a track on the focused DJ Deck or select a track in the Library to inspect its complete SoundDNA passport, multi-band waveform, and full-length perception profile.").size(theme.type_caption).color(theme.text_disabled));
                 ui.add_space(20.0);
                 if ui.button("→ OPEN TRACK LIBRARY").clicked() {
                     app.active_view = crate::View::Library;
