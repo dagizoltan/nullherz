@@ -6,14 +6,21 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
     if let Some(track_id) = app.library.selected_library_track {
         if let Some(track) = app.get_cached_track(track_id) {
+            // Header Bar & Track Metadata Banner
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&track.title).strong().size(theme.type_heading));
                 ui.label(RichText::new(format!("by {}", track.artist)).size(theme.type_body));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(RichText::new(format!("{} DESELECT TRACK", egui_phosphor::regular::X)).size(theme.type_caption)).clicked() {
+                        app.library.selected_library_track = None;
+                        return;
+                    }
+                });
             });
             ui.add_space(theme.space_xs);
             ui.label(RichText::new(&track.path).size(theme.type_caption).color(theme.text_secondary));
 
-            ui.add_space(theme.space_md);
+            ui.add_space(theme.space_sm);
 
             // Compute visible window derived from editor zoom and scroll
             let zoom = app.editor.editor_waveform_zoom.clamp(1.0, 32.0);
@@ -23,12 +30,57 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             let start_ratio = scroll;
             let end_ratio = (scroll + win_span).min(1.0);
 
-            // Waveform Editor Zone
+            // --- 1. FULL-TRACK OVERVIEW MINIMAP ---
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("OVERVIEW MINIMAP").strong().size(theme.type_caption).color(theme.accent));
+            });
+            let minimap_size = Vec2::new(ui.available_width(), 32.0);
+            let (m_rect, m_response) = ui.allocate_at_least(minimap_size, Sense::click_and_drag());
+            ui.painter().rect_filled(m_rect, theme.radius_sm, theme.bg_dark);
+            ui.painter().rect_stroke(m_rect, theme.radius_sm, theme.border_stroke);
+
+            // Render full-length peak envelope on minimap
+            let peaks = track.metadata.peaks.as_slice();
+            if !peaks.is_empty() {
+                let num_peaks = peaks.len();
+                let step_w = m_rect.width() / num_peaks as f32;
+                let center_y = m_rect.center().y;
+                let half_h = m_rect.height() * 0.45;
+
+                for (i, &amp) in peaks.iter().enumerate() {
+                    let x = m_rect.left() + i as f32 * step_w;
+                    let h = (amp.abs() * half_h).clamp(1.0, half_h);
+                    ui.painter().line_segment(
+                        [egui::pos2(x, center_y - h), egui::pos2(x, center_y + h)],
+                        egui::Stroke::new(1.0_f32, theme.text_secondary.linear_multiply(0.4)),
+                    );
+                }
+            }
+
+            // Draw minimap viewport rectangle representing zoomed window
+            let viewport_left = m_rect.left() + start_ratio * m_rect.width();
+            let viewport_right = m_rect.left() + end_ratio * m_rect.width();
+            let vp_rect = egui::Rect::from_min_max(egui::pos2(viewport_left, m_rect.top()), egui::pos2(viewport_right, m_rect.bottom()));
+            ui.painter().rect_filled(vp_rect, 0.0, theme.accent.linear_multiply(0.25));
+            ui.painter().rect_stroke(vp_rect, 0.0, egui::Stroke::new(1.5, theme.accent));
+
+            // Interactive Minimap Viewport Dragging / Clicking
+            if m_response.clicked() || m_response.dragged() {
+                if let Some(pos) = ui.input(|i| i.pointer.latest_pos()) {
+                    let norm_x = ((pos.x - m_rect.left()) / m_rect.width()).clamp(0.0, 1.0);
+                    let target_scroll = (norm_x - win_span * 0.5).clamp(0.0, max_scroll);
+                    app.editor.editor_waveform_scroll = target_scroll;
+                }
+            }
+
+            ui.add_space(theme.space_xs);
+
+            // --- 2. PRIMARY WAVEFORM EDITOR CANVAS ---
             let (rect, response) = ui.allocate_at_least(Vec2::new(ui.available_width(), 200.0), Sense::click_and_drag());
             ui.painter().rect_filled(rect, theme.radius_md, theme.bg_dark);
             ui.painter().rect_stroke(rect, theme.radius_md, theme.border_stroke);
 
-            // Mouse wheel zoom support
+            // Mouse wheel zoom support on main waveform
             if response.hovered() {
                 let scroll_delta = ui.input(|i| i.raw_scroll_delta.y);
                 if scroll_delta != 0.0 {
@@ -110,52 +162,98 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 }
             }
 
-            ui.add_space(theme.space_md);
+            ui.add_space(theme.space_xs);
+
+            // Waveform Controls Toolbar & Style Selectors
             ui.horizontal(|ui| {
-                ui.label(RichText::new("ZOOM").size(theme.type_body));
+                ui.label(RichText::new("ZOOM").size(theme.type_caption).strong());
                 ui.add(egui::Slider::new(&mut app.editor.editor_waveform_zoom, 1.0..=32.0).logarithmic(true).text(""));
 
-                ui.add_space(theme.space_md);
-                ui.label(RichText::new("SCROLL").size(theme.type_body));
+                ui.add_space(theme.space_sm);
+                ui.label(RichText::new("SCROLL").size(theme.type_caption).strong());
                 ui.add_enabled(max_scroll > 0.0, egui::Slider::new(&mut app.editor.editor_waveform_scroll, 0.0..=max_scroll).text(""));
 
-                ui.add_space(theme.space_md);
-                if ui.button(RichText::new(format!("{} RESET VIEW", egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE)).size(theme.type_label)).clicked() {
+                ui.add_space(theme.space_sm);
+                if ui.button(RichText::new(format!("{} RESET VIEW", egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE)).size(theme.type_caption)).clicked() {
                     app.editor.editor_waveform_zoom = 1.0;
                     app.editor.editor_waveform_scroll = 0.0;
                 }
+
+                ui.add_space(15.0);
+                ui.label(RichText::new("STYLE:").size(theme.type_caption).strong().color(theme.accent));
+                let curr_style = app.mixer.waveform_styles[0];
+                for style in nullherz_ui_hal::render::waveform_renderer::WaveformStyle::all() {
+                    let is_sel = curr_style == *style;
+                    if ui.selectable_label(is_sel, style.name()).clicked() {
+                        app.mixer.waveform_styles[0] = *style;
+                    }
+                }
             });
 
-            ui.add_space(theme.space_md);
-            ui.separator();
             ui.add_space(theme.space_sm);
 
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new("METADATA").size(theme.type_body).strong());
-                    Frame::none()
-                        .fill(theme.bg_inset)
-                        .rounding(theme.radius_md)
-                        .stroke(theme.border_stroke)
-                        .inner_margin(Margin::same(theme.space_sm))
-                        .show(ui, |ui| {
-                            ui.vertical(|ui| {
-                                ui.label(RichText::new(format!("BPM: {:.2}", track.metadata.bpm)).size(theme.type_caption));
-                                ui.label(RichText::new(format!("Root Key: {:?}", track.metadata.root_key)).size(theme.type_caption));
-                                ui.label(RichText::new(format!("Transients: {}", track.metadata.transients.len())).size(theme.type_caption));
+            // --- 3. SELECTION STATS & SELECTION MANAGEMENT BANNER ---
+            Frame::none()
+                .fill(theme.bg_inset)
+                .rounding(theme.radius_sm)
+                .stroke(theme.border_stroke)
+                .inner_margin(Margin::symmetric(theme.space_md, theme.space_xs))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        if let Some((s, e)) = app.editor.editor_selection {
+                            let (start, end) = if s < e { (s, e) } else { (e, s) };
+                            let total_s = track.metadata.total_samples as f64;
+                            let sr = track.metadata.sample_rate.max(1) as f64;
+
+                            let start_samp = (start as f64 * total_s) as u64;
+                            let end_samp = (end as f64 * total_s) as u64;
+                            let len_samp = end_samp.saturating_sub(start_samp);
+
+                            let start_sec = start_samp as f64 / sr;
+                            let len_sec = len_samp as f64 / sr;
+                            let beats = (len_sec * (track.metadata.bpm as f64 / 60.0)).max(0.0);
+
+                            ui.label(RichText::new("SELECTION:").strong().size(theme.type_caption).color(theme.accent));
+                            ui.label(RichText::new(format!("{:.3}s - {:.3}s ({:.3}s / {:.2} beats | {} samples)",
+                                start_sec, start_sec + len_sec, len_sec, beats, len_samp)).size(theme.type_caption));
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button(RichText::new(format!("{} CLEAR", egui_phosphor::regular::X)).size(theme.type_caption)).clicked() {
+                                    app.editor.editor_selection = None;
+                                }
+                                if ui.button(RichText::new(format!("{} INVERT", egui_phosphor::regular::ARROWS_OUT_LINE_HORIZONTAL)).size(theme.type_caption)).clicked() {
+                                    app.editor.editor_selection = Some((end, 1.0));
+                                }
+                                if ui.button(RichText::new(format!("{} SELECT ALL", egui_phosphor::regular::SELECTION_ALL)).size(theme.type_caption)).clicked() {
+                                    app.editor.editor_selection = Some((0.0, 1.0));
+                                }
                             });
-                        });
+                        } else {
+                            ui.label(RichText::new("SELECTION: None (Click or drag on waveform to define region)").size(theme.type_caption).color(theme.text_secondary));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button(RichText::new(format!("{} SELECT ALL", egui_phosphor::regular::SELECTION_ALL)).size(theme.type_caption)).clicked() {
+                                    app.editor.editor_selection = Some((0.0, 1.0));
+                                }
+                            });
+                        }
+                    });
                 });
 
-                ui.add_space(theme.space_md);
+            ui.add_space(theme.space_md);
 
-                ui.vertical(|ui| {
-                    ui.label(RichText::new("ACTIONS").size(theme.type_body).strong());
-                    ui.horizontal(|ui| {
+            // --- 4. ORGANIZED DSP TOOLCARDS ---
+            ui.columns(3, |cols| {
+                // Card 1: Sample Operations
+                cols[0].group(|ui| {
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!("{} SAMPLE OPERATIONS", egui_phosphor::regular::SCISSORS)).strong().size(theme.type_body).color(theme.accent));
+                        });
+                        ui.add_space(theme.space_xs);
+
                         let has_selection = app.editor.editor_selection.is_some();
                         ui.add_enabled_ui(has_selection, |ui| {
-                            let btn = ui.button(RichText::new(format!("{} CROP", egui_phosphor::regular::SCISSORS)).size(theme.type_label));
-                            if btn.clicked()
+                            if ui.button(RichText::new(format!("{} CROP SELECTION", egui_phosphor::regular::CROP)).size(theme.type_label)).clicked()
                                 && let Some((s, e)) = app.editor.editor_selection {
                                     let (start, end) = if s < e { (s, e) } else { (e, s) };
                                     let total_samples = track.metadata.total_samples as f32;
@@ -165,31 +263,54 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                                         end_samples: (end * total_samples) as u64,
                                     }));
                                 }
-                        }).response.on_disabled_hover_text("Drag on the waveform to select a range first");
+                        }).response.on_disabled_hover_text("Select a region on waveform first");
 
-                        if ui.button(RichText::new(format!("{} NORMALIZE", egui_phosphor::regular::LIGHTNING)).size(theme.type_label)).clicked() {
+                        ui.add_space(4.0);
+                        if ui.button(RichText::new(format!("{} NORMALIZE PEAK (0 dB)", egui_phosphor::regular::LIGHTNING)).size(theme.type_label)).clicked() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::Normalize { sample_id: track.id }));
                         }
-                        if ui.button(RichText::new(format!("{} RE-ANALYZE DNA", egui_phosphor::regular::DNA)).size(theme.type_label)).clicked() {
+
+                        ui.add_space(4.0);
+                        if ui.button(RichText::new(format!("{} RE-ANALYZE SOUNDDNA", egui_phosphor::regular::DNA)).size(theme.type_label)).clicked() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ReAnalyze { sample_id: track.id }));
                         }
                     });
+                });
 
-                    ui.add_space(theme.space_sm);
+                // Card 2: Transient & Chop
+                cols[1].group(|ui| {
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!("{} TRANSIENTS & CHOPPING", egui_phosphor::regular::KNIFE)).strong().size(theme.type_body).color(theme.success));
+                        });
+                        ui.add_space(theme.space_xs);
 
-                    ui.horizontal(|ui| {
-                        // Transient Chopping Action
-                        if ui.button(RichText::new(format!("{} CHOP BY TRANSIENT", egui_phosphor::regular::KNIFE)).size(theme.type_label)).clicked() {
+                        if ui.button(RichText::new(format!("{} CHOP BY TRANSIENTS ({} MARKS)", egui_phosphor::regular::KNIFE, track.metadata.transients.len())).size(theme.type_label)).clicked() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ChopByTransient { sample_id: track.id }));
                         }
 
-                        ui.add_space(theme.space_md);
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(format!("Transients Detected: {}", track.metadata.transients.len())).size(theme.type_caption));
+                        ui.label(RichText::new(format!("Root Key: {:?}", track.metadata.root_key)).size(theme.type_caption));
+                        ui.label(RichText::new(format!("BPM: {:.2}", track.metadata.bpm)).size(theme.type_caption));
+                    });
+                });
 
-                        // Time Stretching Actions
-                        ui.label(RichText::new("Ratio:").size(theme.type_body));
-                        ui.add(egui::Slider::new(&mut app.editor.editor_time_stretch_ratio, 0.5..=2.0).text(""));
+                // Card 3: Time & Pitch DSP
+                cols[2].group(|ui| {
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!("{} TIME & PITCH DSP", egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE)).strong().size(theme.type_body).color(theme.warning));
+                        });
+                        ui.add_space(theme.space_xs);
 
-                        if ui.button(RichText::new(format!("{} TIME STRETCH", egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE)).size(theme.type_label)).clicked() {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Stretch Ratio:").size(theme.type_caption));
+                            ui.add(egui::Slider::new(&mut app.editor.editor_time_stretch_ratio, 0.5..=2.0).text(""));
+                        });
+
+                        ui.add_space(4.0);
+                        if ui.button(RichText::new(format!("{} APPLY TIME STRETCH", egui_phosphor::regular::WAVEFORM)).size(theme.type_label)).clicked() {
                             let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::TimeStretch {
                                 sample_id: track.id,
                                 ratio: app.editor.editor_time_stretch_ratio,
@@ -208,6 +329,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             ui.add_space(theme.space_xl * 3.0);
             ui.label(RichText::new("NO TRACK SELECTED").size(theme.type_heading).color(theme.text_secondary));
             ui.label(RichText::new("Select a track from the library to begin editing.").size(theme.type_body));
+            ui.add_space(theme.space_md);
             if ui.button(RichText::new("OPEN LIBRARY").size(theme.type_label)).clicked() {
                 app.active_right_tab = Some(crate::RightTab::Library);
             }
