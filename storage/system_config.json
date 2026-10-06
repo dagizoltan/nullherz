@@ -1,11 +1,10 @@
 {
-  "audio_backend": "Alsa",
-  "midi_ports": [
-    "Pioneer DDJ-400",
-    "Generic MIDI Keyboard"
-  ],
-  "sample_rate": 48000,
+  "audio_backend": "Mock",
+  "midi_ports": [],
+  "sample_rate": 44100,
   "block_size": 256,
   "calibration_samples": 0,
-  "period_size": 256
+  "period_size": 64,
+  "audio_output_device": null,
+  "audio_input_device": null
 }
