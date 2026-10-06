@@ -6,7 +6,7 @@ pub fn render_network(app: &mut InspectorApp, ui: &mut Ui) {
     let current_time = ui.input(|i| i.time);
     let telemetry_opt = *app.last_telemetry.lock();
 
-    ui.strong("Distributed Sidecar Discovery");
+    ui.label(RichText::new("DISTRIBUTED SIDECAR DISCOVERY & MESH NETWORK").small().strong().color(theme.text_secondary));
     ui.add_space(theme.space_xs);
 
     // Production-Grade Live Network Discovery Status
