@@ -64,8 +64,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     let seq_node = app.get_node_id("deck_a_sequencer").unwrap_or(70);
 
     ui.horizontal(|ui| {
-        ui.heading(RichText::new("COMPOSER ARRANGEMENT GRID").strong().color(app.theme.text_primary));
-        ui.add_space(app.theme.space_md);
         ui.label(RichText::new(format!("STUDIO DAW ENGINE: {} TRACKS", app.mixer.num_channels)).strong().size(app.theme.type_caption).color(app.theme.accent));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(egui::RichText::new("DECOUPLED STUDIO DAW").color(app.theme.accent).size(app.theme.type_caption));
@@ -790,10 +788,7 @@ mod tests {
             sampler: crate::state::SamplerState {
                 ..Default::default()
             },
-            editor: crate::state::EditorState {
-                editor_time_stretch_ratio: 1.0,
-                editor_selection: None,
-            },
+            editor: crate::state::EditorState::default(),
             broadcast: crate::state::BroadcastState {
                 is_streaming: false,
                 broadcast_url: String::new(),

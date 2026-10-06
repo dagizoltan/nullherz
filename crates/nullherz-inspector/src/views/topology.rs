@@ -5,8 +5,6 @@ use nullherz_traits::{Command, TopologyCommand};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     let theme = app.theme;
-    ui.heading(RichText::new("System Topology").size(theme.type_heading));
-    ui.add_space(theme.space_sm);
 
     let mut socket_positions = std::collections::HashMap::new(); // (node_idx, is_out, socket_idx) -> pos
 
@@ -299,7 +297,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     ui.add_space(theme.space_md);
 
     // 3. Tabular Connections List (Replacing vestigial connections section)
-    ui.heading(RichText::new("Active Connections List").size(theme.type_heading));
+    ui.label(RichText::new("Active Connections List").strong().size(theme.type_label));
     ui.add_space(theme.space_xs);
     Frame::none()
         .fill(theme.bg_surface)
@@ -347,7 +345,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     ui.separator();
     ui.add_space(theme.space_sm);
 
-    ui.heading(RichText::new("Sidecar Discovery").size(theme.type_heading));
+    ui.label(RichText::new("Sidecar Discovery").strong().size(theme.type_label));
     ui.label(RichText::new("Detected WASM and Native Sidecars in sidecars/").size(theme.type_caption).color(theme.text_secondary));
     ui.add_space(theme.space_sm);
 

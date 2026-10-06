@@ -1141,7 +1141,7 @@ impl InspectorApp {
                     }
 
                     ui.separator();
-                    ui.toggle_value(&mut self.broadcast.is_streaming, format!("{} BROADCAST", egui_phosphor::regular::BROADCAST));
+                    ui.toggle_value(&mut self.broadcast.is_streaming, egui_phosphor::regular::BROADCAST).on_hover_text("Toggle Live Broadcast");
 
                     // CENTER: Branding, BPM, POS, Realtime DSP Info
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {

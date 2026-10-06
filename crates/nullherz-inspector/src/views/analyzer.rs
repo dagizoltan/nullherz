@@ -58,9 +58,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Tele
             ui.vertical(|ui| {
                 // --- Top Screen/Mode Selector Bar ---
                 ui.horizontal(|ui| {
-                    ui.heading(egui::RichText::new("AUDIO ANALYZER & PERCEPTION ENGINE").strong().color(theme.text_primary));
-                    ui.add_space(theme.space_md);
-
                     ui.selectable_value(
                         &mut app.analyzer.mode,
                         AnalyzerMode::RealTime,

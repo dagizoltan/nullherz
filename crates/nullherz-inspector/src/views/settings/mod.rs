@@ -17,8 +17,6 @@ pub use calibration::render_calibration;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
-    ui.heading("System Settings");
-    ui.add_space(theme.space_md);
 
     // Two-Column Vertical Tab Layout
     ui.columns(2, |columns| {

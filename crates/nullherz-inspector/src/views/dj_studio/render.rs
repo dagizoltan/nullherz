@@ -36,11 +36,11 @@ fn render_header(ui: &mut Ui, telemetry: &Option<Telemetry>, theme: &nullherz_ui
         .inner_margin(Margin::symmetric(theme.space_md, theme.space_sm))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.heading(RichText::new("NULLHERZ DJ CONSOLE").strong().color(theme.text_primary).size(theme.type_heading).extra_letter_spacing(1.5));
+                ui.label(RichText::new("PERFORMANCE DECK MATRIX").strong().size(theme.type_caption).color(theme.text_secondary));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if let Some(t) = telemetry {
                         ui.label(RichText::new("BPM").size(theme.type_caption).color(theme.text_secondary));
-                        ui.label(RichText::new(format!("{:.1}", t.bpm)).monospace().strong().color(theme.accent).size(theme.type_heading));
+                        ui.label(RichText::new(format!("{:.1}", t.bpm)).monospace().strong().color(theme.accent).size(theme.type_body));
                     }
                 });
             });

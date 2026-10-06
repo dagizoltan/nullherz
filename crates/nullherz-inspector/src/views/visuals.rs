@@ -871,9 +871,6 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
 
     let theme = app.theme.clone();
 
-    ui.heading(egui::RichText::new("Visual Mixer & Target Screens").size(theme.type_heading));
-    ui.add_space(theme.space_md);
-
     // Vertical Target Screen Rows
     let num_screens = app.viz.target_screens.len();
     let mut screen_to_remove = None;

@@ -7,9 +7,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let current_time = ui.input(|i| i.time);
     let telemetry_opt = *app.last_telemetry.lock();
 
-    ui.heading(RichText::new("User Account").size(theme.type_heading));
-    ui.add_space(theme.space_md);
-
     if let Some(t) = app.export_passport_success_toast {
         if current_time - t < 4.0 {
             Frame::none()

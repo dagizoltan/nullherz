@@ -100,7 +100,7 @@ pub fn render_with_mode(app: &mut InspectorApp, ui: &mut Ui, is_sidebar: bool) {
 
     ui.vertical(|ui| {
         // 1. Categories Header & Selector
-        render_categories_header(app, ui);
+        render_categories_header(app, ui, is_sidebar);
 
         ui.add_space(theme.space_sm);
         ui.separator();
@@ -120,8 +120,11 @@ pub fn render_with_mode(app: &mut InspectorApp, ui: &mut Ui, is_sidebar: bool) {
     });
 }
 
-fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui) {
+fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui, is_sidebar: bool) {
     let theme = app.theme;
+    let col_spacing = theme.space_xs;
+    let avail_w = ui.available_width();
+    let item_w = ((avail_w - col_spacing) * 0.5).floor().max(60.0);
 
     // Main Category Selector Grid
     ui.label(
@@ -134,7 +137,7 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui) {
 
     egui::Grid::new("lib_main_cat_grid")
         .num_columns(2)
-        .spacing([theme.space_xs, theme.space_xs])
+        .spacing([col_spacing, col_spacing])
         .show(ui, |ui| {
             for main_cat in MainCategory::all() {
                 let is_selected = app.library.active_main_category == *main_cat;
@@ -150,14 +153,14 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui) {
                     .fill(bg)
                     .rounding(Rounding::same(theme.radius_sm))
                     .stroke(Stroke::new(1.0_f32, border))
-                    .inner_margin(Margin::symmetric(theme.space_sm, theme.space_xs));
+                    .inner_margin(Margin::symmetric(theme.space_xs, 4.0));
 
                 let resp = card.show(ui, |ui| {
-                    ui.set_width((ui.available_width() - theme.space_xs) * 0.5);
+                    ui.set_width(item_w);
                     ui.centered_and_justified(|ui| {
                         ui.label(
                             RichText::new(format!("{} {}", icon, label_text))
-                                .size(theme.type_caption)
+                                .size(if is_sidebar { theme.type_caption - 1.0 } else { theme.type_caption })
                                 .strong()
                                 .color(if is_selected { theme.accent } else { theme.text_primary }),
                         );
@@ -185,7 +188,7 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui) {
     let sub_cols = 2;
     egui::Grid::new("lib_sub_cat_grid")
         .num_columns(sub_cols)
-        .spacing([theme.space_xs, theme.space_xs])
+        .spacing([col_spacing, col_spacing])
         .show(ui, |ui| {
             match app.library.active_main_category {
                 MainCategory::Audio => {
@@ -222,10 +225,10 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui) {
                             .inner_margin(Margin::symmetric(theme.space_xs, 4.0));
 
                         let resp = card.show(ui, |ui| {
-                            ui.set_width((ui.available_width() - theme.space_xs) * 0.5);
+                            ui.set_width(item_w);
                             ui.add(egui::Label::new(
                                 RichText::new(label)
-                                    .size(theme.type_caption - 1.0)
+                                    .size(if is_sidebar { theme.type_caption - 1.0 } else { theme.type_caption - 0.5 })
                                     .strong()
                                     .color(if *is_sel { theme.accent } else { theme.text_primary }),
                             ).truncate());
@@ -268,10 +271,10 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui) {
                             .inner_margin(Margin::symmetric(theme.space_xs, 4.0));
 
                         let resp = card.show(ui, |ui| {
-                            ui.set_width((ui.available_width() - theme.space_xs) * 0.5);
+                            ui.set_width(item_w);
                             ui.add(egui::Label::new(
                                 RichText::new(&label)
-                                    .size(theme.type_caption - 1.0)
+                                    .size(if is_sidebar { theme.type_caption - 1.0 } else { theme.type_caption - 0.5 })
                                     .strong()
                                     .color(if is_selected { theme.accent } else { theme.text_primary }),
                             ).truncate());

@@ -731,15 +731,22 @@ impl Default for SamplerState {
     }
 }
 
-/// Audio editor selection and stretch controls.
+/// Audio editor selection, stretch controls, zoom, and scroll.
 pub struct EditorState {
     pub editor_selection: Option<(f32, f32)>,
     pub editor_time_stretch_ratio: f32,
+    pub editor_waveform_zoom: f32,
+    pub editor_waveform_scroll: f32,
 }
 
 impl Default for EditorState {
     fn default() -> Self {
-        Self { editor_selection: None, editor_time_stretch_ratio: 1.0 }
+        Self {
+            editor_selection: None,
+            editor_time_stretch_ratio: 1.0,
+            editor_waveform_zoom: 1.0,
+            editor_waveform_scroll: 0.0,
+        }
     }
 }
 
