@@ -346,13 +346,6 @@ fn render_waveform_lane(app: &mut InspectorApp, ui: &mut Ui, i: usize, lane_h: f
     let bar_color = if is_focused { deck_color } else { theme.border };
     ui.painter().rect_filled(bar_rect, Rounding::ZERO, bar_color);
 
-    let header_rect = egui::Rect::from_min_max(
-        rect.min,
-        egui::pos2(rect.max.x, (rect.min.y + header_h).min(rect.max.y)),
-    );
-    if ui.interact(header_rect, ui.id().with(format!("lane_click_{i}")), egui::Sense::click()).clicked() {
-        app.decks.focused_deck = i;
-    }
 }
 
 fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, deck_color: Color32, is_focused: bool, telemetry: &Option<Telemetry>) {
