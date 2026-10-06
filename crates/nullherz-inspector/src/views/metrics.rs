@@ -89,6 +89,7 @@ fn human_bytes(b: u64) -> String {
     if mb >= 1024.0 { format!("{:.2} GB", mb / 1024.0) } else { format!("{mb:.1} MB") }
 }
 
+#[allow(dead_code)]
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     render_performance(app, ui);
 }

@@ -18,6 +18,8 @@ pub use calibration::render_calibration;
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
 
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
+        ui.vertical(|ui| {
     // Two-Column Vertical Tab Layout
     ui.horizontal_top(|ui| {
         // Left column (Sidebar navigation card)
@@ -120,5 +122,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 app.settings.autosave_triggered = None;
             }
         }
+    });
+        });
     });
 }

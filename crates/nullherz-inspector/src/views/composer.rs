@@ -609,6 +609,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     }
 }
 
+#[allow(dead_code)]
 pub fn render_clip_editor_drawer_panel(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
     let selected_trk = app.composer.selected_composer_track.unwrap_or(0);
