@@ -185,6 +185,24 @@ impl AudioBackend for ThreadedBackend {
     fn xruns(&self) -> Option<u64> {
         Some(self.xrun_counter.load(Ordering::SeqCst))
     }
+
+    fn enumerate_devices(&self) -> Vec<String> {
+        #[cfg(target_os = "linux")]
+        {
+            let alsa_devs = crate::alsa::AlsaBackend::new().enumerate_devices();
+            if !alsa_devs.is_empty() {
+                return alsa_devs;
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let ca_devs = crate::coreaudio::CoreAudioBackend::new().enumerate_devices();
+            if !ca_devs.is_empty() {
+                return ca_devs;
+            }
+        }
+        vec!["default".to_string()]
+    }
 }
 
 #[cfg(test)]

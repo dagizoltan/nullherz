@@ -1,6 +1,7 @@
 use egui::{Ui, Frame, RichText};
 use crate::InspectorApp;
 use nullherz_traits::AudioBackendType;
+use nullherz_backends::AudioBackend;
 
 pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
@@ -34,6 +35,11 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                     if ui.add(btn).clicked() {
                         app.settings.active_backend = backend;
                         let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SwitchBackend(backend)));
+
+                        let probed = nullherz_backends::BackendFactory::create(backend).enumerate_devices();
+                        if !probed.is_empty() {
+                            app.settings.audio_devices = probed;
+                        }
                     }
                 }
             });
@@ -43,7 +49,7 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
             // Output Device & State Transparency Diagnostics
             ui.horizontal(|ui| {
                 ui.label("Output Device:");
-                let devices = &app.settings.audio_devices;
+                let devices = app.settings.audio_devices.clone();
                 let selected = app.settings._selected_audio_device.clone();
                 let combo_text = if selected.is_empty() {
                     devices.first().cloned().unwrap_or_else(|| "default".to_string())
@@ -55,7 +61,7 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                     .selected_text(RichText::new(&combo_text).strong().color(theme.text_primary))
                     .width(240.0)
                     .show_ui(ui, |ui| {
-                        for dev in devices {
+                        for dev in &devices {
                             if ui.selectable_label(dev == &combo_text, dev).clicked() {
                                 app.settings._selected_audio_device = dev.clone();
 
@@ -71,6 +77,13 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
                             }
                         }
                     });
+
+                if ui.button("🔄 RESCAN").on_hover_text("Rescan audio devices across system interfaces").clicked() {
+                    let probed = nullherz_backends::BackendFactory::create(app.settings.active_backend).enumerate_devices();
+                    if !probed.is_empty() {
+                        app.settings.audio_devices = probed;
+                    }
+                }
 
                 // Device State Badge
                 let (badge_text, badge_bg, badge_fg) = if devices.is_empty() {
